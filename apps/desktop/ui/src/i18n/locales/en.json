@@ -3850,6 +3850,7 @@
       "checks": {
         "browser": "Browser",
         "capabilities": "Capabilities",
+        "catalog_freshness": "Model catalog freshness",
         "cli_accounts": "Coding CLI accounts",
         "clock": "Clock",
         "config": "Provider settings file",
@@ -3872,6 +3873,7 @@
       "empty": "No checks were returned",
       "hints": {
         "browser": "Install Chrome, Edge or Chromium (not the snap package).",
+        "catalog_freshness": "The curated model list is over 90 days old; update Praxi or run `bot catalog check` to review current models.",
         "cli_accounts": "Open a terminal once and sign in to the CLI (for example `claude` or `codex login`).",
         "clock": "Turn on automatic date and time in the system settings.",
         "config": "The provider settings file is damaged; add the provider again in Settings → AI.",

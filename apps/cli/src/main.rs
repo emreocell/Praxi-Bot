@@ -2,6 +2,7 @@
 
 mod backup_cmd;
 mod calendar_host;
+mod catalog_cmd;
 mod channels;
 #[cfg(test)]
 mod channels_tests;
@@ -167,6 +168,11 @@ enum Command {
     Providers {
         #[command(subcommand)]
         action: ProvidersCmd,
+    },
+    /// Validate the curated model catalog, check freshness, or diff against a provider snapshot.
+    Catalog {
+        #[command(subcommand)]
+        action: catalog_cmd::CatalogCmd,
     },
     /// Run the local daemon API on 127.0.0.1 until Ctrl-C or SIGTERM.
     ///
@@ -658,6 +664,18 @@ fn run() -> Result<()> {
     match command {
         Command::Completions { shell } => return Ok(cli_artifacts::completions(*shell)?),
         Command::ManPages { output_dir } => return Ok(cli_artifacts::man_pages(output_dir)?),
+        Command::Catalog { action }
+            if !matches!(action, catalog_cmd::CatalogCmd::Diff { live: true, .. }) =>
+        {
+            return catalog_cmd::run_offline(
+                action,
+                cli.catalog_dir.as_deref(),
+                BUILTIN_CATALOG,
+                cli.json,
+                std::time::SystemTime::now(),
+                &mut std::io::stdout().lock(),
+            );
+        }
         _ => {}
     }
     let data_dir = data_dir(&cli)?;
@@ -809,7 +827,25 @@ fn run() -> Result<()> {
             }
             SecretsCmd::Delete { name } => commands::secrets_delete(store, name),
         },
-        Command::Mcp { .. }
+        Command::Catalog {
+            action:
+                catalog_cmd::CatalogCmd::Diff {
+                    provider,
+                    live: true,
+                    metadata,
+                    ..
+                },
+        } => catalog_cmd::run_live_diff(
+            provider,
+            metadata.as_deref(),
+            &data_dir,
+            &catalog,
+            store,
+            cli.json,
+            &mut std::io::stdout().lock(),
+        ),
+        Command::Catalog { .. }
+        | Command::Mcp { .. }
         | Command::Completions { .. }
         | Command::ManPages { .. }
         | Command::Skills { .. }
@@ -1526,6 +1562,25 @@ mod tests {
         let c = load_catalog(None).unwrap();
         assert!(c.get("openrouter").is_some());
         assert_eq!(c.len(), BUILTIN_CATALOG.len());
+    }
+
+    #[test]
+    fn parses_catalog_commands() {
+        for args in [
+            vec!["check"],
+            vec!["check", "--max-age-days", "30", "--strict"],
+            vec!["diff", "anthropic", "snap.json"],
+            vec!["diff", "anthropic", "--live"],
+            vec!["render-docs"],
+        ] {
+            let cli = Cli::try_parse_from(["bot", "catalog"].into_iter().chain(args)).unwrap();
+            assert!(matches!(cli.command, Some(Command::Catalog { .. })));
+        }
+        // Snapshot path and --live are mutually exclusive.
+        assert!(
+            Cli::try_parse_from(["bot", "catalog", "diff", "anthropic", "snap.json", "--live"])
+                .is_err()
+        );
     }
 
     #[test]

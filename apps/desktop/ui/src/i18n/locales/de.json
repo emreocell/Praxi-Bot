@@ -3850,6 +3850,7 @@
       "checks": {
         "browser": "Browser",
         "capabilities": "Fähigkeiten",
+        "catalog_freshness": "Aktualität des Modellkatalogs",
         "cli_accounts": "Coding-CLI-Konten",
         "clock": "Uhr",
         "config": "Datei mit Anbietereinstellungen",
@@ -3872,6 +3873,7 @@
       "empty": "Es wurden keine Prüfungen zurückgegeben",
       "hints": {
         "browser": "Installiere Chrome, Edge oder Chromium (nicht das Snap-Paket).",
+        "catalog_freshness": "Die kuratierte Modellliste ist älter als 90 Tage; aktualisiere Praxi oder führe `bot catalog check` aus, um aktuelle Modelle zu prüfen.",
         "cli_accounts": "Öffne einmal ein Terminal und melde dich bei der CLI an (zum Beispiel `claude` oder `codex login`).",
         "clock": "Schalte in den Systemeinstellungen die automatische Einstellung von Datum und Uhrzeit ein.",
         "config": "Die Datei mit den Anbietereinstellungen ist beschädigt; füge den Anbieter unter Einstellungen → KI erneut hinzu.",

@@ -70,6 +70,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
             online: env.online.then_some(online),
         })),
         core::check_catalog(env.data_dir, &env.catalog),
+        core::check_catalog_freshness(std::time::SystemTime::now()),
         check_daemon(env.data_dir, env.port),
         env.browser_error.as_ref().map_or_else(
             || check_browser(env.browser.as_deref()),

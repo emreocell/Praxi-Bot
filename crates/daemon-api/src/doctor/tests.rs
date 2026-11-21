@@ -227,6 +227,26 @@ fn clock_check_flags_impossible_and_backwards_clocks() {
 }
 
 #[test]
+fn catalog_freshness_warns_when_older_than_90_days() {
+    let mut table = provider_catalog::embedded_metadata().clone();
+    table.last_reviewed = "2026-01-01".into();
+    for p in &mut table.providers {
+        p.last_reviewed = None;
+    }
+    // 2026-01-01 is 20454 days since 1970-01-01.
+    let jan_1 = SystemTime::UNIX_EPOCH + Duration::from_secs(20_454 * 86_400);
+    let fresh = check_catalog_freshness_for(&table, jan_1 + Duration::from_secs(90 * 86_400), 90);
+    assert_eq!(fresh.id, "catalog_freshness");
+    assert_eq!(fresh.status, Status::Ok);
+
+    let stale = check_catalog_freshness_for(&table, jan_1 + Duration::from_secs(91 * 86_400), 90);
+    assert_eq!(stale.id, "catalog_freshness");
+    assert_eq!(stale.status, Status::Warn);
+    assert!(stale.detail.contains("91 day(s) ago"), "{}", stale.detail);
+    assert!(stale.hint.is_some());
+}
+
+#[test]
 fn disk_check_thresholds() {
     assert_eq!(disk_check(Ok(DISK_WARN_BYTES)).status, Status::Ok);
     assert_eq!(disk_check(Ok(DISK_WARN_BYTES - 1)).status, Status::Warn);

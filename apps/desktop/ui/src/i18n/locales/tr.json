@@ -3850,6 +3850,7 @@
       "checks": {
         "browser": "Tarayıcı",
         "capabilities": "Yetenekler",
+        "catalog_freshness": "Model kataloğu güncelliği",
         "cli_accounts": "Kodlama CLI hesapları",
         "clock": "Saat",
         "config": "Sağlayıcı ayar dosyası",
@@ -3872,6 +3873,7 @@
       "empty": "Hiç denetim sonucu gelmedi",
       "hints": {
         "browser": "Chrome, Edge ya da Chromium kur (snap paketi değil).",
+        "catalog_freshness": "Önerilen model listesi 90 günden eski; güncel modelleri görmek için Praxi'yi güncelleyin veya `bot catalog check` çalıştırın.",
         "cli_accounts": "Bir kez terminal açıp CLI'da oturum aç (örneğin `claude` ya da `codex login`).",
         "clock": "Sistem ayarlarında otomatik tarih ve saati aç.",
         "config": "Sağlayıcı ayar dosyası bozuk; sağlayıcıyı Ayarlar → Yapay zekâ bölümünden yeniden ekle.",
