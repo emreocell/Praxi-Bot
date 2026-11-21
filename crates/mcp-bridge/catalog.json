@@ -11,7 +11,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-filesystem@2.2.0"
+        "@modelcontextprotocol/server-filesystem@2.4.0"
       ],
       "required_secrets": [],
       "folder": {
@@ -215,7 +215,7 @@
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "mcp-server-fetch==2026.11.4"
+        "mcp-server-fetch==2026.11.18"
       ],
       "required_secrets": []
     }
@@ -232,7 +232,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@playwright/mcp@0.0.84"
+        "@playwright/mcp@0.0.86"
       ],
       "required_secrets": []
     }
@@ -249,7 +249,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@sentry/mcp-server@0.49.0"
+        "@sentry/mcp-server@0.50.0"
       ],
       "secret_env": {
         "SENTRY_ACCESS_TOKEN": "mcp/sentry-token"
@@ -340,7 +340,7 @@
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "hass-mcp==0.6.1"
+        "hass-mcp==0.6.2"
       ],
       "env": {
         "HA_URL": "http://homeassistant.local:8123"
@@ -369,7 +369,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "exa-mcp-server@3.4.3"
+        "exa-mcp-server@3.5.1"
       ],
       "secret_env": {
         "EXA_API_KEY": "mcp/exa-token"
@@ -421,7 +421,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "firecrawl-mcp@3.38.0"
+        "firecrawl-mcp@3.41.0"
       ],
       "secret_env": {
         "FIRECRAWL_API_KEY": "mcp/firecrawl-token"
@@ -447,7 +447,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@upstash/context7-mcp@4.5.1"
+        "@upstash/context7-mcp@4.7.3"
       ],
       "required_secrets": []
     }
