@@ -1023,46 +1023,35 @@ impl TelegramChannel {
         is_child: bool,
         a: protocol::event::ApprovalNeeded,
     ) -> Result<()> {
-        let run_is_child = is_child;
-        let prefix = if run_is_child { "subagent: " } else { "" };
+        let tool = &a.tool_name;
+        let heading = Message::ApprovalHeading {
+            tool,
+            subagent: is_child,
+        }
+        .english();
         // A tool that attaches details (a schedule) must be shown in
         // full before anyone can approve it here; if that is not
         // possible, approval is left to the desktop app.
         let (body, offer) = match &a.details {
-            None => (
-                format!(
-                    "⚠️ Approval needed ({prefix}{})
-{}",
-                    a.tool_name, a.summary
-                ),
-                true,
-            ),
+            None => (format!("{heading}\n{}", a.summary), true),
             Some(d) => match protocol::approval_text::describe_details(d) {
                 Some(full) => {
-                    let shown = format!(
-                        "⚠️ Approval needed ({prefix}{})
-{full}",
-                        a.tool_name
-                    );
+                    let shown = format!("{heading}\n{full}");
                     // This channel's own redactor must not change what is shown
                     // either: the stored request holds the raw text.
                     if self.redact(&shown) == shown {
                         (shown, true)
                     } else {
                         (
-                            format!(
-                                "⚠️ {} needs approval, but part of it would be masked here, so this chat cannot show it fully. Approve or deny it in the desktop app.",
-                                a.tool_name
-                            ),
+                            Message::ApprovalMasked { tool }.english().into_owned(),
                             false,
                         )
                     }
                 }
                 None => (
-                    format!(
-                        "⚠️ {} needs approval, but this chat cannot show what it would do. Approve or deny it in the desktop app.",
-                        a.tool_name
-                    ),
+                    Message::ApprovalDetailsUnavailable { tool }
+                        .english()
+                        .into_owned(),
                     false,
                 ),
             },
@@ -1073,14 +1062,7 @@ impl TelegramChannel {
         let chunks = protocol::approval_text::chunk_text(&redacted, 3500);
         if chunks.len() > 40 {
             let _ = self
-                .send_redacted(
-                    chat_id,
-                    &format!(
-                        "⚠️ {} needs approval, but it is too large to review in Telegram. Review it in the desktop app.",
-                        a.tool_name
-                    ),
-                    None,
-                )
+                .send_redacted(chat_id, &Message::ApprovalTooLarge { tool }.english(), None)
                 .await;
             return Ok(());
         }
@@ -1135,11 +1117,7 @@ impl TelegramChannel {
                     chunks.len()
                 );
                 let _ = self
-                    .send_redacted(
-                        chat_id,
-                        "Approval could not be shown completely here. Approve or deny it in the desktop app.",
-                        None,
-                    )
+                    .send_redacted(chat_id, &Message::ApprovalIncomplete.english(), None)
                     .await;
                 return Ok(());
             }

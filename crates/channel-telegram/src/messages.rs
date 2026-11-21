@@ -29,6 +29,11 @@ pub(crate) enum Message<'a> {
     Approved,
     Denied,
     Answered,
+    ApprovalHeading { tool: &'a str, subagent: bool },
+    ApprovalMasked { tool: &'a str },
+    ApprovalDetailsUnavailable { tool: &'a str },
+    ApprovalTooLarge { tool: &'a str },
+    ApprovalIncomplete,
 }
 
 impl<'a> Message<'a> {
@@ -73,6 +78,34 @@ impl<'a> Message<'a> {
             (Self::Denied, true) => "Reddedildi".into(),
             (Self::Answered, false) => "Answered".into(),
             (Self::Answered, true) => "Yanıtlandı".into(),
+            (Self::ApprovalHeading { tool, subagent }, false) => {
+                let prefix = if subagent { "subagent: " } else { "" };
+                format!("⚠️ Approval needed ({prefix}{tool})").into()
+            }
+            (Self::ApprovalHeading { tool, subagent }, true) => {
+                let prefix = if subagent { "alt ajan: " } else { "" };
+                format!("⚠️ Onay gerekiyor ({prefix}{tool})").into()
+            }
+            (Self::ApprovalMasked { tool }, false) => format!(
+                "⚠️ {tool} needs approval, but part of it would be masked here, so this chat cannot show it fully. Approve or deny it in the desktop app."
+            ).into(),
+            (Self::ApprovalMasked { tool }, true) => format!(
+                "⚠️ {tool} için onay gerekiyor. Bazı ayrıntılar burada gizleneceği için isteğin tamamı bu sohbette gösterilemiyor. Masaüstü uygulamasında onayla veya reddet."
+            ).into(),
+            (Self::ApprovalDetailsUnavailable { tool }, false) => format!(
+                "⚠️ {tool} needs approval, but this chat cannot show what it would do. Approve or deny it in the desktop app."
+            ).into(),
+            (Self::ApprovalDetailsUnavailable { tool }, true) => format!(
+                "⚠️ {tool} için onay gerekiyor ancak aracın ne yapacağı bu sohbette gösterilemiyor. Masaüstü uygulamasında onayla veya reddet."
+            ).into(),
+            (Self::ApprovalTooLarge { tool }, false) => format!(
+                "⚠️ {tool} needs approval, but it is too large to review in Telegram. Review it in the desktop app."
+            ).into(),
+            (Self::ApprovalTooLarge { tool }, true) => format!(
+                "⚠️ {tool} için onay gerekiyor. İstek Telegram’da incelenemeyecek kadar uzun. Masaüstü uygulamasında incele."
+            ).into(),
+            (Self::ApprovalIncomplete, false) => "Approval could not be shown completely here. Approve or deny it in the desktop app.".into(),
+            (Self::ApprovalIncomplete, true) => "Onay isteğinin tamamı burada gösterilemedi. Masaüstü uygulamasında onayla veya reddet.".into(),
         }
     }
 }
@@ -110,5 +143,54 @@ mod tests {
             assert_eq!(missing.matches("/bots").count(), 1);
             assert_eq!(missing.matches(query).count(), 1);
         }
+    }
+    #[test]
+    fn approval_heading_preserves_tool_and_subagent_context() {
+        let tool = "tool_name";
+        let main = Message::ApprovalHeading {
+            tool,
+            subagent: false,
+        };
+        let child = Message::ApprovalHeading {
+            tool,
+            subagent: true,
+        };
+        assert_eq!(main.english(), "⚠️ Approval needed (tool_name)");
+        assert_eq!(child.english(), "⚠️ Approval needed (subagent: tool_name)");
+        assert_eq!(main.render(Language::TR), "⚠️ Onay gerekiyor (tool_name)");
+        assert_eq!(
+            child.render(Language::TR),
+            "⚠️ Onay gerekiyor (alt ajan: tool_name)"
+        );
+    }
+
+    #[test]
+    fn approval_fallbacks_keep_the_same_desktop_guidance() {
+        let tool = "tool_name";
+        for message in [
+            Message::ApprovalMasked { tool },
+            Message::ApprovalDetailsUnavailable { tool },
+        ] {
+            assert_eq!(message.english().matches(tool).count(), 1);
+            assert!(
+                message
+                    .english()
+                    .ends_with("Approve or deny it in the desktop app.")
+            );
+            let translated = message.render(Language::TR);
+            assert_eq!(translated.matches(tool).count(), 1);
+            assert!(translated.ends_with("Masaüstü uygulamasında onayla veya reddet."));
+        }
+        let large = Message::ApprovalTooLarge { tool };
+        assert_eq!(large.english().matches(tool).count(), 1);
+        assert!(large.english().ends_with("Review it in the desktop app."));
+        let translated = large.render(Language::TR);
+        assert_eq!(translated.matches(tool).count(), 1);
+        assert!(translated.ends_with("Masaüstü uygulamasında incele."));
+        assert!(
+            Message::ApprovalIncomplete
+                .render(Language::TR)
+                .ends_with("Masaüstü uygulamasında onayla veya reddet.")
+        );
     }
 }
