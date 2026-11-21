@@ -79,7 +79,8 @@ impl HostInfo {
 /// Bot `[runtime]` settings (ADR-0027 §7).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct RuntimeConfigDto {
-    /// Configured computer target (`auto`, `pc`, `host`, `browser`, `off`, or `node:<id>`).
+    /// Configured computer target (`auto`, `pc`, `host`, `browser`, `off`, `node:<id>`, or
+    /// `server:<server key>`: the bot stays here, its browser tools act on that paired server).
     pub computer: String,
 }
 

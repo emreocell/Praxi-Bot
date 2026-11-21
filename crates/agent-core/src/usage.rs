@@ -38,7 +38,7 @@ pub enum CallPurpose {
     Memory,
     /// A model invocation of a child run.
     Subagent,
-    /// Reserved for the separately developed decision pool.
+    /// One attempt by the optional decision pool.
     Decider,
 }
 

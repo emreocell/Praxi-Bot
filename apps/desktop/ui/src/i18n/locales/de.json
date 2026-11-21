@@ -651,7 +651,8 @@
       "browser": "Browser",
       "host": "Host",
       "off": "Aus",
-      "pc": "Dieser Computer"
+      "pc": "Dieser Computer",
+      "server": "Gekoppelter Server (nur Browser)"
     },
     "unsaved": "Ungespeicherte Änderungen"
   },
@@ -3220,6 +3221,8 @@
     "brainAuto": "Automatisch",
     "brainHint": "Das kannst du später im Chat ändern",
     "create": "Erstellen",
+    "creating": "Wird erstellt…",
+    "nameNeeded": "Gib deinem Bot einen Namen, um ihn zu erstellen.",
     "namePlaceholder": "Bot-Name",
     "shapeGroup": "Figurenform",
     "shapes": {
@@ -3240,6 +3243,7 @@
       "star": "Stern",
       "tri": "Dreieck"
     },
+    "subtitle": "Wähle Aussehen, Name und wie selbstständig der Bot arbeitet.",
     "templates": {
       "assistant": "Assistent",
       "blank": "Leer",

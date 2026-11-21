@@ -61,6 +61,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Pick a provider, use the Gemini free tier | [Providers and models](providers-and-models.md) |
 | Understand how the model picker names and ranks models | [Model picker metadata](model-catalog.md) |
 | Let a lighter model answer simple first turns | [Optional model tiering](model-tiering.md) |
+| Configure bounded advisory decisions | [Optional decision pool](decision-pool.md) |
 | See what each model call in a run was for and what it used | [LLM call ledger](llm-call-ledger.md) |
 | Use a local coding CLI (Claude Code, Codex, Cursor, ...) as the engine | [Coding CLI engines](cli-engines.md) |
 | Talk to your bots from your phone | [Telegram](telegram.md) |
@@ -70,7 +71,10 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Let a bot search the web and read pages without a browser | [Web tools](web.md) |
 | Set up knowledge embeddings (optional; knowledge search works without them) | [Set up knowledge embeddings](knowledge-embeddings.md) |
 | Look up a command or flag | [CLI reference](cli-reference.md) |
+| Back up and restore your data | [Backup and restore](backup-and-restore.md) |
 | Understand what protects you | [Security model](security.md) |
+| Look up a term | [Glossary](glossary.md) |
+| See keyboard shortcuts | [Keyboard shortcuts](keyboard-shortcuts.md) |
 | Something does not work | [Troubleshooting](troubleshooting.md), [FAQ](faq.md) |
 
 ## The pieces
