@@ -41,6 +41,13 @@
 
 
 .dialog { animation: enter var(--motion-duration-normal) ease-out; }
+.backdrop { animation: fade var(--motion-duration-normal) ease-out; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dialog, .backdrop { animation: none; } }
+
+/* Narrow windows: less dead space around the dialog. */
+/* stylelint-disable-next-line unit-disallowed-list -- desktop window resize boundary */
+@media (width <= 56em) { .backdrop { padding: var(--space-4); } }
 @keyframes enter { from { opacity: 0; transform: translateY(var(--space-2)); } to { opacity: 1; transform: translateY(0); } }
 
 /* Appearance axes: dialogs get a sheen (solid) or frosted glass. */
