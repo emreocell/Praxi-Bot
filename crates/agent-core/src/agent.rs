@@ -1442,8 +1442,17 @@ impl AgentLoop {
         local_id: &str,
         paired_ids: Option<&[String]>,
     ) -> Result<()> {
+        // A `server:<key>` scope belongs to a paired HOST (not a remote desktop):
+        // it holds while that server is paired now; no link layer or an unknown
+        // key fails closed.
+        let server_links = self.sh.server_links.read().clone();
         let valid_scope = |scope: &str| {
             scope.split_once(':').is_some_and(|(kind, id)| {
+                if kind == "server" {
+                    return server_links
+                        .as_ref()
+                        .is_some_and(|links| links.link(id).is_some());
+                }
                 id == local_id
                     || (kind == "pc"
                         && paired_ids.is_none_or(|ids| ids.iter().any(|paired| paired == id)))

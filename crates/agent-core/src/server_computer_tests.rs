@@ -19,7 +19,8 @@ use tool_registry::Tool;
 
 use crate::ApprovalScope;
 use crate::tests::{
-    Fake, MACHINE_A, MACHINE_B, calls, cfg, make_loop, profile, setup, text, tool_messages, until,
+    Fake, MACHINE_A, MACHINE_B, calls, cfg, make_loop, profile, seed_desktop_grant, setup, text,
+    tool_messages, until,
 };
 
 /// The server's end of the link: records what it was asked, or refuses.
@@ -328,4 +329,43 @@ async fn a_grant_for_one_server_never_covers_another_computer() {
     lp2.deny(a2.call_id, env.user, None).unwrap();
     let _ = lp2.wait(run2).await;
     assert!(c.calls.lock().iter().all(|(_, p)| p["op"] != "open"));
+}
+
+/// A real `server:<key>` grant and a paused server run survive the boot
+/// reconcile while that server is paired; an unknown/unpaired key fails closed.
+#[tokio::test]
+async fn server_grants_and_paused_runs_survive_a_restart_while_the_server_is_paired() {
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let server = Arc::new(ServerLink::default());
+    seed_desktop_grant(&env, Some(&format!("server:{MACHINE_B}")));
+    seed_desktop_grant(&env, Some("server:unpaired-key"));
+    let (lp, _local) = server_loop(
+        &env,
+        &fake,
+        MACHINE_B,
+        Links(vec![(MACHINE_B, server)]),
+        Policy::full(),
+    );
+    let kept = lp
+        .rt
+        .create_run(env.user, env.bot, Some(env.chat), "turn")
+        .unwrap();
+    let lost = lp
+        .rt
+        .create_run(env.user, env.bot, Some(env.chat), "turn")
+        .unwrap();
+    for (run, node) in [(kept, MACHINE_B), (lost, "unpaired-key")] {
+        env.storage
+            .bind_run_computer(run, "server", Some(node), Some("Oracle server"))
+            .unwrap();
+        lp.rt.pause_queued(run, Some("waiting")).unwrap();
+    }
+    lp.reconcile_computer_identity(MACHINE_A, Some(&[])).unwrap();
+    for g in lp.list_grants(env.bot) {
+        let paired = g.computer.as_deref() == Some(format!("server:{MACHINE_B}").as_str());
+        assert_eq!(g.inert, !paired, "{:?}", g.computer);
+    }
+    assert_eq!(env.storage.get_run(kept).unwrap().unwrap().state, "paused");
+    assert_eq!(env.storage.get_run(lost).unwrap().unwrap().state, "failed");
 }
