@@ -249,6 +249,41 @@ APP_HIDE
   XFPANEL_PID=$!
 }
 
+XVFB_PID=""
+DBUS_PID=""
+XFSETTINGSD_PID=""
+XFWM_PID=""
+XFDESKTOP_PID=""
+XFPANEL_PID=""
+BOT_PID=""
+DBUS_SOCKET=""
+
+# shellcheck disable=SC2329  # invoked via EXIT trap
+cleanup_desktop() {
+  local pid
+  for pid in "${BOT_PID}" "${XFPANEL_PID}" "${XFDESKTOP_PID}" "${XFWM_PID}" "${XFSETTINGSD_PID}" "${DBUS_PID}" "${XVFB_PID}"; do
+    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+      kill -TERM "${pid}" 2>/dev/null || true
+    fi
+  done
+  if [[ -n "${BOT_PID}" ]]; then
+    wait "${BOT_PID}" 2>/dev/null || true
+  fi
+  if [[ -n "${DBUS_SOCKET}" ]]; then
+    rm -f "${DBUS_SOCKET}"
+  fi
+}
+
+# shellcheck disable=SC2329  # invoked via INT/TERM trap
+forward_term() {
+  if [[ -n "${BOT_PID}" ]] && kill -0 "${BOT_PID}" 2>/dev/null; then
+    kill -TERM "${BOT_PID}" 2>/dev/null || true
+    wait "${BOT_PID}" || true
+  fi
+  cleanup_desktop
+  exit 0
+}
+
 load_passphrase_file
 
 subcmd="${1:-}"
@@ -279,38 +314,8 @@ if [[ "${subcmd}" == "serve" ]] && command -v Xvfb >/dev/null 2>&1 && [[ "${PRAX
 
   init_xauth "${DISP}" "${XAUTH_FILE}"
 
-  XVFB_PID=""
-  DBUS_PID=""
-  XFSETTINGSD_PID=""
-  XFWM_PID=""
-  XFDESKTOP_PID=""
-  XFPANEL_PID=""
-  BOT_PID=""
-
-  cleanup() {
-    local pid
-    for pid in "${BOT_PID}" "${XFPANEL_PID}" "${XFDESKTOP_PID}" "${XFWM_PID}" "${XFSETTINGSD_PID}" "${DBUS_PID}" "${XVFB_PID}"; do
-      if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-        kill -TERM "${pid}" 2>/dev/null || true
-      fi
-    done
-    if [[ -n "${BOT_PID}" ]]; then
-      wait "${BOT_PID}" 2>/dev/null || true
-    fi
-    rm -f "${DBUS_SOCKET}"
-  }
-
-  forward_term() {
-    if [[ -n "${BOT_PID}" ]] && kill -0 "${BOT_PID}" 2>/dev/null; then
-      kill -TERM "${BOT_PID}" 2>/dev/null || true
-      wait "${BOT_PID}" || true
-    fi
-    cleanup
-    exit 0
-  }
-
   trap forward_term INT TERM
-  trap cleanup EXIT
+  trap cleanup_desktop EXIT
 
   Xvfb "${DISP}" -screen 0 "${SCREEN_SPEC}" -auth "${XAUTH_FILE}" -nolisten tcp +extension RANDR +extension XTEST &
   XVFB_PID=$!
