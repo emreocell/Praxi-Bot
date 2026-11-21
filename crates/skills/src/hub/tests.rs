@@ -140,6 +140,61 @@ fn hash_stable() {
 }
 
 #[test]
+fn hex_known_answers() {
+    assert_eq!(util::hex(&[]), "");
+    assert_eq!(util::hex(&[0x00, 0x0f, 0xff]), "000fff");
+}
+
+#[test]
+fn sha256_hex_known_answers() {
+    assert_eq!(
+        util::sha256_hex(b""),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(
+        util::sha256_hex(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+}
+
+#[test]
+fn hash_files_depends_on_content_relative_path_and_order() {
+    let tmp = TempDir::new().expect("tempdir");
+    let make_file = |rel: &str, bytes: &[u8]| {
+        let path = tmp.path().join(rel);
+        fs::write(&path, bytes).expect("write fixture");
+        util::TreeFile {
+            rel: rel.to_owned(),
+            path,
+            size: bytes.len() as u64,
+        }
+    };
+    let files = [make_file("a.txt", b"first"), make_file("b.txt", b"second")];
+    let hash = |files: &[util::TreeFile]| util::hash_files(files).expect("hash fixtures");
+    let original = hash(&files);
+    assert_eq!(hash(&files), original);
+
+    let mut renamed = files.clone();
+    renamed[0].rel = "c.txt".to_owned();
+    assert_ne!(
+        hash(&renamed),
+        original,
+        "relative path must affect the hash"
+    );
+
+    let mut reordered = files.clone();
+    reordered.swap(0, 1);
+    assert_ne!(
+        hash(&reordered),
+        original,
+        "file order must affect the hash"
+    );
+
+    fs::write(&files[0].path, b"other").expect("change bytes without changing length");
+    assert_ne!(hash(&files), original, "file contents must affect the hash");
+}
+
+#[test]
 fn lock_roundtrip() {
     let tmp = TempDir::new().expect("tempdir");
     let paths = HubPaths {
