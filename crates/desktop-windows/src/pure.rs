@@ -215,9 +215,16 @@ pub fn parse_key(name: &str) -> Option<Key> {
     let lower = name.trim().to_lowercase();
     let vk: u16 = match lower.as_str() {
         "ctrl" | "control" => 0x11,
+        "lctrl" => 0xA2,
+        "rctrl" => 0xA3,
         "shift" => 0x10,
+        "lshift" => 0xA0,
+        "rshift" => 0xA1,
         "alt" | "menu" | "option" => 0x12,
-        "win" | "windows" | "cmd" | "meta" | "super" => 0x5B,
+        "lalt" => 0xA4,
+        "ralt" | "altgr" => 0xA5,
+        "win" | "windows" | "cmd" | "meta" | "super" | "lwin" => 0x5B,
+        "rwin" | "rsuper" => 0x5C,
         "enter" | "return" => 0x0D,
         "tab" => 0x09,
         "esc" | "escape" => 0x1B,
@@ -373,6 +380,35 @@ mod tests {
         assert_eq!(parse_key("\u{fc}"), Some(Key::Char('\u{fc}')));
         assert_eq!(parse_key("nonsense"), None);
         assert_eq!(parse_key("f25"), None);
+    }
+
+    #[test]
+    fn key_parsing_left_right_modifiers() {
+        for (name, vk) in [
+            ("lctrl", 0xA2),
+            ("rctrl", 0xA3),
+            ("lshift", 0xA0),
+            ("rshift", 0xA1),
+            ("lalt", 0xA4),
+            ("ralt", 0xA5),
+            ("altgr", 0xA5),
+            ("lwin", 0x5B),
+            ("rwin", 0x5C),
+            ("rsuper", 0x5C),
+        ] {
+            assert_eq!(parse_key(name), Some(Key::Vk(vk)), "{name}");
+        }
+        // The generic names keep their virtual keys.
+        assert_eq!(parse_key("shift"), Some(Key::Vk(0x10)));
+        assert_eq!(parse_key("alt"), Some(Key::Vk(0x12)));
+        assert_eq!(parse_key("win"), Some(Key::Vk(0x5B)));
+        // Right Ctrl and right Alt are sent with the extended-key flag.
+        for name in ["rctrl", "ralt"] {
+            let Some(Key::Vk(vk)) = parse_key(name) else {
+                panic!("{name} should parse to a virtual key");
+            };
+            assert!(crate::live_view_win::is_win_extended_vk(vk), "{name}");
+        }
     }
 
     #[test]

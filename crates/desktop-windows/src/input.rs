@@ -15,7 +15,8 @@ use windows::Win32::UI::{
     },
 };
 
-use crate::pure::{Key, is_extended, parse_key};
+use crate::live_view_win::is_win_extended_vk;
+use crate::pure::{Key, parse_key};
 
 fn send(inputs: &[INPUT]) -> Result<(), DesktopError> {
     if inputs.is_empty() {
@@ -216,7 +217,7 @@ fn vk_event(vk: u16, up: bool) -> INPUT {
     } else {
         KEYBD_EVENT_FLAGS(0)
     };
-    if is_extended(vk) {
+    if is_win_extended_vk(vk) {
         flags |= KEYEVENTF_EXTENDEDKEY;
     }
     kbd(vk, 0, flags)
