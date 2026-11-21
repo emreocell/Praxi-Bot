@@ -288,6 +288,7 @@ fn linux_desktop_backend_check() -> Check {
 }
 
 /// Facts for [`diagnose_desktop_backend`]. The caller keeps the strings.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 #[derive(Clone, Copy)]
 struct DesktopFacts<'a> {
     session_type: Option<&'a str>,
@@ -302,6 +303,7 @@ struct DesktopFacts<'a> {
     xdpyinfo_present: bool,
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn finish_desktop_check(facts: &DesktopFacts<'_>) -> Check {
     match diagnose_desktop_backend(facts) {
         Ok(detail) => Check::ok("desktop_backend", "desktop backend", detail),
@@ -309,19 +311,15 @@ fn finish_desktop_check(facts: &DesktopFacts<'_>) -> Check {
     }
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn session_problem(session: Option<&str>, wayland: Option<&str>) -> Option<String> {
     let session = session.map(str::trim).filter(|s| !s.is_empty());
     let wayland = wayland.map(str::trim).filter(|s| !s.is_empty());
-    if session
-        .as_deref()
-        .is_some_and(|s| s.eq_ignore_ascii_case("wayland"))
-    {
+    if session.is_some_and(|s| s.eq_ignore_ascii_case("wayland")) {
         return Some("Wayland session (XDG_SESSION_TYPE=wayland)".into());
     }
     if let Some(name) = wayland
-        && !session
-            .as_deref()
-            .is_some_and(|s| s.eq_ignore_ascii_case("x11"))
+        && !session.is_some_and(|s| s.eq_ignore_ascii_case("x11"))
     {
         return Some(format!("Wayland display '{name}'"));
     }
@@ -330,9 +328,8 @@ fn session_problem(session: Option<&str>, wayland: Option<&str>) -> Option<Strin
 
 /// `Ok(detail)` when the Linux desktop backend can drive the screen.
 /// The `Err` names the first real cause and how to fix it.
-fn diagnose_desktop_backend(
-    f: &DesktopFacts<'_>,
-) -> std::result::Result<String, (String, String)> {
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn diagnose_desktop_backend(f: &DesktopFacts<'_>) -> std::result::Result<String, (String, String)> {
     if let Some(problem) = session_problem(f.session_type, f.wayland_display) {
         return Err((
             format!("{problem}: desktop control needs an X11 session such as Xvfb on :99"),
@@ -397,6 +394,7 @@ fn diagnose_desktop_backend(
 
 /// `true` when `name` is a file in a `PATH` entry. `exists` is injected so tests
 /// do not touch the real filesystem layout beyond a temp dir.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn command_on_path(
     name: &str,
     path_env: Option<&std::ffi::OsStr>,
