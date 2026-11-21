@@ -375,8 +375,13 @@ pub(crate) async fn guard(State(state): State<AppState>, mut req: Request, next:
     if crate::live_view::reject_query_credentials(&req) {
         return ApiError::bad_request("URL credentials are forbidden").into_response();
     }
-    req.extensions_mut()
-        .insert(crate::live_view::Actor::local(&state));
+    // A bearer alone (CLI engines, bot children, scripts) is low-privilege for
+    // approval/control events; the owner key makes the local app the manager.
+    let decisions = state.owner_ok(req.headers());
+    req.extensions_mut().insert(crate::live_view::Actor {
+        decisions,
+        ..crate::live_view::Actor::local(&state)
+    });
     with_cors(next.run(req).await, origin, false)
 }
 

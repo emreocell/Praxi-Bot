@@ -908,27 +908,65 @@ fn to_sse(item: &StreamItem, scoped: bool) -> SseEvent {
         .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event"))
 }
 
-/// Overlay questions are for the local app only: a paired peer must never see
-/// a `control_requested` event (it could answer it).
-pub(crate) fn hidden_from_peer(local: bool, out: &Out) -> bool {
-    !local
-        && matches!(out, Out::Run(item) if matches!(item.envelope.event, protocol::Event::ControlRequested(_)))
+/// How much authority a run event needs before a stream may carry it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EventClass {
+    /// Progress/trace events any authenticated client may watch.
+    Open,
+    /// Carries what is needed to answer an approval or a question.
+    Decision,
+    /// An overlay control request (it could be answered or spoofed).
+    Control,
 }
 
-#[cfg(test)]
-pub(crate) fn test_run_out(event: protocol::Event) -> Out {
-    Out::Run(StreamItem {
-        gseq: 1,
-        run_id: protocol::RunId::new(),
-        envelope: protocol::Envelope::new(0, event),
-    })
+/// Classify every run event. Deliberately exhaustive (no wildcard): a new
+/// `protocol::Event` variant does not compile until it is classified here.
+pub(crate) fn classify(event: &protocol::Event) -> EventClass {
+    use protocol::Event as E;
+    match event {
+        E::ApprovalNeeded(_) | E::QuestionAsked(_) => EventClass::Decision,
+        E::ControlRequested(_) => EventClass::Control,
+        E::RunStarted(_)
+        | E::RunFinished(_)
+        | E::MessageDelta(_)
+        | E::ToolCallRequested(_)
+        | E::ToolCallApproved(_)
+        | E::ToolCallDenied(_)
+        | E::ToolCallCompleted(_)
+        | E::TodoUpdated(_)
+        | E::ModelFallback(_)
+        | E::RouteDecided(_)
+        | E::WorkflowStepStarted(_)
+        | E::WorkflowStepCompleted(_)
+        | E::WorkflowDrift(_)
+        | E::SubagentStarted(_)
+        | E::SubagentFinished(_)
+        | E::CheckpointRestored(_)
+        | E::Error(_) => EventClass::Open,
+    }
 }
 
-fn event_stream(feed: Feed, local: bool) -> impl Stream<Item = Result<SseEvent, Infallible>> {
-    stream::unfold((feed, local), |(mut feed, local)| async move {
+/// Whether a stream for this client must not carry `out` (live or replayed).
+/// `decisions`: local app with the owner key, or a paired Desktop.  Overlay
+/// control requests additionally need `local`: a remote manager never answers
+/// them.
+pub(crate) fn hidden_from(local: bool, decisions: bool, out: &Out) -> bool {
+    let Out::Run(item) = out else { return false };
+    match classify(&item.envelope.event) {
+        EventClass::Open => false,
+        EventClass::Decision => !decisions,
+        EventClass::Control => !(local && decisions),
+    }
+}
+
+fn event_stream(
+    feed: Feed,
+    audience: (bool, bool),
+) -> impl Stream<Item = Result<SseEvent, Infallible>> {
+    stream::unfold((feed, audience), |(mut feed, audience)| async move {
         let out = loop {
             let out = feed.next_item().await?;
-            if !hidden_from_peer(local, &out) {
+            if !hidden_from(audience.0, audience.1, &out) {
                 break out;
             }
         };
@@ -977,7 +1015,7 @@ fn event_stream(feed: Feed, local: bool) -> impl Stream<Item = Result<SseEvent, 
                 .json_data(serde_json::json!({"type": "view_targets_changed"}))
                 .unwrap_or_else(|_| SseEvent::default().comment("unserialisable event")),
         };
-        Some((Ok(ev), (feed, local)))
+        Some((Ok(ev), (feed, audience)))
     })
 }
 
@@ -1045,9 +1083,11 @@ pub(crate) async fn events(
         data_dir: state.data_dir(),
         logs: Arc::default(),
         cancel: state.shutdown_token(),
-        // Only the local app counts as the overlay's listener; a paired device
-        // watching events must not make `app_connected()` true.
-        _app: (scoped_run.is_none() && actor.local).then(|| state.hub().subscribe()),
+        // Only the local app (owner key) counts as the overlay's listener; a
+        // paired device or a bearer-only client must not make
+        // `app_connected()` true.
+        _app: (scoped_run.is_none() && actor.local && actor.decisions)
+            .then(|| state.hub().subscribe()),
     };
     match cursor {
         Cursor::Run(run, last) => {
@@ -1077,7 +1117,8 @@ pub(crate) async fn events(
             feed.delivered = feed.scan;
         }
     }
-    Ok(Sse::new(event_stream(feed, actor.local)).keep_alive(KeepAlive::default()))
+    Ok(Sse::new(event_stream(feed, (actor.local, actor.decisions)))
+        .keep_alive(KeepAlive::default()))
 }
 
 /// Counters of the SSE machinery (authenticated, unlike `/v1/health`).
@@ -1182,6 +1223,123 @@ mod tests {
                 text: format!("{seq}"),
             }),
         )
+    }
+
+    fn decision_events(run: RunId) -> Vec<Event> {
+        use protocol::event::{ApprovalNeeded, ControlRequested, MessageDelta, QuestionAsked};
+        let call_id = protocol::ToolCallId::new();
+        vec![
+            Event::MessageDelta(MessageDelta {
+                run_id: run,
+                text: "hi".into(),
+            }),
+            Event::ApprovalNeeded(ApprovalNeeded {
+                run_id: run,
+                call_id,
+                tool_name: "shell".into(),
+                input: serde_json::json!({}),
+                summary: "x".into(),
+                details: None,
+            }),
+            Event::QuestionAsked(QuestionAsked {
+                run_id: run,
+                call_id,
+                question: "q?".into(),
+                options: vec![],
+            }),
+            Event::ControlRequested(ControlRequested {
+                request_id: uuid::Uuid::now_v7(),
+                run_id: run,
+                bot_id: protocol::BotId::new(),
+                rect: None,
+                label: "Save".into(),
+                action: "click".into(),
+            }),
+        ]
+    }
+
+    /// Approval/question/control events per client kind, replayed AND live.
+    #[tokio::test]
+    async fn streams_carry_only_the_events_the_client_may_see() {
+        use crate::{PeerIdentity, PeerRole, live_view::Actor};
+        use futures::StreamExt as _;
+        let peer = |role| {
+            let a = Actor::peer(&PeerIdentity {
+                key: "k".into(),
+                role,
+            });
+            (a.local, a.decisions)
+        };
+        let all = [
+            "message_delta",
+            "approval_needed",
+            "question_asked",
+            "control_requested",
+        ];
+        let cases: Vec<(&str, (bool, bool), Vec<&str>)> = vec![
+            ("local management", (true, true), all.to_vec()),
+            // The bearer alone (CLI engine, bot child, script): owner key absent.
+            ("local bearer only", (true, false), vec!["message_delta"]),
+            // A paired Desktop decides approvals, never overlay requests.
+            ("desktop peer", peer(PeerRole::Desktop), all[..3].to_vec()),
+            ("phone peer", peer(PeerRole::Phone), vec!["message_delta"]),
+            ("node peer", peer(PeerRole::Node), vec!["message_delta"]),
+            ("host peer", peer(PeerRole::Host), vec!["message_delta"]),
+        ];
+        for (name, audience, expected) in cases {
+            for live in [false, true] {
+                let (_dir, st, mut feed, tx) = replay_fixture();
+                let run = RunId::new();
+                // Replay: everything is in the log + index and `replaying` is set.
+                // Live: nothing to replay, the events arrive on the broadcast.
+                feed.replaying = !live;
+                for (i, ev) in decision_events(run).into_iter().enumerate() {
+                    let envelope = Envelope::new(i as u64, ev);
+                    storage::EventLogWriter::open(st.data_dir(), run)
+                        .unwrap()
+                        .append(&envelope)
+                        .unwrap();
+                    st.index_event(i as u64 + 1, run, i as u64).unwrap();
+                    if live {
+                        tx.send(StreamItem {
+                            gseq: i as u64 + 1,
+                            run_id: run,
+                            envelope,
+                        })
+                        .unwrap();
+                    }
+                }
+                drop(tx);
+                let mut seen: Vec<&str> = Vec::new();
+                let mut stream = Box::pin(event_stream(feed, audience));
+                while let Ok(Some(Ok(ev))) =
+                    tokio::time::timeout(Duration::from_secs(3), stream.next()).await
+                {
+                    let text = format!("{ev:?}");
+                    seen.extend(
+                        all.iter()
+                            .copied()
+                            .filter(|n| text.contains(&format!("event: {n}"))),
+                    );
+                }
+                assert_eq!(seen, expected, "{name} (live: {live})");
+            }
+        }
+    }
+
+    #[test]
+    fn classification_is_fail_closed_for_decision_events() {
+        let events = decision_events(RunId::new());
+        let classes: Vec<_> = events.iter().map(classify).collect();
+        assert_eq!(
+            classes,
+            [
+                EventClass::Open,
+                EventClass::Decision,
+                EventClass::Decision,
+                EventClass::Control
+            ]
+        );
     }
 
     #[test]

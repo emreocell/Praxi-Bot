@@ -450,10 +450,15 @@ impl DaemonClient for HttpDaemonClient {
     }
 
     async fn subscribe_run(&self, run_id: RunId) -> Result<BoxStream<'static, Envelope>> {
-        let resp = self
+        let mut rb = self
             .http
             .get(format!("{}/v1/events?run_id={}", self.base_url, run_id.0))
-            .bearer_auth(self.token.expose())
+            .bearer_auth(self.token.expose());
+        // Approval cards need the manager's stream (owner key), see daemon-api sse.
+        if let Some(key) = &self.owner_key {
+            rb = rb.header("x-praxi-owner-key", key.expose());
+        }
+        let resp = rb
             .send()
             .await
             .map_err(|e| TelegramError::Daemon(e.to_string()))?;
