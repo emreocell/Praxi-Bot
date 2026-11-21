@@ -124,3 +124,19 @@ export {
   type GradientMapConfig
 } from "./botShape";
 export { computeEyeGazeOffset, type GazeBounds, type GazeOffset } from "./eyeGaze";
+export {
+  gazeFromPointer,
+  idleSchedule,
+  nextBlink,
+  nextIdleAction,
+  projectFace,
+  seededRandom,
+  shapeSway,
+  sleepAfterMs,
+  stateExpression,
+  type AvatarExpression,
+  type FaceProjection,
+  type IdleAction,
+  type ShapeSway
+} from "./avatarBehavior";
+export { getAvatarTimeScale, setAvatarTimeScale } from "./avatarLife";

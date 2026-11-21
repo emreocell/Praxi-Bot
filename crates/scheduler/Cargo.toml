@@ -34,5 +34,6 @@ tracing = "0.1"
 uuid.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true

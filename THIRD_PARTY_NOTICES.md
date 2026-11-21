@@ -1,5 +1,11 @@
 # Third-party notices
 
+## proptest (MIT OR Apache-2.0)
+
+`proptest` supplies development-only property tests for the scheduler's text parser.
+The upstream crate includes both license texts:
+[proptest](https://github.com/proptest-rs/proptest).
+
 ## Geist Sans and Geist Mono (SIL OFL 1.1)
 
 Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font).

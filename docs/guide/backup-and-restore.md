@@ -97,6 +97,32 @@ The first line names where `bot` keeps secrets; it can differ on your system.
   bot restore ./praxi-backup.tar --allow-policy-relaxation
   ```
 
+## JSON output for scripts
+
+Use the global `--json` flag to get one JSON object on stdout after a successful command. Notices such as `(secret backend: ...)` go to stderr, so stdout can be parsed as it is.
+
+```sh
+bot --json backup ./praxi-backup.tar
+```
+
+```json
+{"file":"./praxi-backup.tar","files":5,"bytes":320256}
+```
+
+`files` counts the backed-up files, and `bytes` is their total size before archive overhead.
+
+```sh
+bot --json restore ./praxi-backup.tar
+```
+
+```json
+{"file":"./praxi-backup.tar","files":5,"app_version":"0.1.0","previous_state":null}
+```
+
+`app_version` is the Praxi version recorded in the archive. When restore saves the state it replaces, `previous_state` is the path to the `backup-*` directory. Otherwise it is `null`.
+
+On failure, the command exits with a non-zero status, writes the error as text to stderr, and leaves stdout empty.
+
 ## Restore checklist
 
 When restoring an installation or moving to a new machine, follow these steps in order:

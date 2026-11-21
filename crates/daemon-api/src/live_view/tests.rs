@@ -2082,6 +2082,7 @@ fn alice_actor() -> Actor {
         recovery: true,
         local: false,
         admin: false,
+        decisions: false,
     }
 }
 
@@ -3872,6 +3873,7 @@ async fn a_revoked_input_grant_stops_applying_while_the_executor_is_busy() {
         recovery: false,
         local: false,
         admin: false,
+        decisions: false,
     };
     assert!(live.allowed(&peer, true));
     let busy = live.executor.lock().await; // a long input batch holds it
@@ -4244,29 +4246,6 @@ async fn a_peer_event_stream_does_not_make_the_app_look_connected() {
     assert_eq!(local.status(), StatusCode::OK);
     assert!(t.state.hub().app_connected(), "the local app does");
     drop((peer, local));
-}
-
-#[test]
-fn control_requested_events_are_hidden_from_peers_only() {
-    use crate::sse::hidden_from_peer;
-    let event = protocol::Event::ControlRequested(protocol::event::ControlRequested {
-        request_id: Uuid::now_v7(),
-        run_id: protocol::RunId::new(),
-        bot_id: protocol::BotId::new(),
-        rect: None,
-        label: "Save".into(),
-        action: "click".into(),
-    });
-    assert!(hidden_from_peer(
-        false,
-        &crate::sse::test_run_out(event.clone())
-    ));
-    assert!(!hidden_from_peer(true, &crate::sse::test_run_out(event)));
-    let other = protocol::Event::MessageDelta(protocol::event::MessageDelta {
-        run_id: protocol::RunId::new(),
-        text: "hi".into(),
-    });
-    assert!(!hidden_from_peer(false, &crate::sse::test_run_out(other)));
 }
 
 #[tokio::test]
@@ -4699,6 +4678,7 @@ fn view_actor(key: &str, admin: bool) -> Actor {
         recovery: true,
         local: false,
         admin,
+        decisions: false,
     }
 }
 

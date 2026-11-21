@@ -13,6 +13,7 @@ import {
   PANEL_BLUR_MIN,
   PANEL_TRANSPARENCY_MAX,
   PANEL_TRANSPARENCY_MIN,
+  isLightColor,
   osPrefersReducedTransparency,
   resolveTheme,
   surfaceSupport,
@@ -27,6 +28,7 @@ import pickerStyles from "../../components/AppearancePicker.module.css";
 import { Segmented, SettingRow, Switch } from "../../components/SettingsUi";
 import { selectedThemeId, ThemePicker } from "../../components/ThemePicker";
 import { CUSTOM_BACKDROP, NO_BACKDROP } from "../../lib/backdropCatalog";
+import { WallpaperPicker } from "../../components/WallpaperPicker";
 import { ACCENT_PRESETS, BLUR_PRESETS, DIM_PRESETS } from "../../config/product";
 import styles from "../SettingsModal.module.css";
 import type { CardDef, SettingsBridge } from "./types";
@@ -397,6 +399,16 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
         />
       ),
       { keywords: "wallpaper scene arka plan backdrop" }
+    ),
+    card(
+      "wallpaper",
+      t("appearance.wallpaper.title"),
+      t("appearance.wallpaper.description"),
+      row(
+        "wallpaper",
+        <WallpaperPicker value={settings.wallpaper} themeId={theme.id} themeIsDark={!isLightColor(theme.bg)} onChange={(wallpaper) => update({ wallpaper })} />
+      ),
+      { keywords: "wallpaper sky clouds dither halftone animated duvar kagidi bulut gokyuzu hintergrund wolken" }
     ),
     card(
       "corners",
