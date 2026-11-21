@@ -162,7 +162,7 @@ type Route =
   | { kind: "onboarding" }
   /** A bot without any chat yet: the empty state (there is no bot page). */
   | { kind: "bot"; botId: string }
-  | { kind: "chat"; chatId: string; botId: string; messageId?: string }
+  | { kind: "chat"; chatId: string; botId: string; messageId?: string; jumpRequestId?: number }
   | { kind: "needs" }
   | { kind: "schedules" };
 
@@ -607,7 +607,7 @@ function AppShell() {
 
   const openChat = (chatId: string, messageId?: string) => {
     const chat = chats.find((c) => c.id === chatId);
-    go({ kind: "chat", chatId, botId: chat?.bot_id ?? "", messageId });
+    go({ kind: "chat", chatId, botId: chat?.bot_id ?? "", messageId, jumpRequestId: messageId ? Date.now() : undefined });
   };
   const openNeeds = () => go({ kind: "needs" });
   // Selecting a bot: its latest chat, or the empty state when it has none.
@@ -1070,6 +1070,7 @@ function AppShell() {
             key={route.chatId}
             chatId={route.chatId}
             jumpMessageId={route.messageId}
+            jumpRequestId={route.jumpRequestId}
             onBack={() => {
               // There is no bot page to go back to: the chat list lives in the right panel.
               if (backFromChatOpensPanel(panelOpen)) setPanelOpen(true);

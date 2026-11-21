@@ -202,6 +202,7 @@ function canOfferRemember(run: RunState): boolean {
 export function ChatView({
   chatId,
   jumpMessageId,
+  jumpRequestId,
   onBack,
   control,
   onControl,
@@ -213,6 +214,7 @@ export function ChatView({
 }: {
   chatId: string;
   jumpMessageId?: string;
+  jumpRequestId?: number;
   /** Present only when there is a page to go back to; without it the header has no arrow. */
   onBack?: () => void;
   /** The native (desktop control) state; the run bar shows it next to the chat run. */
@@ -632,16 +634,21 @@ export function ChatView({
     }
   }, [entries.length]);
 
+  const appliedJump = useRef<string | null>(null);
   useEffect(() => {
-    if (!jumpMessageId || !messages.some((m) => m.id === jumpMessageId)) return;
+    const request = `${jumpMessageId}:${jumpRequestId ?? 0}`;
+    if (!jumpMessageId || appliedJump.current === request || !messages.some((m) => m.id === jumpMessageId)) return;
     stickToBottom.current = false;
     const frame = requestAnimationFrame(() => {
       const row = document.getElementById(`m-${jumpMessageId}`);
-      row?.scrollIntoView({ block: "center" });
-      row?.focus({ preventScroll: true });
+      if (row) {
+        appliedJump.current = request;
+        row.scrollIntoView({ block: "center" });
+        row.focus({ preventScroll: true });
+      }
     });
     return () => cancelAnimationFrame(frame);
-  }, [jumpMessageId, messages]);
+  }, [jumpMessageId, jumpRequestId, messages]);
 
   const onScroll = () => {
     const el = scrollerRef.current;
