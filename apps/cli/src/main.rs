@@ -58,7 +58,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
     version,
     about = "Praxi-Bot agent CLI",
     long_about = None,
-    after_help = "Exit codes:\n  0  OK\n  1  General error\n  2  Usage error\n  3  Daemon unreachable\n  4  Authentication rejected (or missing API token)\n  5  Not found\n  6  Request rejected (invalid input, conflict, or setup required)\n  7  Run failed or cancelled"
+    after_help = "Exit codes:\n  0  OK\n  1  General error\n  2  Usage error\n  3  Daemon unreachable\n  4  Authentication rejected (or missing API token)\n  5  Not found\n  6  Request rejected (invalid input, conflict, or setup required)\n  7  The run ended with an error or was cancelled"
 )]
 struct Cli {
     /// Data directory (defaults to `BOT_DATA_DIR` or the OS app-data directory).
