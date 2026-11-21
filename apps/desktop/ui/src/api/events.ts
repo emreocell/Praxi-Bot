@@ -162,7 +162,7 @@ export function subscribeEvents(
     while (!controller.signal.aborted) {
       try {
         const headers: Record<string, string> = {
-          ...client.authHeaders(),
+          ...(await client.eventStreamHeaders()),
           Accept: "text/event-stream"
         };
         if (cursor !== null) {
