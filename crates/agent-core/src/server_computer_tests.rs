@@ -361,7 +361,8 @@ async fn server_grants_and_paused_runs_survive_a_restart_while_the_server_is_pai
             .unwrap();
         lp.rt.pause_queued(run, Some("waiting")).unwrap();
     }
-    lp.reconcile_computer_identity(MACHINE_A, Some(&[])).unwrap();
+    lp.reconcile_computer_identity(MACHINE_A, Some(&[]))
+        .unwrap();
     for g in lp.list_grants(env.bot) {
         let paired = g.computer.as_deref() == Some(format!("server:{MACHINE_B}").as_str());
         assert_eq!(g.inert, !paired, "{:?}", g.computer);

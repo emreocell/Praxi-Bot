@@ -3056,9 +3056,15 @@ mod tests {
         let b = tool.select_shared(&ctx("b")).unwrap();
         a.observed_epoch
             .store(7, std::sync::atomic::Ordering::SeqCst);
-        assert_eq!(b.observed_epoch.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            b.observed_epoch.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
         let a2 = tool.select_shared(&ctx("a")).unwrap();
-        assert_eq!(a2.observed_epoch.load(std::sync::atomic::Ordering::SeqCst), 7);
+        assert_eq!(
+            a2.observed_epoch.load(std::sync::atomic::Ordering::SeqCst),
+            7
+        );
     }
 
     struct RefuseGate;
