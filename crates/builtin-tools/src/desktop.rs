@@ -831,7 +831,7 @@ pub fn tools_dynamic_with_secrets(
     let method_prop = json!({
         "type":"string",
         "enum":["accessibility","app_post","global"],
-        "description":"How to deliver the input. Default accessibility for indexes; global (moves the real cursor) for marks."
+        "description":"How to deliver the input. Default accessibility for indexes; global (moves the real cursor) for marks. `app_post` is not implemented on Windows or Linux yet, and the call fails."
     });
     let defs: Vec<(Op, ToolSpec)> = vec![
         (
@@ -3654,5 +3654,41 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("unavailable"), "{err}");
+    }
+
+    #[test]
+    fn desktop_click_schema_states_app_post_is_not_implemented_and_parser_keeps_it() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t) = build(fake, None);
+        let click = get(&t, "desktop_click");
+        let spec = click.spec();
+        let method = &spec.input_schema["properties"]["method"];
+
+        let variants: Vec<&str> = method["enum"]
+            .as_array()
+            .expect("method enum")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert!(
+            variants.contains(&"app_post"),
+            "app_post must remain in method enum for workflow replay: {variants:?}"
+        );
+
+        let desc = method["description"].as_str().expect("method description");
+        assert!(desc.contains("app_post"), "{desc}");
+        assert!(desc.contains("not implemented"), "{desc}");
+        assert!(desc.contains("Windows"), "{desc}");
+        assert!(desc.contains("Linux"), "{desc}");
+        assert!(desc.contains("fail"), "{desc}");
+
+        assert_eq!(
+            parse_method(Some("app_post"), ClickMethod::Accessibility).unwrap(),
+            ClickMethod::AppPost
+        );
+        assert_eq!(
+            parse_method(Some("app_post"), ClickMethod::Global).unwrap(),
+            ClickMethod::AppPost
+        );
     }
 }
