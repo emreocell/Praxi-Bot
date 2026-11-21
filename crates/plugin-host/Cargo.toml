@@ -1,6 +1,6 @@
 [package]
 name = "plugin-host"
-description = "Reserved placeholder for a future plugin host; contains no code yet."
+description = "Reserved placeholder with no code yet; the plugin design is tracked in issue #213."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
