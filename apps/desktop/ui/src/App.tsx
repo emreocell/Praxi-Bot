@@ -18,6 +18,8 @@ import {
   SidebarLayout,
   SidebarSection,
   SidePanel,
+  isLightColor,
+  resolveTheme,
 } from "ui";
 import styles from "./App.module.css";
 import { AppsPill } from "./components/AppsPill";
@@ -86,6 +88,8 @@ import { appearanceFromQuery } from "./lib/appearance";
 import { createDebounced } from "./lib/debounce";
 import { backdropIsActive, CUSTOM_BACKDROP, NO_BACKDROP } from "./lib/backdropCatalog";
 import { Backdrop, sceneColors } from "./components/Backdrop";
+import { Wallpaper } from "./components/Wallpaper";
+import { resolveWallpaper, wallpaperSceneId, WALLPAPER_DIM } from "./lib/wallpaper";
 import { useApplyAppearance } from "./state/useApplyAppearance";
 import { usePanelReserve } from "./state/usePanelReserve";
 import { useViewportWidth } from "./state/useViewportWidth";
@@ -528,8 +532,19 @@ function AppShell() {
   const routeBotId =
     route.kind === "bot" || route.kind === "chat" ? route.botId : undefined;
   const selectedBot = bots.find((bot) => bot.id === routeBotId) ?? bots[0];
+  // The wallpaper (when on) takes the backdrop's place, so the panels' glass, tone sampling and
+  // floating layout all follow the existing backdrop plumbing.
+  const baseTheme = resolveTheme(settings.themeMode, settings.customTheme);
+  const wallpaperKind = resolveWallpaper(settings.wallpaper, baseTheme.id, !isLightColor(baseTheme.bg));
+  const shellSettings = useMemo(
+    () =>
+      wallpaperKind
+        ? { ...settings, backdrop: wallpaperSceneId(wallpaperKind), backdropDim: WALLPAPER_DIM }
+        : settings,
+    [settings, wallpaperKind]
+  );
   const { theme: activeTheme, accent: activeAccent } = useApplyAppearance(
-    settings,
+    shellSettings,
     selectedBot ? botView(selectedBot).color : undefined
   );
 
@@ -668,7 +683,7 @@ function AppShell() {
     lastDialogBot.current = dialogBotId;
   }, [dialogBotId]);
   const panelVisible = panelOpen && botInView;
-  const float = isFloatShell(settings.uiStyle, backdropIsActive(settings.backdrop, settings.backgroundUrl));
+  const float = isFloatShell(shellSettings.uiStyle, backdropIsActive(shellSettings.backdrop, shellSettings.backgroundUrl));
   const panelWidth = Math.min(layout.panel, panelMax(viewportWidth, layout.rail, float));
   const panelReserve = usePanelReserve(panelVisible);
   const railWidth = fitRail(viewportWidth, layout.rail, panelWidth, float, panelReserve);
@@ -783,7 +798,9 @@ function AppShell() {
     <SidebarLayout
       style={{ "--size-sidebar-width": `${railWidth}px` } as CSSProperties}
       backdrop={
-        settings.backdrop !== NO_BACKDROP && settings.backdrop !== CUSTOM_BACKDROP ? (
+        wallpaperKind ? (
+          <Wallpaper kind={wallpaperKind} />
+        ) : settings.backdrop !== NO_BACKDROP && settings.backdrop !== CUSTOM_BACKDROP ? (
           <Backdrop
             scene={settings.backdrop}
             dim={settings.backdropDim}

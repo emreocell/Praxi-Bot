@@ -301,6 +301,17 @@
       "lowContrast": "Niedriger Kontrast ({{ratio}}:1). Text braucht mindestens 4,5:1, um lesbar zu bleiben.",
       "modalTitle": "Designs",
       "text": "Text"
+    },
+    "wallpaper": {
+      "description": "Langsam ziehende, gerasterte Wolken hinter den Panels. Standardmäßig aus; pausiert, wenn das Fenster verborgen ist.",
+      "dusk": "Dämmerung",
+      "hint": "„Design folgen“ wählt Nacht für Obsidian, Himmel für Cobalt, Dämmerung für Raven und Warm für Clay. Es ersetzt den Hintergrund, solange es aktiv ist; bei reduzierter Bewegung wird ein einzelnes Standbild gezeigt.",
+      "night": "Nacht",
+      "off": "Aus",
+      "sky": "Himmel",
+      "theme": "Design folgen",
+      "title": "Hintergrundbild",
+      "warm": "Warm"
     }
   },
   "apps": {

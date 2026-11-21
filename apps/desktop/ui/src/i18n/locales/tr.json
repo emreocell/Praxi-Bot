@@ -301,6 +301,17 @@
       "lowContrast": "Kontrast düşük ({{ratio}}:1). Metnin okunur kalması için en az 4,5:1 gerekir.",
       "modalTitle": "Temalar",
       "text": "Yazı"
+    },
+    "wallpaper": {
+      "description": "Panellerin arkasında çok yavaş kayan, noktalı (dither) bulutlar. Varsayılan olarak kapalı; pencere gizlenince durur.",
+      "dusk": "Alacakaranlık",
+      "hint": "Temayı izle: Obsidian için Gece, Cobalt için Gökyüzü, Raven için Alacakaranlık, Clay için Sıcak seçilir. Açıkken arka planın yerini alır; hareket azaltma açıksa tek bir durağan kare gösterilir.",
+      "night": "Gece",
+      "off": "Kapalı",
+      "sky": "Gökyüzü",
+      "theme": "Temayı izle",
+      "title": "Duvar kağıdı",
+      "warm": "Sıcak"
     }
   },
   "apps": {

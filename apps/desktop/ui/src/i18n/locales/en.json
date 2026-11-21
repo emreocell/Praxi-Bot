@@ -301,6 +301,17 @@
       "lowContrast": "Low contrast ({{ratio}}:1). Text needs at least 4.5:1 to stay readable.",
       "modalTitle": "Themes",
       "text": "Text"
+    },
+    "wallpaper": {
+      "description": "Slowly drifting dithered clouds behind the panels. Off by default; pauses when the window is hidden.",
+      "dusk": "Dusk",
+      "hint": "Follow theme picks Night for Obsidian, Sky for Cobalt, Dusk for Raven and Warm for Clay. It replaces the backdrop while on, and reduced motion shows one still frame.",
+      "night": "Night",
+      "off": "Off",
+      "sky": "Sky",
+      "theme": "Follow theme",
+      "title": "Wallpaper",
+      "warm": "Warm"
     }
   },
   "apps": {
