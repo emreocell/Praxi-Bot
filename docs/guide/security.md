@@ -144,6 +144,14 @@ automate the UI, or use a handle that existed before the guard was applied. It
 only closes the in-memory route. Root/administrator and the debugger-privileged
 accounts are not affected.
 
+On Windows an attacker process running **elevated** (administrator token with
+`SeDebugPrivilege`, or SYSTEM) bypasses any process access list, so the guard
+cannot protect against it. After applying the list the daemon therefore tries to
+open itself for memory read/write; if that still succeeds it reports `DEGRADED`
+instead of claiming protection (this is what happens on an elevated
+administrator account, such as the GitHub Windows runner). Run the daemon from a
+normal, non-elevated account if you want this protection.
+
 ## Good practice
 
 1. Keep the default `approve-destructive` preset; widen deliberately.
