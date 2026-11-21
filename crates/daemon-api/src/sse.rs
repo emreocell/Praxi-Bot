@@ -915,7 +915,8 @@ pub(crate) enum EventClass {
     Open,
     /// Carries what is needed to answer an approval or a question.
     Decision,
-    /// An overlay control request (it could be answered or spoofed).
+    /// An overlay control request (it could be answered or spoofed) or a
+    /// credential request (its purpose text is for the owner's own card).
     Control,
 }
 
@@ -925,7 +926,7 @@ pub(crate) fn classify(event: &protocol::Event) -> EventClass {
     use protocol::Event as E;
     match event {
         E::ApprovalNeeded(_) | E::QuestionAsked(_) => EventClass::Decision,
-        E::ControlRequested(_) => EventClass::Control,
+        E::ControlRequested(_) | E::SecretRequested(_) => EventClass::Control,
         E::RunStarted(_)
         | E::RunFinished(_)
         | E::MessageDelta(_)

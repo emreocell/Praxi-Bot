@@ -167,3 +167,12 @@
 @media (width <= 56em) { .row { flex-wrap: wrap; gap: var(--space-3); } .rowControl { max-width: 100%; } }
 
 .group { background-image: var(--surface-sheen); }
+
+/* c451: shared card shell, danger zone and empty note for settings blocks. */
+.card { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-5); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); background: var(--color-surface-elevated); }
+.cardHead { display: flex; flex-direction: column; gap: var(--space-1); }
+.cardTitle { margin: var(--space-0); font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text); }
+.cardDanger { border-color: var(--color-danger); background: var(--color-danger-subtle); }
+.cardDanger .cardTitle { color: var(--color-danger); }
+.emptyNote { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-0); padding: var(--space-3) var(--space-4); border: var(--size-border) dashed var(--color-border-strong); border-radius: var(--radius-md); font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.emptyNote > svg { flex-shrink: 0; width: var(--size-icon-sm); height: var(--size-icon-sm); }

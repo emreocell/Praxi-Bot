@@ -163,6 +163,9 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/v1/fill-secrets/*"),
     ("POST", "/v1/fill-grants"),
     ("DELETE", "/v1/fill-grants/{}"),
+    // a bot's credential request: the value is typed by the owner, never a token holder
+    ("POST", "/v1/secret-requests/{}"),
+    ("POST", "/v1/secret-requests/{}/cancel"),
     ("POST", "/v1/email/accounts"),
     ("PUT", "/v1/email/accounts/{}"),
     ("DELETE", "/v1/email/accounts/{}"),

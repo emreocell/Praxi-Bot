@@ -92,6 +92,21 @@ async fn bench_browser_actions() {
         snap_s.print();
     }
 
+    let mut uncached_heavy = Series::new("snapshot heavy (uncached)");
+    let mut nav_snap_poll = Series::new("navigate_snapshot poll");
+    for _ in 0..RUNS {
+        let p = fresh(&b, &format!("{base}/heavy")).await;
+        p.invalidate_refs().await;
+        uncached_heavy.push(timed(p.snapshot(&opts)).await);
+        let _ = p.close().await;
+
+        let p2 = b.new_page("about:blank").await.expect("open blank");
+        nav_snap_poll.push(timed(p2.navigate_snapshot(&format!("{base}/poll"), &opts)).await);
+        let _ = p2.close().await;
+    }
+    uncached_heavy.print();
+    nav_snap_poll.print();
+
     let mut idle = Series::new("wait network-idle (poll)");
     for _ in 0..RUNS {
         let p = fresh(&b, &format!("{base}/poll")).await;

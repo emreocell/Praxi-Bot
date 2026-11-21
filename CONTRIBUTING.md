@@ -225,7 +225,8 @@ cargo deny check                            # when you change dependencies
    workflow run before CI starts; that is normal.
 8. Link the issue (`Closes #123`). By opening the PR you agree to the licensing terms below.
 
-Maintainers: the triage-and-merge routine is in [docs/contributing/MAINTAINING.md](docs/contributing/MAINTAINING.md).
+Maintainers can follow the [triage-and-merge guide](docs/contributing/MAINTAINING.md) and the
+[release runbook](docs/contributing/releasing.md).
 
 ## Areas that need extra care
 

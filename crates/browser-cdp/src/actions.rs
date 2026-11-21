@@ -397,6 +397,7 @@ impl Page {
         let t_settle = Instant::now();
         let settle_note = if settle { self.settle().await } else { None };
         let settle_ms = t_settle.elapsed().as_millis();
+        self.shared.dom_gen.fetch_add(1, Ordering::SeqCst);
         let t_snap = Instant::now();
         let opts = self.state.lock().await.opts.clone();
         let snapshot = self.snapshot(&opts).await?;
@@ -449,19 +450,37 @@ impl Page {
             return None;
         }
         let deadline = Instant::now() + Duration::from_secs(5);
+        let mut load_complete = false;
         while Instant::now() < deadline {
-            let ready =
-                tokio::time::timeout(Duration::from_secs(2), self.evaluate("document.readyState"))
-                    .await;
+            let ready = tokio::time::timeout(
+                Duration::from_secs(2),
+                self.evaluate_readonly("document.readyState"),
+            )
+            .await;
             match ready {
-                Ok(Ok(v)) if v.as_str() == Some("complete") => break,
+                Ok(Ok(v)) if v.as_str() == Some("complete") => {
+                    load_complete = true;
+                    break;
+                }
                 _ => tokio::time::sleep(Duration::from_millis(50)).await,
             }
         }
-        self.wait_network_idle_since(
+        let navigated = mark.is_some_and(|(_, g)| self.shared.nav_gen.load(Ordering::SeqCst) != g);
+        let nav_at = if navigated {
+            self.shared.last_nav_at.lock().ok().and_then(|t| *t)
+        } else {
+            None
+        };
+        let since = match (mark.map(|(s, _)| s), nav_at) {
+            (Some(s), Some(n)) => Some(s.max(n)),
+            (Some(s), None) => Some(s),
+            (None, n) => n,
+        };
+        self.wait_network_idle_inner(
             Duration::from_millis(250),
             Duration::from_secs(2),
-            mark.map(|(since, _)| since),
+            since,
+            navigated && load_complete,
         )
         .await
         .err()
@@ -1196,6 +1215,9 @@ impl Page {
             *p = dialog_opts.clone();
         }
         self.set_snapshot_options(opts).await;
+        if let Ok(mut m) = self.shared.action_mark.lock() {
+            *m = Some((Instant::now(), self.shared.nav_gen.load(Ordering::SeqCst)));
+        }
         let res = self.navigate_inner(url).await;
         self.finish(Snapshot::default(), res).await
     }

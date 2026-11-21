@@ -455,3 +455,144 @@ async fn click_does_not_wait_for_a_request_that_was_open_before_it() {
     );
     let _ = b.close().await;
 }
+
+/// Navigating to a page that opens a long-lived request (long poll, SSE, stream) must not wait
+/// the full 2 s network-idle cap once `load` + quiet window hold.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn navigate_does_not_wait_for_long_lived_request() {
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((mut s, _)) = l.accept().await {
+            let mut buf = [0u8; 2048];
+            let n = s.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]);
+            if req.starts_with("GET /hold") {
+                held.push(s);
+            } else {
+                let body = "<title>Poll</title><h1>Poll</h1><button>Ok</button>\
+                     <script>fetch('/hold').catch(()=>{});</script>";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            }
+        }
+    });
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let page = b.new_page("about:blank").await.unwrap();
+    let t = std::time::Instant::now();
+    let r = page
+        .navigate(&format!("http://127.0.0.1:{port}/"))
+        .await
+        .unwrap();
+    let took = t.elapsed();
+    assert!(r.ok, "{:?}", r.error);
+    assert!(r.settle_note.is_none(), "{:?}", r.settle_note);
+    assert!(
+        took < Duration::from_millis(1700),
+        "navigate waited {took:?} for a long-lived request"
+    );
+    let _ = b.close().await;
+}
+
+/// A finite fetch that starts after `load` and replaces a skeleton must be waited for: the
+/// action snapshot has to show the final content, not the skeleton.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn navigate_waits_for_finite_fetch_after_load() {
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = l.accept().await {
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let n = s.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let body = if req.starts_with("GET /data") {
+                    tokio::time::sleep(Duration::from_millis(700)).await;
+                    "FinalRows".to_string()
+                } else {
+                    "<title>Dash</title><p id=o>Skeleton</p>                     <script>addEventListener('load',()=>setTimeout(()=>                     fetch('/data').then(r=>r.text()).then(t=>{o.textContent=t}),20));</script>"
+                        .to_string()
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK
+Content-Type: text/html
+Content-Length: {}
+Connection: close
+
+{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let page = b.new_page("about:blank").await.unwrap();
+    let r = page
+        .navigate(&format!("http://127.0.0.1:{port}/"))
+        .await
+        .unwrap();
+    assert!(r.ok, "{:?}", r.error);
+    let snap = page.snapshot(&SnapshotOptions::default()).await.unwrap();
+    assert!(
+        snap.render().contains("FinalRows"),
+        "snapshot taken while fetch was still open:
+{}",
+        snap.render()
+    );
+    let _ = b.close().await;
+}
+
+/// Unchanged DOM reuses the cached capture without extra CDP AX/DOMSnapshot rounds, while
+/// background DOM mutations invalidate the cache.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn snapshot_cache_hits_when_unchanged_and_invalidates_on_dom_mutation() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let page = open(
+        &b,
+        "<title>Cache</title><button id=b>Initial</button><input id=i type=text value=v1>\
+         <script>setTimeout(()=>{\
+         const p=document.createElement('p');p.textContent='AsyncAdded';document.body.append(p);\
+         document.getElementById('i').value='v2';\
+         },250);</script>",
+    )
+    .await;
+    let opts = SnapshotOptions::default();
+    page.invalidate_refs().await;
+    let r0 = page.snapshot_rounds();
+    let s1 = page.snapshot(&opts).await.unwrap();
+    assert_eq!(page.snapshot_rounds() - r0, 1);
+    assert!(s1.render().contains("Initial"));
+
+    // Immediate repeat with same and different options reuses cached capture (0 extra CDP rounds).
+    let s2 = page.snapshot(&opts).await.unwrap();
+    assert_eq!(page.snapshot_rounds() - r0, 1);
+    assert_eq!(s1.render(), s2.render());
+
+    let interactive = page
+        .snapshot(&SnapshotOptions {
+            interactive_only: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.snapshot_rounds() - r0, 1);
+    assert!(interactive.render().contains("button \"Initial\""));
+
+    // After the background timer mutates the DOM, snapshot must observe the new content.
+    tokio::time::sleep(Duration::from_millis(450)).await;
+    let s3 = page.snapshot(&opts).await.unwrap();
+    assert!(
+        s3.render().contains("AsyncAdded") && s3.render().contains("v2"),
+        "cache served stale snapshot after DOM/value mutation:\n{}",
+        s3.render()
+    );
+    let _ = b.close().await;
+}

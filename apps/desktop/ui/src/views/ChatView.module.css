@@ -777,3 +777,129 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---- Polish (c450): folded long messages, calmer hover/press feel ---- */
+.userBubble[data-folded="true"] {
+  position: relative;
+  max-height: calc(var(--space-6) * 9);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, var(--color-text) 70%, transparent);
+  mask-image: linear-gradient(180deg, var(--color-text) 70%, transparent);
+}
+
+.foldToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition:
+    color var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.foldToggle:hover {
+  color: var(--color-text);
+  background-color: var(--color-surface-active);
+}
+
+.foldToggle:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.foldToggle > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.foldOpen {
+  transform: rotate(180deg);
+}
+
+/* Press feedback: the send button gives a little under the thumb, and brightens on hover. */
+.send {
+  transition:
+    border-radius var(--motion-duration-normal) var(--motion-easing-standard),
+    background-color var(--motion-duration-normal) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-standard),
+    opacity var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.send:not(:disabled):hover {
+  transform: scale(1.06);
+}
+
+.send:not(:disabled):active {
+  transform: scale(0.94);
+}
+
+/* The box lifts its border gently on hover, not only on focus. */
+.box:hover {
+  border-color: var(--color-border-strong);
+}
+
+.box:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-border-strong));
+}
+
+.jump {
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-standard);
+  animation: jumpIn var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.jump:hover {
+  transform: translateX(-50%) translateY(calc(var(--size-border) * -1));
+}
+
+@keyframes jumpIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(var(--space-2));
+  }
+}
+
+/* Messages ease in; a streamed block does not re-animate because only new rows mount. */
+.userRow,
+.assistantRow {
+  animation: msgIn var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+@keyframes msgIn {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-1));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jump,
+  .userRow,
+  .assistantRow {
+    animation: none;
+  }
+
+  .send:not(:disabled):hover,
+  .send:not(:disabled):active,
+  .jump:hover {
+    transform: none;
+  }
+
+  .jump:hover {
+    transform: translateX(-50%);
+  }
+
+  .foldToggle > svg,
+  .foldToggle {
+    transition: none;
+  }
+}

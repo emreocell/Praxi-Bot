@@ -25,6 +25,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check tagged release version
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: python -B scripts/release/check_version.py "$env:GITHUB_REF_NAME"
+
       # rust-toolchain.toml pins channel = "stable" (+ rustfmt, clippy); rustup
       # honours it automatically once this installs stable.
       - name: Install Rust toolchain

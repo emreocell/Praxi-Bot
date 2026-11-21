@@ -2833,6 +2833,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/secret-requests/{call_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Answer a `secret_request` form: the value goes into the vault, the run learns `stored`. */
+        post: operations["submit_secret_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/secret-requests/{call_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a `secret_request` form: nothing is stored, the run learns `cancelled`. */
+        post: operations["cancel_secret_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/secrets/{name}": {
         parameters: {
             query?: never;
@@ -6691,6 +6725,23 @@ export interface components {
          * @enum {string}
          */
         ScreenStreamState: "idle" | "starting" | "live" | "paused_idle" | "unavailable";
+        /** @description How a request ended. Never carries a value. */
+        SecretRequestAnswer: {
+            /**
+             * Format: uuid
+             * @description The request that was answered.
+             */
+            call_id: string;
+            /** @description The entry name. */
+            name: string;
+            /** @description `stored` or `cancelled`. */
+            outcome: string;
+            /**
+             * @description The waiting run was told. `false` when the run stopped or the request
+             *     expired in the same instant (a stored value stays stored).
+             */
+            run_notified: boolean;
+        };
         /** @description `POST /v1/chats/{id}/messages`. */
         SendMessage: {
             /**
@@ -7047,6 +7098,22 @@ export interface components {
          * @enum {string}
          */
         StopScope: "all_existing" | "listed";
+        /**
+         * @description Body of `POST /v1/secret-requests/{call_id}`. Give `value` for a `secret`
+         *     request, or `username` and `password` for a `login` request.
+         */
+        SubmitSecretRequest: {
+            /** @description Exact origins the entry may be typed on, like `https://example.com`. */
+            origins?: string[];
+            /** @description Password of a `login` request (write-only). */
+            password?: string | null;
+            /** @description Verified desktop program identities the entry may be typed into. */
+            programs?: string[];
+            /** @description Username of a `login` request. */
+            username?: string | null;
+            /** @description The secret (write-only: no route returns it). */
+            value?: string | null;
+        };
         TakeoverAccepted: {
             /** Format: int64 */
             control_epoch: number;
@@ -13860,6 +13927,108 @@ export interface operations {
             };
             /** @description the scheduler is not running */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    submit_secret_request: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tool call id from the secret_requested event */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitSecretRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretRequestAnswer"];
+                };
+            };
+            /** @description wrong fields, empty value or bad allow-list entry; the request keeps waiting */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description code secret_request_gone: not waiting any more */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description code secret_request_exists: the name exists and the bot did not ask to replace it */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    cancel_secret_request: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tool call id from the secret_requested event */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretRequestAnswer"];
+                };
+            };
+            /** @description not the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description code secret_request_gone: not waiting any more */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

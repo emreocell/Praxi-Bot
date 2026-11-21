@@ -9781,6 +9781,152 @@
         ]
       }
     },
+    "/v1/secret-requests/{call_id}": {
+      "post": {
+        "tags": [
+          "secret-requests"
+        ],
+        "summary": "Answer a `secret_request` form: the value goes into the vault, the run learns `stored`.",
+        "operationId": "submit_secret_request",
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "description": "Tool call id from the secret_requested event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitSecretRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretRequestAnswer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "wrong fields, empty value or bad allow-list entry; the request keeps waiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "code secret_request_gone: not waiting any more",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "code secret_request_exists: the name exists and the bot did not ask to replace it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/secret-requests/{call_id}/cancel": {
+      "post": {
+        "tags": [
+          "secret-requests"
+        ],
+        "summary": "Cancel a `secret_request` form: nothing is stored, the run learns `cancelled`.",
+        "operationId": "cancel_secret_request",
+        "parameters": [
+          {
+            "name": "call_id",
+            "in": "path",
+            "description": "Tool call id from the secret_requested event",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretRequestAnswer"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "code secret_request_gone: not waiting any more",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/secrets/{name}": {
       "post": {
         "tags": [
@@ -20481,6 +20627,35 @@
           "unavailable"
         ]
       },
+      "SecretRequestAnswer": {
+        "type": "object",
+        "description": "How a request ended. Never carries a value.",
+        "required": [
+          "call_id",
+          "name",
+          "outcome",
+          "run_notified"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The request that was answered."
+          },
+          "name": {
+            "type": "string",
+            "description": "The entry name."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "`stored` or `cancelled`."
+          },
+          "run_notified": {
+            "type": "boolean",
+            "description": "The waiting run was told. `false` when the run stopped or the request\nexpired in the same instant (a stored value stays stored)."
+          }
+        }
+      },
       "SendMessage": {
         "type": "object",
         "description": "`POST /v1/chats/{id}/messages`.",
@@ -21315,6 +21490,47 @@
           "all_existing",
           "listed"
         ]
+      },
+      "SubmitSecretRequest": {
+        "type": "object",
+        "description": "Body of `POST /v1/secret-requests/{call_id}`. Give `value` for a `secret`\nrequest, or `username` and `password` for a `login` request.",
+        "properties": {
+          "origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exact origins the entry may be typed on, like `https://example.com`."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Password of a `login` request (write-only)."
+          },
+          "programs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Verified desktop program identities the entry may be typed into."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Username of a `login` request."
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The secret (write-only: no route returns it)."
+          }
+        }
       },
       "TakeoverAccepted": {
         "type": "object",
