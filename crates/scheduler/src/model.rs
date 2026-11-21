@@ -698,6 +698,23 @@ pub struct Occurrence {
     pub run_id: Option<String>,
     /// Current occurrence state.
     pub state: OccurrenceState,
+    /// Index of the run attempt in the durable idempotency key.
+    pub attempt: u32,
+    /// Manual retries done so far.
+    pub retry_count: u32,
+    /// When the last manual retry was claimed (Unix ms).
+    pub last_retry_ms: Option<i64>,
+}
+
+/// What the executor knows about the run of one occurrence attempt key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttemptRun {
+    /// No run exists under the key.
+    None,
+    /// The run ended failed or cancelled; a new attempt may start.
+    Failed,
+    /// The run is live, paused, waiting for approval, or already succeeded.
+    Active,
 }
 
 /// A persisted schedule definition and its runtime state.

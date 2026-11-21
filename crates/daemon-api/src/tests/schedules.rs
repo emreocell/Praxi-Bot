@@ -1413,3 +1413,87 @@ async fn schedule_history_and_owner_only_idempotent_retry() {
 
     t.state.stop_scheduler().await;
 }
+
+#[tokio::test]
+async fn retry_after_restart_returns_409_while_the_first_run_still_waits_and_never_duplicates_it() {
+    let t = super::setup();
+    let clock = Arc::new(scheduler::FakeClock::new(storage::now_ms()));
+    *t.state.0.scheduler_clock.lock() = Some(clock.clone());
+    t.state.start_scheduler().unwrap();
+    let (bot, _) = make_chat(&t).await;
+    let mut body = new_schedule(
+        &bot,
+        json!({"kind": "tool", "name": "danger_run", "input": {}}),
+    );
+    body["spec"] = json!({"every": {"seconds": 60}});
+    body["misfire_policy"] = json!("run_once");
+    let created = create(&t, body).await;
+    let sid = created["id"].as_str().unwrap().to_owned();
+    let due_ms = created["next_run_at_ms"].as_i64().unwrap();
+
+    // The timer fires; the run waits for an approval nobody has given.
+    let mut rx = t.agent.subscribe();
+    clock.advance_ms(61_000);
+    let mut follow = Follow::new(&sid);
+    let _call_id = follow.until_approval(&mut rx).await;
+    let first_run = follow.mine.expect("scheduled run started");
+
+    // Daemon restart: the scheduler starts again and reclassifies the
+    // unresolved dispatch as `interrupted`.
+    t.state.stop_scheduler().await;
+    t.state.start_scheduler().unwrap();
+    settled(&t).await;
+
+    let retry_path = format!("/v1/schedules/{sid}/occurrences/{due_ms}/retry");
+    let hist = call(
+        &t,
+        Method::GET,
+        &format!("/v1/schedules/{sid}/history"),
+        None,
+    )
+    .await
+    .json();
+    let entry = hist
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["due_ms"] == due_ms)
+        .expect("occurrence in history")
+        .clone();
+    assert_eq!(
+        entry["run_id"],
+        first_run.to_string(),
+        "existing run linked"
+    );
+    assert_eq!(entry["status"], "waiting_approval");
+    assert_eq!(entry["retryable"], false);
+
+    let refused = call(&t, Method::POST, &retry_path, None).await;
+    assert_eq!(refused.status, StatusCode::CONFLICT, "{:?}", refused.json());
+    let runs = call(&t, Method::GET, "/v1/runs", None).await.json();
+    assert_eq!(
+        runs.as_array().unwrap().len(),
+        1,
+        "no second run was started"
+    );
+
+    // Once that run ended failed/cancelled, a retry starts exactly one new run.
+    let cancel = call(
+        &t,
+        Method::POST,
+        &format!("/v1/runs/{first_run}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(cancel.status, StatusCode::OK, "{:?}", cancel.json());
+    let (_, _) = follow.until_finished(&mut rx).await;
+    settled(&t).await;
+    let retried = call(&t, Method::POST, &retry_path, None).await;
+    assert_eq!(retried.status, StatusCode::ACCEPTED, "{:?}", retried.json());
+    let mut follow2 = Follow::new(&sid);
+    let _ = follow2.until_approval(&mut rx).await;
+    let runs = call(&t, Method::GET, "/v1/runs", None).await.json();
+    assert_eq!(runs.as_array().unwrap().len(), 2);
+
+    t.state.stop_scheduler().await;
+}

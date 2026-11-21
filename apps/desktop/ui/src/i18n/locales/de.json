@@ -2192,6 +2192,10 @@
         "hint": "Er läuft dort und ist auf diesem Computer eingefroren. Nutze in seiner Zeile „Zu diesem Computer zurückholen“.",
         "title": "Dieser Zeitplan wurde auf einen Server verschoben"
       },
+      "schedule_retry_limited": {
+        "hint": "Warte einen Moment, bevor du diesen Lauf erneut versuchst. Wiederholungen desselben Laufs liegen mindestens 30 Sekunden auseinander.",
+        "title": "Zu schnell erneut versucht"
+      },
       "secret_request_exists": {
         "hint": "Bitte den Bot, ausdrücklich zu ersetzen, oder wähle einen anderen Namen. Es wurde nichts geändert.",
         "title": "Dieser Name ist schon vergeben"

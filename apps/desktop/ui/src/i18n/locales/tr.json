@@ -2192,6 +2192,10 @@
         "hint": "Orada çalışır, bu bilgisayarda dondurulmuştur. Satırındaki Bu bilgisayara geri getir düğmesini kullan.",
         "title": "Bu zamanlama sunucuya taşındı"
       },
+      "schedule_retry_limited": {
+        "hint": "Bu çalıştırmayı tekrar denemeden önce biraz bekle. Aynı çalıştırmanın denemeleri en az 30 saniye arayla yapılır.",
+        "title": "Çok hızlı yeniden denendi"
+      },
       "secret_request_exists": {
         "hint": "Bottan açıkça değiştirmesini iste ya da başka bir ad seç. Hiçbir şey değiştirilmedi.",
         "title": "Bu ad zaten kullanılıyor"

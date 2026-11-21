@@ -1029,6 +1029,22 @@ impl Storage {
             .optional()?)
     }
 
+    /// The oldest run of `user_id` whose `kind` is exactly `kind` (the durable
+    /// idempotency key of a scheduled occurrence attempt).
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn find_run_by_kind(&self, user_id: UserId, kind: &str) -> Result<Option<Run>> {
+        Ok(self
+            .conn()
+            .query_row(
+                &format!("{RUN_SELECT} WHERE user_id = ?1 AND kind = ?2 ORDER BY id LIMIT 1"),
+                params![user_id.to_string(), kind],
+                run_row,
+            )
+            .optional()?)
+    }
+
     /// List a user's runs.
     ///
     /// # Errors

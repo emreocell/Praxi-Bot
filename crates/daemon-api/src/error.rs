@@ -140,6 +140,9 @@ impl From<scheduler::SchedulerError> for ApiError {
             E::Disabled(m) => Self::conflict(format!("schedule {m} is disabled")),
             E::Busy(m) => Self::conflict(format!("schedule {m} is already running")),
             E::Conflict(m) => Self::conflict(m),
+            E::RateLimited(m) => {
+                Self::new(StatusCode::TOO_MANY_REQUESTS, "schedule_retry_limited", m)
+            }
             E::Frozen(m) => Self::new(
                 StatusCode::CONFLICT,
                 "schedule_moved",

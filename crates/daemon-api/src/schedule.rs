@@ -9,7 +9,7 @@ use agent_core::{AgentLoop, LoopError, ScheduleWork};
 use async_trait::async_trait;
 use builtin_tools::GateRequest;
 use protocol::{BotId, ChatId, UserId};
-use scheduler::{Payload, Schedule, ScheduleExecutor, SchedulerError};
+use scheduler::{AttemptRun, Payload, Schedule, ScheduleExecutor, SchedulerError};
 use serde_json::Value;
 use storage::{Chat, Storage, now_ms};
 use task_runtime::RunState;
@@ -163,15 +163,60 @@ impl ScheduleExecutor for DaemonExecutor {
     }
 
     async fn execute_occurrence(&self, schedule: &Schedule, due_ms: i64) -> scheduler::Result<()> {
-        self.execute_inner(schedule, Some(due_ms)).await
+        self.execute_inner(schedule, Some((due_ms, 0))).await
     }
+
+    async fn execute_attempt(
+        &self,
+        schedule: &Schedule,
+        due_ms: i64,
+        attempt: u32,
+    ) -> scheduler::Result<()> {
+        self.execute_inner(schedule, Some((due_ms, attempt))).await
+    }
+
+    fn attempt_run(&self, schedule_id: protocol::TaskId, due_ms: i64, attempt: u32) -> AttemptRun {
+        attempt_run_of(&self.storage, self.user_id, schedule_id, due_ms, attempt)
+    }
+}
+
+/// What exists under the run key of one occurrence attempt. The key is stored in
+/// the run record itself, so this holds across restarts and also covers a crash
+/// before `run_id` reached the occurrence row. Plain and external schedules key
+/// their runs differently; both are checked.
+pub(crate) fn attempt_run_of(
+    storage: &Storage,
+    user_id: UserId,
+    schedule_id: protocol::TaskId,
+    due_ms: i64,
+    attempt: u32,
+) -> AttemptRun {
+    let mut found = AttemptRun::None;
+    for external in [false, true] {
+        let kind = agent_core::occurrence_kind(external, schedule_id, due_ms, attempt);
+        match storage.find_run_by_kind(user_id, &kind) {
+            Ok(None) => {}
+            Ok(Some(run)) => {
+                // Only a run that ended failed or cancelled may be replaced.
+                // Queued, running, waiting, paused and succeeded runs block.
+                if matches!(run.state.as_str(), "failed" | "cancelled") {
+                    found = AttemptRun::Failed;
+                } else {
+                    return AttemptRun::Active;
+                }
+            }
+            // Unknown storage state: never risk a second run.
+            Err(_) => return AttemptRun::Active,
+        }
+    }
+    found
 }
 
 impl DaemonExecutor {
     async fn execute_inner(
         &self,
         schedule: &Schedule,
-        due_ms: Option<i64>,
+        occurrence: Option<(i64, u32)>,
     ) -> scheduler::Result<()> {
         self.storage
             .get_bot(schedule.bot_id)
@@ -197,17 +242,27 @@ impl DaemonExecutor {
         let run = self
             .leader
             .with_active(|| {
-                if external {
-                    self.agent.run_scheduled_external(
+                let note = schedule
+                    .precheck_failed
+                    .then_some(scheduler::precheck::FAILURE_NOTE);
+                match (external, occurrence) {
+                    (true, Some((due, attempt))) => self.agent.run_scheduled_external_occurrence(
                         chat,
                         schedule.id,
+                        due,
+                        attempt,
                         work,
-                        schedule
-                            .precheck_failed
-                            .then_some(scheduler::precheck::FAILURE_NOTE),
-                    )
-                } else {
-                    self.agent.run_scheduled(chat, schedule.id, work)
+                        note,
+                    ),
+                    (true, None) => {
+                        self.agent
+                            .run_scheduled_external(chat, schedule.id, work, note)
+                    }
+                    (false, Some((due, attempt))) => {
+                        self.agent
+                            .run_scheduled_occurrence(chat, schedule.id, due, attempt, work)
+                    }
+                    (false, None) => self.agent.run_scheduled(chat, schedule.id, work),
                 }
             })
             .map_err(exec_err)?
@@ -215,7 +270,9 @@ impl DaemonExecutor {
                 LoopError::Busy(c) => exec_err(format!("chat {c} is busy with another turn")),
                 other => exec_err(other),
             })?;
-        if let Some(due) = due_ms {
+        // Display link only: the idempotency key in the run record, not this
+        // row, is what keeps a retry from starting a second run.
+        if let Some((due, _)) = occurrence {
             let _ = self
                 .store
                 .set_occurrence_run_id(schedule.id, due, &run.to_string());
@@ -224,7 +281,14 @@ impl DaemonExecutor {
         // handle away from `AgentLoop::shutdown`.
         loop {
             match self.agent.runtime().state(run).map_err(exec_err)? {
-                RunState::Succeeded | RunState::Paused => return Ok(()),
+                RunState::Succeeded => return Ok(()),
+                // The approval wait timed out: the run is resumable but the
+                // occurrence did not complete, so it must not read as succeeded.
+                RunState::Paused => {
+                    return Err(exec_err(format!(
+                        "run {run} paused waiting for approval; resume it from the run page"
+                    )));
+                }
                 RunState::Failed => {
                     let why = self
                         .storage

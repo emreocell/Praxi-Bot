@@ -1451,3 +1451,191 @@ async fn retry_occurrence_is_idempotent_uses_current_spec_and_preserves_timer() 
     ));
     scheduler.shutdown().await;
 }
+
+fn dispatched_row(store: &ScheduleStore, t0: i64) -> (Schedule, i64) {
+    let sched = Schedule::new(
+        BotId::new(),
+        None,
+        "occ",
+        ScheduleSpec::Every { seconds: 60 },
+        Payload::AgentPrompt { text: "p".into() },
+        MisfirePolicy::Skip,
+        t0,
+    )
+    .unwrap();
+    let due = sched.next_run_at.unwrap();
+    store.insert(&sched).unwrap();
+    assert!(
+        store
+            .reserve_occurrences(&sched, &[due], Some(due + 60_000))
+            .unwrap()
+    );
+    (sched, due)
+}
+
+#[test]
+fn retry_after_restart_never_restarts_a_run_that_already_started() {
+    use crate::AttemptRun;
+    let store = ScheduleStore::open_in_memory().unwrap();
+    let (sched, due) = dispatched_row(&store, 1_700_000_000_000);
+    let id = sched.id;
+    // The timer dispatched it and the run started (run id recorded)...
+    store
+        .claim_occurrence(id, sched.revision, due, 1)
+        .unwrap()
+        .unwrap();
+    assert!(store.set_occurrence_run_id(id, due, "run-1").unwrap());
+    // ...then the daemon restarted.
+    assert_eq!(store.recover_unresolved_occurrences().unwrap(), 1);
+    let occ = store.get_occurrence(id, due).unwrap().unwrap();
+    assert_eq!(occ.state, crate::OccurrenceState::Interrupted);
+    assert_eq!(occ.run_id.as_deref(), Some("run-1"));
+
+    // Run still alive / paused / waiting: retry is refused, row untouched.
+    let err = store
+        .claim_retry_occurrence(id, due, 100_000, &|_| AttemptRun::Active)
+        .unwrap_err();
+    assert!(matches!(err, SchedulerError::Conflict(_)), "{err}");
+    let occ = store.get_occurrence(id, due).unwrap().unwrap();
+    assert_eq!(occ.state, crate::OccurrenceState::Interrupted);
+    assert_eq!(
+        occ.run_id.as_deref(),
+        Some("run-1"),
+        "run_id is never cleared"
+    );
+    assert_eq!(occ.retry_count, 0);
+
+    // Run ended failed: retry moves to the next attempt key, run_id kept.
+    let (_, attempt) = store
+        .claim_retry_occurrence(id, due, 100_000, &|a| {
+            assert_eq!(a, 0);
+            AttemptRun::Failed
+        })
+        .unwrap();
+    assert_eq!(attempt, 1);
+    let occ = store.get_occurrence(id, due).unwrap().unwrap();
+    assert_eq!(occ.state, crate::OccurrenceState::Dispatched);
+    assert_eq!(occ.run_id.as_deref(), Some("run-1"));
+}
+
+#[test]
+fn missed_row_retry_works_once_and_reuses_the_attempt_key() {
+    use crate::AttemptRun;
+    let store = ScheduleStore::open_in_memory().unwrap();
+    let (sched, due) = dispatched_row(&store, 1_700_000_000_000);
+    assert_eq!(store.recover_unresolved_occurrences().unwrap(), 1);
+    let (_, attempt) = store
+        .claim_retry_occurrence(sched.id, due, 5, &|_| AttemptRun::None)
+        .unwrap();
+    assert_eq!(attempt, 0);
+    assert!(matches!(
+        store.claim_retry_occurrence(sched.id, due, 999_999, &|_| AttemptRun::None),
+        Err(SchedulerError::Conflict(_))
+    ));
+}
+
+#[test]
+fn concurrent_double_retry_claims_the_occurrence_once() {
+    use crate::AttemptRun;
+    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
+    let (sched, due) = dispatched_row(&store, 1_700_000_000_000);
+    store.recover_unresolved_occurrences().unwrap();
+    let wins: usize = (0..2)
+        .map(|_| {
+            let store = Arc::clone(&store);
+            let id = sched.id;
+            std::thread::spawn(move || {
+                store
+                    .claim_retry_occurrence(id, due, 10, &|_| AttemptRun::None)
+                    .is_ok()
+            })
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|h| usize::from(h.join().unwrap()))
+        .sum();
+    assert_eq!(wins, 1);
+}
+
+#[test]
+fn retry_is_refused_for_disabled_schedules_inside_the_cooldown_and_after_the_cap() {
+    use crate::{AttemptRun, MAX_OCCURRENCE_RETRIES, RETRY_COOLDOWN_MS};
+    let store = ScheduleStore::open_in_memory().unwrap();
+    let (sched, due) = dispatched_row(&store, 1_700_000_000_000);
+    let id = sched.id;
+    store.recover_unresolved_occurrences().unwrap();
+
+    // Disabled schedule: refused, the row stays retryable for later.
+    let mut off = store.get(id).unwrap().unwrap();
+    off.enabled = false;
+    assert!(store.update_definition(&off).unwrap());
+    assert!(matches!(
+        store.claim_retry_occurrence(id, due, 1, &|_| AttemptRun::None),
+        Err(SchedulerError::Disabled(_))
+    ));
+    let mut on = store.get(id).unwrap().unwrap();
+    on.enabled = true;
+    assert!(store.update_definition(&on).unwrap());
+
+    let mut now = 1_000;
+    for n in 0..MAX_OCCURRENCE_RETRIES {
+        store
+            .claim_retry_occurrence(id, due, now, &|_| AttemptRun::Failed)
+            .unwrap();
+        store.finish_occurrence(id, due, false).unwrap();
+        // Inside the cooldown a second try is rate limited.
+        if n + 1 < MAX_OCCURRENCE_RETRIES {
+            assert!(
+                matches!(
+                    store.claim_retry_occurrence(id, due, now + 1_000, &|_| AttemptRun::Failed),
+                    Err(SchedulerError::RateLimited(_))
+                ),
+                "retry {n}"
+            );
+        }
+        now += RETRY_COOLDOWN_MS + 1;
+    }
+    let err = store
+        .claim_retry_occurrence(id, due, now, &|_| AttemptRun::Failed)
+        .unwrap_err();
+    assert!(matches!(err, SchedulerError::Conflict(_)), "{err}");
+}
+
+#[tokio::test]
+async fn retry_that_did_not_run_is_recorded_failed_not_succeeded() {
+    let t0 = 1_700_000_000_000_i64;
+    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
+    let (sched, due) = dispatched_row(&store, t0);
+    store.recover_unresolved_occurrences().unwrap();
+    let exec = RecordingExecutor::new();
+    let clock = Arc::new(FakeClock::new(t0 + 10_000));
+    let scheduler = Scheduler::start_with_clock(Arc::clone(&store), exec.clone(), clock);
+    scheduler.settle().await;
+    // The schedule moves to a server before the retry starts: the engine
+    // skips it, which must not read as success.
+    assert!(store.freeze(sched.id, "host").unwrap());
+    let outcome = crate::engine::execute_checked(&store, exec.as_ref(), &sched, Some((due, 0)))
+        .await
+        .unwrap();
+    assert_eq!(outcome, crate::engine::Dispatch::Skipped);
+    assert_eq!(exec.count(), 0);
+    scheduler.shutdown().await;
+}
+
+#[test]
+fn cron_at_a_nonexistent_dst_local_time_fires_once_at_the_transition_instant() {
+    // 2026-03-08 02:30 does not exist in America/New_York (02:00 EST -> 03:00 EDT).
+    // croner moves such a run forward to the transition instant (03:00 EDT =
+    // 07:00 UTC) on that day only; the other days stay at 02:30 local.
+    let before = utc_ms(2026, 3, 7, 12, 0, 0);
+    let spec = ScheduleSpec::cron_tz("30 2 * * *", "America/New_York");
+    let runs = spec.next_occurrences(before, 3).unwrap();
+    assert_eq!(
+        runs,
+        vec![
+            utc_ms(2026, 3, 8, 7, 0, 0),  // gap day: 03:00 EDT, exactly once
+            utc_ms(2026, 3, 9, 6, 30, 0), // 02:30 EDT
+            utc_ms(2026, 3, 10, 6, 30, 0),
+        ]
+    );
+}

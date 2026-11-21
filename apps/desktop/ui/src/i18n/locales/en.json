@@ -2192,6 +2192,10 @@
         "hint": "It runs there and is frozen on this computer. Use Bring back to this computer on its row.",
         "title": "That schedule moved to a server"
       },
+      "schedule_retry_limited": {
+        "hint": "Wait a moment before retrying this run again. Retries of the same run are spaced at least 30 seconds apart.",
+        "title": "Retried too quickly"
+      },
       "secret_request_exists": {
         "hint": "Ask the bot to replace it explicitly, or pick another name. Nothing was changed.",
         "title": "This name is already taken"

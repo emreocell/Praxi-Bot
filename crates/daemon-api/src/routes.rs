@@ -2854,14 +2854,35 @@ pub(crate) async fn list_schedule_history(
             .as_ref()
             .map(|r| r.id.0)
             .or_else(|| occ.run_id.as_deref().and_then(|r| Uuid::parse_str(r).ok()));
+        let live_run = run.as_ref().is_some_and(|r| {
+            matches!(
+                r.state.as_str(),
+                "queued" | "running" | "waiting_approval" | "paused"
+            )
+        });
         let status = match occ.state {
             scheduler::OccurrenceState::Pending
             | scheduler::OccurrenceState::Dispatched
             | scheduler::OccurrenceState::Started => run
                 .as_ref()
                 .map_or_else(|| occ.state.as_str().to_owned(), |r| r.state.clone()),
+            // An interrupted or failed row whose run is still alive (or paused
+            // for approval) shows the run's real state, with the run link.
+            _ if live_run => run
+                .as_ref()
+                .map_or_else(|| occ.state.as_str().to_owned(), |r| r.state.clone()),
             other => other.as_str().to_owned(),
         };
+        let retryable = occ.state.is_retryable()
+            && sc.enabled
+            && occ.retry_count < scheduler::MAX_OCCURRENCE_RETRIES
+            && crate::schedule::attempt_run_of(
+                s.storage(),
+                s.user_id(),
+                sc.id,
+                occ.due_ms,
+                occ.attempt,
+            ) != scheduler::AttemptRun::Active;
         let started_at_ms = run.as_ref().map(|r| r.created_at_ms);
         let finished_at_ms = run.as_ref().and_then(|r| {
             matches!(r.state.as_str(), "succeeded" | "failed" | "cancelled")
@@ -2875,7 +2896,7 @@ pub(crate) async fn list_schedule_history(
             started_at_ms,
             finished_at_ms,
             error: run.and_then(|r| r.error),
-            retryable: occ.state.is_retryable(),
+            retryable,
         });
     }
     for (_, r) in runs_by_id {
@@ -2910,7 +2931,8 @@ pub(crate) async fn list_schedule_history(
            ("due_ms" = i64, Path, description = "Occurrence due timestamp in Unix ms")),
     responses((status = 202, body = AcceptedResponse),
               (status = 404, body = ErrorBody),
-              (status = 409, body = ErrorBody, description = "occurrence already handled or a run is in flight"),
+              (status = 409, body = ErrorBody, description = "occurrence already handled, its run is still active, the schedule is disabled, or the retry limit is used up"),
+              (status = 429, body = ErrorBody, description = "retried again within 30 seconds"),
               (status = 503, body = ErrorBody, description = "the scheduler is not running")))]
 pub(crate) async fn retry_schedule_occurrence(
     State(s): State<AppState>,

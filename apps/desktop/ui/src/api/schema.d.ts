@@ -14058,8 +14058,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
-            /** @description occurrence already handled or a run is in flight */
+            /** @description occurrence already handled, its run is still active, the schedule is disabled, or the retry limit is used up */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description retried again within 30 seconds */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

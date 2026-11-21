@@ -1622,6 +1622,45 @@ fn tool_work(name: &str) -> crate::ScheduleWork {
 }
 
 #[tokio::test]
+async fn scheduled_occurrence_key_returns_the_existing_run_instead_of_a_second_one() {
+    let env = setup();
+    let w = Arc::new(tool("t.write", Effect::Write, "written"));
+    let fake = Fake::new(vec![]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&w)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let sid = protocol::TaskId::new();
+    let first = lp
+        .run_scheduled_occurrence(env.chat, sid, 1_000, 0, tool_work("t.write"))
+        .unwrap();
+    assert_eq!(lp.wait(first).await.unwrap(), RunState::Succeeded);
+    // Same key again (retry after a restart, double click): the run that
+    // exists is returned, nothing runs a second time.
+    let again = lp
+        .run_scheduled_occurrence(env.chat, sid, 1_000, 0, tool_work("t.write"))
+        .unwrap();
+    assert_eq!(again, first);
+    assert_eq!(w.count.load(Ordering::SeqCst), 1, "the tool ran once");
+    // Another attempt index is a different run.
+    let next = lp
+        .run_scheduled_occurrence(env.chat, sid, 1_000, 1, tool_work("t.write"))
+        .unwrap();
+    assert_ne!(next, first);
+    assert_eq!(lp.wait(next).await.unwrap(), RunState::Succeeded);
+    let r = env.storage.get_run(first).unwrap().unwrap();
+    assert_eq!(crate::shared::schedule_id_of(&r.kind), Some(sid));
+    assert_eq!(
+        crate::shared::initiator_of(&r.kind),
+        protocol::InitiatorKind::Schedule
+    );
+}
+
+#[tokio::test]
 async fn scheduled_tool_run_calls_the_tool_without_a_model_and_carries_the_schedule_id() {
     let env = setup();
     let w = Arc::new(tool("t.write", Effect::Write, "written"));

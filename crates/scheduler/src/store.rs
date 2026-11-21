@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use crate::error::{Result, SchedulerError};
 use crate::model::{
-    MisfirePolicy, Occurrence, OccurrenceState, Payload, Schedule, ScheduleOrigin, ScheduleSpec,
-    Trigger,
+    AttemptRun, MisfirePolicy, Occurrence, OccurrenceState, Payload, Schedule, ScheduleOrigin,
+    ScheduleSpec, Trigger,
 };
 
 /// Embedded forward-only migrations; schema version = index + 1.
@@ -44,10 +44,20 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0013_frozen_schedules",
         include_str!("../migrations/0013_frozen_schedules.sql"),
     ),
+    (
+        "0014_occurrence_retry_guard",
+        include_str!("../migrations/0014_occurrence_retry_guard.sql"),
+    ),
 ];
 
 /// Schema version produced by the newest embedded migration.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
+
+/// Manual retries allowed per occurrence.
+pub const MAX_OCCURRENCE_RETRIES: u32 = 5;
+
+/// Minimum time between two manual retries of the same occurrence.
+pub const RETRY_COOLDOWN_MS: i64 = 30_000;
 
 /// Terminal occurrence rows kept per schedule; older ones are pruned in the
 /// transaction that finishes an occurrence. Unresolved rows are never pruned.
@@ -782,7 +792,7 @@ impl ScheduleStore {
         let limit = i64::try_from(limit.clamp(1, 200)).unwrap_or(200);
         let conn = self.conn();
         let mut st = conn.prepare(
-            "SELECT schedule_id, due_ms, revision, run_id, state \
+            "SELECT schedule_id, due_ms, revision, run_id, state, attempt, retry_count, last_retry_ms \
              FROM occurrences WHERE schedule_id = ?1 \
              ORDER BY due_ms DESC LIMIT ?2",
         )?;
@@ -798,7 +808,7 @@ impl ScheduleStore {
         Ok(self
             .conn()
             .query_row(
-                "SELECT schedule_id, due_ms, revision, run_id, state \
+                "SELECT schedule_id, due_ms, revision, run_id, state, attempt, retry_count, last_retry_ms \
                  FROM occurrences WHERE schedule_id = ?1 AND due_ms = ?2",
                 params![schedule_id.to_string(), due_ms],
                 occurrence_row,
@@ -810,43 +820,82 @@ impl ScheduleStore {
     /// an explicit owner retry, transitioning it to `dispatched` with the
     /// current schedule revision. Never modifies `next_run_at` or `enabled`.
     ///
+    /// `probe(attempt)` reports what the executor knows about the run of the
+    /// occurrence's current attempt key. A live, paused or waiting run
+    /// ([`AttemptRun::Active`]) or a succeeded one is never restarted; a
+    /// terminal-failed one moves the occurrence to the next attempt key; no run
+    /// at all (a `missed` row, a failure before the run existed) reuses the key,
+    /// so a run that did start meanwhile is returned by the idempotent start.
+    /// The row's `run_id` is never cleared. Returns the schedule and the
+    /// attempt index to start.
+    ///
     /// # Errors
-    /// Returns [`SchedulerError::NotFound`] if the schedule or occurrence does
-    /// not exist, or [`SchedulerError::Conflict`] if the occurrence is already
-    /// pending, in flight, or succeeded.
-    pub fn claim_retry_occurrence(&self, id: TaskId, due_ms: i64, now_ms: i64) -> Result<Schedule> {
+    /// [`SchedulerError::NotFound`] if the schedule or occurrence does not
+    /// exist, [`SchedulerError::Disabled`] for a disabled schedule,
+    /// [`SchedulerError::RateLimited`] inside the cooldown after the previous
+    /// retry, [`SchedulerError::Conflict`] if the occurrence is pending, in
+    /// flight, succeeded, has an active run or used up its retries.
+    pub fn claim_retry_occurrence(
+        &self,
+        id: TaskId,
+        due_ms: i64,
+        now_ms: i64,
+        probe: &dyn Fn(u32) -> AttemptRun,
+    ) -> Result<(Schedule, u32)> {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let Some(mut current) = get_schedule(&tx, id)? else {
             return Err(SchedulerError::NotFound(format!("schedule {id}")));
         };
-        let state_raw: Option<String> = tx
+        let Some(occ) = tx
             .query_row(
-                "SELECT state FROM occurrences WHERE schedule_id = ?1 AND due_ms = ?2",
+                "SELECT schedule_id, due_ms, revision, run_id, state, attempt, retry_count, last_retry_ms \
+                 FROM occurrences WHERE schedule_id = ?1 AND due_ms = ?2",
                 params![id.to_string(), due_ms],
-                |r| r.get(0),
+                occurrence_row,
             )
-            .optional()?;
-        let Some(state_str) = state_raw else {
+            .optional()?
+        else {
             return Err(SchedulerError::NotFound(format!(
                 "occurrence {id}:{due_ms}"
             )));
         };
-        let Some(state) = OccurrenceState::parse(&state_str) else {
-            return Err(SchedulerError::Conflict(format!(
-                "occurrence {id}:{due_ms} has unknown state {state_str}"
-            )));
-        };
-        if !state.is_retryable() {
+        if !occ.state.is_retryable() {
             return Err(SchedulerError::Conflict(format!(
                 "occurrence {id}:{due_ms} is already {}",
-                state.as_str()
+                occ.state.as_str()
             )));
         }
+        if !current.enabled {
+            return Err(SchedulerError::Disabled(id.to_string()));
+        }
+        if occ.retry_count >= MAX_OCCURRENCE_RETRIES {
+            return Err(SchedulerError::Conflict(format!(
+                "occurrence {id}:{due_ms} was already retried {MAX_OCCURRENCE_RETRIES} times"
+            )));
+        }
+        if let Some(last) = occ.last_retry_ms
+            && now_ms.saturating_sub(last) < RETRY_COOLDOWN_MS
+        {
+            let wait = (RETRY_COOLDOWN_MS - now_ms.saturating_sub(last) + 999) / 1000;
+            return Err(SchedulerError::RateLimited(format!(
+                "occurrence {id}:{due_ms} was retried just now; wait {wait} s"
+            )));
+        }
+        let attempt = match probe(occ.attempt) {
+            AttemptRun::None => occ.attempt,
+            AttemptRun::Failed => occ.attempt.saturating_add(1),
+            AttemptRun::Active => {
+                return Err(SchedulerError::Conflict(format!(
+                    "occurrence {id}:{due_ms} already has a run that is not finished or not failed"
+                )));
+            }
+        };
         let changed = tx.execute(
-            "UPDATE occurrences SET state = 'dispatched', revision = ?3, run_id = NULL \
+            "UPDATE occurrences SET state = 'dispatched', revision = ?3, attempt = ?4, \
+             retry_count = retry_count + 1, last_retry_ms = ?5 \
              WHERE schedule_id = ?1 AND due_ms = ?2 AND state IN ('failed', 'missed', 'interrupted')",
-            params![id.to_string(), due_ms, current.revision],
+            params![id.to_string(), due_ms, current.revision, attempt, now_ms],
         )?;
         if changed == 0 {
             return Err(SchedulerError::Conflict(format!(
@@ -859,7 +908,7 @@ impl ScheduleStore {
         )?;
         current.last_run_at = Some(now_ms);
         tx.commit()?;
-        Ok(current)
+        Ok((current, attempt))
     }
 
     /// Startup crash recovery, without replaying anything (replay needs the
@@ -1324,6 +1373,9 @@ fn occurrence_row(row: &Row<'_>) -> rusqlite::Result<Occurrence> {
         revision: row.get(2)?,
         run_id: row.get(3)?,
         state,
+        attempt: row.get(5)?,
+        retry_count: row.get(6)?,
+        last_retry_ms: row.get(7)?,
     })
 }
 

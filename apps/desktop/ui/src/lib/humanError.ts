@@ -77,6 +77,7 @@ export const DAEMON_ERROR_CODES = [
   "resync_required",
   "run_files_in_use",
   "schedule_moved",
+  "schedule_retry_limited",
   "secret_request_exists",
   "secret_request_gone",
   "secret_store_failed",

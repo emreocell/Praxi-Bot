@@ -3,13 +3,15 @@
 //! via monotonic vs. wall time, applying [`MisfirePolicy`], reserving durable
 //! occurrence intents, and enforcing a per-schedule concurrency limit of 1.
 //!
-//! Recovery boundary: the current executor cannot accept the
-//! `schedule_id:due_ms` idempotency key or return a durable `run_id`. Pending
-//! and interrupted dispatches survive in SQLite but are deliberately NOT
-//! replayed on startup. Retrying a dispatch could duplicate an agent run.
+//! Recovery boundary: pending and interrupted dispatches survive in SQLite but
+//! are deliberately NOT replayed automatically on startup. An explicit owner
+//! retry goes through [`ScheduleExecutor::execute_attempt`], whose
+//! `schedule_id:due_ms:attempt` key the executor stores durably in the run
+//! record, so starting the same attempt twice returns the existing run, also
+//! after a restart. A retry never starts a second run while the occurrence's
+//! run is live, paused or waiting ([`ScheduleExecutor::attempt_run`]).
 //! One-shot timers are consumed at reservation, but never disabled merely
-//! because an intent was written. `started(run_id)` and automatic recovery
-//! must be wired together with the durable `AgentLoop::start_scheduled` API.
+//! because an intent was written.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -25,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::clock::{Clock, SystemClock};
 use crate::error::{Result, SchedulerError};
-use crate::model::{MisfirePolicy, Schedule, ScheduleSpec};
+use crate::model::{AttemptRun, MisfirePolicy, Schedule, ScheduleSpec};
 use crate::store::ScheduleStore;
 use crate::webhook::{PendingReplay, ReplayGuard, WebhookMeta, prepare_webhook};
 
@@ -52,6 +54,19 @@ pub trait ScheduleExecutor: Send + Sync + 'static {
     /// [`Self::execute`]).
     async fn execute_occurrence(&self, schedule: &Schedule, _due_ms: i64) -> Result<()> {
         self.execute(schedule).await
+    }
+
+    /// Execute attempt `attempt` of occurrence `due_ms`. The executor makes
+    /// `schedule_id:due_ms:attempt` an idempotency key of the run it starts
+    /// (defaults to [`Self::execute_occurrence`]).
+    async fn execute_attempt(&self, schedule: &Schedule, due_ms: i64, _attempt: u32) -> Result<()> {
+        self.execute_occurrence(schedule, due_ms).await
+    }
+
+    /// What exists under the run key of attempt `attempt` of occurrence
+    /// `due_ms`. Read-only; the default knows no runs.
+    fn attempt_run(&self, _schedule_id: TaskId, _due_ms: i64, _attempt: u32) -> AttemptRun {
+        AttemptRun::None
     }
 
     /// Read-only host for a precheck; never creates an agent run.
@@ -240,6 +255,7 @@ impl Scheduler {
             None,
         )
         .await
+        .map(|_| ())
     }
 
     /// Like [`Self::handle_webhook`], but returns as soon as the request is
@@ -331,6 +347,8 @@ impl Scheduler {
     /// # Errors
     /// [`SchedulerError::NotFound`] if the schedule or occurrence is missing,
     /// [`SchedulerError::Frozen`] if the schedule moved to a server,
+    /// [`SchedulerError::Disabled`] if it is disabled,
+    /// [`SchedulerError::RateLimited`] within 30 s of the previous retry,
     /// [`SchedulerError::Busy`] if a run of `id` is currently in flight,
     /// [`SchedulerError::Conflict`] if the occurrence is already pending,
     /// dispatched, or succeeded.
@@ -347,11 +365,14 @@ impl Scheduler {
             return Err(SchedulerError::Busy(id.to_string()));
         };
         let now_ms = self.inner.clock.wall_ms();
-        let claimed = self
-            .inner
-            .store
-            .claim_retry_occurrence(id, due_ms, now_ms)?;
-        spawn_retry_execution(&self.inner, claimed, due_ms, guard);
+        let executor = Arc::clone(&self.inner.executor);
+        let (claimed, attempt) =
+            self.inner
+                .store
+                .claim_retry_occurrence(id, due_ms, now_ms, &|attempt| {
+                    executor.attempt_run(id, due_ms, attempt)
+                })?;
+        spawn_retry_execution(&self.inner, claimed, due_ms, attempt, guard);
         Ok(())
     }
 
@@ -663,6 +684,7 @@ fn spawn_retry_execution(
     inner: &Arc<Inner>,
     schedule: Schedule,
     due_ms: i64,
+    attempt: u32,
     guard: InFlightGuard,
 ) {
     let inner = Arc::clone(inner);
@@ -673,13 +695,17 @@ fn spawn_retry_execution(
             &inner.store,
             inner.executor.as_ref(),
             &schedule,
-            Some(due_ms),
+            Some((due_ms, attempt)),
         )
         .await;
         if let Err(error) = &outcome {
             tracing::error!(schedule_id = %id, due_ms, %error, "retried execution failed");
         }
-        if let Err(error) = inner.store.finish_occurrence(id, due_ms, outcome.is_ok()) {
+        // A retry that did not run (frozen, precheck said no, row deleted,
+        // definition edited meanwhile) is not a success: record it as failed so
+        // history stays honest and Retry stays available.
+        let ran = matches!(outcome, Ok(Dispatch::Ran));
+        if let Err(error) = inner.store.finish_occurrence(id, due_ms, ran) {
             tracing::error!(schedule_id = %id, due_ms, %error, "failed to record retried occurrence outcome");
         }
     });
@@ -738,7 +764,7 @@ fn spawn_timer_executions(
                 &inner.store,
                 inner.executor.as_ref(),
                 &schedule,
-                Some(due_ms),
+                Some((due_ms, 0)),
             )
             .await;
             if let Err(error) = &outcome {
@@ -752,17 +778,26 @@ fn spawn_timer_executions(
     });
 }
 
+/// Whether [`execute_checked`] handed the occurrence to the executor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Dispatch {
+    /// The executor ran it (its own result is the `Result`).
+    Ran,
+    /// Nothing ran: frozen, precheck said no, deleted, or edited meanwhile.
+    Skipped,
+}
+
 /// Every ingress shares this no-run-before-precheck boundary. A stale definition
 /// cannot finish its check and start work after an owner edit or deletion.
 pub(crate) async fn execute_checked(
     store: &ScheduleStore,
     executor: &dyn ScheduleExecutor,
     schedule: &Schedule,
-    due_ms: Option<i64>,
-) -> Result<()> {
+    occurrence: Option<(i64, u32)>,
+) -> Result<Dispatch> {
     // A schedule that moved to a server never fires here, whichever ingress asked.
     if store.frozen_for(schedule.id)?.is_some() {
-        return Ok(());
+        return Ok(Dispatch::Skipped);
     }
     let mut fired = schedule.clone();
     if fired.precheck.is_some() {
@@ -781,10 +816,10 @@ pub(crate) async fn execute_checked(
                 state.skipped_by_precheck = state.skipped_by_precheck.saturating_add(1);
             }
             if !store.save_check_state(schedule, &state)? {
-                return Ok(());
+                return Ok(Dispatch::Skipped);
             }
             if !outcome.run {
-                return Ok(());
+                return Ok(Dispatch::Skipped);
             }
             if let Some(input) = outcome.input {
                 fired.external_input = Some(input);
@@ -792,22 +827,23 @@ pub(crate) async fn execute_checked(
         } else {
             state.precheck_errors = state.precheck_errors.saturating_add(1);
             if !store.save_check_state(schedule, &state)? {
-                return Ok(());
+                return Ok(Dispatch::Skipped);
             }
             fired.precheck_failed = true;
         }
     }
     let Some(current) = store.get(schedule.id)? else {
-        return Ok(());
+        return Ok(Dispatch::Skipped);
     };
     if current.revision != schedule.revision {
-        return Ok(());
+        return Ok(Dispatch::Skipped);
     }
     // The tenth failed check still fails open; the next firing is paused.
-    match due_ms {
-        Some(due) => executor.execute_occurrence(&fired, due).await,
+    match occurrence {
+        Some((due, attempt)) => executor.execute_attempt(&fired, due, attempt).await,
         None => executor.execute(&fired).await,
     }
+    .map(|()| Dispatch::Ran)
 }
 
 fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
@@ -840,7 +876,9 @@ fn poll_triggers(inner: &Arc<Inner>, now: i64) -> Result<()> {
             drop(slot);
             let result = match result {
                 Ok(Some(fired)) => {
-                    execute_checked(&inner.store, inner.executor.as_ref(), &fired, None).await
+                    execute_checked(&inner.store, inner.executor.as_ref(), &fired, None)
+                        .await
+                        .map(|_| ())
                 }
                 Ok(None) => Ok(()),
                 Err(error) => Err(error),

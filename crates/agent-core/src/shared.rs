@@ -1117,10 +1117,32 @@ pub(crate) fn kind_for_schedule(id: TaskId) -> String {
     format!("{KIND_PREFIX}:schedule:{id}")
 }
 
-/// The schedule behind a run kind written by [`kind_for_schedule`].
+/// Durable idempotency key of one scheduled occurrence attempt, stored in the
+/// run's `kind`: `turn:[external_]schedule:<id>:<due_ms>:<attempt>`. A repeated
+/// start with the same key returns the existing run, also after a restart.
+#[must_use]
+pub fn occurrence_kind(external: bool, id: TaskId, due_ms: i64, attempt: u32) -> String {
+    let prefix = if external {
+        "external_schedule"
+    } else {
+        "schedule"
+    };
+    format!("{KIND_PREFIX}:{prefix}:{id}:{due_ms}:{attempt}")
+}
+
+/// Whether `kind` carries an occurrence idempotency key.
+pub(crate) fn is_occurrence_kind(kind: &str) -> bool {
+    kind.strip_prefix("turn:schedule:")
+        .or_else(|| kind.strip_prefix("turn:external_schedule:"))
+        .is_some_and(|rest| rest.split(':').count() == 3)
+}
+
+/// The schedule behind a run kind written by [`kind_for_schedule`] or [`occurrence_kind`].
 pub fn schedule_id_of(kind: &str) -> Option<TaskId> {
     kind.strip_prefix("turn:schedule:")
         .or_else(|| kind.strip_prefix("turn:external_schedule:"))?
+        .split(':')
+        .next()?
         .parse()
         .ok()
         .map(TaskId)
