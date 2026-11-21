@@ -70,8 +70,11 @@ pub fn protect() -> Report {
     REPORT
         .get_or_init(|| {
             let (outcome, detail) = match apply() {
+                #[cfg(windows)]
                 Ok(Applied::Yes(detail)) => (Outcome::Applied, detail.to_owned()),
+                #[cfg(target_os = "linux")]
                 Ok(Applied::Skipped(reason)) => (Outcome::Skipped, reason.to_owned()),
+                #[cfg(not(any(windows, target_os = "linux")))]
                 Ok(Applied::Unsupported) => (
                     Outcome::NotSupported,
                     format!("not supported on {}", std::env::consts::OS),
@@ -88,10 +91,11 @@ pub fn protect() -> Report {
 }
 
 enum Applied {
+    #[cfg(windows)]
     Yes(&'static str),
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    #[cfg(target_os = "linux")]
     Skipped(&'static str),
-    #[cfg_attr(any(windows, target_os = "linux"), allow(dead_code))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     Unsupported,
 }
 
