@@ -5,6 +5,7 @@ import {
   Bookmark,
   Paperclip,
   Pencil,
+  Phone,
   Plus,
   Square,
   Terminal,
@@ -50,6 +51,8 @@ import { Markdown } from "../components/Markdown";
 import { MessageTime } from "../components/MessageTime";
 import { ModelPicker } from "../components/ModelPicker";
 import { DictateButton } from "../components/DictateButton";
+import { useVoiceCall } from "../components/voiceCall/useVoiceCall";
+import { VoiceCallPanel } from "../components/voiceCall/VoiceCallPanel";
 import { MessageInfo } from "../components/MessageInfo";
 import { MessageActions } from "../components/MessageActions";
 import { EditMessage, RegenerateRow, SupersededView } from "../components/ResendTurn";
@@ -1144,6 +1147,18 @@ export function ChatView({
       : undefined;
   const lastFailed = [...chatRuns].reverse()[0]?.error;
   const avatarState = awaitingApproval ? "waiting-approval" : active ? (lastItem?.kind === "chain" || (lastItem?.kind === "item" && lastItem.item.kind === "tool") ? "working" : "thinking") : lastFailed ? "error" : "idle";
+  // Hands-free voice call (docs/design/voice-call-mode.md): the transcribed text goes out as an ordinary
+  // message; approvals stay click-only (the call only pauses while the card waits).
+  const voiceCall = useVoiceCall({
+    botId: chat?.bot_id,
+    runs: chatRuns,
+    awaitingApproval,
+    sendText: async (spoken) => {
+      if (client) {
+        await client.sendMessage(chatId, spoken, undefined, await ownerKey(client.baseUrl));
+      }
+    }
+  });
   // The bot that answered: a mentioned bot's run has its own bot id.
   const guestBot = (botId: string | null | undefined) =>
     botId && botId !== chat?.bot_id ? bots.find((b) => b.id === botId) : undefined;
@@ -1858,6 +1873,20 @@ export function ChatView({
                 inputRef.current?.focus();
               }}
             />
+            {voiceCall.supported ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={styles.plus}
+                title={t("voice.call.start")}
+                aria-label={t("voice.call.start")}
+                disabled={!client || voiceCall.state.phase !== "idle"}
+                data-testid="voice-call-start"
+                onClick={voiceCall.start}
+              >
+                <Phone aria-hidden="true" />
+              </Button>
+            ) : null}
             {bot ? (
               <div className={styles.modelSlot}>
                 <ModelPicker
@@ -1890,6 +1919,7 @@ export function ChatView({
         </div>
       </footer>
       )}
+      <VoiceCallPanel call={voiceCall} bot={view ?? { id: chat?.bot_id ?? "unknown", name: "Bot" }} />
     </div>
   );
 }

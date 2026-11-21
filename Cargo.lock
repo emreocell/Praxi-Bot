@@ -1367,6 +1367,7 @@ dependencies = [
  "state-bundle",
  "storage",
  "tar",
+ "tauri-winres",
  "tempfile",
  "tokio",
  "toml 0.8.2",

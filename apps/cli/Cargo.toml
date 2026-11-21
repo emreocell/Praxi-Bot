@@ -16,6 +16,9 @@ path = "src/main.rs"
 fake-provider = ["daemon-api/fake-provider"]
 local-embeddings = ["daemon-api/local-embeddings"]
 
+[target.'cfg(windows)'.build-dependencies]
+tauri-winres = "0.3"
+
 [dependencies]
 qrcode = { version = "0.14", default-features = false }
 flate2 = "1"

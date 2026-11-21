@@ -1,0 +1,57 @@
+/* Integrated window controls: same surface as the app, Windows-style hit areas. */
+.controls {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: stretch;
+  height: var(--space-8);
+  -webkit-app-region: no-drag;
+}
+
+.button {
+  display: inline-grid;
+  place-items: center;
+  width: var(--space-12);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: default;
+  transition: background-color var(--motion-duration-fast) ease-out;
+}
+
+.button svg {
+  width: var(--space-4);
+  height: var(--space-4);
+}
+
+.restoreIcon {
+  transform: scaleX(-1);
+}
+
+.button:hover {
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+}
+
+.button:active {
+  background-color: var(--color-surface-active);
+}
+
+.button:focus-visible {
+  outline: var(--size-border-thick) solid var(--color-focus);
+  outline-offset: calc(var(--size-border-thick) * -1);
+}
+
+.close:hover {
+  background-color: var(--color-danger);
+  color: var(--color-danger-contrast);
+}
+
+.close:active {
+  background-color: color-mix(in srgb, var(--color-danger) 80%, var(--color-background));
+  color: var(--color-danger-contrast);
+}

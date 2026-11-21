@@ -107,19 +107,79 @@ fn check_host_display(env: &DoctorEnv<'_>) -> Check {
     {
         return Check::ok("host_display", "host display", "not in host mode");
     }
-    if browser_cdp::host::has_display() && env.browser.is_some() && env.browser_error.is_none() {
-        Check::ok(
-            "host_display",
-            "host display",
-            "display reachable and browser discovered; see browser launch check",
-        )
-    } else {
-        Check::warn(
-            "host_display",
-            "host display",
-            "host display or usable browser missing",
-            "configure Xvfb :99 and a non-snap Chromium; run doctor in the service environment",
-        )
+    let display = std::env::var("DISPLAY").ok();
+    let xauthority = std::env::var("XAUTHORITY").ok();
+    let xauth_readable = xauthority
+        .as_deref()
+        .is_some_and(|p| std::fs::File::open(p).is_ok());
+    match diagnose_host_display(&HostDisplayFacts {
+        display: display.as_deref(),
+        xauthority: xauthority.as_deref(),
+        xauthority_readable: xauth_readable,
+        reachable: browser_cdp::host::has_display(),
+        browser: env.browser.as_deref(),
+        browser_error: env.browser_error.as_deref(),
+    }) {
+        Ok(detail) => Check::ok("host_display", "host display", detail),
+        Err((detail, hint)) => Check::warn("host_display", "host display", detail, hint),
+    }
+}
+
+/// What the host display check looked at (injected so tests need no X server).
+struct HostDisplayFacts<'a> {
+    display: Option<&'a str>,
+    xauthority: Option<&'a str>,
+    xauthority_readable: bool,
+    reachable: bool,
+    browser: Option<&'a Path>,
+    browser_error: Option<&'a str>,
+}
+
+/// `Ok(detail)` when the desktop and the browser are usable, otherwise
+/// `Err((what is missing, how to fix it))` naming the first real cause.
+fn diagnose_host_display(
+    f: &HostDisplayFacts<'_>,
+) -> std::result::Result<String, (String, String)> {
+    let run_in_service =
+        "run `bot doctor` with the service's environment (see /etc/praxi/praxi.env)";
+    if !browser_cdp::host::display_configured(f.display) {
+        return Err((
+            "DISPLAY is not set for this process: the bot cannot use its desktop".into(),
+            format!(
+                "the service needs DISPLAY=:99 (praxi-xvfb.service, /etc/praxi/praxi.env); {run_in_service}"
+            ),
+        ));
+    }
+    if !f.reachable {
+        let xauth = match (f.xauthority, f.xauthority_readable) {
+            (None, _) => "; XAUTHORITY is not set",
+            (Some(_), false) => "; the XAUTHORITY file is missing or unreadable",
+            (Some(_), true) => "",
+        };
+        return Err((
+            format!(
+                "display {} does not answer{xauth}",
+                f.display.unwrap_or_default().trim()
+            ),
+            "check `systemctl status praxi-xvfb` and that the daemon user can read its XAUTHORITY file".into(),
+        ));
+    }
+    if let Some(e) = f.browser_error {
+        return Err((
+            format!("display is reachable but the browser is unusable: {e}"),
+            "install a non-snap Chrome/Chromium (e.g. /opt/praxi-browser/chrome) or set BOT_BROWSER_PATH".into(),
+        ));
+    }
+    match f.browser {
+        None => Err((
+            "display is reachable but no browser was found".into(),
+            "install a non-snap Chrome/Chromium (e.g. /opt/praxi-browser/chrome) or set BOT_BROWSER_PATH".into(),
+        )),
+        Some(p) => Ok(format!(
+            "display {} reachable, browser {}; see browser launch check",
+            f.display.unwrap_or_default().trim(),
+            p.display()
+        )),
     }
 }
 
@@ -672,6 +732,42 @@ pub fn write_report(env: &DoctorEnv<'_>, checks: &[Check], path: &Path) -> Resul
 mod tests {
     use super::*;
     use provider_catalog::ProviderSettings;
+
+    #[test]
+    fn host_display_check_names_the_first_missing_piece() {
+        let base = HostDisplayFacts {
+            display: Some(":99"),
+            xauthority: Some("/x"),
+            xauthority_readable: true,
+            reachable: true,
+            browser: Some(Path::new("/opt/praxi-browser/chrome")),
+            browser_error: None,
+        };
+        assert!(diagnose_host_display(&base).unwrap().contains(":99"));
+        let (d, _) = diagnose_host_display(&HostDisplayFacts {
+            display: None,
+            ..base
+        })
+        .unwrap_err();
+        assert!(d.contains("DISPLAY is not set"), "{d}");
+        let (d, _) = diagnose_host_display(&HostDisplayFacts {
+            reachable: false,
+            xauthority_readable: false,
+            ..base
+        })
+        .unwrap_err();
+        assert!(
+            d.contains("does not answer") && d.contains("XAUTHORITY"),
+            "{d}"
+        );
+        let (d, _) = diagnose_host_display(&HostDisplayFacts {
+            browser: None,
+            ..base
+        })
+        .unwrap_err();
+        assert!(d.contains("no browser"), "{d}");
+    }
+
     use secret_store::{SecretRef, SecretValue};
     use std::collections::BTreeMap;
     use std::sync::Mutex;

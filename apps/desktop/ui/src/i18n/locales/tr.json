@@ -1744,7 +1744,13 @@
       "starting": "Ekran başlatılıyor…"
     },
     "live": "CANLI",
+    "mainBot": "Ana bot: {{name}}",
     "pausedNote": "duraklatıldı",
+    "presence": {
+      "busy": "Çalışıyor",
+      "offline": "Çevrimdışı",
+      "online": "Çevrimiçi"
+    },
     "reason": {
       "connecting": "{{name}} sunucusuna bağlanılıyor…",
       "failed": "Ekran alınamadı",
@@ -2648,7 +2654,9 @@
     "send": "Mesaj gönder",
     "settings": "Ayarları aç",
     "stop": "Tüm bot çalışmalarını durdur",
-    "title": "Klavye kısayolları"
+    "title": "Klavye kısayolları",
+    "voiceCallEnd": "Sesli aramayı bitir",
+    "voiceCallTalk": "Basılı tutarak konuşma aramasında konuş"
   },
   "home": {
     "admin": {
@@ -3926,7 +3934,7 @@
         "title": "Hesap adı"
       },
       "frame": {
-        "description": "Yerel başlık çubuğunu göster (bazı platformlarda yeniden başlatma gerekebilir).",
+        "description": "Uygulamanın kendi pencere düğmeleri yerine Windows başlık çubuğunu göster.",
         "title": "Pencere çerçevesi"
       },
       "send": {
@@ -4036,7 +4044,6 @@
   "sidebar": {
     "apps": "Uygulamalar",
     "botsSection": "Botlar",
-    "mainBot": "Ana",
     "mainBotHint": "Ana bot: yeni sohbetlerin varsayılanı",
     "needsYou": "Senden bekleyenler",
     "needsYouCount": "{{count}} öğe senden bekliyor",
@@ -4204,6 +4211,37 @@
       "title": "Bu botun sesi",
       "useGlobal": "Ayarlardakiyle aynı"
     },
+    "call": {
+      "approvalHint": "Sohbetteki karttan onaylayın veya reddedin. Onaylar sesle verilemez.",
+      "captions": "Altyazılar",
+      "close": "Kapat",
+      "end": "Aramayı bitir",
+      "holdToTalk": "Konuşmak için basılı tut",
+      "interrupt": "Sözünü kes",
+      "micMuted": "Mikrofon susturuldu",
+      "micOn": "Mikrofon açık",
+      "mute": "Mikrofonu sustur",
+      "noSpeech": "Konuşma algılanmadı. Dinlemeye devam ediyorum.",
+      "notConfigured": "Dikte henüz kurulmadı. Ayarlar > Genel bölümünden bir yazıya çevirme servisi ekleyin.",
+      "phase": {
+        "approval": "Onayınız bekleniyor",
+        "failed": "Arama sona erdi",
+        "hearing": "Sizi dinliyor…",
+        "listening": "Dinliyor",
+        "speaking": "{{name}} konuşuyor",
+        "starting": "Mikrofon başlatılıyor…",
+        "thinking": "{{name}} düşünüyor…"
+      },
+      "pushToTalk": "Basılı tutarak konuş",
+      "replyFailed": "Bot yanıt veremedi. Lütfen tekrar deneyin.",
+      "retry": "Tekrar dene",
+      "simulate": "Konuşmayı simüle et (sahte)",
+      "start": "Sesli sohbeti başlat",
+      "title": "Sesli arama",
+      "transcribeFailed": "Bu yazıya çevrilemedi. Lütfen tekrar söyleyin.",
+      "unmute": "Mikrofonu aç",
+      "unsupported": "Bu pencere ses kaydedemiyor."
+    },
     "codeOmitted": "(kod atlandı)",
     "description": "Sesli oku düğmesinin sesi ve hızı. Sistemin konuşma motorunu kullanır.",
     "dictate": "Sesle yaz",
@@ -4265,8 +4303,10 @@
     "takeTheWheel": "Direksiyonu devral"
   },
   "window": {
-    "maximize": "Büyüt / geri yükle",
-    "minimize": "Küçült"
+    "close": "Kapat",
+    "maximize": "Büyüt",
+    "minimize": "Küçült",
+    "restore": "Geri yükle"
   },
   "workflow": {
     "button": "İş akışı olarak kaydet",

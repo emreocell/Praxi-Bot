@@ -1744,7 +1744,13 @@
       "starting": "Bildschirm wird gestartet …"
     },
     "live": "LIVE",
+    "mainBot": "Hauptbot: {{name}}",
     "pausedNote": "pausiert",
+    "presence": {
+      "busy": "Arbeitet",
+      "offline": "Nicht erreichbar",
+      "online": "Bereit"
+    },
     "reason": {
       "connecting": "Verbindung zu {{name}} wird hergestellt …",
       "failed": "Bildschirm konnte nicht abgerufen werden",
@@ -2648,7 +2654,9 @@
     "send": "Nachricht senden",
     "settings": "Einstellungen öffnen",
     "stop": "Alle Bot-Läufe stoppen",
-    "title": "Tastenkürzel"
+    "title": "Tastenkürzel",
+    "voiceCallEnd": "Sprachanruf beenden",
+    "voiceCallTalk": "Im Push-to-Talk-Anruf zum Sprechen halten"
   },
   "home": {
     "admin": {
@@ -3926,7 +3934,7 @@
         "title": "Kontoname"
       },
       "frame": {
-        "description": "Die native Titelleiste anzeigen (auf manchen Plattformen ist ein Neustart nötig).",
+        "description": "Die native Titelleiste statt der eigenen Fenstertasten der App anzeigen.",
         "title": "Fensterrahmen"
       },
       "send": {
@@ -4036,7 +4044,6 @@
   "sidebar": {
     "apps": "Apps",
     "botsSection": "Bots",
-    "mainBot": "Haupt",
     "mainBotHint": "Haupt-Bot: der Standard für neue Chats",
     "needsYou": "Braucht dich",
     "needsYouCount": "{{count}} warten auf dich",
@@ -4204,6 +4211,37 @@
       "title": "Stimme für diesen Bot",
       "useGlobal": "Wie in den Einstellungen"
     },
+    "call": {
+      "approvalHint": "Bestätigen oder lehnen Sie auf der Karte im Chat ab. Freigaben sind per Sprache nicht möglich.",
+      "captions": "Untertitel",
+      "close": "Schließen",
+      "end": "Anruf beenden",
+      "holdToTalk": "Zum Sprechen gedrückt halten",
+      "interrupt": "Unterbrechen",
+      "micMuted": "Mikrofon stummgeschaltet",
+      "micOn": "Mikrofon an",
+      "mute": "Mikrofon stummschalten",
+      "noSpeech": "Keine Sprache erkannt. Ich höre weiter zu.",
+      "notConfigured": "Diktieren ist noch nicht eingerichtet. Fügen Sie unter Einstellungen > Allgemein einen Transkriptionsdienst hinzu.",
+      "phase": {
+        "approval": "Warten auf Ihre Freigabe",
+        "failed": "Der Anruf wurde beendet",
+        "hearing": "Hört Ihnen zu…",
+        "listening": "Hört zu",
+        "speaking": "{{name}} spricht",
+        "starting": "Mikrofon wird gestartet…",
+        "thinking": "{{name}} denkt nach…"
+      },
+      "pushToTalk": "Push-to-Talk",
+      "replyFailed": "Der Bot konnte nicht antworten. Bitte erneut versuchen.",
+      "retry": "Erneut versuchen",
+      "simulate": "Sprechen simulieren (Mock)",
+      "start": "Sprachchat starten",
+      "title": "Sprachanruf",
+      "transcribeFailed": "Das konnte nicht transkribiert werden. Bitte noch einmal sagen.",
+      "unmute": "Mikrofon einschalten",
+      "unsupported": "Dieses Fenster kann kein Audio aufnehmen."
+    },
     "codeOmitted": "(Code ausgelassen)",
     "description": "Stimme und Tempo für die Vorlesen-Schaltfläche. Nutzt die Sprachausgabe deines Systems.",
     "dictate": "Diktieren",
@@ -4265,8 +4303,10 @@
     "takeTheWheel": "Steuer übernehmen"
   },
   "window": {
-    "maximize": "Maximieren / Wiederherstellen",
-    "minimize": "Minimieren"
+    "close": "Schließen",
+    "maximize": "Maximieren",
+    "minimize": "Minimieren",
+    "restore": "Wiederherstellen"
   },
   "workflow": {
     "button": "Als Workflow speichern",
