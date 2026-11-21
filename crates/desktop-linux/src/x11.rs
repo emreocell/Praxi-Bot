@@ -25,16 +25,24 @@ use x11rb::{
     wrapper::ConnectionExt as _,
 };
 
+use crate::helper::{LaunchFail, explain_launch};
 use crate::pure::{
-    Key, char_to_keysym, clamp_capture_rect, detect_display_session, parse_key, zpixmap_to_bgra,
+    Key, KeyPlace, TypeAction, char_to_keysym, clamp_capture_rect, detect_display_session,
+    find_keysym, free_keycodes, parse_key, plan_text_actions, x_unreachable, zpixmap_to_bgra,
 };
 
+fn display_name() -> String {
+    std::env::var("DISPLAY").unwrap_or_else(|_| "(unset)".into())
+}
+
 fn x11_err<E: std::fmt::Display>(ctx: &str) -> impl FnOnce(E) -> DesktopError + '_ {
-    move |e| DesktopError::Accessibility(format!("{ctx}: {e}"))
+    move |e| {
+        DesktopError::Accessibility(format!("{ctx} on display {}: {e}", display_name().trim()))
+    }
 }
 
 fn shot_err<E: std::fmt::Display>(ctx: &str) -> impl FnOnce(E) -> DesktopError + '_ {
-    move |e| DesktopError::Screenshot(format!("{ctx}: {e}"))
+    move |e| DesktopError::Screenshot(format!("{ctx} on display {}: {e}", display_name().trim()))
 }
 
 /// Ensure we are on an X11 session (rejecting Wayland with [`DesktopError::Unsupported`]).
@@ -45,39 +53,114 @@ pub fn ensure_x11_session() -> Result<String, DesktopError> {
     detect_display_session(xdg.as_deref(), wayland.as_deref(), x11.as_deref())
 }
 
+/// How long one X11 handshake may block the probe thread.
+const X11_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Cached, authenticated startup reachability. Capability queries are synchronous
-/// and run inside async tool calls, so never connect on their calling thread.
+/// and run inside async tool calls, so the handshake runs on its own thread.
+/// A failure is retried after [`crate::pure::PROBE_RETRY_AFTER`] instead of being
+/// pinned for the process lifetime (a slow start used to force every later
+/// desktop call to report "no display").
 #[must_use]
 pub fn has_x11_display() -> bool {
-    static DISPLAY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    cached_display_probe(&DISPLAY, Duration::from_millis(200), || {
-        ensure_x11_session().is_ok() && x11rb::connect(None).is_ok()
+    static CACHE: std::sync::Mutex<crate::pure::ProbeCache> =
+        std::sync::Mutex::new(crate::pure::ProbeCache::new());
+    let mut cache = CACHE.lock().unwrap_or_else(|err| err.into_inner());
+    cache.get(std::time::Instant::now(), || {
+        ensure_x11_session().is_ok()
+            && probe_thread(Duration::from_secs(1), || x11rb::connect(None).is_ok())
     })
 }
 
-fn cached_display_probe(
-    cache: &std::sync::OnceLock<bool>,
-    timeout: Duration,
-    probe: impl FnOnce() -> bool + Send + 'static,
-) -> bool {
-    *cache.get_or_init(|| {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-        if thread::Builder::new()
-            .name("desktop-display-probe".into())
-            .spawn(move || {
-                let _ = sender.send(probe());
-            })
-            .is_err()
-        {
-            return false;
-        }
-        receiver.recv_timeout(timeout).unwrap_or(false)
-    })
+fn probe_thread(timeout: Duration, probe: impl FnOnce() -> bool + Send + 'static) -> bool {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    if thread::Builder::new()
+        .name("desktop-display-probe".into())
+        .spawn(move || {
+            let _ = sender.send(probe());
+        })
+        .is_err()
+    {
+        return false;
+    }
+    receiver.recv_timeout(timeout).unwrap_or(false)
+}
+
+/// Handshake with `display`, bounded so a dead socket cannot hang the caller.
+///
+/// # Errors
+///
+/// [`DesktopError::Accessibility`] naming the display when the session is wrong
+/// or the server does not answer in time.
+pub fn probe_x_server(timeout: Duration) -> Result<(), String> {
+    let dpy = ensure_x11_session().map_err(|e| e.to_string())?;
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let name = dpy.clone();
+    if thread::Builder::new()
+        .name("x11-probe".into())
+        .spawn(move || {
+            let res = x11rb::connect(Some(&name))
+                .map(|_| ())
+                .map_err(|e| x_unreachable(&name, &e.to_string()));
+            let _ = sender.send(res);
+        })
+        .is_err()
+    {
+        return Err(x_unreachable(&dpy, "could not start the X probe thread"));
+    }
+    match receiver.recv_timeout(timeout) {
+        Ok(res) => res,
+        Err(_) => Err(x_unreachable(
+            &dpy,
+            &format!("timed out after {}s", timeout.as_secs().max(1)),
+        )),
+    }
 }
 
 fn connect() -> Result<(RustConnection, usize), DesktopError> {
     let dpy = ensure_x11_session()?;
-    x11rb::connect(Some(&dpy)).map_err(x11_err("x11rb::connect"))
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let name = dpy.clone();
+    if thread::Builder::new()
+        .name("x11-connect".into())
+        .spawn(move || {
+            let res = x11rb::connect(Some(&name)).map_err(|e| x_unreachable(&name, &e.to_string()));
+            let _ = sender.send(res);
+        })
+        .is_err()
+    {
+        return Err(DesktopError::Accessibility(x_unreachable(
+            &dpy,
+            "could not start the X connect thread",
+        )));
+    }
+    match receiver.recv_timeout(X11_CONNECT_TIMEOUT) {
+        Ok(Ok(conn)) => Ok(conn),
+        Ok(Err(msg)) => Err(DesktopError::Accessibility(msg)),
+        Err(_) => {
+            // Spawn may still complete after the deadline. Dropping the receiver
+            // makes that send fail; the thread then drops the connection.
+            Err(DesktopError::Accessibility(x_unreachable(
+                &dpy,
+                "timed out waiting for the X server",
+            )))
+        }
+    }
+}
+
+/// Root window size in pixels. Used when AT-SPI has no frame and X has no
+/// focused window, so coordinates are not invented as 1920×1080.
+pub fn screen_size() -> Result<(u32, u32), DesktopError> {
+    let (conn, screen_num) = connect()?;
+    let screen = conn
+        .setup()
+        .roots
+        .get(screen_num)
+        .ok_or_else(|| DesktopError::Accessibility(x_unreachable(&display_name(), "no screen")))?;
+    Ok((
+        u32::from(screen.width_in_pixels),
+        u32::from(screen.height_in_pixels),
+    ))
 }
 
 fn intern_atom(conn: &RustConnection, name: &[u8]) -> Result<Atom, DesktopError> {
@@ -310,27 +393,74 @@ pub fn activate_window(window_id: u64) -> Result<(), DesktopError> {
     Ok(())
 }
 
+/// How long `Command::spawn` may block. A stuck filesystem must not hang the tool.
+const LAUNCH_SPAWN_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Launch an application process on the current X11 session.
 pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
     let dpy = ensure_x11_session()?;
-    let child = Command::new(&app.executable)
-        .args(&app.args)
-        .env("DISPLAY", &dpy)
-        .env("GTK_MODULES", "gail:atk-bridge")
-        .env("QT_ACCESSIBILITY", "1")
-        .env("QT_LINUX_ACCESSIBILITY_ALWAYS_ON", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| DesktopError::Internal(format!("launch '{}': {e}", app.executable)))?;
-    let pid = child.id();
-    // Reap the child when it exits so it does not linger as a zombie.
-    thread::spawn(move || {
-        let mut child = child;
-        let _ = child.wait();
-    });
-    Ok(pid)
+    let exe = app.executable.clone();
+    let args = app.args.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let started = thread::Builder::new()
+        .name("desktop-launch".into())
+        .spawn(move || {
+            match Command::new(&exe)
+                .args(&args)
+                .env("DISPLAY", &dpy)
+                .env("GTK_MODULES", "gail:atk-bridge")
+                .env("QT_ACCESSIBILITY", "1")
+                .env("QT_LINUX_ACCESSIBILITY_ALWAYS_ON", "1")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(mut child) => {
+                    let pid = child.id();
+                    if sender.send(Ok(pid)).is_ok() {
+                        // Caller accepted the pid. Reap on exit so it is not a zombie.
+                        let _ = child.wait();
+                    } else {
+                        // Caller already gave up. Kill and reap.
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
+                }
+                Err(err) => {
+                    let _ = sender.send(Err(err));
+                }
+            }
+        });
+    if started.is_err() {
+        return Err(DesktopError::Internal(explain_launch(
+            &app.executable,
+            LaunchFail::Other("could not start the launch thread"),
+        )));
+    }
+    match receiver.recv_timeout(LAUNCH_SPAWN_TIMEOUT) {
+        Ok(Ok(pid)) => Ok(pid),
+        Ok(Err(err)) => Err(launch_io_error(&app.executable, &err)),
+        Err(_) => match receiver.try_recv() {
+            Ok(Ok(pid)) => Ok(pid),
+            Ok(Err(err)) => Err(launch_io_error(&app.executable, &err)),
+            Err(_) => Err(DesktopError::Internal(explain_launch(
+                &app.executable,
+                LaunchFail::TimedOut {
+                    secs: LAUNCH_SPAWN_TIMEOUT.as_secs().max(1),
+                },
+            ))),
+        },
+    }
+}
+
+fn launch_io_error(program: &str, err: &std::io::Error) -> DesktopError {
+    if err.kind() == std::io::ErrorKind::NotFound {
+        DesktopError::Internal(explain_launch(program, LaunchFail::NotFound))
+    } else {
+        let text = err.to_string();
+        DesktopError::Internal(explain_launch(program, LaunchFail::Other(&text)))
+    }
 }
 
 // ── XTest input injection ─────────────────────────────────────────────────────
@@ -408,8 +538,14 @@ pub fn scroll_at(x: f64, y: f64, delta_x: f64, delta_y: f64) -> Result<(), Deskt
     Ok(())
 }
 
-/// Look up `(keycode, temporary_binding)` for `keysym` in the server's keymap.
-fn resolve_keycode(conn: &RustConnection, keysym: u32) -> Result<(u8, bool), DesktopError> {
+struct Keymap {
+    min_kc: u8,
+    max_kc: u8,
+    per: u8,
+    keysyms: Vec<u32>,
+}
+
+fn load_keymap(conn: &RustConnection) -> Result<Keymap, DesktopError> {
     let setup = conn.setup();
     let min_kc = setup.min_keycode;
     let max_kc = setup.max_keycode;
@@ -423,29 +559,33 @@ fn resolve_keycode(conn: &RustConnection, keysym: u32) -> Result<(u8, bool), Des
         .map_err(x11_err("get_keyboard_mapping"))?
         .reply()
         .map_err(x11_err("get_keyboard_mapping reply"))?;
+    Ok(Keymap {
+        min_kc,
+        max_kc,
+        per: keysyms_per_keycode.max(1),
+        keysyms,
+    })
+}
 
-    let per = usize::from(keysyms_per_keycode.max(1));
-    let mut unused_kc: Option<u8> = None;
-
-    for (idx, chunk) in keysyms.chunks(per).enumerate() {
-        let Ok(offset) = u8::try_from(idx) else {
-            break;
-        };
-        let kc = min_kc.saturating_add(offset);
-        if chunk.first().copied() == Some(keysym) {
-            return Ok((kc, false));
-        }
-        if unused_kc.is_none() && kc != 8 && chunk.iter().all(|&s| s == 0) {
-            unused_kc = Some(kc);
+/// Look up `(keycode, temporary_binding)` for a chord keysym.
+///
+/// Level-0 hits are used as-is. Anything else (shifted symbols, characters
+/// absent from the layout) is bound onto a scratch keycode so the chord does
+/// not depend on Shift already being down.
+fn resolve_keycode(conn: &RustConnection, keysym: u32) -> Result<(u8, bool), DesktopError> {
+    let map = load_keymap(conn)?;
+    match find_keysym(keysym, map.min_kc, map.max_kc, map.per, &map.keysyms) {
+        KeyPlace::Level0 { keycode } => Ok((keycode, false)),
+        KeyPlace::Level1 { .. } | KeyPlace::Bind { .. } => {
+            let free = free_keycodes(map.min_kc, map.max_kc, map.per, &map.keysyms, 1);
+            let scratch = free.first().copied().unwrap_or(map.max_kc);
+            conn.change_keyboard_mapping(1, scratch, 2, &[keysym, keysym])
+                .map_err(x11_err("change_keyboard_mapping"))?;
+            conn.sync()
+                .map_err(x11_err("change_keyboard_mapping sync"))?;
+            Ok((scratch, true))
         }
     }
-
-    let scratch = unused_kc.unwrap_or(max_kc);
-    conn.change_keyboard_mapping(1, scratch, 2, &[keysym, keysym])
-        .map_err(x11_err("change_keyboard_mapping"))?;
-    conn.sync()
-        .map_err(x11_err("change_keyboard_mapping sync"))?;
-    Ok((scratch, true))
 }
 
 fn unbind_keycode(conn: &RustConnection, kc: u8) {
@@ -465,22 +605,96 @@ fn key_event(conn: &RustConnection, root: Window, kc: u8, press: bool) -> Result
 }
 
 /// Type arbitrary UTF-8 text via `XTest` keysym injection.
+///
+/// Characters on the current layout are pressed directly (with Shift when they
+/// sit on level 1). Characters outside the layout, including Turkish letters
+/// such as ğ ş ı İ, are bound onto free keycodes for the whole string and
+/// cleared only after the last key-up so a client cannot observe `NoSymbol`.
 pub fn type_text(text: &str) -> Result<(), DesktopError> {
     if text.is_empty() {
         return Ok(());
     }
     let (conn, screen_num) = connect()?;
     let root = conn.setup().roots[screen_num].root;
-    for ch in text.chars() {
-        let sym = char_to_keysym(ch);
-        let (kc, temp) = resolve_keycode(&conn, sym)?;
-        let res = key_event(&conn, root, kc, true).and_then(|()| key_event(&conn, root, kc, false));
-        if temp {
-            unbind_keycode(&conn, kc);
+    let map = load_keymap(&conn)?;
+    let steps: Vec<KeyPlace> = text
+        .chars()
+        .map(|ch| {
+            find_keysym(
+                char_to_keysym(ch),
+                map.min_kc,
+                map.max_kc,
+                map.per,
+                &map.keysyms,
+            )
+        })
+        .collect();
+    let distinct_binds = {
+        let mut syms = Vec::new();
+        for step in &steps {
+            if let KeyPlace::Bind { keysym } = *step
+                && !syms.contains(&keysym)
+            {
+                syms.push(keysym);
+            }
         }
-        res?;
+        syms.len()
+    };
+    let free = free_keycodes(
+        map.min_kc,
+        map.max_kc,
+        map.per,
+        &map.keysyms,
+        distinct_binds,
+    );
+    let shift = match find_keysym(0xFFE1, map.min_kc, map.max_kc, map.per, &map.keysyms) {
+        KeyPlace::Level0 { keycode } => Some(keycode),
+        _ => None,
+    };
+    let actions = plan_text_actions(&steps, shift, &free).map_err(DesktopError::Accessibility)?;
+
+    let mut result = Ok(());
+    let mut unbound = false;
+    let mut synced_binds = false;
+    for action in actions {
+        match action {
+            TypeAction::Bind { keycode, keysym } => {
+                if result.is_err() {
+                    continue;
+                }
+                if let Err(err) = conn
+                    .change_keyboard_mapping(1, keycode, 2, &[keysym, keysym])
+                    .map_err(x11_err("change_keyboard_mapping"))
+                {
+                    result = Err(err);
+                }
+            }
+            TypeAction::Down { keycode } | TypeAction::Up { keycode } => {
+                if result.is_err() {
+                    continue;
+                }
+                if !synced_binds {
+                    if let Err(err) = conn.sync().map_err(x11_err("change_keyboard_mapping sync")) {
+                        result = Err(err);
+                        continue;
+                    }
+                    synced_binds = true;
+                }
+                let press = matches!(action, TypeAction::Down { .. });
+                if let Err(err) = key_event(&conn, root, keycode, press) {
+                    result = Err(err);
+                }
+            }
+            TypeAction::Unbind { keycode } => {
+                if !unbound {
+                    thread::sleep(Duration::from_millis(30));
+                    unbound = true;
+                }
+                unbind_keycode(&conn, keycode);
+            }
+        }
     }
-    Ok(())
+    result
 }
 
 /// Press a key chord: all keys down in order, then released in reverse order.
@@ -517,6 +731,10 @@ pub fn key_chord(keys: &[String]) -> Result<(), DesktopError> {
     }
     for &(kc, _) in resolved.iter().rev() {
         let _ = key_event(&conn, root, kc, false);
+    }
+    if resolved.iter().any(|(_, temp)| *temp) {
+        // Leave the scratch keysym in place until the client can read the event.
+        thread::sleep(Duration::from_millis(30));
     }
     for (kc, temp) in resolved {
         if temp {
@@ -607,21 +825,12 @@ mod display_tests {
     use super::*;
 
     #[test]
-    fn capability_probe_times_out_and_does_not_reconnect() {
-        let cache = std::sync::OnceLock::new();
-        let (release, blocked) = std::sync::mpsc::sync_channel(1);
+    fn capability_probe_times_out_without_blocking_the_caller() {
         let started = std::time::Instant::now();
-        assert!(!cached_display_probe(
-            &cache,
-            Duration::from_millis(10),
-            move || { blocked.recv().unwrap_or(false) }
-        ));
+        assert!(!probe_thread(Duration::from_millis(20), || {
+            thread::sleep(Duration::from_secs(5));
+            true
+        }));
         assert!(started.elapsed() < Duration::from_secs(2));
-        let _ = release.send(true);
-        assert!(!cached_display_probe(
-            &cache,
-            Duration::from_millis(10),
-            || { panic!("capabilities must reuse the cached probe") }
-        ));
     }
 }
