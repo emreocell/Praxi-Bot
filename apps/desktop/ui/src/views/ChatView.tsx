@@ -1407,6 +1407,7 @@ export function ChatView({
             .filter(Boolean)
             .join(" ")}
         >
+          {entries.length > 0 && view?.name ? <h1 className={styles.srOnly}>{view.name}</h1> : null}
           {entries.length === 0 ? (
             <div className={styles.emptyConversation}>
               <BotAvatar

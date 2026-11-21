@@ -26,6 +26,13 @@ Appearance parameters such as `theme` are handled by `appearanceFromQuery`; cons
 the current supported appearance values. Mock-mode setup and parameter handling live in
 `src/api/mockMode.ts` and `src/App.tsx`.
 
+## Accessibility check
+
+`pnpm --dir apps/desktop/ui check:a11y` runs axe-core over the mock screens listed in
+`scripts/check-a11y.mjs` (add a screen there when you add one; it reads the same `?screen=` hooks as
+above) and compares the result with `scripts/a11y-allowlist.mjs`. See CONTRIBUTING.md for the rules
+of the allow-list.
+
 ## Real-app smoke run
 
 `pnpm --dir apps/desktop/ui smoke` drives the REAL UI (vite dev, not mock mode) against a REAL

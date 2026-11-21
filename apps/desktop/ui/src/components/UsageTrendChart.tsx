@@ -107,7 +107,7 @@ export function UsageTrendChart({ daily, timeZone }: UsageTrendChartProps) {
         <svg
           className={styles.svg}
           viewBox={`0 0 ${PLOT_W} ${VIEW_H}`}
-          role="img"
+          role="group"
           aria-label={ariaSummary}
           onMouseLeave={() => setActiveIndex(null)}
         >
