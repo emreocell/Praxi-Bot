@@ -264,6 +264,12 @@ impl TurnExecutor {
         specs: &[ToolSpec],
         cancel: &CancellationToken,
     ) -> Result<ModelOut, ExecError> {
+        // Safe mode: a coding CLI runs its own shell and files, outside our gate.
+        if self.sh.cfg.safe_mode {
+            return Err(xe(
+                "CLI executors are unavailable in safe mode; pick an API model or restart normally",
+            ));
+        }
         // Central boundary covers primary models, fallbacks and child roles.
         // Native CLI tools cannot honor the per-call external-agent gate.
         if self.sh.ctx(run)?.initiator == protocol::InitiatorKind::ExternalAgent {

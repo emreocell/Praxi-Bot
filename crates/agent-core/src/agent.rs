@@ -732,6 +732,11 @@ impl AgentLoop {
         name: &str,
         params: BTreeMap<String, String>,
     ) -> Result<RunId> {
+        if self.sh.cfg.safe_mode {
+            return Err(LoopError::Router(
+                "workflows are disabled in safe mode".into(),
+            ));
+        }
         let chat = self
             .sh
             .storage
@@ -878,6 +883,11 @@ impl AgentLoop {
         credential_id: Uuid,
         work: ScheduleWork,
     ) -> Result<RunId> {
+        if self.sh.cfg.safe_mode && !matches!(work, ScheduleWork::Prompt(_)) {
+            return Err(LoopError::Profile(
+                "tool calls are disabled in safe mode".into(),
+            ));
+        }
         let text = match &work {
             ScheduleWork::Prompt(text) => text.clone(),
             ScheduleWork::Tool { .. } => "External agent requested a computer tool call.".into(),
@@ -914,6 +924,11 @@ impl AgentLoop {
         schedule_id: TaskId,
         work: ScheduleWork,
     ) -> Result<RunId> {
+        if self.sh.cfg.safe_mode && !matches!(work, ScheduleWork::Prompt(_)) {
+            return Err(LoopError::Profile(
+                "scheduled tools and workflows are disabled in safe mode".into(),
+            ));
+        }
         let text = match &work {
             ScheduleWork::Prompt(t) => t.clone(),
             ScheduleWork::Workflow { name, params } => {

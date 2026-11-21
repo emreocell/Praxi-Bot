@@ -593,6 +593,19 @@ impl TurnExecutor {
                     reason: format!("router budget of {budget:?} exceeded"),
                 },
             };
+        // Safe mode: a matched workflow is never replayed; chat goes to the model.
+        let decision = if self.sh.cfg.safe_mode && matches!(decision.route, Route::Workflow { .. })
+        {
+            Decision {
+                route: Route::Agent,
+                level: Level::K4,
+                confidence: 0.0,
+                latency_ms: decision.latency_ms,
+                reason: "safe mode: saved workflows are disabled".to_owned(),
+            }
+        } else {
+            decision
+        };
         let tier = self.initial_tier(ctx, text, Some(&decision));
         self.emit_route(ctx, &decision, tier);
         Some((decision, tier))
@@ -624,6 +637,10 @@ impl TurnExecutor {
         work: crate::shared::ScheduleWork,
     ) -> Option<StepSpec> {
         use crate::shared::ScheduleWork;
+        if self.sh.cfg.safe_mode && !matches!(work, ScheduleWork::Prompt(_)) {
+            // Safe mode: no scheduled workflow or tool directive is planned.
+            return None;
+        }
         match work {
             ScheduleWork::Prompt(_) => None,
             ScheduleWork::Workflow { name, params } => {
@@ -779,6 +796,14 @@ impl TurnExecutor {
                 "exposure": { "ran": false },
             })
         };
+        if self.sh.cfg.safe_mode {
+            // Safe mode: a replay never starts; the turn goes on as plain chat.
+            return if human {
+                Err(xe("workflows are disabled in safe mode"))
+            } else {
+                Ok(fail("safe mode is on, workflows are disabled".into()))
+            };
+        }
         let Some(w) = self.sh.router.workflows.get() else {
             return if human {
                 Err(xe("workflows are not available"))

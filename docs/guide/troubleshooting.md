@@ -149,8 +149,12 @@ and read and change bots, schedules and settings.
 
 What is off: every tool, schedules and workflows (nothing fires), the Telegram bridge
 and other channels, MCP servers and apps, email/calendar/web connectors, memory
-recall and write-back, the desktop backend, and peer or host networking. Interrupted
-runs are not resumed; they stay paused and visible. Settings pages of the parts that
+recall and write-back, the desktop backend, and peer or host networking. Saved workflows
+never replay (a matching chat line is answered by the model, and the run endpoint is
+refused), and coding-CLI executors are refused. Interrupted runs are not resumed:
+starting the service marks runs that were running or waiting for approval as paused,
+as after any restart, and a later normal start does not resume them either; they stay
+visible. Settings pages of the parts that
 are off answer "not configured" until you leave safe mode.
 
 Nothing is deleted or changed: bots, chats, schedules, channels and settings stay

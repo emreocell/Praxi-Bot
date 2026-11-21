@@ -2361,6 +2361,18 @@ impl LoopGate {
         req: &GateRequest,
         page_guard: bool,
     ) -> Result<(Option<tool_registry::ControlIdentity>, Option<String>), String> {
+        // Safe mode: fail closed like `resolve_call` (replay, scripts, any gate caller).
+        if self.sh.upgrade().is_some_and(|sh| sh.cfg.safe_mode) {
+            return Err(format!("unknown tool: {}", req.tool));
+        }
+        self.authorize_checked(req, page_guard).await
+    }
+
+    async fn authorize_checked(
+        &self,
+        req: &GateRequest,
+        page_guard: bool,
+    ) -> Result<(Option<tool_registry::ControlIdentity>, Option<String>), String> {
         let sh = self.sh.upgrade().ok_or("agent loop is gone")?;
         let run_id = req
             .run_id

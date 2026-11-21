@@ -12,6 +12,9 @@ use serde_json::{Value, json};
 use tool_registry::Effect;
 
 fn check(sh: &Shared, bot_id: BotId, name: &str, input: &Value) -> Result<(), String> {
+    if sh.cfg.safe_mode {
+        return Err("schedule read tool unavailable".into());
+    }
     let tool = sh.tools.get(name).ok_or("schedule read tool unavailable")?;
     let spec = tool.spec();
     let profile = sh

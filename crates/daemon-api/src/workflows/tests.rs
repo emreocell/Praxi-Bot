@@ -93,7 +93,12 @@ struct Env {
     inputs: Arc<parking_lot::Mutex<Vec<Value>>>,
 }
 fn setup() -> Env {
-    let dir = tempfile::tempdir().unwrap();
+    setup_with(tempfile::tempdir().unwrap(), false, None)
+}
+
+/// `existing`: reopen this directory (bot and chat already stored), e.g. to
+/// start the same data in safe mode.
+fn setup_with(dir: tempfile::TempDir, safe_mode: bool, existing: Option<ChatId>) -> Env {
     let storage = Arc::new(storage::Storage::open(dir.path()).unwrap());
     let registry = ToolRegistry::new();
     let calls = Arc::new(AtomicUsize::new(0));
@@ -140,6 +145,7 @@ fn setup() -> Env {
         agent_core::LoopConfig {
             global_policy: permission_engine::Policy::full(),
             redactor: Some(agent_core::SharedRedactor::default()),
+            safe_mode,
             ..Default::default()
         },
     )
@@ -159,6 +165,18 @@ fn setup() -> Env {
     .unwrap();
     state.set_owner_key(crate::tests::OWNER_KEY.into());
     let profile = agent_core::BotProfile::from_toml_str("[bot]\nid='test'\nname='test'\n[models]\nexecutor='fake/echo'\nclassifier='fake/classifier'\n").unwrap();
+    if let Some(chat) = existing {
+        let bot_id = storage.get_chat(chat).unwrap().unwrap().bot_id;
+        state.agent().add_profile(bot_id, profile);
+        return Env {
+            state,
+            chat,
+            dir,
+            provider,
+            calls,
+            inputs,
+        };
+    }
     let bot = storage::Bot {
         id: protocol::BotId::new(),
         user_id: state.user_id(),
@@ -1042,4 +1060,58 @@ async fn bot_file_tools_cannot_forge_automation_in_the_scoped_store() {
         "{result:?}"
     );
     assert!(!path.exists());
+}
+
+/// Safe mode must not replay a saved workflow, by a matching chat line or by
+/// the run endpoint: the tools behind the steps never run.
+#[tokio::test]
+async fn safe_mode_never_replays_a_saved_workflow() {
+    let env = setup();
+    let id = source(&env).await;
+    let (_, proposal) = request(
+        &env,
+        Method::POST,
+        &format!("/v1/runs/{id}/workflow-proposal"),
+        None,
+        true,
+    )
+    .await;
+    let save = json!({"run_id":id.0, "name":"recorded", "description":"d", "params":proposal["workflow"]["params"], "steps":proposal["workflow"]["steps"],"confirmed_steps":[0,1,2]});
+    assert_eq!(
+        request(&env, Method::POST, "/v1/workflows", Some(save), true)
+            .await
+            .0,
+        StatusCode::CREATED
+    );
+    let chat = env.chat;
+    let Env { dir, .. } = env;
+    let env = setup_with(dir, true, Some(chat));
+    let approvals = approve_replays(&env);
+    env.provider.saved.store(true, Ordering::SeqCst);
+    let run = env
+        .state
+        .agent()
+        .run_turn(env.chat, "do the recorded thing")
+        .unwrap();
+    env.state.agent().wait(run).await.unwrap();
+    assert_eq!(
+        env.calls.load(Ordering::SeqCst),
+        0,
+        "chat line replayed a workflow"
+    );
+    let (status, _) = request(
+        &env,
+        Method::POST,
+        "/v1/workflows/recorded/run",
+        Some(json!({"chat_id": chat.0, "params": {}})),
+        true,
+    )
+    .await;
+    assert!(!status.is_success(), "run endpoint accepted: {status}");
+    assert_eq!(
+        env.calls.load(Ordering::SeqCst),
+        0,
+        "endpoint replayed a workflow"
+    );
+    approvals.abort();
 }

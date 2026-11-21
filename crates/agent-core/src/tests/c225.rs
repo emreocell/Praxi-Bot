@@ -292,3 +292,34 @@ async fn c225_runless_read_uses_refreshed_production_redactor_before_returning_s
     assert!(log.iter().any(|a| a.action == "schedule.read_intent"));
     assert!(log.iter().all(|a| !a.detail.to_string().contains(secret)));
 }
+
+#[tokio::test]
+async fn safe_mode_refuses_cli_executor_and_every_gate_call() {
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let mut config = cfg(Policy::full());
+    config.safe_mode = true;
+    let read = Arc::new(tool("read", Effect::Read, "safe output"));
+    let lp = make_loop(&env.storage, env.bot, &fake, &[&read], profile(""), config);
+    let run = lp
+        .rt
+        .create_run(env.user, env.bot, Some(env.chat), "turn:user")
+        .unwrap();
+    let row = env.storage.get_run(run).unwrap().unwrap();
+    let executor = crate::exec::TurnExecutor { sh: lp.sh.clone() };
+    let request = ChatRequest::new(provider_catalog::ModelRef("fake/m".into()), vec![]);
+    let error = executor
+        .exec_cli(
+            &row,
+            &request,
+            &[],
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .expect_err("CLI must fail in safe mode");
+    assert!(error.to_string().contains("unavailable in safe mode"));
+    // The runless schedule read path is closed too.
+    let host = lp.schedule_read_host(env.bot, TaskId::new());
+    assert!(host.call_tool("read", json!({})).await.is_err());
+    assert_eq!(read.count.load(Ordering::SeqCst), 0);
+}
