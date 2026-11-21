@@ -130,9 +130,14 @@ where the daemon keeps its owner secret:
 - **Windows:** the process gets a protected access list: the owner may only
   query, wait for and terminate it. Opening it for memory read/write, handle
   duplication or thread creation fails with "access denied".
-- **Linux:** `PR_SET_DUMPABLE=0`, so `ptrace` and `/proc/<pid>/mem` reads by the
-  same user are refused and no core dump is written.
+- **Linux:** not enabled yet; `doctor` shows "skipped". `PR_SET_DUMPABLE=0`
+  would also hide `/proc/<pid>` from the same user, which the desktop app uses
+  to confirm it is talking to the real daemon, so the app would refuse to
+  connect. It needs the desktop check moved to a pid+stdin handshake or
+  `SO_PEERCRED` first; that is future work.
 - **macOS and others:** nothing is done; `doctor` shows "not supported".
+
+So for now this protection is **Windows only**.
 
 Children start and run normally; they do not inherit the restriction. If the OS
 refuses, the daemon still starts, prints a `DEGRADED` warning and `doctor`

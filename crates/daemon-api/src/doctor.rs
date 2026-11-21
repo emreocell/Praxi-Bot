@@ -882,11 +882,16 @@ pub fn check_process_guard(dir: &Path) -> Check {
     const ID: &str = "process_guard";
     const N: &str = "process guard";
     let Some(report) = process_guard::load(dir) else {
-        return Check::skipped(ID, N, "no report yet; it is written when the daemon starts");
+        let msg = if dir.join(process_guard::REPORT_FILE).exists() {
+            "report file is unreadable (torn or from another build); it is rewritten when the daemon starts"
+        } else {
+            "no report yet; it is written when the daemon starts"
+        };
+        return Check::skipped(ID, N, msg);
     };
     match report.outcome {
         Outcome::Applied => Check::ok(ID, N, format!("{} (pid {})", report.detail, report.pid)),
-        Outcome::NotSupported => Check::skipped(ID, N, report.detail),
+        Outcome::NotSupported | Outcome::Skipped => Check::skipped(ID, N, report.detail),
         Outcome::Failed => Check::warn(
             ID,
             N,

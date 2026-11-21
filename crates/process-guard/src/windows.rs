@@ -192,7 +192,7 @@ mod tests {
                 );
                 assert!(!denied, "reported Failed but access is denied: {report:?}");
             }
-            crate::Outcome::NotSupported => panic!("{report:?}"),
+            crate::Outcome::NotSupported | crate::Outcome::Skipped => panic!("{report:?}"),
         }
         assert!(can_open(pid, PROCESS_QUERY_LIMITED_INFORMATION));
 

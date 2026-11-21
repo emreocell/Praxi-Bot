@@ -9,8 +9,13 @@
 //! * **Windows**: the process security descriptor is replaced by a protected
 //!   DACL that grants the owner only query/terminate/synchronize (plus an
 //!   `OWNER RIGHTS` entry so the owner cannot implicitly regain `WRITE_DAC`).
-//! * **Linux**: `PR_SET_DUMPABLE=0`. This blocks `ptrace` attach and makes
-//!   `/proc/<pid>/mem` unreadable for the same user, and disables core dumps.
+//! * **Linux**: deliberately **not enabled yet**, reported as
+//!   [`Outcome::Skipped`]. `PR_SET_DUMPABLE=0` would make `/proc/<pid>`
+//!   root-owned and unreadable for the same user, and the desktop app learns
+//!   the daemon's listener by scanning `/proc/<pid>/fd` and comparing the uid of
+//!   `/proc/<pid>`; it would refuse to connect to a healthy daemon. Enabling it
+//!   needs the desktop's listener check moved to a pid+stdin handshake or
+//!   `SO_PEERCRED` first (follow-up).
 //! * **Other platforms**: no-op, reported as [`Outcome::NotSupported`].
 //!
 //! This is defence in depth, **not** a sandbox: it does not stop a child from
@@ -39,6 +44,8 @@ pub enum Outcome {
     Applied,
     /// This platform has no such switch; nothing was changed.
     NotSupported,
+    /// Intentionally not applied (see `detail`); nothing was changed.
+    Skipped,
     /// The OS refused; the process runs unprotected.
     Failed,
 }
@@ -63,8 +70,9 @@ pub fn protect() -> Report {
     REPORT
         .get_or_init(|| {
             let (outcome, detail) = match apply() {
-                Ok(Some(detail)) => (Outcome::Applied, detail.to_owned()),
-                Ok(None) => (
+                Ok(Applied::Yes(detail)) => (Outcome::Applied, detail.to_owned()),
+                Ok(Applied::Skipped(reason)) => (Outcome::Skipped, reason.to_owned()),
+                Ok(Applied::Unsupported) => (
                     Outcome::NotSupported,
                     format!("not supported on {}", std::env::consts::OS),
                 ),
@@ -79,29 +87,37 @@ pub fn protect() -> Report {
         .clone()
 }
 
-/// `Ok(Some(what))` applied, `Ok(None)` unsupported platform.
-#[allow(clippy::unnecessary_wraps)] // the cfg arms below do return errors
-fn apply() -> io::Result<Option<&'static str>> {
+enum Applied {
+    Yes(&'static str),
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Skipped(&'static str),
+    #[cfg_attr(any(windows, target_os = "linux"), allow(dead_code))]
+    Unsupported,
+}
+
+#[allow(clippy::unnecessary_wraps)] // the windows arm returns errors
+fn apply() -> io::Result<Applied> {
     #[cfg(windows)]
     {
         windows::protect()?;
-        Ok(Some(
+        Ok(Applied::Yes(
             "process access restricted (no VM read/write, handle duplication or thread creation by other processes)",
         ))
     }
     #[cfg(target_os = "linux")]
     {
-        rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable)?;
-        if rustix::process::dumpable_behavior()? != rustix::process::DumpableBehavior::NotDumpable {
-            return Err(io::Error::other("PR_SET_DUMPABLE did not stick"));
-        }
-        Ok(Some(
-            "PR_SET_DUMPABLE=0 (no ptrace or /proc/pid/mem reads by same-user processes, no core dumps)",
+        // PR_SET_DUMPABLE=0 is intentionally NOT set: it makes /proc/<pid>
+        // root-owned and unreadable for the same user, which breaks the desktop
+        // app's listener identity check (apps/desktop listener_pids scans
+        // /proc/<pid>/fd; is_same_user compares the uid of /proc/<pid>). Enable
+        // it only after that check uses a pid+stdin handshake or SO_PEERCRED.
+        Ok(Applied::Skipped(
+            "not enabled on Linux yet: it would break the desktop app's listener check; tracked as follow-up",
         ))
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {
-        Ok(None)
+        Ok(Applied::Unsupported)
     }
 }
 
@@ -111,7 +127,13 @@ fn apply() -> io::Result<Option<&'static str>> {
 /// The file cannot be written.
 pub fn record(data_dir: &Path, report: &Report) -> io::Result<()> {
     let text = serde_json::to_string(report).map_err(io::Error::other)?;
-    std::fs::write(data_dir.join(REPORT_FILE), text)
+    // Atomic: write a temp file, then rename over the report so `doctor` never
+    // reads a torn file.
+    let tmp = data_dir.join(format!("{REPORT_FILE}.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, data_dir.join(REPORT_FILE)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
 }
 
 /// Last recorded report, `None` if the daemon never wrote one (or it is
@@ -124,6 +146,21 @@ pub fn load(data_dir: &Path) -> Option<Report> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_overwrites_and_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut report = Report {
+            outcome: Outcome::Skipped,
+            detail: "a".into(),
+            pid: 1,
+        };
+        record(dir.path(), &report).unwrap();
+        report.detail = "b".into();
+        record(dir.path(), &report).unwrap();
+        assert_eq!(load(dir.path()).unwrap().detail, "b");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 
     #[test]
     fn report_round_trips_through_the_data_dir() {
@@ -157,7 +194,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn linux_guard_clears_dumpable_and_children_still_run() {
+    fn linux_guard_is_a_documented_noop_and_proc_stays_readable() {
         run_fixture("tests::linux_fixture");
     }
 
@@ -168,29 +205,20 @@ mod tests {
             return;
         }
         let report = protect();
-        assert_eq!(report.outcome, Outcome::Applied, "{report:?}");
-        assert_eq!(
-            rustix::process::dumpable_behavior().unwrap(),
-            rustix::process::DumpableBehavior::NotDumpable
-        );
-        // A same-user child cannot read our memory, yet starts and works
-        // normally (exec resets the child's own dumpable flag).
-        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(report.outcome, Outcome::Skipped, "{report:?}");
+        assert!(report.detail.contains("not enabled on Linux yet"));
+        // The desktop's listener check needs a same-user process to read
+        // /proc/<daemon>/fd and to see /proc/<daemon> owned by the same user.
         let output = std::process::Command::new("sh")
             .args([
                 "-c",
-                "test ! -r /proc/$1/mem && test -O /proc/self && echo ok > result",
+                "ls /proc/$1/fd >/dev/null && test -O /proc/$1",
                 "probe",
             ])
             .arg(std::process::id().to_string())
-            .current_dir(dir.path())
             .output()
             .unwrap();
         assert!(output.status.success(), "{output:?}");
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("result")).unwrap(),
-            "ok\n"
-        );
     }
 
     #[cfg(windows)]

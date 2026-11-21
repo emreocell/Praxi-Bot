@@ -17,8 +17,5 @@ serde_json.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-rustix = { version = "1", default-features = false, features = ["process", "std"] }
-
 [dev-dependencies]
 tempfile.workspace = true

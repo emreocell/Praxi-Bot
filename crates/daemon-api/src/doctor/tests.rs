@@ -184,6 +184,10 @@ fn process_guard_check_shows_degraded_when_protection_failed() {
     use process_guard::{Outcome, Report, record};
     let d = tempfile::tempdir().unwrap();
     assert_eq!(check_process_guard(d.path()).status, Status::Skipped);
+    std::fs::write(d.path().join(process_guard::REPORT_FILE), "{\"outc").unwrap();
+    let torn = check_process_guard(d.path());
+    assert_eq!(torn.status, Status::Skipped);
+    assert!(torn.detail.contains("unreadable"), "{}", torn.detail);
     let mut report = Report {
         outcome: Outcome::Applied,
         detail: "ok".into(),
