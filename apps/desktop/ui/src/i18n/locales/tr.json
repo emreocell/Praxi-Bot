@@ -3339,6 +3339,7 @@
   "pastedSecret": {
     "back": "Düzenlemeye devam et",
     "body": "Mesajınız şunu içeriyor gibi görünüyor: {{kinds}}. Gönderdiğiniz her şey yapay zekâ sağlayıcısına gider ve sohbet geçmişinde kalır.",
+    "editedMeanwhile": "Bu arada mesajı değiştirdiniz, o yüzden olduğu gibi bırakıldı. Saklanan: {{names}}. Değeri metinden kendiniz silin.",
     "kind": {
       "aws_access_key_id": "AWS erişim anahtarı",
       "digitalocean_token": "DigitalOcean jetonu",
@@ -3358,11 +3359,14 @@
     },
     "nameHint": "Yalnızca harf, rakam, . _ - ve /. Taslakta değer yerine [secret: ad] kalır ve henüz gönderilmez.",
     "nameLabel": "Kasa kaydının adı",
+    "notConnected": "Hizmetle bağlantı yok. Hiçbir şey saklanmadı.",
+    "partialStored": "Hatadan önce saklananlar: {{names}}. Mesajda geri kalanı hâlâ duruyor.",
     "remove": "Mesajdan çıkar",
     "sendAnyway": "Yine de gönder",
     "store": "Kasaya kaydet…",
     "storeConfirm": "Kaydet ve yer tutucuyla değiştir",
-    "title": "Bu bir gizli bilgiye benziyor"
+    "title": "Bu bir gizli bilgiye benziyor",
+    "voiceBlocked": "Söyledikleriniz bir parola ya da anahtara benziyor, bu yüzden gönderilmedi."
   },
   "peerLink": {
     "direct": "Doğrudan · {{rtt}} ms",
@@ -3499,7 +3503,9 @@
     "expired": "Bu isteğin süresi doldu. Hiçbir şey kaydedilmedi.",
     "expiresIn": "Yanıt için kalan süre",
     "fillAll": "Önce tüm alanları doldurun.",
+    "hostRefused": "{{name}} bunu kabul etmedi. Hiçbir şey kaydedilmedi.",
     "neverSeen": "Yazdığınızı bot görmez. Yalnızca kaydedilip kaydedilmediğini öğrenir.",
+    "notConnected": "Hizmetle bağlantı yok. Hiçbir şey gönderilmedi, yazdığınız değer burada duruyor.",
     "origins": "Yazılabileceği web siteleri (isteğe bağlı, satır başına bir)",
     "password": "Parola",
     "programs": "Yazılabileceği programlar (isteğe bağlı)",

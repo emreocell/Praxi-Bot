@@ -91,6 +91,14 @@ export function removeSecrets(text: string, found: readonly SecretCandidate[]): 
  * The returned `text` never contains a value; `entries` does, so it must go straight to the
  * vault call and be dropped.
  */
+/**
+ * The kinds the composer must warn about before this send. `allowOnce` is the owner's "Send anyway"
+ * for exactly this call: it is a plain argument (never stored), so the next send checks again.
+ */
+export function kindsToWarn(text: string, allowOnce: boolean): string[] {
+  return allowOnce ? [] : detectSecrets(text).map((c) => c.kind);
+}
+
 export function planStore(
   text: string,
   found: readonly SecretCandidate[],

@@ -2,6 +2,14 @@
  * Pure rules of the credential-request card (`SecretRequestCard`), kept apart from React so they
  * can be tested. Nothing here stores, logs or returns a value other than the body the card posts.
  */
+/** Thrown instead of returning quietly when there is no daemon connection: the card keeps the value. */
+export class NoClientError extends Error {
+  constructor() {
+    super("no daemon connection");
+    this.name = "NoClientError";
+  }
+}
+
 export type SecretFields = "secret" | "login";
 
 export interface SubmitBody {

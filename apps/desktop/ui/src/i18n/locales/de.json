@@ -3339,6 +3339,7 @@
   "pastedSecret": {
     "back": "Weiter bearbeiten",
     "body": "Deine Nachricht scheint Folgendes zu enthalten: {{kinds}}. Alles, was du sendest, geht an den KI-Anbieter und bleibt im Chatverlauf.",
+    "editedMeanwhile": "Sie haben die Nachricht inzwischen geändert, daher blieb sie unverändert. Gespeichert: {{names}}. Entfernen Sie den Wert selbst aus dem Text.",
     "kind": {
       "aws_access_key_id": "AWS-Zugangsschlüssel",
       "digitalocean_token": "DigitalOcean-Token",
@@ -3358,11 +3359,14 @@
     },
     "nameHint": "Nur Buchstaben, Ziffern, . _ - und /. Im Entwurf bleibt dann [secret: Name] statt des Werts und er wird noch nicht gesendet.",
     "nameLabel": "Name des Tresoreintrags",
+    "notConnected": "Keine Verbindung zum Dienst. Es wurde nichts gespeichert.",
+    "partialStored": "Vor dem Fehler gespeichert: {{names}}. Der Rest steht noch in der Nachricht.",
     "remove": "Aus der Nachricht entfernen",
     "sendAnyway": "Trotzdem senden",
     "store": "Im Tresor speichern…",
     "storeConfirm": "Speichern und durch Platzhalter ersetzen",
-    "title": "Das sieht nach einem Geheimnis aus"
+    "title": "Das sieht nach einem Geheimnis aus",
+    "voiceBlocked": "Das Gesagte sieht nach einem Passwort oder Schlüssel aus und wurde deshalb nicht gesendet."
   },
   "peerLink": {
     "direct": "Direkt · {{rtt}} ms",
@@ -3499,7 +3503,9 @@
     "expired": "Diese Anfrage ist abgelaufen. Es wurde nichts gespeichert.",
     "expiresIn": "Verbleibende Zeit zum Antworten",
     "fillAll": "Fülle zuerst alle Felder aus.",
+    "hostRefused": "{{name}} hat das nicht akzeptiert. Es wurde nichts gespeichert.",
     "neverSeen": "Der Bot sieht nicht, was du eingibst. Er erfährt nur, ob es gespeichert wurde.",
+    "notConnected": "Keine Verbindung zum Dienst. Es wurde nichts gesendet, Ihre Eingabe ist noch da.",
     "origins": "Websites, auf denen es eingetippt werden darf (optional, eine pro Zeile)",
     "password": "Passwort",
     "programs": "Programme, in die es eingetippt werden darf (optional)",

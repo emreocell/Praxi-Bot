@@ -46,7 +46,7 @@ import { ApprovalBatchCard } from "../components/ApprovalBatchCard";
 import { PendingDecisions, useDecisionActions } from "../components/PendingDecisions";
 import { SecretRequestCard } from "../components/SecretRequestCard";
 import { PastedSecretWarning } from "../components/PastedSecretWarning";
-import { detectSecrets, planStore, removeSecrets } from "../lib/secretDetect";
+import { detectSecrets, kindsToWarn, planStore, removeSecrets } from "../lib/secretDetect";
 import { chatTitleLabel } from "../lib/chatTitle";
 import { pendingForChat } from "../lib/pendingDecisions";
 import { ChatFindBar } from "../components/ChatFindBar";
@@ -294,9 +294,11 @@ export function ChatView({
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
+  // The newest draft, for async work that must not act on a stale closure (kept in memory only).
+  const draftRef = useRef("");
+  draftRef.current = text;
   // A pasted credential found in the draft before send (kinds only; the value stays in `text`).
   const [secretKinds, setSecretKinds] = useState<string[] | null>(null);
-  const sendAnyway = useRef(false);
   const [queue, updateQueue] = useChatQueue(chatId);
   // Up / Down recall this chat's earlier messages; the draft is kept (lib/composerHistory).
   const [nav, setNav] = useState<HistoryNav>(FRESH);
@@ -813,7 +815,9 @@ export function ChatView({
     toast.show(t("chat.export.done"), "success");
   };
 
-  const send = async () => {
+  // `allowSecrets` is the owner's "Send anyway" for THIS call only: it is an argument, never state,
+  // so a call that returns early (busy, offline) cannot leave a standing permission behind.
+  const send = async (allowSecrets = false) => {
     const body = text.trim();
     const attachmentIds = readyFiles.flatMap((f) => (f.id ? [f.id] : []));
     if (!client || (!body && attachmentIds.length === 0) || sending || uploadingFiles) {
@@ -832,14 +836,14 @@ export function ChatView({
       return;
     }
     // A draft that looks like it holds a credential is not sent (or queued) until the owner says so.
-    if (!body.startsWith("/") && !sendAnyway.current) {
-      const found = detectSecrets(text);
+    // Slash commands that reach the bot are stored in the history too, so they are checked as well.
+    if (!allowSecrets) {
+      const found = kindsToWarn(text, allowSecrets);
       if (found.length > 0) {
-        setSecretKinds(found.map((c) => c.kind));
+        setSecretKinds(found);
         return;
       }
     }
-    sendAnyway.current = false;
     // A message typed while the bot works joins the queue as a "Sirada." bubble (slash commands such
     // as /stop still go straight to the daemon). It is delivered when the run ends or by "Simdi gonder".
     if (active && !body.startsWith("/") && attachmentIds.length === 0) {
@@ -1170,6 +1174,11 @@ export function ChatView({
     runs: chatRuns,
     awaitingApproval,
     sendText: async (spoken) => {
+      // Nobody is looking at a screen to confirm a warning during a call: a credential is not sent.
+      if (detectSecrets(spoken).length > 0) {
+        toast.show(t("pastedSecret.voiceBlocked"), "danger");
+        return;
+      }
       if (client) {
         await client.sendMessage(chatId, spoken, undefined, await ownerKey(client.baseUrl));
       }
@@ -1689,9 +1698,8 @@ export function ChatView({
             kinds={secretKinds}
             onDismiss={() => setSecretKinds(null)}
             onSendAnyway={() => {
-              sendAnyway.current = true;
               setSecretKinds(null);
-              void send();
+              void send(true);
             }}
             onRemove={() => {
               setText((cur) => removeSecrets(cur, detectSecrets(cur)));
@@ -1699,14 +1707,30 @@ export function ChatView({
               inputRef.current?.focus();
             }}
             onStore={async (name) => {
-              if (!client) return;
-              const plan = planStore(text, detectSecrets(text), name);
-              for (const entry of plan.entries) {
-                await client.createFillSecret({ name: entry.name, value: entry.value });
+              if (!client) throw new Error(t("pastedSecret.notConnected"));
+              const analysed = text;
+              const plan = planStore(analysed, detectSecrets(analysed), name);
+              const stored: string[] = [];
+              try {
+                for (const entry of plan.entries) {
+                  await client.createFillSecret({ name: entry.name, value: entry.value });
+                  stored.push(entry.name);
+                }
+              } catch (e) {
+                // The draft stays exactly as typed; say which entries already are in the vault.
+                if (stored.length > 0) {
+                  toast.show(t("pastedSecret.partialStored", { names: stored.join(", ") }), "danger");
+                }
+                throw e;
+              } finally {
+                plan.entries.length = 0;
               }
-              // Only now does the draft lose the value; it keeps a placeholder with the name.
-              plan.entries.length = 0;
-              setText(plan.text);
+              // The plan fits only the text it was made from; an edit made meanwhile is never overwritten.
+              if (draftRef.current === analysed) {
+                setText(plan.text);
+              } else {
+                toast.show(t("pastedSecret.editedMeanwhile", { names: stored.join(", ") }), "info");
+              }
               setSecretKinds(null);
               inputRef.current?.focus();
             }}

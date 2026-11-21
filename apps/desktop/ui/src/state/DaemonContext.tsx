@@ -479,7 +479,24 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
       dispatch({ type: "secretAnswered", runId, callId, outcome }),
     []
   );
-  const needs = useMemo(() => needsYou(events, runs), [events, runs]);
+  // A credential request stops being pinned the moment its card locks: wake up at the next expiry.
+  const [expiryTick, setExpiryTick] = useState(0);
+  useEffect(() => {
+    const now = Date.now();
+    let next = Infinity;
+    for (const run of Object.values(events.runs)) {
+      for (const i of run.items) {
+        if (i.kind === "secret" && i.outcome === undefined && !i.closed && i.expiresMs > now) {
+          next = Math.min(next, i.expiresMs);
+        }
+      }
+    }
+    if (next === Infinity) return;
+    const id = window.setTimeout(() => setExpiryTick((n) => n + 1), Math.min(next - now + 50, 2_000_000_000));
+    return () => window.clearTimeout(id);
+  }, [events, expiryTick]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const needs = useMemo(() => needsYou(events, runs), [events, runs, expiryTick]);
 
   return {
     client,

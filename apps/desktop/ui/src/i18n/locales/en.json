@@ -3339,6 +3339,7 @@
   "pastedSecret": {
     "back": "Keep editing",
     "body": "Your message seems to contain: {{kinds}}. Anything you send goes to the AI provider and stays in the chat history.",
+    "editedMeanwhile": "You changed the message meanwhile, so it was left as it is. Stored: {{names}}. Remove the value from the text yourself.",
     "kind": {
       "aws_access_key_id": "AWS access key",
       "digitalocean_token": "DigitalOcean token",
@@ -3358,11 +3359,14 @@
     },
     "nameHint": "Letters, digits, . _ - and / only. The draft then keeps [secret: name] instead of the value and is not sent yet.",
     "nameLabel": "Vault entry name",
+    "notConnected": "No connection to the service. Nothing was stored.",
+    "partialStored": "Stored before the error: {{names}}. The message still holds the rest.",
     "remove": "Remove it from the message",
     "sendAnyway": "Send anyway",
     "store": "Store in vault…",
     "storeConfirm": "Store and replace with a placeholder",
-    "title": "This looks like a secret"
+    "title": "This looks like a secret",
+    "voiceBlocked": "What you said looks like a password or key, so it was not sent."
   },
   "peerLink": {
     "direct": "Direct · {{rtt}} ms",
@@ -3499,7 +3503,9 @@
     "expired": "This request ran out of time. Nothing was saved.",
     "expiresIn": "Time left to answer",
     "fillAll": "Fill in every field first.",
+    "hostRefused": "{{name}} did not accept this. Nothing was saved.",
     "neverSeen": "The bot never sees what you type. It only learns whether it was saved.",
+    "notConnected": "No connection to the service. Nothing was sent and what you typed is still here.",
     "origins": "Websites it may be typed on (optional, one per line)",
     "password": "Password",
     "programs": "Programs it may be typed into (optional)",

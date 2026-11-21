@@ -816,7 +816,8 @@ export interface PendingApprovalFact {
  */
 export function needsYou(
   state: EventsState,
-  runs: readonly RunFact[] = []
+  runs: readonly RunFact[] = [],
+  nowMs: number = Date.now()
 ): NeedsYouEntry[] {
   const out: NeedsYouEntry[] = [];
   for (const run of Object.values(state.runs)) {
@@ -853,7 +854,7 @@ export function needsYou(
           sinceMs: i.requestedMs,
           question: i
         });
-      } else if (i.kind === "secret" && i.outcome === undefined && !i.closed) {
+      } else if (i.kind === "secret" && i.outcome === undefined && !i.closed && i.expiresMs > nowMs) {
         out.push({
           kind: "secret",
           runId: run.id,

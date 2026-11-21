@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   detectSecrets,
   isValidSecretName,
+  kindsToWarn,
   planStore,
   removeSecrets,
   suggestedName
@@ -81,10 +82,42 @@ test("the only calls that carry a typed value are the vault and the secret-reque
   const chat = SRC("../views/ChatView.tsx");
   assert.equal((chat.match(/createFillSecret\(/g) ?? []).length, 1);
   // The warning keeps kinds (strings), never offsets or text, in state.
-  assert.ok(/setSecretKinds\(found\.map\(\(c\) => c\.kind\)\)/.test(chat));
+  assert.ok(/setSecretKinds\(found\)/.test(chat));
   const card = SRC("../components/SecretRequestCard.tsx");
   // The value inputs are uncontrolled: no `value=` prop and no state setter receives them.
   assert.ok(!/<input[^>]*\bvalue=/.test(card));
   assert.ok(!/useState<[^>]*(password|secret|value)/i.test(card));
   assert.ok(/type="password"/.test(card) && /autoComplete: "off"/.test(card));
+});
+
+// ---- "Send anyway" is a single-use allowance (review of #495) ----
+
+test("Send anyway allows one call; the next draft is checked again even if the first call returned early", () => {
+  const first = `key ${CANARY}`;
+  const second = `other ${GH}`;
+  assert.deepEqual(kindsToWarn(first, true), []);
+  // The first call bailed out early (busy): nothing carried over, so a changed draft still blocks.
+  assert.deepEqual(kindsToWarn(second, false), ["github_token"]);
+  assert.deepEqual(kindsToWarn(first, false), ["openai_style_key"]);
+});
+
+test("ChatView keeps no standing send-anyway flag, checks slash text and voice, and guards onStore", () => {
+  const chat = SRC("../views/ChatView.tsx");
+  assert.ok(!/sendAnyway/.test(chat));
+  assert.ok(/const send = async \(allowSecrets = false\)/.test(chat));
+  assert.ok(/void send\(true\)/.test(chat));
+  // allowSecrets is read only in the gate, never assigned to a ref or state.
+  assert.ok(!/allowSecrets\s*=[^=]|allowSecrets\.current|setAllowSecrets/.test(chat.replace("allowSecrets = false", "")));
+  // Slash text reaches the bot and the history: no startsWith("/") exemption in front of the gate.
+  assert.ok(!/startsWith\("\/"\)\s*&&\s*!allowSecrets/.test(chat));
+  // Voice text is checked, and "store" never overwrites an edited draft.
+  assert.ok(/sendText: async \(spoken\) => \{\s*[^}]*detectSecrets\(spoken\)/.test(chat));
+  assert.ok(/draftRef\.current === analysed/.test(chat));
+});
+
+test("the secret card refuses to wipe or claim success without a connection, and shows no host sentence", () => {
+  const dec = SRC("../components/PendingDecisions.tsx");
+  assert.equal((dec.match(/throw new NoClientError\(\)/g) ?? []).length, 2);
+  const card = SRC("../components/SecretRequestCard.tsx");
+  assert.ok(/secretRequest\.hostRefused/.test(card) && /secretRequest\.notConnected/.test(card));
 });

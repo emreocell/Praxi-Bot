@@ -8,6 +8,7 @@ import { shieldFromCapture } from "../lib/captureShield";
 import { escapeInvisible } from "../lib/approvalPlain";
 import { humanLine } from "../lib/humanError";
 import {
+  NoClientError,
   buildSubmitBody,
   formatCountdown,
   isGone,
@@ -74,6 +75,16 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
   };
   useEffect(() => wipe, []);
 
+  // Fixed sentences only: a paired host's refusal text never lands in the card.
+  const describe = (err: unknown): string => {
+    if (err instanceof NoClientError) return t("secretRequest.notConnected");
+    const host = (err as { host?: unknown } | null)?.host;
+    if (typeof host === "string" && !(err instanceof ApiError && isGone(err.code))) {
+      return t("secretRequest.hostRefused", { name: escapeInvisible(host) });
+    }
+    return humanLine(err);
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (busy || locked || !confirmed) return;
@@ -102,7 +113,7 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
         wipe();
         setGone(true);
       }
-      setError(humanLine(err));
+      setError(describe(err));
     } finally {
       body.value = undefined;
       body.password = undefined;
@@ -112,14 +123,17 @@ export function SecretRequestCard({ item, botName, onSubmit, onCancel }: SecretR
 
   const cancel = async () => {
     if (busy || locked) return;
-    wipe();
     setBusy(true);
     setError(null);
     try {
       await onCancel();
+      wipe();
     } catch (err) {
-      if (err instanceof ApiError && isGone(err.code)) setGone(true);
-      setError(humanLine(err));
+      if (err instanceof ApiError && isGone(err.code)) {
+        wipe();
+        setGone(true);
+      }
+      setError(describe(err));
     } finally {
       setBusy(false);
     }

@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import type { NeedsYouEntry } from "../state/timeline";
 import { ApprovalCard, QuestionCard, type ApprovalCardProps } from "./ChatCards";
 import { SecretRequestCard } from "./SecretRequestCard";
-import type { SubmitBody } from "../lib/secretRequestForm";
+import { NoClientError, type SubmitBody } from "../lib/secretRequestForm";
 import styles from "./PendingDecisions.module.css";
 
 type Decide = ApprovalCardProps["onDecide"];
@@ -60,7 +60,7 @@ export function useDecisionActions() {
   // The value goes from the card to the daemon and nowhere else: only the outcome is recorded.
   const submitSecret = useCallback(
     (runId: string, callId: string) => async (body: SubmitBody) => {
-      if (!client) return;
+      if (!client) throw new NoClientError();
       await client.submitSecretRequest(callId, body);
       recordSecretOutcome(runId, callId, "stored");
     },
@@ -68,7 +68,7 @@ export function useDecisionActions() {
   );
   const cancelSecret = useCallback(
     (runId: string, callId: string) => async () => {
-      if (!client) return;
+      if (!client) throw new NoClientError();
       await client.cancelSecretRequest(callId);
       recordSecretOutcome(runId, callId, "cancelled");
     },

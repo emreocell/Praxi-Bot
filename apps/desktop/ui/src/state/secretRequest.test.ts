@@ -48,10 +48,16 @@ test("secret_requested becomes one card with an expiry, and is a pending decisio
   assert.equal(item.expiresMs, 10_000 + 300_000);
   assert.equal(item.replacesExisting, true);
   assert.equal(item.untrustedContent, true);
-  const need = needsYou(s);
+  const need = needsYou(s, [], 20_000);
   assert.equal(need.length, 1);
   assert.equal(need[0].kind, "secret");
   assert.equal(need[0].botId, "bot-1");
+});
+
+test("an expired request is no longer pinned (its card is locked)", () => {
+  const s = requested();
+  assert.equal(needsYou(s, [], 309_999).length, 1);
+  assert.equal(needsYou(s, [], 310_000).length, 0);
 });
 
 test("the card closes when it is answered, when the call completes and when the run ends", () => {
