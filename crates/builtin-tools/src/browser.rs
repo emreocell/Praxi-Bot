@@ -27,6 +27,9 @@ use crate::control::{ActionPermit, ControlRequest, DesktopControlGate};
 use crate::fill_secret::{Source, names_a_secret, refused, scrub, source};
 use crate::util::{exec_err, finish_text, parse, save_file, spec};
 
+mod act;
+pub use act::{can_egress as act_can_egress, summary as act_summary};
+
 pub use browser_cdp::FieldTarget;
 
 /// Why a driver cannot type a secret.
@@ -145,6 +148,14 @@ pub trait BrowserDriver: Send + Sync {
     ) -> Result<(Vec<u8>, &'static str), String>;
     /// Evaluate JavaScript in the page.
     async fn eval(&self, js: &str) -> Result<Value, String>;
+    /// Role and accessible name of the element behind `r` right now, as the browser
+    /// reports them; `None` when the ref is unknown or the driver cannot tell. A
+    /// `browser_act` batch compares this before every step, so a changed page stops the
+    /// batch instead of being clicked blindly.
+    async fn ref_identity(&self, r: &str) -> Option<(String, String)> {
+        let _ = r;
+        None
+    }
     /// Browser-reported origin of the receiving ref, or the focused frame for a key press.
     async fn input_origin(&self, r: Option<&str>) -> Option<String> {
         self.field_target(r?).await.ok()?.frame_origin
@@ -834,6 +845,16 @@ impl BrowserDriver for CdpDriver {
         result.ok().flatten()
     }
 
+    async fn ref_identity(&self, r: &str) -> Option<(String, String)> {
+        let result: Result<Option<(String, String)>, String> = async {
+            with_session!(self, None, false, |sess| {
+                Ok::<_, browser_cdp::Error>(sess.page.ref_identity(r).await)
+            })
+        }
+        .await;
+        result.ok().flatten()
+    }
+
     async fn field_target(&self, r: &str) -> Result<FieldTarget, String> {
         with_session!(self, None, false, |sess| {
             sess.page.field_target(r).await
@@ -1012,6 +1033,7 @@ enum Op {
     Tabs,
     Screenshot,
     Eval,
+    Act,
 }
 
 struct Shared {
@@ -1343,6 +1365,29 @@ fn tools_with_pool(
                     "ref":ref_prop
                 }}),
                 Effect::Read,
+                b,
+            ),
+        ),
+        (
+            Op::Act,
+            spec(
+                "browser_act",
+                "Do several browser steps in ONE call (fewer round trips): click, fill, select, press, scroll, wait, in order, on the page you just read. Prefer it for forms and multi-click flows with refs from one browser_snapshot. Each step is checked against the page first: if a ref is no longer the same element, the page navigated, a dialog appeared or a step fails, the batch stops there and says which step and why; the rest is not run. At most 12 steps. Not in a batch: browser_open, browser_eval, tabs, back, dialog options, secret fills (use the single tools). Typed text is not repeated in the result. Example: {\"steps\":[{\"action\":\"fill\",\"ref\":\"e3\",\"text\":\"Ada\"},{\"action\":\"fill\",\"ref\":\"e4\",\"text\":\"ada@example.com\"},{\"action\":\"click\",\"ref\":\"e9\"}]}",
+                json!({"type":"object","properties":{
+                    "steps":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"object","properties":{
+                        "action":{"type":"string","enum":["click","fill","select","press","scroll","wait"]},
+                        "ref":ref_prop,
+                        "text":{"type":"string","description":"fill: the text to type; wait: text to wait for."},
+                        "value":{"type":"string","description":"select: option value or label."},
+                        "key":{"type":"string","description":"press: key such as Enter, Tab."},
+                        "selector":{"type":"string","description":"wait: CSS selector."},
+                        "idle":{"type":"boolean","description":"wait: network idle."},
+                        "timeout_secs":{"type":"integer","minimum":1,"maximum":15,"description":"wait: at most 15."},
+                        "dx":{"type":"number"},
+                        "dy":{"type":"number"}
+                    },"required":["action"]}}
+                },"required":["steps"]}),
+                Effect::Write,
                 b,
             ),
         ),
@@ -2020,6 +2065,7 @@ impl BrowserTool {
                 let path = save_file(&self.shared.data_dir.join("screenshots"), ext, &bytes)?;
                 Ok(format!("screenshot: {path}"))
             }
+            Op::Act => return self.run_act(run_id, input).await,
             Op::Eval => {
                 let i: EvalIn = parse(input)?;
                 let label: String = i.js.trim().chars().take(80).collect();
@@ -2063,17 +2109,29 @@ impl BrowserTool {
 impl BrowserTool {
     async fn current_origin_in_lane(&self, ctx: &ToolContext, input: &Value) -> Option<String> {
         // Only the actions that act on the page that is open now (not open/eval/tabs/back).
-        if !matches!(self.op, Op::Click | Op::Fill | Op::Select | Op::Press) {
+        if !matches!(
+            self.op,
+            Op::Click | Op::Fill | Op::Select | Op::Press | Op::Act
+        ) {
             return None;
         }
         let shared = self.select_shared(ctx).ok()?;
+        let batch_ref = if self.op == Op::Act {
+            act::first_ref(input)
+        } else {
+            None
+        };
         shared
             .driver
-            .input_origin(if self.op == Op::Press {
-                None
-            } else {
-                input.get("ref")?.as_str()
-            })
+            .input_origin(
+                if self.op == Op::Press || (self.op == Op::Act && batch_ref.is_none()) {
+                    None
+                } else if self.op == Op::Act {
+                    batch_ref.as_deref()
+                } else {
+                    input.get("ref")?.as_str()
+                },
+            )
             .await
             .and_then(|o| origin_of(&o))
     }
@@ -2101,6 +2159,9 @@ impl BrowserTool {
         ctx: &ToolContext,
         input: &Value,
     ) -> Result<Option<Value>, ToolError> {
+        if self.op == Op::Act {
+            return self.act_details(ctx, input).await.map(Some);
+        }
         let Some((name, target, grant)) = self.secret_fill_facts(ctx, input).await? else {
             return Ok(None);
         };
@@ -2140,7 +2201,10 @@ impl BrowserTool {
         // Recheck the receiving frame after approval. The CDP driver repeats this
         // check with the session lock held immediately before sending input.
         if let Some(expected) = &ctx.expected_origin
-            && matches!(self.op, Op::Click | Op::Fill | Op::Select | Op::Press)
+            && matches!(
+                self.op,
+                Op::Click | Op::Fill | Op::Select | Op::Press | Op::Act
+            )
         {
             let now = self.current_origin(ctx, &input).await;
             if now.as_deref() != Some(expected.as_str()) {
@@ -2265,6 +2329,9 @@ pub(crate) mod fake {
         pub raw_secret_output: PMutex<String>,
         /// Make the page echo the typed value in the action result.
         pub echo_value: bool,
+        /// `(role, name)` per ref for `ref_identity`; an unlisted ref is a button named
+        /// after itself. A test changes an entry to model a page that changed.
+        pub identities: PMutex<std::collections::HashMap<String, (String, String)>>,
         /// What `live_view_attached` reports (`None`: cannot tell).
         pub watched: PMutex<Option<bool>>,
     }
@@ -2295,6 +2362,13 @@ pub(crate) mod fake {
                 .lock()
                 .get(r.unwrap_or("focused"))
                 .and_then(|t| t.frame_origin.clone())
+        }
+
+        async fn ref_identity(&self, r: &str) -> Option<(String, String)> {
+            if let Some(id) = self.identities.lock().get(r) {
+                return Some(id.clone());
+            }
+            (!r.contains("e404")).then(|| ("button".to_owned(), format!("name of {r}")))
         }
 
         async fn current_url(&self) -> Option<String> {

@@ -1390,6 +1390,11 @@
         "failed": "Bot nicht geändert",
         "running": "Bot wird geändert"
       },
+      "browser_act": {
+        "done": "Mehrere Schritte im Browser ausgeführt",
+        "failed": "Die Schritte im Browser nicht abgeschlossen",
+        "running": "Führt mehrere Schritte im Browser aus"
+      },
       "browser_click": {
         "done": "Auf einer Seite geklickt",
         "failed": "Auf einer Seite wurde nicht geklickt",

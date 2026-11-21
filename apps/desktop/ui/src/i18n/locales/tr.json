@@ -1390,6 +1390,11 @@
         "failed": "Bot değiştirilmedi",
         "running": "Bot değiştiriliyor"
       },
+      "browser_act": {
+        "done": "Tarayıcıda birkaç adım yaptı",
+        "failed": "Tarayıcıdaki adımları tamamlamadı",
+        "running": "Tarayıcıda birkaç adım yapıyor"
+      },
       "browser_click": {
         "done": "Sayfada tıklandı",
         "failed": "Sayfada tıklanmadı",

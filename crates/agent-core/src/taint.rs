@@ -301,7 +301,7 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
         "web_extract" | "web_feed" | "web_sitemap" | "web_metadata" | "browser_open"
         | "browser_back" | "browser_snapshot" | "browser_screenshot" | "browser_click"
         | "browser_fill" | "browser_select" | "browser_press" | "browser_scroll"
-        | "browser_wait" | "browser_tabs" | "browser_eval" => {
+        | "browser_wait" | "browser_tabs" | "browser_eval" | "browser_act" => {
             format!("page {}", str_field("url").unwrap_or("the browser"))
         }
         "skill_read" | "skill_list" | "skill_write" | "skill_publish" => {
@@ -376,7 +376,7 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
         "shell_run" => ("the shell".to_owned(), "body"),
         "script_run" => ("a script".to_owned(), "body"),
         "browser_fill" | "browser_press" | "browser_select" | "browser_click"
-        | "browser_scroll" | "browser_tabs" | "browser_back" | "browser_eval" => {
+        | "browser_scroll" | "browser_tabs" | "browser_back" | "browser_eval" | "browser_act" => {
             ("the browser".to_owned(), "body")
         }
         "schedule_create" | "schedule_update" | "schedule_resume" => {
@@ -592,6 +592,11 @@ fn skill_payload(input: &Value) -> String {
 pub(crate) fn call_can_egress(name: &str, class: ContentClass, input: &Value) -> bool {
     if !class.egress {
         return false;
+    }
+    // A batch carries bytes when any step types, selects or presses: judged like those
+    // single tools. Unreadable input counts as carrying.
+    if name == "browser_act" {
+        return builtin_tools::act_can_egress(input);
     }
     if name == "browser_click" {
         return input
@@ -956,6 +961,24 @@ mod card_tests {
     };
 
     use super::{ContentTaint, egress_payload};
+
+    #[test]
+    fn a_browser_batch_is_judged_like_the_single_actions_it_contains() {
+        let class = builtin_tools::classify("browser_act").unwrap();
+        let typing = json!({"steps":[{"action":"fill","ref":"e1","text":"x"}]});
+        let clicking = json!({"steps":[{"action":"click","ref":"e1"},{"action":"scroll","dy":9}]});
+        assert!(super::call_can_egress("browser_act", class, &typing));
+        assert!(!super::call_can_egress("browser_act", class, &clicking));
+        // Unreadable input is the strict case.
+        assert!(super::call_can_egress("browser_act", class, &json!({})));
+        // Its allowance is bound to the page origin like the single page actions, and its
+        // result is read as page content.
+        assert!(crate::shared::is_page_action("browser_act"));
+        assert_eq!(
+            super::source_label("browser_act", &json!({})),
+            "page the browser"
+        );
+    }
 
     #[test]
     fn a_shell_result_is_never_recorded_as_a_file_and_the_card_carries_codes() {

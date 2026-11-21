@@ -590,7 +590,7 @@ pub(crate) struct Pending {
 pub(crate) fn is_page_action(name: &str) -> bool {
     matches!(
         name,
-        "browser_fill" | "browser_press" | "browser_click" | "browser_select"
+        "browser_fill" | "browser_press" | "browser_click" | "browser_select" | "browser_act"
     )
 }
 

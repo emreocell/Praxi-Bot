@@ -1390,6 +1390,11 @@
         "failed": "Didn't change a bot",
         "running": "Changing a bot"
       },
+      "browser_act": {
+        "done": "Did several steps in the browser",
+        "failed": "Didn't finish the steps in the browser",
+        "running": "Doing several steps in the browser"
+      },
       "browser_click": {
         "done": "Clicked on a page",
         "failed": "Didn't click on a page",
