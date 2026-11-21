@@ -1526,6 +1526,25 @@ impl BrowserTool {
     /// selection serves the call and its approval checks, so what is checked
     /// is what will receive the text.
     fn select_shared(&self, ctx: &ToolContext) -> Result<Arc<Shared>, ToolError> {
+        // A bot whose own computer is a paired server browses THERE: the driver
+        // is a link to that server's browser, never this machine's browser and
+        // never a profile pool of this daemon. No owner secrets (`fill_secrets`)
+        // go over the link.
+        if let Some(driver) = self
+            .shared
+            .control
+            .as_ref()
+            .and_then(|gate| gate.remote_browser_for_run(&ctx.run_id))
+        {
+            return Ok(Arc::new(Shared {
+                driver,
+                managed: None,
+                data_dir: self.shared.data_dir.clone(),
+                control: self.shared.control.clone(),
+                observed_epoch: self.shared.observed_epoch.clone(),
+                fill_secrets: None,
+            }));
+        }
         let mut shared = self.shared.for_bot(ctx.bot_id.as_deref())?;
         if let Some(headless) = self
             .shared

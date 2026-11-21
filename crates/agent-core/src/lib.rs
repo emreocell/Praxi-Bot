@@ -52,6 +52,8 @@ mod router_tests;
 #[cfg(test)]
 mod scoped_tests;
 #[cfg(test)]
+mod server_computer_tests;
+#[cfg(test)]
 mod spend_tests;
 #[cfg(test)]
 mod subagent_tests;
