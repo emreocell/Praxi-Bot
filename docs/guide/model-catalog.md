@@ -49,25 +49,76 @@ entered custom model remains usable even when absent from this list.
 ## Curated data and maintenance
 
 `crates/provider-catalog/src/model_metadata.json` contains the checked-in table,
-verification date, and source URLs. Its validator requires unique provider ids
-and aliases, unique model ids within a provider, unique ranks in 1–4, no more
-than four recommendations per provider, and no deprecated or non-chat
-recommendations. Changing this file does not change inference or execution.
+`last_reviewed` date, and official source URLs. `providers/catalog/*.toml` holds
+provider endpoints, context limits, and reference pricing. The validator checks:
 
-Verified on 2026-11-15:
+- required fields and valid ISO `YYYY-MM-DD` review/pricing dates,
+- unique provider ids, aliases, and model ids, with every alias resolving to its
+  canonical provider and every shipped TOML provider/model covered by the table,
+- unique display names per provider (case-insensitive),
+- sane context windows, output limits (`max_output_tokens <= context_window`),
+  and non-negative finite pricing (`cached_per_mtok <= input_per_mtok`),
+- unique recommendation ranks in 1–4, no more than four recommendations per
+  provider, no `:free` recommendations, and no deprecated or non-chat
+  recommendations,
+- deprecated models explicitly flagged with both `"deprecated": true` and a
+  human note (such as `"legacy"` or `"retired"`),
+- zero drift between `model_metadata.json` and the summary table below.
 
-| Provider | Candidate recommendations | Source |
-| --- | --- | --- |
-| Gemini and Gemini OpenAI compatibility | Gemini 4 Carbon, Argon, Hydrogen; Gemini 3.5 Flash-Lite | [Google model list](https://ai.google.dev/gemini-api/docs/models) and [deprecations](https://ai.google.dev/gemini-api/docs/deprecations) |
-| OpenAI | GPT-6.1 Sol, GPT-6 Luna, GPT-6 Astra, GPT-6.1 Terra | [OpenAI model list](https://developers.openai.com/api/docs/models) |
-| Anthropic | Claude Sonnet 5.5, Opus 5.5, Haiku 5.5, Fable 5.2 | [Claude model overview](https://platform.claude.com/docs/en/models/overview) |
-| OpenRouter | Claude Sonnet 5.5, GPT-6 Luna, Gemini 3.8 Flash | [Sonnet](https://openrouter.ai/anthropic/claude-sonnet-5.5), [Luna](https://openrouter.ai/openai/gpt-6-luna), [Flash](https://openrouter.ai/google/gemini-3.8-flash) |
-| xAI | Grok 4.7 | [xAI model list](https://docs.x.ai/developers/models) |
-| DeepSeek | DeepSeek V4.1 Flash (`deepseek-flash`), V4 Pro | [DeepSeek model list](https://api-docs.deepseek.com/quick_start/pricing/) |
-| Ollama | Qwen 3 8B, 4B, 30B; Llama 3.3 70B | [Qwen 3](https://ollama.com/library/qwen3), [Llama 3.3](https://ollama.com/library/llama3.3) |
-| LM Studio | No static recommendations: ids depend on installed models and aliases | [Server-visible model list](https://lmstudio.ai/docs/developer/openai-compat/models) |
-| Claude Code | Metadata for `default`, `sonnet`, `opus`, `haiku` | [Claude Code model configuration](https://code.claude.com/docs/en/model-config) |
-| Codex | Metadata for `default` | [Codex models](https://developers.openai.com/codex/models); existing Praxi CLI runtime |
+Changing `model_metadata.json` does not change inference or execution.
+
+<!-- BEGIN:model-catalog-table -->
+Last reviewed on 2026-11-15:
+
+| Provider | Aliases | Last reviewed | Candidate recommendations | Sources |
+| --- | --- | --- | --- | --- |
+| `gemini` | `gemini-openai-compat` | 2026-11-15 | Gemini 4 Carbon (`gemini-4-carbon`), Gemini 4 Argon (`gemini-4-argon`), Gemini 4 Hydrogen (`gemini-4-hydrogen`), Gemini 3.5 Flash-Lite (`gemini-3.5-flash-lite`) | <https://ai.google.dev/gemini-api/docs/models>, <https://ai.google.dev/gemini-api/docs/deprecations> |
+| `openai` | — | 2026-11-15 | GPT-6.1 Sol (`gpt-6.1-sol`), GPT-6 Luna (`gpt-6-luna`), GPT-6 Astra (`gpt-6-astra`), GPT-6.1 Terra (`gpt-6.1-terra`) | <https://developers.openai.com/api/docs/models> |
+| `anthropic` | — | 2026-11-15 | Claude Sonnet 5.5 (`claude-sonnet-5-5`), Claude Opus 5.5 (`claude-opus-5-5`), Claude Haiku 5.5 (`claude-haiku-5-5`), Claude Fable 5.2 (`claude-fable-5-2`) | <https://platform.claude.com/docs/en/models/overview> |
+| `openrouter` | — | 2026-11-15 | Claude Sonnet 5.5 (`anthropic/claude-sonnet-5.5`), GPT-6 Luna (`openai/gpt-6-luna`), Gemini 3.8 Flash (`google/gemini-3.8-flash`) | <https://openrouter.ai/anthropic/claude-sonnet-5.5>, <https://openrouter.ai/openai/gpt-6-luna>, <https://openrouter.ai/google/gemini-3.8-flash> |
+| `xai` | — | 2026-11-15 | Grok 4.7 (`grok-4.7`) | <https://docs.x.ai/developers/models> |
+| `deepseek` | — | 2026-11-15 | DeepSeek V4.1 Flash (`deepseek-flash`), DeepSeek V4 Pro (`deepseek-v4-pro`) | <https://api-docs.deepseek.com/quick_start/pricing/> |
+| `ollama` | — | 2026-11-15 | Qwen 3 · 8B (`qwen3:8b`), Qwen 3 · 4B (`qwen3:4b`), Qwen 3 · 30B (`qwen3:30b`), Llama 3.3 · 70B (`llama3.3:70b`) | <https://ollama.com/library/qwen3>, <https://ollama.com/library/llama3.3> |
+| `lmstudio` | — | 2026-11-15 | None (depends on installed local models) | <https://lmstudio.ai/docs/developer/openai-compat/models> |
+| `cli:claude` | — | 2026-11-15 | Claude Code default (`default`), Claude Sonnet (`sonnet`), Claude Opus (`opus`), Claude Haiku (`haiku`) | <https://code.claude.com/docs/en/model-config> |
+| `cli:codex` | — | 2026-11-15 | Codex default (`default`) | <https://developers.openai.com/codex/models> |
+<!-- END:model-catalog-table -->
+
+### Freshness tooling and staleness reminders
+
+Praxi works offline by design, so catalog freshness is checked against the
+recorded `last_reviewed` date rather than fetched at runtime:
+
+- **Offline validation & freshness check:**
+  ```sh
+  bot catalog check --docs docs/guide/model-catalog.md
+  ```
+  Validates `model_metadata.json`, `providers/catalog/*.toml`, and the docs
+  table above, then prints each provider's review date and age. Validation
+  errors exit non-zero; staleness (older than 90 days) prints a warning and
+  exits 0 unless `--strict` is passed. Add `--json` for machine-readable output.
+- **Offline diff against a provider snapshot (JSON or TOML):**
+  ```sh
+  bot catalog diff anthropic ./anthropic-models.json
+  bot catalog diff gemini ./gemini-models.toml
+  ```
+  Compares the committed catalog for a provider (or alias such as
+  `gemini-openai-compat`) against a saved listing snapshot and prints added,
+  removed, and changed models plus likely renames. Read-only: never edits files
+  and makes no network calls. Pass `--live` instead of a snapshot path to
+  opt-in query your configured provider using its stored key (also read-only).
+- **Regenerate the Markdown table above:**
+  ```sh
+  bot catalog render-docs
+  ```
+- **Staleness reminders:** `bot doctor` and Settings → Diagnostics report a
+  non-blocking `catalog_freshness` warning when `last_reviewed` is older than
+  90 days. A weekly GitHub Actions workflow
+  (`.github/workflows/catalog-freshness.yml`) runs the offline check and writes
+  a non-blocking warning to the job summary when a review is due.
+
+For the maintainer review routine, see
+[Keeping the model catalog fresh](../contributing/MAINTAINING.md#keeping-the-model-catalog-fresh).
 
 OpenAI and xAI currently use custom OpenAI-compatible provider configuration on
 main; this change supplies metadata, not new provider adapters. Only Claude and

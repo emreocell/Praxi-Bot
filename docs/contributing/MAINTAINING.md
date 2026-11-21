@@ -59,6 +59,10 @@ Rules the workflows follow, and that any new workflow must keep:
 
 - `ci.yml` and `linux-scripts.yml` run on `pull_request`. For a fork, GitHub gives that event a
   read-only token and **no secrets**. These workflows never use secrets. Do not add any.
+- `catalog-freshness.yml` runs on a weekly schedule (and `workflow_dispatch`) only on the main
+  repository, with a read-only token, no network calls, and no secrets. It fails only on
+  malformed catalog data or docs drift; staleness beyond 90 days is reported as a non-blocking
+  warning in the job summary.
 - `labeler.yml` is the only workflow using `pull_request_target` (it runs with write access to
   pull requests). It has **no checkout step** and only reads the list of changed files, so it never
   runs a fork's code. Never add a checkout, a build or a script step to it. If you must, switch to
@@ -81,6 +85,41 @@ Rules the workflows follow, and that any new workflow must keep:
   status check **`ci-result`**, require branches to be up to date, and do not allow force pushes.
   Allow squash merging only.
 - **Settings > Environments:** keep the `release` environment with a required reviewer.
+
+## Keeping the model catalog fresh
+
+Every ~90 days (or whenever `bot doctor` / the weekly `Model catalog freshness` workflow warns
+that `last_reviewed` is stale), review the curated table in
+`crates/provider-catalog/src/model_metadata.json` and the pricing/limits in
+`providers/catalog/*.toml`:
+
+1. **Inspect current status offline:**
+   ```sh
+   bot catalog check --docs docs/guide/model-catalog.md
+   ```
+2. **Diff against each provider's current listing:** save the provider's model-list JSON or TOML
+   response to a local file (or pass `--live` with your own configured key) and run:
+   ```sh
+   bot catalog diff anthropic ./anthropic-models.json
+   bot catalog diff gemini ./gemini-models.json
+   ```
+   Review added models, removed recommendations, changed limits/prices, and likely renames.
+3. **Update the committed files:**
+   - Edit `crates/provider-catalog/src/model_metadata.json` (and `providers/catalog/*.toml` if
+     context limits or prices changed; keep `prices_as_of` updated).
+   - Flag retired models with both `"deprecated": true` and a short `"note"` (such as `"retired"`
+     or `"legacy"`), and remove them from recommendations.
+   - Keep display names unique within each provider and never pin unstable `:free` ids as
+     recommendations.
+   - Update `"last_reviewed"` (top-level and any per-provider overrides) to today's `YYYY-MM-DD`.
+4. **Sync the documentation table:** run `bot catalog render-docs` and replace the block between
+   `<!-- BEGIN:model-catalog-table -->` and `<!-- END:model-catalog-table -->` in
+   [docs/guide/model-catalog.md](../guide/model-catalog.md).
+5. **Verify before opening the PR:**
+   ```sh
+   cargo test -p provider-catalog -p cli
+   bot catalog check --docs docs/guide/model-catalog.md
+   ```
 
 ## After merging
 

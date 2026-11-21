@@ -1,0 +1,68 @@
+name: Model catalog freshness
+
+# Weekly offline validation and staleness reminder for the checked-in model catalog.
+# Never makes network calls and never uses secrets. Validation errors fail the job;
+# staleness (> 90 days since last_reviewed) emits a non-blocking warning and writes
+# the report to the job summary.
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalog-freshness
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  freshness:
+    name: Validate catalog and check review age
+    # A scheduled run on a fork would only burn the fork owner's minutes.
+    if: github.repository == 'emreocell/Praxi-Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: catalog-freshness
+
+      - name: Validate committed catalog and docs sync
+        run: cargo test --locked -p provider-catalog catalog_freshness
+
+      - name: Run offline catalog freshness check (non-blocking warning on staleness)
+        run: |
+          set -euo pipefail
+          cargo run --locked -p cli --bin bot -- catalog check --docs docs/guide/model-catalog.md | tee catalog-check.txt
+          cargo run --locked -p cli --bin bot -- --json catalog check --docs docs/guide/model-catalog.md > catalog-check.json
+          stale="$(python3 -c 'import json; d = json.load(open("catalog-check.json")); print("true" if (d.get("staleness") or {}).get("stale") else "false")')"
+          {
+            echo "## Model catalog freshness"
+            echo
+            if [ "$stale" = "true" ]; then
+              echo "> [!WARNING]"
+              echo "> The curated model catalog is older than 90 days. Review \`crates/provider-catalog/src/model_metadata.json\` against official provider model lists (see \`docs/contributing/MAINTAINING.md\`)."
+              echo
+              echo "::warning title=Model catalog stale::Curated model catalog is older than 90 days; review model_metadata.json and providers/catalog/*.toml."
+            else
+              echo "Catalog validation passed and review date is within the 90-day freshness window."
+              echo
+            fi
+            echo '```text'
+            cat catalog-check.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
