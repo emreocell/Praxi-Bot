@@ -1,10 +1,14 @@
 //! IMAP access (implicit TLS only) built on `async-imap`.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_imap::error::Error as ImapError;
 use async_imap::types::Flag;
+use base64::Engine as _;
+use base64::alphabet::Alphabet;
+use base64::engine::general_purpose::{GeneralPurpose, NO_PAD};
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
@@ -109,7 +113,9 @@ pub const MAX_LIMIT: usize = 100;
 /// A mailbox folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FolderInfo {
-    /// Folder name as the server reports it.
+    /// Decoded and capped display name, not necessarily a round-trip selector.
+    /// For example, a mailbox whose wire name is `Entw&-APw-rfe` displays as
+    /// `Entw&APw-rfe`, which as an input selects `Entwürfe` instead.
     pub name: String,
     /// Hierarchy delimiter.
     pub delimiter: Option<String>,
@@ -195,6 +201,123 @@ pub(crate) fn check_folder(name: &str) -> Result<(), EmailError> {
         return Err(EmailError::Input("invalid folder name".into()));
     }
     Ok(())
+}
+
+// RFC 3501 §5.1.3: UTF-16BE in unpadded Base64, with ',' instead of '/'.
+const MODIFIED_BASE64: GeneralPurpose = {
+    let Ok(alphabet) =
+        Alphabet::new("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,")
+    else {
+        panic!("invalid IMAP Base64 alphabet")
+    };
+    GeneralPurpose::new(&alphabet, NO_PAD)
+};
+
+fn direct(c: char) -> bool {
+    (' '..='~').contains(&c)
+}
+
+pub(crate) fn encode_mailbox_name(name: &str) -> String {
+    fn flush_shift(out: &mut String, bytes: &mut Vec<u8>) {
+        if !bytes.is_empty() {
+            out.push('&');
+            MODIFIED_BASE64.encode_string(&*bytes, out);
+            out.push('-');
+            bytes.clear();
+        }
+    }
+
+    let mut out = String::with_capacity(name.len());
+    let mut bytes = Vec::new();
+    for c in name.chars() {
+        if direct(c) {
+            flush_shift(&mut out, &mut bytes);
+            if c == '&' {
+                out.push_str("&-");
+            } else {
+                out.push(c);
+            }
+        } else {
+            for unit in c.encode_utf16(&mut [0; 2]) {
+                bytes.extend_from_slice(&unit.to_be_bytes());
+            }
+        }
+    }
+    flush_shift(&mut out, &mut bytes);
+    out
+}
+
+pub(crate) fn decode_mailbox_name(mut name: &str) -> Result<String, EmailError> {
+    let invalid = || EmailError::Input("invalid modified UTF-7 folder name".into());
+    let mut out = String::with_capacity(name.len());
+    let mut previous_shift = false;
+    while let Some((plain, shifted)) = name.split_once('&') {
+        if !plain.chars().all(direct) {
+            return Err(invalid());
+        }
+        out.push_str(plain);
+        let (encoded, rest) = shifted.split_once('-').ok_or_else(invalid)?;
+        if encoded.is_empty() {
+            out.push('&');
+            previous_shift = false;
+        } else {
+            // Adjacent non-empty shifts have no intervening direct character.
+            if previous_shift && plain.is_empty() {
+                return Err(invalid());
+            }
+            let bytes = MODIFIED_BASE64.decode(encoded).map_err(|_| invalid())?;
+            let (pairs, remainder) = bytes.as_chunks::<2>();
+            if !remainder.is_empty() {
+                return Err(invalid());
+            }
+            let units = pairs.iter().copied().map(u16::from_be_bytes);
+            for c in char::decode_utf16(units) {
+                let c = c.map_err(|_| invalid())?;
+                if direct(c) {
+                    return Err(invalid());
+                }
+                out.push(c);
+            }
+            previous_shift = true;
+        }
+        name = rest;
+    }
+    if !name.chars().all(direct) {
+        return Err(invalid());
+    }
+    out.push_str(name);
+    Ok(out)
+}
+
+fn wire_mailbox_name(name: &str) -> Result<Cow<'_, str>, EmailError> {
+    check_folder(name)?;
+    // Keep legacy ASCII (including already-encoded names) byte-for-byte.
+    // If any shift is invalid, interpret the entire input as a literal name.
+    if name.is_ascii() && (!name.contains('&') || decode_mailbox_name(name).is_ok()) {
+        Ok(Cow::Borrowed(name))
+    } else {
+        Ok(Cow::Owned(encode_mailbox_name(name)))
+    }
+}
+
+fn display_mailbox_name(name: &str) -> Option<String> {
+    if name.is_ascii() {
+        // Like outgoing selectors, keep permitted legacy ASCII names with
+        // no shifts byte-for-byte (subject to the display cap).
+        if !name.contains('&') {
+            check_folder(name).ok()?;
+            return Some(cap_untrusted(name));
+        }
+        // Omit a malformed name rather than returning text that a caller
+        // could pass back and inadvertently select a different mailbox.
+        decode_mailbox_name(name)
+            .ok()
+            .map(|name| cap_untrusted(&name))
+    } else {
+        // RFC 3501 §5.1 recommends interpreting 8-bit names as UTF-8.
+        // This is already a string; preserve any literal ampersands.
+        Some(cap_untrusted(name))
+    }
 }
 
 type Stream = TlsStream<TcpStream>;
@@ -310,7 +433,7 @@ impl ImapSession {
             .map_err(|e| fixed_imap_error("fetch", &e, &password))
     }
 
-    /// List all folders.
+    /// List folders with decoded display names, omitting malformed names.
     ///
     /// # Errors
     /// IMAP failures.
@@ -328,14 +451,16 @@ impl ImapSession {
             .map_err(|e| fixed_imap_error("list", &e, &password))?;
         Ok(names
             .iter()
-            .map(|n| FolderInfo {
-                name: cap_untrusted(n.name()),
-                delimiter: n.delimiter().map(cap_untrusted),
-                attributes: n
-                    .attributes()
-                    .iter()
-                    .map(|a| cap_untrusted(&format!("{a:?}")))
-                    .collect(),
+            .filter_map(|n| {
+                Some(FolderInfo {
+                    name: display_mailbox_name(n.name())?,
+                    delimiter: n.delimiter().map(cap_untrusted),
+                    attributes: n
+                        .attributes()
+                        .iter()
+                        .map(|a| cap_untrusted(&format!("{a:?}")))
+                        .collect(),
+                })
             })
             .collect())
     }
@@ -351,11 +476,11 @@ impl ImapSession {
         query: &SearchQuery,
         limit: usize,
     ) -> Result<(Vec<MessageSummary>, usize), EmailError> {
-        check_folder(folder)?;
+        let wire_name = wire_mailbox_name(folder)?;
         let criteria = query.to_imap()?;
         enforce_imap_trace_ceiling();
         self.session
-            .examine(folder)
+            .examine(wire_name)
             .await
             .map_err(|e| self.fail("examine", &e))?;
         let mut uids: Vec<u32> = self
@@ -418,11 +543,11 @@ impl ImapSession {
         uid: u32,
         max_body_chars: usize,
     ) -> Result<MessageDetail, EmailError> {
-        check_folder(folder)?;
+        let wire_name = wire_mailbox_name(folder)?;
         enforce_imap_trace_ceiling();
         let max_body_chars = max_body_chars.min(MAX_BODY_CHARS);
         self.session
-            .examine(folder)
+            .examine(wire_name)
             .await
             .map_err(|e| self.fail("examine", &e))?;
         let sized = self
@@ -467,10 +592,10 @@ impl ImapSession {
     /// # Errors
     /// IMAP failures.
     pub async fn set_seen(&mut self, folder: &str, uid: u32, seen: bool) -> Result<(), EmailError> {
-        check_folder(folder)?;
+        let wire_name = wire_mailbox_name(folder)?;
         enforce_imap_trace_ceiling();
         self.session
-            .select(folder)
+            .select(wire_name)
             .await
             .map_err(|e| self.fail("select", &e))?;
         let op = if seen {
@@ -496,10 +621,10 @@ impl ImapSession {
     /// # Errors
     /// IMAP failures.
     pub async fn append_draft(&mut self, folder: &str, raw: &[u8]) -> Result<(), EmailError> {
-        check_folder(folder)?;
+        let wire_name = wire_mailbox_name(folder)?;
         enforce_imap_trace_ceiling();
         self.session
-            .append(folder, Some("(\\Draft \\Seen)"), None, raw)
+            .append(wire_name, Some("(\\Draft \\Seen)"), None, raw)
             .await
             .map_err(|e| self.fail("append", &e))
     }
@@ -525,6 +650,67 @@ fn uid_set(uids: &[u32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn modified_utf7_known_answers() {
+        for (plain, wire) in [
+            ("INBOX", "INBOX"),
+            ("Drafts", "Drafts"),
+            ("R&D", "R&-D"),
+            ("Entwürfe", "Entw&APw-rfe"),
+            ("~peter/mail/台北/日本語", "~peter/mail/&U,BTFw-/&ZeVnLIqe-"),
+            ("😀", "&2D3eAA-"),
+            ("☺!", "&Jjo-!"),
+        ] {
+            assert_eq!(encode_mailbox_name(plain), wire);
+            assert_eq!(decode_mailbox_name(wire).unwrap(), plain);
+        }
+    }
+
+    #[test]
+    fn modified_utf7_rejects_invalid_wire_names() {
+        for malformed in [
+            "&APw",               // valid payload with missing shift terminator
+            "R&D",                // missing shift terminator
+            "&!-",                // not modified Base64
+            "&APw=-",             // padding
+            "&U/BTFw-",           // ordinary Base64 slash
+            "&APx-",              // non-zero trailing bits
+            "&QQ-",               // odd UTF-16BE byte count
+            "&2AA-",              // unpaired surrogate
+            "&AEE-",              // shifted printable ASCII
+            "&U,BTFw-&ZeVnLIqe-", // superfluous shift (RFC example)
+            "Entwürfe",           // direct non-ASCII
+            "name\t&APw-",        // direct control before a valid shift
+            "name\t",             // direct control character
+        ] {
+            assert!(
+                matches!(decode_mailbox_name(malformed), Err(EmailError::Input(_))),
+                "{malformed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn wire_names_preserve_only_whole_valid_encodings() {
+        for (input, expected) in [
+            ("Drafts", "Drafts"),
+            ("INBOX", "INBOX"),
+            ("name\t", "name\t"),
+            ("Entwürfe", "Entw&APw-rfe"),
+            ("Entw&APw-rfe", "Entw&APw-rfe"),
+            ("Entw&-APw-rfe", "Entw&-APw-rfe"),
+            ("Entw&APw-rfe/R&D", "Entw&-APw-rfe/R&-D"),
+        ] {
+            assert_eq!(wire_mailbox_name(input).unwrap(), expected);
+        }
+        for invalid in ["", "name\r", "name\n", "name\0"] {
+            assert!(matches!(
+                wire_mailbox_name(invalid),
+                Err(EmailError::Input(_))
+            ));
+        }
+    }
 
     #[test]
     fn builds_search() {

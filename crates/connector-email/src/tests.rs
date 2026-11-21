@@ -95,6 +95,100 @@ async fn imap_tools_list_search_read_mark_and_draft_over_tls() {
 }
 
 #[tokio::test]
+async fn imap_utf7_folders_are_decoded_before_display_cap() {
+    use crate::message::MAX_UNTRUSTED_FIELD_CHARS;
+
+    let imap = server(Protocol::ImapUtf7Folders).await;
+    let smtp = server(Protocol::Smtp).await;
+    let conn = connector(account(&imap, &smtp, SmtpSecurity::Implicit));
+    let result = call(&conn, "email_list_folders", json!({})).await;
+    let names: Vec<_> = result["folders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|folder| folder["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "INBOX",
+            "Entwürfe",
+            "Entw&APw-rfe",
+            "Quarter\tDrafts",
+            &"中".repeat(MAX_UNTRUSTED_FIELD_CHARS),
+            "中&APw-",
+        ]
+    );
+    assert!(
+        imap.commands
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|line| { line.trim_end().split_once(' ').unwrap().1 == r#"LIST "" *"# })
+    );
+}
+
+#[tokio::test]
+async fn imap_utf7_folders_are_encoded_at_each_command_boundary() {
+    let imap = server(Protocol::Imap).await;
+    let smtp = server(Protocol::Smtp).await;
+    let mut config = account(&imap, &smtp, SmtpSecurity::Implicit);
+    config.drafts_folder = "Entwürfe".into();
+    let conn = connector(config);
+
+    call(&conn, "email_search", json!({"folder":"Entwürfe"})).await;
+    call(&conn, "email_read", json!({"folder":"R&D", "uid":42})).await;
+    call(
+        &conn,
+        "email_mark_read",
+        json!({"folder":"Entwürfe", "uid":42}),
+    )
+    .await;
+    call(
+        &conn,
+        "email_mark_read",
+        json!({"folder":"Entw&-APw-rfe", "uid":42}),
+    )
+    .await;
+    call(
+        &conn,
+        "email_read",
+        json!({"folder":"Entw&APw-rfe", "uid":42}),
+    )
+    .await;
+    let draft = call(
+        &conn,
+        "email_draft",
+        json!({"to":["bob@example.com"],"subject":"Draft","body":"Unsent"}),
+    )
+    .await;
+    assert_eq!(draft["folder"], "Entwürfe");
+
+    let commands = imap.commands.lock().unwrap();
+    let folders: Vec<_> = commands
+        .iter()
+        .filter_map(|line| {
+            let (_, command) = line.trim_end().split_once(' ').unwrap();
+            ["EXAMINE ", "SELECT ", "APPEND "]
+                .iter()
+                .any(|prefix| command.starts_with(prefix))
+                .then_some(command.splitn(3, ' ').take(2).collect::<Vec<_>>())
+        })
+        .collect();
+    assert_eq!(
+        folders,
+        [
+            vec!["EXAMINE", "\"Entw&APw-rfe\""],
+            vec!["EXAMINE", "\"R&-D\""],
+            vec!["SELECT", "\"Entw&APw-rfe\""],
+            vec!["SELECT", "\"Entw&-APw-rfe\""],
+            vec!["EXAMINE", "\"Entw&APw-rfe\""],
+            vec!["APPEND", "\"Entw&APw-rfe\""],
+        ]
+    );
+}
+
+#[tokio::test]
 async fn smtp_implicit_and_required_starttls_send_with_bcc_only_in_envelope() {
     for (protocol, security) in [
         (Protocol::Smtp, SmtpSecurity::Implicit),

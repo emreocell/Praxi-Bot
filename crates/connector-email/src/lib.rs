@@ -10,9 +10,10 @@
 //! - Credentials are [`secret_store::SecretRef`]s resolved only when connecting.
 //!
 //! Entry points: [`tools`] / [`register`]. Wiring into `builtin-tools` is a
-//! follow-up. Limitation: folder names are passed as-is (no modified UTF-7
-//! conversion), so non-ASCII folder names must be given in the server's
-//! encoding.
+//! follow-up. IMAP folder selectors accept Unicode or a complete modified
+//! UTF-7 wire name. LIST names are decoded and capped for display and may not
+//! be exact selectors: if a display name looks like modified UTF-7, pass the
+//! original wire name to disambiguate.
 
 pub mod agentmail;
 pub mod config;

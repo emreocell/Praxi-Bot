@@ -37,6 +37,7 @@ impl Drop for Server {
 #[derive(Clone, Copy)]
 pub enum Protocol {
     Imap,
+    ImapUtf7Folders,
     Smtp,
     StartTls,
     NoStartTls,
@@ -175,6 +176,14 @@ async fn imap<S: AsyncRead + AsyncWrite + Unpin>(
             }
         } else if matches!(protocol, Protocol::PasswordInNo) && !command.starts_with("LOGOUT") {
             format!("{tag} NO marker-secret-echo {PASSWORD}\r\n")
+        } else if command.starts_with("LIST") && matches!(protocol, Protocol::ImapUtf7Folders) {
+            // "Ti1OLU4t" is three UTF-16BE encodings of '中', with no padding.
+            let long_name = format!("&{}-", "Ti1OLU4t".repeat(90));
+            let utf8_name = "中&APw-";
+            format!(
+                "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST () \"/\" \"Entw&APw-rfe\"\r\n* LIST () \"/\" \"Invalid&?-\"\r\n* LIST () \"/\" \"Entw&-APw-rfe\"\r\n* LIST () \"/\" \"Quarter\tDrafts\"\r\n* LIST () \"/\" \"{long_name}\"\r\n* LIST () \"/\" {{{}}}\r\n{utf8_name}\r\n{tag} OK listed\r\n",
+                utf8_name.len()
+            )
         } else if command.starts_with("LIST") {
             format!(
                 "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST (\\Drafts) \"/\" \"Drafts\"\r\n{tag} OK listed\r\n"
