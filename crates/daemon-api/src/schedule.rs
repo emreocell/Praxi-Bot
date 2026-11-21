@@ -32,6 +32,7 @@ const POLL: Duration = Duration::from_millis(100);
 pub(crate) struct DaemonExecutor {
     pub agent: AgentLoop,
     pub storage: Arc<Storage>,
+    pub store: Arc<scheduler::ScheduleStore>,
     pub user_id: UserId,
     pub leader: crate::host::LeaderControl,
 }
@@ -158,6 +159,20 @@ impl ScheduleExecutor for DaemonExecutor {
     }
 
     async fn execute(&self, schedule: &Schedule) -> scheduler::Result<()> {
+        self.execute_inner(schedule, None).await
+    }
+
+    async fn execute_occurrence(&self, schedule: &Schedule, due_ms: i64) -> scheduler::Result<()> {
+        self.execute_inner(schedule, Some(due_ms)).await
+    }
+}
+
+impl DaemonExecutor {
+    async fn execute_inner(
+        &self,
+        schedule: &Schedule,
+        due_ms: Option<i64>,
+    ) -> scheduler::Result<()> {
         self.storage
             .get_bot(schedule.bot_id)
             .map_err(exec_err)?
@@ -200,6 +215,11 @@ impl ScheduleExecutor for DaemonExecutor {
                 LoopError::Busy(c) => exec_err(format!("chat {c} is busy with another turn")),
                 other => exec_err(other),
             })?;
+        if let Some(due) = due_ms {
+            let _ = self
+                .store
+                .set_occurrence_run_id(schedule.id, due, &run.to_string());
+        }
         // Poll rather than `AgentLoop::wait`: that would take the run's task
         // handle away from `AgentLoop::shutdown`.
         loop {

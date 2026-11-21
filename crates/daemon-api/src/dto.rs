@@ -971,6 +971,9 @@ pub struct ScheduleDto {
     /// (not deleted) so nothing runs twice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moved_to: Option<String>,
+    /// Next up to 5 upcoming firing timestamps (Unix epoch ms).
+    #[serde(default)]
+    pub next_runs_ms: Vec<i64>,
 }
 
 /// Body of `POST /v1/schedules` and `PUT /v1/schedules/{id}`.
@@ -1019,13 +1022,64 @@ pub struct ParseSchedule {
     pub tz: Option<String>,
 }
 
-/// Result of `POST /v1/schedules/parse`.
+/// Result of `POST /v1/schedules/parse` and `POST /v1/schedules/preview`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ParsedSchedule {
     /// The [`ScheduleDto::spec`] the phrase means.
     pub spec: Value,
     /// First firing from now.
     pub next_run_at_ms: Option<i64>,
+    /// Next up to 5 (or requested `count`) upcoming firing timestamps (Unix epoch ms).
+    #[serde(default)]
+    pub next_runs_ms: Vec<i64>,
+}
+
+/// Body of `POST /v1/schedules/preview`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct PreviewSchedule {
+    /// Schedule specification (`{"cron": ...}`, `{"every": ...}`, `{"at": ...}`).
+    #[serde(default)]
+    pub spec: Option<Value>,
+    /// Natural-language phrase (used when `spec` is omitted).
+    #[serde(default)]
+    pub text: Option<String>,
+    /// Optional IANA timezone applied to 5-field cron expressions without an embedded timezone.
+    #[serde(default)]
+    pub tz: Option<String>,
+    /// Number of upcoming occurrences to compute (default 5, max 100).
+    #[serde(default)]
+    pub count: Option<usize>,
+    /// Anchor timestamp in Unix ms (default: now).
+    #[serde(default)]
+    pub from_ms: Option<i64>,
+}
+
+/// One entry in a schedule's run history (`GET /v1/schedules/{id}/history`).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ScheduleHistoryEntryDto {
+    /// Scheduled due timestamp (Unix ms), present for timer occurrences.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_ms: Option<i64>,
+    /// Linked run id, if a run was created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<Uuid>,
+    /// Chat id where the run posted, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<Uuid>,
+    /// Outcome or status (`pending`, `dispatched`, `started`, `queued`, `running`,
+    /// `waiting_approval`, `paused`, `succeeded`, `failed`, `cancelled`, `missed`, `interrupted`).
+    pub status: String,
+    /// When the run started (Unix ms), if it started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<i64>,
+    /// When the run finished (Unix ms), if it reached a terminal run state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at_ms: Option<i64>,
+    /// Failure message, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Whether this occurrence can be retried via `POST /v1/schedules/{id}/occurrences/{due_ms}/retry`.
+    pub retryable: bool,
 }
 
 /// Answer of `POST /v1/schedules/{id}/run-now` and `POST /v1/webhooks/{id}`:

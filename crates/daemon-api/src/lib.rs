@@ -796,6 +796,7 @@ impl AppState {
         let exec = Arc::new(schedule::DaemonExecutor {
             agent: self.0.agent.clone(),
             storage: self.storage_arc(),
+            store: Arc::clone(&store),
             user_id: self.user_id(),
             leader: self.leader().clone(),
         });
@@ -1341,11 +1342,17 @@ fn api_routes() -> Router<AppState> {
             get(r::list_schedules).post(r::create_schedule),
         )
         .route("/v1/schedules/parse", post(r::parse_schedule))
+        .route("/v1/schedules/preview", post(r::preview_schedule))
         .route(
             "/v1/schedules/{id}",
             get(r::get_schedule)
                 .put(r::update_schedule)
                 .delete(r::delete_schedule),
+        )
+        .route("/v1/schedules/{id}/history", get(r::list_schedule_history))
+        .route(
+            "/v1/schedules/{id}/occurrences/{due_ms}/retry",
+            post(r::retry_schedule_occurrence),
         )
         .route("/v1/schedules/{id}/run-now", post(r::run_schedule_now))
         .route("/v1/schedules/{id}/reclaim", post(host_import::reclaim))

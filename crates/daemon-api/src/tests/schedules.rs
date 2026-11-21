@@ -1233,3 +1233,183 @@ async fn c225_real_temp_folder_and_fake_clock_fire_one_external_run_for_five_mat
     );
     t.state.stop_scheduler().await;
 }
+
+#[tokio::test]
+async fn parse_preview_and_dto_return_next_five_runs_across_dst() {
+    let t = super::setup();
+    let (bot, _) = make_chat(&t).await;
+
+    let parsed = call(
+        &t,
+        Method::POST,
+        "/v1/schedules/parse",
+        Some(json!({"text": "every 10 minutes"})),
+    )
+    .await;
+    assert_eq!(parsed.status, StatusCode::OK);
+    let runs = parsed.json()["next_runs_ms"].as_array().unwrap().clone();
+    assert_eq!(runs.len(), 5);
+    assert_eq!(runs[0].as_i64(), parsed.json()["next_run_at_ms"].as_i64());
+
+    // DST spring-forward in America/New_York: 2026-03-07 09:00 EST (14:00 UTC) -> 2026-03-08 09:00 EDT (13:00 UTC).
+    let from_ms = chrono::NaiveDate::from_ymd_opt(2026, 3, 7)
+        .unwrap()
+        .and_hms_opt(12, 0, 0)
+        .unwrap()
+        .and_utc()
+        .timestamp_millis();
+    let preview = call(
+        &t,
+        Method::POST,
+        "/v1/schedules/preview",
+        Some(json!({
+            "spec": {"cron": "0 9 * * *"},
+            "tz": "America/New_York",
+            "from_ms": from_ms,
+            "count": 5
+        })),
+    )
+    .await;
+    assert_eq!(preview.status, StatusCode::OK, "{:?}", preview.json());
+    let p_runs: Vec<i64> = preview.json()["next_runs_ms"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_i64().unwrap())
+        .collect();
+    assert_eq!(p_runs.len(), 5);
+    assert_eq!(p_runs[1] - p_runs[0], 23 * 3_600_000);
+    assert_eq!(p_runs[2] - p_runs[1], 24 * 3_600_000);
+
+    let created = create(&t, new_schedule(&bot, prompt("ping"))).await;
+    assert_eq!(created["next_runs_ms"].as_array().unwrap().len(), 5);
+    assert_eq!(created["next_runs_ms"][0], created["next_run_at_ms"]);
+    let sid = created["id"].as_str().unwrap();
+    let got = call(&t, Method::GET, &format!("/v1/schedules/{sid}"), None)
+        .await
+        .json();
+    assert_eq!(got["next_runs_ms"].as_array().unwrap().len(), 5);
+}
+
+#[tokio::test]
+async fn schedule_history_and_owner_only_idempotent_retry() {
+    let t = super::setup();
+    let clock = Arc::new(scheduler::FakeClock::new(storage::now_ms()));
+    *t.state.0.scheduler_clock.lock() = Some(clock.clone());
+    t.state.start_scheduler().unwrap();
+    let (bot, _) = make_chat(&t).await;
+
+    // 1. Create a schedule whose first timer occurrence needs approval and is cancelled -> `failed`.
+    let mut body = new_schedule(
+        &bot,
+        json!({"kind": "tool", "name": "danger_run", "input": {}}),
+    );
+    body["spec"] = json!({"every": {"seconds": 60}});
+    body["misfire_policy"] = json!("run_once");
+    let created = create(&t, body).await;
+    let sid = created["id"].as_str().unwrap().to_owned();
+    let failed_due_ms = created["next_run_at_ms"].as_i64().unwrap();
+
+    let mut rx = t.agent.subscribe();
+    clock.advance_ms(61_000);
+    let mut follow = Follow::new(&sid);
+    let _call_id = follow.until_approval(&mut rx).await;
+    let failed_run = follow.mine.expect("scheduled run started");
+    let cancel = call(
+        &t,
+        Method::POST,
+        &format!("/v1/runs/{failed_run}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(cancel.status, StatusCode::OK, "{:?}", cancel.json());
+    let (_, _) = follow.until_finished(&mut rx).await;
+    settled(&t).await;
+
+    let orig_next = call(&t, Method::GET, &format!("/v1/schedules/{sid}"), None)
+        .await
+        .json()["next_run_at_ms"]
+        .as_i64()
+        .unwrap();
+
+    // 2. History includes the failed occurrence with its linked run_id and chat_id.
+    let hist = call(
+        &t,
+        Method::GET,
+        &format!("/v1/schedules/{sid}/history"),
+        None,
+    )
+    .await;
+    assert_eq!(hist.status, StatusCode::OK, "{:?}", hist.json());
+    let items = hist.json().as_array().unwrap().clone();
+    let failed_entry = items
+        .iter()
+        .find(|e| e["due_ms"] == failed_due_ms)
+        .expect("failed occurrence in history");
+    assert_eq!(failed_entry["status"], "failed");
+    assert_eq!(failed_entry["run_id"], failed_run.to_string());
+    assert_eq!(failed_entry["retryable"], true);
+    assert!(failed_entry["started_at_ms"].as_i64().is_some());
+    assert!(failed_entry["finished_at_ms"].as_i64().is_some());
+    assert!(failed_entry["chat_id"].as_str().is_some());
+
+    // 3. Owner-only enforcement: bearer token without owner key is refused.
+    let retry_path = format!("/v1/schedules/{sid}/occurrences/{failed_due_ms}/retry");
+    let unauth = super::call_token_only(&t, Method::POST, &retry_path, None).await;
+    assert_eq!(unauth.status, StatusCode::FORBIDDEN);
+    assert_eq!(unauth.json()["error"]["code"], "owner_key_required");
+
+    // 4. Retry with owner key creates a normal run under the same permissions & approvals,
+    // and preserves next_run_at_ms.
+    let mut rx = t.agent.subscribe();
+    let retried = call(&t, Method::POST, &retry_path, None).await;
+    assert_eq!(retried.status, StatusCode::ACCEPTED, "{:?}", retried.json());
+    let mut follow2 = Follow::new(&sid);
+    let call_id2 = follow2.until_approval(&mut rx).await;
+    let approve = call(
+        &t,
+        Method::POST,
+        &format!("/v1/approvals/{call_id2}"),
+        Some(json!({"decision": "approve"})),
+    )
+    .await;
+    assert_eq!(approve.status, StatusCode::OK, "{:?}", approve.json());
+    let (retry_run, _) = follow2.until_finished(&mut rx).await;
+    settled(&t).await;
+
+    let after = call(&t, Method::GET, &format!("/v1/schedules/{sid}"), None)
+        .await
+        .json();
+    assert_eq!(after["next_run_at_ms"], orig_next);
+
+    let hist2 = call(
+        &t,
+        Method::GET,
+        &format!("/v1/schedules/{sid}/history"),
+        None,
+    )
+    .await
+    .json();
+    let retried_entry = hist2
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["due_ms"] == failed_due_ms)
+        .unwrap();
+    assert_eq!(retried_entry["status"], "succeeded");
+    assert_eq!(retried_entry["run_id"], retry_run.to_string());
+    assert_eq!(retried_entry["retryable"], false);
+
+    // 5. Idempotency: a second retry on the same occurrence refuses to double-fire.
+    let again = call(&t, Method::POST, &retry_path, None).await;
+    assert_eq!(again.status, StatusCode::CONFLICT);
+    let total_runs = call(&t, Method::GET, "/v1/runs", None)
+        .await
+        .json()
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(total_runs, 2);
+
+    t.state.stop_scheduler().await;
+}

@@ -9502,6 +9502,52 @@
         ]
       }
     },
+    "/v1/schedules/preview": {
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Preview the next upcoming run timestamps for a schedule spec or phrase.",
+        "operationId": "preview_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewSchedule"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParsedSchedule"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid schedule spec or phrase",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/schedules/{id}": {
       "get": {
         "tags": [
@@ -9639,6 +9685,135 @@
           },
           "404": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/schedules/{id}/history": {
+      "get": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Run and occurrence history for a schedule (newest first).",
+        "operationId": "list_schedule_history",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScheduleHistoryEntryDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/schedules/{id}/occurrences/{due_ms}/retry": {
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Explicitly retry a `failed`, `missed`, or `interrupted` occurrence of a schedule.\nCreates a normal run under the same permissions and approvals as a scheduled run\nwithout altering `next_run_at`. Idempotent: concurrent or repeat retries never double-fire.",
+        "operationId": "retry_schedule_occurrence",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "due_ms",
+            "in": "path",
+            "description": "Occurrence due timestamp in Unix ms",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "occurrence already handled or a run is in flight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the scheduler is not running",
             "content": {
               "application/json": {
                 "schema": {
@@ -19230,7 +19405,7 @@
       },
       "ParsedSchedule": {
         "type": "object",
-        "description": "Result of `POST /v1/schedules/parse`.",
+        "description": "Result of `POST /v1/schedules/parse` and `POST /v1/schedules/preview`.",
         "required": [
           "spec"
         ],
@@ -19242,6 +19417,14 @@
             ],
             "format": "int64",
             "description": "First firing from now."
+          },
+          "next_runs_ms": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Next up to 5 (or requested `count`) upcoming firing timestamps (Unix epoch ms)."
           },
           "spec": {
             "description": "The [`ScheduleDto::spec`] the phrase means."
@@ -19416,6 +19599,45 @@
               "null"
             ],
             "description": "`read-only`, `approve-destructive`, `read-and-draft` or `full`."
+          }
+        }
+      },
+      "PreviewSchedule": {
+        "type": "object",
+        "description": "Body of `POST /v1/schedules/preview`.",
+        "properties": {
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Number of upcoming occurrences to compute (default 5, max 100).",
+            "minimum": 0
+          },
+          "from_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Anchor timestamp in Unix ms (default: now)."
+          },
+          "spec": {
+            "description": "Schedule specification (`{\"cron\": ...}`, `{\"every\": ...}`, `{\"at\": ...}`)."
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Natural-language phrase (used when `spec` is omitted)."
+          },
+          "tz": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional IANA timezone applied to 5-field cron expressions without an embedded timezone."
           }
         }
       },
@@ -20447,6 +20669,14 @@
             "format": "int64",
             "description": "Next firing (`null` for a disabled or finished schedule)."
           },
+          "next_runs_ms": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Next up to 5 upcoming firing timestamps (Unix epoch ms)."
+          },
           "origin": {
             "type": "string",
             "description": "Who created it: `user`, or `bot` (a bot's schedule tools, after you\napproved it). A bot may change only its own `bot` schedules."
@@ -20468,6 +20698,71 @@
           },
           "trigger": {
             "description": "Non-webhook trigger definition; never includes webhook secrets."
+          }
+        }
+      },
+      "ScheduleHistoryEntryDto": {
+        "type": "object",
+        "description": "One entry in a schedule's run history (`GET /v1/schedules/{id}/history`).",
+        "required": [
+          "status",
+          "retryable"
+        ],
+        "properties": {
+          "chat_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Chat id where the run posted, if known."
+          },
+          "due_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Scheduled due timestamp (Unix ms), present for timer occurrences."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Failure message, if any."
+          },
+          "finished_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When the run finished (Unix ms), if it reached a terminal run state."
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "Whether this occurrence can be retried via `POST /v1/schedules/{id}/occurrences/{due_ms}/retry`."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Linked run id, if a run was created."
+          },
+          "started_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When the run started (Unix ms), if it started."
+          },
+          "status": {
+            "type": "string",
+            "description": "Outcome or status (`pending`, `dispatched`, `started`, `queued`, `running`,\n`waiting_approval`, `paused`, `succeeded`, `failed`, `cancelled`, `missed`, `interrupted`)."
           }
         }
       },

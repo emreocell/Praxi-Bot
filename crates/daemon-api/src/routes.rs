@@ -29,10 +29,10 @@ use crate::dto::{
     ControlDecisionResponse, ControlStateDto, ControlStateInput, CreateChat, DecideApproval,
     Decision, DecisionResponse, DeliveryKind, DetectedProviderDto, EffectivePolicyDto,
     EnableCliProviderInput, GrantDto, GrantTargetDto, Health, LatestCursor, MessageDto, Mode,
-    ParseSchedule, ParsedSchedule, PolicyDto, PolicyInput, ProvidersDto, ReloadResponse,
-    RememberResponse, ResendMessage, ResendResponse, RevokeGrant, RunDto, RunUsageDto,
-    RuntimeConfigDto, ScheduleChangeKind, ScheduleDto, ScheduleInput, Scope, SendMessage,
-    SendResponse, UpdateChat, UsageSummary, UsageTotals,
+    ParseSchedule, ParsedSchedule, PolicyDto, PolicyInput, PreviewSchedule, ProvidersDto,
+    ReloadResponse, RememberResponse, ResendMessage, ResendResponse, RevokeGrant, RunDto,
+    RunUsageDto, RuntimeConfigDto, ScheduleChangeKind, ScheduleDto, ScheduleHistoryEntryDto,
+    ScheduleInput, Scope, SendMessage, SendResponse, UpdateChat, UsageSummary, UsageTotals,
 };
 use crate::error::{ApiError, ErrorBody};
 
@@ -2250,6 +2250,7 @@ fn schedule_dto(sc: &Schedule, has_webhook: bool) -> ScheduleDto {
         origin: sc.origin.as_str().to_owned(),
         missed_occurrences: sc.missed_occurrences,
         moved_to: None,
+        next_runs_ms: Vec::new(),
     }
 }
 
@@ -2265,6 +2266,7 @@ fn dto_of(s: &AppState, sc: &Schedule) -> Result<ScheduleDto, ApiError> {
     ) {
         dto.next_run_at_ms = None;
     }
+    dto.next_runs_ms = compute_next_runs(sc, dto.next_run_at_ms, dto.moved_to.is_some());
     dto.trigger = trigger
         .filter(|t| !matches!(t, Trigger::Webhook { .. }))
         .map(|t| serde_json::to_value(t).unwrap_or(Value::Null));
@@ -2278,6 +2280,23 @@ fn dto_of(s: &AppState, sc: &Schedule) -> Result<ScheduleDto, ApiError> {
         redact_schedule_value(s, value);
     }
     Ok(dto)
+}
+
+fn compute_next_runs(sc: &Schedule, next_run_at: Option<i64>, is_moved: bool) -> Vec<i64> {
+    if !sc.enabled || is_moved {
+        return Vec::new();
+    }
+    let Some(first) = next_run_at else {
+        return Vec::new();
+    };
+    if matches!(sc.spec, ScheduleSpec::At { .. }) {
+        return vec![first];
+    }
+    let mut runs = vec![first];
+    if let Ok(more) = sc.spec.next_occurrences(first, 4) {
+        runs.extend(more);
+    }
+    runs
 }
 
 /// The schedule `id`, when its bot belongs to the local user.
@@ -2724,14 +2743,200 @@ pub(crate) async fn parse_schedule(
         .ok_or_else(|| bad_schedule(format!("cannot understand {:?}", input.text)))?;
     // A bad timezone only shows when the spec is validated.
     spec.validate()?;
-    let next = match &spec {
-        ScheduleSpec::At { unix_ms } => Some(*unix_ms),
-        other => other.next_after(now)?,
+    let next_runs_ms = preview_runs_of(&spec, now, 5)?;
+    Ok(Json(ParsedSchedule {
+        spec: serde_json::to_value(&spec).unwrap_or(Value::Null),
+        next_run_at_ms: next_runs_ms.first().copied(),
+        next_runs_ms,
+    }))
+}
+
+fn preview_runs_of(
+    spec: &ScheduleSpec,
+    anchor_ms: i64,
+    count: usize,
+) -> Result<Vec<i64>, ApiError> {
+    match spec {
+        ScheduleSpec::At { unix_ms } => Ok(vec![*unix_ms]),
+        other => Ok(other.next_occurrences(anchor_ms, count)?),
+    }
+}
+
+fn apply_tz_to_spec(spec: ScheduleSpec, tz: Option<&str>) -> Result<ScheduleSpec, ApiError> {
+    let Some(tz_name) = tz.map(str::trim).filter(|t| !t.is_empty()) else {
+        spec.validate()?;
+        return Ok(spec);
+    };
+    let resolved = match spec {
+        ScheduleSpec::Cron(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.split_whitespace().count() == 5 {
+                ScheduleSpec::cron_tz(trimmed, tz_name)
+            } else {
+                ScheduleSpec::Cron(trimmed.to_owned())
+            }
+        }
+        other => other,
+    };
+    resolved.validate()?;
+    Ok(resolved)
+}
+
+/// Preview the next upcoming run timestamps for a schedule spec or phrase.
+#[utoipa::path(post, path = "/v1/schedules/preview", tag = "schedules",
+    security(("bearer" = [])),
+    request_body = PreviewSchedule,
+    responses((status = 200, body = ParsedSchedule),
+              (status = 422, body = ErrorBody, description = "invalid schedule spec or phrase")))]
+pub(crate) async fn preview_schedule(
+    ApiJson(input): ApiJson<PreviewSchedule>,
+) -> Result<Json<ParsedSchedule>, ApiError> {
+    let anchor = input.from_ms.unwrap_or_else(now_ms);
+    let count = input.count.unwrap_or(5).clamp(1, 100);
+    let tz = input.tz.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    let spec = if let Some(spec_val) = input.spec {
+        let parsed: ScheduleSpec = serde_json::from_value(spec_val)
+            .map_err(|e| bad_schedule(format!("invalid spec: {e}")))?;
+        apply_tz_to_spec(parsed, tz)?
+    } else if let Some(text) = input.text {
+        let parsed = scheduler::parse_natural_language_with_tz(&text, anchor, tz)
+            .ok_or_else(|| bad_schedule(format!("cannot understand {text:?}")))?;
+        parsed.validate()?;
+        parsed
+    } else {
+        return Err(bad_schedule("provide either spec or text"));
+    };
+    let next_runs_ms = match &spec {
+        ScheduleSpec::At { unix_ms } => {
+            if *unix_ms > anchor {
+                vec![*unix_ms]
+            } else {
+                Vec::new()
+            }
+        }
+        other => other.next_occurrences(anchor, count)?,
     };
     Ok(Json(ParsedSchedule {
         spec: serde_json::to_value(&spec).unwrap_or(Value::Null),
-        next_run_at_ms: next,
+        next_run_at_ms: next_runs_ms.first().copied(),
+        next_runs_ms,
     }))
+}
+
+/// Run and occurrence history for a schedule (newest first).
+#[utoipa::path(get, path = "/v1/schedules/{id}/history", tag = "schedules",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "Schedule id")),
+    responses((status = 200, body = Vec<ScheduleHistoryEntryDto>),
+              (status = 404, body = ErrorBody)))]
+pub(crate) async fn list_schedule_history(
+    State(s): State<AppState>,
+    Path(sid): Path<String>,
+) -> Result<Json<Vec<ScheduleHistoryEntryDto>>, ApiError> {
+    let sc = schedule_of_user(&s, &sid)?;
+    let occurrences = s.schedule_store()?.list_occurrences(sc.id, 100)?;
+    let mut runs_by_id: std::collections::HashMap<Uuid, storage::Run> = s
+        .storage()
+        .list_runs(s.user_id())?
+        .into_iter()
+        .filter(|r| agent_core::schedule_id_of(&r.kind) == Some(sc.id) && r.parent_run_id.is_none())
+        .map(|r| (r.id.0, r))
+        .collect();
+
+    let mut entries = Vec::with_capacity(occurrences.len() + runs_by_id.len());
+    for occ in occurrences {
+        let run = occ
+            .run_id
+            .as_deref()
+            .and_then(|raw| Uuid::parse_str(raw).ok())
+            .and_then(|uid| runs_by_id.remove(&uid));
+        let run_id = run
+            .as_ref()
+            .map(|r| r.id.0)
+            .or_else(|| occ.run_id.as_deref().and_then(|r| Uuid::parse_str(r).ok()));
+        let status = match occ.state {
+            scheduler::OccurrenceState::Pending
+            | scheduler::OccurrenceState::Dispatched
+            | scheduler::OccurrenceState::Started => run
+                .as_ref()
+                .map_or_else(|| occ.state.as_str().to_owned(), |r| r.state.clone()),
+            other => other.as_str().to_owned(),
+        };
+        let started_at_ms = run.as_ref().map(|r| r.created_at_ms);
+        let finished_at_ms = run.as_ref().and_then(|r| {
+            matches!(r.state.as_str(), "succeeded" | "failed" | "cancelled")
+                .then_some(r.updated_at_ms)
+        });
+        entries.push(ScheduleHistoryEntryDto {
+            due_ms: Some(occ.due_ms),
+            run_id,
+            chat_id: run.as_ref().and_then(|r| r.chat_id.map(|c| c.0)),
+            status,
+            started_at_ms,
+            finished_at_ms,
+            error: run.and_then(|r| r.error),
+            retryable: occ.state.is_retryable(),
+        });
+    }
+    for (_, r) in runs_by_id {
+        let finished_at_ms = matches!(r.state.as_str(), "succeeded" | "failed" | "cancelled")
+            .then_some(r.updated_at_ms);
+        entries.push(ScheduleHistoryEntryDto {
+            due_ms: None,
+            run_id: Some(r.id.0),
+            chat_id: r.chat_id.map(|c| c.0),
+            status: r.state,
+            started_at_ms: Some(r.created_at_ms),
+            finished_at_ms,
+            error: r.error,
+            retryable: false,
+        });
+    }
+    entries.sort_by(|a, b| {
+        let ak = a.started_at_ms.or(a.due_ms).unwrap_or(0);
+        let bk = b.started_at_ms.or(b.due_ms).unwrap_or(0);
+        bk.cmp(&ak).then_with(|| b.due_ms.cmp(&a.due_ms))
+    });
+    entries.truncate(100);
+    Ok(Json(entries))
+}
+
+/// Explicitly retry a `failed`, `missed`, or `interrupted` occurrence of a schedule.
+/// Creates a normal run under the same permissions and approvals as a scheduled run
+/// without altering `next_run_at`. Idempotent: concurrent or repeat retries never double-fire.
+#[utoipa::path(post, path = "/v1/schedules/{id}/occurrences/{due_ms}/retry", tag = "schedules",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "Schedule id"),
+           ("due_ms" = i64, Path, description = "Occurrence due timestamp in Unix ms")),
+    responses((status = 202, body = AcceptedResponse),
+              (status = 404, body = ErrorBody),
+              (status = 409, body = ErrorBody, description = "occurrence already handled or a run is in flight"),
+              (status = 503, body = ErrorBody, description = "the scheduler is not running")))]
+pub(crate) async fn retry_schedule_occurrence(
+    State(s): State<AppState>,
+    Path((sid, due_ms)): Path<(String, i64)>,
+) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
+    let sc = schedule_of_user(&s, &sid)?;
+    if s.schedule_store()?.frozen_for(sc.id)?.is_some() {
+        return Err(scheduler::SchedulerError::Frozen(sc.id.to_string()).into());
+    }
+    let scheduler = s.scheduler()?;
+    s.leader()
+        .with_active(|| scheduler.retry_occurrence(sc.id, due_ms))??;
+    s.0.storage.append_audit(
+        s.user_id(),
+        None,
+        "user",
+        "schedule.retry_occurrence",
+        &serde_json::json!({"schedule_id": sc.id.to_string(), "due_ms": due_ms}),
+    )?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(AcceptedResponse {
+            status: "accepted".to_owned(),
+            schedule_id: sc.id.0,
+        }),
+    ))
 }
 
 /// Fire a schedule from outside.  No bearer token: the body is authenticated
