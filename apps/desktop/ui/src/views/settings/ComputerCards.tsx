@@ -1,5 +1,6 @@
 import { TrustedFolders } from "../../components/TrustedFolders";
 import { Monitor } from "lucide-react";
+import { SettingsCard } from "../../components/SettingsUi";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
@@ -119,7 +120,7 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       title: t("computerAccess.title"),
       description: t("computerAccess.description"),
       keywords: "bots use computer server host bilgisayar sunucu botlarim izin",
-      node: <ComputerAccessCard />
+      node: <SettingsCard title={t("computerAccess.title")}><ComputerAccessCard /></SettingsCard>
     },
     {
       id: "trusted-folders",
@@ -128,7 +129,7 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       title: t("folderTrust.title"),
       description: t("folderTrust.description"),
       keywords: "trust folder repository klasor guven depo",
-      node: <TrustedFolders />
+      node: <SettingsCard title={t("folderTrust.title")}><TrustedFolders /></SettingsCard>
     },
     {
       id: "permissions",

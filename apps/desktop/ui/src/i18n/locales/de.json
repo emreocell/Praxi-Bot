@@ -1255,6 +1255,10 @@
       "prev": "Vorheriger Treffer"
     },
     "jumpToLatest": "Zum Neuesten springen",
+    "longMessage": {
+      "less": "Weniger anzeigen",
+      "more": "Mehr anzeigen"
+    },
     "md": {
       "code": "Code",
       "copied": "Kopiert",
@@ -3973,9 +3977,24 @@
       "updates": "Updates",
       "usage": "Nutzung"
     },
+    "navGroups": {
+      "app": "App",
+      "bots": "Bots",
+      "personal": "Persönlich"
+    },
     "noResults": "Keine passenden Einstellungen.",
     "results": "Suchergebnisse",
     "search": "Einstellungen suchen",
+    "sectionDesc": {
+      "ai": "Was deine Bots wissen und sich merken. Modelle werden pro Bot gewählt.",
+      "appearance": "Design, Akzentfarbe, Hintergrund und Form der App.",
+      "computer": "Wo Werkzeuge laufen, was Bots dort dürfen, und die Websuche.",
+      "diagnostics": "Prüfe, ob die App und ihr Hilfsdienst gesund sind.",
+      "general": "Dein Name, die Sprache und das Verhalten von Nachrichten.",
+      "mail": "Postfächer, die deine Bots lesen und beschreiben können.",
+      "updates": "Welche Version läuft und wie Updates zu dir kommen.",
+      "usage": "Wie stark jedes Modell und jeder Bot genutzt wurde."
+    },
     "title": "Einstellungen",
     "updates": {
       "appVersion": "Desktop-App",

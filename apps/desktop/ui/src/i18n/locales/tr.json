@@ -1255,6 +1255,10 @@
       "prev": "Önceki eşleşme"
     },
     "jumpToLatest": "En sona git",
+    "longMessage": {
+      "less": "Daha az göster",
+      "more": "Devamını göster"
+    },
     "md": {
       "code": "kod",
       "copied": "Kopyalandı",
@@ -3973,9 +3977,24 @@
       "updates": "Güncellemeler",
       "usage": "Kullanım"
     },
+    "navGroups": {
+      "app": "Uygulama",
+      "bots": "Botlar",
+      "personal": "Kişisel"
+    },
     "noResults": "Eşleşen ayar yok.",
     "results": "Arama sonuçları",
     "search": "Ayarlarda ara",
+    "sectionDesc": {
+      "ai": "Botlarınızın bildikleri ve hatırladıkları. Modeller bot başına seçilir.",
+      "appearance": "Tema, vurgu rengi, arka plan ve uygulamanın biçimi.",
+      "computer": "Araçların nerede çalıştığı, botların orada neler yapabileceği ve web araması.",
+      "diagnostics": "Uygulamanın ve yardımcı servisinin sağlıklı olduğunu denetleyin.",
+      "general": "Adınız, dil ve mesajların davranışı.",
+      "mail": "Botlarınızın okuyup yazabildiği posta kutuları.",
+      "updates": "Hangi sürümü kullandığınız ve güncellemelerin size nasıl ulaştığı.",
+      "usage": "Her modelin ve botun ne kadar kullanıldığı."
+    },
     "title": "Ayarlar",
     "updates": {
       "appVersion": "Masaüstü uygulaması",

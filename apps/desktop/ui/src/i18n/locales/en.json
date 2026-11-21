@@ -1255,6 +1255,10 @@
       "prev": "Previous match"
     },
     "jumpToLatest": "Jump to latest",
+    "longMessage": {
+      "less": "Show less",
+      "more": "Show more"
+    },
     "md": {
       "code": "code",
       "copied": "Copied",
@@ -3973,9 +3977,24 @@
       "updates": "Updates",
       "usage": "Usage"
     },
+    "navGroups": {
+      "app": "App",
+      "bots": "Bots",
+      "personal": "Personal"
+    },
     "noResults": "No matching settings.",
     "results": "Search results",
     "search": "Search settings",
+    "sectionDesc": {
+      "ai": "What your bots know and remember. Models are chosen per bot.",
+      "appearance": "Theme, accent colour, backdrop and shape of the app.",
+      "computer": "Where tools run, what bots may do there, and web search.",
+      "diagnostics": "Check that the app and its helper are healthy.",
+      "general": "Your name, language and how messages behave.",
+      "mail": "Mailboxes your bots can read and write with.",
+      "updates": "Which version you run and how updates reach you.",
+      "usage": "How much each model and bot has been used."
+    },
     "title": "Settings",
     "updates": {
       "appVersion": "Desktop app",

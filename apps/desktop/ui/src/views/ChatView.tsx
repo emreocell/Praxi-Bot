@@ -48,6 +48,7 @@ import { chatTitleLabel } from "../lib/chatTitle";
 import { pendingForChat } from "../lib/pendingDecisions";
 import { ChatFindBar } from "../components/ChatFindBar";
 import { Markdown } from "../components/Markdown";
+import { UserBubble } from "../components/UserBubble";
 import { MessageTime } from "../components/MessageTime";
 import { ModelPicker } from "../components/ModelPicker";
 import { DictateButton } from "../components/DictateButton";
@@ -1425,7 +1426,7 @@ export function ChatView({
                         onCancel={() => setEditingId(null)}
                       />
                     ) : (
-                    <div className={styles.userBubble}>
+                    <UserBubble text={e.text}>
                       <MessageFiles client={client} chatId={chatId} attachments={e.attachments ?? []} />
                       {splitMentions(e.text, mentionBots).map((part, i) =>
                         part.color ? (
@@ -1434,7 +1435,7 @@ export function ChatView({
                           part.text
                         )
                       )}
-                    </div>
+                    </UserBubble>
                     )}
                     <MessageActions
                       side="me"
