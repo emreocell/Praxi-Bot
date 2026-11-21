@@ -28,6 +28,7 @@ const EXACT_PHRASE_TABLE: &[(&str, ExactSpec)] = &[
     ("saatte bir", ExactSpec::EverySecs(3_600)),
     ("saat basi", ExactSpec::EverySecs(3_600)),
     ("her saat basi", ExactSpec::EverySecs(3_600)),
+    ("yarim saatte bir", ExactSpec::EverySecs(1_800)),
     // Relative one-offs
     ("in a minute", ExactSpec::AtOffsetSecs(60)),
     ("bir dakika sonra", ExactSpec::AtOffsetSecs(60)),
@@ -35,6 +36,7 @@ const EXACT_PHRASE_TABLE: &[(&str, ExactSpec)] = &[
     ("yarim saat sonra", ExactSpec::AtOffsetSecs(1_800)),
     ("in an hour", ExactSpec::AtOffsetSecs(3_600)),
     ("bir saat sonra", ExactSpec::AtOffsetSecs(3_600)),
+    ("bir bucuk saat sonra", ExactSpec::AtOffsetSecs(5_400)),
     ("tomorrow", ExactSpec::AtOffsetSecs(86_400)),
     ("yarin", ExactSpec::AtOffsetSecs(86_400)),
     // Recurring calendar shortcuts
@@ -63,6 +65,7 @@ const EXACT_PHRASE_TABLE: &[(&str, ExactSpec)] = &[
     ("weekdays", ExactSpec::Cron("0 9 * * 1-5")),
     ("on weekdays", ExactSpec::Cron("0 9 * * 1-5")),
     ("hafta ici", ExactSpec::Cron("0 9 * * 1-5")),
+    ("hafta icleri", ExactSpec::Cron("0 9 * * 1-5")),
     ("hafta ici her gun", ExactSpec::Cron("0 9 * * 1-5")),
     ("her hafta ici", ExactSpec::Cron("0 9 * * 1-5")),
     ("is gunleri", ExactSpec::Cron("0 9 * * 1-5")),
@@ -177,6 +180,7 @@ const CADENCE_CRON_TABLE: &[(&str, &str)] = &[
     ("weekdays", "* * 1-5"),
     ("on weekdays", "* * 1-5"),
     ("hafta ici", "* * 1-5"),
+    ("hafta icleri", "* * 1-5"),
     ("hafta ici her gun", "* * 1-5"),
     ("her hafta ici", "* * 1-5"),
     ("is gunleri", "* * 1-5"),
