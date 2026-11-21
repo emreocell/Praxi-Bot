@@ -79,6 +79,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         check_secret_request(env.data_dir),
         check_web(env),
         core::check_schedule_tools(env.data_dir),
+        core::check_process_guard(env.data_dir),
         core::check_disk(env.data_dir),
         check_resources(),
         check_telegram(env),
@@ -928,6 +929,7 @@ id = "m1"
         assert_eq!(get(&checks, "daemon").status, Status::Warn);
         assert_eq!(get(&checks, "browser").status, Status::Warn);
         assert_eq!(get(&checks, "mcp config").status, Status::Ok);
+        assert_eq!(get(&checks, "process guard").status, Status::Skipped);
         assert_eq!(get(&checks, "telegram").status, Status::Ok);
         assert_eq!(get(&checks, "model catalog").status, Status::Ok);
         assert!(

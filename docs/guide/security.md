@@ -121,6 +121,42 @@ Be realistic about the limits:
 - **Early development.** The code is young and unaudited. Do not rely on it for
   high-stakes automation yet.
 
+## Daemon process guard (defence in depth)
+
+At startup the daemon restricts its own process so that a child running as the
+same OS user (a shell command, MCP server or coding CLI) cannot read its memory,
+where the daemon keeps its owner secret:
+
+- **Windows:** the process gets a protected access list: the owner may only
+  query, wait for and terminate it. Opening it for memory read/write, handle
+  duplication or thread creation fails with "access denied".
+- **Linux:** not enabled yet; `doctor` shows "skipped". `PR_SET_DUMPABLE=0`
+  would also hide `/proc/<pid>` from the same user, which the desktop app uses
+  to confirm it is talking to the real daemon, so the app would refuse to
+  connect. It needs the desktop check moved to a pid+stdin handshake or
+  `SO_PEERCRED` first; that is future work.
+- **macOS and others:** nothing is done; `doctor` shows "not supported".
+
+So for now this protection is **Windows only**.
+
+Children start and run normally; they do not inherit the restriction. If the OS
+refuses, the daemon still starts, prints a `DEGRADED` warning and `doctor`
+(`process guard`) shows it.
+
+What this does **not** do: it is not a sandbox. A same-user child can still read
+the token file, call the loopback API with it, edit your configuration files,
+automate the UI, or use a handle that existed before the guard was applied. It
+only closes the in-memory route. Root/administrator and the debugger-privileged
+accounts are not affected.
+
+On Windows an attacker process running **elevated** (administrator token with
+`SeDebugPrivilege`, or SYSTEM) bypasses any process access list, so the guard
+cannot protect against it. After applying the list the daemon therefore tries to
+open itself for memory read/write; if that still succeeds it reports `DEGRADED`
+instead of claiming protection (this is what happens on an elevated
+administrator account, such as the GitHub Windows runner). Run the daemon from a
+normal, non-elevated account if you want this protection.
+
 ## Good practice
 
 1. Keep the default `approve-destructive` preset; widen deliberately.

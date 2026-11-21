@@ -872,6 +872,35 @@ pub fn check_providers_loaded(data_dir: &Path, active: &[String]) -> Check {
     }
 }
 
+/// `process guard`: whether the daemon protected its own process (blocks
+/// same-user children from reading its memory) at its last start.  Reads the
+/// report the daemon recorded in the data dir; a missing report means the
+/// daemon has not run yet, an old/other build, or an unsupported start path.
+#[must_use]
+pub fn check_process_guard(dir: &Path) -> Check {
+    use process_guard::Outcome;
+    const ID: &str = "process_guard";
+    const N: &str = "process guard";
+    let Some(report) = process_guard::load(dir) else {
+        let msg = if dir.join(process_guard::REPORT_FILE).exists() {
+            "report file is unreadable (torn or from another build); it is rewritten when the daemon starts"
+        } else {
+            "no report yet; it is written when the daemon starts"
+        };
+        return Check::skipped(ID, N, msg);
+    };
+    match report.outcome {
+        Outcome::Applied => Check::ok(ID, N, format!("{} (pid {})", report.detail, report.pid)),
+        Outcome::NotSupported | Outcome::Skipped => Check::skipped(ID, N, report.detail),
+        Outcome::Failed => Check::warn(
+            ID,
+            N,
+            format!("DEGRADED: {}", report.detail),
+            "the daemon runs without memory protection against same-user child processes; restart it, and report this if it persists",
+        ),
+    }
+}
+
 /// `schedule tools`: whether `schedule.toml` is usable.  A broken one switches
 /// the bots' schedule tools off (they never fall back to looser defaults).
 #[must_use]

@@ -972,6 +972,10 @@ pub fn serve(
     }
     let storage = Arc::new(Storage::open(data_dir)?);
     step("database open");
+    // Result of the early process guard (see `run_serve`), for `doctor`.
+    if let Err(e) = process_guard::record(data_dir, &process_guard::protect()) {
+        eprintln!("warning: could not record the process guard status: {e}");
+    }
     let token = load_or_create_token(data_dir)?;
     step("api token ready");
     if !token.restricted {

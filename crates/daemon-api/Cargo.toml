@@ -20,6 +20,7 @@ workflow-replay = { path = "../workflow-replay", version = "0.1.0" }
 base64.workspace = true
 cap-fs-ext = "4.0.3"
 peer-network = { path = "../peer-network", version = "0.1.0" }
+process-guard = { path = "../process-guard", version = "0.1.0" }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 browser-cdp = { path = "../browser-cdp", version = "0.1.0" }
 tempfile.workspace = true

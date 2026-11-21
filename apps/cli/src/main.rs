@@ -933,6 +933,14 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
 fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
     use std::sync::Arc;
 
+    // First thing: restrict the daemon process before secrets are read or
+    // children are spawned. Never fatal; the result is recorded in `serve`
+    // and shown by `doctor`.
+    let guard = process_guard::protect();
+    if guard.outcome == process_guard::Outcome::Failed {
+        eprintln!("warning: DEGRADED process guard: {}", guard.detail);
+    }
+
     let (host_mode, peer_enabled) = match command {
         Command::Serve { host, peer, .. } => (*host, *peer),
         _ => (false, false),

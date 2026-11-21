@@ -59,6 +59,7 @@ impl Default for ViewLimits {
 }
 /// Identity is installed only after loopback or trusted transport authentication.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // independent authority flags, each set by one transport
 pub struct Actor {
     pub(crate) key: String,
     pub(crate) recovery: bool,
@@ -68,6 +69,11 @@ pub struct Actor {
     /// read from the device list for THIS request. Such a desktop may watch and
     /// drive the host's screen without a manual grant (see [`LiveView::allowed`]).
     pub(crate) admin: bool,
+    /// May see approval/question decisions and overlay control requests on the
+    /// event stream: the local app (owner key presented) or a paired Desktop.
+    /// Everything else (bearer-only holders, phones, node/host roles) is
+    /// low-privilege. See `sse::classify`.
+    pub(crate) decisions: bool,
 }
 impl Actor {
     pub(crate) fn local(s: &AppState) -> Self {
@@ -76,6 +82,8 @@ impl Actor {
             recovery: true,
             local: true,
             admin: false,
+            // Installed from the request by the auth layer (owner key).
+            decisions: false,
         }
     }
     pub(crate) fn peer(p: &crate::PeerIdentity) -> Self {
@@ -84,6 +92,11 @@ impl Actor {
             recovery: p.role == crate::PeerRole::Desktop,
             local: false,
             admin: false,
+            decisions: match p.role {
+                crate::PeerRole::Desktop => true,
+                // Fail closed: every other role is low-privilege.
+                crate::PeerRole::Phone | crate::PeerRole::Node | crate::PeerRole::Host => false,
+            },
         }
     }
     /// A paired peer as seen by THIS daemon right now: the admin desktop of a host
@@ -1722,6 +1735,7 @@ fn write_released_audit(s: &AppState, journal: &ReleaseJournal) -> Result<(), Ap
         recovery: false,
         local: false,
         admin: false,
+        decisions: false,
     };
     audit(
         s,
@@ -2011,6 +2025,7 @@ impl AppState {
             recovery: false,
             local: false,
             admin: false,
+            decisions: false,
         };
         if (!privileges.view || !privileges.input)
             && let Some(t) = self.hub().takeover().filter(|t| t.actor == actor_key)
