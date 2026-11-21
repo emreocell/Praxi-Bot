@@ -4186,13 +4186,19 @@
   },
   "usage": {
     "bot": "Bot",
+    "byBot": "Nach Bot",
+    "byModel": "Nach Modell",
     "cached": "Im Cache",
     "calls": "Aufrufe",
     "completion": "Antwort",
     "cost": "Kosten",
-    "costNote": "Kosten werden nur für Modelle mit bekanntem Preis angezeigt; „—“ bedeutet unbekannt.",
+    "costNote": "Kosten werden nur für Modelle mit bekanntem Preis angezeigt; unbekannte Preise werden nie als Null dargestellt.",
+    "day": "Tag",
     "deletedBot": "Gelöschter Bot",
     "empty": "Noch keine Nutzung. Sobald du einem Bot schreibst, erscheint der Token-Verbrauch hier.",
+    "exportCsv": "CSV herunterladen",
+    "exportDone": "Nutzungs-CSV heruntergeladen.",
+    "exportFailed": "Nutzungs-CSV konnte nicht heruntergeladen werden",
     "limit": {
       "clear": "Limit entfernen",
       "forecast": "Prognose zum Monatsende",
@@ -4218,21 +4224,44 @@
       "title": "Monatliches Ausgabenlimit",
       "unpriced": "{{count}} Aufrufe diesen Monat hatten keinen bekannten Preis und wurden nicht mitgezählt."
     },
+    "loading": "Nutzung wird geladen…",
+    "model": "Modell",
     "modelCalls": "Modellaufrufe",
+    "noUsageShort": "{{count}} ohne Daten",
+    "partialCostShort": "+ {{count}} unbekannt",
     "prompt": "Prompt",
     "range": "Zeitraum",
     "ranges": {
       "all": "Gesamte Zeit",
       "day": "Letzte 24 Std.",
       "month": "Letzte 30 Tage",
+      "quarter": "Letzte 90 Tage",
       "week": "Letzte 7 Tage"
     },
     "refresh": "Aktualisieren",
+    "retry": "Erneut versuchen",
     "runs": "Läufe",
-    "subtitle": "Tokens, die jeder Bot verbraucht hat.",
+    "subtitle": "Tokens, Aufrufe und geschätzte Kosten nach Modell, Bot und Tag.",
     "title": "Nutzung",
     "tokens": "Tokens",
-    "total": "Gesamt"
+    "total": "Gesamt",
+    "trend": {
+      "ariaLabel": "Täglicher {{metric}}-Verlauf über {{days}} Tage",
+      "dayReadout": "{{day}} · {{calls}} Aufrufe · {{tokens}} Tokens · {{cost}}",
+      "hoverHint": "Fahre über einen Tag oder fokussiere ihn, um die Summen zu sehen.",
+      "metric": "Diagramm-Kennzahl",
+      "metrics": {
+        "calls": "Aufrufe",
+        "cost": "Kosten",
+        "tokens": "Token-Menge"
+      },
+      "showTable": "Tägliche Tabelle anzeigen",
+      "timeZone": "Lokale Tage ({{tz}})",
+      "title": "Tagesverlauf"
+    },
+    "unknown": "Unbekannt",
+    "unknownCostNotice": "{{count}} Aufruf(e) hatten keinen bekannten Preis und sind nicht in den Gesamtkosten enthalten.",
+    "unknownUsageNotice": "{{count}} Aufruf(e) haben keine Token-Daten gemeldet und werden getrennt gezählt."
   },
   "voice": {
     "auto": "Automatisch (passend zur App-Sprache)",

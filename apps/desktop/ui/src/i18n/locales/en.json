@@ -4186,13 +4186,19 @@
   },
   "usage": {
     "bot": "Bot",
+    "byBot": "By bot",
+    "byModel": "By model",
     "cached": "Cached",
     "calls": "Calls",
     "completion": "Completion",
     "cost": "Cost",
-    "costNote": "Cost is shown only for models with a known price; “—” means unknown.",
+    "costNote": "Cost is shown only for models with a known price; unknown pricing is never shown as zero.",
+    "day": "Day",
     "deletedBot": "Deleted bot",
     "empty": "No usage yet. Send a message to a bot and its token use shows up here.",
+    "exportCsv": "Download CSV",
+    "exportDone": "Usage CSV downloaded.",
+    "exportFailed": "Could not download usage CSV",
     "limit": {
       "clear": "Remove limit",
       "forecast": "Forecast for month end",
@@ -4218,21 +4224,44 @@
       "title": "Monthly spending limit",
       "unpriced": "{{count}} calls this month had no known price and are not counted."
     },
+    "loading": "Loading usage…",
+    "model": "Model",
     "modelCalls": "Model calls",
+    "noUsageShort": "{{count}} without usage",
+    "partialCostShort": "+ {{count}} unknown",
     "prompt": "Prompt",
     "range": "Time range",
     "ranges": {
       "all": "All time",
       "day": "Last 24 h",
       "month": "Last 30 days",
+      "quarter": "Last 90 days",
       "week": "Last 7 days"
     },
     "refresh": "Refresh",
+    "retry": "Try again",
     "runs": "Runs",
-    "subtitle": "Tokens used by each bot.",
+    "subtitle": "Tokens, calls, and estimated cost by model, bot, and day.",
     "title": "Usage",
     "tokens": "Tokens",
-    "total": "Total"
+    "total": "Total",
+    "trend": {
+      "ariaLabel": "Daily {{metric}} trend over {{days}} days",
+      "dayReadout": "{{day}} · {{calls}} calls · {{tokens}} tokens · {{cost}}",
+      "hoverHint": "Hover or focus a day to see its totals.",
+      "metric": "Chart metric",
+      "metrics": {
+        "calls": "Calls",
+        "cost": "Cost",
+        "tokens": "Tokens"
+      },
+      "showTable": "Show daily breakdown table",
+      "timeZone": "Local days ({{tz}})",
+      "title": "Daily trend"
+    },
+    "unknown": "Unknown",
+    "unknownCostNotice": "{{count}} call(s) had unknown pricing and are excluded from the cost total.",
+    "unknownUsageNotice": "{{count}} call(s) reported no token usage data and are counted separately."
   },
   "voice": {
     "auto": "Automatic (matches the app language)",

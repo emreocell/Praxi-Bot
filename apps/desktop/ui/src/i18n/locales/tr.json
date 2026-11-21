@@ -4186,13 +4186,19 @@
   },
   "usage": {
     "bot": "Bot",
+    "byBot": "Bota göre",
+    "byModel": "Modele göre",
     "cached": "Önbellekte",
     "calls": "Çağrı",
     "completion": "Yanıt",
     "cost": "Maliyet",
-    "costNote": "Maliyet yalnızca fiyatı bilinen modeller için gösterilir; “—” bilinmiyor demektir.",
+    "costNote": "Maliyet yalnızca fiyatı bilinen modeller için gösterilir; bilinmeyen fiyat asla sıfır olarak gösterilmez.",
+    "day": "Gün",
     "deletedBot": "Silinmiş bot",
     "empty": "Henüz kullanım yok. Bir bota mesaj gönderdiğinde token kullanımı burada görünür.",
+    "exportCsv": "CSV indir",
+    "exportDone": "Kullanım CSV dosyası indirildi.",
+    "exportFailed": "Kullanım CSV dosyası indirilemedi",
     "limit": {
       "clear": "Limiti kaldır",
       "forecast": "Ay sonu tahmini",
@@ -4218,21 +4224,44 @@
       "title": "Aylık harcama limiti",
       "unpriced": "Bu ay {{count}} çağrının fiyatı bilinmiyor; sayılmadı."
     },
+    "loading": "Kullanım yükleniyor…",
+    "model": "Model adı",
     "modelCalls": "Model çağrıları",
+    "noUsageShort": "{{count}} verisiz",
+    "partialCostShort": "+ {{count}} bilinmiyor",
     "prompt": "İstem",
     "range": "Zaman aralığı",
     "ranges": {
       "all": "Tüm zamanlar",
       "day": "Son 24 saat",
       "month": "Son 30 gün",
+      "quarter": "Son 90 gün",
       "week": "Son 7 gün"
     },
     "refresh": "Yenile",
+    "retry": "Tekrar dene",
     "runs": "Çalışmalar",
-    "subtitle": "Her botun kullandığı token sayısı.",
+    "subtitle": "Model, bot ve güne göre token, çağrı ve tahmini maliyet.",
     "title": "Kullanım",
     "tokens": "Token",
-    "total": "Toplam"
+    "total": "Toplam",
+    "trend": {
+      "ariaLabel": "{{days}} günlük {{metric}} eğilimi",
+      "dayReadout": "{{day}} · {{calls}} çağrı · {{tokens}} token · {{cost}}",
+      "hoverHint": "Toplamlarını görmek için bir günün üzerine gelin veya odaklanın.",
+      "metric": "Grafik ölçütü",
+      "metrics": {
+        "calls": "Çağrılar",
+        "cost": "Maliyet",
+        "tokens": "Token"
+      },
+      "showTable": "Günlük döküm tablosunu göster",
+      "timeZone": "Yerel günler ({{tz}})",
+      "title": "Günlük eğilim"
+    },
+    "unknown": "Bilinmiyor",
+    "unknownCostNotice": "{{count}} çağrının fiyatı bilinmiyor ve maliyet toplamına dahil edilmedi.",
+    "unknownUsageNotice": "{{count}} çağrı token kullanım verisi bildirmedi ve ayrı sayıldı."
   },
   "voice": {
     "auto": "Otomatik (uygulama diline göre)",

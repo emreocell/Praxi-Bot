@@ -340,9 +340,13 @@ export class ApiClient {
     return res.blob();
   }
 
-  /** Like `request`, for routes that answer with text (Markdown). */
-  protected async requestText(method: string, path: string): Promise<string> {
-    const res = await this.send(method, path);
+  /** Like `request`, for routes that answer with text (Markdown, CSV). */
+  protected async requestText(
+    method: string,
+    path: string,
+    opts: { query?: Query; signal?: AbortSignal } = {}
+  ): Promise<string> {
+    const res = await this.send(method, path, opts);
     return res.text();
   }
 
@@ -822,8 +826,19 @@ export class ApiClient {
     return this.request("PUT", "/spend-limit", { body: { limit_usd: limitUsd } });
   }
 
-  usage(sinceMs?: number): Promise<UsageSummary> {
-    return this.request("GET", "/usage", { query: { since_ms: sinceMs } });
+  usage(
+    opts?: number | { since_ms?: number; until_ms?: number; days?: number; tz?: string }
+  ): Promise<UsageSummary> {
+    const query: Query =
+      typeof opts === "number" ? { since_ms: opts } : (opts ?? {});
+    return this.request("GET", "/usage", { query });
+  }
+
+  /** Formula-safe CSV export of usage over the same range (owner only). */
+  usageExport(
+    opts?: { since_ms?: number; until_ms?: number; days?: number; tz?: string }
+  ): Promise<string> {
+    return this.requestText("GET", "/usage/export", { query: opts });
   }
 
   /** Daemon's current controller registration & owned takeover status. */

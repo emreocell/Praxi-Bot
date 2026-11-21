@@ -447,6 +447,30 @@ const MOCK_NPM: Record<string, string> = {
   gemini: "@google/gemini-cli"
 };
 
+function mockDailySeries(days = 30) {
+  const out = [];
+  const today = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const calls = i % 3 === 0 ? 0 : 6 + ((days - i) % 11);
+    const prompt = calls * 4200;
+    const completion = calls * 650;
+    const cached = Math.round(prompt * 0.45);
+    out.push({
+      day,
+      model_calls: calls,
+      prompt_tokens: prompt,
+      completion_tokens: completion,
+      cached_tokens: cached,
+      cost_usd: calls === 0 ? null : Number((calls * 0.0112).toFixed(4)),
+      calls_without_usage: 0,
+      calls_without_cost: i === 2 ? 1 : 0
+    });
+  }
+  return out;
+}
+
 const USAGE: UsageSummary = {
   runs: 42,
   total: {
@@ -473,7 +497,94 @@ const USAGE: UsageSummary = {
       cached_tokens: 140_000,
       cost_usd: 0.5127
     }
-  ]
+  ],
+  by_purpose: {
+    executor: {
+      model_calls: 280,
+      prompt_tokens: 1_120_000,
+      completion_tokens: 175_000,
+      cached_tokens: 640_000,
+      cost_usd: 3.4127
+    },
+    router: {
+      model_calls: 31,
+      prompt_tokens: 84_500,
+      completion_tokens: 13_300,
+      cached_tokens: 0,
+      cost_usd: null
+    }
+  },
+  by_model: [
+    {
+      model: "anthropic/claude-sonnet-4-5",
+      provider: "anthropic",
+      model_calls: 190,
+      prompt_tokens: 820_000,
+      completion_tokens: 130_000,
+      cached_tokens: 500_000,
+      cost_usd: 2.9,
+      calls_without_usage: 0,
+      calls_without_cost: 0
+    },
+    {
+      model: "openai/gpt-4o-mini",
+      provider: "openai",
+      model_calls: 90,
+      prompt_tokens: 300_000,
+      completion_tokens: 45_000,
+      cached_tokens: 140_000,
+      cost_usd: 0.5127,
+      calls_without_usage: 0,
+      calls_without_cost: 0
+    },
+    {
+      model: "ollama/llama3.2",
+      provider: "ollama",
+      model_calls: 31,
+      prompt_tokens: 84_500,
+      completion_tokens: 13_300,
+      cached_tokens: 0,
+      cost_usd: null,
+      calls_without_usage: 2,
+      calls_without_cost: 31
+    }
+  ],
+  by_provider: [
+    {
+      provider: "anthropic",
+      model_calls: 190,
+      prompt_tokens: 820_000,
+      completion_tokens: 130_000,
+      cached_tokens: 500_000,
+      cost_usd: 2.9,
+      calls_without_usage: 0,
+      calls_without_cost: 0
+    },
+    {
+      provider: "openai",
+      model_calls: 90,
+      prompt_tokens: 300_000,
+      completion_tokens: 45_000,
+      cached_tokens: 140_000,
+      cost_usd: 0.5127,
+      calls_without_usage: 0,
+      calls_without_cost: 0
+    },
+    {
+      provider: "ollama",
+      model_calls: 31,
+      prompt_tokens: 84_500,
+      completion_tokens: 13_300,
+      cached_tokens: 0,
+      cost_usd: null,
+      calls_without_usage: 2,
+      calls_without_cost: 31
+    }
+  ],
+  daily: mockDailySeries(30),
+  calls_without_usage: 2,
+  calls_without_cost: 31,
+  time_zone: "UTC"
 };
 
 const MCP_TOOLS: McpTool[] = [
@@ -690,6 +801,16 @@ export class MockApiClient extends ApiClient {
 
   protected override async requestText(method: string, path: string): Promise<string> {
     await Promise.resolve();
+    if (method === "GET" && path === "/usage/export") {
+      const today = new Date().toISOString().slice(0, 10);
+      return [
+        "day,bot,model,purpose,calls,calls_without_usage,prompt_tokens,completion_tokens,cached_tokens,cost_usd",
+        `${today},Atlas,anthropic/claude-sonnet-4-5,executor,190,0,820000,130000,500000,2.900000`,
+        `${today},Nova,openai/gpt-4o-mini,executor,90,0,300000,45000,140000,0.512700`,
+        `${today},Nova,ollama/llama3.2,router,31,2,84500,13300,0,`,
+        ""
+      ].join("\n");
+    }
     if (method === "GET" && path === "/doctor/report") {
       const rows = this.doctorChecks
         .map((c) => `| ${c.status} | ${c.title} | ${c.detail} |`)
@@ -1121,8 +1242,12 @@ export class MockApiClient extends ApiClient {
             state: "running", created_at_ms: Date.now() - 6000, parent_run_id: null
           }] : [past]);
         }
-      case "GET /usage":
-        return ok(USAGE);
+      case "GET /usage": {
+        const rawDays = Number(opts.query?.days);
+        const days = Number.isFinite(rawDays) && rawDays > 0 ? Math.min(rawDays, 90) : 30;
+        const tz = typeof opts.query?.tz === "string" && opts.query.tz ? opts.query.tz : "UTC";
+        return ok({ ...USAGE, daily: mockDailySeries(days), time_zone: tz });
+      }
       case "GET /spend-limit":
       case "PUT /spend-limit": {
         if (method === "PUT") {
