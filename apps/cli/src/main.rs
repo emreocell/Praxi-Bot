@@ -29,6 +29,7 @@ mod mcp_serve;
 mod pc_target;
 mod peer;
 mod presets;
+mod profile_cmd;
 mod prompt;
 mod remote;
 mod serve;
@@ -246,6 +247,11 @@ enum Command {
     Bots {
         #[command(subcommand)]
         action: BotsCmd,
+    },
+    /// Export or import a shareable bot profile (no secrets, grants, memory or paths).
+    Profile {
+        #[command(subcommand)]
+        action: profile_cmd::ProfileCmd,
     },
     /// Answer a pending question from a bot.
     Answer {
@@ -719,6 +725,7 @@ fn run() -> Result<()> {
                 | Command::Proxy
                 | Command::Chat { .. }
                 | Command::Bots { .. }
+                | Command::Profile { .. }
                 | Command::Approve { .. }
                 | Command::Answer { .. }
                 | Command::Schedules { .. }
@@ -793,6 +800,7 @@ fn run() -> Result<()> {
         | Command::Chat { .. }
         | Command::Chats { .. }
         | Command::Bots { .. }
+        | Command::Profile { .. }
         | Command::Approve { .. }
         | Command::Answer { .. }
         | Command::Schedules { .. }
@@ -899,6 +907,7 @@ fn run() -> Result<()> {
         | Command::Chat { .. }
         | Command::Chats { .. }
         | Command::Bots { .. }
+        | Command::Profile { .. }
         | Command::Approve { .. }
         | Command::Answer { .. }
         | Command::Schedules { .. }
@@ -1259,6 +1268,7 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
             Command::Bots {
                 action: BotsCmd::Add { file },
             } => remote::bots_add(&c, file, json, &mut out).await,
+            Command::Profile { action } => profile_cmd::run(&c, action, json, &mut out).await,
             Command::Chat {
                 bot_id,
                 message,
@@ -2005,6 +2015,22 @@ mod tests {
                 action: BotsCmd::Add { .. }
             })
         ));
+        // `bot profile import` defaults to the safest ceiling and needs --yes to create.
+        match Cli::try_parse_from(["bot", "profile", "import", "p.praxi-bot.json"])
+            .unwrap()
+            .command
+        {
+            Some(Command::Profile {
+                action:
+                    profile_cmd::ProfileCmd::Import {
+                        level, yes: false, ..
+                    },
+            }) => assert_eq!(level, profile_cmd::Level::ReadOnly),
+            other => panic!("unexpected parse: {}", other.is_some()),
+        }
+        assert!(
+            Cli::try_parse_from(["bot", "profile", "import", "p.json", "--level", "root"]).is_err()
+        );
         assert!(matches!(
             Cli::try_parse_from(["bot", "status"]).unwrap().command,
             Some(Command::Status)
