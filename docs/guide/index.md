@@ -6,6 +6,8 @@ provider you choose (a cloud API or a local model), and can work for you:
 read and edit files, run commands, drive a browser, operate desktop apps, run
 on a schedule, and report to you on your phone through Telegram.
 
+In another language: [Türkçe](tr/index.md) · [Deutsch](de/index.md). Pages that are not translated yet open in English.
+
 Three ideas run through the whole product:
 
 - **You stay in control.** Every action that changes something is checked by a

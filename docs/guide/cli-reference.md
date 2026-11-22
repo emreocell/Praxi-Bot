@@ -99,6 +99,7 @@ fails.
 | --- | --- |
 | `--online` | Also test provider connections and peer relay reachability over the network |
 | `--report <FILE>` | Write a redacted diagnostic bundle (JSON, no secrets) to this file |
+| `--time-url <HTTPS_URL>` | Compare this computer's clock with the `Date` header of this https address and warn about a large difference (more than 2 minutes). Off by default: without it no request is made. If the address cannot be reached the check is skipped and never fails the doctor |
 
 `--json` prints the checks as JSON.
 

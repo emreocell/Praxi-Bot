@@ -1,0 +1,130 @@
+[
+  {
+    "doc": "tr/backup-and-restore.md",
+    "title": "Eski şifresiz yedekleri geri yükleme",
+    "headings": [],
+    "summary": "Güncel sürümler şifreli yedek oluşturur; bkz. Şifreli yedekleme ve geri yükleme."
+  },
+  {
+    "doc": "tr/bot-spending-limits.md",
+    "title": "Bot harcama sınırları",
+    "headings": [
+      "Neler ayarlayabilirsin",
+      "Yeni botlar için varsayılan",
+      "Sınıra ulaşılınca ne olur",
+      "Kullanım nasıl sayılır",
+      "Sınırları kim değiştirebilir"
+    ],
+    "summary": "Her bota, model çağrılarının kullanabileceği miktar için günlük, haftalık ve aylık sınır koyabilirsin."
+  },
+  {
+    "doc": "tr/calendar.md",
+    "title": "Takvim (CalDAV)",
+    "headings": [
+      "Kurulum",
+      "Araçlar",
+      "Güvenlik"
+    ],
+    "summary": "Botlar bir CalDAV takviminde (Nextcloud, Radicale, Fastmail, iCloud, Synology ...) etkinlik okuyabilir ve"
+  },
+  {
+    "doc": "tr/computer-use.md",
+    "title": "Kendi bilgisayarında bilgisayar kullanımı",
+    "headings": [
+      "Bir bot neler yapabilir",
+      "Güvenlik",
+      "Doğrulanmayanlar"
+    ],
+    "summary": "Sohbet Bu bilgisayar'ı kullanıyorsa ve sahip anahtarı Botlarım bu bilgisayarı kullanabilsin açıksa,"
+  },
+  {
+    "doc": "tr/faq.md",
+    "title": "SSS",
+    "headings": [
+      "Praxi kullanıma hazır mı?",
+      "Bir şey bilgisayarımdan dışarı çıkıyor mu?",
+      "Para harcar mı?",
+      "Hangi işletim sistemleri çalışıyor?",
+      "Terminal olmadan kullanabilir miyim?",
+      "Bot, bana sormadan bir şey yapabilir mi?",
+      "Bir botu hemen nasıl durdururum?",
+      "Birden fazla bot çalıştırabilir miyim?",
+      "Verilerim nerede ve nasıl yedeklerim?",
+      "Docker içinde nasıl yedek alırım?",
+      "Bir botu nasıl daha hızlı ve ucuz yaparım?",
+      "Bir iş akışını göstererek kaydedebilir miyim?",
+      "Uzun süreli hafızası var mı?",
+      "MCP sunucuları ya da eklentiler ekleyebilir miyim?",
+      "Bir bot başka bir bilgisayarı yönetebilir mi?",
+      "Başka hangi mesajlaşma uygulamaları destekleniyor?",
+      "Ses, görüntü ya da video üretimi var mı?",
+      "Türkçe kullanabilir miyim?",
+      "Nasıl güncellerim?",
+      "Nasıl kaldırırım?",
+      "Hataları nerede bildirir ya da nasıl katkıda bulunurum?"
+    ],
+    "summary": "Erken geliştirme aşamasında. README'de kararlı bir API ve sürüm olmadığı, bazı şeylerin bozulacağı yazıyor."
+  },
+  {
+    "doc": "tr/glossary.md",
+    "title": "Sözlük",
+    "headings": [],
+    "summary": "Praxi'de, kullanım kılavuzunda ve kodda geçen temel terimlerin alfabetik listesi."
+  },
+  {
+    "doc": "tr/home-assistant.md",
+    "title": "Home Assistant",
+    "headings": [
+      "Kurulum",
+      "Araçlar",
+      "Güvenlik"
+    ],
+    "summary": "Botlar Home Assistant varlıklarını okuyabilir ve servisleri çağırabilir (ışığı açmak, termostatı ayarlamak gibi)."
+  },
+  {
+    "doc": "tr/index.md",
+    "title": "Kullanım kılavuzu (Türkçe)",
+    "headings": [
+      "Çevrilmiş sayfalar"
+    ],
+    "summary": "Kılavuzun bu bölümü, en çok bakılan sayfaların sade Türkçe çevirisidir. Henüz çevrilmemiş sayfalar İngilizce"
+  },
+  {
+    "doc": "tr/schedules.md",
+    "title": "Zamanlanmış işler, sade anlatımla",
+    "headings": [
+      "İlk işini oluştur",
+      "Sözcüklerle yazmak",
+      "Gelişmiş (kapalı)",
+      "Bilgisayar kapalıysa",
+      "Şimdi çalıştır, duraklat, düzenle, sil",
+      "Geçmiş ve sorunlar",
+      "Sana haber vermek",
+      "Güvenlik"
+    ],
+    "summary": "\"hafta içi her gün 9:00'da okunmamış e-postalarımı özetle\". Bir kez kurarsın, sonra kendi kendine çalışır."
+  },
+  {
+    "doc": "tr/settings.md",
+    "title": "Ayarlar",
+    "headings": [
+      "Sayfalar",
+      "Arama",
+      "Basit ve Gelişmiş",
+      "Güvenlik düzeyleri",
+      "Önerilene sıfırla",
+      "Küçük ekranlar"
+    ],
+    "summary": "Değişiklikler kendiliğinden kaydedilir: her değişiklikten sonra sağ üstteki etikette Kaydedildi yazar."
+  },
+  {
+    "doc": "tr/telegram.md",
+    "title": "Telegram",
+    "headings": [
+      "Sohbette",
+      "Dil",
+      "Bilmen gerekenler"
+    ],
+    "summary": "Botlarınla telefonundan konuş. Daemon bir Telegram kanalı çalıştırır: botuna mesaj yazarsın, yanıtın akışını"
+  }
+]

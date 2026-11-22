@@ -494,6 +494,10 @@ struct DoctorCmd {
     /// Write a redacted diagnostic bundle (JSON, no secrets) to this file.
     #[arg(long, value_name = "FILE")]
     report: Option<PathBuf>,
+    /// Compare this computer's clock with the `Date` header of this HTTPS URL
+    /// (off by default; sends one HEAD request only when given).
+    #[arg(long, value_name = "HTTPS_URL")]
+    time_url: Option<String>,
 }
 
 #[derive(Args)]
@@ -1007,6 +1011,7 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
         }),
         detected: detect_cli_accounts(),
         desktop: serve::local_desktop(&mut |_| {}).map(|d| d.capabilities()),
+        time_url: c.time_url.as_deref(),
     };
     let checks = doctor::run_checks(&env);
     if cli.json {
@@ -2136,6 +2141,7 @@ mod tests {
             browser_error: None,
             detected: None,
             desktop: None,
+            time_url: None,
         });
         let prov = checks.iter().find(|c| c.title == "providers").unwrap();
         assert!(prov.detail.contains("no LLM provider"), "{}", prov.detail);
