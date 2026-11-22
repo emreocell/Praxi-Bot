@@ -2,6 +2,9 @@
 
 Tier-1 evaluation scenarios live as YAML data files under [`evals/scenarios/`](../../evals/scenarios/) and run hermetically in CI (`cargo test -p evals`) with no network access and no real provider keys.
 
+To capture a real model turn and replay its sanitized transcript through the same
+loop, see [Record and replay](eval-record-replay.md).
+
 For the full scenario schema, tool content classes, and baseline commands, see:
 
 - [`evals/README.md`](../../evals/README.md) — scenario schema, `attack` metadata, `approval_cards` assertions, and `bot-eval` commands

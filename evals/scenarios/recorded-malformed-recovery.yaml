@@ -1,0 +1,131 @@
+name: recorded-malformed-recovery
+description: 'Synthetic provider recording: Malformed JSON arguments and an unknown tool become error results the model can recover from; nothing executes.'
+policy: full
+profile_toml: ''
+guards:
+  max_steps: null
+  repeat_warn: null
+  repeat_stop: null
+  max_tokens_per_turn: null
+  spill_threshold_bytes: null
+  spill_preview_bytes: null
+  tool_timeout_ms: null
+  model_timeout_ms: null
+tools:
+- name: t_read
+  effect: read
+  category: fs
+  output: fine
+  output_bytes: null
+  delay_ms: 0
+  error: null
+  content: none
+  executes: false
+subagents: false
+workflows: []
+user: go
+script: []
+transcript:
+  version: 1
+  synthetic: true
+  source_model: fake/m
+  calls:
+  - request:
+      fingerprint: fb83bff02f4f113c
+      roles:
+      - user
+      tool_results: []
+      tools:
+      - t_read
+      - todo_write
+    chunks:
+    - !tool
+      id: c1
+      name: t_read
+      arguments: '{not json'
+    - !usage
+      prompt_tokens: 10
+      completion_tokens: 5
+      cached_tokens: null
+      cache_write_tokens: null
+    - !done ToolCalls
+  - request:
+      fingerprint: 86f5ca460516126c
+      roles:
+      - user
+      - assistant
+      - tool
+      tool_results:
+      - 'Error: invalid JSON arguments: key must be a string at line 1 column 2'
+      tools:
+      - t_read
+      - todo_write
+    chunks:
+    - !tool
+      id: c2
+      name: does_not_exist
+      arguments: '{}'
+    - !usage
+      prompt_tokens: 10
+      completion_tokens: 5
+      cached_tokens: null
+      cache_write_tokens: null
+    - !done ToolCalls
+  - request:
+      fingerprint: 36df1a4292f908ad
+      roles:
+      - user
+      - assistant
+      - tool
+      - assistant
+      - tool
+      tool_results:
+      - 'Error: invalid JSON arguments: key must be a string at line 1 column 2'
+      - 'Error: unknown tool "does_not_exist"'
+      tools:
+      - t_read
+      - todo_write
+    chunks:
+    - !text recovered
+    - !usage
+      prompt_tokens: 10
+      completion_tokens: 5
+      cached_tokens: null
+      cache_write_tokens: null
+    - !done Stop
+reactions: []
+expect:
+  state: succeeded
+  model_calls: 3
+  tool_calls:
+  - t_read
+  - does_not_exist
+  tool_runs:
+    t_read: 0
+  tool_finished: {}
+  permissions:
+  - tool: t_read
+    decision: allowed
+  - tool: does_not_exist
+    decision: allowed
+  final_text:
+    contains: []
+    not_contains: []
+    regex: null
+    equals: recovered
+  error: null
+  requests: []
+  files_absent: []
+  files_unchanged: {}
+  approval_cards: []
+  no_approval_tools:
+  - t_read
+timeout_ms: null
+unsafe_tools: []
+secrets: []
+expected_fail: null
+initiator: human
+fs: null
+settle_ms: 0
+redact_secrets: false
+attack: null

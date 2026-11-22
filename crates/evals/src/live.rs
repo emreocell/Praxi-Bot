@@ -77,6 +77,27 @@ pub fn build_live_provider(
     data_dir: &Path,
     catalog: Option<&Path>,
 ) -> Result<LiveProvider> {
+    build_provider(model, data_dir, catalog, true)
+}
+
+/// Real provider for recording, with raw failed-request debug dumps disabled.
+///
+/// # Errors
+/// The same configuration and credential errors as [`build_live_provider`].
+pub fn build_recording_provider(
+    model: Option<&str>,
+    data_dir: &Path,
+    catalog: Option<&Path>,
+) -> Result<LiveProvider> {
+    build_provider(model, data_dir, catalog, false)
+}
+
+fn build_provider(
+    model: Option<&str>,
+    data_dir: &Path,
+    catalog: Option<&Path>,
+    debug: bool,
+) -> Result<LiveProvider> {
     let cfg = ProviderConfig::load(&config_path(data_dir))?;
     let wanted = model.map(|m| ModelRef(m.to_owned()));
     let wanted_provider = wanted.as_ref().and_then(ModelRef::provider);
@@ -86,7 +107,7 @@ pub fn build_live_provider(
     };
     if configured.is_none()
         && let (Some(p), Some(m)) = (wanted_provider, &wanted)
-        && let Some(live) = native_gemini_preset(p, m, data_dir, catalog)?
+        && let Some(live) = native_gemini_preset(p, m, data_dir, catalog, debug)?
     {
         return Ok(live);
     }
@@ -118,7 +139,7 @@ pub fn build_live_provider(
         })?
     };
     let (store, _) = open_store(BackendChoice::Auto, data_dir, &|_| None)?;
-    let provider = settings.build_provider(&entry, &*store, compat_config(data_dir))?;
+    let provider = settings.build_provider(&entry, &*store, compat_config(data_dir, debug))?;
     Ok(LiveProvider {
         provider: Arc::from(provider),
         model: model_ref.0,
@@ -127,9 +148,9 @@ pub fn build_live_provider(
 
 /// Provider tunables for eval runs: failed HTTP 400 request bodies (redacted, no
 /// key) are dumped to `<data_dir>/debug/`.
-fn compat_config(data_dir: &Path) -> OpenAiCompatConfig {
+fn compat_config(data_dir: &Path, debug: bool) -> OpenAiCompatConfig {
     OpenAiCompatConfig {
-        debug_dir: Some(data_dir.join("debug")),
+        debug_dir: debug.then(|| data_dir.join("debug")),
         ..OpenAiCompatConfig::default()
     }
 }
@@ -146,6 +167,7 @@ fn native_gemini_preset(
     model: &ModelRef,
     data_dir: &Path,
     catalog: Option<&Path>,
+    debug: bool,
 ) -> Result<Option<LiveProvider>> {
     let dir = catalog_dir(catalog);
     // Lenient: one broken catalog file must not hide the valid presets.
@@ -166,7 +188,7 @@ fn native_gemini_preset(
         },
         Auth::None => None,
     };
-    let built = build_chat_provider(&entry, compat_config(data_dir), key)?;
+    let built = build_chat_provider(&entry, compat_config(data_dir, debug), key)?;
     Ok(Some(LiveProvider {
         provider: Arc::from(built),
         model: model.0.clone(),
@@ -316,12 +338,12 @@ mod tests {
         let m = |p: &str| ModelRef(format!("{p}/x"));
         // Not in the catalog / not of kind `gemini`: no preset.
         assert!(
-            native_gemini_preset("nope", &m("nope"), d.path(), None)
+            native_gemini_preset("nope", &m("nope"), d.path(), None, true)
                 .unwrap()
                 .is_none()
         );
         assert!(
-            native_gemini_preset("openrouter", &m("openrouter"), d.path(), None)
+            native_gemini_preset("openrouter", &m("openrouter"), d.path(), None, true)
                 .unwrap()
                 .is_none()
         );
