@@ -1,5 +1,5 @@
-//! Per-bot notes (a persistent scratchpad): `notes_list`, `notes_read`,
-//! `notes_write`, `notes_delete`.
+//! Per-bot notes (a persistent scratchpad): `notes_read` (list, read one,
+//! or search) and `notes_write` (replace, append or delete).
 //!
 //! Notes are small named text documents the bot keeps between runs: a plan, a
 //! checklist, facts for a long task. They are NOT long-term memory (see
@@ -16,7 +16,8 @@
 //!   exposure, so a poisoned note cannot launder a page into a trusted turn.
 //! * `notes_write` is classified as egress-like (`declared(false, true, true)`,
 //!   like `memory_save`): after an untrusted or private read the taint gate
-//!   asks before the bot persists anything. `notes_delete` is destructive.
+//!   asks before the bot persists or deletes anything. Only two tools exist
+//!   because the direct tool budget is nearly full (see `docs/design/agent-tools.md`).
 //! * Text that looks like a credential (`secret_store::detect_secrets`) is
 //!   refused. Size limits: 32 KiB per note, 100 notes, 512 KiB per bot.
 
@@ -36,7 +37,7 @@ use tool_registry::{
 use crate::util::{exec_err, finish_text, parse, spec};
 
 /// Names of the notes tools.
-pub const NOTES_TOOL_NAMES: [&str; 4] = ["notes_list", "notes_read", "notes_write", "notes_delete"];
+pub const NOTES_TOOL_NAMES: [&str; 2] = ["notes_read", "notes_write"];
 
 /// Longest note name, in characters.
 pub const MAX_NAME_CHARS: usize = 64;
@@ -63,10 +64,8 @@ struct Note {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Op {
-    List,
     Read,
     Write,
-    Delete,
 }
 
 struct NotesTool {
@@ -100,12 +99,8 @@ enum WriteMode {
     #[default]
     Replace,
     Append,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DeleteIn {
-    name: String,
+    /// Remove the note (`text` must be empty).
+    Delete,
 }
 
 /// Build the notes tools. Notes live under `<data_dir>/notes/`.
@@ -115,22 +110,12 @@ pub fn tools(data_dir: &std::path::Path) -> Vec<Arc<dyn Tool>> {
     let spill = data_dir.join("spill");
     let lock = Arc::new(tokio::sync::Mutex::new(()));
     let cat = PermissionCategory::Fs;
-    let defs: [(Op, ToolSpec); 4] = [
-        (
-            Op::List,
-            spec(
-                "notes_list",
-                "List this bot's saved notes (name, size, last change). Example: {}",
-                json!({"type":"object","properties":{},"additionalProperties":false}),
-                Effect::Read,
-                cat,
-            ),
-        ),
+    let defs: [(Op, ToolSpec); 2] = [
         (
             Op::Read,
             spec(
                 "notes_read",
-                "Read one note by name, or search all notes for a word or phrase. Notes are your own scratchpad between runs. Example: {\"name\":\"trip-plan\"} or {\"query\":\"passport\"}",
+                "Read your notes: with no arguments list them, with a name read one note, with a query search all notes. Notes are your own scratchpad between runs. Example: {} or {\"name\":\"trip-plan\"} or {\"query\":\"passport\"}",
                 json!({"type":"object","properties":{
                     "name":{"type":"string","maxLength":MAX_NAME_CHARS,"description":"Note name."},
                     "query":{"type":"string","maxLength":200,"description":"Case-insensitive text to look for in every note."}
@@ -143,25 +128,13 @@ pub fn tools(data_dir: &std::path::Path) -> Vec<Arc<dyn Tool>> {
             Op::Write,
             spec(
                 "notes_write",
-                "Create or change a note in your private scratchpad (replace the text or append to it). Keep notes short; never store passwords or keys. Example: {\"name\":\"trip-plan\",\"text\":\"- book hotel\",\"mode\":\"append\"}",
+                "Create, change or delete a note in your private scratchpad (mode replace, append or delete; delete needs empty text). Keep notes short; never store passwords or keys. Example: {\"name\":\"trip-plan\",\"text\":\"- book hotel\",\"mode\":\"append\"}",
                 json!({"type":"object","required":["name","text"],"properties":{
                     "name":{"type":"string","maxLength":MAX_NAME_CHARS,"description":"Letters, digits, space, dash, underscore, dot."},
-                    "text":{"type":"string","maxLength":MAX_NOTE_BYTES,"description":"Note text."},
-                    "mode":{"type":"string","enum":["replace","append"],"description":"Default replace."}
+                    "text":{"type":"string","maxLength":MAX_NOTE_BYTES,"description":"Note text (empty for delete)."},
+                    "mode":{"type":"string","enum":["replace","append","delete"],"description":"Default replace."}
                 },"additionalProperties":false}),
                 Effect::Write,
-                cat,
-            ),
-        ),
-        (
-            Op::Delete,
-            spec(
-                "notes_delete",
-                "Delete one note by name. Example: {\"name\":\"trip-plan\"}",
-                json!({"type":"object","required":["name"],"properties":{
-                    "name":{"type":"string","maxLength":MAX_NAME_CHARS}
-                },"additionalProperties":false}),
-                Effect::Destructive,
                 cat,
             ),
         ),
@@ -258,24 +231,6 @@ impl Tool for NotesTool {
             .to_owned();
         let _guard = self.lock.lock().await;
         match self.op {
-            Op::List => {
-                let book = self.load(&bot)?;
-                if book.notes.is_empty() {
-                    return Ok(ToolOutput::text("No notes yet."));
-                }
-                let mut out = String::new();
-                for (name, n) in &book.notes {
-                    let _ = writeln!(
-                        out,
-                        "{name} ({} bytes, updated {})",
-                        n.text.len(),
-                        n.updated
-                    );
-                }
-                let mut o = ToolOutput::text(out);
-                o.exposure = Some(exposure(book.notes.values().any(|n| n.untrusted)));
-                Ok(o)
-            }
             Op::Read => {
                 let i: ReadIn = parse(input)?;
                 let book = self.load(&bot)?;
@@ -312,9 +267,24 @@ impl Tool for NotesTool {
                         }
                         (out, untrusted)
                     }
-                    _ => {
+                    (None, None) => {
+                        let mut out = String::new();
+                        for (name, n) in &book.notes {
+                            let _ = writeln!(
+                                out,
+                                "{name} ({} bytes, updated {})",
+                                n.text.len(),
+                                n.updated
+                            );
+                        }
+                        if out.is_empty() {
+                            out.push_str("No notes yet.");
+                        }
+                        (out, book.notes.values().any(|n| n.untrusted))
+                    }
+                    (Some(_), Some(_)) => {
                         return Err(ToolError::InvalidInput(
-                            "give exactly one of name or query".into(),
+                            "give a name or a query, not both".into(),
                         ));
                     }
                 };
@@ -340,6 +310,16 @@ impl Tool for NotesTool {
                 }
                 let mut book = self.load(&bot)?;
                 let old = book.notes.get(&name).cloned();
+                if i.mode == WriteMode::Delete {
+                    if !i.text.is_empty() {
+                        return Err(ToolError::InvalidInput("delete takes an empty text".into()));
+                    }
+                    if book.notes.remove(&name).is_none() {
+                        return Err(exec_err(format!("no note named {name:?}")));
+                    }
+                    self.save(&bot, &book)?;
+                    return Ok(ToolOutput::text(format!("Deleted note {name:?}.")));
+                }
                 let text = match (i.mode, &old) {
                     (WriteMode::Append, Some(o)) => format!("{}\n{}", o.text, i.text),
                     _ => i.text,
@@ -381,16 +361,6 @@ impl Tool for NotesTool {
                 Ok(ToolOutput::text(format!(
                     "Saved note {name:?} ({len} bytes)."
                 )))
-            }
-            Op::Delete => {
-                let i: DeleteIn = parse(input)?;
-                let name = valid_name(&i.name)?;
-                let mut book = self.load(&bot)?;
-                if book.notes.remove(&name).is_none() {
-                    return Err(exec_err(format!("no note named {name:?}")));
-                }
-                self.save(&bot, &book)?;
-                Ok(ToolOutput::text(format!("Deleted note {name:?}.")))
             }
         }
     }
@@ -514,6 +484,5 @@ mod tests {
         assert!(w.egress && w.reads_private, "write must ask after a taint");
         let r = get(&ts, "notes_read").spec().content;
         assert!(r.reads_private && !r.egress);
-        assert_eq!(get(&ts, "notes_delete").spec().effect, Effect::Destructive);
     }
 }

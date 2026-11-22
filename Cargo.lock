@@ -885,8 +885,6 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "browser-cdp",
- "chrono",
- "chrono-tz",
  "connector-email",
  "desktop-api",
  "desktop-windows",

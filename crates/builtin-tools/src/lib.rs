@@ -18,7 +18,6 @@
 pub mod bots;
 pub mod browser;
 pub mod checkpoint;
-pub mod clock;
 pub mod control;
 pub mod desktop;
 pub mod files;
@@ -66,7 +65,6 @@ pub use checkpoint::{
     MAX_DIFF_FILE_BYTES, MAX_DIFF_RUN_BYTES, RestoreAction, RestorePreviewEntry, RestoreReport,
     UnifiedDiff, Verification,
 };
-pub use clock::CLOCK_TOOL_NAMES;
 pub use control::{
     ActionPermit, ControlRequest, DesktopControlGate, OBSERVATION_DISCARDED, PermitValidator,
 };
@@ -280,7 +278,6 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         cfg.control,
     ));
     all.extend(meta::tools());
-    all.extend(clock::tools());
     all.extend(notes::tools(&cfg.data_dir));
     if let Some(backend) = cfg.knowledge {
         all.push(knowledge::tool(backend));
@@ -543,12 +540,8 @@ mod tests {
             ("script_run", W, Sc),
             ("ask_user", R, Me),
             ("todo_write", W, Me),
-            ("time_now", R, Me),
-            ("calculate", R, Me),
-            ("notes_list", R, Fs),
             ("notes_read", R, Fs),
             ("notes_write", W, Fs),
-            ("notes_delete", D, Fs),
         ]
     }
 
@@ -1121,7 +1114,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 35 + 6 + 6);
+        assert_eq!(added, 35 + 6 + 2);
 
         // Verification of email tools and their effects
         let send_tool = reg

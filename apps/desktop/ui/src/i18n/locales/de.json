@@ -1469,11 +1469,6 @@
         "failed": "Eine Seite konnte nicht betrachtet werden",
         "running": "Betrachtet eine Seite"
       },
-      "calculate": {
-        "done": "Berechnet",
-        "failed": "Berechnung fehlgeschlagen",
-        "running": "Wird berechnet"
-      },
       "desktop_key": {
         "done": "Tasten auf dem Computer gedrückt",
         "failed": "Tasten wurden nicht gedrückt",
@@ -1609,11 +1604,6 @@
         "failed": "Das Gedächtnis konnte nicht durchsucht werden",
         "running": "Durchsucht das Gedächtnis"
       },
-      "notes_delete": {
-        "done": "Notiz gelöscht",
-        "failed": "Notiz nicht gelöscht",
-        "running": "Notiz wird gelöscht"
-      },
       "notes_read": {
         "done": "Notizen gelesen",
         "failed": "Notizen konnten nicht gelesen werden",
@@ -1663,11 +1653,6 @@
         "done": "Einen Skill geschrieben",
         "failed": "Ein Skill wurde nicht geschrieben",
         "running": "Schreibt einen Skill"
-      },
-      "time_now": {
-        "done": "Uhrzeit geprüft",
-        "failed": "Uhrzeit konnte nicht geprüft werden",
-        "running": "Uhrzeit wird geprüft"
       },
       "todo": {
         "done": "Den Plan aktualisiert",
