@@ -76,6 +76,10 @@ pub mod codes {
     pub const BUSY: &str = "terminal_busy";
     /// The session is gone (ended, replaced or never opened by this desktop).
     pub const GONE: &str = "terminal_gone";
+    /// The host is online but runs a daemon older than this app (no terminal route).
+    pub const HOST_OUTDATED: &str = "host_outdated";
+    /// The host is online but refused this desktop for the terminal.
+    pub const NOT_PERMITTED: &str = "host_not_permitted";
 }
 
 /// The terminal sessions of this daemon, by the key of the desktop that owns each.
@@ -613,7 +617,7 @@ fn open_session(
                 .wait()
                 .await
                 .ok()
-                .and_then(|status| status.code())
+                .and_then(|status| status.code_str())
                 .unwrap_or(-1);
             *session.exit.lock() = Some((code, Instant::now()));
             session.wake.notify_waiters();
@@ -803,7 +807,18 @@ fn host_error(status: u16, body: &serde_json::Value) -> ApiError {
         codes::GONE => codes::GONE,
         crate::host_admin::codes::REQUIRED => crate::host_admin::codes::REQUIRED,
         crate::host_admin::codes::FORBIDDEN => crate::host_admin::codes::FORBIDDEN,
+        // A host that answers 404/405 without one of our codes does not know the
+        // terminal route at all: it runs an older daemon than this app.
+        _ if matches!(status.as_u16(), 404 | 405) => codes::HOST_OUTDATED,
+        // The host refused this desktop (not its paired owner, or the route is closed).
+        _ if matches!(status.as_u16(), 401 | 403) => codes::NOT_PERMITTED,
         _ => "host_link_failed",
+    };
+    // The desktop reads a 404 as "session gone": an outdated host is a gateway problem.
+    let status = if known == codes::HOST_OUTDATED {
+        StatusCode::BAD_GATEWAY
+    } else {
+        status
     };
     ApiError::new(
         status,
@@ -963,6 +978,16 @@ pub(crate) async fn host_close(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_answers_are_worded_by_cause_not_as_unreachable() {
+        let empty = serde_json::json!({});
+        assert_eq!(host_error(404, &empty).code_str(), codes::HOST_OUTDATED);
+        assert_eq!(host_error(403, &empty).code_str(), codes::NOT_PERMITTED);
+        assert_eq!(host_error(500, &empty).code_str(), "host_link_failed");
+        let gone = serde_json::json!({"error":{"code":codes::GONE}});
+        assert_eq!(host_error(404, &gone).code_str(), codes::GONE);
+    }
 
     #[test]
     fn output_ring_keeps_the_newest_bytes_and_reports_what_was_dropped() {

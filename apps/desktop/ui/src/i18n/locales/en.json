@@ -2110,6 +2110,14 @@
         "hint": "Check that it is on and online, then try again.",
         "title": "Could not reach that computer"
       },
+      "host_not_permitted": {
+        "hint": "The computer is online, but it only allows the terminal for its owner's paired desktop. Pair this computer again from the host, then try again.",
+        "title": "That computer did not allow the terminal"
+      },
+      "host_outdated": {
+        "hint": "The computer is online, but its Praxi-Bot version does not know the terminal yet. Update Praxi-Bot there and restart it, then try again.",
+        "title": "That computer runs an older Praxi-Bot"
+      },
       "host_setup_conflict": {
         "hint": "Wait for the current setup to finish, then try again.",
         "title": "That computer is already being set up"
@@ -3091,7 +3099,7 @@
       "watch": "Awake · Watching live"
     },
     "pausedBanner": {
-      "body": "A screen takeover left the bot paused. Clear the pause to let it continue, or open the screen to reacquire control.",
+      "body": "You took over the bot's screen and it stayed paused, so the bot is waiting for you. Hand control back, or remove the pause so it carries on.",
       "title": "Bot paused, waiting for you"
     },
     "privacyNotice": "Screen pixels cannot be redacted (may show passwords or OTPs); this stream stays in memory only and is never sent to model providers.",

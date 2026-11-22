@@ -2110,6 +2110,14 @@
         "hint": "Prüfe, ob er eingeschaltet und online ist, und versuche es erneut.",
         "title": "Dieser Computer ist nicht erreichbar"
       },
+      "host_not_permitted": {
+        "hint": "Der Computer ist online, erlaubt das Terminal aber nur für den gekoppelten Desktop seines Besitzers. Koppel diesen Computer am Host erneut und versuche es dann wieder.",
+        "title": "Dieser Computer hat das Terminal nicht erlaubt"
+      },
+      "host_outdated": {
+        "hint": "Der Computer ist online, aber seine Praxi-Bot-Version kennt das Terminal noch nicht. Aktualisiere Praxi-Bot dort, starte es neu und versuche es erneut.",
+        "title": "Auf diesem Computer läuft ein älteres Praxi-Bot"
+      },
       "host_setup_conflict": {
         "hint": "Warte, bis die aktuelle Einrichtung abgeschlossen ist, und versuche es dann erneut.",
         "title": "Dieser Computer wird bereits eingerichtet"
@@ -3091,7 +3099,7 @@
       "watch": "Aktiv · Live-Ansicht"
     },
     "pausedBanner": {
-      "body": "Eine Bildschirmübernahme hat den Bot pausiert zurückgelassen. Hebe die Pause auf, damit er fortfahren kann, oder öffne den Bildschirm, um die Kontrolle erneut zu übernehmen.",
+      "body": "Du hast den Bildschirm des Bots übernommen und er blieb pausiert, deshalb wartet der Bot auf dich. Gib die Kontrolle zurück oder hebe die Pause auf, damit er weitermacht.",
       "title": "Bot pausiert, wartet auf dich"
     },
     "privacyNotice": "Bildschirmpixel lassen sich nicht schwärzen (können Passwörter oder OTPs zeigen); dieser Stream bleibt nur im Arbeitsspeicher und wird nie an Modellanbieter gesendet.",

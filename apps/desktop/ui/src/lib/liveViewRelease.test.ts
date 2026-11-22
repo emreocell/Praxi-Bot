@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ControlStateDto, ReleaseRequest } from "../api/types.ts";
 import { humanLine } from "./humanError.ts";
-import { runClearPause, runRelease } from "./liveViewRelease.ts";
+import { ApiError } from "../api/client.ts";
+import { requestTakeoverWithRetry, runClearPause, runRelease } from "./liveViewRelease.ts";
 
 const NIL = "00000000-0000-0000-0000-000000000000";
 
@@ -173,4 +174,59 @@ test("unreadable state and a failing recover both fail closed", async () => {
     { kind: "own", takeoverId: "to-1" }
   );
   assert.equal(failed.kind === "failed" && failed.code, "busy");
+});
+
+test("a takeover that hits a 409 refetches and retries once, reacquiring our paused takeover", async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  const accepted = { id: "ok" } as never;
+  const out = await requestTakeoverWithRetry(
+    {
+      takeover: async (r) => {
+        sent.push(r as unknown as Record<string, unknown>);
+        if (sent.length === 1) throw new ApiError(409, "conflict", "changed");
+        return accepted;
+      },
+      getControlState: async () => dto({ id: "mine-1", state: "paused" })
+    },
+    { session_id: "s", request_id: "r1" } as never,
+    () => "r2"
+  );
+  assert.equal(out, accepted);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].request_id, "r2");
+  assert.equal(sent[1].reacquire_takeover_id, "mine-1");
+});
+
+test("a second conflict, or any other error, is not retried again", async () => {
+  let calls = 0;
+  await assert.rejects(
+    requestTakeoverWithRetry(
+      {
+        takeover: async () => {
+          calls++;
+          throw new ApiError(409, "conflict", "changed");
+        },
+        getControlState: async () => dto(null)
+      },
+      { session_id: "s", request_id: "r1" } as never,
+      () => "r2"
+    ),
+    /changed/
+  );
+  assert.equal(calls, 2);
+  calls = 0;
+  await assert.rejects(
+    requestTakeoverWithRetry(
+      {
+        takeover: async () => {
+          calls++;
+          throw new ApiError(403, "forbidden", "no");
+        },
+        getControlState: async () => dto(null)
+      },
+      { session_id: "s", request_id: "r1" } as never,
+      () => "r2"
+    )
+  );
+  assert.equal(calls, 1);
 });

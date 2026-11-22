@@ -2110,6 +2110,14 @@
         "hint": "Açık ve çevrimiçi olduğundan emin olup yeniden dene.",
         "title": "O bilgisayara ulaşılamadı"
       },
+      "host_not_permitted": {
+        "hint": "Bilgisayar çevrimiçi ama terminale yalnızca sahibinin eşleşmiş masaüstü uygulaması için izin veriyor. Bu bilgisayarı sunucudan yeniden eşleştirip yeniden dene.",
+        "title": "O bilgisayar terminale izin vermedi"
+      },
+      "host_outdated": {
+        "hint": "Bilgisayar çevrimiçi ama Praxi-Bot sürümü terminali henüz bilmiyor. Orada Praxi-Bot'u güncelleyip yeniden başlat, sonra yeniden dene.",
+        "title": "O bilgisayarda Praxi-Bot eski sürüm"
+      },
       "host_setup_conflict": {
         "hint": "Süren kurulumun bitmesini bekleyip yeniden dene.",
         "title": "O bilgisayar zaten kuruluyor"
@@ -3091,7 +3099,7 @@
       "watch": "Açık · Canlı izleniyor"
     },
     "pausedBanner": {
-      "body": "Bir ekran devralması botu duraklatılmış bıraktı. Devam etmesi için duraklatmayı kaldır veya kontrolü yeniden devralmak için ekranı aç.",
+      "body": "Botun ekranını devraldın ve bot duraklamış kaldı; senden haber bekliyor. Kontrolü geri ver ya da duraklatmayı kaldırıp devam etmesini sağla.",
       "title": "Bot duraklatıldı, seni bekliyor"
     },
     "privacyNotice": "Ekran pikselleri maskelenemez (parola/OTP içerebilir); bu akış yalnızca bellekte tutulur ve model sağlayıcılarına gönderilmez.",

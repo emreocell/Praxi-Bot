@@ -313,7 +313,11 @@ impl ControlHub {
                 || old
                     .input_deadline
                     .is_some_and(|d| d <= tokio::time::Instant::now());
-            let same = old.actor == actor && req.reacquire_takeover_id == Some(old.info.id);
+            // The same actor taking its own expired/paused takeover back on the same
+            // target needs no remembered id: a reopened live view or a reload loses
+            // the id, and a single user must not be refused by their own leftover.
+            let same = old.actor == actor
+                && (req.reacquire_takeover_id == Some(old.info.id) || old.info.target_id == target);
             if !expired || !(same || (req.recover && privileged && req.reason.is_some())) {
                 return Err("takeover already owned".into());
             }
@@ -1326,6 +1330,32 @@ mod tests {
         assert!(
             hub.begin_takeover("local-ui:me", &recover, Uuid::now_v7(), 1, true, true)
                 .is_ok()
+        );
+    }
+    #[test]
+    fn the_same_actor_retakes_its_own_paused_takeover_without_a_remembered_id() {
+        let hub = ControlHub::new(super::super::ControlConfig::default());
+        let target = Uuid::now_v7();
+        let t = hub
+            .begin_takeover("local-ui:me", &request(), target, 1, false, true)
+            .unwrap();
+        hub.activate(t.info.id, t.info.control_epoch).unwrap();
+        hub.interrupt(t.info.id, Reason::Disconnected);
+        // A reopened live view lost the takeover id: a plain request must work.
+        assert!(
+            hub.begin_takeover("local-ui:me", &request(), target, 1, false, true)
+                .is_ok()
+        );
+        // Another actor, or another target, still needs the explicit path.
+        let t = hub.takeover().unwrap();
+        hub.interrupt(t.info.id, Reason::Disconnected);
+        assert!(
+            hub.begin_takeover("peer:bob", &request(), target, 1, false, false)
+                .is_err()
+        );
+        assert!(
+            hub.begin_takeover("local-ui:me", &request(), Uuid::now_v7(), 1, false, true)
+                .is_err()
         );
     }
     #[test]

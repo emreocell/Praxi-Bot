@@ -62,6 +62,7 @@ import type { TargetsStatus } from "../lib/computerLabel.ts";
 import {
   type ClearTarget,
   runClearPause,
+  requestTakeoverWithRetry,
   runRelease
 } from "../lib/liveViewRelease.ts";
 import { admitSnapshot, createSnapshotSequencer } from "../lib/snapshotOrder.ts";
@@ -961,7 +962,14 @@ export function LiveViewProvider({
     }
     updateState((prev) => applyTakeoverStarted(prev, requestId));
     try {
-      const accepted = await client.requestTakeover(req);
+      const accepted = await requestTakeoverWithRetry(
+        {
+          takeover: (r) => client.requestTakeover(r),
+          getControlState: () => client.getControlState()
+        },
+        req,
+        () => crypto.randomUUID()
+      );
       updateState((prev) => applyTakeoverAccepted(prev, accepted));
       void refreshTargets();
     } catch (err) {
@@ -1221,7 +1229,12 @@ export function LiveViewProvider({
       }
     }
     setViewerOpen(false);
-  }, [performRelease]);
+    // Closing the screen while our own takeover is left paused would strand the
+    // bot behind a banner nobody asked for: clear it (the user chose to leave).
+    if (needsPauseRecovery(stateRef.current, controlStateRef.current) !== null) {
+      void clearPause("own");
+    }
+  }, [performRelease, clearPause]);
 
   const selectTarget = useCallback((targetId: string) => {
     if (isControlBusy(stateRef.current)) {

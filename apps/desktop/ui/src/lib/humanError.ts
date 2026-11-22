@@ -42,6 +42,8 @@ export const DAEMON_ERROR_CODES = [
   "host_admin_forbidden",
   "host_admin_required",
   "host_link_failed",
+  "host_not_permitted",
+  "host_outdated",
   "host_setup_conflict",
   "host_unreachable",
   "input_busy",

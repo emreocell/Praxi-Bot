@@ -1,4 +1,10 @@
-import type { ControlStateDto, ReleaseRequest } from "../api/types.ts";
+import { ApiError } from "../api/client.ts";
+import type {
+  ControlStateDto,
+  ReleaseRequest,
+  TakeoverAccepted,
+  TakeoverRequest
+} from "../api/types.ts";
 import {
   type ForeignPaused,
   releaseConfirmedBy,
@@ -155,5 +161,36 @@ export async function runClearPause(
     return { kind: "cleared", dto: await deps.recover() };
   } catch (err) {
     return { kind: "failed", ...describeError(err, "recover_failed") };
+  }
+}
+
+/**
+ * `POST /v1/control/takeover`, with one automatic refetch+retry when the daemon
+ * answers 409 (`conflict`): the screen's takeover state moved under the UI (a
+ * leftover paused takeover of ours, an SSE update that had not arrived). The
+ * retry re-reads the control state, reacquires our own paused takeover when one
+ * shows, and uses a fresh request id. Only a second conflict reaches the user.
+ */
+export async function requestTakeoverWithRetry(
+  deps: {
+    takeover(req: TakeoverRequest): Promise<TakeoverAccepted>;
+    getControlState(): Promise<ControlStateDto>;
+  },
+  req: TakeoverRequest,
+  newRequestId: () => string
+): Promise<TakeoverAccepted> {
+  try {
+    return await deps.takeover(req);
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.code !== "conflict") {
+      throw err;
+    }
+    const fresh = await deps.getControlState();
+    const retry: TakeoverRequest = { ...req, request_id: newRequestId() };
+    const ours = snapshotPausedTakeoverId(fresh);
+    if (ours !== null) {
+      retry.reacquire_takeover_id = ours;
+    }
+    return deps.takeover(retry);
   }
 }

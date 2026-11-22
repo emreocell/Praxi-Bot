@@ -1115,7 +1115,8 @@ pub(crate) async fn takeover(
         && (old.info.state == ViewState::Paused
             || (old.info.state == ViewState::Active && old.info.input_expires_in_ms == 0))
     {
-        let allowed = (old.actor == actor.key && i.reacquire_takeover_id == Some(old.info.id))
+        let allowed = (old.actor == actor.key
+            && (i.reacquire_takeover_id == Some(old.info.id) || old.info.target_id == target))
             || (actor.recovery && i.recover && i.reason.is_some());
         if !allowed {
             return Err(ApiError::conflict(
