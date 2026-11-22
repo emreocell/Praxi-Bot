@@ -507,7 +507,7 @@ test("connected but unsynced, the late-sweep warning is shown at once (en + tr t
     const dict = JSON.parse(readFileSync(new URL(`../i18n/locales/${locale}.json`, import.meta.url), "utf8")) as Record<string, unknown>;
     return d.key.split(".").reduce<unknown>((o, k) => (o as Record<string, unknown>)[k], dict) as string;
   };
-  assert.match(text("en"), /EVERY run open when the daemon receives it, including runs started meanwhile/);
+  assert.match(text("en"), /EVERY run open when the background service receives it, including runs started meanwhile/);
   assert.match(text("tr"), /TÜM çalışmaları durduracak; arada başka bir cihazdan veya bir zamanlamadan başlatılanlar dahil/);
 });
 

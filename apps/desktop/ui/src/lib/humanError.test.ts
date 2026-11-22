@@ -55,7 +55,8 @@ test("every daemon error code has a title and a hint in both languages", async (
   for (const code of rustCodes()) {
     assert.ok(known.has(code), `the daemon can emit "${code}" but the UI has no text for it`);
   }
-  for (const lng of ["en", "tr"]) {
+  const english = new Map<string, { title: string; hint: string }>();
+  for (const lng of ["en", "tr", "de"]) {
     await i18n.changeLanguage(lng);
     for (const code of layer.DAEMON_ERROR_CODES) {
       const h = layer.humanError({ status: 409, code, message: "raw daemon text" });
@@ -63,6 +64,14 @@ test("every daemon error code has a title and a hint in both languages", async (
       assert.ok(h.title && !h.title.startsWith("errors."), `${lng}/${code} title`);
       assert.ok(h.hint && !h.hint.startsWith("errors."), `${lng}/${code} hint`);
       assert.ok(!h.title.includes("raw daemon text"));
+      // No dead end: the hint says what to do next, in a real sentence of its own.
+      assert.ok(h.hint.length >= 12 && h.hint !== h.title, `${lng}/${code} hint must tell what to do`);
+      if (lng === "en") {
+        english.set(code, h);
+      } else {
+        // Not left in English.
+        assert.notEqual(h.hint, english.get(code)!.hint, `${lng}/${code} hint is still English`);
+      }
     }
   }
 });

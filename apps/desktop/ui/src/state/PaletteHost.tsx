@@ -106,6 +106,13 @@ export function PaletteHost({
       });
     }
     out.push({
+      id: "help-center",
+      title: t("palette.help"),
+      group: t("palette.group.navigate"),
+      keywords: t("palette.helpKeywords").split(" "),
+      run: onHelp
+    });
+    out.push({
       id: "help-shortcuts",
       title: t("palette.shortcuts"),
       group: t("palette.group.navigate"),

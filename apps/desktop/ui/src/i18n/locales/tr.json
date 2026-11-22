@@ -495,7 +495,7 @@
       "stderr": "Sunucunun yazdıkları"
     },
     "folder": {
-      "hint": "Uygulamayla yalnızca bu klasör paylaşılır. Praxi-Bot'un kendi verileri ve kimlik bilgisi klasörleri reddedilir.",
+      "hint": "Uygulamayla yalnızca bu klasör paylaşılır. Praxi-Bot'un kendi verileri ile parola ve oturum klasörlerin hiçbir zaman paylaşılamaz.",
       "label": "Botun okuyup yazabileceği klasör",
       "missing": "Önce bir klasör seç.",
       "placeholder": "Tam yol, örneğin C:\\Users\\sen\\Documents",
@@ -729,7 +729,7 @@
     },
     "needCli": "Önce yukarıdan bu bota bir kodlama CLI modeli seçip kaydet (cli: ile başlayan). CLI'yi Ayarlar → Yapay zekâ → Algılanan hesaplar bölümünden aç.",
     "workspace": "Çalışma klasörü",
-    "workspaceHint": "CLI bu klasörde çalışır. Praxi veri klasörü, ana klasörün, sürücü kökleri ve kimlik bilgisi ya da CLI ayar klasörleri reddedilir.",
+    "workspaceHint": "Kodlama aracı bu klasörde çalışır. Praxi'nin kendi verileri, ana klasörün, tüm sürücüler ve parola ya da oturum bilgisi tutan klasörler kabul edilmez.",
     "workspacePlaceholder": "Boş: Praxi bu bot için bir klasör açar. Ya da C:/Projeler/uygulamam gibi bir yol yaz"
   },
   "botForm": {
@@ -778,7 +778,7 @@
         "name": "Bu bilgisayar"
       },
       "folder": {
-        "hint": "Dosya araçları için korumalı alan: yalnızca aşağıdaki klasörler. Bu bot için kabuk komutları ve betikler kapatılır; bağlı uygulamalar ve CLI motorları sınırlanmaz.",
+        "hint": "Bot yalnızca aşağıdaki klasörlerdeki dosyalara dokunabilir, başka hiçbir yere. Bu bot için komutlar ve betikler kapalıdır. Bağlı uygulamalar ve kodlama araçları bundan etkilenmez.",
         "name": "Yalnızca klasör"
       },
       "foldersLabel": "İzinli klasörler",
@@ -1051,14 +1051,14 @@
       "egress": {
         "hidden": "{{hidden}} görünmeyen karakter <U+XXXX> olarak gösterilir",
         "host": "Hedef: {{host}}",
-        "large": "Bu içerik kısa kartta incelenemeyecek kadar büyük ({{bytes}} bayt). Onaylamadan önce tam metni açıp sonuna kadar kaydır.",
+        "large": "Bu içerik küçük kartta tam görünemeyecek kadar uzun ({{bytes}} bayt). Onaylamadan önce tam metni açıp sonuna kadar kaydır.",
         "payload": {
           "body": "Gönderilecek veri (tamamı gösterilir):",
           "query": "Giden sorgu (tamamı gösterilir):",
           "url": "Giden adres (tamamı gösterilir):"
         },
         "read": "Bu çalışma şunu okudu: {{list}}",
-        "reviewFull": "İçeriğin tamamını incele"
+        "reviewFull": "Gönderilecek her şeyi oku"
       },
       "input": {
         "label": "{{name}} aracının alacağı tam veri",
@@ -1219,7 +1219,7 @@
       "bytes": "{{count}} B",
       "changedByRun": "Başka bir çalışma değiştirdi ({{run}})",
       "changedOutsideRun": "Bu çalışma dışında değiştirildi",
-      "computerScope": "Çalışma bilgisayarı: {{computer}}. Bu dosya kontrol noktaları bağlı daemon'un diskindedir.",
+      "computerScope": "Çalıştığı yer: {{computer}}. Dosyalarının bu kayıtlı kopyaları o bilgisayarda duruyor.",
       "computerUnknown": "Kaydedilmemiş",
       "couldNotVerify": "Dosyanın mevcut durumu doğrulanamadı",
       "diffStats": "+{{added}} / -{{removed}}",
@@ -2004,7 +2004,7 @@
   "errors": {
     "cliNotInstalled": {
       "hint": "Ayarlar → Yapay zekâ bölümünden kur ya da güncelle, sonra yeniden dene.",
-      "title": "O kodlama CLI'ı kurulu değil ya da güncellenmeli"
+      "title": "O kodlama aracı kurulu değil ya da güncellenmeli"
     },
     "cliQuota": {
       "hint": "Sıfırlanmasını bekle ya da başka bir model seç.",
@@ -2012,7 +2012,7 @@
     },
     "cliSignedOut": {
       "hint": "Ayarlar → Yapay zekâ bölümünden oturum aç, sonra yeniden dene.",
-      "title": "O kodlama CLI'ının oturumu kapalı"
+      "title": "O kodlama aracında oturumun kapalı"
     },
     "codes": {
       "admin_rate_limit": {
@@ -2148,7 +2148,7 @@
         "title": "Bu uygulama erişimi geçerli değil"
       },
       "invalid_signature": {
-        "hint": "Bu tetikleyici için ayarlanan gizli anahtarı kontrol et.",
+        "hint": "Bu tetikleyici için kurduğun gizli kodu kontrol et ve yeniden dene.",
         "title": "İstek doğrulanamadı"
       },
       "invalid_skill": {
@@ -2236,11 +2236,11 @@
         "title": "Sunucuda gerekli bir bileşen yok"
       },
       "provider_endpoint": {
-        "hint": "Ayarlar → Yapay zekâ bölümünde temel adresi ve API yolunu kontrol et.",
-        "title": "Sağlayıcının API adresi bulunamadı"
+        "hint": "Ayarlar → Yapay zekâ bölümünü aç ve bu sağlayıcı için yazdığın web adresini kontrol et. Sağlayıcının sitesinden yeniden kopyala.",
+        "title": "Bu web adresi çalışmıyor"
       },
       "provider_model": {
-        "hint": "Ayarlar → Yapay zekâ bölümünde model kimliğini kontrol et ve hesabında kullanılabilen bir model seç.",
+        "hint": "Ayarlar → Yapay zekâ bölümünü aç ve listeden başka bir model seç. Hesabının kullanabildiği birini seç.",
         "title": "Sağlayıcı, ayarlanan modeli bulamadı"
       },
       "reload_failed": {
@@ -2365,7 +2365,7 @@
       },
       "unauthorized": {
         "hint": "Yerel servisi yeniden başlat. Olmazsa Praxi'yi yeniden başlat.",
-        "title": "Praxi kim olduğunu doğrulayamadı"
+        "title": "Praxi senin olduğunu doğrulayamadı"
       },
       "unavailable": {
         "hint": "Biraz sonra yeniden dene.",
@@ -2510,7 +2510,7 @@
       },
       "portInUse": {
         "hint": "O programı kapat ya da bilgisayarı yeniden başlat, sonra yeniden dene.",
-        "title": "{{port}} numaralı bağlantı noktasını başka bir program kullanıyor"
+        "title": "Başka bir program Praxi'nin ihtiyaç duyduğu bağlantıyı kullanıyor ({{port}})"
       },
       "sidecarBlocked": {
         "hint": "Antivirüs, SmartScreen veya bir ilke çalıştırmayı reddetti. Praxi klasöründeki bot.exe'ye izin ver, sonra yeniden dene.",
@@ -2533,7 +2533,7 @@
         "title": "Praxi'nin servisi her zamankinden uzun sürede açılıyor"
       },
       "unreachable": {
-        "hint": "{{port}} numaralı bağlantı noktasını başka bir program kullanıyor olabilir. Servisi yeniden başlat.",
+        "hint": "Başka bir program Praxi'nin ihtiyaç duyduğu bağlantıyı ({{port}}) kullanıyor olabilir. Servisi yeniden başlat.",
         "title": "Praxi'nin servisi yanıt veriyor ama uygulama ona güvenmiyor"
       }
     },
@@ -2735,6 +2735,15 @@
     "retry": "Yeniden dene"
   },
   "help": {
+    "center": {
+      "allDocs": "Tam kılavuzu aç",
+      "intro": "İnsanların ilk sorduğu soruların kısa cevapları. Aramak için bir kelime yaz.",
+      "noMatch": "Cevap bulunamadı. Tek bir basit kelime dene ya da aşağıdan tam kılavuzu aç.",
+      "readMore": "Kılavuzda devamını oku",
+      "searchLabel": "Yardımda ara",
+      "searchPlaceholder": "Örneğin: ücretsiz, durdur, uygulama",
+      "title": "Yardım"
+    },
     "closePanel": "Yan paneli kapat",
     "dialogClose": "Pencereyi kapat",
     "dialogFocus": "Pencere içinde odağı taşı",
@@ -3049,7 +3058,7 @@
       "recover_failed": "Kontrol kurtarılamadı. Yeniden dene.",
       "release_failed": "Kontrol geri verilemedi. Bot duraklatılmış kalır; Bitirdim'i yeniden dene.",
       "release_interrupted": "Bitirdim tamamlanmadan devralma kesildi, bu yüzden geri verme tamamlanmadı. Botun devam etmesi için duraklatmayı kaldır veya kontrolü yeniden devral.",
-      "release_unconfirmed": "Daemon devralmanı hâlâ etkin gösteriyor. Bitirdim'i yeniden dene.",
+      "release_unconfirmed": "Arka plan servisi devralmanı hâlâ etkin gösteriyor. Bitirdim'i yeniden dene.",
       "server_restarting": "Sunucu yeniden başlatılıyor olabilir. Çevrimiçi olduğunda yeniden dene.",
       "takeover_failed": "Kontrol devralınamadı. Yeniden dene.",
       "timeout": "Ekran zamanında başlatılamadı.",
@@ -3130,7 +3139,7 @@
       "refresh_pending": "Hedeften güncel kare bekleniyor.",
       "remote_node_live_view": "Uzak sunucu canlı görünümü bu bağlantıda kullanılamıyor.",
       "reset_failed": "Tuş sıfırlaması doğrulanamadı; botlar güvenli şekilde duraklatıldı.",
-      "restart": "Kontrol sendeyken daemon yeniden başladı. Botun devam etmesini istediğinde duraklatmayı kaldır.",
+      "restart": "Kontrol sendeyken arka plan servisi yeniden başladı. Botun devam etmesini istediğinde duraklatmayı kaldır.",
       "resync_required": "Ekran geometrisi veya sıra güncellendi; son kare ile eşzamanlanıyor.",
       "revoked": "Bu aygıtın ekran erişim yetkisi kaldırıldı.",
       "stale": "Kareler güncelliğini yitirdi. Yeni kare gelip kurtarma yapılana kadar botlar duraklatıldı.",
@@ -3195,7 +3204,7 @@
     "clearSelection": "Genel görünüme dön",
     "daemonConnectingDescription": "Bu bilgisayardaki yerleşik Praxi-Bot arka plan servisine bağlanılıyor.",
     "daemonConnectingTitle": "Yerel servis başlatılıyor…",
-    "daemonOfflineDescription": "Praxi-Bot yerel arka plan servisine (bot serve) ulaşamadı. 47821 numaralı yerel bağlantı noktasının engellenmediğinden emin olup yeniden dene.",
+    "daemonOfflineDescription": "Praxi-Bot'un arka plan servisi yanıt vermiyor. Birkaç saniye bekleyip yeniden dene. Sorun sürerse bir güvenlik duvarının Praxi-Bot'u engellemediğini kontrol et veya uygulamayı yeniden başlat.",
     "daemonOfflineTitle": "Yerel arka plan servisi çalışmıyor",
     "daemonRetry": "Bağlantıyı yeniden dene",
     "refreshBots": "Yenile",
@@ -3470,6 +3479,8 @@
       "navigate": "Gezinti",
       "schedule": "Zamanlama"
     },
+    "help": "Yardım ve cevaplar",
+    "helpKeywords": "yardım sorular sss nasıl nedir kılavuz",
     "hint": "↑↓ gezin · Enter çalıştır · Esc kapat",
     "newChat": "Yeni sohbet",
     "placeholder": "Bir komut yaz…",
@@ -3798,7 +3809,7 @@
     "replaces": "Bu işlem {{name}} için kayıtlı değerin yerine geçer.",
     "stored": "Kasaya kaydedildi. Bota kaydedildiği bildirildi.",
     "submit": "Kasaya kaydet",
-    "title": "{{bot}} bir kimlik bilgisi istiyor",
+    "title": "{{bot}} senden bir parola veya anahtar istiyor",
     "typeLogin": "giriş (kullanıcı adı ve parola)",
     "typeSecret": "tek bir gizli değer",
     "untrusted": "Bu çalışma dışarıdan içerik okudu. Bu isteği oradaki bir şey istemiş olabilir. O içeriğe doğrudan vermeyeceğiniz bir parolayı girmeyin.",
@@ -3977,7 +3988,7 @@
       "disabled": "Devre dışı",
       "keyHint": "Anahtar sistem anahtarlığına gönderilir ve bir daha gösterilmez.",
       "keyStored": "anahtar kayıtlı",
-      "localDaemonOnly": "Sağlayıcı kurulumu, bu uygulamanın başlattığı yerel daemon için kullanılabilir. Diğer bağlantılarda sağlayıcıları daemon'un çalıştığı bilgisayarda yönet.",
+      "localDaemonOnly": "Sağlayıcı kurulumu, bu uygulamanın başlattığı yerel arka plan servisi için kullanılabilir. Diğer bağlantılarda sağlayıcıları arka plan servisinin çalıştığı bilgisayarda yönet.",
       "makeDefault": "Varsayılan yap",
       "modelCount": "{{count}} model",
       "modelCount_other": "{{count}} model",
@@ -3989,9 +4000,9 @@
       "notLoaded": "Henüz yüklenmedi",
       "offline": "Yerel servis çalışmıyor. Sağlayıcıları yönetmek için yeniden başlat.",
       "provider": "Sağlayıcı",
-      "restart": "Daemon'u yeniden başlat",
-      "restartHint": "Değişikliğin geçerli olması için daemon'u yeniden başlat.",
-      "restartManual": "Değişikliğin geçerli olması için daemon'u kendin yeniden başlat (bu uygulama başlatmadı).",
+      "restart": "Arka plan servisini yeniden başlat",
+      "restartHint": "Değişikliğin geçerli olması için arka plan servisini yeniden başlat.",
+      "restartManual": "Değişikliğin geçerli olması için arka plan servisini kendin yeniden başlat (bu uygulama başlatmadı).",
       "test": "Bağlantıyı sına",
       "title": "Model sağlayıcıları"
     },
@@ -4159,7 +4170,7 @@
         "disk_space": "Biraz disk alanı aç; disk dolduğunda sohbetler ve kayıtlar kaydedilemez.",
         "host_ownership": "Bu kurulum boşta; sunucu ayarlarından etkinleştir.",
         "peer_link": "Bu cihazı sunucuyla yeniden eşleştir.",
-        "process_guard": "Arka plan hizmeti kendi işlemini koruyamadı; yeniden başlat, sürerse bildir.",
+        "process_guard": "Arka plan servisi kendi işlemini koruyamadı; yeniden başlat, sürerse bildir.",
         "providers": "API anahtarını Ayarlar → Yapay zekâ bölümünden ekle ya da kodlama CLI'ında oturum açıp orada etkinleştir.",
         "providers_loaded": "Botun kayıtlı ayarları kullanması için sağlayıcıları yeniden yükle.",
         "schedule_tools": "schedule.toml geçersiz; düzelt ya da sil.",
@@ -4463,8 +4474,8 @@
   },
   "stopStatus": {
     "detail": {
-      "expiredNone": "Daemon bu durdurmanın kaydını artık tutmuyordu; bekletilen çalışmaların hiçbiri devam etmiyor.",
-      "expiredRetry": "Daemon bu durdurmanın kaydını artık tutmuyordu. Yalnızca hâlâ bekletilen {{held}} çalışma yeniden deneniyor; sonradan başlayan hiçbir şeye dokunulmuyor.",
+      "expiredNone": "Arka plan servisi bu durdurmanın kaydını artık tutmuyordu; bekletilen çalışmaların hiçbiri devam etmiyor.",
+      "expiredRetry": "Arka plan servisi bu durdurmanın kaydını artık tutmuyordu. Yalnızca hâlâ bekletilen {{held}} çalışma yeniden deneniyor; sonradan başlayan hiçbir şeye dokunulmuyor.",
       "partial": "{{count}} çalışmadan {{stopped}} tanesi durdu. Kalanlar bekletiliyor ve işlem yapamıyor; yeniden deneniyor…",
       "released": "Duraklatılan çalışmaların devam etmesine izin verdin. Hiçbir şey iptal edilmedi.",
       "stoppedCount_one": "{{count}} çalışma durduruldu.",
@@ -4472,13 +4483,13 @@
       "stoppedNone": "Çalışan bot yoktu.",
       "stoppingCount_one": "{{count}} çalışmadan {{stopped}} tanesi durdu; kalanların bitmesi bekleniyor.",
       "stoppingCount_other": "{{count}} çalışmadan {{stopped}} tanesi durdu; kalanların bitmesi bekleniyor.",
-      "stoppingNone": "Daemon'dan çalışan tüm botları durdurması isteniyor…",
-      "stoppingSweep": "Daemon'dan durdurması isteniyor. Bu durdurma, daemon onu aldığında açık olan TÜM çalışmaları durduracak; arada başka bir cihazdan veya bir zamanlamadan başlatılanlar dahil (Durdur'a bastığında uygulamanın güncel bir çalışma listesi yoktu).",
-      "unconfirmable": "Uygulama yeniden başlamadan önceki bir durdurma daemon'a ulaşmadı. Botlar hâlâ çalışıyorsa yeniden Durdur'a bas.",
-      "unconfirmed": "Daemon bu durdurmanın neyi durdurduğunu bildirmeden kaydını kaybetti. Hedeflenmiş olabilecek {{quarantined}} çalışma duraklatıldı ve sen karar verene kadar işlem yapamaz.",
-      "unreachableListed_one": "Bot ve devralma girdisi burada durduruldu. Daemon henüz doğrulamadı; ulaşıldığında yalnızca Durdur'a bastığında bilinen {{count}} çalışmayı durduracak. Yeniden deneniyor…",
-      "unreachableListed_other": "Bot ve devralma girdisi burada durduruldu. Daemon henüz doğrulamadı; ulaşıldığında yalnızca Durdur'a bastığında bilinen {{count}} çalışmayı durduracak. Yeniden deneniyor…",
-      "unreachableSweep": "Bot ve devralma girdisi burada durduruldu. Daemon'a henüz ulaşılamıyor; ulaşıldığında bu durdurma o anda açık olan TÜM çalışmaları durduracak, arada başka bir cihazdan veya bir zamanlamadan başlatılanlar dahil."
+      "stoppingNone": "Arka plan servisinden çalışan tüm botları durdurması isteniyor…",
+      "stoppingSweep": "Arka plan servisinden durdurması isteniyor. Bu durdurma, arka plan servisi onu aldığında açık olan TÜM çalışmaları durduracak; arada başka bir cihazdan veya bir zamanlamadan başlatılanlar dahil (Durdur'a bastığında uygulamanın güncel bir çalışma listesi yoktu).",
+      "unconfirmable": "Uygulama yeniden başlamadan önceki bir durdurma arka plan servisine ulaşmadı. Botlar hâlâ çalışıyorsa yeniden Durdur'a bas.",
+      "unconfirmed": "Arka plan servisi bu durdurmanın neyi durdurduğunu bildirmeden kaydını kaybetti. Hedeflenmiş olabilecek {{quarantined}} çalışma duraklatıldı ve sen karar verene kadar işlem yapamaz.",
+      "unreachableListed_one": "Bot ve devralma girdisi burada durduruldu. Arka plan servisi henüz doğrulamadı; ulaşıldığında yalnızca Durdur'a bastığında bilinen {{count}} çalışmayı durduracak. Yeniden deneniyor…",
+      "unreachableListed_other": "Bot ve devralma girdisi burada durduruldu. Arka plan servisi henüz doğrulamadı; ulaşıldığında yalnızca Durdur'a bastığında bilinen {{count}} çalışmayı durduracak. Yeniden deneniyor…",
+      "unreachableSweep": "Bot ve devralma girdisi burada durduruldu. Arka plan servisine henüz ulaşılamıyor; ulaşıldığında bu durdurma o anda açık olan TÜM çalışmaları durduracak, arada başka bir cihazdan veya bir zamanlamadan başlatılanlar dahil."
     },
     "dismiss": "Kapat",
     "letContinue": "Devam etsinler",
@@ -4695,7 +4706,7 @@
       "description": "Kayıtların nerede yazıya çevrileceği: OpenAI uyumlu bir servis (bulut sağlayıcı ya da yerel whisper sunucusu).",
       "geminiKey": "Gemini API anahtarı",
       "geminiModel": "Gemini modeli",
-      "geminiPrivacy": "Gemini Live ile konuşman, yalnızca sesle yazarken ya da sesli görüşmedeyken, daemon üzerinden Google'a gider. Anahtar gizli bilgi deposunda kalır. Yalnızca yazıya dökülen metin kullanılır; modelin kendi yanıtı yok sayılır.",
+      "geminiPrivacy": "Gemini Live ile konuşman, yalnızca sesle yazarken ya da sesli görüşmedeyken, arka plan servisi üzerinden Google'a gider. Anahtar gizli bilgi deposunda kalır. Yalnızca yazıya dökülen metin kullanılır; modelin kendi yanıtı yok sayılır.",
       "key": "API anahtarı",
       "keyStored": "Anahtar kayıtlı (değiştirmek için yaz)",
       "model": "Model",

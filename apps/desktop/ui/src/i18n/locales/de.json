@@ -134,7 +134,7 @@
     "body": "Anweisungen",
     "bodyHint": "Markdown. Schreibe die Schritte so, wie du sie einem sorgfältigen Kollegen erklären würdest.",
     "bodyPlaceholder": "# Rechnungsprüfung\n\n1. Öffne die Bestellung.\n2. Vergleiche die Summen.\n3. Frage vor der Zahlung nach, wenn sie abweichen.",
-    "boundaryBody": "Die App kann einen Skill noch nicht selbst im Skills-Ordner speichern. Dein Skill hat in der App eine vorläufige Prüfung bestanden; ob er geladen wird, entscheidet der Daemon. Lege die Datei einmal ab und drücke dann „Prüfen“.",
+    "boundaryBody": "Die App kann einen Skill noch nicht selbst im Skills-Ordner speichern. Dein Skill hat in der App eine vorläufige Prüfung bestanden; ob er geladen wird, entscheidet der Hintergrunddienst. Lege die Datei einmal ab und drücke dann „Prüfen“.",
     "boundaryTitle": "Vorerst ein manueller Schritt",
     "check": "Prüfen",
     "checkFailed": "Prüfung nicht möglich",
@@ -207,7 +207,7 @@
     "title": "Einen Skill hinzufügen",
     "triggers": "Automatisch vorschlagen (optional)",
     "triggersHint": "Durch Kommas getrennt. Der Skill wird vorgeschlagen, wenn der Bot auf einer dieser Websites oder in einer dieser Apps ist oder die Aufgabe ein Stichwort erwähnt.",
-    "unverified": "Dieser Daemon meldet keinen Fingerabdruck der Anweisungen, daher lässt sich eine ältere Datei mit demselben Namen, derselben Version und Beschreibung nicht ausschließen. Beim Schließen wird dennoch vor dem Verwerfen des Geschriebenen nachgefragt.",
+    "unverified": "Dieser Hintergrunddienst meldet keinen Fingerabdruck der Anweisungen, daher lässt sich eine ältere Datei mit demselben Namen, derselben Version und Beschreibung nicht ausschließen. Beim Schließen wird dennoch vor dem Verwerfen des Geschriebenen nachgefragt.",
     "useSuggestion": "„{{name}}“ verwenden",
     "version": "Version"
   },
@@ -495,7 +495,7 @@
       "stderr": "Was der Server ausgegeben hat"
     },
     "folder": {
-      "hint": "Nur dieser Ordner wird mit der App geteilt. Die eigenen Daten- und Zugangsdatenordner von Praxi-Bot werden abgelehnt.",
+      "hint": "Nur dieser Ordner wird mit der App geteilt. Die eigenen Daten von Praxi-Bot und deine Ordner mit Passwörtern oder Anmeldungen lassen sich nie teilen.",
       "label": "Ordner, den der Bot lesen und beschreiben darf",
       "missing": "Wähle zuerst einen Ordner.",
       "placeholder": "Vollständiger Pfad, zum Beispiel C:\\Users\\du\\Documents",
@@ -729,7 +729,7 @@
     },
     "needCli": "Wähle oben ein Coding-CLI-Modell für diesen Bot und speichere zuerst (ein Modell, das mit cli: beginnt). Aktiviere die CLI unter Einstellungen, KI, Erkannte Konten.",
     "workspace": "Arbeitsordner",
-    "workspaceHint": "Die CLI arbeitet in diesem Ordner. Der Datenordner von Praxi, dein Home-Ordner, Laufwerkswurzeln und Ordner mit Zugangsdaten oder CLI-Einstellungen werden abgelehnt.",
+    "workspaceHint": "Das Programmier-Werkzeug arbeitet in diesem Ordner. Die eigenen Daten von Praxi, dein Home-Ordner, ganze Laufwerke und Ordner mit Passwörtern oder Anmeldungen sind nicht erlaubt.",
     "workspacePlaceholder": "Leer: Praxi legt einen Ordner für diesen Bot an. Oder gib einen Pfad ein, etwa C:/Projects/my-app"
   },
   "botForm": {
@@ -778,7 +778,7 @@
         "name": "Dieser Computer"
       },
       "folder": {
-        "hint": "Sandbox für die Dateiwerkzeuge: nur die Ordner unten, sonst nichts. Shell-Befehle und Skripte sind für diesen Bot abgeschaltet; verbundene Apps und CLI-Engines sind nicht eingeschränkt.",
+        "hint": "Der Bot kann nur Dateien in den Ordnern unten anfassen, sonst nichts. Befehle und Skripte sind für diesen Bot abgeschaltet. Verbundene Apps und Programmier-Werkzeuge sind davon nicht eingeschränkt.",
         "name": "Nur Ordner"
       },
       "foldersLabel": "Erlaubte Ordner",
@@ -1051,14 +1051,14 @@
       "egress": {
         "hidden": "{{hidden}} unsichtbare Zeichen werden als <U+XXXX> angezeigt",
         "host": "Ziel: {{host}}",
-        "large": "Dieser Inhalt ist zu groß für die kompakte Karte ({{bytes}} Byte). Öffne den vollständigen Text und scrolle vor der Genehmigung bis zum Ende.",
+        "large": "Das ist zu lang für die kleine Karte ({{bytes}} Byte). Öffne den vollständigen Text und scrolle vor der Freigabe bis zum Ende.",
         "payload": {
           "body": "Ausgehende Daten (vollständig angezeigt):",
           "query": "Ausgehende Abfrage (vollständig angezeigt):",
           "url": "Ausgehende URL (vollständig angezeigt):"
         },
         "read": "Dieser Lauf hat gelesen: {{list}}",
-        "reviewFull": "Vollständigen Inhalt prüfen"
+        "reviewFull": "Alles lesen, was gesendet wird"
       },
       "input": {
         "label": "Genau das erhält {{name}}",
@@ -1219,7 +1219,7 @@
       "bytes": "{{count}} B",
       "changedByRun": "Von einem anderen Lauf geändert ({{run}})",
       "changedOutsideRun": "Außerhalb dieses Laufs geändert",
-      "computerScope": "Computer des Laufs: {{computer}}. Diese Datei-Checkpoints liegen auf dem Datenträger des verbundenen Daemons.",
+      "computerScope": "Ausgeführt auf: {{computer}}. Diese gesicherten Kopien deiner Dateien liegen auf diesem Computer.",
       "computerUnknown": "Nicht aufgezeichnet",
       "couldNotVerify": "Der aktuelle Dateizustand konnte nicht überprüft werden",
       "diffStats": "+{{added}} / -{{removed}}",
@@ -2004,7 +2004,7 @@
   "errors": {
     "cliNotInstalled": {
       "hint": "Installiere oder aktualisiere sie in den Einstellungen unter KI und versuche es dann erneut.",
-      "title": "Diese Coding-CLI ist nicht installiert oder braucht ein Update"
+      "title": "Dieses Programmier-Werkzeug ist nicht installiert oder braucht ein Update"
     },
     "cliQuota": {
       "hint": "Warte, bis es zurückgesetzt wird, oder wähle ein anderes Modell.",
@@ -2012,7 +2012,7 @@
     },
     "cliSignedOut": {
       "hint": "Melde dich in den Einstellungen unter KI dort an und versuche es dann erneut.",
-      "title": "Diese Coding-CLI ist abgemeldet"
+      "title": "Du bist bei diesem Programmier-Werkzeug abgemeldet"
     },
     "codes": {
       "admin_rate_limit": {
@@ -2148,7 +2148,7 @@
         "title": "Dieser App-Zugriff ist ungültig"
       },
       "invalid_signature": {
-        "hint": "Prüfe das Secret, das für diesen Trigger eingerichtet wurde.",
+        "hint": "Prüfe den geheimen Code, den du für diesen Auslöser eingerichtet hast, und versuche es erneut.",
         "title": "Die Anfrage konnte nicht verifiziert werden"
       },
       "invalid_skill": {
@@ -2236,11 +2236,11 @@
         "title": "Dem Server fehlt eine erforderliche Komponente"
       },
       "provider_endpoint": {
-        "hint": "Prüfe die Basis-URL und ihren API-Pfad unter Einstellungen → KI.",
-        "title": "Der Anbieter-Endpunkt wurde nicht gefunden"
+        "hint": "Öffne Einstellungen → KI und prüfe die Webadresse, die du für diesen Anbieter eingegeben hast. Kopiere sie noch einmal von der Website des Anbieters.",
+        "title": "Diese Webadresse funktioniert nicht"
       },
       "provider_model": {
-        "hint": "Prüfe die Modell-ID unter Einstellungen → KI und wähle ein Modell, das für dein Konto verfügbar ist.",
+        "hint": "Öffne Einstellungen → KI und wähle ein anderes Modell aus der Liste. Nimm eines, das dein Konto nutzen darf.",
         "title": "Der Anbieter konnte das konfigurierte Modell nicht finden"
       },
       "reload_failed": {
@@ -2365,7 +2365,7 @@
       },
       "unauthorized": {
         "hint": "Starte den lokalen Dienst neu. Wenn das nicht hilft, starte Praxi neu.",
-        "title": "Praxi konnte nicht prüfen, wer du bist"
+        "title": "Praxi konnte nicht bestätigen, dass du es bist"
       },
       "unavailable": {
         "hint": "Versuche es gleich noch einmal.",
@@ -2510,7 +2510,7 @@
       },
       "portInUse": {
         "hint": "Schließe dieses Programm oder starte den Computer neu und versuche es dann erneut.",
-        "title": "Port {{port}} wird von einem anderen Programm verwendet"
+        "title": "Ein anderes Programm belegt die Verbindung, die Praxi braucht ({{port}})"
       },
       "sidecarBlocked": {
         "hint": "Antivirus, SmartScreen oder eine Richtlinie hat die Ausführung verweigert. Erlaube bot.exe im Ordner von Praxi und versuche es dann erneut.",
@@ -2533,7 +2533,7 @@
         "title": "Der Dienst von Praxi braucht länger als üblich zum Starten"
       },
       "unreachable": {
-        "hint": "Möglicherweise verwendet ein anderes Programm Port {{port}}. Starte den Dienst neu.",
+        "hint": "Möglicherweise belegt ein anderes Programm die Verbindung ({{port}}), die Praxi braucht. Starte den Dienst neu.",
         "title": "Der Dienst von Praxi antwortet, aber die App vertraut ihm nicht"
       }
     },
@@ -2735,6 +2735,15 @@
     "retry": "Erneut versuchen"
   },
   "help": {
+    "center": {
+      "allDocs": "Ganze Anleitung öffnen",
+      "intro": "Kurze Antworten auf die Fragen, die am häufigsten zuerst kommen. Tippe ein Wort, um zu suchen.",
+      "noMatch": "Keine Antwort gefunden. Versuche ein einfaches Wort oder öffne unten die ganze Anleitung.",
+      "readMore": "Mehr in der Anleitung lesen",
+      "searchLabel": "Hilfe durchsuchen",
+      "searchPlaceholder": "Zum Beispiel: gratis, stopp, Apps",
+      "title": "Hilfe"
+    },
     "closePanel": "Seitenpanel schließen",
     "dialogClose": "Dialog schließen",
     "dialogFocus": "Fokus im Dialog verschieben",
@@ -3049,7 +3058,7 @@
       "recover_failed": "Die Kontrolle konnte nicht wiederhergestellt werden. Versuche es erneut.",
       "release_failed": "Die Kontrolle konnte nicht zurückgegeben werden. Der Bot bleibt pausiert; versuche „Ich bin fertig“ erneut.",
       "release_interrupted": "Die Übernahme wurde unterbrochen, bevor die Rückgabe abgeschlossen war. Hebe die Pause auf, damit der Bot fortfahren kann, oder übernimm die Kontrolle erneut.",
-      "release_unconfirmed": "Der Daemon meldet deine Übernahme weiterhin als aktiv. Versuche „Ich bin fertig“ erneut.",
+      "release_unconfirmed": "Der Hintergrunddienst meldet deine Übernahme weiterhin als aktiv. Versuche „Ich bin fertig“ erneut.",
       "server_restarting": "Der Server wird möglicherweise neu gestartet. Versuche es erneut, sobald er wieder online ist.",
       "takeover_failed": "Die Kontrolle konnte nicht übernommen werden. Versuche es erneut.",
       "timeout": "Der Bildschirm konnte nicht rechtzeitig gestartet werden.",
@@ -3130,7 +3139,7 @@
       "refresh_pending": "Wartet, bis das Ziel ein neues Bild veröffentlicht.",
       "remote_node_live_view": "Die Live-Ansicht eines Remote-Hosts ist bei dieser Verbindung nicht verfügbar.",
       "reset_failed": "Es konnte nicht überprüft werden, ob das Zurücksetzen der Eingabetasten sauber verlief; sicher pausiert.",
-      "restart": "Der Daemon wurde neu gestartet, während du die Kontrolle hattest. Hebe die Pause auf, wenn der Bot fortfahren soll.",
+      "restart": "Der Hintergrunddienst wurde neu gestartet, während du die Kontrolle hattest. Hebe die Pause auf, wenn der Bot fortfahren soll.",
       "resync_required": "Bildschirmgeometrie oder Reihenfolge aktualisiert; synchronisiert mit dem neuesten Bild.",
       "revoked": "Der Bildschirmzugriff für dieses Gerät wurde widerrufen.",
       "stale": "Die Bilder sind veraltet. Bots bleiben pausiert, bis ein neues Bild eintrifft und du wiederherstellst.",
@@ -3194,9 +3203,9 @@
   "main": {
     "clearSelection": "Zurück zur Übersicht",
     "daemonConnectingDescription": "Verbindung zum mitgelieferten Praxi-Bot-Hintergrunddienst auf diesem Computer wird hergestellt.",
-    "daemonConnectingTitle": "Lokaler Daemon wird gestartet …",
-    "daemonOfflineDescription": "Praxi-Bot konnte den lokalen Hintergrund-Daemon (bot serve) nicht erreichen. Stelle sicher, dass keine Firewall und kein Portkonflikt den Loopback-Port 47821 blockiert, und versuche es dann erneut.",
-    "daemonOfflineTitle": "Lokaler Daemon läuft nicht",
+    "daemonConnectingTitle": "Lokaler Hintergrunddienst wird gestartet …",
+    "daemonOfflineDescription": "Der Hintergrunddienst von Praxi-Bot antwortet nicht. Warte ein paar Sekunden und versuche es erneut. Hilft das nicht, prüfe, ob eine Firewall Praxi-Bot blockiert, oder starte die App neu.",
+    "daemonOfflineTitle": "Lokaler Hintergrunddienst läuft nicht",
     "daemonRetry": "Verbindung erneut versuchen",
     "refreshBots": "Aktualisieren",
     "runSetupWizard": "Einrichtungsassistent starten",
@@ -3470,6 +3479,8 @@
       "navigate": "Navigieren",
       "schedule": "Zeitplan"
     },
+    "help": "Hilfe und Antworten",
+    "helpKeywords": "hilfe fragen faq wie was ist anleitung",
     "hint": "↑↓ zum Bewegen · Enter zum Ausführen · Esc zum Schließen",
     "newChat": "Neuer Chat",
     "placeholder": "Befehl eingeben …",
@@ -3798,7 +3809,7 @@
     "replaces": "Dies ersetzt den gespeicherten Wert für {{name}}.",
     "stored": "Im Tresor gespeichert. Der Bot weiß, dass es gespeichert ist.",
     "submit": "Im Tresor speichern",
-    "title": "{{bot}} fragt nach Zugangsdaten",
+    "title": "{{bot}} braucht ein Passwort oder einen Schlüssel von dir",
     "typeLogin": "Login (Benutzername und Passwort)",
     "typeSecret": "einzelnes Geheimnis",
     "untrusted": "Dieser Lauf hat Inhalte von außen gelesen. Möglicherweise hat etwas darin dazu aufgefordert. Gib kein Passwort ein, das du diesem Inhalt nicht direkt geben würdest.",
@@ -3973,11 +3984,11 @@
       "customId": "Anbieter-ID",
       "default": "Standard",
       "defaultModel": "Standardmodell",
-      "description": "API-Schlüssel werden im Schlüsselbund deines Betriebssystems gespeichert. Änderungen übernimmt der Daemon ohne Neustart.",
+      "description": "API-Schlüssel werden im Schlüsselbund deines Betriebssystems gespeichert. Änderungen übernimmt der Hintergrunddienst ohne Neustart.",
       "disabled": "Deaktiviert",
       "keyHint": "Der Schlüssel wird an den Schlüsselbund des Betriebssystems gesendet und nie wieder angezeigt.",
       "keyStored": "Schlüssel gespeichert",
-      "localDaemonOnly": "Die Anbietereinrichtung ist für den von dieser App gestarteten lokalen Daemon verfügbar. Verwalte bei anderen Verbindungen die Anbieter auf dem Computer, auf dem der Daemon läuft.",
+      "localDaemonOnly": "Die Anbietereinrichtung ist für den von dieser App gestarteten lokalen Hintergrunddienst verfügbar. Verwalte bei anderen Verbindungen die Anbieter auf dem Computer, auf dem der Hintergrunddienst läuft.",
       "makeDefault": "Als Standard festlegen",
       "modelCount": "{{count}} Modell",
       "modelCount_other": "{{count}} Modelle",
@@ -3989,9 +4000,9 @@
       "notLoaded": "Noch nicht geladen",
       "offline": "Der lokale Dienst läuft nicht. Starte ihn neu, um Anbieter zu verwalten.",
       "provider": "Anbieter",
-      "restart": "Daemon neu starten",
-      "restartHint": "Starte den Daemon neu, damit er die Änderung übernimmt.",
-      "restartManual": "Starte den Daemon selbst neu, damit er die Änderung übernimmt (er wurde nicht von dieser App gestartet).",
+      "restart": "Hintergrunddienst neu starten",
+      "restartHint": "Starte den Hintergrunddienst neu, damit er die Änderung übernimmt.",
+      "restartManual": "Starte den Hintergrunddienst selbst neu, damit er die Änderung übernimmt (er wurde nicht von dieser App gestartet).",
       "test": "Verbindung testen",
       "title": "Modellanbieter"
     },
@@ -4463,8 +4474,8 @@
   },
   "stopStatus": {
     "detail": {
-      "expiredNone": "Der Daemon hatte diesen Stopp nicht mehr gespeichert; keiner der von ihm festgehaltenen Läufe läuft noch.",
-      "expiredRetry": "Der Daemon hatte diesen Stopp nicht mehr gespeichert. Es werden nur die {{held}} noch festgehaltenen Läufe erneut versucht; nichts, was später gestartet wurde, wird berührt.",
+      "expiredNone": "Der Hintergrunddienst hatte diesen Stopp nicht mehr gespeichert; keiner der von ihm festgehaltenen Läufe läuft noch.",
+      "expiredRetry": "Der Hintergrunddienst hatte diesen Stopp nicht mehr gespeichert. Es werden nur die {{held}} noch festgehaltenen Läufe erneut versucht; nichts, was später gestartet wurde, wird berührt.",
       "partial": "{{stopped}} von {{count}} gestoppt. Die übrigen werden festgehalten und können nicht handeln; neuer Versuch …",
       "released": "Du hast die pausierten Läufe fortsetzen lassen. Es wurde nichts abgebrochen.",
       "stoppedCount_one": "{{count}} Lauf gestoppt.",
@@ -4472,13 +4483,13 @@
       "stoppedNone": "Es liefen keine Bot-Läufe.",
       "stoppingCount_one": "{{stopped}} von {{count}} Lauf gestoppt; warte auf das Ende der übrigen.",
       "stoppingCount_other": "{{stopped}} von {{count}} Läufen gestoppt; warte auf das Ende der übrigen.",
-      "stoppingNone": "Der Daemon wird gebeten, jeden laufenden Bot zu stoppen …",
-      "stoppingSweep": "Der Daemon wird gebeten zu stoppen. Dieser Stopp stoppt JEDEN Lauf, der offen ist, wenn der Daemon ihn erhält, auch zwischenzeitlich von einem anderen Gerät oder per Zeitplan gestartete Läufe (die App hatte beim Drücken auf Stopp keine aktuelle Laufliste).",
-      "unconfirmable": "Ein Stopp von vor dem Neustart der App hat den Daemon nie erreicht. Drücke erneut auf Stopp, falls noch Bots laufen.",
-      "unconfirmed": "Der Daemon hat diesen Stopp verloren, bevor er sagte, was er gestoppt hat. {{quarantined}} Läufe, die betroffen gewesen sein könnten, sind pausiert und können nicht handeln, bis du entscheidest.",
-      "unreachableListed_one": "Bot- und Übernahme-Eingaben sind hier angehalten. Der Daemon hat noch nicht bestätigt; sobald er erreicht wird, stoppt er nur den {{count}} Lauf, der beim Drücken auf „Stopp“ bekannt war. Neuer Versuch …",
-      "unreachableListed_other": "Bot- und Übernahme-Eingaben sind hier angehalten. Der Daemon hat noch nicht bestätigt; sobald er erreicht wird, stoppt er nur die {{count}} Läufe, die beim Drücken auf „Stopp“ bekannt waren. Neuer Versuch …",
-      "unreachableSweep": "Bot- und Übernahme-Eingaben sind hier angehalten. Der Daemon ist noch nicht erreichbar; sobald er es ist, stoppt dieser Stopp JEDEN in diesem Moment offenen Lauf, auch zwischenzeitlich von einem anderen Gerät oder per Zeitplan gestartete Läufe."
+      "stoppingNone": "Der Hintergrunddienst wird gebeten, jeden laufenden Bot zu stoppen …",
+      "stoppingSweep": "Der Hintergrunddienst wird gebeten zu stoppen. Dieser Stopp stoppt JEDEN Lauf, der offen ist, wenn der Hintergrunddienst ihn erhält, auch zwischenzeitlich von einem anderen Gerät oder per Zeitplan gestartete Läufe (die App hatte beim Drücken auf Stopp keine aktuelle Laufliste).",
+      "unconfirmable": "Ein Stopp von vor dem Neustart der App hat den Hintergrunddienst nie erreicht. Drücke erneut auf Stopp, falls noch Bots laufen.",
+      "unconfirmed": "Der Hintergrunddienst hat diesen Stopp verloren, bevor er sagte, was er gestoppt hat. {{quarantined}} Läufe, die betroffen gewesen sein könnten, sind pausiert und können nicht handeln, bis du entscheidest.",
+      "unreachableListed_one": "Bot- und Übernahme-Eingaben sind hier angehalten. Der Hintergrunddienst hat noch nicht bestätigt; sobald er erreicht wird, stoppt er nur den {{count}} Lauf, der beim Drücken auf „Stopp“ bekannt war. Neuer Versuch …",
+      "unreachableListed_other": "Bot- und Übernahme-Eingaben sind hier angehalten. Der Hintergrunddienst hat noch nicht bestätigt; sobald er erreicht wird, stoppt er nur die {{count}} Läufe, die beim Drücken auf „Stopp“ bekannt waren. Neuer Versuch …",
+      "unreachableSweep": "Bot- und Übernahme-Eingaben sind hier angehalten. Der Hintergrunddienst ist noch nicht erreichbar; sobald er es ist, stoppt dieser Stopp JEDEN in diesem Moment offenen Lauf, auch zwischenzeitlich von einem anderen Gerät oder per Zeitplan gestartete Läufe."
     },
     "dismiss": "Verwerfen",
     "letContinue": "Weiterlaufen lassen",
@@ -4695,7 +4706,7 @@
       "description": "Wo deine Aufnahmen transkribiert werden: ein OpenAI-kompatibler Dienst (Cloud-Anbieter oder lokaler Whisper-Server).",
       "geminiKey": "Gemini-API-Schlüssel",
       "geminiModel": "Gemini-Modell",
-      "geminiPrivacy": "Mit Gemini Live geht deine Sprache über den Daemon an Google, nur während du diktierst oder im Sprachgespräch bist. Der Schlüssel bleibt im Schlüsselspeicher. Nur das Transkript wird verwendet; die eigene Antwort des Modells wird ignoriert.",
+      "geminiPrivacy": "Mit Gemini Live geht deine Sprache über den Hintergrunddienst an Google, nur während du diktierst oder im Sprachgespräch bist. Der Schlüssel bleibt im Schlüsselspeicher. Nur das Transkript wird verwendet; die eigene Antwort des Modells wird ignoriert.",
       "key": "API-Schlüssel",
       "keyStored": "Schlüssel gespeichert (zum Ersetzen eintippen)",
       "model": "Modell",

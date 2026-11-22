@@ -134,7 +134,7 @@
     "body": "Instructions",
     "bodyHint": "Markdown. Write the steps the way you would explain them to a careful colleague.",
     "bodyPlaceholder": "# Invoice check\n\n1. Open the order.\n2. Compare the totals.\n3. Ask before paying if they differ.",
-    "boundaryBody": "The app cannot save a skill into the skills folder by itself yet. Your skill passed a preliminary check in the app; whether it loads is decided by the daemon. Place the file once, then press Check.",
+    "boundaryBody": "The app cannot save a skill into the skills folder by itself yet. Your skill passed a preliminary check in the app; whether it loads is decided by the background service. Place the file once, then press Check.",
     "boundaryTitle": "One manual step for now",
     "check": "Check",
     "checkFailed": "Could not check",
@@ -207,7 +207,7 @@
     "title": "Add a skill",
     "triggers": "Suggest it automatically (optional)",
     "triggersHint": "Comma separated. The skill is suggested when the bot is on one of these sites or apps, or the task mentions a keyword.",
-    "unverified": "This daemon does not report a fingerprint of the instructions, so an older file with the same name, version and description cannot be ruled out. Closing still asks before discarding what you wrote.",
+    "unverified": "This background service does not report a fingerprint of the instructions, so an older file with the same name, version and description cannot be ruled out. Closing still asks before discarding what you wrote.",
     "useSuggestion": "Use “{{name}}”",
     "version": "Version"
   },
@@ -495,7 +495,7 @@
       "stderr": "What the server printed"
     },
     "folder": {
-      "hint": "Only this folder is shared with the app. Praxi-Bot's own data and credential folders are refused.",
+      "hint": "Only this folder is shared with the app. Praxi-Bot's own data and your password or sign-in folders can never be shared.",
       "label": "Folder the bot may read and write",
       "missing": "Choose a folder first.",
       "placeholder": "Full path, for example C:\\Users\\you\\Documents",
@@ -729,7 +729,7 @@
     },
     "needCli": "Choose a coding CLI model for this bot above and save it first (a model that starts with cli:). Enable the CLI in Settings, AI, Detected accounts.",
     "workspace": "Workspace folder",
-    "workspaceHint": "The CLI works in this folder. Praxi's data folder, your home folder, drive roots and credential or CLI settings folders are refused.",
+    "workspaceHint": "The coding tool works in this folder. Praxi's own data, your home folder, whole drives and folders that hold passwords or sign-ins are not allowed.",
     "workspacePlaceholder": "Empty: Praxi makes a folder for this bot. Or type a path such as C:/Projects/my-app"
   },
   "botForm": {
@@ -778,7 +778,7 @@
         "name": "This computer"
       },
       "folder": {
-        "hint": "Sandbox for the file tools: only the folders below, nothing else. Shell commands and scripts are switched off for this bot; connected apps and CLI engines are not confined.",
+        "hint": "The bot can only touch files inside the folders below, nothing else. Commands and scripts are switched off for this bot. Connected apps and coding tools are not limited by this.",
         "name": "Folder only"
       },
       "foldersLabel": "Allowed folders",
@@ -1051,14 +1051,14 @@
       "egress": {
         "hidden": "{{hidden}} invisible characters are shown as <U+XXXX>",
         "host": "Destination: {{host}}",
-        "large": "This payload is too large for the compact card ({{bytes}} bytes). Open the full text and scroll to the end before approving.",
+        "large": "This is too long to show in full on the small card ({{bytes}} bytes). Open the full text and scroll to the end before you approve.",
         "payload": {
           "body": "Outgoing data (shown in full):",
           "query": "Outgoing query (shown in full):",
           "url": "Outgoing URL (shown in full):"
         },
         "read": "This run read: {{list}}",
-        "reviewFull": "Review full payload"
+        "reviewFull": "Read everything that will be sent"
       },
       "input": {
         "label": "Exactly what {{name}} will receive",
@@ -1219,7 +1219,7 @@
       "bytes": "{{count}} B",
       "changedByRun": "Changed by another run ({{run}})",
       "changedOutsideRun": "Changed outside this run",
-      "computerScope": "Run computer: {{computer}}. These file checkpoints are on the connected daemon’s disk.",
+      "computerScope": "Ran on: {{computer}}. These saved copies of your files are on that computer.",
       "computerUnknown": "Not recorded",
       "couldNotVerify": "Could not verify the current file state",
       "diffStats": "+{{added}} / -{{removed}}",
@@ -2004,7 +2004,7 @@
   "errors": {
     "cliNotInstalled": {
       "hint": "Install or update it in Settings, AI, then try again.",
-      "title": "That coding CLI is not installed or needs an update"
+      "title": "That coding tool is not installed or needs an update"
     },
     "cliQuota": {
       "hint": "Wait until it resets or pick another model.",
@@ -2012,7 +2012,7 @@
     },
     "cliSignedOut": {
       "hint": "Sign in to it in Settings, AI, then try again.",
-      "title": "That coding CLI is signed out"
+      "title": "You are signed out of that coding tool"
     },
     "codes": {
       "admin_rate_limit": {
@@ -2148,7 +2148,7 @@
         "title": "That app access is not valid"
       },
       "invalid_signature": {
-        "hint": "Check the secret that was set up for this trigger.",
+        "hint": "Check the secret code you set up for this trigger and try again.",
         "title": "The request could not be verified"
       },
       "invalid_skill": {
@@ -2236,11 +2236,11 @@
         "title": "The server is missing a required component"
       },
       "provider_endpoint": {
-        "hint": "Check the base URL and its API path in Settings → AI.",
-        "title": "The provider endpoint could not be found"
+        "hint": "Open Settings → AI and check the web address you typed for this provider. Copy it again from the provider's website.",
+        "title": "That web address does not work"
       },
       "provider_model": {
-        "hint": "Check the model ID in Settings → AI and choose a model available to your account.",
+        "hint": "Open Settings → AI and pick another model from the list. Choose one your account can use.",
         "title": "The provider could not find the configured model"
       },
       "reload_failed": {
@@ -2365,7 +2365,7 @@
       },
       "unauthorized": {
         "hint": "Restart the local service. If that does not help, restart Praxi.",
-        "title": "Praxi could not prove who you are"
+        "title": "Praxi could not confirm it is you"
       },
       "unavailable": {
         "hint": "Try again in a moment.",
@@ -2510,7 +2510,7 @@
       },
       "portInUse": {
         "hint": "Close that program or restart the computer, then try again.",
-        "title": "Port {{port}} is used by another program"
+        "title": "Another program is using the connection Praxi needs ({{port}})"
       },
       "sidecarBlocked": {
         "hint": "Antivirus, SmartScreen or a policy refused to run it. Allow bot.exe in Praxi's folder, then try again.",
@@ -2533,7 +2533,7 @@
         "title": "Praxi's service is taking longer than usual to start"
       },
       "unreachable": {
-        "hint": "Another program may be using port {{port}}. Restart the service.",
+        "hint": "Another program may be using the connection ({{port}}) Praxi needs. Restart the service.",
         "title": "Praxi's service answers, but the app does not trust it"
       }
     },
@@ -2735,6 +2735,15 @@
     "retry": "Retry"
   },
   "help": {
+    "center": {
+      "allDocs": "Open the full guide",
+      "intro": "Short answers to the questions people ask first. Type a word to search.",
+      "noMatch": "No answer found. Try one simple word, or open the full guide below.",
+      "readMore": "Read more in the guide",
+      "searchLabel": "Search the help",
+      "searchPlaceholder": "For example: free, stop, apps",
+      "title": "Help"
+    },
     "closePanel": "Close the side panel",
     "dialogClose": "Close the dialog",
     "dialogFocus": "Move focus inside the dialog",
@@ -3049,7 +3058,7 @@
       "recover_failed": "Could not recover control. Try again.",
       "release_failed": "Could not hand control back. The bot stays paused; try “I'm done” again.",
       "release_interrupted": "The takeover was interrupted before hand-back finished. Clear the pause to let the bot continue, or reacquire control.",
-      "release_unconfirmed": "The daemon still reports your takeover as active. Try “I'm done” again.",
+      "release_unconfirmed": "The background service still reports your takeover as active. Try “I'm done” again.",
       "server_restarting": "The server may be restarting. Try again when it comes back online.",
       "takeover_failed": "Could not take control. Try again.",
       "timeout": "The screen did not start in time.",
@@ -3130,7 +3139,7 @@
       "refresh_pending": "Waiting for the target to publish a fresh frame.",
       "remote_node_live_view": "Remote host live view is not available on this connection.",
       "reset_failed": "Could not verify input key reset cleanly; paused safely.",
-      "restart": "The daemon restarted while you had control. Clear the pause when you want the bot to continue.",
+      "restart": "The background service restarted while you had control. Clear the pause when you want the bot to continue.",
       "resync_required": "Screen geometry or sequence updated; syncing with latest frame.",
       "revoked": "Screen access for this device was revoked.",
       "stale": "Frames became stale. Bots stay paused until a fresh frame arrives and you recover.",
@@ -3194,9 +3203,9 @@
   "main": {
     "clearSelection": "Back to overview",
     "daemonConnectingDescription": "Connecting to the bundled Praxi-Bot background service on this computer.",
-    "daemonConnectingTitle": "Starting local daemon…",
-    "daemonOfflineDescription": "Praxi-Bot could not reach the local background daemon (bot serve). Make sure no firewall or port conflict blocks loopback port 47821, then retry.",
-    "daemonOfflineTitle": "Local daemon is not running",
+    "daemonConnectingTitle": "Starting local background service…",
+    "daemonOfflineDescription": "Praxi-Bot's background service is not answering. Wait a few seconds and try again. If it keeps failing, check that a firewall is not blocking Praxi-Bot, or restart the app.",
+    "daemonOfflineTitle": "Local background service is not running",
     "daemonRetry": "Retry connection",
     "refreshBots": "Refresh",
     "runSetupWizard": "Run setup wizard",
@@ -3470,6 +3479,8 @@
       "navigate": "Navigate",
       "schedule": "Schedule"
     },
+    "help": "Help and answers",
+    "helpKeywords": "help questions faq how do I what is guide",
     "hint": "↑↓ to move · Enter to run · Esc to close",
     "newChat": "New chat",
     "placeholder": "Type a command…",
@@ -3798,7 +3809,7 @@
     "replaces": "This replaces the stored value for {{name}}.",
     "stored": "Saved to the vault. The bot was told it is stored.",
     "submit": "Save to vault",
-    "title": "{{bot}} asks for a credential",
+    "title": "{{bot}} needs a password or key from you",
     "typeLogin": "login (username and password)",
     "typeSecret": "single secret",
     "untrusted": "This run has read content from outside. Something there may have asked for this. Do not enter a password you would not give that content directly.",
@@ -3973,11 +3984,11 @@
       "customId": "Provider id",
       "default": "Default",
       "defaultModel": "Default model",
-      "description": "API keys are stored in your OS keychain. Changes are picked up by the daemon without a restart.",
+      "description": "API keys are stored in your OS keychain. Changes are picked up by the background service without a restart.",
       "disabled": "Disabled",
       "keyHint": "The key is sent to the OS keychain and never shown again.",
       "keyStored": "key stored",
-      "localDaemonOnly": "Provider setup is available for the local daemon started by this app. For other connections, manage providers on the computer running the daemon.",
+      "localDaemonOnly": "Provider setup is available for the local background service started by this app. For other connections, manage providers on the computer running the background service.",
       "makeDefault": "Make default",
       "modelCount": "{{count}} model",
       "modelCount_other": "{{count}} models",
@@ -3989,9 +4000,9 @@
       "notLoaded": "Not loaded yet",
       "offline": "The local service is not running. Restart it to manage providers.",
       "provider": "Provider",
-      "restart": "Restart daemon",
-      "restartHint": "Restart the daemon so it picks up the change.",
-      "restartManual": "Restart the daemon yourself so it picks up the change (it was not started by this app).",
+      "restart": "Restart background service",
+      "restartHint": "Restart the background service so it picks up the change.",
+      "restartManual": "Restart the background service yourself so it picks up the change (it was not started by this app).",
       "test": "Test connection",
       "title": "Model providers"
     },
@@ -4463,8 +4474,8 @@
   },
   "stopStatus": {
     "detail": {
-      "expiredNone": "The daemon no longer had this Stop on record; none of the runs it held is still going.",
-      "expiredRetry": "The daemon no longer had this Stop on record. Retrying only the {{held}} runs still held; nothing started later is touched.",
+      "expiredNone": "The background service no longer had this Stop on record; none of the runs it held is still going.",
+      "expiredRetry": "The background service no longer had this Stop on record. Retrying only the {{held}} runs still held; nothing started later is touched.",
       "partial": "{{stopped}} of {{count}} stopped. The rest are held and cannot act; retrying…",
       "released": "You let the paused runs continue. Nothing was cancelled.",
       "stoppedCount_one": "{{count}} run stopped.",
@@ -4472,13 +4483,13 @@
       "stoppedNone": "No bot runs were going.",
       "stoppingCount_one": "{{stopped}} of {{count}} run stopped; waiting for the rest to end.",
       "stoppingCount_other": "{{stopped}} of {{count}} runs stopped; waiting for the rest to end.",
-      "stoppingNone": "Asking the daemon to stop every running bot…",
-      "stoppingSweep": "Asking the daemon to stop. This Stop will stop EVERY run open when the daemon receives it, including runs started meanwhile from another device or a schedule (the app had no fresh run list when you pressed Stop).",
-      "unconfirmable": "A Stop from before the app restarted never reached the daemon. Press Stop again if bots are still running.",
-      "unconfirmed": "The daemon lost this Stop before saying what it stopped. {{quarantined}} runs that may have been targeted are paused and cannot act until you decide.",
-      "unreachableListed_one": "Bot and takeover input is halted here. The daemon has not confirmed yet; when it is reached it will stop only the {{count}} run known when you pressed Stop. Retrying…",
-      "unreachableListed_other": "Bot and takeover input is halted here. The daemon has not confirmed yet; when it is reached it will stop only the {{count}} runs known when you pressed Stop. Retrying…",
-      "unreachableSweep": "Bot and takeover input is halted here. The daemon cannot be reached yet; when it is, this Stop will stop EVERY run open at that moment, including runs started meanwhile from another device or a schedule."
+      "stoppingNone": "Asking the background service to stop every running bot…",
+      "stoppingSweep": "Asking the background service to stop. This Stop will stop EVERY run open when the background service receives it, including runs started meanwhile from another device or a schedule (the app had no fresh run list when you pressed Stop).",
+      "unconfirmable": "A Stop from before the app restarted never reached the background service. Press Stop again if bots are still running.",
+      "unconfirmed": "The background service lost this Stop before saying what it stopped. {{quarantined}} runs that may have been targeted are paused and cannot act until you decide.",
+      "unreachableListed_one": "Bot and takeover input is halted here. The background service has not confirmed yet; when it is reached it will stop only the {{count}} run known when you pressed Stop. Retrying…",
+      "unreachableListed_other": "Bot and takeover input is halted here. The background service has not confirmed yet; when it is reached it will stop only the {{count}} runs known when you pressed Stop. Retrying…",
+      "unreachableSweep": "Bot and takeover input is halted here. The background service cannot be reached yet; when it is, this Stop will stop EVERY run open at that moment, including runs started meanwhile from another device or a schedule."
     },
     "dismiss": "Dismiss",
     "letContinue": "Let them continue",
@@ -4695,7 +4706,7 @@
       "description": "Where your recordings are transcribed: an OpenAI-compatible service (a cloud provider or a local whisper server).",
       "geminiKey": "Gemini API key",
       "geminiModel": "Gemini model",
-      "geminiPrivacy": "With Gemini Live your speech goes to Google, through the daemon, only while you dictate or are in a voice call. The key stays in the secret store. Only the transcript is used; the model's own answer is ignored.",
+      "geminiPrivacy": "With Gemini Live your speech goes to Google, through the background service, only while you dictate or are in a voice call. The key stays in the secret store. Only the transcript is used; the model's own answer is ignored.",
       "key": "API key",
       "keyStored": "Key stored (type to replace)",
       "model": "Model",
