@@ -1,4 +1,4 @@
-//! `bot chats list|export`: read and archive chat transcripts from the daemon.
+//! `bot chats list|export|import`: read, archive and load chat transcripts.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -8,6 +8,9 @@ use reqwest::Method;
 
 use crate::Result;
 use crate::client::{Client, exit, fail};
+
+/// The daemon's import body limit; refuse a larger file before reading it.
+const MAX_IMPORT_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// `bot chats` subcommands.
 #[derive(Subcommand)]
@@ -32,6 +35,14 @@ pub(crate) enum ChatsCmd {
         /// symlink is never followed.
         #[arg(long)]
         force: bool,
+    },
+    /// Import a JSON export as a new chat (owner only).
+    Import {
+        /// JSON export file.
+        file: PathBuf,
+        /// Bot that will own the new chat.
+        #[arg(long)]
+        bot: String,
     },
 }
 
@@ -60,6 +71,7 @@ pub(crate) async fn run(
             )
             .await
         }
+        ChatsCmd::Import { file, bot } => import(c, file, bot, json, out).await,
     }
 }
 
@@ -139,6 +151,70 @@ async fn export(
         }
     } else {
         out.write_all(&bytes)?;
+    }
+    Ok(())
+}
+
+async fn import(
+    c: &Client,
+    file: &std::path::Path,
+    bot: &str,
+    json: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let bot =
+        uuid::Uuid::parse_str(bot).map_err(|_| fail(exit::REJECTED, "bot id must be a UUID"))?;
+    let size = std::fs::metadata(file)
+        .map_err(|error| {
+            fail(
+                exit::GENERIC,
+                format!("cannot read {}: {error}", file.display()),
+            )
+        })?
+        .len();
+    if size > MAX_IMPORT_FILE_BYTES {
+        return Err(fail(
+            exit::REJECTED,
+            format!(
+                "{} is larger than the {} MiB import limit",
+                file.display(),
+                MAX_IMPORT_FILE_BYTES / (1024 * 1024)
+            ),
+        ));
+    }
+    let data = std::fs::read(file).map_err(|error| {
+        fail(
+            exit::GENERIC,
+            format!("cannot read {}: {error}", file.display()),
+        )
+    })?;
+    let doc: serde_json::Value = serde_json::from_slice(&data).map_err(|error| {
+        fail(
+            exit::REJECTED,
+            format!(
+                "{} is not a valid JSON chat export: {error}",
+                file.display()
+            ),
+        )
+    })?;
+    let report = c
+        .request(
+            Method::POST,
+            &format!("/v1/chats/import?bot_id={bot}"),
+            Some(doc),
+        )
+        .await?;
+    if json {
+        writeln!(out, "{}", serde_json::to_string(&report)?)?;
+    } else {
+        writeln!(
+            out,
+            "imported chat {}: {} message(s); {} step(s) and {} approval(s) not imported",
+            report["chat_id"].as_str().unwrap_or("?"),
+            report["messages"].as_u64().unwrap_or(0),
+            report["steps_ignored"].as_u64().unwrap_or(0),
+            report["approvals_ignored"].as_u64().unwrap_or(0),
+        )?;
     }
     Ok(())
 }
@@ -371,6 +447,112 @@ mod tests {
                 format: None,
                 output: None,
                 force: false,
+            },
+            false,
+            &mut Vec::new(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<crate::client::ExitError>()
+                .map(|error| error.code),
+            Some(exit::REJECTED)
+        );
+    }
+
+    #[tokio::test]
+    async fn import_posts_the_file_with_the_owner_key_and_prints_the_report() {
+        use wiremock::matchers::body_json;
+
+        let server = MockServer::start().await;
+        let bot = uuid::Uuid::from_u128(4);
+        let chat_id = uuid::Uuid::from_u128(5);
+        let doc = serde_json::json!({
+            "format_version": 1,
+            "title": "Imported",
+            "messages": [{"role": "user", "content": "hello"}],
+            "steps": [],
+            "approvals": []
+        });
+        Mock::given(method("POST"))
+            .and(path("/v1/chats/import"))
+            .and(query_param("bot_id", bot.to_string()))
+            .and(header("x-praxi-owner-key", "owner-key"))
+            .and(body_json(doc.clone()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "chat_id": chat_id.to_string(),
+                "title": "Imported",
+                "messages": 1,
+                "steps_ignored": 0,
+                "approvals_ignored": 0
+            })))
+            .mount(&server)
+            .await;
+        let client =
+            Client::new(&server.uri(), "tok".into()).with_owner_key(Some("owner-key".into()));
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("chat.json");
+        std::fs::write(&file, serde_json::to_vec(&doc).unwrap()).unwrap();
+
+        let mut out = Vec::new();
+        run(
+            &client,
+            &ChatsCmd::Import {
+                file,
+                bot: bot.to_string(),
+            },
+            true,
+            &mut out,
+        )
+        .await
+        .unwrap();
+        let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(report["chat_id"], chat_id.to_string());
+        assert_eq!(report["messages"], 1);
+    }
+
+    #[tokio::test]
+    async fn import_rejects_malformed_json_and_never_calls_the_daemon() {
+        let server = MockServer::start().await;
+        let client = Client::new(&server.uri(), "tok".into());
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("bad.json");
+        std::fs::write(&file, b"{not json").unwrap();
+        let error = run(
+            &client,
+            &ChatsCmd::Import {
+                file,
+                bot: uuid::Uuid::from_u128(4).to_string(),
+            },
+            false,
+            &mut Vec::new(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<crate::client::ExitError>()
+                .map(|error| error.code),
+            Some(exit::REJECTED)
+        );
+    }
+
+    #[tokio::test]
+    async fn import_rejects_an_oversized_file_before_reading_it() {
+        let server = MockServer::start().await;
+        let client = Client::new(&server.uri(), "tok".into());
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("huge.json");
+        std::fs::File::create(&file)
+            .unwrap()
+            .set_len(MAX_IMPORT_FILE_BYTES + 1)
+            .unwrap();
+        let error = run(
+            &client,
+            &ChatsCmd::Import {
+                file,
+                bot: uuid::Uuid::from_u128(4).to_string(),
             },
             false,
             &mut Vec::new(),

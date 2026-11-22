@@ -177,6 +177,14 @@ and JSON files as the desktop app.
 | --- | --- |
 | `bot chats list [--bot <BOT_ID>]` | List chats; `--json` prints the API array |
 | `bot chats export <CHAT_ID>` | Write one chat to stdout. Options: `--format md\|json` (default `md`; global `--json` forces JSON), `-o, --output <FILE>` writes a private file (mode `0600` on Unix; an existing path or a symlink is refused) and `--force` replaces an existing regular file |
+| `bot chats import <FILE> --bot <BOT_ID>` | Create a new chat from a version-1 JSON export. Imported messages are untrusted history; tool steps and approvals are never executed |
+
+Imported messages keep their `user` or `assistant` role but are marked with the
+`imported` source and stored as untrusted content, so later egress and tool
+use still ask. A file's tool steps and approvals are listed in one inert
+`imported_note` message; they never enter the run or approval tables. Import
+only accepts `format_version: 1`; malformed, newer or oversized files fail
+with exit code 6.
 
 ### `bot bots`
 
