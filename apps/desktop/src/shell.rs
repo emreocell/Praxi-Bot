@@ -58,15 +58,18 @@ pub struct NotifyAction {
     pub label: String,
 }
 
+#[cfg(any(windows, test))]
 const ACTION_PREFIX: &str = "praxi-action|";
 const ACTION_IDS: [&str; 3] = ["allow", "always", "deny"];
 
 /// The button argument carried through the toast: `praxi-action|<id>|<call id>`.
+#[cfg(any(windows, test))]
 fn action_argument(id: &str, call_id: &str) -> String {
     format!("{ACTION_PREFIX}{id}|{call_id}")
 }
 
 /// Parse a toast activation argument back; `None` for a body click or anything foreign.
+#[cfg(any(windows, test))]
 fn parse_action_argument(arg: &str) -> Option<ActionPayload> {
     let rest = arg.strip_prefix(ACTION_PREFIX)?;
     let (id, call_id) = rest.split_once('|')?;
