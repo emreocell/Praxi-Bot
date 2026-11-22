@@ -2178,11 +2178,14 @@
     "empty": "Botların bugün henüz bir şey yapmadı.",
     "failed": "Başarısız: {{count}}",
     "noCalls": "Henüz model çağrısı yok.",
+    "notifyPrivate": "Günlük özetin hazır. Okumak için uygulamayı aç.",
+    "notifyTitle": "Botların bugün",
     "ofLimit": "Bu, günlük limitin {{percent}} kadarı.",
     "running": "Çalışan: {{count}}",
     "stopped": "Durdurulan: {{count}}",
     "subtitle": "Botların gece yarısından beri neler yaptığı ve maliyeti.",
     "title": "Bugün",
+    "totalCost": "Maliyet: {{cost}}",
     "waiting": "Seni bekleyen: {{count}}"
   },
   "engineConsent": {
@@ -3684,6 +3687,7 @@
     "held": "Tutuldu (sessiz saatler)",
     "heldMuted": "Tutuldu (bot sessizde)",
     "kind": {
+      "digest": "Günlük özet",
       "failed": "Çalışma başarısız",
       "longRun": "Uzun çalışma bitti",
       "needsYou": "Sizi bekliyor",
@@ -4295,6 +4299,12 @@
       },
       "noFile": "Arka plan görseli seçilmedi",
       "title": "Arka plan görseli"
+    },
+    "digest": {
+      "enabled": "Günlük özet gönder",
+      "enabledHint": "Günde bir kısa bildirim: botların neler yaptı ve maliyeti ne oldu. Sessiz saatler geçerlidir: o saatlerde yalnızca bildirim geçmişine düşer.",
+      "time": "Şu saatte gönder",
+      "title": "Günlük özet"
     },
     "hotkey": {
       "currentLabel": "Aktif kısayol",

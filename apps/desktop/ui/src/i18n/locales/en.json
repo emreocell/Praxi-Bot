@@ -2178,11 +2178,14 @@
     "empty": "Your bots have not done anything today.",
     "failed": "Failed: {{count}}",
     "noCalls": "No model calls yet.",
+    "notifyPrivate": "Your daily summary is ready. Open the app to read it.",
+    "notifyTitle": "Your bots today",
     "ofLimit": "That is {{percent}} of the daily limit.",
     "running": "Running: {{count}}",
     "stopped": "Stopped: {{count}}",
     "subtitle": "What your bots did since midnight and what it cost.",
     "title": "Today",
+    "totalCost": "Cost: {{cost}}",
     "waiting": "Waiting for you: {{count}}"
   },
   "engineConsent": {
@@ -3684,6 +3687,7 @@
     "held": "Held (quiet hours)",
     "heldMuted": "Held (bot muted)",
     "kind": {
+      "digest": "Daily summary",
       "failed": "Run failed",
       "longRun": "Long run finished",
       "needsYou": "Needs you",
@@ -4295,6 +4299,12 @@
       },
       "noFile": "No background image selected",
       "title": "Background Image"
+    },
+    "digest": {
+      "enabled": "Send a daily summary",
+      "enabledHint": "One short notification a day with what your bots did and what it cost. Quiet hours apply: during them it only goes to the notification history.",
+      "time": "Send it at",
+      "title": "Daily summary"
     },
     "hotkey": {
       "currentLabel": "Active shortcut",
