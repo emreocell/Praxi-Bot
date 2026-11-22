@@ -18,6 +18,7 @@
 pub mod bots;
 pub mod browser;
 pub mod checkpoint;
+pub mod clock;
 pub mod control;
 pub mod desktop;
 pub mod files;
@@ -27,6 +28,7 @@ mod fill_secret_tests;
 pub mod knowledge;
 pub mod knowledge_brain;
 pub mod meta;
+pub mod notes;
 pub mod pc;
 pub mod provenance;
 pub mod schedule;
@@ -64,6 +66,7 @@ pub use checkpoint::{
     MAX_DIFF_FILE_BYTES, MAX_DIFF_RUN_BYTES, RestoreAction, RestorePreviewEntry, RestoreReport,
     UnifiedDiff, Verification,
 };
+pub use clock::CLOCK_TOOL_NAMES;
 pub use control::{
     ActionPermit, ControlRequest, DesktopControlGate, OBSERVATION_DISCARDED, PermitValidator,
 };
@@ -71,6 +74,7 @@ pub use desktop::{DesktopSettings, SharedOcr, resolve_input_target};
 pub use files::{try_with_exclusive_file_access, with_checkpoint_access, workspace_refusal};
 pub use fill_secret::{SECRETS_LIST, secrets_list_tool};
 pub use meta::{META_TOOL_NAMES, QUESTION_CARD_KIND, TODO_LIST_KIND, TodoItem, TodoStatus};
+pub use notes::NOTES_TOOL_NAMES;
 pub use schedule::{
     PreviousSchedule, SCHEDULE_TOOL_NAMES, ScheduleCaller, ScheduleChange, ScheduleHost,
     SchedulePreview, ScheduleRequest, ScheduleView,
@@ -276,6 +280,8 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         cfg.control,
     ));
     all.extend(meta::tools());
+    all.extend(clock::tools());
+    all.extend(notes::tools(&cfg.data_dir));
     if let Some(backend) = cfg.knowledge {
         all.push(knowledge::tool(backend));
     }
@@ -537,6 +543,12 @@ mod tests {
             ("script_run", W, Sc),
             ("ask_user", R, Me),
             ("todo_write", W, Me),
+            ("time_now", R, Me),
+            ("calculate", R, Me),
+            ("notes_list", R, Fs),
+            ("notes_read", R, Fs),
+            ("notes_write", W, Fs),
+            ("notes_delete", D, Fs),
         ]
     }
 
@@ -1109,7 +1121,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 35 + 6);
+        assert_eq!(added, 35 + 6 + 6);
 
         // Verification of email tools and their effects
         let send_tool = reg

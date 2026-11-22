@@ -1469,6 +1469,11 @@
         "failed": "Sayfaya bakılamadı",
         "running": "Sayfaya bakılıyor"
       },
+      "calculate": {
+        "done": "Hesaplandı",
+        "failed": "Hesaplanamadı",
+        "running": "Hesaplanıyor"
+      },
       "desktop_key": {
         "done": "Bilgisayarda tuşa basıldı",
         "failed": "Bilgisayarda tuşa basılmadı",
@@ -1604,6 +1609,21 @@
         "failed": "Hafızada aranamadı",
         "running": "Hafızada aranıyor"
       },
+      "notes_delete": {
+        "done": "Not silindi",
+        "failed": "Not silinmedi",
+        "running": "Not siliniyor"
+      },
+      "notes_read": {
+        "done": "Notlar okundu",
+        "failed": "Notlar okunamadı",
+        "running": "Notlar okunuyor"
+      },
+      "notes_write": {
+        "done": "Not kaydedildi",
+        "failed": "Not kaydedilmedi",
+        "running": "Not kaydediliyor"
+      },
       "schedule_create": {
         "done": "Yinelenen görev oluşturuldu",
         "failed": "Yinelenen görev oluşturulmadı",
@@ -1643,6 +1663,11 @@
         "done": "Beceri yazıldı",
         "failed": "Beceri yazılmadı",
         "running": "Beceri yazılıyor"
+      },
+      "time_now": {
+        "done": "Saate bakıldı",
+        "failed": "Saate bakılamadı",
+        "running": "Saate bakılıyor"
       },
       "todo": {
         "done": "Plan güncellendi",

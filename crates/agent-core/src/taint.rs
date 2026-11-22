@@ -308,6 +308,7 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
             format!("file skill {}", str_field("name").unwrap_or("a skill"))
         }
         "memory_search" | "memory_save" | "memory_forget" => "memory".to_owned(),
+        "notes_list" | "notes_read" | "notes_write" | "notes_delete" => "notes".to_owned(),
         "session_search" => "past conversation".to_owned(),
         "workflow_run" | "workflow_list" => "workflow replay".to_owned(),
         other if other.starts_with("desktop_") => format!(
@@ -383,6 +384,7 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
             ("this bot's scheduler".to_owned(), "body")
         }
         "memory_save" | "memory_forget" => ("this bot's memory".to_owned(), "body"),
+        "notes_write" | "notes_delete" => ("this bot's notes".to_owned(), "body"),
         "bot_create" | "bot_update" | "bot_delete" => ("the user's bots".to_owned(), "body"),
         other if other.starts_with("desktop_") => ("the desktop".to_owned(), "body"),
         _ => {

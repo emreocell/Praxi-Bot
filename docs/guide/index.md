@@ -77,6 +77,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Read and add calendar events | [Calendar (CalDAV)](calendar.md) |
 | Let a bot read Home Assistant entities and call services | [Home Assistant](home-assistant.md) |
 | Let a bot search the web and read pages without a browser | [Web tools](web.md) |
+| Give a bot a scratchpad, the clock and a calculator | [Notes, clock and calculator](agent-tools.md) |
 | Set up knowledge embeddings (optional; knowledge search works without them) | [Set up knowledge embeddings](knowledge-embeddings.md) |
 | Look up a command or flag | [CLI reference](cli-reference.md) |
 | Back up and restore your data (encrypted) | [Encrypted backup and restore](backup.md) |

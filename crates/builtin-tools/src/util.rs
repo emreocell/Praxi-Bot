@@ -21,7 +21,9 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // of the bot's own bookkeeping. A write does not bring content in:
         // the model already had the bytes, and the result is not a private read.
         "ask_user" | "todo_write" | "schedule_pause" | "schedule_delete" | "fs_write"
-        | "fs_move" | "fs_delete" | "checkpoint_list" | "checkpoint_restore" | "schedule_list" => {
+        | "fs_move" | "fs_delete" | "checkpoint_list" | "checkpoint_restore" | "schedule_list"
+        // Pure: the clock and arithmetic bring no content in and send nothing out.
+        | "time_now" | "calculate" => {
             ContentClass::none()
         }
         // The names and allowed origins the owner chose for typed secrets. No
@@ -45,7 +47,15 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // outside (Downloads, attachments, mail) is marked untrusted per call by the loop
         // (`taint::arrived_from_outside`). Full screen content (`desktop_get_state`) stays
         // untrusted: the code cannot tell a browser or mail window from another program.
-        "fs_read" | "fs_list" | "fs_search" | "fs_edit" => ContentClass::private_read(),
+        // The bot's own notes (`notes_list`, `notes_read`) are private too: a later
+        // egress asks. A note written in an untrusted run reports untrusted
+        // exposure per call (see `notes`).
+        "fs_read" | "fs_list" | "fs_search" | "fs_edit" | "notes_list" | "notes_read" => {
+            ContentClass::private_read()
+        }
+        // Persisting or deleting notes from a tainted run changes what later
+        // runs read, so it asks like `memory_save` / `memory_forget`.
+        "notes_write" | "notes_delete" => ContentClass::declared(false, true, true),
         // A shell, a script, browser navigation and input, a drag, or a
         // desktop mutation that types, replaces a value, presses a key, or
         // launches a program can read and can send data off the machine. Tab
