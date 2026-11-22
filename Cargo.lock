@@ -1356,6 +1356,7 @@ dependencies = [
  "fs4",
  "futures-util",
  "host-provision",
+ "libc",
  "live-view",
  "mcp-bridge",
  "memory-store",

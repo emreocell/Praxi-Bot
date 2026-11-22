@@ -3252,6 +3252,84 @@
         ]
       }
     },
+    "/v1/chats/import": {
+      "post": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Import one version-1 chat export as a new chat. Every message is stored as\nuntrusted history with origin `imported`; tool steps and approvals are\ncounted but never executed or written to their tables.",
+        "operationId": "import_chat",
+        "parameters": [
+          {
+            "name": "bot_id",
+            "in": "query",
+            "description": "Bot that will own the new chat.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatImportReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/chats/search": {
       "get": {
         "tags": [
@@ -14100,6 +14178,76 @@
           }
         }
       },
+      "ChatImport": {
+        "type": "object",
+        "description": "A version-1 export file. The chat and message ids are ignored; a new chat\nand new message ids are created on import.",
+        "required": [
+          "format_version",
+          "messages"
+        ],
+        "properties": {
+          "approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportRow"
+            }
+          },
+          "format_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportMessage"
+            }
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportRow"
+            }
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "ChatImportReport": {
+        "type": "object",
+        "required": [
+          "chat_id",
+          "title",
+          "messages",
+          "steps_ignored",
+          "approvals_ignored"
+        ],
+        "properties": {
+          "approvals_ignored": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "chat_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "messages": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "steps_ignored": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "Check": {
         "type": "object",
         "description": "One diagnostic result.",
@@ -16482,6 +16630,13 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Recorded origin (`owner`, `telegram`, `imported`, ...), when known."
           }
         }
       },
@@ -18294,6 +18449,10 @@
             "description": "Tool patterns removed."
           }
         }
+      },
+      "ImportRow": {
+        "type": "object",
+        "description": "A tool step or approval row. Kept only for its count; it is never stored\nin the run or approval tables."
       },
       "ImportRun": {
         "type": "object",
@@ -20915,7 +21074,7 @@
               "string",
               "null"
             ],
-            "description": "Where a user message came from (`owner` = this app, `telegram`, `peer`,\n`local_api`); absent for older messages and for replies."
+            "description": "Where the message came from (`owner` = this app, `telegram`, `peer`,\n`local_api`, `imported`); absent for older messages and most replies."
           },
           "superseded": {
             "type": "boolean",

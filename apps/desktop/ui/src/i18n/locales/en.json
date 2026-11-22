@@ -14,7 +14,7 @@
   },
   "addServer": {
     "advanced": "Advanced",
-    "agentHint": "Praxi will use the keys already loaded in your SSH agent. Passwords are not supported.",
+    "agentHint": "Praxi will use the keys your computer has already loaded for signing in to servers (the SSH agent). Passwords are not supported.",
     "answerFailed": "The answer did not reach the setup. Close this window and start again.",
     "auth": "Sign-in",
     "auth_agent": "SSH agent",
@@ -195,7 +195,7 @@
     },
     "host": "Server address",
     "hostHint": "Example: 203.0.113.7 or myserver.example.com",
-    "hostKeyBody": "This is the first time this computer connects to {{host}}. Compare this fingerprint with the one in your provider's console if it shows one.",
+    "hostKeyBody": "This is the first time this computer connects to {{host}}. The fingerprint below is a code that identifies the server. Compare it with the one in your provider's console if it shows one.",
     "hostKeyNo": "No, stop",
     "hostKeyTitle": "Is this your server?",
     "hostKeyYes": "Yes, trust this server",
@@ -209,7 +209,7 @@
     },
     "keyFile": "Private key file",
     "keyHint": "Only the path is used. Praxi never copies or stores the key itself.",
-    "lead": "Connect a server you rent. No ticket to copy.",
+    "lead": "Connect a server you rent. Praxi does the setup for you.",
     "logEmpty": "Nothing to show yet.",
     "manual": "I have a pairing ticket instead",
     "noDaemon": "The local Praxi service is not running. Restart the app and try again.",
@@ -258,7 +258,7 @@
       "userInvalid": "Use letters, numbers, dots, dashes or underscores only."
     },
     "progress": "Setup progress",
-    "releaseNote": "Praxi can add a server that already runs Praxi. Installing it for you needs a published release, which does not exist yet.",
+    "releaseNote": "For now the server must already have Praxi on it. Installing Praxi on a blank server for you is not available yet.",
     "retry": "Try again",
     "retryResume": "Try again from here",
     "sayHello": "Say hello to your bot",
@@ -1514,6 +1514,7 @@
       "placeholder": "Find in chat…",
       "prev": "Previous match"
     },
+    "imported": "Imported",
     "jumpToLatest": "Jump to latest",
     "longMessage": {
       "less": "Show less",
@@ -3586,6 +3587,7 @@
     "sources": {
       "api": "local API",
       "app": "this app",
+      "imported": "imported file",
       "peer": "another computer",
       "telegram": "Telegram",
       "unknown": "unknown"
@@ -3659,7 +3661,7 @@
   },
   "newBot": {
     "advanced": "Advanced settings",
-    "autonomy": "Autonomy",
+    "autonomy": "How much it may do alone",
     "autonomyCustom": "Using the {{preset}} permission preset.",
     "autonomyHints": {
       "ask": "Reads files, checks the screen, and searches the web without asking; asks before any change, send, page fetch, click, or command.",
@@ -4073,7 +4075,7 @@
       "confirmParsed": "Check this is what you meant, then press Create.",
       "create": "Create",
       "cron": "Cron expression",
-      "cronHint": "Five fields, optionally followed by a timezone.",
+      "cronHint": "For people who know cron: five fields, for example 0 9 * * 1-5 means 9:00 on weekdays. A timezone may follow.",
       "customHint": "Describe it in your own words, for example \"every Monday at 8\".",
       "date": "On which day?",
       "editTitle": "Edit scheduled task",
@@ -4155,6 +4157,7 @@
     "movedTo": "Moved to {{name}}: it runs there and is frozen on this computer.",
     "never": "Never",
     "new": "New schedule",
+    "newNeedsBot": "Create a bot first, then you can schedule something for it.",
     "nextRun": "Next run",
     "nextRuns": "Next 5 runs",
     "nextRunsEmpty": "No upcoming runs.",
@@ -4215,6 +4218,7 @@
     "subtitle": "Things your bots do on a timer: every morning, every hour, or once.",
     "title": "Scheduled tasks",
     "viewCalendar": "Calendar",
+    "viewLabel": "Show as",
     "viewList": "List",
     "when": "When"
   },
@@ -4294,7 +4298,7 @@
   },
   "servers": {
     "add": "Add a server",
-    "checkNow": "Check now",
+    "checkNow": "Switch to it",
     "empty": "No server yet. This is fine: your bots run on this computer.",
     "lead": "Servers keep your bots running when this computer is off.",
     "remove": "Remove",
