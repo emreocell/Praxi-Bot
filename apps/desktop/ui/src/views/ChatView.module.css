@@ -498,10 +498,8 @@
 }
 
 .box:focus-within {
-  border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-border-strong));
-  box-shadow:
-    var(--shadow-card),
-    0 0 0 var(--space-1) color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-color: var(--color-focus);
+  box-shadow: var(--shadow-focus), var(--shadow-card);
 }
 
 .input {
@@ -872,7 +870,7 @@
 }
 
 .box:focus-within {
-  border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-border-strong));
+  border-color: var(--color-focus);
 }
 
 .jump {

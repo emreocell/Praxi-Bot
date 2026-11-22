@@ -1174,7 +1174,10 @@ export function ChatView({
   const jumpToPending = () => {
     const call = firstPending?.callId;
     const el = call ? document.querySelector(`[data-call-id="${call}"]`) : null;
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const instant =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el?.scrollIntoView({ block: "center", behavior: instant ? "instant" : "smooth" });
   };
   const decisions = useDecisionActions();
   const barBotName =

@@ -58,8 +58,8 @@
   justify-content: center;
   gap: var(--space-1);
   flex: none;
-  min-width: var(--size-info-button);
-  height: var(--size-info-button);
+  min-width: var(--space-6);
+  min-height: var(--space-6);
   padding: var(--space-0) calc(var(--space-1) * 0.75);
   border: none;
   border-radius: var(--radius-sm);

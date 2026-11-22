@@ -21,20 +21,24 @@ const LOCAL_ONLY: Record<string, string> = {
   "components/AccountMenu.tsx": "arrow keys inside the account menu (covered by popup menu rows)",
   "components/BotEditorFields.tsx": "Enter inside a single field",
   "components/BotPanel.tsx": "arrow keys on the panel tabs",
+  "components/CharacterPicker.tsx": "arrow keys inside the bot shape and color pickers",
   "components/ChatList.tsx": "Enter/Escape in inline rename and arrow keys on chat menu trigger",
   "components/ModelPicker.tsx": "arrow keys inside the model picker list",
   "components/ResendTurn.tsx": "Escape and Ctrl/Cmd+Enter inside the inline message editor",
   "components/ResizeGrip.tsx": "arrow keys on a resize handle",
   "components/SecretRequestCard.tsx": "Escape cancels the credential form it is typed in",
   "components/ServerSignInModal.tsx": "Enter inside a single field",
+  "components/SettingsUi.tsx": "arrow keys on a segmented radio group",
   "components/useBotReorder.ts": "keyboard reordering of the bot list",
   "lib/liveViewInput.ts": "forwards keys to the remote screen, not app shortcuts",
   "lib/liveViewLayers.ts": "layer routing for the live view",
   "overlay/events.ts": "stop hotkey formatting (documented as the stop entry)",
   "views/BotEditModal.tsx": "arrow keys on editor section tabs",
   "views/SchedulesView.tsx": "arrow, Home, and End navigation inside the schedule calendar grid",
+  "views/SettingsModal.tsx": "arrow, Home, and End navigation across settings section tabs",
   "views/firstrun/BrainStep.tsx": "Enter inside a single field",
-  "views/firstrun/FreedomStep.tsx": "arrow keys on a segmented control"
+  "views/firstrun/FreedomStep.tsx": "arrow keys on a segmented control",
+  "views/settings/ComputerCards.tsx": "arrow keys on computer target radio cards"
 };
 
 const KEY_HANDLER = /\b(?:e|ev|evt|event)\.key\b|\.key\s*(?:===|!==)\s*"/;

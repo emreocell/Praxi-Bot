@@ -399,6 +399,8 @@
 .botSearch { width: 100%; margin-top: var(--space-3); padding: var(--space-2); border: none; border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-ui); }
 /* Search while the rail is collapsed only by fitting: the field lives in a body-level Popover, the stored width stays. */
 .botSearchPopover { width: 100%; box-sizing: border-box; padding: var(--space-2); border: none; border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); font-size: var(--font-size-ui); }
+.botSearch:focus-visible,
+.botSearchPopover:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
 .botRole { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-ui); font-weight: var(--font-weight-regular); }
 
 .emptyStateCard { border: none; box-shadow: none; background: transparent; }
@@ -408,7 +410,47 @@
 .stateIconDanger { color: var(--color-danger); }
 .spin { animation: stateSpin 1.2s linear infinite; }
 @keyframes stateSpin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .spin { animation: none; }
+  .colorSwatch,
+  .botChip,
+  .botChip > svg { transition: none; }
+}
+
+.skipLink {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 50;
+  width: var(--size-border);
+  height: var(--size-border);
+  padding: var(--space-0);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface-elevated-opaque);
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: none;
+}
+
+.skipLink:focus-visible {
+  width: auto;
+  height: auto;
+  min-height: var(--space-6);
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  clip-path: none;
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.mainColumn:focus {
+  outline: none;
+}
 
 
 /* ───────── v6 shell ───────── */

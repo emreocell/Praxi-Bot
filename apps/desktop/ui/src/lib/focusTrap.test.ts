@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isTabStop, trapTarget } from "./focusTrap.ts";
+import { isTabStop, returnFocusTarget, trapTarget } from "./focusTrap.ts";
 
 test("a tab stop needs a non-negative tabIndex, a layout box and no inert ancestor", () => {
   assert.equal(isTabStop({ tabIndex: 0, rects: 1 }), true);
@@ -32,4 +32,21 @@ test("focus outside the cycle is pulled back in", () => {
 test("with no stops the caller keeps focus on the dialog", () => {
   assert.equal(trapTarget([], null, "dlg", false), "none");
   assert.equal(trapTarget([], "dlg", "dlg", true), "none");
+});
+
+test("returnFocusTarget prefers a connected previous trigger and falls back when unmounted", () => {
+  const connected = new Set(["trigger", "anchor"]);
+  assert.equal(
+    returnFocusTarget("trigger", (el) => connected.has(el), "anchor"),
+    "trigger"
+  );
+  assert.equal(
+    returnFocusTarget("unmounted-menu-item", (el) => connected.has(el), "anchor"),
+    "anchor"
+  );
+  assert.equal(
+    returnFocusTarget("unmounted-menu-item", (el) => connected.has(el), "also-gone"),
+    null
+  );
+  assert.equal(returnFocusTarget(null, (el) => connected.has(el)), null);
 });

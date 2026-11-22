@@ -28,11 +28,22 @@
 }
 
 .grip:hover::after,
-.grip:focus-visible::after,
 :global(:root[data-resizing]) .grip::after {
   opacity: 0.55;
 }
 
+.grip:focus-visible::after {
+  opacity: 1;
+  background: var(--color-focus);
+  box-shadow: var(--shadow-focus);
+}
+
 .grip:focus-visible {
   outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grip::after {
+    transition: none;
+  }
 }

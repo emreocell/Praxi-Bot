@@ -72,10 +72,10 @@ export function FreedomStep({
       </div>
 
       <section className={styles.always} aria-labelledby="fr-always">
-        <h3 id="fr-always" className={styles.alwaysTitle}>
+        <h2 id="fr-always" className={styles.alwaysTitle}>
           <ShieldCheck aria-hidden="true" />
           {t("firstRun.freedom.alwaysTitle")}
-        </h3>
+        </h2>
         <ul className={styles.alwaysList}>
           <li>{t("firstRun.freedom.alwaysMoney")}</li>
           <li>{t("firstRun.freedom.alwaysStop", { hotkey })}</li>

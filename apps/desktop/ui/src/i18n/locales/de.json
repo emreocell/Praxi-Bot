@@ -4279,7 +4279,8 @@
   },
   "shell": {
     "panelGrip": "Bot-Panel in der Größe ändern (Pfeiltasten)",
-    "railGrip": "Seitenleiste in der Größe ändern (Pfeiltasten)"
+    "railGrip": "Seitenleiste in der Größe ändern (Pfeiltasten)",
+    "skipToMain": "Zum Hauptinhalt springen"
   },
   "sidebar": {
     "apps": "Apps",

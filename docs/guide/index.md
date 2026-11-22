@@ -84,6 +84,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Understand what protects you | [Security model](security.md) |
 | Look up a term | [Glossary](glossary.md) |
 | See keyboard shortcuts | [Keyboard shortcuts](keyboard-shortcuts.md) |
+| Use Praxi with a keyboard, screen reader, high-contrast theme, or reduced motion | [Accessibility](accessibility.md) |
 | Something does not work | [Troubleshooting](troubleshooting.md), [FAQ](faq.md) |
 
 ## The pieces

@@ -4279,7 +4279,8 @@
   },
   "shell": {
     "panelGrip": "Bot panelini boyutlandır (ok tuşları)",
-    "railGrip": "Kenar şeridini boyutlandır (ok tuşları)"
+    "railGrip": "Kenar şeridini boyutlandır (ok tuşları)",
+    "skipToMain": "Ana içeriğe geç"
   },
   "sidebar": {
     "apps": "Uygulamalar",

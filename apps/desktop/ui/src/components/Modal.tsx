@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { isTabStop, trapTarget } from "../lib/focusTrap";
+import { isTabStop, returnFocusTarget, trapTarget } from "../lib/focusTrap";
 import { appInert } from "../lib/inertStack";
 import { layerStack as modalStack } from "../lib/modalStack";
 import styles from "./Modal.module.css";
@@ -82,7 +82,7 @@ export function Modal({
       document.removeEventListener("keydown", onKey, true);
       modalStack.remove(seq);
       appInert.release(seq);
-      previous?.focus?.();
+      returnFocusTarget(previous, (el) => el.isConnected)?.focus?.();
     };
   }, [open]);
 

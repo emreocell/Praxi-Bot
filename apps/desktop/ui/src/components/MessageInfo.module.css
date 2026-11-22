@@ -3,8 +3,8 @@
   place-items: center;
   flex: none;
   align-self: flex-end;
-  width: var(--size-info-button);
-  height: var(--size-info-button);
+  min-width: var(--space-6);
+  min-height: var(--space-6);
   padding: var(--space-0);
   border: none;
   border-radius: var(--radius-sm);
@@ -63,4 +63,10 @@
   font-size: var(--font-size-caption);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .info {
+    transition: none;
+  }
 }

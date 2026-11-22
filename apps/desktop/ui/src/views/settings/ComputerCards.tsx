@@ -2,6 +2,7 @@ import { TrustedFolders } from "../../components/TrustedFolders";
 import { Monitor } from "lucide-react";
 import { SettingsCard } from "../../components/SettingsUi";
 import type { TFunction } from "i18next";
+import type { KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import {
@@ -44,21 +45,46 @@ export function ComputerTargetBlock({
   onChange: (v: ComputerTarget) => void;
 }) {
   const { t } = useTranslation();
+  const available = COMPUTER_TARGETS.filter((target) =>
+    isComputerTargetAvailable(target)
+  );
+  const current = parseComputerTarget(value);
+  const activeTarget = available.includes(current) ? current : available[0];
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const step =
+      e.key === "ArrowRight" || e.key === "ArrowDown"
+        ? 1
+        : e.key === "ArrowLeft" || e.key === "ArrowUp"
+          ? -1
+          : 0;
+    if (!step || available.length === 0) {
+      return;
+    }
+    e.preventDefault();
+    const at = Math.max(0, available.indexOf(activeTarget));
+    const next = available[(at + step + available.length) % available.length];
+    onChange(next);
+    e.currentTarget
+      .querySelector<HTMLElement>(`[data-testid="computer-target-${next}"]`)
+      ?.focus();
+  };
   return (
     <div
       className={styles.targetGrid}
       role="radiogroup"
       aria-label={t("settingsModal.computer.target.title")}
+      onKeyDown={onKeyDown}
     >
       {COMPUTER_TARGETS.map((target) => {
         const soon = !isComputerTargetAvailable(target);
-        const active = parseComputerTarget(value) === target;
+        const active = current === target;
         return (
           <button
             key={target}
             type="button"
             role="radio"
             aria-checked={active}
+            tabIndex={!soon && target === activeTarget ? 0 : -1}
             disabled={soon}
             data-testid={`computer-target-${target}`}
             className={[

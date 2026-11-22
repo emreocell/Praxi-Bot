@@ -340,9 +340,9 @@ export function BrainStep({
 
       {engines !== null && !connected ? (
         <section className={styles.block} aria-labelledby="fr-api">
-          <h3 id="fr-api" className={styles.eyebrow}>
+          <h2 id="fr-api" className={styles.eyebrow}>
             {ready.length > 0 ? t("firstRun.brain.apiTitleAfter") : t("firstRun.brain.apiTitle")}
-          </h3>
+          </h2>
           <div className={styles.tiles} role="group" aria-label={t("firstRun.brain.apiTitle")}>
             {API_GROUPS.map((g) => {
               const on = group === g;
@@ -376,7 +376,7 @@ export function BrainStep({
 
       {otherLocal.length > 0 && !connected ? (
         <section className={styles.block} aria-labelledby="fr-local">
-          <h3 id="fr-local" className={styles.eyebrow}>{t("firstRun.brain.localTitle")}</h3>
+          <h2 id="fr-local" className={styles.eyebrow}>{t("firstRun.brain.localTitle")}</h2>
           <div className={styles.cards} role="group" aria-label={t("firstRun.brain.localTitle")}>
             {otherLocal.map((s) => (
               <button

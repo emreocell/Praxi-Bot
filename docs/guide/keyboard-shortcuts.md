@@ -89,6 +89,7 @@ These shortcuts apply when modal dialogs, popup menus, or the command palette ar
 
 ## Related documentation
 
+- [Accessibility](accessibility.md) — Keyboard navigation order, skip links, screen-reader landmarks and live regions, focus rings, high-contrast themes, and reduced motion.
 - [Chatting and approvals](chatting-and-approvals.md) — Learn about turns, steering, approving tool calls, and managing chats.
 - [CLI reference](cli-reference.md) — Command reference for interacting with Praxi from the command line.
 - [Workflows](workflows.md) — Create and trigger automated sequences with `/workflow`.

@@ -53,6 +53,7 @@ export function AccountMenu({
   const close = useCallback(() => setOpen(false), []);
   const run = (id: AccountAction) => {
     setOpen(false);
+    trigger.current?.focus();
     onAction(id);
   };
 

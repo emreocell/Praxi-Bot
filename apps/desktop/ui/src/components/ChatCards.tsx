@@ -542,7 +542,7 @@ export function ApprovalCard({
             {outbound ? t("chat.approval.sendTitle") : t("chat.approval.title")}
           </span>
           {remaining !== null ? (
-            <span className={styles.countdown} aria-live="polite">
+            <span className={styles.countdown} role="timer" aria-live="off">
               {t("chat.approval.countdown", { seconds: remaining })}
             </span>
           ) : null}

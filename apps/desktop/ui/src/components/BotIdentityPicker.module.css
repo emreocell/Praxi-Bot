@@ -51,5 +51,5 @@
 .nameInput:focus-visible {
   outline: none;
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 var(--size-border-heavy) var(--color-accent-subtle);
+  box-shadow: var(--shadow-focus);
 }

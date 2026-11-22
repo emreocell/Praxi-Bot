@@ -873,6 +873,22 @@ function AppShell() {
       }
       sidebar={
         <Sidebar className={[styles.rail, mini ? styles.railMini : ""].filter(Boolean).join(" ")} data-rail-tier={railTier(railWidth)}>
+          <a
+            href="#main-content"
+            className={styles.skipLink}
+            data-testid="skip-to-main"
+            onClick={(e) => {
+              e.preventDefault();
+              const main = document.getElementById("main-content");
+              const target =
+                main?.querySelector<HTMLElement>(
+                  "textarea:not([disabled]), [data-autofocus], h1[tabindex], button:not([disabled]), [href], input:not([disabled])"
+                ) ?? main;
+              target?.focus();
+            }}
+          >
+            {t("shell.skipToMain")}
+          </a>
           <ResizeGrip
             side="end"
             label={t("shell.railGrip")}
@@ -934,7 +950,7 @@ function AppShell() {
         </Sidebar>
       }
     >
-      <div className={styles.mainColumn}>
+      <div id="main-content" tabIndex={-1} className={styles.mainColumn}>
         <div className={styles.titleBar} data-tauri-drag-region>
           <span className={styles.runtimeLabel} data-tauri-drag-region><i className={styles.liveDot} aria-hidden="true" />{home.kind === "host" && !workLocalNow ? home.name || t("computerPicker.host") : t("account.localComputer")}</span>
           {botInView && panelBotView ? (

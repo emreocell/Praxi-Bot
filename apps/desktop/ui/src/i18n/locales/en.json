@@ -4279,7 +4279,8 @@
   },
   "shell": {
     "panelGrip": "Resize bot panel (arrow keys)",
-    "railGrip": "Resize sidebar (arrow keys)"
+    "railGrip": "Resize sidebar (arrow keys)",
+    "skipToMain": "Skip to main content"
   },
   "sidebar": {
     "apps": "Apps",
