@@ -4100,7 +4100,10 @@ async fn a_failed_language_save_changes_nothing_and_confirms_nothing() {
     assert!(channel.handle_incoming(lang_tr.clone()).await.is_err());
     assert_eq!(pairing.chat_language(TEST_CHAT_ID), Language::EN);
     assert_eq!(std::fs::read(&path).unwrap(), before);
-    assert!(replies_to(&server, TEST_CHAT_ID).await.is_empty());
+    assert_eq!(
+        replies_to(&server, TEST_CHAT_ID).await,
+        Vec::<String>::new()
+    );
 
     pairing.fail_saves(false);
     channel.handle_incoming(lang_tr).await.unwrap();
