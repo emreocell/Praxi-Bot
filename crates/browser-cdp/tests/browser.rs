@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use browser_cdp::{
-    Browser, LaunchOptions, Page, ScreenshotOptions, ScreenshotTarget, SnapshotOptions,
-    WaitCondition,
+    Browser, DialogOptions, LaunchOptions, Page, ScreenshotOptions, ScreenshotTarget,
+    SnapshotOptions, StepGuard, WaitCondition,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -454,6 +454,160 @@ async fn click_does_not_wait_for_a_request_that_was_open_before_it() {
         "click waited {took:?} for a request that predates it"
     );
     let _ = b.close().await;
+}
+
+fn batch_guard(focus_ref: Option<&str>) -> StepGuard {
+    StepGuard {
+        batch: true,
+        focus_ref: focus_ref.map(str::to_owned),
+    }
+}
+
+/// A modal that sits over an approved button must not receive the click: the ref's role and
+/// name are unchanged, only what is on top of it is not.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn a_batch_click_is_refused_when_another_element_covers_the_target() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = open(
+        &b,
+        r#"<html><body>
+<button id=nt style="position:absolute;left:20px;top:20px;width:120px;height:40px" onclick="document.getElementById('out').textContent='no-thanks'">No thanks</button>
+<button id=ok style="position:absolute;left:20px;top:100px;width:120px;height:40px" onclick="document.getElementById('out').textContent='ok'"><span id=inner>Fine</span></button>
+<button id=pay style="position:fixed;left:0;top:0;width:200px;height:70px;z-index:9" onmouseover="document.getElementById('out').textContent='HOVERED'" onclick="document.getElementById('out').textContent='PAID'">Pay</button>
+<p id=out style="position:absolute;top:300px">idle</p>
+<script>
+// A hostile page: the covering node claims the approved button as its parent and host, so a
+// walk in the page's own JS world would call it a descendant.
+const nt = document.getElementById('nt');
+for (const k of ['parentNode', 'host', 'parentElement']) {
+  Object.defineProperty(document.getElementById('pay'), k, { get: () => nt });
+}
+</script></body></html>"#,
+    )
+    .await;
+    let snap = p.snapshot(&SnapshotOptions::default()).await.unwrap();
+    let nt = ref_of(&snap, "button", "No thanks");
+    let fine = ref_of(&snap, "button", "Fine");
+    let guard = batch_guard(None);
+    let res = p
+        .click_with_guard(&nt, &DialogOptions::default(), None, &guard)
+        .await;
+    let err = res.map_or_else(|e| e.to_string(), |a| a.error.unwrap_or_default());
+    assert!(err.contains("on top of"), "{err}");
+    let out = p
+        .evaluate("document.getElementById('out').textContent")
+        .await
+        .unwrap();
+    assert_eq!(
+        out.as_str(),
+        Some("idle"),
+        "no mouse event of any kind (not even a move/hover) may reach the covering element"
+    );
+    // Not covered, and the point lands on a child (the span) of the button: clicked.
+    let r = p
+        .click_with_guard(&fine, &DialogOptions::default(), None, &guard)
+        .await
+        .unwrap();
+    assert!(r.ok, "{:?}", r.error);
+    let out = p
+        .evaluate("document.getElementById('out').textContent")
+        .await
+        .unwrap();
+    assert_eq!(out.as_str(), Some("ok"));
+    b.close().await.unwrap();
+}
+
+/// The first hit test passes, then the pointer move runs the page's mousemove handler, which
+/// lays "Pay" over the target. The press must not be sent: no mousedown/click/mouseup at all.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn a_batch_click_is_refused_when_the_hover_handler_covers_the_target() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = open(
+        &b,
+        r#"<html><body>
+<button id=nt style="position:absolute;left:20px;top:20px;width:120px;height:40px" onmousemove="if(!document.getElementById('pay')){const d=document.createElement('button');d.id='pay';d.textContent='Pay';d.style.cssText='position:fixed;left:0;top:0;width:200px;height:70px;z-index:9';d.onmousedown=d.onmouseup=d.onclick=()=>{document.getElementById('log').textContent+='pay '};document.body.appendChild(d)}" onmousedown="document.getElementById('log').textContent+='nt-down '" onclick="document.getElementById('log').textContent+='nt-click '">No thanks</button>
+<p id=log style="position:absolute;top:300px"></p>
+</body></html>"#,
+    )
+    .await;
+    let snap = p.snapshot(&SnapshotOptions::default()).await.unwrap();
+    let nt = ref_of(&snap, "button", "No thanks");
+    let res = p
+        .click_with_guard(&nt, &DialogOptions::default(), None, &batch_guard(None))
+        .await;
+    let err = res.map_or_else(|e| e.to_string(), |a| a.error.unwrap_or_default());
+    assert!(err.contains("on top of"), "{err}");
+    let log = p
+        .evaluate("document.getElementById('log').textContent")
+        .await
+        .unwrap();
+    assert_eq!(
+        log.as_str(),
+        Some(""),
+        "the press and release must not be sent once the hover covered the target"
+    );
+    b.close().await.unwrap();
+}
+
+/// Enter goes to whatever has focus. A page script that moves focus to another control after
+/// the fill must stop the batch's Enter.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn a_batch_enter_is_refused_when_focus_moved_off_the_filled_field() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let html = |steal: bool| {
+        format!(
+            r#"<html><body><label>Email <input id=email type=text {}></label>
+<button id=del onclick="document.getElementById('out').textContent='DELETED'">Delete account</button>
+<p id=out>idle</p>
+<script>document.getElementById('email').addEventListener('keydown',e=>{{if(e.key==='Enter')document.getElementById('out').textContent='submitted'}});</script>
+</body></html>"#,
+            if steal {
+                r#"oninput="document.getElementById('del').focus()""#
+            } else {
+                ""
+            }
+        )
+    };
+    // Focus stays on the field: Enter is pressed.
+    let p = open(&b, &html(false)).await;
+    let snap = p.snapshot(&SnapshotOptions::default()).await.unwrap();
+    let email = ref_of(&snap, "textbox", "Email");
+    assert!(p.fill(&email, "a@b.c").await.unwrap().ok);
+    let r = p
+        .press_key_with_guard("Enter", None, &batch_guard(Some(&email)))
+        .await
+        .unwrap();
+    assert!(r.ok, "{:?}", r.error);
+    let out = p
+        .evaluate("document.getElementById('out').textContent")
+        .await
+        .unwrap();
+    assert_eq!(out.as_str(), Some("submitted"));
+    // The script moved focus to "Delete account": refused, nothing activated.
+    let p = open(&b, &html(true)).await;
+    let snap = p.snapshot(&SnapshotOptions::default()).await.unwrap();
+    let email = ref_of(&snap, "textbox", "Email");
+    assert!(p.fill(&email, "a@b.c").await.unwrap().ok);
+    let res = p
+        .press_key_with_guard("Enter", None, &batch_guard(Some(&email)))
+        .await;
+    let err = res.map_or_else(|e| e.to_string(), |a| a.error.unwrap_or_default());
+    assert!(err.contains("NOT pressed"), "{err}");
+    let out = p
+        .evaluate("document.getElementById('out').textContent")
+        .await
+        .unwrap();
+    assert_eq!(out.as_str(), Some("idle"));
+    // No earlier node to compare with: Enter is refused as well.
+    let res = p
+        .press_key_with_guard("Enter", None, &batch_guard(None))
+        .await;
+    let err = res.map_or_else(|e| e.to_string(), |a| a.error.unwrap_or_default());
+    assert!(err.contains("NOT pressed"), "{err}");
+    b.close().await.unwrap();
 }
 
 /// Navigating to a page that opens a long-lived request (long poll, SSE, stream) must not wait

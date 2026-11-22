@@ -1,8 +1,8 @@
 # Secure input request: a bot asks for a credential, the value goes straight to the vault
 
-Status: slices 1 and 2 of issue #422 (this note and the daemon side). The desktop card (slice 3)
-and the leak canaries and audit rows of #220 / #222 follow; the card contract below is what that
-slice must implement.
+Status: slices 1 and 2 of issue #422 (this note and the daemon side) and slice 3 (the desktop card,
+`apps/desktop/ui/src/components/SecretRequestCard.tsx`). The leak canaries and audit rows of #220 /
+#222 follow. Gaps of the card: see "Card: what is not done" at the end.
 
 Related: #218 (vault), #219, #220, #221, #222. Existing parts used here: `secrets_list` and
 `browser_fill` with `secret` (`crates/builtin-tools/src/fill_secret.rs`), the fill store
@@ -230,3 +230,13 @@ The card MUST:
 - **A list route for open requests**; the journal replay covers reconnects.
 - **Audit rows for the model's `requested` for #222** exist (names only); the shape of the shared
   audit view is #222's.
+
+## Card: what is not done
+
+- No Settings switch: the switch is read once at daemon start from `host.toml` / `BOT_SECRET_REQUESTS`
+  and no daemon route edits it, so it stays a file/environment setting (see the security guide).
+- The card is an inline card (pinned above the composer), not a modal: focus moves to its first
+  field and Escape cancels, but there is no focus trap.
+- Capture hiding uses `setContentProtected` on the main window while a card is open; it is a no-op
+  on Linux and does not hide the live view of a paired computer.
+- The card does not offer a list of origins to pick from; the owner types them (empty by default).

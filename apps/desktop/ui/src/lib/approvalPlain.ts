@@ -242,3 +242,39 @@ export function actionArguments(input: unknown): { text: string; shortened: bool
   if (!text) return null;
   return cutAndEscape(text, INPUT_LIMIT);
 }
+
+/**
+ * The steps of a `browser_act` batch (`details.kind = "browser_steps"`) as numbered, readable
+ * lines, every step in order. Invisible and bidi characters are shown as `<U+XXXX>`. `null` when
+ * the card carries no steps (the full input box stays the fallback).
+ */
+export function browserStepLines(details: unknown, t: T): string[] | null {
+  if (!details || typeof details !== "object") return null;
+  const d = details as { kind?: unknown; steps?: unknown };
+  if (d.kind !== "browser_steps" || !Array.isArray(d.steps) || d.steps.length === 0) return null;
+  const str = (v: unknown, max: number): string =>
+    typeof v === "string" ? escapeInvisible([...v].slice(0, max).join("")) : "";
+  const known = ["click", "fill", "select", "press", "scroll", "wait"];
+  const lines: string[] = [];
+  for (const [i, raw] of d.steps.entries()) {
+    if (!raw || typeof raw !== "object") return null;
+    const row = raw as Record<string, unknown>;
+    const action = str(row.action, 16);
+    if (!known.includes(action)) return null;
+    const ref = str(row.ref, 40);
+    const rawTarget = str(row.target, 120);
+    const target =
+      !rawTarget || rawTarget === "unknown element" ? t("chat.approval.steps.unknown", { ref }) : rawTarget;
+    const values = {
+      n: i + 1,
+      target,
+      text: str(row.text, 300),
+      value: str(row.value, 120),
+      key: str(row.key, 40),
+      what: str(row.wait_for, 120)
+    };
+    const key = action === "scroll" && !ref ? "scrollPage" : action;
+    lines.push(t(`chat.approval.steps.${key}`, values));
+  }
+  return lines;
+}

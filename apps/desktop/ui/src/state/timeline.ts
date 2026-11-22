@@ -52,6 +52,28 @@ export interface QuestionItem {
   closed?: boolean;
 }
 
+/**
+ * A bot's credential request (`secret_requested`). Holds only what the event carries (no value:
+ * the typed value lives in the card's own form state and goes straight to the daemon).
+ */
+export interface SecretRequestItem {
+  kind: "secret";
+  key: string;
+  callId: string;
+  /** Vault entry name (without the `fill/` prefix). */
+  name: string;
+  /** Untrusted model text. */
+  purpose: string;
+  fields: "secret" | "login";
+  replacesExisting: boolean;
+  untrustedContent: boolean;
+  requestedMs: number;
+  expiresMs: number;
+  /** How the owner answered here; `closed` when the run moved on or the request expired. */
+  outcome?: "stored" | "cancelled";
+  closed?: boolean;
+}
+
 export interface TodoListItem {
   kind: "todo";
   key: string;
@@ -73,6 +95,7 @@ export type TimelineItem =
   | TextItem
   | ToolItem
   | QuestionItem
+  | SecretRequestItem
   | TodoListItem
   | NoticeItem;
 
@@ -122,7 +145,9 @@ export const EMPTY_EVENTS: EventsState = { runs: {}, lastGseq: 0 };
 
 /** When an item appeared (for interleaving with user messages). */
 export function itemTs(i: TimelineItem): number {
-  return i.kind === "tool" || i.kind === "question" ? i.requestedMs : i.ts;
+  return i.kind === "tool" || i.kind === "question" || i.kind === "secret"
+    ? i.requestedMs
+    : i.ts;
 }
 
 /** What the daemon says when it closes a card nobody answered (`tool_call_denied.reason`). */
@@ -241,7 +266,9 @@ function closeOpenItems(items: TimelineItem[]): TimelineItem[] {
   return items.map((i) =>
     i.kind === "question" && i.answer === undefined
       ? { ...i, closed: true }
-      : i.kind === "tool" &&
+      : i.kind === "secret"
+        ? { ...i, closed: true }
+        : i.kind === "tool" &&
           (i.status === "awaiting_approval" ||
             i.status === "requested" ||
             i.status === "running")
@@ -365,7 +392,9 @@ function reduce(
             i.callId === e.call_id &&
             i.answer === undefined
               ? { ...i, closed: true }
-              : i
+              : i.kind === "secret" && i.callId === e.call_id
+                ? { ...i, closed: true }
+                : i
           )
         };
       });
@@ -390,7 +419,9 @@ function reduce(
             i.callId === e.call_id &&
             i.answer === undefined
               ? { ...i, closed: true }
-              : i
+              : i.kind === "secret" && i.callId === e.call_id
+                ? { ...i, closed: true }
+                : i
           )
         };
       });
@@ -521,8 +552,33 @@ function reduce(
     case "control_state_changed":
     case "view_targets_changed":
     case "mcp_server_changed":
-    case "secret_requested": // the owner card is a later slice (#422); no value rides this event
       return state;
+    case "secret_requested":
+      return withRun(state, e.run_id, ts, (r) => {
+        const item: SecretRequestItem = {
+          kind: "secret",
+          key: `secret-${e.call_id}`,
+          callId: e.call_id,
+          name: e.name,
+          purpose: e.purpose,
+          fields: e.fields,
+          replacesExisting: e.replaces_existing,
+          untrustedContent: e.untrusted_content,
+          requestedMs: ts,
+          expiresMs: ts + Math.max(0, e.expires_in_secs) * 1000
+        };
+        const idx = r.items.findIndex(
+          (i) => (i.kind === "tool" || i.kind === "secret") && i.callId === e.call_id
+        );
+        return {
+          ...r,
+          // the `secret_request` tool card becomes the form card
+          items:
+            idx >= 0
+              ? r.items.map((i, n) => (n === idx ? item : i))
+              : [...r.items, item]
+        };
+      });
   }
 }
 
@@ -631,6 +687,31 @@ export function markAnswered(
   };
 }
 
+/** Remember how the owner answered a credential request (never a value). */
+export function recordSecretOutcome(
+  state: EventsState,
+  runId: string,
+  callId: string,
+  outcome: "stored" | "cancelled"
+): EventsState {
+  const run = state.runs[runId];
+  if (!run) {
+    return state;
+  }
+  return {
+    ...state,
+    runs: {
+      ...state.runs,
+      [runId]: {
+        ...run,
+        items: run.items.map((i) =>
+          i.kind === "secret" && i.callId === callId ? { ...i, outcome } : i
+        )
+      }
+    }
+  };
+}
+
 /**
  * Cross-check approvals / questions with the daemon's own picture: anything
  * still shown as pending but unknown to the daemon (e.g. from a previous daemon
@@ -668,6 +749,16 @@ export function reconcile(
         runChanged = true;
         return { ...i, closed: true };
       }
+      if (
+        i.kind === "secret" &&
+        !i.closed &&
+        i.outcome === undefined &&
+        i.requestedMs < asOfMs &&
+        !liveRunIds.has(id)
+      ) {
+        runChanged = true;
+        return { ...i, closed: true };
+      }
       return i;
     });
     if (runChanged) {
@@ -681,7 +772,7 @@ export function reconcile(
 }
 
 export interface NeedsYouEntry {
-  kind: "approval" | "question";
+  kind: "approval" | "question" | "secret";
   runId: string;
   chatId: string;
   botId: string;
@@ -692,6 +783,8 @@ export interface NeedsYouEntry {
   tool?: ToolItem;
   /** The card to render, for a question. */
   question?: QuestionItem;
+  /** The card to render, for a credential request. */
+  secret?: SecretRequestItem;
 }
 
 /** What the daemon's run list says about a run (enough to place a run the events never introduced). */
@@ -723,7 +816,8 @@ export interface PendingApprovalFact {
  */
 export function needsYou(
   state: EventsState,
-  runs: readonly RunFact[] = []
+  runs: readonly RunFact[] = [],
+  nowMs: number = Date.now()
 ): NeedsYouEntry[] {
   const out: NeedsYouEntry[] = [];
   for (const run of Object.values(state.runs)) {
@@ -759,6 +853,17 @@ export function needsYou(
           title: i.question,
           sinceMs: i.requestedMs,
           question: i
+        });
+      } else if (i.kind === "secret" && i.outcome === undefined && !i.closed && i.expiresMs > nowMs) {
+        out.push({
+          kind: "secret",
+          runId: run.id,
+          chatId,
+          botId,
+          callId: i.callId,
+          title: i.name,
+          sinceMs: i.requestedMs,
+          secret: i
         });
       }
     }

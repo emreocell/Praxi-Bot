@@ -64,8 +64,8 @@ export function AccountMenu({
         className={styles.trigger}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={label}
-        aria-label={label}
+        title={compact ? label : undefined}
+        aria-label={compact ? label : undefined}
         data-testid="account-menu"
         onClick={() => setOpen((o) => !o)}
         onKeyDown={(event) => {

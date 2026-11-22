@@ -4,6 +4,7 @@ import {
   applyTheme,
   deriveTheme,
   resolveTheme,
+  setAvatarSkin,
   setReducedTransparencyOverride,
   subscribeSurfaceSupport,
   subscribeSystemTheme,
@@ -28,7 +29,8 @@ export interface AppliedAppearance {
   accent: string;
 }
 
-type AppearanceInput = Pick<AppSettings, "themeMode" | "customTheme" | "accentColor">;
+type AppearanceInput = Pick<AppSettings, "themeMode" | "customTheme" | "accentColor"> &
+  Partial<Pick<AppSettings, "photorealAvatars">>;
 
 /** The window's own backdrop / style axes only apply to the main window. */
 type FullAppearanceInput = AppearanceInput &
@@ -58,6 +60,7 @@ export function paintAppearance(
   tone?: BackdropTone
 ): void {
   const f = settings as FullAppearanceInput;
+  setAvatarSkin(settings.photorealAvatars === false ? "procedural" : "render");
   if (full) setReducedTransparencyOverride(f.transparencyOverride === true);
   applyTheme(theme, {
     accentColor: accent,
@@ -171,7 +174,8 @@ export function useApplyAppearance(
     full?.backdrop,
     full?.backgroundUrl,
     full?.backgroundBlur,
-    full?.backgroundDim
+    full?.backgroundDim,
+    settings.photorealAvatars
   ];
   useEffect(() => {
     paintAppearance(settings, theme, accent, full !== null, tone);

@@ -57,6 +57,8 @@ export interface AppearanceSettings {
   chatPanel: boolean;
   /** Paint the chosen panel style even when the OS asks apps to reduce transparency. */
   transparencyOverride: boolean;
+  /** Bots use the photoreal clay body renders (default) instead of the drawn SVG clay. */
+  photorealAvatars: boolean;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -74,7 +76,8 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   panelBlur: DEFAULT_SURFACE.blur,
   transparentChat: true,
   chatPanel: false,
-  transparencyOverride: false
+  transparencyOverride: false,
+  photorealAvatars: true
 };
 
 function oneOf<T extends string>(values: readonly T[], v: unknown, fallback: T): T {
@@ -108,7 +111,9 @@ export function normalizeAppearance(raw: Record<string, unknown>): AppearanceSet
     panelBlur: parsePanelBlur(raw.panelBlur),
     transparentChat: !chatPanel,
     chatPanel,
-    transparencyOverride: raw.transparencyOverride === true
+    transparencyOverride: raw.transparencyOverride === true,
+    // Default on: only an explicit `false` turns the photoreal skin off.
+    photorealAvatars: raw.photorealAvatars !== false
   };
 }
 

@@ -264,6 +264,10 @@
       "soft": "Soft",
       "title": "Corners"
     },
+    "photorealAvatars": {
+      "description": "Bots use soft photoreal clay bodies tinted in their colour. Turn off for the lighter drawn clay style.",
+      "title": "Photoreal clay avatars"
+    },
     "style": {
       "blur": "Blur",
       "blurSoft": "Soft",
@@ -1145,6 +1149,17 @@
       },
       "sendOnce": "Send",
       "sendTitle": "Send on your behalf?",
+      "steps": {
+        "click": "Click {{target}}",
+        "fill": "Type “{{text}}” into {{target}}",
+        "label": "Steps, in this order",
+        "press": "Press the {{key}} key",
+        "scroll": "Scroll {{target}}",
+        "scrollPage": "Scroll the page",
+        "select": "Choose “{{value}}” in {{target}}",
+        "unknown": "an element that could not be identified ({{ref}})",
+        "wait": "Wait for {{what}}"
+      },
       "thisChat": "This chat",
       "title": "Approval needed",
       "why": {
@@ -1405,6 +1420,11 @@
         "done": "Changed a bot",
         "failed": "Didn't change a bot",
         "running": "Changing a bot"
+      },
+      "browser_act": {
+        "done": "Did several steps in the browser",
+        "failed": "Didn't finish the steps in the browser",
+        "running": "Doing several steps in the browser"
       },
       "browser_click": {
         "done": "Clicked on a page",
@@ -3340,6 +3360,38 @@
     "switchBot": "Switch to {{name}}",
     "title": "Command palette"
   },
+  "pastedSecret": {
+    "back": "Keep editing",
+    "body": "Your message seems to contain: {{kinds}}. Anything you send goes to the AI provider and stays in the chat history.",
+    "editedMeanwhile": "You changed the message meanwhile, so it was left as it is. Stored: {{names}}. Remove the value from the text yourself.",
+    "kind": {
+      "aws_access_key_id": "AWS access key",
+      "digitalocean_token": "DigitalOcean token",
+      "github_token": "GitHub token",
+      "gitlab_token": "GitLab token",
+      "google_api_key": "Google API key",
+      "groq_key": "Groq API key",
+      "huggingface_token": "Hugging Face token",
+      "jwt": "JSON web token",
+      "npm_token": "npm token",
+      "nvidia_key": "NVIDIA API key",
+      "openai_style_key": "OpenAI-style API key",
+      "private_key": "private key",
+      "slack_token": "Slack token",
+      "stripe_key": "Stripe live key",
+      "telegram_bot_token": "Telegram bot token"
+    },
+    "nameHint": "Letters, digits, . _ - and / only. The draft then keeps [secret: name] instead of the value and is not sent yet.",
+    "nameLabel": "Vault entry name",
+    "notConnected": "No connection to the service. Nothing was stored.",
+    "partialStored": "Stored before the error: {{names}}. The message still holds the rest.",
+    "remove": "Remove it from the message",
+    "sendAnyway": "Send anyway",
+    "store": "Store in vault…",
+    "storeConfirm": "Store and replace with a placeholder",
+    "title": "This looks like a secret",
+    "voiceBlocked": "What you said looks like a password or key, so it was not sent."
+  },
   "peerLink": {
     "direct": "Direct · {{rtt}} ms",
     "relay": "Relay · {{rtt}} ms"
@@ -3503,6 +3555,33 @@
     "viewCalendar": "Calendar",
     "viewList": "List",
     "when": "When"
+  },
+  "secretRequest": {
+    "allowHint": "Leave both empty and the bot cannot use it anywhere until you add a place in Settings.",
+    "cancel": "Cancel",
+    "cancelled": "Cancelled. Nothing was saved.",
+    "closed": "This request is no longer open.",
+    "confirmUntrusted": "I understand and still want to enter it",
+    "destination": "Goes into the vault on this computer as a {{type}} named",
+    "expired": "This request ran out of time. Nothing was saved.",
+    "expiresIn": "Time left to answer",
+    "fillAll": "Fill in every field first.",
+    "hostRefused": "{{name}} did not accept this. Nothing was saved.",
+    "neverSeen": "The bot never sees what you type. It only learns whether it was saved.",
+    "notConnected": "No connection to the service. Nothing was sent and what you typed is still here.",
+    "origins": "Websites it may be typed on (optional, one per line)",
+    "password": "Password",
+    "programs": "Programs it may be typed into (optional)",
+    "purposeLabel": "Written by the bot (not checked by Praxi):",
+    "replaces": "This replaces the stored value for {{name}}.",
+    "stored": "Saved to the vault. The bot was told it is stored.",
+    "submit": "Save to vault",
+    "title": "{{bot}} asks for a credential",
+    "typeLogin": "login (username and password)",
+    "typeSecret": "single secret",
+    "untrusted": "This run has read content from outside. Something there may have asked for this. Do not enter a password you would not give that content directly.",
+    "username": "Username",
+    "value": "Secret value"
   },
   "serverSignIn": {
     "apiKey": {
@@ -4240,13 +4319,19 @@
   },
   "usage": {
     "bot": "Bot",
+    "byBot": "By bot",
+    "byModel": "By model",
     "cached": "Cached",
     "calls": "Calls",
     "completion": "Completion",
     "cost": "Cost",
-    "costNote": "Cost is shown only for models with a known price; “—” means unknown.",
+    "costNote": "Cost is shown only for models with a known price; unknown pricing is never shown as zero.",
+    "day": "Day",
     "deletedBot": "Deleted bot",
     "empty": "No usage yet. Send a message to a bot and its token use shows up here.",
+    "exportCsv": "Download CSV",
+    "exportDone": "Usage CSV downloaded.",
+    "exportFailed": "Could not download usage CSV",
     "limit": {
       "clear": "Remove limit",
       "forecast": "Forecast for month end",
@@ -4272,21 +4357,44 @@
       "title": "Monthly spending limit",
       "unpriced": "{{count}} calls this month had no known price and are not counted."
     },
+    "loading": "Loading usage…",
+    "model": "Model",
     "modelCalls": "Model calls",
+    "noUsageShort": "{{count}} without usage",
+    "partialCostShort": "+ {{count}} unknown",
     "prompt": "Prompt",
     "range": "Time range",
     "ranges": {
       "all": "All time",
       "day": "Last 24 h",
       "month": "Last 30 days",
+      "quarter": "Last 90 days",
       "week": "Last 7 days"
     },
     "refresh": "Refresh",
+    "retry": "Try again",
     "runs": "Runs",
-    "subtitle": "Tokens used by each bot.",
+    "subtitle": "Tokens, calls, and estimated cost by model, bot, and day.",
     "title": "Usage",
     "tokens": "Tokens",
-    "total": "Total"
+    "total": "Total",
+    "trend": {
+      "ariaLabel": "Daily {{metric}} trend over {{days}} days",
+      "dayReadout": "{{day}} · {{calls}} calls · {{tokens}} tokens · {{cost}}",
+      "hoverHint": "Hover or focus a day to see its totals.",
+      "metric": "Chart metric",
+      "metrics": {
+        "calls": "Calls",
+        "cost": "Cost",
+        "tokens": "Tokens"
+      },
+      "showTable": "Show daily breakdown table",
+      "timeZone": "Local days ({{tz}})",
+      "title": "Daily trend"
+    },
+    "unknown": "Unknown",
+    "unknownCostNotice": "{{count}} call(s) had unknown pricing and are excluded from the cost total.",
+    "unknownUsageNotice": "{{count}} call(s) reported no token usage data and are counted separately."
   },
   "voice": {
     "auto": "Automatic (matches the app language)",

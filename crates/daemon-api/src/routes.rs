@@ -1,7 +1,5 @@
 //! Route handlers (`/v1`).
 
-use std::collections::BTreeMap;
-
 use agent_core::{
     ApprovalScope, BotProfile, Delivery, EffectivePolicy, Grant, GrantTarget, MessageMode,
     PolicyDecision, Scope as RuleScope, ScopeKind,
@@ -24,15 +22,14 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::dto::{
     AcceptedResponse, AnswerQuestion, AnswerResponse, ApprovalDto, BotConflictBody, BotDto,
-    BotInput, BotPatchInput, BotPatchKind, BotPatchOp, BotUsage, CatalogProviderDto,
-    CategoryDecisionDto, ChatDto, ConfiguredProviderDto, ControlDecisionInput,
-    ControlDecisionResponse, ControlStateDto, ControlStateInput, CreateChat, DecideApproval,
-    Decision, DecisionResponse, DeliveryKind, DetectedProviderDto, EffectivePolicyDto,
-    EnableCliProviderInput, GrantDto, GrantTargetDto, Health, LatestCursor, MessageDto, Mode,
-    ParseSchedule, ParsedSchedule, PolicyDto, PolicyInput, PreviewSchedule, ProvidersDto,
-    ReloadResponse, RememberResponse, ResendMessage, ResendResponse, RevokeGrant, RunDto,
-    RunUsageDto, RuntimeConfigDto, ScheduleChangeKind, ScheduleDto, ScheduleHistoryEntryDto,
-    ScheduleInput, Scope, SendMessage, SendResponse, UpdateChat, UsageSummary, UsageTotals,
+    BotInput, BotPatchInput, BotPatchKind, BotPatchOp, CatalogProviderDto, CategoryDecisionDto,
+    ChatDto, ConfiguredProviderDto, ControlDecisionInput, ControlDecisionResponse, ControlStateDto,
+    ControlStateInput, CreateChat, DecideApproval, Decision, DecisionResponse, DeliveryKind,
+    DetectedProviderDto, EffectivePolicyDto, EnableCliProviderInput, GrantDto, GrantTargetDto,
+    Health, LatestCursor, MessageDto, Mode, ParseSchedule, ParsedSchedule, PolicyDto, PolicyInput,
+    PreviewSchedule, ProvidersDto, ReloadResponse, RememberResponse, ResendMessage, ResendResponse,
+    RevokeGrant, RunDto, RunUsageDto, RuntimeConfigDto, ScheduleChangeKind, ScheduleDto,
+    ScheduleHistoryEntryDto, ScheduleInput, Scope, SendMessage, SendResponse, UpdateChat,
 };
 use crate::error::{ApiError, ErrorBody};
 
@@ -1374,118 +1371,6 @@ pub(crate) async fn resume_run(
 }
 
 // ----------------------------------------------------------------- usage
-
-/// Query of `GET /v1/usage`.
-#[derive(Debug, Deserialize, IntoParams)]
-#[into_params(parameter_in = Query)]
-pub struct UsageQuery {
-    /// Only runs created at or after this time.
-    pub since_ms: Option<i64>,
-}
-
-fn add(t: &mut UsageTotals, u: &Usage, cost: Option<f64>) {
-    if let Some(c) = cost {
-        *t.cost_usd.get_or_insert(0.0) += c;
-    }
-    t.prompt_tokens = t.prompt_tokens.saturating_add(u.prompt_tokens);
-    t.completion_tokens = t.completion_tokens.saturating_add(u.completion_tokens);
-    t.cached_tokens = t.cached_tokens.saturating_add(u.cached_tokens.unwrap_or(0));
-    t.model_calls = t.model_calls.saturating_add(1);
-}
-
-/// Invocation usage, with legacy model-step fallback for pre-ledger runs.
-#[utoipa::path(get, path = "/v1/usage", tag = "usage", security(("bearer" = [])),
-    params(UsageQuery),
-    responses((status = 200, body = UsageSummary)))]
-pub(crate) async fn usage(
-    State(s): State<AppState>,
-    Query(q): Query<UsageQuery>,
-) -> Result<Json<UsageSummary>, ApiError> {
-    let st = s.storage();
-    let mut total = UsageTotals::default();
-    let mut by_bot: BTreeMap<Uuid, UsageTotals> = BTreeMap::new();
-    let mut runs = 0u64;
-    let mut by_purpose: BTreeMap<String, UsageTotals> = BTreeMap::new();
-    let ledger = agent_core::usage::calls_from_audit(&st.list_audit(s.user_id())?);
-    for run in st.list_runs(s.user_id())? {
-        if q.since_ms.is_some_and(|t| run.created_at_ms < t) {
-            continue;
-        }
-        runs += 1;
-        let mut recorded_steps = std::collections::HashSet::new();
-        if let Some(calls) = ledger.get(&run.id) {
-            for call in calls {
-                if matches!(
-                    call.purpose,
-                    agent_core::CallPurpose::Executor
-                        | agent_core::CallPurpose::GuardClose
-                        | agent_core::CallPurpose::Subagent
-                ) {
-                    recorded_steps.insert(call.step_n);
-                }
-                let usage = call.tokens.unwrap_or_default();
-                // Preserve the API's existing current-price semantics.
-                let cost = call.tokens.and_then(|u| {
-                    s.agent()
-                        .price_for(&call.model)
-                        .map(|p| p.cost(u.prompt_tokens, u.completion_tokens, u.cached_tokens))
-                });
-                add(&mut total, &usage, cost);
-                add(by_bot.entry(run.bot_id.0).or_default(), &usage, cost);
-                add(
-                    by_purpose
-                        .entry(call.purpose.as_str().to_owned())
-                        .or_default(),
-                    &usage,
-                    cost,
-                );
-            }
-        }
-        for step in st.list_steps(run.id)? {
-            if recorded_steps.contains(&step.idx) {
-                continue;
-            }
-            let Some(u) = (step.name == "model")
-                .then_some(step.output.as_ref())
-                .flatten()
-                .and_then(|o| o.get("usage"))
-                .and_then(|u| serde_json::from_value::<Usage>(u.clone()).ok())
-            else {
-                continue;
-            };
-            let cost = step
-                .output
-                .as_ref()
-                .and_then(|o| o.get("model"))
-                .and_then(Value::as_str)
-                .and_then(|m| s.agent().price_for(m))
-                .map(|p| p.cost(u.prompt_tokens, u.completion_tokens, u.cached_tokens));
-            add(&mut total, &u, cost);
-            add(by_bot.entry(run.bot_id.0).or_default(), &u, cost);
-            let purpose = if run.parent_run_id.is_some() {
-                "subagent"
-            } else if step
-                .output
-                .as_ref()
-                .is_some_and(|o| o["stopped_by_guard"] == true)
-            {
-                "guard_close"
-            } else {
-                "executor"
-            };
-            add(by_purpose.entry(purpose.to_owned()).or_default(), &u, cost);
-        }
-    }
-    Ok(Json(UsageSummary {
-        runs,
-        total,
-        by_purpose,
-        by_bot: by_bot
-            .into_iter()
-            .map(|(bot_id, totals)| BotUsage { bot_id, totals })
-            .collect(),
-    }))
-}
 
 /// Model and token usage of one run (read-only; feeds the chat's message info).
 #[utoipa::path(get, path = "/v1/runs/{id}/usage", tag = "runs", security(("bearer" = [])),

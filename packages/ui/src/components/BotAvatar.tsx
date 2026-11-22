@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useId, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import {
   BOT_SHAPE_GEOMETRY,
   EYE_HEIGHT,
@@ -18,9 +18,12 @@ import { AvatarLife, type AvatarFace } from '../avatarLife';
 import { trackAvatarActivity } from '../avatarActivity';
 import { AVATAR_GRAIN_FILTER_ID, AVATAR_SOFT_FILTER_ID, AVATAR_WIDE_FILTER_ID, ensureAvatarDefs } from '../avatarDefs';
 import { isReducedMotionPreferred, subscribeReducedMotion } from '../theme';
+import { FILM_RIM_COOL, FILM_RIM_WARM, renderLayout, renderTint, socketColors } from '../avatarRender';
+import { RENDER_URLS } from '../avatarRenderAssets';
+import { getAvatarSkin, subscribeAvatarSkin, type AvatarSkin } from '../avatarSkin';
 import styles from './BotAvatar.module.css';
 
-export type { BotAvatarSize, BotAvatarState };
+export type { AvatarSkin, BotAvatarSize, BotAvatarState };
 
 export interface BotIdentity {
   id: string;
@@ -39,9 +42,10 @@ const EYE_BOOST: Readonly<Record<BotAvatarSize, number>> = { xs: 1.4, sm: 1.28, 
 const pct = (v: number) => `${((v / 64) * 100).toFixed(3)}%`;
 
 /**
- * One art slot for every bot surface: a procedural soft-clay character with pill eyes that turn
- * like a head in 3D, a seeded idle behaviour schedule and calm state expressions, or custom
- * uploaded artwork when configured.
+ * One art slot for every bot surface: a soft-clay character (a photoreal clay body render
+ * recoloured to the bot's tint, or the procedural SVG clay) with inset pill eyes that turn like a
+ * head in 3D, a seeded idle behaviour schedule and calm state expressions, or custom uploaded
+ * artwork when configured.
  */
 export function BotAvatar({
   bot,
@@ -50,6 +54,7 @@ export function BotAvatar({
   live,
   decorative = false,
   lookAt,
+  skin,
   className
 }: {
   bot: BotIdentity;
@@ -61,6 +66,8 @@ export function BotAvatar({
   decorative?: boolean;
   /** Fix the look direction in degrees (yaw: + right, pitch: + down), e.g. a cast looking at a headline. */
   lookAt?: { yaw: number; pitch: number } | null;
+  /** Force a skin (gallery comparisons); defaults to the page-wide Appearance setting. */
+  skin?: AvatarSkin;
   className?: string;
 }) {
   const shape = botShape(bot.id, bot.shape);
@@ -72,6 +79,10 @@ export function BotAvatar({
   if (hiFi) ensureAvatarDefs();
 
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const [renderFailed, setRenderFailed] = useState(false);
+  const pageSkin = useSyncExternalStore(subscribeAvatarSkin, getAvatarSkin, getAvatarSkin);
+  const useRender = (skin ?? pageSkin) === 'render' && !renderFailed;
+  const layout = useRender ? renderLayout(shape.id) : null;
   const [reducedMotion, setReducedMotion] = useState<boolean>(() => isReducedMotionPreferred());
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const rootRef = useRef<HTMLSpanElement | null>(null);
@@ -81,6 +92,8 @@ export function BotAvatar({
   const shadowRef = useRef<HTMLSpanElement | null>(null);
   const eyeRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const lidRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  const depthRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  const faceRef = useRef<HTMLSpanElement | null>(null);
   const lifeRef = useRef<AvatarLife | null>(null);
 
   useEffect(() => subscribeReducedMotion(setReducedMotion), []);
@@ -93,14 +106,20 @@ export function BotAvatar({
   const motion = resolveAvatarMotion({ size, state: canonicalState, live, prefersReducedMotion: reducedMotion });
   const alive = live !== false && !motion.reducedMotion;
 
+  // Face anchors: the render skin has its own table (the bodies differ from the SVG silhouettes).
+  const leftEyeX = layout ? layout.leftEyeX : shape.leftEyeX;
+  const rightEyeX = layout ? layout.rightEyeX : shape.rightEyeX;
+  const eyeY = layout ? layout.eyeY : shape.eyeY;
+  const eyeTilt = layout ? layout.eyeTilt : geometry.eyeTilt;
+  const eyeScale = layout ? layout.eyeScale : geometry.eyeScale;
   const face: AvatarFace = {
     eyes: [
-      { x: shape.leftEyeX, y: shape.eyeY },
-      { x: shape.rightEyeX, y: shape.eyeY }
+      { x: leftEyeX, y: eyeY },
+      { x: rightEyeX, y: eyeY }
     ],
-    center: { x: geometry.faceCx, y: geometry.faceCy },
-    radius: geometry.faceR,
-    eyeTilt: geometry.eyeTilt
+    center: { x: layout ? layout.faceCx : geometry.faceCx, y: layout ? layout.faceCy : geometry.faceCy },
+    radius: layout ? layout.faceR : geometry.faceR,
+    eyeTilt
   };
   const lifeOptions = {
     seed: fnv1a32(`${bot.id}:life`),
@@ -127,8 +146,13 @@ export function BotAvatar({
     const shadow = shadowRef.current;
     const eyes = eyeRefs.current.filter((e): e is HTMLSpanElement => Boolean(e));
     const lids = lidRefs.current.filter((e): e is HTMLSpanElement => Boolean(e));
+    const depths = depthRefs.current.filter((e): e is HTMLSpanElement => Boolean(e));
     if (!root || !stage || !act || !body || !shadow || eyes.length !== 2) return undefined;
-    const life = new AvatarLife({ root, stage, act, body, shadow, eyes, lids }, face, lifeOptions);
+    const life = new AvatarLife(
+      { root, stage, act, body, shadow, eyes, lids, depths, face: faceRef.current },
+      face,
+      lifeOptions
+    );
     lifeRef.current = life;
     return () => {
       life.destroy();
@@ -147,23 +171,34 @@ export function BotAvatar({
     motion.reducedMotion,
     lookAt?.yaw,
     lookAt?.pitch,
-    shape.leftEyeX,
-    shape.eyeY
+    leftEyeX,
+    rightEyeX,
+    eyeY,
+    face.radius
   ]);
 
-  const groundPct = pct(geometry.maxY);
+  const tint = layout ? renderTint(material.base) : null;
+  const socket = socketColors(tint ? tint.body : material.mid);
+  const groundPct = pct(layout ? layout.maxY : geometry.maxY);
+  const shadowRx = layout ? layout.shadowRx : geometry.shadowRx;
+  const shadowCx = layout ? (layout.minX + layout.maxX) / 2 : (geometry.minX + geometry.maxX) / 2;
   const avatarVars = {
     '--bot-color': material.base,
     '--avatar-ground': groundPct,
     '--avatar-breath-duration': `${timing.breathDurationSec}s`,
     '--avatar-breath-delay': `${timing.breathDelaySec}s`,
-    '--avatar-shadow-width': `${((geometry.shadowRx * 2) / 0.64).toFixed(1)}%`,
-    '--avatar-shadow-left': pct((geometry.minX + geometry.maxX) / 2)
+    '--avatar-shadow-width': `${((shadowRx * 2) / 0.64).toFixed(1)}%`,
+    '--avatar-shadow-left': pct(shadowCx),
+    // The render skin lifts dark tints, so pick the eye ink against the body actually shown.
+    '--eye-ink': tint ? botAvatarMaterial(tint.body).eyeColor : material.eyeColor,
+    '--eye-lip': socket.lip,
+    '--eye-shade': socket.shade
   } as CSSProperties;
 
   const sway = shapeSway(shape.id);
-  const eyeW = EYE_WIDTH * geometry.eyeScale * EYE_BOOST[size];
-  const eyeH = EYE_HEIGHT * geometry.eyeScale * EYE_BOOST[size];
+  const eyeW = EYE_WIDTH * eyeScale * EYE_BOOST[size];
+  const eyeH = EYE_HEIGHT * eyeScale * EYE_BOOST[size];
+  const renderUrl = layout ? RENDER_URLS[layout.render] : '';
 
   const ids = {
     body: `ba-body-${uid}`,
@@ -204,6 +239,7 @@ export function BotAvatar({
       {...(decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': bot.name, title: bot.name })}
       data-state={canonicalState}
       data-shape={shape.id}
+      data-skin={useRender ? 'render' : 'procedural'}
     >
       {hasCustomAvatar ? (
         <span className={styles.stage}>
@@ -226,6 +262,47 @@ export function BotAvatar({
                 <span className={styles.breath}>
                   <span className={styles.sway}>
                     <span ref={bodyRef} className={styles.body}>
+                      {layout && tint ? (
+                        <span
+                          className={[styles.render, hiFi ? styles.renderHi : ''].filter(Boolean).join(' ')}
+                          style={
+                            {
+                              left: pct(layout.imgX),
+                              top: pct(layout.imgY),
+                              width: pct(layout.imgSize),
+                              height: pct(layout.imgSize),
+                              '--render-mask': `url("${renderUrl}")`,
+                              '--render-gain': layout.gain,
+                              '--tint-mul': tint.multiply,
+                              '--tint-glow': tint.glow,
+                              '--tint-lift': tint.lift,
+                              '--tint-lift-opacity': tint.liftOpacity,
+                              '--rim-warm': FILM_RIM_WARM,
+                              '--rim-cool': FILM_RIM_COOL
+                            } as CSSProperties
+                          }
+                        >
+                          <img
+                            className={styles.renderImg}
+                            src={renderUrl}
+                            alt=""
+                            draggable={false}
+                            decoding="async"
+                            onError={() => setRenderFailed(true)}
+                          />
+                          <span className={styles.renderTint} />
+                          {hiFi ? (
+                            <>
+                              <img className={styles.renderGlow} src={renderUrl} alt="" draggable={false} decoding="async" />
+                              {tint.liftOpacity > 0 ? <span className={styles.renderLift} /> : null}
+                              <span className={styles.rim}>
+                                <span className={styles.rimWarm} />
+                                <span className={styles.rimCool} />
+                              </span>
+                            </>
+                          ) : null}
+                        </span>
+                      ) : (
                       <svg className={styles.bodySvg} viewBox="0 0 64 64" aria-hidden="true" focusable="false">
                         <defs>
                           <radialGradient
@@ -302,25 +379,26 @@ export function BotAvatar({
                           strokeWidth="0.6"
                         />
                       </svg>
+                      )}
                     </span>
-                    <span className={styles.face} aria-hidden="true">
-                      {[shape.leftEyeX, shape.rightEyeX].map((cx, index) => (
+                    <span ref={faceRef} className={styles.face} aria-hidden="true">
+                      {[leftEyeX, rightEyeX].map((cx, index) => (
                         <span
                           key={index}
                           ref={(el) => {
                             eyeRefs.current[index] = el;
                           }}
                           className={styles.eye}
-                          style={{ transformOrigin: `${pct(cx)} ${pct(shape.eyeY)}` }}
+                          style={{ transformOrigin: `${pct(cx)} ${pct(eyeY)}` }}
                         >
                           <span
                             className={styles.pill}
                             style={{
                               left: pct(cx - eyeW / 2),
-                              top: pct(shape.eyeY - eyeH / 2),
+                              top: pct(eyeY - eyeH / 2),
                               width: pct(eyeW),
                               height: pct(eyeH),
-                              transform: geometry.eyeTilt ? `rotate(${geometry.eyeTilt}deg)` : undefined
+                              transform: eyeTilt ? `rotate(${eyeTilt}deg)` : undefined
                             }}
                           >
                             <span
@@ -328,8 +406,16 @@ export function BotAvatar({
                                 lidRefs.current[index] = el;
                               }}
                               className={styles.lid}
-                              style={{ background: material.eyeColor }}
-                            />
+                            >
+                              {hiFi ? (
+                                <span
+                                  ref={(el) => {
+                                    depthRefs.current[index] = el;
+                                  }}
+                                  className={styles.depth}
+                                />
+                              ) : null}
+                            </span>
                           </span>
                         </span>
                       ))}

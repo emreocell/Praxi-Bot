@@ -109,7 +109,7 @@ function ProfileDialog({
   return (
     <div className={dialogStyles.root} data-testid="bot-profile-dialog">
       <DialogHeader title={t("botPanel.profile")} onClose={onClose} />
-      <div className={dialogStyles.body}>
+      <div className={dialogStyles.body} tabIndex={0}>
         <div className={styles.hero}>
           <BotAvatar bot={view} size="hero" decorative />
           <div className={styles.heroText}>

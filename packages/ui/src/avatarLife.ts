@@ -1,7 +1,9 @@
 /**
- * DOM side of the avatar behaviour model. One controller per avatar applies poses as inline
- * transforms with CSS transitions (no per-frame JS): a seeded schedule of blinks and idle actions
- * runs on timers, one shared rAF-throttled pointer listener serves every avatar that is hovered,
+ * DOM side of the avatar behaviour model. One controller per avatar composes a target pose and
+ * critically damped springs carry the eyes and the head toward it (eyes lead, the body follows a
+ * little later), advanced by ONE shared requestAnimationFrame loop that only runs while some
+ * avatar is moving and the window is visible. A seeded schedule of blinks and idle actions runs
+ * on timers; one shared rAF-throttled pointer listener serves every avatar that is hovered,
  * featured (tracks a near pointer) or asleep (wakes when the pointer comes near).
  */
 import {
@@ -17,6 +19,14 @@ import {
   type IdleAction
 } from './avatarBehavior.ts';
 import type { BotAvatarState } from './botShape.ts';
+import {
+  omegaForSettle,
+  sharedAvatarLoop,
+  springSettled,
+  springStep,
+  type LoopSubject,
+  type SpringState
+} from './avatarSpring.ts';
 
 export interface AvatarElements {
   readonly root: HTMLElement;
@@ -27,6 +37,10 @@ export interface AvatarElements {
   /** Per-eye transform layer (turn + openness) and the blink layer inside it. */
   readonly eyes: readonly HTMLElement[];
   readonly lids: readonly HTMLElement[];
+  /** Socket depth shading inside each eye (slides opposite to the turn). Optional. */
+  readonly depths?: readonly HTMLElement[];
+  /** The face layer (reduced motion fades it on pose changes). Optional. */
+  readonly face?: HTMLElement | null;
 }
 
 export interface AvatarFace {
@@ -116,8 +130,9 @@ function syncListeners(): void {
 
 /* ---------------- per-avatar controller ---------------- */
 
-const EASE_LOOK = 'cubic-bezier(0.33, 0.9, 0.3, 1)';
 const EASE_SOFT = 'cubic-bezier(0.37, 0, 0.2, 1)';
+/** Legacy easing name kept so call sites read the same; motion is spring-driven now. */
+const EASE_LOOK = 'look';
 
 interface Pose {
   yaw: number;
@@ -128,7 +143,14 @@ interface Pose {
   lean: number;
 }
 
-export class AvatarLife {
+/** Spring channels: the eyes and the head turn separately so the eyes can lead. */
+type Channel = 'eyeYaw' | 'eyePitch' | 'headYaw' | 'headPitch' | 'open' | 'droop' | 'tilt';
+const CHANNELS: readonly Channel[] = ['eyeYaw', 'eyePitch', 'headYaw', 'headPitch', 'open', 'droop', 'tilt'];
+
+/** Head lags the eyes: a bit longer settle, capped so long returns do not drag. */
+const headSettle = (ms: number) => Math.min(ms * 1.4, ms + 130);
+
+export class AvatarLife implements LoopSubject {
   private els: AvatarElements;
   private face: AvatarFace;
   private opts: AvatarLifeOptions;
@@ -146,6 +168,34 @@ export class AvatarLife {
   private readonly sleepAfter: number;
   private mounted = false;
   private destroyed = false;
+  private readonly spring: Record<Channel, SpringState> = {
+    eyeYaw: { x: 0, v: 0 },
+    eyePitch: { x: 0, v: 0 },
+    headYaw: { x: 0, v: 0 },
+    headPitch: { x: 0, v: 0 },
+    open: { x: 1, v: 0 },
+    droop: { x: 0, v: 0 },
+    tilt: { x: 0, v: 0 }
+  };
+  private readonly target: Record<Channel, number> = {
+    eyeYaw: 0,
+    eyePitch: 0,
+    headYaw: 0,
+    headPitch: 0,
+    open: 1,
+    droop: 0,
+    tilt: 0
+  };
+  private readonly omega: Record<Channel, number> = {
+    eyeYaw: 20,
+    eyePitch: 20,
+    headYaw: 15,
+    headPitch: 15,
+    open: 20,
+    droop: 12,
+    tilt: 10
+  };
+  private written = '';
 
   constructor(els: AvatarElements, face: AvatarFace, opts: AvatarLifeOptions) {
     this.els = els;
@@ -165,6 +215,7 @@ export class AvatarLife {
   destroy(): void {
     this.destroyed = true;
     this.clearTimers();
+    sharedAvatarLoop().remove(this);
     controllers.delete(this);
     syncListeners();
     this.hoverTarget?.removeEventListener('pointerenter', this.onEnter);
@@ -173,6 +224,9 @@ export class AvatarLife {
 
   update(face: AvatarFace, opts: AvatarLifeOptions): void {
     const prev = this.opts;
+    const faceChanged =
+      face.radius !== this.face.radius ||
+      face.eyes.some((e, i) => e.x !== this.face.eyes[i]?.x || e.y !== this.face.eyes[i]?.y);
     this.face = face;
     this.opts = opts;
     if (prev.state !== opts.state) {
@@ -181,6 +235,7 @@ export class AvatarLife {
     if (prev.alive !== opts.alive || prev.reducedMotion !== opts.reducedMotion || prev.state !== opts.state) {
       this.reschedule();
     }
+    if (faceChanged) this.written = '';
     this.apply(240);
   }
 
@@ -209,7 +264,7 @@ export class AvatarLife {
     if (!near) {
       if (this.tracking) {
         this.tracking = false;
-        this.apply(520);
+        this.apply(650, EASE_SOFT);
       }
       return;
     }
@@ -217,14 +272,14 @@ export class AvatarLife {
     // Attenuate with distance so a far pointer only earns a small turn.
     const k = this.hovered ? 1 : Math.max(0.35, 1 - g.distance / 3.6);
     this.pointerGaze = { yaw: g.yaw * k, pitch: g.pitch * k };
-    this.apply(200);
+    this.apply(220);
   }
 
   pointerGone(): void {
     if (this.tracking || this.hovered) {
       this.tracking = false;
       this.hovered = false;
-      this.apply(520);
+      this.apply(650, EASE_SOFT);
     }
   }
 
@@ -241,7 +296,7 @@ export class AvatarLife {
   private onExit = (): void => {
     this.hovered = false;
     this.tracking = false;
-    this.apply(560);
+    this.apply(650, EASE_SOFT);
   };
 
   private running(): boolean {
@@ -284,7 +339,7 @@ export class AvatarLife {
     } else if ((this.tracking || this.hovered) && !this.opts.reducedMotion) {
       yaw = this.pointerGaze.yaw;
       pitch = this.pointerGaze.pitch;
-      if (this.hovered && !this.sleepy) open = Math.max(open, 1.1);
+      if (this.hovered && !this.sleepy) open = Math.max(open, 1.08);
     } else if (this.glance) {
       yaw = this.glance.yaw;
       pitch = this.glance.pitch;
@@ -297,31 +352,100 @@ export class AvatarLife {
     return { yaw, pitch, open, droop: ex.droop, tilt, lean };
   }
 
-  /** Write the composed pose as inline transforms; CSS transitions animate between poses. */
-  apply(ms: number, ease = EASE_LOOK): void {
+  /**
+   * Retarget the springs to the composed pose. `ms` is the settle time of the eyes; the head
+   * follows a little later. Nothing ever jumps: a new target mid-flight bends the current motion.
+   * Reduced motion (or `ms` 0) snaps, with a short fade of the face instead of a sweep.
+   */
+  apply(ms: number, ease: string = EASE_LOOK): void {
     const pose = this.targetPose();
-    const duration = this.opts.reducedMotion ? 0 : Math.round(ms);
-    const proj = projectFace(pose.yaw, pose.pitch, this.face.eyes, this.face.center, this.face.radius);
-    const { stage, body, eyes } = this.els;
-    const set = (el: HTMLElement, transform: string, d = duration, e = ease) => {
-      el.style.transition = d > 0 ? `transform ${d}ms ${e}` : 'none';
-      el.style.transform = transform;
-    };
-    set(stage, `rotate(${(pose.tilt + pose.lean).toFixed(2)}deg)`, Math.max(duration, this.opts.reducedMotion ? 0 : 380), EASE_SOFT);
-    set(
-      body,
-      `translateX(${proj.bodyTx}%) scaleX(${proj.bodySx}) skewY(${proj.bodySkew}deg)`
-    );
+    const t = this.target;
+    t.eyeYaw = pose.yaw;
+    t.eyePitch = pose.pitch;
+    t.headYaw = pose.yaw;
+    t.headPitch = pose.pitch;
+    t.open = pose.open;
+    t.droop = pose.droop;
+    t.tilt = pose.tilt + pose.lean;
+    if (this.opts.reducedMotion || ms <= 0 || this.inactive()) {
+      const changed = CHANNELS.some((c) => Math.abs(this.spring[c].x - t[c]) > 0.5);
+      for (const c of CHANNELS) {
+        this.spring[c].x = t[c];
+        this.spring[c].v = 0;
+      }
+      sharedAvatarLoop().remove(this);
+      this.write();
+      if (changed && this.opts.reducedMotion && this.mounted && ms > 0) {
+        this.els.face?.animate?.([{ opacity: 0.2 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' });
+      }
+      return;
+    }
+    // A long jump of the gaze gets a quicker, saccade-like eye move (still continuous).
+    const jump = Math.hypot(t.eyeYaw - this.spring.eyeYaw.x, t.eyePitch - this.spring.eyePitch.x);
+    const eyeMs = jump > 22 && ease !== EASE_SOFT ? Math.min(ms, 170) : ms;
+    this.omega.eyeYaw = this.omega.eyePitch = omegaForSettle(eyeMs);
+    this.omega.headYaw = this.omega.headPitch = omegaForSettle(headSettle(ms));
+    this.omega.open = omegaForSettle(Math.max(160, Math.min(ms, 420)));
+    this.omega.droop = omegaForSettle(Math.max(300, ms));
+    this.omega.tilt = omegaForSettle(Math.max(420, headSettle(ms)));
+    sharedAvatarLoop().wake(this);
+  }
+
+  /** One frame of the shared loop: advance every channel, write, report rest. */
+  step(dtSec: number): boolean {
+    if (this.destroyed) return true;
+    if (this.inactive()) {
+      for (const c of CHANNELS) {
+        this.spring[c].x = this.target[c];
+        this.spring[c].v = 0;
+      }
+      this.write();
+      return true;
+    }
+    let settled = true;
+    for (const c of CHANNELS) {
+      const s = springStep(this.spring[c], this.target[c], this.omega[c], dtSec);
+      if (springSettled(s, this.target[c], c === 'open' ? 0.002 : 0.02)) {
+        s.x = this.target[c];
+        s.v = 0;
+      } else {
+        settled = false;
+      }
+    }
+    this.write();
+    return settled;
+  }
+
+  /** Write the current spring values as inline transforms (transform only, no transitions). */
+  private write(): void {
+    const sp = this.spring;
+    const key = CHANNELS.map((c) => sp[c].x.toFixed(3)).join(',');
+    if (key === this.written) return;
+    this.written = key;
+    const { stage, body, eyes, depths } = this.els;
+    const head = projectFace(sp.headYaw.x, sp.headPitch.x, this.face.eyes, this.face.center, this.face.radius);
+    const look = projectFace(sp.eyeYaw.x, sp.eyePitch.x, this.face.eyes, this.face.center, this.face.radius);
+    stage.style.transform = `rotate(${sp.tilt.x.toFixed(2)}deg)`;
+    body.style.transform = `translateX(${head.bodyTx}%) scaleX(${head.bodySx}) skewY(${head.bodySkew}deg)`;
+    const open = Math.max(0.04, sp.open.x);
     eyes.forEach((el, i) => {
-      const p = proj.eyes[i];
+      const p = look.eyes[i];
       if (!p) return;
       const side = i === 0 ? 1 : -1;
-      const droop = pose.droop * side;
-      set(
-        el,
-        `translate(${p.tx}%, ${p.ty}%) rotate(${droop}deg) scale(${p.sx}, ${(p.sy * pose.open).toFixed(3)})`
-      );
+      const droop = (sp.droop.x * side).toFixed(2);
+      el.style.transform = `translate(${p.tx}%, ${p.ty}%) rotate(${droop}deg) scale(${p.sx}, ${(p.sy * open).toFixed(3)})`;
     });
+    // Socket depth: the far inner wall shows on the side the face turns away from.
+    if (depths?.length) {
+      const dx = (-sp.eyeYaw.x / 38) * 18;
+      const dy = (-sp.eyePitch.x / 26) * 10;
+      for (const d of depths) d.style.transform = `translate(${dx.toFixed(1)}%, ${dy.toFixed(1)}%)`;
+    }
+  }
+
+  /** Current spring values (tests / gallery diagnostics). */
+  poseSnapshot(): Readonly<Record<Channel, number>> {
+    return Object.fromEntries(CHANNELS.map((c) => [c, this.spring[c].x])) as Record<Channel, number>;
   }
 
   /* ---- schedule ---- */
@@ -540,13 +664,9 @@ export class AvatarLife {
       return;
     }
     // Start with closed eyes, then open after a seeded beat so a crowd wakes up unevenly.
-    const { eyes } = this.els;
-    const proj = projectFace(0, 0, this.face.eyes, this.face.center, this.face.radius);
-    eyes.forEach((el, i) => {
-      const p = proj.eyes[i];
-      el.style.transition = 'none';
-      el.style.transform = `translate(${p?.tx ?? 0}%, ${p?.ty ?? 0}%) scale(1, 0.06)`;
-    });
+    this.spring.open.x = 0.06;
+    this.target.open = 0.06;
+    this.write();
     this.later(120 + this.rand() * 520, () => {
       this.apply(320);
       this.oneShot('wake');

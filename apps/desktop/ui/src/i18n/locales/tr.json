@@ -264,6 +264,10 @@
       "soft": "Yumuşak",
       "title": "Köşeler"
     },
+    "photorealAvatars": {
+      "description": "Botlar kendi renklerine boyanmış, yumuşak ve fotogerçekçi kil gövdeler kullanır. Daha hafif çizim kil stili için kapatın.",
+      "title": "Fotogerçekçi kil avatarlar"
+    },
     "style": {
       "blur": "Bulanıklık",
       "blurSoft": "Hafif",
@@ -1145,6 +1149,17 @@
       },
       "sendOnce": "Gönder",
       "sendTitle": "Senin adına gönderilsin mi?",
+      "steps": {
+        "click": "{{target}} öğesine tıkla",
+        "fill": "{{target}} alanına “{{text}}” yaz",
+        "label": "Adımlar, bu sırayla",
+        "press": "{{key}} tuşuna bas",
+        "scroll": "{{target}} öğesini kaydır",
+        "scrollPage": "Sayfayı kaydır",
+        "select": "{{target}} listesinde “{{value}}” seç",
+        "unknown": "tanımlanamayan bir öğe ({{ref}})",
+        "wait": "Şunu bekle: {{what}}"
+      },
       "thisChat": "Bu sohbet",
       "title": "Onay gerekiyor",
       "why": {
@@ -1405,6 +1420,11 @@
         "done": "Bot değiştirildi",
         "failed": "Bot değiştirilmedi",
         "running": "Bot değiştiriliyor"
+      },
+      "browser_act": {
+        "done": "Tarayıcıda birkaç adım yaptı",
+        "failed": "Tarayıcıdaki adımları tamamlamadı",
+        "running": "Tarayıcıda birkaç adım yapıyor"
       },
       "browser_click": {
         "done": "Sayfada tıklandı",
@@ -3340,6 +3360,38 @@
     "switchBot": "{{name}} botuna geç",
     "title": "Komut paleti"
   },
+  "pastedSecret": {
+    "back": "Düzenlemeye devam et",
+    "body": "Mesajınız şunu içeriyor gibi görünüyor: {{kinds}}. Gönderdiğiniz her şey yapay zekâ sağlayıcısına gider ve sohbet geçmişinde kalır.",
+    "editedMeanwhile": "Bu arada mesajı değiştirdiniz, o yüzden olduğu gibi bırakıldı. Saklanan: {{names}}. Değeri metinden kendiniz silin.",
+    "kind": {
+      "aws_access_key_id": "AWS erişim anahtarı",
+      "digitalocean_token": "DigitalOcean jetonu",
+      "github_token": "GitHub jetonu",
+      "gitlab_token": "GitLab jetonu",
+      "google_api_key": "Google API anahtarı",
+      "groq_key": "Groq API anahtarı",
+      "huggingface_token": "Hugging Face jetonu",
+      "jwt": "JSON web jetonu",
+      "npm_token": "npm jetonu",
+      "nvidia_key": "NVIDIA API anahtarı",
+      "openai_style_key": "OpenAI tarzı API anahtarı",
+      "private_key": "özel anahtar",
+      "slack_token": "Slack jetonu",
+      "stripe_key": "Stripe canlı anahtarı",
+      "telegram_bot_token": "Telegram bot jetonu"
+    },
+    "nameHint": "Yalnızca harf, rakam, . _ - ve /. Taslakta değer yerine [secret: ad] kalır ve henüz gönderilmez.",
+    "nameLabel": "Kasa kaydının adı",
+    "notConnected": "Hizmetle bağlantı yok. Hiçbir şey saklanmadı.",
+    "partialStored": "Hatadan önce saklananlar: {{names}}. Mesajda geri kalanı hâlâ duruyor.",
+    "remove": "Mesajdan çıkar",
+    "sendAnyway": "Yine de gönder",
+    "store": "Kasaya kaydet…",
+    "storeConfirm": "Kaydet ve yer tutucuyla değiştir",
+    "title": "Bu bir gizli bilgiye benziyor",
+    "voiceBlocked": "Söyledikleriniz bir parola ya da anahtara benziyor, bu yüzden gönderilmedi."
+  },
   "peerLink": {
     "direct": "Doğrudan · {{rtt}} ms",
     "relay": "Röle · {{rtt}} ms"
@@ -3503,6 +3555,33 @@
     "viewCalendar": "Takvim",
     "viewList": "Liste",
     "when": "Ne zaman"
+  },
+  "secretRequest": {
+    "allowHint": "İkisini de boş bırakırsanız, Ayarlar'dan bir yer ekleyene kadar bot bunu hiçbir yerde kullanamaz.",
+    "cancel": "İptal",
+    "cancelled": "İptal edildi. Hiçbir şey kaydedilmedi.",
+    "closed": "Bu istek artık açık değil.",
+    "confirmUntrusted": "Anladım, yine de girmek istiyorum",
+    "destination": "Bu bilgisayardaki kasaya {{type}} olarak şu adla kaydedilir:",
+    "expired": "Bu isteğin süresi doldu. Hiçbir şey kaydedilmedi.",
+    "expiresIn": "Yanıt için kalan süre",
+    "fillAll": "Önce tüm alanları doldurun.",
+    "hostRefused": "{{name}} bunu kabul etmedi. Hiçbir şey kaydedilmedi.",
+    "neverSeen": "Yazdığınızı bot görmez. Yalnızca kaydedilip kaydedilmediğini öğrenir.",
+    "notConnected": "Hizmetle bağlantı yok. Hiçbir şey gönderilmedi, yazdığınız değer burada duruyor.",
+    "origins": "Yazılabileceği web siteleri (isteğe bağlı, satır başına bir)",
+    "password": "Parola",
+    "programs": "Yazılabileceği programlar (isteğe bağlı)",
+    "purposeLabel": "Bot tarafından yazıldı (Praxi doğrulamaz):",
+    "replaces": "Bu işlem {{name}} için kayıtlı değerin yerine geçer.",
+    "stored": "Kasaya kaydedildi. Bota kaydedildiği bildirildi.",
+    "submit": "Kasaya kaydet",
+    "title": "{{bot}} bir kimlik bilgisi istiyor",
+    "typeLogin": "giriş (kullanıcı adı ve parola)",
+    "typeSecret": "tek bir gizli değer",
+    "untrusted": "Bu çalışma dışarıdan içerik okudu. Bu isteği oradaki bir şey istemiş olabilir. O içeriğe doğrudan vermeyeceğiniz bir parolayı girmeyin.",
+    "username": "Kullanıcı adı",
+    "value": "Gizli değer"
   },
   "serverSignIn": {
     "apiKey": {
@@ -4240,13 +4319,19 @@
   },
   "usage": {
     "bot": "Bot",
+    "byBot": "Bota göre",
+    "byModel": "Modele göre",
     "cached": "Önbellekte",
     "calls": "Çağrı",
     "completion": "Yanıt",
     "cost": "Maliyet",
-    "costNote": "Maliyet yalnızca fiyatı bilinen modeller için gösterilir; “—” bilinmiyor demektir.",
+    "costNote": "Maliyet yalnızca fiyatı bilinen modeller için gösterilir; bilinmeyen fiyat asla sıfır olarak gösterilmez.",
+    "day": "Gün",
     "deletedBot": "Silinmiş bot",
     "empty": "Henüz kullanım yok. Bir bota mesaj gönderdiğinde token kullanımı burada görünür.",
+    "exportCsv": "CSV indir",
+    "exportDone": "Kullanım CSV dosyası indirildi.",
+    "exportFailed": "Kullanım CSV dosyası indirilemedi",
     "limit": {
       "clear": "Limiti kaldır",
       "forecast": "Ay sonu tahmini",
@@ -4272,21 +4357,44 @@
       "title": "Aylık harcama limiti",
       "unpriced": "Bu ay {{count}} çağrının fiyatı bilinmiyor; sayılmadı."
     },
+    "loading": "Kullanım yükleniyor…",
+    "model": "Model adı",
     "modelCalls": "Model çağrıları",
+    "noUsageShort": "{{count}} verisiz",
+    "partialCostShort": "+ {{count}} bilinmiyor",
     "prompt": "İstem",
     "range": "Zaman aralığı",
     "ranges": {
       "all": "Tüm zamanlar",
       "day": "Son 24 saat",
       "month": "Son 30 gün",
+      "quarter": "Son 90 gün",
       "week": "Son 7 gün"
     },
     "refresh": "Yenile",
+    "retry": "Tekrar dene",
     "runs": "Çalışmalar",
-    "subtitle": "Her botun kullandığı token sayısı.",
+    "subtitle": "Model, bot ve güne göre token, çağrı ve tahmini maliyet.",
     "title": "Kullanım",
     "tokens": "Token",
-    "total": "Toplam"
+    "total": "Toplam",
+    "trend": {
+      "ariaLabel": "{{days}} günlük {{metric}} eğilimi",
+      "dayReadout": "{{day}} · {{calls}} çağrı · {{tokens}} token · {{cost}}",
+      "hoverHint": "Toplamlarını görmek için bir günün üzerine gelin veya odaklanın.",
+      "metric": "Grafik ölçütü",
+      "metrics": {
+        "calls": "Çağrılar",
+        "cost": "Maliyet",
+        "tokens": "Token"
+      },
+      "showTable": "Günlük döküm tablosunu göster",
+      "timeZone": "Yerel günler ({{tz}})",
+      "title": "Günlük eğilim"
+    },
+    "unknown": "Bilinmiyor",
+    "unknownCostNotice": "{{count}} çağrının fiyatı bilinmiyor ve maliyet toplamına dahil edilmedi.",
+    "unknownUsageNotice": "{{count}} çağrı token kullanım verisi bildirmedi ve ayrı sayıldı."
   },
   "voice": {
     "auto": "Otomatik (uygulama diline göre)",

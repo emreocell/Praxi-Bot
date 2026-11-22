@@ -264,6 +264,10 @@
       "soft": "Weich",
       "title": "Ecken"
     },
+    "photorealAvatars": {
+      "description": "Bots erhalten weiche, fotorealistische Tonkörper in ihrer Farbe. Ausschalten für den leichteren gezeichneten Ton-Stil.",
+      "title": "Fotorealistische Ton-Avatare"
+    },
     "style": {
       "blur": "Unschärfe",
       "blurSoft": "Weich",
@@ -1145,6 +1149,17 @@
       },
       "sendOnce": "Senden",
       "sendTitle": "In deinem Namen senden?",
+      "steps": {
+        "click": "{{target}} anklicken",
+        "fill": "„{{text}}“ in {{target}} eingeben",
+        "label": "Schritte in dieser Reihenfolge",
+        "press": "Taste {{key}} drücken",
+        "scroll": "{{target}} scrollen",
+        "scrollPage": "Seite scrollen",
+        "select": "„{{value}}“ in {{target}} auswählen",
+        "unknown": "ein Element, das nicht erkannt werden konnte ({{ref}})",
+        "wait": "Warten auf {{what}}"
+      },
       "thisChat": "Dieser Chat",
       "title": "Genehmigung erforderlich",
       "why": {
@@ -1405,6 +1420,11 @@
         "done": "Bot geändert",
         "failed": "Bot nicht geändert",
         "running": "Bot wird geändert"
+      },
+      "browser_act": {
+        "done": "Mehrere Schritte im Browser ausgeführt",
+        "failed": "Die Schritte im Browser nicht abgeschlossen",
+        "running": "Führt mehrere Schritte im Browser aus"
       },
       "browser_click": {
         "done": "Auf einer Seite geklickt",
@@ -3340,6 +3360,38 @@
     "switchBot": "Zu {{name}} wechseln",
     "title": "Befehlspalette"
   },
+  "pastedSecret": {
+    "back": "Weiter bearbeiten",
+    "body": "Deine Nachricht scheint Folgendes zu enthalten: {{kinds}}. Alles, was du sendest, geht an den KI-Anbieter und bleibt im Chatverlauf.",
+    "editedMeanwhile": "Sie haben die Nachricht inzwischen geändert, daher blieb sie unverändert. Gespeichert: {{names}}. Entfernen Sie den Wert selbst aus dem Text.",
+    "kind": {
+      "aws_access_key_id": "AWS-Zugangsschlüssel",
+      "digitalocean_token": "DigitalOcean-Token",
+      "github_token": "GitHub-Token",
+      "gitlab_token": "GitLab-Token",
+      "google_api_key": "Google-API-Schlüssel",
+      "groq_key": "Groq-API-Schlüssel",
+      "huggingface_token": "Hugging-Face-Token",
+      "jwt": "JSON-Web-Token",
+      "npm_token": "npm-Token",
+      "nvidia_key": "NVIDIA-API-Schlüssel",
+      "openai_style_key": "API-Schlüssel im OpenAI-Format",
+      "private_key": "privater Schlüssel",
+      "slack_token": "Slack-Token",
+      "stripe_key": "Stripe-Live-Schlüssel",
+      "telegram_bot_token": "Telegram-Bot-Token"
+    },
+    "nameHint": "Nur Buchstaben, Ziffern, . _ - und /. Im Entwurf bleibt dann [secret: Name] statt des Werts und er wird noch nicht gesendet.",
+    "nameLabel": "Name des Tresoreintrags",
+    "notConnected": "Keine Verbindung zum Dienst. Es wurde nichts gespeichert.",
+    "partialStored": "Vor dem Fehler gespeichert: {{names}}. Der Rest steht noch in der Nachricht.",
+    "remove": "Aus der Nachricht entfernen",
+    "sendAnyway": "Trotzdem senden",
+    "store": "Im Tresor speichern…",
+    "storeConfirm": "Speichern und durch Platzhalter ersetzen",
+    "title": "Das sieht nach einem Geheimnis aus",
+    "voiceBlocked": "Das Gesagte sieht nach einem Passwort oder Schlüssel aus und wurde deshalb nicht gesendet."
+  },
   "peerLink": {
     "direct": "Direkt · {{rtt}} ms",
     "relay": "Relay · {{rtt}} ms"
@@ -3503,6 +3555,33 @@
     "viewCalendar": "Kalender",
     "viewList": "Liste",
     "when": "Wann"
+  },
+  "secretRequest": {
+    "allowHint": "Lässt du beides leer, kann der Bot es nirgends verwenden, bis du in den Einstellungen einen Ort hinzufügst.",
+    "cancel": "Abbrechen",
+    "cancelled": "Abgebrochen. Es wurde nichts gespeichert.",
+    "closed": "Diese Anfrage ist nicht mehr offen.",
+    "confirmUntrusted": "Ich verstehe das und möchte es trotzdem eingeben",
+    "destination": "Wird im Tresor auf diesem Computer als {{type}} gespeichert unter dem Namen",
+    "expired": "Diese Anfrage ist abgelaufen. Es wurde nichts gespeichert.",
+    "expiresIn": "Verbleibende Zeit zum Antworten",
+    "fillAll": "Fülle zuerst alle Felder aus.",
+    "hostRefused": "{{name}} hat das nicht akzeptiert. Es wurde nichts gespeichert.",
+    "neverSeen": "Der Bot sieht nicht, was du eingibst. Er erfährt nur, ob es gespeichert wurde.",
+    "notConnected": "Keine Verbindung zum Dienst. Es wurde nichts gesendet, Ihre Eingabe ist noch da.",
+    "origins": "Websites, auf denen es eingetippt werden darf (optional, eine pro Zeile)",
+    "password": "Passwort",
+    "programs": "Programme, in die es eingetippt werden darf (optional)",
+    "purposeLabel": "Vom Bot geschrieben (von Praxi nicht geprüft):",
+    "replaces": "Dies ersetzt den gespeicherten Wert für {{name}}.",
+    "stored": "Im Tresor gespeichert. Der Bot weiß, dass es gespeichert ist.",
+    "submit": "Im Tresor speichern",
+    "title": "{{bot}} fragt nach Zugangsdaten",
+    "typeLogin": "Login (Benutzername und Passwort)",
+    "typeSecret": "einzelnes Geheimnis",
+    "untrusted": "Dieser Lauf hat Inhalte von außen gelesen. Möglicherweise hat etwas darin dazu aufgefordert. Gib kein Passwort ein, das du diesem Inhalt nicht direkt geben würdest.",
+    "username": "Benutzername",
+    "value": "Geheimer Wert"
   },
   "serverSignIn": {
     "apiKey": {
@@ -4240,13 +4319,19 @@
   },
   "usage": {
     "bot": "Bot",
+    "byBot": "Nach Bot",
+    "byModel": "Nach Modell",
     "cached": "Im Cache",
     "calls": "Aufrufe",
     "completion": "Antwort",
     "cost": "Kosten",
-    "costNote": "Kosten werden nur für Modelle mit bekanntem Preis angezeigt; „—“ bedeutet unbekannt.",
+    "costNote": "Kosten werden nur für Modelle mit bekanntem Preis angezeigt; unbekannte Preise werden nie als Null dargestellt.",
+    "day": "Tag",
     "deletedBot": "Gelöschter Bot",
     "empty": "Noch keine Nutzung. Sobald du einem Bot schreibst, erscheint der Token-Verbrauch hier.",
+    "exportCsv": "CSV herunterladen",
+    "exportDone": "Nutzungs-CSV heruntergeladen.",
+    "exportFailed": "Nutzungs-CSV konnte nicht heruntergeladen werden",
     "limit": {
       "clear": "Limit entfernen",
       "forecast": "Prognose zum Monatsende",
@@ -4272,21 +4357,44 @@
       "title": "Monatliches Ausgabenlimit",
       "unpriced": "{{count}} Aufrufe diesen Monat hatten keinen bekannten Preis und wurden nicht mitgezählt."
     },
+    "loading": "Nutzung wird geladen…",
+    "model": "Modell",
     "modelCalls": "Modellaufrufe",
+    "noUsageShort": "{{count}} ohne Daten",
+    "partialCostShort": "+ {{count}} unbekannt",
     "prompt": "Prompt",
     "range": "Zeitraum",
     "ranges": {
       "all": "Gesamte Zeit",
       "day": "Letzte 24 Std.",
       "month": "Letzte 30 Tage",
+      "quarter": "Letzte 90 Tage",
       "week": "Letzte 7 Tage"
     },
     "refresh": "Aktualisieren",
+    "retry": "Erneut versuchen",
     "runs": "Läufe",
-    "subtitle": "Tokens, die jeder Bot verbraucht hat.",
+    "subtitle": "Tokens, Aufrufe und geschätzte Kosten nach Modell, Bot und Tag.",
     "title": "Nutzung",
     "tokens": "Tokens",
-    "total": "Gesamt"
+    "total": "Gesamt",
+    "trend": {
+      "ariaLabel": "Täglicher {{metric}}-Verlauf über {{days}} Tage",
+      "dayReadout": "{{day}} · {{calls}} Aufrufe · {{tokens}} Tokens · {{cost}}",
+      "hoverHint": "Fahre über einen Tag oder fokussiere ihn, um die Summen zu sehen.",
+      "metric": "Diagramm-Kennzahl",
+      "metrics": {
+        "calls": "Aufrufe",
+        "cost": "Kosten",
+        "tokens": "Token-Menge"
+      },
+      "showTable": "Tägliche Tabelle anzeigen",
+      "timeZone": "Lokale Tage ({{tz}})",
+      "title": "Tagesverlauf"
+    },
+    "unknown": "Unbekannt",
+    "unknownCostNotice": "{{count}} Aufruf(e) hatten keinen bekannten Preis und sind nicht in den Gesamtkosten enthalten.",
+    "unknownUsageNotice": "{{count}} Aufruf(e) haben keine Token-Daten gemeldet und werden getrennt gezählt."
   },
   "voice": {
     "auto": "Automatisch (passend zur App-Sprache)",

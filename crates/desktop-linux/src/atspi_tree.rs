@@ -33,6 +33,50 @@ fn a11y_err<E: std::fmt::Display>(ctx: &str) -> impl FnOnce(E) -> DesktopError +
     move |e| DesktopError::Accessibility(format!("{ctx}: {e}"))
 }
 
+/// Merge the X11 window (if any) with the AT-SPI frame into the reported window.
+fn resolve_window(
+    x11_win: Option<WindowInfo>,
+    frame_title: String,
+    frame_bounds: Option<Rect>,
+    axis: pure::AxisMap,
+) -> Res<WindowInfo> {
+    if let Some(mut w) = x11_win {
+        if w.title.is_empty() && !frame_title.is_empty() {
+            w.title = frame_title;
+        }
+        if (w.bounds.width <= 1.0 || w.bounds.height <= 1.0)
+            && let Some(b) = frame_bounds
+        {
+            w.bounds = axis.map_rect(b);
+        }
+        return Ok(w);
+    }
+    let bounds = if let Some(b) = frame_bounds {
+        axis.map_rect(b)
+    } else {
+        match x11::screen_size() {
+            Ok((w, h)) => Rect {
+                x: 0.0,
+                y: 0.0,
+                width: f64::from(w),
+                height: f64::from(h),
+            },
+            Err(err) => {
+                return Err(DesktopError::Accessibility(format!(
+                    "no window geometry and the X screen size is unknown ({err}); refusing to assume 1920x1080"
+                )));
+            }
+        }
+    };
+    Ok(WindowInfo {
+        id: 0,
+        title: frame_title,
+        pid: 0,
+        bounds,
+        focused: true,
+    })
+}
+
 #[derive(Debug, Clone)]
 struct Retained {
     index: u32,
@@ -55,6 +99,10 @@ pub struct AtspiWorker {
     generation: u64,
     retained: Vec<Retained>,
     window_bounds: Option<Rect>,
+    /// X11 id of the window this snapshot describes. `0` when unknown.
+    window_id: u64,
+    /// AT-SPI extents → X11 pixels, so clicks land on the screenshot.
+    axis: pure::AxisMap,
 }
 
 impl AtspiWorker {
@@ -85,31 +133,17 @@ impl AtspiWorker {
         let (frame_ref, frame_title, frame_bounds) =
             find_target_frame(&a11y, x11_win.as_ref(), scope.is_some()).await?;
 
-        let window = match x11_win {
-            Some(mut w) => {
-                if w.title.is_empty() && !frame_title.is_empty() {
-                    w.title = frame_title;
-                }
-                if (w.bounds.width <= 1.0 || w.bounds.height <= 1.0)
-                    && let Some(b) = frame_bounds
-                {
-                    w.bounds = b;
-                }
-                w
+        let x11_bounds = x11_win.as_ref().map(|w| w.bounds);
+        let axis = match (frame_bounds, x11_bounds) {
+            (Some(atspi), Some(x11)) if x11.width > 1.0 && x11.height > 1.0 => {
+                pure::align_atspi_to_x11(&atspi, &x11)
             }
-            None => WindowInfo {
-                id: 0,
-                title: frame_title,
-                pid: 0,
-                bounds: frame_bounds.unwrap_or(Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width: 1920.0,
-                    height: 1080.0,
-                }),
-                focused: true,
-            },
+            _ => pure::AxisMap::identity(),
         };
+        self.axis = axis;
+        self.window_id = x11_win.as_ref().map_or(0, |w| w.id);
+
+        let window = resolve_window(x11_win, frame_title, frame_bounds, axis)?;
 
         let walked = walk_subtree(conn, frame_ref).await;
         if walked.is_empty() {
@@ -127,13 +161,17 @@ impl AtspiWorker {
         for (n, &src) in selected.iter().enumerate() {
             let index = u32::try_from(n).unwrap_or(u32::MAX);
             let item = &walked[src];
-            let node = pure::to_ui_node(index, &item.raw);
+            let mut raw = item.raw.clone();
+            if let Some(bounds) = raw.bounds {
+                raw.bounds = Some(axis.map_rect(bounds));
+            }
+            let node = pure::to_ui_node(index, &raw);
             retained.push(Retained {
                 index,
                 object_ref: item.object_ref.clone(),
                 interfaces: item.interfaces,
-                actions: item.raw.actions.clone(),
-                bounds: item.raw.bounds,
+                actions: raw.actions.clone(),
+                bounds: raw.bounds,
                 fingerprint: node.fingerprint,
             });
             nodes.push(node);
@@ -190,11 +228,16 @@ impl AtspiWorker {
         Ok(r)
     }
 
-    async fn element_center(conn: &zbus::Connection, r: &Retained) -> Res<(f64, f64)> {
+    async fn element_center(
+        axis: pure::AxisMap,
+        conn: &zbus::Connection,
+        r: &Retained,
+    ) -> Res<(f64, f64)> {
+        // Live extents are still in AT-SPI space. Stored bounds were mapped at snapshot time.
         if r.interfaces.contains(Interface::Component)
             && let Some(rect) = read_extents(conn, &r.object_ref).await
         {
-            return Ok(rect.center());
+            return Ok(axis.map_rect(rect).center());
         }
         if let Some(rect) = r.bounds {
             return Ok(rect.center());
@@ -202,6 +245,18 @@ impl AtspiWorker {
         Err(DesktopError::Accessibility(
             "element has no on-screen bounds".into(),
         ))
+    }
+
+    fn focus_snapshot_window(&self) -> Res<()> {
+        if self.window_id == 0 {
+            return Ok(());
+        }
+        x11::activate_window(self.window_id).map_err(|err| {
+            DesktopError::Accessibility(format!(
+                "could not focus window {} before input ({err}); refusing to click or type into another window",
+                self.window_id
+            ))
+        })
     }
 
     fn current_window_rect(&self) -> Res<Rect> {
@@ -218,7 +273,7 @@ impl AtspiWorker {
         match *target {
             Target::ByIndex { index, generation } => {
                 let r = self.resolve_verified(conn, index, generation).await?;
-                Self::element_center(conn, &r).await
+                Self::element_center(self.axis, conn, &r).await
             }
             Target::ByCoordinate { x, y, space } => match space {
                 CoordinateSpace::Absolute => Ok((x, y)),
@@ -231,6 +286,7 @@ impl AtspiWorker {
 
     pub async fn act(&mut self, action: &Action) -> Res<ActionResult> {
         x11::ensure_x11_session()?;
+        self.focus_snapshot_window()?;
 
         match action {
             Action::TypeText { text } => {
@@ -262,7 +318,7 @@ impl AtspiWorker {
                 (Target::ByIndex { index, generation }, ClickMethod::Accessibility) => {
                     let r = self.resolve_verified(conn, *index, *generation).await?;
                     if !try_atspi_click(conn, &r).await? {
-                        let (x, y) = Self::element_center(conn, &r).await?;
+                        let (x, y) = Self::element_center(self.axis, conn, &r).await?;
                         x11::click_at(x, y)?;
                     }
                 }
@@ -285,7 +341,7 @@ impl AtspiWorker {
             Action::SetValue { target, value } => match target {
                 Target::ByIndex { index, generation } => {
                     let r = self.resolve_verified(conn, *index, *generation).await?;
-                    set_element_value(conn, &r, value).await?;
+                    set_element_value(self.axis, conn, &r, value).await?;
                 }
                 Target::ByCoordinate { .. } => {
                     return Err(DesktopError::Unsupported(
@@ -357,7 +413,12 @@ async fn try_atspi_click(conn: &zbus::Connection, r: &Retained) -> Res<bool> {
     Ok(false)
 }
 
-async fn set_element_value(conn: &zbus::Connection, r: &Retained, value: &str) -> Res<()> {
+async fn set_element_value(
+    axis: pure::AxisMap,
+    conn: &zbus::Connection,
+    r: &Retained,
+    value: &str,
+) -> Res<()> {
     if let Some(bus_name) = r.object_ref.name() {
         let path = r.object_ref.path();
 
@@ -399,7 +460,7 @@ async fn set_element_value(conn: &zbus::Connection, r: &Retained, value: &str) -
         {
             focused = true;
         }
-        if !focused && let Ok((x, y)) = AtspiWorker::element_center(conn, r).await {
+        if !focused && let Ok((x, y)) = AtspiWorker::element_center(axis, conn, r).await {
             x11::click_at(x, y)?;
             focused = true;
         }

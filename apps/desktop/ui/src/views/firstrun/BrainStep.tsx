@@ -305,7 +305,7 @@ export function BrainStep({
         </p>
       ) : ready.length > 0 && !connected ? (
         <section className={styles.block} aria-labelledby="fr-found">
-          <h3 id="fr-found" className={styles.eyebrow}>{t("firstRun.brain.foundTitle")}</h3>
+          <h2 id="fr-found" className={styles.eyebrow}>{t("firstRun.brain.foundTitle")}</h2>
           <div className={styles.cards} role="group" aria-label={t("firstRun.brain.foundTitle")}>
             {ready.map((e) => {
               const d = e.detected;

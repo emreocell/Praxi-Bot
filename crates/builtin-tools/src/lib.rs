@@ -58,7 +58,7 @@ pub use bots::{
     BOT_PRESETS, BOT_TOOL_NAMES, BotCaller, BotChange, BotHost, BotPreview, BotRequest, BotView,
     FieldChange,
 };
-pub use browser::{BrowserDriver, BrowserSettings, CdpDriver, Wait};
+pub use browser::{BrowserDriver, BrowserSettings, CdpDriver, Wait, act_can_egress, act_summary};
 pub use checkpoint::{
     ChangeKind, Checkpoint, CheckpointEntry, CheckpointStore, DiffOmittedReason, FileChange,
     MAX_DIFF_FILE_BYTES, MAX_DIFF_RUN_BYTES, RestoreAction, RestorePreviewEntry, RestoreReport,
@@ -515,6 +515,7 @@ mod tests {
             ("browser_snapshot", R, B),
             ("browser_click", W, B),
             ("browser_fill", W, B),
+            ("browser_act", W, B),
             ("browser_select", W, B),
             ("browser_press", W, B),
             ("browser_scroll", R, B),
@@ -1108,7 +1109,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 34 + 6);
+        assert_eq!(added, 35 + 6);
 
         // Verification of email tools and their effects
         let send_tool = reg
