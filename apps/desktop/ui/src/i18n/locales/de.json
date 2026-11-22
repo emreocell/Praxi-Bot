@@ -997,7 +997,7 @@
   "botLimits": {
     "card": {
       "body": {
-        "tokens": "Dieser Bot hat sein Token-Limit aufgebraucht. Der Lauf wurde gestoppt, bevor das Modell aufgerufen wurde, es wurde also nichts überschritten.",
+        "tokens": "Dieser Bot hat sein Nutzungslimit (die Textmenge, die das Modell lesen und schreiben darf) aufgebraucht. Der Lauf wurde gestoppt, bevor das Modell aufgerufen wurde, es wurde also nichts überschritten.",
         "usd": "Dieser Bot hat sein Ausgabenlimit aufgebraucht. Der Lauf wurde gestoppt, bevor das Modell aufgerufen wurde, es wurde also nichts überschritten."
       },
       "raise": "Limit erhöhen",
@@ -1012,15 +1012,15 @@
       "waiting": "Okay. Der Bot kann wieder arbeiten, sobald das Limit am {{when}} zurückgesetzt wird.",
       "waitingUnknown": "Okay. Der Bot kann wieder arbeiten, sobald das Limit zurückgesetzt wird."
     },
-    "defaultNote": "Dieser Bot hat noch keine gespeicherten Limits, deshalb gilt eine sichere Obergrenze von {{usd}} oder {{tokens}} Tokens pro Tag. Erhöhe sie hier, wenn der Bot mehr braucht.",
+    "defaultNote": "Dieser Bot hat noch keine gespeicherten Limits, deshalb gilt eine sichere Obergrenze von {{usd}} oder {{amount}} Textbausteine pro Tag. Erhöhe sie hier, wenn der Bot mehr braucht.",
     "field": {
-      "hard_tokens": "Stoppen bei (Tokens)",
+      "hard_tokens": "Stoppen bei (Nutzung)",
       "hard_usd": "Stoppen bei (USD)",
-      "soft_tokens": "Warnen bei (Tokens)",
+      "soft_tokens": "Warnen bei (Nutzung)",
       "soft_usd": "Warnen bei (USD)"
     },
-    "hint": "Eine Warnung benachrichtigt dich nur bei 80 % und 100 %. Ein Stopp beendet den Lauf, bevor das Modell aufgerufen wird. Bei Modellen mit unbekanntem Preis zählen nur Tokens. Zeitpläne und Kanalnachrichten folgen denselben Limits.",
-    "invalid": "Gib einen positiven Betrag ein (Geld ab 0,01, Tokens als ganze Zahl) oder lass das Feld leer.",
+    "hint": "Eine Warnung benachrichtigt dich nur bei 80 % und 100 %. Ein Stopp beendet den Lauf, bevor das Modell aufgerufen wird. Bei Modellen mit unbekanntem Preis zählt nur die Nutzung. Zeitpläne und Kanalnachrichten folgen denselben Limits.",
+    "invalid": "Gib einen positiven Betrag ein (Geld ab 0,01, Nutzung als ganze Zahl) oder lass das Feld leer.",
     "order": "Die Warnschwelle darf nicht über der Stoppschwelle liegen.",
     "period": {
       "daily": "Pro Tag",
@@ -1033,7 +1033,7 @@
     "saving": "Wird gespeichert…",
     "unlimited": "Kein Limit",
     "unreported": "{{count}} Aufrufe meldeten keine Nutzung und werden mit einer vorsichtigen Schätzung gezählt.",
-    "used": "{{usd}} und {{tokens}} Tokens verbraucht. Zurückgesetzt am {{when}}."
+    "used": "{{usd}} und {{amount}} Textbausteine verbraucht. Zurückgesetzt am {{when}}."
   },
   "botPanel": {
     "botsComputer": "Computer von {{bot}} · {{name}}",
@@ -5064,7 +5064,7 @@
     "total": "Gesamt",
     "trend": {
       "ariaLabel": "Täglicher {{metric}}-Verlauf über {{days}} Tage",
-      "dayReadout": "{{day}} · {{calls}} Aufrufe · {{tokens}} Tokens · {{cost}}",
+      "dayReadout": "{{day}} · {{calls}} Aufrufe · {{amount}} Tokens · {{cost}}",
       "hoverHint": "Fahre über einen Tag oder fokussiere ihn, um die Summen zu sehen.",
       "metric": "Diagramm-Kennzahl",
       "metrics": {

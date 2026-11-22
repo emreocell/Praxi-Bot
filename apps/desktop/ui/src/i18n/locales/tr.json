@@ -997,7 +997,7 @@
   "botLimits": {
     "card": {
       "body": {
-        "tokens": "Bu bot token limitini doldurdu. Koşu model çağrılmadan durduruldu, yani limit aşılmadı.",
+        "tokens": "Bu bot kullanım sınırını (modelin okuyup yazabileceği metin miktarı) doldurdu. Koşu model çağrılmadan durduruldu, yani limit aşılmadı.",
         "usd": "Bu bot harcama limitini doldurdu. Koşu model çağrılmadan durduruldu, yani limit aşılmadı."
       },
       "raise": "Limiti yükselt",
@@ -1012,15 +1012,15 @@
       "waiting": "Tamam. Limit {{when}} tarihinde sıfırlanınca bot yeniden çalışabilir.",
       "waitingUnknown": "Tamam. Limit sıfırlanınca bot yeniden çalışabilir."
     },
-    "defaultNote": "Bu botun henüz kayıtlı limiti yok, bu yüzden günde {{usd}} veya {{tokens}} token güvenli üst sınırı geçerli. Bot daha fazlasına ihtiyaç duyuyorsa buradan yükselt.",
+    "defaultNote": "Bu botun henüz kayıtlı limiti yok, bu yüzden günde {{usd}} veya {{amount}} metin parçası güvenli üst sınırı geçerli. Bot daha fazlasına ihtiyaç duyuyorsa buradan yükselt.",
     "field": {
-      "hard_tokens": "Durdurma eşiği (token)",
+      "hard_tokens": "Durdurma eşiği (kullanım)",
       "hard_usd": "Durdurma eşiği (USD)",
-      "soft_tokens": "Uyarı eşiği (token)",
+      "soft_tokens": "Uyarı eşiği (kullanım)",
       "soft_usd": "Uyarı eşiği (USD)"
     },
-    "hint": "Uyarı yalnızca %80 ve %100'de bildirim verir. Durdurma, model çağrılmadan koşuyu bitirir. Fiyatı bilinmeyen modellerde yalnızca token sayılır. Zamanlamalar ve kanal mesajları aynı limitlere uyar.",
-    "invalid": "Pozitif bir miktar gir (para 0,01'den başlar, token tam sayı olmalı) ya da alanı boş bırak.",
+    "hint": "Uyarı yalnızca %80 ve %100'de bildirim verir. Durdurma, model çağrılmadan koşuyu bitirir. Fiyatı bilinmeyen modellerde yalnızca kullanım sayılır. Zamanlamalar ve kanal mesajları aynı limitlere uyar.",
+    "invalid": "Pozitif bir miktar gir (para 0,01'den başlar, kullanım tam sayı olmalı) ya da alanı boş bırak.",
     "order": "Uyarı eşiği durdurma eşiğinden yüksek olamaz.",
     "period": {
       "daily": "Günlük",
@@ -1033,7 +1033,7 @@
     "saving": "Kaydediliyor…",
     "unlimited": "Limit yok",
     "unreported": "{{count}} çağrı kullanım bildirmedi ve temkinli bir tahminle sayıldı.",
-    "used": "{{usd}} ve {{tokens}} token kullanıldı. Sıfırlanma: {{when}}."
+    "used": "{{usd}} ve {{amount}} metin parçası kullanıldı. Sıfırlanma: {{when}}."
   },
   "botPanel": {
     "botsComputer": "{{bot}} botunun bilgisayarı · {{name}}",
@@ -5064,7 +5064,7 @@
     "total": "Toplam",
     "trend": {
       "ariaLabel": "{{days}} günlük {{metric}} eğilimi",
-      "dayReadout": "{{day}} · {{calls}} çağrı · {{tokens}} token · {{cost}}",
+      "dayReadout": "{{day}} · {{calls}} çağrı · {{amount}} token · {{cost}}",
       "hoverHint": "Toplamlarını görmek için bir günün üzerine gelin veya odaklanın.",
       "metric": "Grafik ölçütü",
       "metrics": {

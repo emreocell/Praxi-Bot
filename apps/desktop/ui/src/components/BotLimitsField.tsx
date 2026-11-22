@@ -100,7 +100,7 @@ export function BotLimitsField({ botId }: { botId: string }) {
         <p className={styles.defaultNote} data-testid="bot-limits-default">
           {t("botLimits.defaultNote", {
             usd: usd.format(state.default_daily_hard_usd),
-            tokens: num.format(state.default_daily_hard_tokens)
+            amount: num.format(state.default_daily_hard_tokens)
           })}
         </p>
       ) : null}
@@ -114,7 +114,7 @@ export function BotLimitsField({ botId }: { botId: string }) {
               {t(`botLimits.period.${period}`)}
             </h3>
             <p className={formStyles.hint}>
-              {t("botLimits.used", { usd: usd.format(u.usd), tokens: num.format(u.tokens), when: when(u.resets_ms) })}
+              {t("botLimits.used", { usd: usd.format(u.usd), amount: num.format(u.tokens), when: when(u.resets_ms) })}
             </p>
             <div
               className={styles.bar}
