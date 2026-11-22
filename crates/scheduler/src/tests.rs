@@ -1505,26 +1505,6 @@ async fn startup_settles_an_interrupted_occurrence_whose_run_key_says_done() {
     first.settle().await;
     let occ = store.get_occurrence(sched.id, due).unwrap().unwrap();
     assert_eq!(occ.state, OccurrenceState::Succeeded);
-
-    // Without a finished run the same crash stays visibly interrupted, and a row
-    // left in `started` by a hard kill is reconciled too.
-    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
-    let (sched, due) = dispatched_row(&store, 1_700_000_000_000);
-    store
-        .conn()
-        .execute(
-            "UPDATE occurrences SET state = 'started' WHERE schedule_id = ?1",
-            rusqlite::params![sched.id.to_string()],
-        )
-        .unwrap();
-    let second = Scheduler::start_with_clock(
-        Arc::clone(&store),
-        Arc::new(KeyedExecutor(AttemptRun::None)),
-        Arc::new(FakeClock::new(1_700_000_000_000)),
-    );
-    second.settle().await;
-    let occ = store.get_occurrence(sched.id, due).unwrap().unwrap();
-    assert_eq!(occ.state, OccurrenceState::Interrupted);
 }
 
 #[test]

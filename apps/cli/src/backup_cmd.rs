@@ -679,14 +679,13 @@ fn refuse_if_daemon_running(data_dir: &Path, port: u16) -> crate::Result<()> {
         .read(true)
         .write(true)
         .open(data_dir.join(DAEMON_LOCK))
+        && file.try_lock().is_err()
     {
-        if file.try_lock().is_err() {
-            return Err(format!(
-                "cannot restore while a daemon is using {}; stop `bot serve` (or close the desktop app) and retry",
-                data_dir.display()
-            )
-            .into());
-        }
+        return Err(format!(
+            "cannot restore while a daemon is using {}; stop `bot serve` (or close the desktop app) and retry",
+            data_dir.display()
+        )
+        .into());
     }
     Ok(())
 }
@@ -1053,7 +1052,10 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("wrong passphrase"), "{err}");
-        assert!(!dst.exists(), "a failed restore must not create the data dir");
+        assert!(
+            !dst.exists(),
+            "a failed restore must not create the data dir"
+        );
     }
 
     #[test]

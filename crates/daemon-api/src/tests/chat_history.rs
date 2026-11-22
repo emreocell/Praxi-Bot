@@ -81,6 +81,20 @@ async fn search_is_owner_only_scoped_bounded_and_never_matches_secrets() {
             .status,
         StatusCode::BAD_REQUEST
     );
+    // A page whose hits are all omitted by redaction does not hide later matches.
+    let (_, quiet) = make_chat(&t).await;
+    for _ in 0..3 {
+        message(
+            &t,
+            &quiet,
+            "zebra history-secret-canary-value",
+            false,
+            "user",
+        );
+    }
+    let visible = message(&t, &quiet, "zebra and visible text", false, "assistant");
+    let r = call(&t, Method::GET, "/v1/chats/search?q=zebra&limit=1", None).await;
+    assert_eq!(r.json()["results"][0]["message_id"], visible.to_string());
     let (_, other) = make_chat(&t).await;
     let r = call(
         &t,
@@ -97,27 +111,6 @@ async fn search_is_owner_only_scoped_bounded_and_never_matches_secrets() {
             .json()["results"],
         json!([])
     );
-}
-
-#[tokio::test]
-async fn a_page_of_omitted_hits_does_not_hide_later_matches() {
-    let redactor = agent_core::SharedRedactor::default();
-    redactor.register("history-secret-canary-value");
-    let t = setup_with_config(
-        |_| {},
-        LoopConfig {
-            redactor: Some(redactor),
-            ..LoopConfig::default()
-        },
-    );
-    let (_bot, chat) = make_chat(&t).await;
-    for _ in 0..3 {
-        message(&t, &chat, "ancient history-secret-canary-value", false, "user");
-    }
-    let hit = message(&t, &chat, "ancient and visible text", false, "assistant");
-    let r = call(&t, Method::GET, "/v1/chats/search?q=ancient&limit=1", None).await;
-    assert_eq!(r.status, StatusCode::OK, "{}", r.json());
-    assert_eq!(r.json()["results"][0]["message_id"], hit.to_string());
 }
 
 #[tokio::test]
