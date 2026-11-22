@@ -1,0 +1,18 @@
+# cargo-nextest configuration. Pull request checks use `cargo test`; this file only
+# defines the profile for the scheduled test report (.github/workflows/test-report.yml).
+
+[profile.ci-report]
+# A test that fails and then passes on a retry is reported as flaky.
+retries = 2
+fail-fast = false
+# Report tests running longer than 60 s; never kill them (the job has its own limit).
+slow-timeout = { period = "60s" }
+failure-output = "final"
+success-output = "never"
+status-level = "retry"
+final-status-level = "flaky"
+
+[profile.ci-report.junit]
+path = "junit.xml"
+store-success-output = false
+store-failure-output = true

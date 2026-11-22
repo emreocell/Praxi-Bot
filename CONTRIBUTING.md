@@ -156,6 +156,22 @@ See [reading CI timing reports](docs/contributing/ci-report.md) for prerequisite
 queue/run-time definitions, JUnit artifacts and flaky-candidate limitations, and
 the [November 2026 findings](docs/contributing/ci-report-2026-11.md) for the first sample.
 
+**Test report (slow and flaky tests).** A scheduled workflow, `Test report`
+(`.github/workflows/test-report.yml`), runs the workspace tests on Linux and Windows and the browser
+integration tests with [cargo-nextest](https://nexte.st), retrying a failed test up to twice. Its
+job summary lists the flaky tests (failed, then passed on a retry), the tests that failed on every
+attempt, the 20 slowest tests and the 20 slowest test binaries. The same data is in the
+`test-report-*` artifacts (`report.json` and the raw `junit.xml`). A red check on your pull
+request that names a test from that flaky list is probably not your change; say so in the pull
+request. The pull request checks themselves still use `cargo test` without retries. Doctests are
+not part of the report (nextest does not run them). To measure locally:
+
+```sh
+cargo install cargo-nextest --locked                        # once
+cargo nextest run -p <crate> --profile ci-report            # retries, writes JUnit XML
+python3 scripts/test_report.py target/nextest/ci-report/junit.xml
+```
+
 The CLI reference is checked too: `apps/cli/tests/cli_reference.rs` fails when a visible
 command, long flag or environment variable is missing from `docs/guide/cli-reference.md`, or
 when a heading names a command that no longer exists. Update the guide, or add a reasoned entry

@@ -1,0 +1,181 @@
+name: Test report
+
+# Scheduled measurement of the test suite (#463): the slowest tests and test binaries and
+# the tests that are flaky (failed, then passed on a retry), per OS. It never runs on pull
+# requests and does not change the pull request checks; retries exist only here (the
+# `ci-report` profile in .config/nextest.toml). Read the job summaries or download the
+# `test-report-*` artifacts. To measure locally, see CONTRIBUTING.md ("Test report").
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-report
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+
+jobs:
+  workspace:
+    name: Workspace tests (${{ matrix.os }})
+    # A scheduled run on a fork would only burn the fork owner's minutes; a manual run is
+    # the owner's own choice.
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'emreocell/Praxi-Bot'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-nextest@0.9.152
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev pkg-config libxcb1-dev
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: test-report
+
+      - name: Build tests
+        run: cargo nextest run --workspace --locked --no-run
+
+      - name: Run tests with retries
+        id: run
+        shell: bash
+        run: |
+          set -uo pipefail
+          status=0
+          cargo nextest run --workspace --locked --profile ci-report --no-fail-fast || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Write the report
+        if: always()
+        shell: bash
+        env:
+          TITLE: workspace, ${{ runner.os }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp target/nextest/ci-report/junit.xml out/junit.xml
+          python3 scripts/test_report.py out/junit.xml --title "$TITLE" \
+            --markdown "$GITHUB_STEP_SUMMARY" --json out/report.json
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-report-workspace-${{ runner.os }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Fail on tests that failed every attempt
+        env:
+          STATUS: ${{ steps.run.outputs.status }}
+        shell: bash
+        run: |
+          if [ "${STATUS:-1}" != "0" ]; then
+            echo "Some tests failed on every attempt (see the job summary)."
+            exit 1
+          fi
+
+  browser:
+    name: Browser integration tests
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'emreocell/Praxi-Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable (2026-10-16)
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-nextest@0.9.152
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config libxcb1-dev
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: test-report-browser
+
+      # Same pin and checksums as the CI browser job and scripts/install-linux.sh.
+      - name: Install pinned Chrome for Testing
+        run: |
+          set -euo pipefail
+          version="157.0.8103.38"
+          expected="8cdeb344e9b2cefe59f4aea8d1d93d5d93054c03cde217665c16fc1f62e72a66"
+          curl -fsSL "https://storage.googleapis.com/chrome-for-testing-public/${version}/linux64/chrome-linux64.zip" -o "$RUNNER_TEMP/chrome.zip"
+          echo "${expected}  $RUNNER_TEMP/chrome.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/chrome.zip" -d "$RUNNER_TEMP/cft"
+          echo "PRAXI_BROWSER_PATH=$RUNNER_TEMP/cft/chrome-linux64/chrome" >> "$GITHUB_ENV"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Run browser tests with retries
+        id: run
+        run: |
+          set -uo pipefail
+          status=0
+          cargo nextest run -p browser-cdp --test browser --test dialogs --locked \
+            --profile ci-report --run-ignored only --test-threads 1 || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Write the report
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp target/nextest/ci-report/junit.xml out/junit.xml
+          python3 scripts/test_report.py out/junit.xml --title "browser integration, Linux" \
+            --markdown "$GITHUB_STEP_SUMMARY" --json out/report.json
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-report-browser
+          path: out/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Fail on tests that failed every attempt
+        env:
+          STATUS: ${{ steps.run.outputs.status }}
+        run: |
+          if [ "${STATUS:-1}" != "0" ]; then
+            echo "Some tests failed on every attempt (see the job summary)."
+            exit 1
+          fi
