@@ -206,6 +206,12 @@ impl FakeTool {
                     CategorySpec::Desktop => PermissionCategory::Desktop,
                     CategorySpec::Browser => PermissionCategory::Browser,
                     CategorySpec::Money => PermissionCategory::Money,
+                    CategorySpec::Messaging => PermissionCategory::Messaging,
+                    CategorySpec::Script => PermissionCategory::Script,
+                    CategorySpec::Accounts => PermissionCategory::Accounts,
+                    CategorySpec::System => PermissionCategory::System,
+                    CategorySpec::Remote => PermissionCategory::Remote,
+                    CategorySpec::Meta => PermissionCategory::Meta,
                 },
                 platforms: vec![Platform::All],
 

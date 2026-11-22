@@ -66,6 +66,8 @@ pub struct TurnExtras {
     pub fs_home: Option<std::path::PathBuf>,
     /// Who starts the run.
     pub initiator: Option<protocol::InitiatorKind>,
+    /// Pre-created isolated data directory for the turn (keeps `{data_dir}` predictable).
+    pub data_dir: Option<tempfile::TempDir>,
 }
 
 /// The permission outcome of one tool call.
@@ -221,6 +223,7 @@ struct Reactor<'a> {
     run: protocol::RunId,
     reactions: &'a [Reaction],
     fired: Vec<bool>,
+    seen: Vec<usize>,
 }
 
 impl Reactor<'_> {
@@ -249,6 +252,10 @@ impl Reactor<'_> {
                 continue;
             }
             if r.tool.as_ref().is_some_and(|t| *t != tool) {
+                continue;
+            }
+            self.seen[i] += 1;
+            if r.nth.is_some_and(|n| self.seen[i] != n) {
                 continue;
             }
             self.fired[i] = true;
@@ -311,7 +318,10 @@ pub async fn run_turn(cfg: TurnConfig) -> Result<TurnTrace> {
 /// As [`run_turn`].
 #[allow(clippy::too_many_lines)] // one ordered setup, run and collect pass
 pub async fn run_turn_ext(cfg: TurnConfig, extras: TurnExtras) -> Result<TurnTrace> {
-    let dir = tempfile::tempdir()?;
+    let dir = match extras.data_dir {
+        Some(d) => d,
+        None => tempfile::tempdir()?,
+    };
     let storage = Arc::new(Storage::open(dir.path())?);
     let (user, bot, chat) = seed(&storage)?;
     let mut loop_cfg = build_config(&cfg);
@@ -383,6 +393,7 @@ pub async fn run_turn_ext(cfg: TurnConfig, extras: TurnExtras) -> Result<TurnTra
         run,
         reactions: &cfg.reactions,
         fired: vec![false; cfg.reactions.len()],
+        seen: vec![0; cfg.reactions.len()],
     };
     let mut timed_out = false;
     let deadline = tokio::time::sleep(cfg.timeout);

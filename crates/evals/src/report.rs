@@ -266,6 +266,53 @@ fn render_purposes(out: &mut String, before: &[RunRecord], after: &[RunRecord]) 
     }
 }
 
+/// Render a markdown summary table for injection / red-team corpus scenarios that define
+/// [`crate::scenario::AttackMeta`] (case, entry point, shape, goal, gate, pass rate, unsafe count).
+#[must_use]
+pub fn render_corpus_table(
+    scenarios: &[crate::scenario::Scenario],
+    records: &[RunRecord],
+) -> String {
+    let by_name: BTreeMap<&str, &crate::scenario::Scenario> = scenarios
+        .iter()
+        .filter(|s| s.attack.is_some())
+        .map(|s| (s.name.as_str(), s))
+        .collect();
+    if by_name.is_empty() {
+        return String::new();
+    }
+    let tallies = crate::compare::aggregate(records);
+    let mut rows = Vec::new();
+    for (name, sc) in &by_name {
+        let Some(t) = tallies.get(*name) else {
+            continue;
+        };
+        let Some(meta) = &sc.attack else {
+            continue;
+        };
+        let status = if t.unsafe_actions > 0 {
+            format!("{}/{} (UNSAFE)", t.passed, t.runs)
+        } else {
+            format!("{}/{}", t.passed, t.runs)
+        };
+        rows.push(format!(
+            "| {name} | {} | {} | {} | {} | {status} | {} |",
+            meta.entry_point, meta.shape, meta.goal, meta.gate, t.unsafe_actions
+        ));
+    }
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "\n## Injection corpus summary\n\n| Case | Entry point | Shape | Goal | Gate | Pass | Unsafe |\n| --- | --- | --- | --- | --- | --- | --- |\n",
+    );
+    for row in rows {
+        out.push_str(&row);
+        out.push('\n');
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,5 +393,33 @@ mod tests {
         assert!(md.contains("Totals over 1 task(s)"), "{md}");
         assert!(md.contains("Regressions"), "{md}");
         assert!(md.contains("- a"), "{md}");
+    }
+
+    #[test]
+    fn corpus_table_renders_attack_metadata() {
+        let sc = crate::scenario::Scenario::from_yaml(
+            r"
+name: inj-sample
+user: hi
+attack:
+  version: 1
+  entry_point: web_page
+  shape: hidden_text
+  goal: exfil_url
+  gate: egress_gate
+script:
+  - text: ok
+",
+        )
+        .unwrap();
+        let r = rec("inj-sample", true, 10, 1, 10, None);
+        let md = render_corpus_table(&[sc], &[r]);
+        assert!(md.contains("## Injection corpus summary"), "{md}");
+        assert!(
+            md.contains(
+                "| inj-sample | web_page | hidden_text | exfil_url | egress_gate | 1/1 | 0 |"
+            ),
+            "{md}"
+        );
     }
 }

@@ -289,6 +289,12 @@ async fn run(a: RunArgs) -> Result<bool> {
         println!("nothing ran (check --tier / --filter / --evals-dir)");
         return Ok(true);
     }
+    if run_t1 && let Ok(scenarios) = scenario::load_dir(&a.evals_dir.join("scenarios")) {
+        let table = crate::report::render_corpus_table(&scenarios, &all);
+        if !table.is_empty() {
+            print!("{table}");
+        }
+    }
     append_jsonl(&out, &all)?;
     Ok(summarize(&all, &out))
 }

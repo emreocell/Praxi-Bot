@@ -16,7 +16,8 @@ use crate::fake::{FakeTool, ScriptedProvider};
 use crate::harness::{TurnConfig, TurnExtras, TurnTrace, run_turn_ext};
 use crate::metrics::RunRecord;
 use crate::scenario::{
-    Expect, FsFixture, InitiatorSpec, PolicyPreset, RequestExpect, Scenario, TextMatch, load_dir,
+    ApprovalCardExpect, Expect, FsFixture, InitiatorSpec, PolicyPreset, RequestExpect, Scenario,
+    TextMatch, load_dir,
 };
 
 /// Model reference used by tier-1 runs.
@@ -44,11 +45,16 @@ fn policy(p: PolicyPreset) -> Policy {
 pub async fn run_scenario(s: &Scenario) -> Result<ScenarioResult> {
     // The workspace outlives the turn so its files can be inspected by the real tools.
     let workspace = tempfile::tempdir()?;
+    let data_dir = tempfile::tempdir()?;
     let ws = workspace
         .path()
         .to_string_lossy()
         .replace(std::path::MAIN_SEPARATOR, "/");
-    let s = &s.with_workspace(&ws);
+    let dd = data_dir
+        .path()
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    let s = &s.with_workspace(&ws).with_data_dir(&dd);
     if let Some(fx) = &s.fs {
         build_fixture(workspace.path(), fx)?;
     }
@@ -88,6 +94,7 @@ pub async fn run_scenario(s: &Scenario) -> Result<ScenarioResult> {
             InitiatorSpec::Schedule => Some(protocol::InitiatorKind::Schedule),
             InitiatorSpec::Routine => Some(protocol::InitiatorKind::Routine),
         },
+        data_dir: Some(data_dir),
     };
     let trace = run_turn_ext(
         TurnConfig {
@@ -505,5 +512,120 @@ pub fn evaluate(
     for r in &e.requests {
         request_failures(r, requests, &mut f);
     }
+    approval_card_failures(e, &trace.events, &mut f);
     f
+}
+
+fn approval_card_failures(e: &Expect, events: &[protocol::Event], out: &mut Vec<String>) {
+    let cards: Vec<&protocol::event::ApprovalNeeded> = events
+        .iter()
+        .filter_map(|ev| match ev {
+            protocol::Event::ApprovalNeeded(a) => Some(a),
+            _ => None,
+        })
+        .collect();
+    for tool in &e.no_approval_tools {
+        if cards.iter().any(|c| c.tool_name == *tool) {
+            out.push(format!(
+                "no_approval_tools: {tool} emitted an unexpected approval card"
+            ));
+        }
+    }
+    let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
+    for want in &e.approval_cards {
+        let nth = *seen.entry(want.tool.as_str()).or_default();
+        seen.insert(want.tool.as_str(), nth + 1);
+        let Some(card) = cards.iter().filter(|c| c.tool_name == want.tool).nth(nth) else {
+            out.push(format!(
+                "approval_cards: expected approval card #{} for {}, none emitted",
+                nth + 1,
+                want.tool
+            ));
+            continue;
+        };
+        check_card_details(want, card, out);
+    }
+}
+
+fn check_card_details(
+    want: &ApprovalCardExpect,
+    card: &protocol::event::ApprovalNeeded,
+    out: &mut Vec<String>,
+) {
+    let needs_details = want.kind.is_some()
+        || want.why.is_some()
+        || want.host_contains.is_some()
+        || !want.payload_contains.is_empty()
+        || !want.payload_not_contains.is_empty()
+        || !want.reason_contains.is_empty();
+    if !needs_details {
+        return;
+    }
+    let Some(details) = card.details.as_ref() else {
+        out.push(format!("approval_cards: {} card had no details", want.tool));
+        return;
+    };
+    let field = |key: &str| {
+        details
+            .get(key)
+            .or_else(|| details.get("egress").and_then(|e| e.get(key)))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+    };
+    if let Some(kind) = &want.kind {
+        let got = field("kind");
+        if got != kind {
+            out.push(format!(
+                "approval_cards: {} details.kind = {got:?}, expected {kind:?}",
+                want.tool
+            ));
+        }
+    }
+    if let Some(why) = &want.why {
+        let got = details
+            .get("why")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if got != why {
+            out.push(format!(
+                "approval_cards: {} details.why = {got:?}, expected {why:?}",
+                want.tool
+            ));
+        }
+    }
+    if let Some(host_sub) = &want.host_contains {
+        let host = field("host");
+        if !host.contains(host_sub.as_str()) {
+            out.push(format!(
+                "approval_cards: {} host {host:?} lacks {host_sub:?}",
+                want.tool
+            ));
+        }
+    }
+    let payload = field("payload");
+    for needle in &want.payload_contains {
+        if !payload.contains(needle.as_str()) {
+            out.push(format!(
+                "approval_cards: {} payload {payload:?} lacks {needle:?}",
+                want.tool
+            ));
+        }
+    }
+    for needle in &want.payload_not_contains {
+        if payload.contains(needle.as_str()) {
+            out.push(format!(
+                "approval_cards: {} payload {payload:?} must not contain {needle:?}",
+                want.tool
+            ));
+        }
+    }
+    let reason = field("reason");
+    for needle in &want.reason_contains {
+        if !reason.contains(needle.as_str()) {
+            out.push(format!(
+                "approval_cards: {} reason {reason:?} lacks {needle:?}",
+                want.tool
+            ));
+        }
+    }
 }

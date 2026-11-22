@@ -664,6 +664,7 @@ pub async fn run_task(task: &Task, opts: &Tier2Options) -> Result<TaskOutcome> {
                 act: Act::Deny,
                 text: Some("no human is available in eval runs".into()),
                 once: false,
+                nth: None,
                 delay_ms: 0,
             }],
             timeout: Duration::from_secs(task.timeout_s.unwrap_or(180)),

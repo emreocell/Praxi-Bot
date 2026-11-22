@@ -104,6 +104,26 @@ pub struct Scenario {
     /// the event stream, the audit log, stored messages and every file of the data dir.
     #[serde(default)]
     pub redact_secrets: bool,
+    /// Classification metadata for prompt-injection / red-team corpus reporting.
+    #[serde(default)]
+    pub attack: Option<AttackMeta>,
+}
+
+/// Classification metadata for a prompt-injection or red-team scenario.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttackMeta {
+    /// Corpus format version (for example, `1`).
+    #[serde(default)]
+    pub version: Option<u32>,
+    /// Untrusted content entry point (`web_page`, `mail`, `file`, `tool_output`, `skill_text`, `filename`, `memory`, `chat`, `control`).
+    pub entry_point: String,
+    /// Attack shape (`hidden_text`, `markdown_link_exfil`, `instruction_in_filename`, `multilingual_turkish`, `claims_to_be_user`, ...).
+    pub shape: String,
+    /// What the injected instruction attempts (`exfil_url`, `exfil_mail`, `run_shell`, `desktop_type`, `benign_control`, ...).
+    pub goal: String,
+    /// Gate or floor expected to hold (`egress_gate`, `executes_gate`, `forbidden_egress_chars`, `money_floor`, `never_list_floor`, ...).
+    pub gate: String,
 }
 
 /// Who starts the run.
@@ -229,6 +249,18 @@ pub enum CategorySpec {
     Browser,
     /// Money.
     Money,
+    /// Messaging (e-mail, chat).
+    Messaging,
+    /// Scripts (`script_run`).
+    Script,
+    /// Accounts.
+    Accounts,
+    /// System.
+    System,
+    /// Remote.
+    Remote,
+    /// Meta.
+    Meta,
 }
 
 /// A fake tool backend.
@@ -395,6 +427,9 @@ pub struct Reaction {
     /// Fire at most once.
     #[serde(default)]
     pub once: bool,
+    /// Fire only on the 1-based N-th matching event.
+    #[serde(default)]
+    pub nth: Option<usize>,
     /// Wait this many milliseconds before acting.
     #[serde(default)]
     pub delay_ms: u64,
@@ -483,6 +518,32 @@ pub struct RequestExpect {
     pub tools_not_offered: Vec<String>,
 }
 
+/// Assertion about an `ApprovalNeeded` card emitted for a tool call.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApprovalCardExpect {
+    /// Tool name that must have emitted an `ApprovalNeeded` card.
+    pub tool: String,
+    /// Expected `details.kind` (for example, `"egress"`).
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// Expected `details.why` (`"egress"`, `"executes"`, `"floor"`, `"always_ask"`, `"policy"`).
+    #[serde(default)]
+    pub why: Option<String>,
+    /// Substring expected in `details.host`.
+    #[serde(default)]
+    pub host_contains: Option<String>,
+    /// Substrings expected in `details.payload`.
+    #[serde(default)]
+    pub payload_contains: Vec<String>,
+    /// Substrings that must not appear in `details.payload`.
+    #[serde(default)]
+    pub payload_not_contains: Vec<String>,
+    /// Substrings expected in `details.reason`.
+    #[serde(default)]
+    pub reason_contains: Vec<String>,
+}
+
 /// All assertions of a scenario; absent fields are not checked.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -521,6 +582,12 @@ pub struct Expect {
     /// Workspace files (relative) that must still hold exactly this text after the run.
     #[serde(default)]
     pub files_unchanged: BTreeMap<String, String>,
+    /// Expected `ApprovalNeeded` card payloads (checked in per-tool call order).
+    #[serde(default)]
+    pub approval_cards: Vec<ApprovalCardExpect>,
+    /// Tools that must NOT emit an `ApprovalNeeded` card during the turn.
+    #[serde(default)]
+    pub no_approval_tools: Vec<String>,
 }
 
 impl Scenario {
@@ -531,14 +598,24 @@ impl Scenario {
     /// and `expect.files_unchanged`.
     #[must_use]
     pub fn with_workspace(&self, ws: &str) -> Self {
-        let r = |s: &mut String| *s = s.replace("{ws}", ws);
+        self.substitute_placeholder("{ws}", ws)
+    }
+
+    /// A copy with `{data_dir}` replaced by the run's isolated data directory path.
+    #[must_use]
+    pub fn with_data_dir(&self, data_dir: &str) -> Self {
+        self.substitute_placeholder("{data_dir}", data_dir)
+    }
+
+    fn substitute_placeholder(&self, placeholder: &str, replacement: &str) -> Self {
+        let r = |s: &mut String| *s = s.replace(placeholder, replacement);
         let mut c = self.clone();
         r(&mut c.user);
         r(&mut c.profile_toml);
         for step in &mut c.script {
             step.text.iter_mut().for_each(r);
             for call in &mut step.tool_calls {
-                substitute(&mut call.args, "{ws}", ws);
+                substitute(&mut call.args, placeholder, replacement);
                 call.raw_args.iter_mut().for_each(r);
             }
         }
@@ -554,6 +631,11 @@ impl Scenario {
         for req in &mut c.expect.requests {
             req.tool_messages_contain.iter_mut().for_each(r);
             req.tool_messages_not_contain.iter_mut().for_each(r);
+        }
+        for card in &mut c.expect.approval_cards {
+            card.payload_contains.iter_mut().for_each(r);
+            card.payload_not_contains.iter_mut().for_each(r);
+            card.reason_contains.iter_mut().for_each(r);
         }
         c
     }
