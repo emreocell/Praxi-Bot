@@ -28,6 +28,10 @@ pub(crate) enum ChatsCmd {
         /// Write to this file instead of stdout.
         #[arg(long, short = 'o', value_name = "FILE")]
         output: Option<PathBuf>,
+        /// Replace an existing file. Files are refused by default, and a
+        /// symlink is never followed.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -43,7 +47,19 @@ pub(crate) async fn run(
             chat_id,
             format,
             output,
-        } => export(c, chat_id, format.as_deref(), output.as_deref(), json, out).await,
+            force,
+        } => {
+            export(
+                c,
+                chat_id,
+                format.as_deref(),
+                output.as_deref(),
+                *force,
+                json,
+                out,
+            )
+            .await
+        }
     }
 }
 
@@ -95,6 +111,7 @@ async fn export(
     chat_id: &str,
     format: Option<&str>,
     output: Option<&std::path::Path>,
+    force: bool,
     json: bool,
     out: &mut dyn Write,
 ) -> Result<()> {
@@ -105,12 +122,7 @@ async fn export(
     let path = format!("/v1/chats/{chat_id}/export?format={api_format}");
     let bytes = c.request_bytes(Method::GET, &path).await?;
     if let Some(output) = output {
-        std::fs::write(output, &bytes).map_err(|error| {
-            fail(
-                exit::GENERIC,
-                format!("cannot write {}: {error}", output.display()),
-            )
-        })?;
+        write_export(output, &bytes, force)?;
         if json {
             writeln!(
                 out,
@@ -122,6 +134,74 @@ async fn export(
         }
     } else {
         out.write_all(&bytes)?;
+    }
+    Ok(())
+}
+
+/// Create a private export file. `create_new` refuses an existing path and a
+/// symlink atomically; with `--force` only a regular file is removed first.
+fn write_export(path: &std::path::Path, bytes: &[u8], force: bool) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(fail(
+                exit::GENERIC,
+                format!(
+                    "refusing to write through symlink {}; choose another path",
+                    path.display()
+                ),
+            ));
+        }
+        Ok(meta) if meta.is_dir() => {
+            return Err(fail(
+                exit::GENERIC,
+                format!("{} is a directory; choose a file path", path.display()),
+            ));
+        }
+        Ok(_) if !force => {
+            return Err(fail(
+                exit::GENERIC,
+                format!(
+                    "{} already exists; pass --force to replace it",
+                    path.display()
+                ),
+            ));
+        }
+        Ok(_) => {
+            std::fs::remove_file(path).map_err(|error| {
+                fail(
+                    exit::GENERIC,
+                    format!("cannot replace {}: {error}", path.display()),
+                )
+            })?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(fail(
+                exit::GENERIC,
+                format!("cannot inspect {}: {error}", path.display()),
+            ));
+        }
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|error| {
+        fail(
+            exit::GENERIC,
+            format!("cannot create {}: {error}", path.display()),
+        )
+    })?;
+    if let Err(error) = file.write_all(bytes) {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(fail(
+            exit::GENERIC,
+            format!("cannot write {}: {error}", path.display()),
+        ));
     }
     Ok(())
 }
@@ -202,6 +282,7 @@ mod tests {
                 chat_id: chat_id.to_string(),
                 format: None,
                 output: None,
+                force: false,
             },
             false,
             &mut out,
@@ -226,6 +307,7 @@ mod tests {
                 chat_id: chat_id.to_string(),
                 format: Some("json".into()),
                 output: Some(json_file.clone()),
+                force: false,
             },
             false,
             &mut out,
@@ -245,6 +327,7 @@ mod tests {
                 chat_id: chat_id.to_string(),
                 format: Some("md".into()),
                 output: None,
+                force: false,
             },
             true,
             &mut out,
@@ -261,6 +344,7 @@ mod tests {
                 chat_id: chat_id.to_string(),
                 format: None,
                 output: Some(file.clone()),
+                force: false,
             },
             false,
             &mut out,
@@ -281,6 +365,7 @@ mod tests {
                 chat_id: "../secrets".into(),
                 format: None,
                 output: None,
+                force: false,
             },
             false,
             &mut Vec::new(),
@@ -293,5 +378,40 @@ mod tests {
                 .map(|error| error.code),
             Some(exit::REJECTED)
         );
+    }
+
+    #[test]
+    fn export_files_are_private_and_never_overwritten_without_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("chat.md");
+        write_export(&path, b"first", false).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        let error = write_export(&path, b"second", false).unwrap_err();
+        assert!(error.to_string().contains("already exists"), "{error}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+        write_export(&path, b"second", true).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn export_refuses_a_symlink_even_with_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        std::fs::write(&target, b"keep").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        for force in [false, true] {
+            let error = write_export(&link, b"new", force).unwrap_err();
+            assert!(error.to_string().contains("symlink"), "{error}");
+            assert_eq!(std::fs::read(&target).unwrap(), b"keep");
+        }
     }
 }
