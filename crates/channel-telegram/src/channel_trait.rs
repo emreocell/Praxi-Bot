@@ -69,6 +69,13 @@ impl From<IncomingMessage> for channel_api::IncomingMessage {
             kind: match msg.kind {
                 IncomingKind::Text(text) => channel_api::IncomingKind::Text(text),
                 IncomingKind::Unsupported(label) => channel_api::IncomingKind::Unsupported(label),
+                IncomingKind::Voice {
+                    file_id,
+                    duration_secs,
+                } => channel_api::IncomingKind::Voice {
+                    file_id,
+                    duration_secs,
+                },
                 IncomingKind::Callback {
                     query_id,
                     data,
