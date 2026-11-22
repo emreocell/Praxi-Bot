@@ -2998,6 +2998,20 @@
   "help": {
     "center": {
       "allDocs": "Ganze Anleitung öffnen",
+      "diag": {
+        "copied": "Diagnoseinfos kopiert.",
+        "copy": "Kopieren",
+        "copyFailed": "Kopieren nicht möglich. Markieren Sie den Text oben und kopieren Sie ihn von Hand.",
+        "failed": "Die Informationen konnten nicht gesammelt werden",
+        "intro": "Gibt es ein Problem? Lassen Sie sich anzeigen, was kopiert würde, lesen Sie es und fügen Sie es dann in eine Fehlermeldung ein. Schlüssel, Passwörter, E-Mail-Adressen und Ihr Benutzerordner sind unkenntlich gemacht, Nachrichten sind nicht enthalten. Es wird nichts gesendet.",
+        "loading": "Informationen werden gesammelt …",
+        "offline": "Noch nicht mit dem Hintergrunddienst verbunden.",
+        "previewLabel": "Vorschau der Diagnoseinfos",
+        "previewNote": "Genau dieser Text landet mit „Kopieren“ in Ihrer Zwischenablage:",
+        "refresh": "Aktualisieren",
+        "show": "Anzeigen, was kopiert wird",
+        "title": "Diagnoseinfos kopieren"
+      },
       "guideNote": "Die Handbuchseiten sind vorerst auf Englisch.",
       "guideTitle": "Im vollständigen Handbuch",
       "intro": "Kurze Antworten auf die Fragen, die am häufigsten zuerst kommen. Tippe ein Wort, um zu suchen.",
@@ -4483,7 +4497,7 @@
       },
       "repairDone": "Reparatur abgeschlossen",
       "repairFailed": "Die Reparatur war nicht erfolgreich",
-      "reportCopied": "Support-Bericht kopiert. Schlüssel, Tokens, E-Mail-Adressen und dein Benutzerordner sind maskiert.",
+      "reportCopied": "Support-Bericht kopiert. Schlüssel, Passwörter, E-Mail-Adressen und dein Benutzerordner sind maskiert.",
       "reportFailed": "Der Support-Bericht konnte nicht erstellt werden",
       "rerun": "Erneut ausführen",
       "running": "Diagnose läuft …",

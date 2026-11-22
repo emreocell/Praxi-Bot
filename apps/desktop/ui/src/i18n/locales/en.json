@@ -2998,6 +2998,20 @@
   "help": {
     "center": {
       "allDocs": "Open the full guide",
+      "diag": {
+        "copied": "Diagnostic info copied.",
+        "copy": "Copy",
+        "copyFailed": "Could not copy. Select the text above and copy it by hand.",
+        "failed": "Could not collect the information",
+        "intro": "Having a problem? Show what would be copied, read it, then paste it into a bug report. Keys, passwords, e-mail addresses and your user folder are masked, and no messages are included. Nothing is sent anywhere.",
+        "loading": "Collecting the information…",
+        "offline": "Not connected to the background service yet.",
+        "previewLabel": "Diagnostic info preview",
+        "previewNote": "This exact text is what Copy puts on your clipboard:",
+        "refresh": "Refresh",
+        "show": "Show what will be copied",
+        "title": "Copy diagnostic info"
+      },
       "guideNote": "Guide pages are in English for now.",
       "guideTitle": "In the full guide",
       "intro": "Short answers to the questions people ask first. Type a word to search.",
@@ -4483,7 +4497,7 @@
       },
       "repairDone": "Repair finished",
       "repairFailed": "The repair did not succeed",
-      "reportCopied": "Support report copied. Keys, tokens, e-mail addresses and your user folder are masked.",
+      "reportCopied": "Support report copied. Keys, passwords, e-mail addresses and your user folder are masked.",
       "reportFailed": "Could not create the support report",
       "rerun": "Run again",
       "running": "Running diagnostics…",

@@ -2998,6 +2998,20 @@
   "help": {
     "center": {
       "allDocs": "Tam kılavuzu aç",
+      "diag": {
+        "copied": "Tanılama bilgisi kopyalandı.",
+        "copy": "Kopyala",
+        "copyFailed": "Kopyalanamadı. Yukarıdaki metni seçip elle kopyalayın.",
+        "failed": "Bilgiler toplanamadı",
+        "intro": "Bir sorun mu yaşıyorsunuz? Kopyalanacak metni gösterin, okuyun, sonra hata bildirimine yapıştırın. Anahtarlar, parolalar, e-posta adresleri ve kullanıcı klasörünüz gizlenir, mesajlar eklenmez. Hiçbir yere gönderilmez.",
+        "loading": "Bilgiler toplanıyor…",
+        "offline": "Arka plan hizmetine henüz bağlanılmadı.",
+        "previewLabel": "Tanılama bilgisi önizlemesi",
+        "previewNote": "Kopyala düğmesi panonuza tam olarak şu metni koyar:",
+        "refresh": "Yenile",
+        "show": "Kopyalanacakları göster",
+        "title": "Tanılama bilgisini kopyala"
+      },
       "guideNote": "Kılavuz sayfaları şimdilik İngilizce.",
       "guideTitle": "Tam kılavuzda",
       "intro": "İnsanların ilk sorduğu soruların kısa cevapları. Aramak için bir kelime yaz.",
