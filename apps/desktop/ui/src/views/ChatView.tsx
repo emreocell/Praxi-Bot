@@ -198,6 +198,12 @@ function SlashIcon({ name }: { name: string }) {
   return <Icon />;
 }
 
+/** Counts from the daemon's fixed import note, `null` for any other text. */
+function importedNoteCounts(text: string): { steps: string; approvals: string } | null {
+  const match = /^Imported chat note: (\d+) tool step\(s\) and (\d+) approval\(s\) were listed in the file but were not imported or executed\.$/.exec(text);
+  return match ? { steps: match[1], approvals: match[2] } : null;
+}
+
 function canOfferRemember(run: RunState): boolean {
   return (
     run.finishedMs !== undefined &&
@@ -1542,12 +1548,14 @@ export function ChatView({
                     </MessageActions>
                   </div>
                 );
-              case "imported_note":
+              case "imported_note": {
+                const counts = importedNoteCounts(e.text);
                 return (
                   <div key={e.key} className={styles.importedNote} data-message-row="imported_note">
-                    {e.text}
+                    {counts ? t("chat.importedNote", counts) : e.text}
                   </div>
                 );
+              }
               case "runStopped":
                 return (
                   <div key={e.key} className={styles.runStopped} data-testid="run-stopped">

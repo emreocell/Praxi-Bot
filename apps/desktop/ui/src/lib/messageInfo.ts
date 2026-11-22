@@ -90,6 +90,9 @@ export function replyInfoRows(
 export type MessageSourceKind = "app" | "telegram" | "peer" | "api" | "imported" | "unknown";
 
 export function messageSourceKind(source: string | null | undefined): MessageSourceKind {
+  if (source?.startsWith("imported")) {
+    return "imported";
+  }
   switch (source) {
     case "owner":
       return "app";
@@ -100,8 +103,6 @@ export function messageSourceKind(source: string | null | undefined): MessageSou
       return "peer";
     case "local_api":
       return "api";
-    case "imported":
-      return "imported";
     default:
       return "unknown";
   }
