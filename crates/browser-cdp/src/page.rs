@@ -22,6 +22,10 @@ use crate::snapshot::{
 /// Default navigation / wait timeout.
 pub const DEFAULT_WAIT: Duration = Duration::from_secs(30);
 
+/// How long a navigation waits for the `load` event before the page is handed
+/// over as "still loading" (see `Page::finish_navigation`).
+pub const NAVIGATION_LOAD_DEADLINE: Duration = Duration::from_secs(20);
+
 /// Requests in flight longer than this (long-poll, `EventSource`) do not block network idle.
 pub(crate) const INFLIGHT_CAP: Duration = Duration::from_secs(10);
 /// After a navigation settles, a request open this long is treated as a page-owned long poll.

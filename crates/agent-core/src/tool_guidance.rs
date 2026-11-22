@@ -81,6 +81,10 @@ says no live view is attached, tell them to open the live view of this chat.",
 browser_eval after each click just to look again, and do not write a paragraph between steps. Make the next call \
 straight away; say something only when you are done, blocked or need the user.",
         );
+        out.push_str(
+            "
+- Page workflow: the result of browser_open already holds the page with element refs (e1, e2...); act on those refs. After a page change refs go stale, so look again before the next click. Dismiss a cookie banner or consent dialog first (click its Accept or Reject button), then do the task. A link that opens a new tab or a popup shows up in browser_tabs; switch to it there. If a result says the page was still loading, read what is shown or use browser_wait; do not reopen the same address in a loop. Take a screenshot only when the question is about how the page looks. Downloads are blocked by design: say so instead of retrying.",
+        );
         if f.browser_act {
             out.push_str(
                 "
@@ -93,6 +97,12 @@ straight away; say something only when you are done, blocked or need the user.",
             "\n- A connected app also offers browser tools. Prefer browser_*: they drive this assistant's own browser, \
 which the user can watch. A connected app's browser is a different browser the user cannot see here; if you use it, \
 say so.",
+        );
+    }
+    if f.app_browser && !f.browser {
+        out.push_str(
+            "
+- A connected app offers browser tools (Playwright): call browser_snapshot before browser_click or browser_type and pass the ref it shows; use browser_wait_for for text that loads late; dismiss cookie banners first; use browser_tabs for popups and new tabs. Its pages are in a separate browser the user may not see: say so.",
         );
     }
     if (f.web_fetch || f.browser) && f.shell {
@@ -144,6 +154,29 @@ mod tests {
         assert!(with.contains("stops at the first change"), "{with}");
         let without = block(Families::of(["browser_open", "browser_click"])).unwrap();
         assert!(!without.contains("browser_act"), "{without}");
+    }
+
+    #[test]
+    fn page_workflow_is_taught_for_both_browser_surfaces() {
+        let own = block(Families::of(["browser_open"])).unwrap();
+        for needle in [
+            "element refs",
+            "cookie banner",
+            "browser_tabs",
+            "still loading",
+            "Downloads are blocked",
+        ] {
+            assert!(own.contains(needle), "{needle}: {own}");
+        }
+        let app = block(Families::of(["mcp:playwright/browser_navigate"])).unwrap();
+        assert!(
+            app.contains("browser_snapshot before browser_click"),
+            "{app}"
+        );
+        assert!(app.contains("browser_wait_for"), "{app}");
+        // Nothing browser-related when no browser tool exists.
+        let none = block(Families::of(["fs_read"])).unwrap();
+        assert!(!none.contains("cookie banner"), "{none}");
     }
 
     #[test]

@@ -195,6 +195,35 @@ never on the user's computer. The desktop_* tools act on the user's computer \"{
     Some(out)
 }
 
+/// What a bot living on the owner's own computer is told about its browser,
+/// every run, so it never has to guess why `browser_*` is or is not there.
+/// Fixed text only (never an error string), so it is stable across the run.
+pub(crate) fn local_browser_note(
+    label: ComputerLabel,
+    browser: bool,
+    headless: Option<bool>,
+    unavailable: bool,
+) -> String {
+    if browser {
+        return if headless == Some(false) {
+            "Your browser: browser_open opens a real browser window on this computer; the user can watch it. Use browser_* for pages that need a browser; do not start a browser with shell_run."
+        } else {
+            "Your browser: browser_open opens a browser on this computer without a window; the user watches it through the live view of this chat. Use browser_* for pages that need a browser; do not start a browser with shell_run."
+        }
+        .to_owned();
+    }
+    let why = if label == ComputerLabel::Off {
+        "this bot's computer is switched off (\"Runs on\" is set to none)"
+    } else if unavailable {
+        "the computer it should run on is not reachable right now"
+    } else {
+        "no Chrome or Edge was found on this computer"
+    };
+    format!(
+        "Your browser: the browser_* tools are NOT available in this run because {why}. Tell the user exactly this (and that they can fix it in the chat bar or by installing Chrome or Edge); do not claim a browser is missing for any other reason and do not try to open one with shell_run."
+    )
+}
+
 /// The "where you run" block of a bot whose computer is a paired server: its
 /// browser is there, its shell and files are on the computer it runs on.
 pub(crate) fn server_place_block(server_name: &str) -> String {
@@ -428,6 +457,20 @@ mod tests {
         assert!(!block_for(["browser_open"], true).unwrap().contains("pc_*"));
         let host = place_block(&place(ComputerLabel::Host, true)).unwrap();
         assert!(host.contains("pc_* tools") && host.contains("use YOUR OWN tools"));
+    }
+
+    #[test]
+    fn a_local_bot_is_told_exactly_why_it_has_no_browser() {
+        let ok = local_browser_note(ComputerLabel::Pc, true, Some(false), false);
+        assert!(ok.contains("real browser window"), "{ok}");
+        let headless = local_browser_note(ComputerLabel::Pc, true, Some(true), false);
+        assert!(headless.contains("live view"), "{headless}");
+        let none = local_browser_note(ComputerLabel::Pc, false, None, false);
+        assert!(none.contains("no Chrome or Edge was found"), "{none}");
+        let off = local_browser_note(ComputerLabel::Off, false, None, false);
+        assert!(off.contains("switched off"), "{off}");
+        let down = local_browser_note(ComputerLabel::Pc, false, None, true);
+        assert!(down.contains("not reachable"), "{down}");
     }
 
     #[test]

@@ -125,6 +125,19 @@ impl Browser {
                 if let Some(net) = &opts.served {
                     client.set_destination_check(net.check.clone());
                 }
+                // A page must not be able to put a file on the owner's disk:
+                // every download is cancelled (the events stay on for tests
+                // and diagnostics). Chromium before this command existed
+                // never reaches here, so a failure is only logged.
+                if let Err(e) = client
+                    .send(
+                        "Browser.setDownloadBehavior",
+                        json!({"behavior": "deny", "eventsEnabled": true}),
+                    )
+                    .await
+                {
+                    tracing::warn!(error = %e, "could not switch browser downloads off");
+                }
                 Ok(Self {
                     client,
                     endpoint,

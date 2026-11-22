@@ -126,3 +126,14 @@ bot doctor --online
 
 The `web search` line shows which backends are configured and whether a live
 search answered. A search that does not answer is a warning, not an error.
+
+## Browser use: what to expect
+
+The bot's own browser (`browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_tabs`, ...) is a managed Chrome or Edge that starts on the first call.
+
+- **Where it runs.** On your computer it opens a real window so you can watch; on an always-on server without a display it is headless and you watch it through the live view of the chat.
+- **Slow pages.** A page that has not finished loading after 20 seconds is no longer a failure: the bot gets what is on screen with a note that the page was still loading, and carries on instead of waiting blindly.
+- **Downloads are blocked.** A page can never put a file on your disk through the bot's browser; the download is cancelled.
+- **No browser tools?** The bot is told exactly why in its instructions (the computer is switched off, it is not reachable, or no Chrome or Edge is installed) and will say so instead of guessing. Install Chrome or Edge, or change "Runs on" in the chat bar.
+- **Working method the bot is taught.** Open the page (the result already lists clickable elements with refs), act on those refs, dismiss cookie banners first, use the tab list for popups, and take a screenshot only for questions about how a page looks.
+- Approvals are unchanged: public http(s) pages need no extra approval; `file:` and local addresses ask.

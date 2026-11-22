@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use crate::diff::{self, SnapshotDiff};
 use crate::error::{Error, Result};
-use crate::page::{DEFAULT_WAIT, DialogInfo, DialogOptions, Page};
+use crate::page::{DEFAULT_WAIT, DialogInfo, DialogOptions, NAVIGATION_LOAD_DEADLINE, Page};
 use crate::snapshot::{DomExtra, RefEntry, Snapshot};
 
 /// Result of an action: success flag, refreshed view as a diff against what the agent saw before.
@@ -1384,6 +1384,29 @@ impl Page {
         }
     }
 
+    /// Like [`Page::finish`] for a navigation. A page whose `load` event does not
+    /// arrive in [`NAVIGATION_LOAD_DEADLINE`] (an ad or tracker that never
+    /// answers) is usually already readable: the model gets the page as it is
+    /// with a note saying it was still loading, instead of a bare timeout that
+    /// leaves it blind.
+    async fn finish_navigation(
+        &self,
+        before: Snapshot,
+        outcome: Result<()>,
+    ) -> Result<ActionResult> {
+        let still_loading = matches!(&outcome, Err(Error::Timeout(m)) if m == "page load");
+        let mut result = self
+            .finish(before, if still_loading { Ok(()) } else { outcome })
+            .await?;
+        if still_loading {
+            result.settle_note = Some(format!(
+                "the page was still loading after {}s; this is what is on it now. Read it, or call browser_wait / browser_snapshot to look again; do not reopen the same address in a loop",
+                NAVIGATION_LOAD_DEADLINE.as_secs()
+            ));
+        }
+        Ok(result)
+    }
+
     async fn navigate_inner(&self, url: &str) -> Result<()> {
         let mut rx = self.client.subscribe();
         let r = self.cmd("Page.navigate", json!({"url": url})).await?;
@@ -1391,7 +1414,7 @@ impl Page {
             return Err(Error::Navigation(format!("{url}: {err}")));
         }
         if r.get("loaderId").is_some() {
-            self.wait_load(&mut rx, DEFAULT_WAIT).await?;
+            self.wait_load(&mut rx, NAVIGATION_LOAD_DEADLINE).await?;
         }
         Ok(())
     }
@@ -1414,7 +1437,7 @@ impl Page {
             *m = Some((Instant::now(), self.shared.nav_gen.load(Ordering::SeqCst)));
         }
         let res = self.navigate_inner(url).await;
-        self.finish(Snapshot::default(), res).await
+        self.finish_navigation(Snapshot::default(), res).await
     }
 
     /// Navigate and return the first view of the page: one snapshot taken with `opts` (no
@@ -1432,7 +1455,7 @@ impl Page {
     pub async fn navigate_with(&self, url: &str, opts: &DialogOptions) -> Result<ActionResult> {
         let before = self.baseline_with(opts).await?;
         let res = self.navigate_inner(url).await;
-        self.finish(before, res).await
+        self.finish_navigation(before, res).await
     }
 
     /// Navigate to a URL and wait for the load event.

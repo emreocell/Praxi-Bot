@@ -2179,7 +2179,13 @@ impl Shared {
             ));
         }
         if !self.is_host_homed() {
-            return None;
+            let rc = &ctx.resolved_computer;
+            return Some(crate::discovery_prompt::local_browser_note(
+                rc.label,
+                rc.browser,
+                rc.browser_headless,
+                rc.unavailable_reason.is_some() || rc.wait_for_pc,
+            ));
         }
         let rc = &ctx.resolved_computer;
         let platform = rc.desktop.as_ref().map(|d| d.capabilities().platform);
