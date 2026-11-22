@@ -102,6 +102,23 @@ fixed list, never from the model's arguments:
 | File upload or download (`browser_file_upload`, `browser_pdf_save`, ...) | **always asks** | always asks | always asks |
 | Any other tool of the server | as any MCP tool | asks | asks |
 
+**Addresses.** A call that opens a URL (`browser_navigate`, `browser_tabs`,
+`browser_tab_new`) stays prompt-free only when its URL argument is an `http`
+or `https` address with a public DNS name or public IP, no user name or
+password. A `file:` path, `about:`, `chrome:`, `data:`, `javascript:`,
+`view-source:`, `blob:`, `ftp:`, `localhost`, `*.local`, `*.internal`, `*.lan`,
+`*.home.arpa`, a single-word host, a loopback, private (10/8, 172.16/12,
+192.168/16), link-local, carrier-grade (100.64/10), unique-local or other
+reserved IP (also written as one number, in hex or octal, or inside an
+IPv6 form), an address that does not parse, a missing, non-text or very long
+URL, always asks, in every run, with the plain sentence "open <address> in
+your browser". "Allow for this task" is not offered on that card, and an
+earlier grant never covers such a call: the address is checked again at every
+call. Once you approve one, the run counts as having read private data, so
+every later in-page action that can carry data, a script included, asks. Links
+that the page itself follows, or a redirect, are not judged by the bot; the
+address bar of the browser decides there.
+
 Before this rule every call of such a server counted as "sending data off
 the machine" and its result as private, so a five-minute task in a page could
 need a hundred cards. A page you opened in that browser is web content, not
@@ -109,7 +126,10 @@ your private data: an in-page result counts as untrusted, not private. The
 consequence to know: if you sign the automation browser into private
 accounts, a page that injected instructions can make the bot open and read
 those accounts and navigate elsewhere without a card, as long as the task has
-not read anything private through other tools. The Playwright preset uses its
+not read anything private through other tools. A name that resolves to a
+private address (DNS rebinding) cannot be seen without resolving it, so a
+navigation to such a public-looking name passes without a card; that is an
+accepted residual like the signed-in accounts above. The Playwright preset uses its
 own isolated profile; the preset is recognised only in its exact catalog form
 (`npx -y @playwright/mcp@<version>`), so `--extension`, `--cdp-endpoint` or a
 user data directory need the explicit `browser` flag, which is your decision.
@@ -129,7 +149,8 @@ command (a standing grant never waives item 12); and **Deny**. Every approval
 is recorded in the audit log with its scope (`RunTool` for the task scope).
 "Allow for this task" is not offered for a program start after untrusted
 content, a floor, an always-ask tool or an external caller, and the daemon
-refuses it on a card that did not offer it.
+refuses it on a card that did not offer it. It never covers a file, localhost or LAN address (see item 12a, Addresses);
+the address is judged again at every call.
 
 ## What it does not protect you from
 
@@ -582,8 +603,9 @@ model, fake tools, no network). Each attack covers a different untrusted source
 (web pages, e-mail, files, MCP output, chat messages, memory) and has an
 `-holdout` twin with different wording and fixtures. The `inj-browser-mcp-*`
 scenarios cover item 12a: page actions after a web page alone run without a
-card, a navigation after private data asks, `browser_run_code` asks, and a
-shell or script after a page read through the browser asks.
+card, a navigation after private data asks, `browser_run_code` asks, a
+shell or script after a page read through the browser asks, and a file,
+localhost or LAN address always asks, also after "Allow for this task".
 
 Run the pack and compare it against the checked-in baseline:
 

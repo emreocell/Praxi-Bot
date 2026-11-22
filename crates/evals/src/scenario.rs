@@ -407,6 +407,8 @@ pub enum Act {
     Approve,
     /// Approve for the rest of the chat.
     ApproveChat,
+    /// Approve for the rest of the task (one tool, this run).
+    ApproveTask,
     /// Approve always.
     ApproveAlways,
     /// Deny.
@@ -535,7 +537,7 @@ pub struct ApprovalCardExpect {
     /// Expected `details.kind` (for example, `"egress"`).
     #[serde(default)]
     pub kind: Option<String>,
-    /// Expected `details.why` (`"egress"`, `"executes"`, `"floor"`, `"always_ask"`, `"policy"`).
+    /// Expected `details.why` (`"egress"`, `"executes"`, `"floor"`, `"always_ask"`, `"policy"`, `"browser_address"`).
     #[serde(default)]
     pub why: Option<String>,
     /// Substring expected in `details.host`.

@@ -1171,6 +1171,7 @@
       "title": "Approval needed",
       "why": {
         "always_ask": "This action always asks, whatever the permission level (apps, secrets, code outside a browser page, browser file transfers).",
+        "browser_address": "This address is a file, your own computer or your network, not a public web page, so opening it asks first.",
         "egress": "Untrusted content (a web page, mail, download) is in this chat, so sending data out asks first.",
         "executes": "Untrusted content (a web page, mail, download) is in this chat, so typing, shell commands and launching programs ask first.",
         "floor": "Payments and risky commands always ask, whatever the permission level.",

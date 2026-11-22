@@ -13,6 +13,7 @@
 mod agent;
 mod approval;
 pub mod attachments;
+mod browser_url;
 mod cli;
 mod compaction;
 mod config;

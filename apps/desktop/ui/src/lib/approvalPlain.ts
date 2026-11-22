@@ -196,8 +196,8 @@ export function browserMcpText(tool: string, input: unknown, details: unknown, t
   }
   if (d.browser_action !== true) return null;
   const rec = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
-  if ((remote === "browser_navigate" || remote === "browser_tabs") && typeof rec.url === "string") {
-    return t("chat.approval.plain.action.browserMcpOpen", { url: clip(rec.url, 160) });
+  if ((remote === "browser_navigate" || remote === "browser_tabs" || remote === "browser_tab_new") && typeof rec.url === "string") {
+    return t("chat.approval.plain.action.browserMcpOpen", { url: escapeInvisible(clip(rec.url, 160)) });
   }
   return t("chat.approval.plain.action.browserMcpAction", { tool: remote });
 }

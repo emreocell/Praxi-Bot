@@ -1171,6 +1171,7 @@
       "title": "Genehmigung erforderlich",
       "why": {
         "always_ask": "Diese Aktion fragt immer nach, unabhängig von der Berechtigungsstufe (Apps, Zugangsdaten, Code außerhalb einer Browserseite, Dateiübertragungen im Browser).",
+        "browser_address": "Diese Adresse ist eine Datei, dein eigener Computer oder dein Netzwerk und keine öffentliche Webseite, deshalb wird vor dem Öffnen gefragt.",
         "egress": "In diesem Chat befinden sich nicht vertrauenswürdige Inhalte (eine Webseite, E-Mail, ein Download), daher wird vor dem Senden von Daten nachgefragt.",
         "executes": "In diesem Chat befinden sich nicht vertrauenswürdige Inhalte (eine Webseite, E-Mail, ein Download), daher wird vor Tippen, Shell-Befehlen und dem Starten von Programmen nachgefragt.",
         "floor": "Zahlungen und riskante Befehle fragen immer nach, unabhängig von der Berechtigungsstufe.",

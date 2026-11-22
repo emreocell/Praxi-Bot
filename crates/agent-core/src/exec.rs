@@ -1303,7 +1303,14 @@ impl TurnExecutor {
             let class = match &resolved.spec {
                 Some(spec) => PlannedClass {
                     ingests_untrusted: spec.content.ingests_untrusted && !status_call,
-                    reads_private: spec.content.reads_private && !status_call,
+                    // Opening a file, localhost or LAN address in the owner's browser reads
+                    // private machine data, whatever the page then returns.
+                    reads_private: (spec.content.reads_private && !status_call)
+                        || (spec.content.in_owner_browser
+                            && crate::browser_url::opens_non_public(
+                                &resolved.name,
+                                &resolved.input,
+                            )),
                     label: taint::source_label(&resolved.name, &resolved.input),
                     page_origin: crate::shared::is_page_action(&resolved.name)
                         .then(|| ctx.page_origin.lock().clone())

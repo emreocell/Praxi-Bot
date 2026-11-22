@@ -1171,6 +1171,7 @@
       "title": "Onay gerekiyor",
       "why": {
         "always_ask": "Bu işlem izin düzeyi ne olursa olsun her zaman sorar (uygulamalar, gizli bilgiler, tarayıcı sayfası dışında kod, tarayıcı dosya aktarımları).",
+        "browser_address": "Bu adres bir dosya, kendi bilgisayarın veya ağın; herkese açık bir web sayfası değil, bu yüzden açmadan önce sorulur.",
         "egress": "Bu sohbette güvenilmeyen içerik (web sayfası, e-posta, indirilen dosya) var; bu yüzden veri göndermeden önce sorar.",
         "executes": "Bu sohbette güvenilmeyen içerik (web sayfası, e-posta, indirilen dosya) var; bu yüzden yazma, komut ve program başlatmadan önce sorar.",
         "floor": "Ödemeler ve riskli komutlar izin düzeyi ne olursa olsun her zaman sorar.",

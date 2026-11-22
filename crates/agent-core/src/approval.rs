@@ -824,6 +824,7 @@ impl Shared {
             reach,
             ctx.profile.permissions.allow_egress_after_reads,
         ) || executes_must_ask(exposure, class.executes)
+            || (class.in_owner_browser && crate::browser_url::opens_non_public(name, input))
     }
 
     /// The tools "allow for this task" ([`ApprovalScope::RunTool`]) can name:
@@ -839,6 +840,13 @@ impl Shared {
     /// program start after untrusted content (that asks every time).
     fn run_tool_covers(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
         if !Self::run_tool_eligible(name) {
+            return false;
+        }
+        // A grant never lets a file, localhost or LAN address through: the URL is judged again
+        // at every call.
+        if self.content_class(ctx, name, input).in_owner_browser
+            && crate::browser_url::opens_non_public(name, input)
+        {
             return false;
         }
         let exposure = ctx.taint.lock().exposure;
@@ -1010,6 +1018,9 @@ impl Shared {
             return "always_ask";
         }
         let class = self.content_class(ctx, name, input);
+        if class.in_owner_browser && crate::browser_url::opens_non_public(name, input) {
+            return "browser_address";
+        }
         let exposure = ctx.taint.lock().exposure;
         if executes_must_ask(exposure, class.executes) {
             return "executes";
@@ -1603,8 +1614,12 @@ impl Shared {
         // A standing tool grant for an MCP tool is not offered once the run read something
         // private: the owner decides that on a clean card, never next to private data.
         let always_refused = Self::run_tool_eligible(name) && exposure.has_private();
-        let always_offered =
-            !once_only && !always_refused && !matches!(why, "egress" | "executes" | "always_ask");
+        let always_offered = !once_only
+            && !always_refused
+            && !matches!(
+                why,
+                "egress" | "executes" | "always_ask" | "browser_address"
+            );
         let class = self.content_class(ctx, name, input);
         if let Some(obj) = details.get_or_insert_with(|| json!({})).as_object_mut() {
             obj.insert("why".into(), json!(why));
@@ -2570,9 +2585,13 @@ impl LoopGate {
 /// the model by the time the next call is authorized. Record that now so the
 /// next inner call sees the taint. A denial records nothing.
 fn note_gate(ctx: &RunCtx, req: &GateRequest) {
+    let mut content = req.content;
+    if content.in_owner_browser && crate::browser_url::opens_non_public(&req.tool, &req.input) {
+        content.reads_private = true;
+    }
     ctx.taint
         .lock()
-        .note(req.content, &taint::source_label(&req.tool, &req.input));
+        .note(content, &taint::source_label(&req.tool, &req.input));
 }
 
 /// Whether the top-level run above `run_id` was started and steered only by the

@@ -266,6 +266,7 @@ impl Reactor<'_> {
                 let _ = match (act, call_id) {
                     (Act::Approve, Some(id)) => lp.approve(id, ApprovalScope::Once, user),
                     (Act::ApproveChat, Some(id)) => lp.approve(id, ApprovalScope::ThisChat, user),
+                    (Act::ApproveTask, Some(id)) => lp.approve(id, ApprovalScope::RunTool, user),
                     (Act::ApproveAlways, Some(id)) => lp.approve(id, ApprovalScope::Always, user),
                     (Act::Deny, Some(id)) => lp.deny(id, user, text),
                     (Act::Steer, _) => lp

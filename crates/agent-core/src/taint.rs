@@ -863,7 +863,12 @@ pub(crate) fn note_executes_on_egress(value: &mut Value) {
 pub(crate) fn owner_browser_action(name: &str, input: &Value) -> String {
     let tool = name.rsplit('/').next().unwrap_or(name);
     match input.get("url").and_then(Value::as_str) {
-        Some(url) if tool == "browser_navigate" || tool == "browser_tabs" => {
+        Some(url)
+            if matches!(
+                tool,
+                "browser_navigate" | "browser_tabs" | "browser_tab_new"
+            ) =>
+        {
             format!("open {url} in your browser")
         }
         _ => format!("use {tool} in your browser"),
@@ -883,7 +888,7 @@ pub(crate) fn note_owner_browser(value: &mut Value, name: &str, input: &Value) {
     let Some(obj) = value.as_object_mut() else {
         return;
     };
-    let sources = obj
+    let sources: String = obj
         .get("read")
         .and_then(Value::as_array)
         .map(|items| {
@@ -893,19 +898,26 @@ pub(crate) fn note_owner_browser(value: &mut Value, name: &str, input: &Value) {
                 .collect::<Vec<_>>()
                 .join(", ")
         })
-        .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| "private content".to_owned());
+        .unwrap_or_default();
     if let Some(url) = input.get("url").and_then(Value::as_str) {
         obj.insert("host".to_owned(), json!(host_of_url(url)));
     }
     obj.insert("action".to_owned(), json!(action));
     obj.insert("browser".to_owned(), json!(server));
-    obj.insert(
-        "reason".to_owned(),
-        json!(format!(
+    let reason = if crate::browser_url::opens_non_public(name, input) {
+        format!(
+            "this is not a public web address (a file, this computer or your network), so it asks before it will {action} ({server})"
+        )
+    } else if sources.is_empty() {
+        format!(
+            "this run read private data and now wants to {action} ({server}): a web address or a page script could carry it out"
+        )
+    } else {
+        format!(
             "this run read {sources}, which includes private data, and now wants to {action} ({server}): a web address or a page script could carry what it read"
-        )),
-    );
+        )
+    };
+    obj.insert("reason".to_owned(), json!(reason));
     obj.insert("reason_code".to_owned(), json!("egress_browser"));
 }
 
