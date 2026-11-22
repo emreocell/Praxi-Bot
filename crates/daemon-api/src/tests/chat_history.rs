@@ -236,6 +236,8 @@ async fn import_creates_untrusted_history_and_never_runs_tool_rows() {
     assert_eq!(messages[0].role, "user");
     assert_eq!(messages[1].role, "assistant");
     assert_eq!(messages[2].role, agent_core::control_note::IMPORTED_ROLE);
+    assert!(messages[0].created_at_ms < messages[1].created_at_ms);
+    assert!(messages[1].created_at_ms <= messages[2].created_at_ms);
     for message in &messages {
         assert!(message.exposure_untrusted);
         // An imported assistant line is never the bot's own: it is stored as a foreign author's
@@ -287,6 +289,87 @@ async fn import_creates_untrusted_history_and_never_runs_tool_rows() {
         call(&t, Method::POST, &path, Some(too_many)).await.status,
         StatusCode::BAD_REQUEST
     );
+}
+
+#[tokio::test]
+async fn imported_attachment_marker_stays_literal() {
+    let t = setup();
+    let (bot, _) = make_chat(&t).await;
+    let marker = agent_core::attachments::with_marker("see this", &[Uuid::from_u128(77)]);
+    let doc = json!({
+        "format_version": 1,
+        "title": "marker",
+        "messages": [{"role": "user", "content": marker}],
+        "steps": [],
+        "approvals": []
+    });
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/chats/import?bot_id={bot}"),
+        Some(doc),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json());
+    let chat = r.json()["chat_id"].as_str().unwrap().to_owned();
+
+    let r = call(&t, Method::GET, &format!("/v1/chats/{chat}/messages"), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json());
+    assert_eq!(r.json().as_array().map(Vec::len), Some(1), "{}", r.json());
+    assert_eq!(r.json()[0]["content"], json!(marker));
+    assert!(
+        r.json()[0]["attachments"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    );
+
+    let r = call(
+        &t,
+        Method::GET,
+        &format!("/v1/chats/{chat}/export?format=json"),
+        None,
+    )
+    .await;
+    assert_eq!(r.json()["messages"][0]["content"], json!(marker));
+    assert!(
+        r.json()["messages"][0]["attachments"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    );
+}
+
+#[tokio::test]
+async fn an_imported_note_does_not_count_against_export_limits() {
+    let t = setup();
+    let (bot, _) = make_chat(&t).await;
+    let messages: Vec<_> = (0..1000)
+        .map(|i| json!({"role": "user", "content": format!("m{i}")}))
+        .collect();
+    let doc = json!({
+        "format_version": 1,
+        "title": "full",
+        "messages": messages,
+        "steps": [{}],
+        "approvals": []
+    });
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/chats/import?bot_id={bot}"),
+        Some(doc),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json());
+    let chat = r.json()["chat_id"].as_str().unwrap().to_owned();
+    let r = call(
+        &t,
+        Method::GET,
+        &format!("/v1/chats/{chat}/export?format=json"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json());
+    assert_eq!(r.json()["messages"].as_array().unwrap().len(), 1000);
 }
 
 fn tool_fixture(t: &T, bot: &str, chat: &str, canary: &str) {

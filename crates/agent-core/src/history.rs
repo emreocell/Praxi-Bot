@@ -252,7 +252,10 @@ fn imported_foreign_author(storage: &Storage, m: &storage::Message) -> Option<St
 
 /// Whether a user row has no run and carries the `imported` source (chat import).
 fn imported_user_row(storage: &Storage, m: &storage::Message) -> bool {
-    m.run_id.is_none() && storage.message_source(m.id).is_ok_and(|s| s == "imported")
+    m.run_id.is_none()
+        && storage
+            .message_source(m.id)
+            .map_or(true, |s| s == "imported")
 }
 
 fn imported_user_message(text: &str) -> Message {

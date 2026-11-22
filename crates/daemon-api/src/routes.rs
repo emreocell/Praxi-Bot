@@ -1055,12 +1055,14 @@ pub(crate) async fn list_messages(
                 .or_insert_with(|| s.storage().get_run(run).ok().flatten().map(|r| r.bot_id.0)),
             None => None,
         };
-        let source = s
-            .storage()
-            .message_source(m.id)
-            .ok()
-            .filter(|source| !source.is_empty());
-        let (content, attachments) = if m.role == "user" {
+        let source = s.storage().message_source(m.id);
+        // A failed lookup is treated as imported: never interpret untrusted
+        // text as local attachment metadata.
+        let imported = source
+            .as_ref()
+            .map_or(true, |source| source.starts_with("imported"));
+        let source = source.ok().filter(|source| !source.is_empty());
+        let (content, attachments) = if m.role == "user" && !imported {
             let (text, ids) = agent_core::attachments::split_marker(&m.content);
             let dtos = ids
                 .into_iter()
@@ -1132,6 +1134,9 @@ fn has_attachments(s: &AppState, chat: ChatId, message: Uuid) -> bool {
         .flatten()
         .is_some_and(|m| {
             m.chat_id == chat
+                && s.storage()
+                    .message_source(m.id)
+                    .is_ok_and(|source| !source.starts_with("imported"))
                 && !agent_core::attachments::split_marker(&m.content)
                     .1
                     .is_empty()
