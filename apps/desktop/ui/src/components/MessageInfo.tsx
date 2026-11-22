@@ -5,6 +5,7 @@ import type { Run, RunUsage } from "../api/types";
 import {
   type InfoRow,
   type MessageSourceKind,
+  messageSourceKind,
   replyInfoRows,
   userInfoRows
 } from "../lib/messageInfo";
@@ -81,6 +82,12 @@ export function MessageInfo({
           steps: (n) => t("messageInfo.steps", { count: n })
         })
       : userInfoRows(ts, source, i18n.language, (k: MessageSourceKind) => t(`messageInfo.sources.${k}`));
+  if (side === "bot" && source) {
+    const kind = messageSourceKind(source);
+    if (kind !== "unknown") {
+      rows.push({ key: "source", value: t(`messageInfo.sources.${kind}`) });
+    }
+  }
   if (side === "bot" && rows.length === 0 && !usage) {
     rows.push(...userInfoRows(ts, null, i18n.language, () => "").map((r) => ({ ...r, key: "finished" as const })));
   }

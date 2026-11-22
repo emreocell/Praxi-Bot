@@ -338,8 +338,8 @@ pub struct MessageDto {
     pub content: String,
     /// Creation time.
     pub created_at_ms: i64,
-    /// Where a user message came from (`owner` = this app, `telegram`, `peer`,
-    /// `local_api`); absent for older messages and for replies.
+    /// Where the message came from (`owner` = this app, `telegram`, `peer`,
+    /// `local_api`, `imported`); absent for older messages and most replies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// Files attached to a user message.

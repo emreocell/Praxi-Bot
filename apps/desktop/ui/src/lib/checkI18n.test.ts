@@ -64,13 +64,13 @@ test("keeps the success output when all locale and source keys match", () => {
 
 test("warns about values identical to English without changing the output or exit code", () => {
   const result = check({
-    en: { send: "Send", port: "Port" },
-    tr: { send: "Gönder", port: "Port" },
+    en: { send: "Send", port: "Settings" },
+    tr: { send: "Gönder", port: "Settings" },
   });
   assert.equal(result.status, 0);
   assert.equal(result.stdout.trim(), "i18n ok (2 keys)");
   assert.match(result.stderr, /^tr: 1 values identical to English$/m);
-  assert.match(result.stderr, /^warn tr: port = "Port"$/m);
+  assert.match(result.stderr, /^warn tr: port = "Settings"$/m);
   assert.doesNotMatch(result.stderr, /warn tr: send/);
 });
 
@@ -80,4 +80,15 @@ test("skips keyboard shortcut combinations but still warns about a bare key name
   assert.equal(result.status, 0);
   assert.match(result.stderr, /^warn tr: keys\.tab = "Tab"$/m);
   assert.doesNotMatch(result.stderr, /keys\.combo/);
+});
+
+test("a word that is a cognate in German is still flagged in Turkish", () => {
+  const result = check({
+    en: { where: "Details" },
+    tr: { where: "Details" },
+    de: { where: "Details" },
+  });
+  assert.equal(result.status, 0);
+  assert.match(result.stderr, /^warn tr: where = "Details"$/m);
+  assert.doesNotMatch(result.stderr, /warn de:/);
 });

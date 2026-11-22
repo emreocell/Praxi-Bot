@@ -80,6 +80,7 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     // Full history reads and portable transcripts expose sensitive conversation data.
     ("GET", "/v1/chats/search"),
     ("GET", "/v1/chats/{}/export"),
+    ("POST", "/v1/chats/import"),
     // approvals and questions: a token must not approve its own tool calls
     ("POST", "/v1/approvals/{}"),
     ("POST", "/v1/questions/{}"),

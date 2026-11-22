@@ -14,9 +14,16 @@ use uuid::Uuid;
 use crate::{
     AppState,
     error::{ApiError, ErrorBody},
+    routes::ApiJson,
 };
 
 const MAX_EXPORT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_EXPORT_MESSAGES: usize = 1000;
+const MAX_EXPORT_TEXT_BYTES: usize = 2 * 1024 * 1024;
+const MAX_EXPORT_ROWS: usize = 2000;
+
+/// Largest import body; the same bound as an export file.
+pub(crate) const MAX_IMPORT_BYTES: usize = MAX_EXPORT_BYTES;
 /// Ranked pages scanned for one request when redaction omits every hit.
 const MAX_SCAN_PAGES: usize = 20;
 
@@ -146,6 +153,9 @@ pub(crate) struct ExportMessage {
     role: String,
     created_at_ms: i64,
     content: String,
+    /// Recorded origin (`owner`, `telegram`, `imported`, ...), when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
     /// Display names only: no paths, URLs, extracted text or bytes.
     attachments: Vec<String>,
 }
@@ -174,6 +184,184 @@ pub(crate) struct ChatExport {
     messages: Vec<ExportMessage>,
     steps: Vec<ExportStep>,
     approvals: Vec<ExportApproval>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ImportQuery {
+    /// Bot that will own the new chat.
+    bot_id: Uuid,
+}
+
+/// A version-1 export file. The chat and message ids are ignored; a new chat
+/// and new message ids are created on import.
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct ChatImport {
+    format_version: u32,
+    #[serde(default)]
+    title: String,
+    messages: Vec<ImportMessage>,
+    #[serde(default)]
+    steps: Vec<ImportRow>,
+    #[serde(default)]
+    approvals: Vec<ImportRow>,
+}
+
+/// An imported message. Usable roles are checked by the handler; `id`,
+/// `run_id`, `created_at_ms` and `attachments` from an export are ignored.
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct ImportMessage {
+    role: String,
+    content: String,
+}
+
+/// A tool step or approval row. Kept only for its count; it is never stored
+/// in the run or approval tables.
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct ImportRow {}
+
+#[derive(Serialize, ToSchema)]
+pub(crate) struct ChatImportReport {
+    chat_id: Uuid,
+    title: String,
+    messages: u32,
+    steps_ignored: u32,
+    approvals_ignored: u32,
+}
+
+/// Import one version-1 chat export as a new chat. Every message is stored as
+/// untrusted history with origin `imported`; tool steps and approvals are
+/// counted but never executed or written to their tables.
+#[utoipa::path(post, operation_id = "import_chat", path = "/v1/chats/import", tag = "chats", security(("bearer" = [])),
+    params(("bot_id" = Uuid, Query, description = "Bot that will own the new chat.")),
+    request_body = ChatImport,
+    responses((status = 200, body = ChatImportReport),
+        (status = 400, body = ErrorBody), (status = 403, body = ErrorBody),
+        (status = 404, body = ErrorBody)))]
+pub(crate) async fn import(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<ImportQuery>,
+    ApiJson(doc): ApiJson<ChatImport>,
+) -> Result<Json<ChatImportReport>, ApiError> {
+    s.require_owner(&headers)?;
+    let report = tokio::task::spawn_blocking(move || import_doc(&s, q.bot_id, doc))
+        .await
+        .map_err(ApiError::internal)??;
+    Ok(Json(report))
+}
+
+fn import_doc(s: &AppState, bot_id: Uuid, doc: ChatImport) -> Result<ChatImportReport, ApiError> {
+    s.agent().refresh_external_redactor();
+    let bot = s.bot_of_user(BotId(bot_id))?;
+    if doc.format_version != 1 {
+        return Err(ApiError::bad_request(
+            "unsupported chat export format_version; this build imports version 1",
+        ));
+    }
+    if doc.messages.len() > MAX_EXPORT_MESSAGES {
+        return Err(ApiError::bad_request("chat export has too many messages"));
+    }
+    if doc.steps.len() > MAX_EXPORT_ROWS || doc.approvals.len() > MAX_EXPORT_ROWS {
+        return Err(ApiError::bad_request(
+            "chat export has too many steps or approvals",
+        ));
+    }
+    let text_bytes = doc.messages.iter().try_fold(0usize, |total, message| {
+        total
+            .checked_add(message.content.len())
+            .ok_or_else(|| ApiError::bad_request("chat export text is too large"))
+    })?;
+    if text_bytes > MAX_EXPORT_TEXT_BYTES {
+        return Err(ApiError::bad_request("chat export text is too large"));
+    }
+    if let Some(message) = doc
+        .messages
+        .iter()
+        .find(|message| !matches!(message.role.as_str(), "user" | "assistant"))
+    {
+        return Err(ApiError::bad_request(format!(
+            "chat export contains unsupported role {:?}; only user and assistant are imported",
+            message.role
+        )));
+    }
+
+    let now = storage::now_ms();
+    let title = safe_text(s, doc.title.trim());
+    let title: String = if title.is_empty() {
+        "Imported chat".to_owned()
+    } else {
+        title.chars().take(120).collect()
+    };
+    let chat = storage::Chat {
+        id: ChatId::new(),
+        user_id: s.user_id(),
+        bot_id: bot.id,
+        title: title.clone(),
+        created_at_ms: now,
+    };
+    let message_count = doc.messages.len();
+    let mut rows = Vec::with_capacity(message_count + 1);
+    for (index, message) in doc.messages.into_iter().enumerate() {
+        let (id, source) = (Uuid::now_v7(), import_source(&message.role));
+        rows.push((
+            storage::Message {
+                id,
+                user_id: s.user_id(),
+                chat_id: chat.id,
+                run_id: None,
+                role: message.role,
+                content: safe_text(s, &message.content),
+                // Keep the file's order; a later import must not land before it.
+                created_at_ms: now.saturating_add(i64::try_from(index).unwrap_or(i64::MAX)),
+                exposure_untrusted: true,
+                exposure_private: false,
+                exposure_sources: vec!["imported chat".to_owned()],
+            },
+            source,
+        ));
+    }
+    if !doc.steps.is_empty() || !doc.approvals.is_empty() {
+        let note = format!(
+            "Imported chat note: {} tool step(s) and {} approval(s) were listed in the file but were not imported or executed.",
+            doc.steps.len(),
+            doc.approvals.len()
+        );
+        rows.push((
+            storage::Message {
+                id: Uuid::now_v7(),
+                user_id: s.user_id(),
+                chat_id: chat.id,
+                run_id: None,
+                role: agent_core::control_note::IMPORTED_ROLE.to_owned(),
+                content: note,
+                created_at_ms: now.saturating_add(i64::try_from(rows.len()).unwrap_or(i64::MAX)),
+                exposure_untrusted: true,
+                exposure_private: false,
+                exposure_sources: vec!["imported chat".to_owned()],
+            },
+            "imported",
+        ));
+    }
+    let messages = u32::try_from(message_count).unwrap_or(u32::MAX);
+    let steps_ignored = u32::try_from(doc.steps.len()).unwrap_or(u32::MAX);
+    let approvals_ignored = u32::try_from(doc.approvals.len()).unwrap_or(u32::MAX);
+    s.storage().insert_chat_with_messages(&chat, &rows)?;
+    Ok(ChatImportReport {
+        chat_id: chat.id.0,
+        title,
+        messages,
+        steps_ignored,
+        approvals_ignored,
+    })
+}
+
+/// Imported replies are quoted as a foreign author's untrusted data, never as our own.
+fn import_source(role: &str) -> &'static str {
+    if role == "assistant" {
+        "imported_foreign:imported chat"
+    } else {
+        "imported"
+    }
 }
 
 fn safe_text(s: &AppState, text: &str) -> String {
@@ -209,12 +397,15 @@ fn export_response(s: &AppState, cid: Uuid, q: &ExportQuery) -> Result<Response,
         return Err(ApiError::bad_request("format must be markdown or json"));
     }
     let chat = s.chat_of_user(ChatId(cid))?;
-    let (messages, omitted) =
-        s.storage()
-            .list_messages_bounded(chat.id, None, 1000, 2 * 1024 * 1024)?;
+    let (messages, omitted) = s.storage().list_messages_bounded(
+        chat.id,
+        None,
+        MAX_EXPORT_MESSAGES,
+        MAX_EXPORT_TEXT_BYTES,
+    )?;
     let steps = s.storage().chat_step_summaries(s.user_id(), chat.id)?;
     let approvals = s.storage().chat_approval_summaries(s.user_id(), chat.id)?;
-    if omitted || steps.len() > 2000 || approvals.len() > 2000 {
+    if omitted || steps.len() > MAX_EXPORT_ROWS || approvals.len() > MAX_EXPORT_ROWS {
         return Err(ApiError::bad_request("chat exceeds export limits"));
     }
     let mut doc = ChatExport {
@@ -257,6 +448,11 @@ fn export_response(s: &AppState, cid: Uuid, q: &ExportQuery) -> Result<Response,
                 .map(|a| agent_core::attachments::clean_name(&safe_text(s, &a.name)))
                 .collect()
         };
+        let source = s
+            .storage()
+            .message_source(m.id)
+            .ok()
+            .filter(|source| !source.is_empty());
         doc.messages.push(ExportMessage {
             id: m.id,
             run_id: m.run_id.map(|r| r.0),
@@ -267,6 +463,7 @@ fn export_response(s: &AppState, cid: Uuid, q: &ExportQuery) -> Result<Response,
             } else {
                 safe_text(s, text)
             },
+            source,
             attachments,
         });
     }
@@ -383,6 +580,7 @@ mod tests {
                 role: "user".into(),
                 created_at_ms: 0,
                 content: "Hello [REDACTED]".into(),
+                source: Some("owner".into()),
                 attachments: vec!["notes.txt".into()],
             }],
             steps: vec![ExportStep {
