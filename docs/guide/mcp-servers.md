@@ -3,7 +3,9 @@
 The daemon (`bot serve`) loads `<data dir>/mcp.toml` at startup and **runs** every
 enabled server in that file. A `stdio` server is a program the daemon starts
 as the same user the daemon runs as: it can read and write whatever that user
-can. An `http` server is a URL the daemon calls.
+can. An `http` server is a URL the daemon calls. For connecting apps through the
+desktop **Apps** dialog (direct OAuth apps, Composio, per-bot access, and
+signing out), see [Connecting apps](apps.md).
 
 You can also add, change and remove servers while the daemon is running, with
 `POST`, `PUT` and `DELETE` on `/v1/mcp/servers` (see
