@@ -48,5 +48,5 @@ test("returnFocusTarget prefers a connected previous trigger and falls back when
     returnFocusTarget("unmounted-menu-item", (el) => connected.has(el), "also-gone"),
     null
   );
-  assert.equal(returnFocusTarget(null, (el) => connected.has(el)), null);
+  assert.equal(returnFocusTarget<string>(null, (el) => connected.has(el)), null);
 });
