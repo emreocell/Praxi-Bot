@@ -26,6 +26,13 @@ Bundled skills today: `cookie-consent-banners`, `custom-dropdowns`,
 `shadow-dom-and-iframes`, `sign-in-forms`, `web-tables-and-spreadsheets`,
 `windows-file-upload-dialog`, `windows-settings-navigation`.
 
+The **starter pack** covers everyday jobs: `document-to-action-items`,
+`meeting-action-items`, `weekly-review-planning`, `email-inbox-triage`,
+`product-price-monitor`, `competitor-news-monitor`, `grounded-citations`,
+`blocked-page-recovery` and `maps`. They are adapted from Hermes Agent (MIT, see
+`THIRD_PARTY_NOTICES.md`), never send, delete or schedule anything without your
+approval, and treat web pages, mail and documents as data, not instructions.
+
 ## Write one
 
 Create `<data dir>/skills/<name>/SKILL.md`:
@@ -54,6 +61,8 @@ Rules:
 - `version`: 1 to 64 characters of letters, digits, `.`, `-`, `_` and `+`; it
   must start with a letter or digit, must not contain `..` and must not end
   with `.`.
+- `author` and `license` (optional): one-line credit lines, for example when a
+  skill was adapted from open-source work. They are not shown to the model.
 - `when` (optional) makes the skill surface automatically. All three keys are
   lists: `domains` (such as `github.com`; subdomains match), `apps` (application
   names such as `SystemSettings`, case-insensitive, `.exe` ignored) and
