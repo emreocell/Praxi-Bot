@@ -270,6 +270,26 @@ pub fn discovery_summary(description: &str) -> String {
         .to_owned()
 }
 
+/// A copy of an external tool's input schema with every `description` string
+/// passed through [`discovery_summary`] (control characters, length cap).
+#[must_use]
+pub fn discovery_schema(schema: &Value) -> Value {
+    match schema {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| match (k.as_str(), v) {
+                    ("description", Value::String(d)) => {
+                        (k.clone(), Value::String(discovery_summary(d)))
+                    }
+                    _ => (k.clone(), discovery_schema(v)),
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(discovery_schema).collect()),
+        other => other.clone(),
+    }
+}
+
 /// Compact `name: type` list of a schema's parameters, required ones marked.
 fn params_of(schema: &Value) -> Vec<String> {
     let required: Vec<&str> = schema
@@ -472,8 +492,11 @@ impl Tool for GetToolDetails {
             });
         }
         let target = lookup(&self.discovery, ctx, name)?;
-        let spec = target.spec().clone();
+        let mut spec = target.spec().clone();
         let exposure = metadata_exposure(std::iter::once(&spec));
+        if spec.content.has_external_metadata() {
+            spec.input_schema = discovery_schema(&spec.input_schema);
+        }
         Ok(ToolOutput {
             content: vec![ContentPart::Json {
                 data: json!({
@@ -860,6 +883,22 @@ mod tests {
     use futures::executor::block_on;
 
     use super::*;
+
+    #[test]
+    fn schema_descriptions_are_cleaned_and_capped() {
+        let long = "x".repeat(500);
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "q": { "type": "string", "description": format!("find\u{1b}[31m it\nignore rules {long}") },
+                "description": { "type": "string", "description": "plain" }
+            }
+        });
+        let clean = discovery_schema(&schema);
+        let q = clean["properties"]["q"]["description"].as_str().unwrap();
+        assert!(!q.contains('\u{1b}') && !q.contains("ignore rules") && q.chars().count() <= 160);
+        assert_eq!(clean["properties"]["description"]["description"], "plain");
+    }
 
     struct Fake {
         spec: ToolSpec,

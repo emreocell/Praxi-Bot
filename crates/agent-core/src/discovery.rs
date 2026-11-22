@@ -1,6 +1,8 @@
 //! Per-run deferred tool definitions shared by the HTTP provider adapters.
 
-use agent_router::{TOOL_DESCRIBE, discovery_name, discovery_summary, provider_tool_name};
+use agent_router::{
+    TOOL_DESCRIBE, discovery_name, discovery_schema, discovery_summary, provider_tool_name,
+};
 use storage::RunStep;
 use task_runtime::StepStatus;
 use tool_registry::ToolSpec;
@@ -109,6 +111,7 @@ impl Shared {
         }
         if spec.content.has_external_metadata() {
             spec.description = discovery_summary(&spec.description);
+            spec.input_schema = discovery_schema(&spec.input_schema);
         }
         Some(spec)
     }

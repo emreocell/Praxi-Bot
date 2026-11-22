@@ -24,5 +24,6 @@ pub use surface::{
     ToolVisibility, USE_TOOL,
 };
 pub use surface::{
-    TOOL_DESCRIBE, TOOL_SEARCH, discovery_name, discovery_summary, provider_tool_name,
+    TOOL_DESCRIBE, TOOL_SEARCH, discovery_name, discovery_schema, discovery_summary,
+    provider_tool_name,
 };

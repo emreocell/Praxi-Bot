@@ -821,7 +821,9 @@ impl TurnExecutor {
                 crate::discovery::bound_legacy(&mut cli_specs);
                 alternative = cli_specs;
                 &alternative
-            } else if deferred && tier_light && i > 0 && !ctx.profile.models.direct_tools_only {
+            // Only the standard (executor) attempt gets the full deferred surface;
+            // later fallback models keep the light tier's direct-only surface.
+            } else if deferred && tier_light && i == 1 && !ctx.profile.models.direct_tools_only {
                 alternative =
                     self.sh
                         .deferred_specs(&ctx, &crate::discovery::activations(&steps), false);
