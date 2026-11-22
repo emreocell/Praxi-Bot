@@ -13,6 +13,7 @@
     "usage": "Nutzung"
   },
   "addServer": {
+    "advanced": "Erweitert",
     "agentHint": "Praxi verwendet die Schlüssel, die bereits in deinem SSH-Agent geladen sind. Passwörter werden nicht unterstützt.",
     "answerFailed": "Die Antwort hat die Einrichtung nicht erreicht. Schließe dieses Fenster und beginne von vorn.",
     "auth": "Anmeldung",
@@ -21,10 +22,71 @@
     "cancelNote": "Beim Abbrechen wird zuerst der laufende Schritt beendet.",
     "cancelled": "Einrichtung abgebrochen",
     "cancelledBody": "Es wurde nichts weiter getan. Du kannst jederzeit neu beginnen.",
+    "checks": {
+      "login": {
+        "fix": "Prüfe Benutzernamen und Schlüsseldatei. Siehe die Erklärung weiter unten.",
+        "pass": "Angemeldet",
+        "pending": "Wartet",
+        "running": "Dein Schlüssel wird probiert…",
+        "title": "Die Anmeldung klappt"
+      },
+      "ports": {
+        "fix": "Der Server muss github.com im Internet erreichen und der Praxi-Port muss frei sein. Erlaube in der Firewall ausgehendes HTTPS.",
+        "pass": "Alles in Ordnung",
+        "pending": "Wartet",
+        "running": "Wird getestet…",
+        "title": "Netzwerk und Ports sind frei"
+      },
+      "reach": {
+        "fix": "Prüfe die Adresse, ob der Server läuft und ob Port 22 in seiner Firewall offen ist.",
+        "pass": "Er hat geantwortet",
+        "pending": "Wartet",
+        "running": "Klopft an die Tür…",
+        "title": "Der Server antwortet"
+      },
+      "room": {
+        "fix": "Praxi braucht etwa 1 GB Arbeitsspeicher (mit Browser mehr) und 8 GB freien Platz. Nimm einen größeren Server oder schaffe Platz.",
+        "pass": "Genug Platz",
+        "pending": "Wartet",
+        "running": "Wird gemessen…",
+        "title": "Genug Speicher und Festplatte"
+      },
+      "system": {
+        "fix": "Nutze Ubuntu 22.04 oder neuer; der Benutzer braucht Administratorrechte (sudo) ohne Passwortabfrage.",
+        "pass": "Unterstützt",
+        "pending": "Wartet",
+        "running": "System wird angesehen…",
+        "title": "Das System wird unterstützt"
+      },
+      "title": "Prüfungen vor der Installation"
+    },
+    "choose": {
+      "home": "Einen anderen Computer zu Hause nutzen",
+      "homeHint": "Ein alter PC oder Mini-PC, den du eingeschaltet lässt.",
+      "oracle": "Einen kostenlosen Dauer-Server bekommen",
+      "oracleHint": "Eine kurze Anleitung für das Gratis-Angebot von Oracle Cloud. Praxi sieht nie dein Konto oder Passwort.",
+      "ssh": "Ich habe schon einen Server",
+      "sshHint": "Du kennst seine Adresse und hast eine Schlüsseldatei zur Anmeldung (SSH).",
+      "title": "Was passt zu dir?"
+    },
     "connect": "Verbinden",
     "copied": "Details kopiert.",
     "copy": "Details kopieren",
     "copyFailed": "Kopieren nicht möglich.",
+    "done": {
+      "open": {
+        "body": "Wähle den Server oben im Computer-Menü. Dann kannst du mit seinen Bots chatten, seinen Bildschirm ansehen und sein Terminal öffnen.",
+        "title": "So öffnest du ihn"
+      },
+      "stop": {
+        "body": "Öffne Server im Computer-Menü. Entfernen vergisst den Server nur auf diesem Computer; auf dem Server wird nichts gelöscht.",
+        "title": "So stoppst oder entfernst du ihn"
+      },
+      "where": {
+        "body": "Deine Bots auf diesem Server laufen dort rund um die Uhr. Dieser Computer zeigt sie nur an und lässt dich chatten.",
+        "title": "Was läuft wo"
+      }
+    },
     "doneNoScreen": "Er steht in deiner Computerliste. Er hat noch keinen Bildschirm zum Ansehen.",
     "doneScreen": "Er steht in deiner Computerliste. Du kannst mit seinen Bots chatten und seinen Bildschirm ansehen.",
     "doneTitle": "{{name}} ist verbunden",
@@ -33,6 +95,18 @@
       "auth": {
         "fix": "Prüfe den Benutzernamen (Ubuntu-Images verwenden ubuntu, Oracle Linux verwendet opc) und wähle die richtige Schlüsseldatei.",
         "msg": "Der Server hat die Anmeldung nicht akzeptiert."
+      },
+      "auth_agent": {
+        "fix": "Dein SSH-Agent ist vielleicht leer. Wechsle zu Schlüsseldatei und wähle den heruntergeladenen Schlüssel, oder füge ihn mit ssh-add hinzu und versuche es erneut.",
+        "msg": "Der Server hat die Schlüssel in deinem SSH-Agenten nicht akzeptiert."
+      },
+      "auth_key": {
+        "fix": "Das ist die Meldung \"permission denied (publickey)\". Prüfe drei Dinge: den Benutzernamen (Ubuntu-Images nutzen ubuntu, Oracle Linux opc, andere root); ob du die Schlüsseldatei gewählt hast, die zu diesem Server gehört; und ob der Schlüssel beim Erstellen des Servers hinzugefügt wurde.",
+        "msg": "Der Server hat deinen Schlüssel nicht akzeptiert."
+      },
+      "bad_address": {
+        "fix": "Prüfe auf Tippfehler. Kopiere die Adresse erneut von der Seite deines Anbieters.",
+        "msg": "Diese Adresse gibt es nicht."
       },
       "generic": {
         "fix": "Versuche es erneut. Wenn es weiter fehlschlägt, kopiere die Details.",
@@ -54,6 +128,14 @@
         "fix": "Das SSH-Programm dieses Computers ist möglicherweise älter als das des Servers. Aktualisiere den OpenSSH-Client (Windows: Einstellungen > Optionale Features oder installiere Git for Windows) und versuche es erneut.",
         "msg": "Praxi hat den Server erreicht, konnte aber seine Identität nicht lesen."
       },
+      "key_passphrase": {
+        "fix": "Praxi kann sie nicht für dich eingeben. Entsperre den Schlüssel im SSH-Agenten (ssh-add) und wähle SSH-Agent, oder nutze einen Schlüssel ohne Passphrase.",
+        "msg": "Dieser Schlüssel ist mit einer Passphrase gesperrt."
+      },
+      "key_permissions": {
+        "fix": "Unter Mac oder Linux: chmod 600 und danach der Pfad deiner Schlüsseldatei. Unter Windows: Rechtsklick auf die Datei, Eigenschaften, Sicherheit, und nur deinen eigenen Benutzer zugreifen lassen.",
+        "msg": "Deine Schlüsseldatei ist für andere lesbar und wird deshalb abgelehnt."
+      },
       "needs_sudo": {
         "fix": "Verwende einen Benutzer mit passwortlosem sudo, etwa den Standard-Cloud-Benutzer.",
         "msg": "Dieser Benutzer kann Administratorbefehle nicht ohne Passwort ausführen."
@@ -74,6 +156,18 @@
         "fix": "Versuche es erneut. Wenn es weiter fehlschlägt, kopiere die Details und prüfe den Dienst des Servers.",
         "msg": "Praxi konnte diesen Computer nicht mit dem Server koppeln."
       },
+      "password_only": {
+        "fix": "Praxi nutzt keine Passwörter. Frage deinen Anbieter, wie man einen SSH-Schlüssel auf dem Server hinterlegt, und versuche es dann erneut.",
+        "msg": "Dieser Server akzeptiert nur ein Passwort."
+      },
+      "port_closed": {
+        "fix": "Port 22 ist wahrscheinlich gesperrt. Erlaube in der Firewall oder Sicherheitsliste deines Anbieters eingehendes TCP auf Port 22 und prüfe, dass es die öffentliche Adresse ist.",
+        "msg": "Der Server hat nicht rechtzeitig geantwortet."
+      },
+      "port_refused": {
+        "fix": "Der Server läuft, aber dort ist der SSH-Dienst nicht gestartet. Starte ihn (sudo systemctl start ssh) oder installiere openssh-server neu.",
+        "msg": "Der Server hat die Verbindung abgelehnt."
+      },
       "preflight": {
         "fix": "Kopiere die Details, um zu sehen, welche. Praxi braucht Ubuntu 22.04 oder neuer, ausreichend Arbeitsspeicher und Speicherplatz sowie systemd.",
         "msg": "Der Server erfüllt eine Anforderung nicht."
@@ -85,24 +179,90 @@
       "ssh_client": {
         "fix": "Installiere den OpenSSH-Client und versuche es erneut.",
         "msg": "Praxi konnte das SSH-Programm auf diesem Computer nicht finden."
+      },
+      "wrong_port": {
+        "fix": "Du hast den Port geändert. Öffne Erweitert und setze ihn auf 22 zurück, außer dein Anbieter hat einen anderen genannt.",
+        "msg": "Auf diesem Port lauscht nichts."
       }
     },
-    "formInvalid": "Gib die Serveradresse und einen gültigen Port ein.",
+    "home": {
+      "go": "Ich habe die Adresse",
+      "lead": "Jeder Computer, der eingeschaltet bleibt, kann ein Server sein. Praxi läuft am besten mit Ubuntu Linux 22.04 oder neuer.",
+      "one": "Installiere Ubuntu auf diesem Computer und schalte den SSH-Dienst ein (das Paket heißt openssh-server).",
+      "three": "Finde seine Adresse in der Geräteliste deines Routers; sie sieht aus wie 192.168.1.20.",
+      "title": "Einen anderen Computer zu Hause nutzen",
+      "two": "Schließe ihn möglichst per Kabel an den Router an und sorge dafür, dass er nie in den Ruhezustand geht."
+    },
     "host": "Serveradresse",
+    "hostHint": "Beispiel: 203.0.113.7 oder meinserver.example.com",
     "hostKeyBody": "Dieser Computer verbindet sich zum ersten Mal mit {{host}}. Vergleiche diesen Fingerabdruck mit dem in der Konsole deines Anbieters, falls dort einer angezeigt wird.",
     "hostKeyNo": "Nein, stoppen",
     "hostKeyTitle": "Ist das dein Server?",
     "hostKeyYes": "Ja, diesem Server vertrauen",
+    "intro": {
+      "go": "Server einrichten",
+      "optional": "Das ist freiwillig. Deine Bots laufen schon auf diesem Computer. Füge einen Server nur hinzu, wenn sie rund um die Uhr arbeiten sollen.",
+      "optionalTitle": "Du brauchst keinen Server",
+      "skip": "Nein danke, diesen Computer nutzen",
+      "title": "Was ist ein Server?",
+      "what": "Ein Server ist ein weiterer Computer, der Tag und Nacht läuft und meist online gemietet wird. Deine Bots können dort leben und arbeiten weiter, auch wenn dein eigener Computer aus ist."
+    },
     "keyFile": "Private Schlüsseldatei",
     "keyHint": "Nur der Pfad wird verwendet. Praxi kopiert oder speichert den Schlüssel selbst nie.",
-    "keyMissing": "Wähle eine private Schlüsseldatei oder wechsle zum SSH-Agent.",
     "lead": "Verbinde einen Server, den du mietest. Kein Ticket zu kopieren.",
+    "logEmpty": "Noch nichts zu zeigen.",
     "manual": "Ich habe stattdessen ein Kopplungsticket",
     "noDaemon": "Der lokale Praxi-Dienst läuft nicht. Starte die App neu und versuche es erneut.",
+    "noKeys": "Im Ordner .ssh wurde keine Schlüsseldatei gefunden. Gib den Pfad der heruntergeladenen Schlüsseldatei ein.",
+    "oracle": {
+      "haveIt": "Ich habe die Angaben",
+      "lead": "Mach diese Schritte in deinem Browser und hake jeden ab, wenn er erledigt ist. Es dauert etwa 20 Minuten.",
+      "privacy": "Das machst du alles auf der Website von Oracle. Praxi sieht weder dein Oracle-Konto noch dein Passwort oder deine Zahlungskarte.",
+      "ready": "Alles erledigt, weiter",
+      "step": {
+        "account": {
+          "body": "Öffne oracle.com/cloud/free und melde dich an. Eine Zahlungskarte dient nur dem Nachweis, dass du ein Mensch bist; im Gratis-Angebot wird nichts abgebucht.",
+          "title": "Ein kostenloses Oracle-Cloud-Konto anlegen"
+        },
+        "address": {
+          "body": "Sobald die Instanz Running anzeigt, kopiere die Public-IP-Adresse. Der Benutzername ist ubuntu.",
+          "title": "Die öffentliche Adresse kopieren"
+        },
+        "firewall": {
+          "body": "Das Standardnetzwerk erlaubt Port 22 (SSH) bereits. Wenn du die Regeln geändert hast, erlaube eingehendes TCP auf Port 22.",
+          "title": "Prüfen, dass SSH erlaubt ist"
+        },
+        "instance": {
+          "body": "Wähle in der Konsole Compute und dann Create instance. Nimm das Image Ubuntu 22.04 oder neuer und eine Shape mit dem Hinweis Always Free.",
+          "title": "Eine virtuelle Maschine erstellen"
+        },
+        "ssh_key": {
+          "body": "Wähle im Formular Generate a key pair und lade den privaten Schlüssel herunter. Bewahre die Datei sicher auf; du wählst sie im nächsten Schritt aus.",
+          "title": "Oracle einen Schlüssel erzeugen lassen"
+        }
+      },
+      "title": "Einen kostenlosen Server von Oracle Cloud holen"
+    },
+    "passwordNote": "Praxi meldet sich mit einer Schlüsseldatei an, nicht mit einem Passwort. Es wird also nie ein Passwort eingegeben, gespeichert oder gesendet. Wenn dein Anbieter dir nur ein Passwort gegeben hat, erstelle zuerst mit der Hilfeseite des Anbieters einen Schlüssel.",
     "port": "Port",
+    "portHint": "Fast immer 22. Ändere ihn nur, wenn dein Anbieter es sagt.",
+    "problem": {
+      "hostEmpty": "Gib die Adresse des Servers ein.",
+      "hostPort": "Lass das :Port weg. Wenn dein Port nicht 22 ist, öffne Erweitert.",
+      "hostScheme": "Entferne den Teil vor der Adresse, zum Beispiel ssh://. Gib nur die Adresse selbst ein.",
+      "hostSpaces": "Die Adresse darf keine Leerzeichen enthalten.",
+      "hostUser": "Gib hier nur die Adresse ein. Der Benutzername kommt ins nächste Feld.",
+      "keyEmpty": "Wähle deine private Schlüsseldatei.",
+      "keyPublic": "Das sieht nach dem öffentlichen Schlüssel (.pub) aus. Wähle den privaten: gleicher Name ohne .pub.",
+      "portInvalid": "Der Port ist eine Zahl von 1 bis 65535. Normalerweise 22.",
+      "userInvalid": "Nutze nur Buchstaben, Zahlen, Punkte, Bindestriche oder Unterstriche."
+    },
     "progress": "Einrichtungsfortschritt",
-    "releaseNote": "Praxi kann einen Server hinzufügen, auf dem Praxi bereits läuft. Die Installation für dich erfordert ein veröffentlichtes Release, das es noch nicht gibt.",
+    "releaseNote": "Praxi kann einen Server hinzufügen, auf dem Praxi schon läuft. Die Installation für dich braucht eine veröffentlichte Version, die es noch nicht gibt.",
     "retry": "Erneut versuchen",
+    "retryResume": "Ab hier erneut versuchen",
+    "sayHello": "Sag deinem Bot Hallo",
+    "showLog": "Technisches Protokoll anzeigen",
     "stage": {
       "check": "System prüfen",
       "connect": "Verbinden und Server bestätigen",
@@ -121,9 +281,11 @@
       "waiting": "Braucht deine Antwort",
       "warn": "Fertig, mit einem Hinweis"
     },
+    "stepOf": "Schritt {{n}} von 3",
     "title": "Server hinzufügen",
     "useServer": "Diesen Server verwenden",
     "user": "Benutzer",
+    "userHint": "Oracle und Ubuntu: ubuntu. Oracle Linux: opc.",
     "viewScreen": "Bildschirm ansehen"
   },
   "addSkill": {
@@ -3851,6 +4013,27 @@
     "typeCode": "Gib diesen Code auf jener Seite ein.",
     "verifying": "Anmeldung auf dem Server wird geprüft …",
     "waitingDevice": "Wartet darauf, dass du auf jener Seite fertig wirst. Dieses Fenster aktualisiert sich von selbst."
+  },
+  "servers": {
+    "add": "Server hinzufügen",
+    "checkNow": "Jetzt prüfen",
+    "empty": "Noch kein Server. Das ist in Ordnung: Deine Bots laufen auf diesem Computer.",
+    "lead": "Server halten deine Bots am Laufen, wenn dieser Computer aus ist.",
+    "remove": "Entfernen",
+    "removeBody": "Dieser Computer vergisst den Server und die Kopplung. Der Server selbst, seine Bots und seine Dateien werden nicht angerührt und laufen weiter. Du kannst ihn später wieder hinzufügen.",
+    "removeConfirm": "Server entfernen",
+    "removeFailed": "Der Server konnte nicht entfernt werden. Versuche es erneut.",
+    "removeTitle": "{{name}} entfernen?",
+    "removed": "{{name}} wurde von diesem Computer entfernt.",
+    "status": {
+      "connected": "Online",
+      "connecting": "Verbindet…",
+      "idle": "Gerade nicht verbunden",
+      "offline": "Offline",
+      "unreachable": "Nicht erreichbar"
+    },
+    "title": "Deine Server",
+    "updateHelp": "Um einen Server zu aktualisieren, öffne sein Terminal und führe dort das Praxi-Update aus. Ein Update mit einem Klick gibt es noch nicht."
   },
   "settings": {
     "accent": {

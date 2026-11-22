@@ -56,6 +56,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Set up an always-on Linux host (VPS / VM) | [Running on a remote host](remote-host.md) |
 | Run the always-on host in Docker | [Running Praxi in Docker](docker-host.md) |
 | Run the always-on Linux host: logs, restart, upgrade, backup | [Host operations](host-operations.md) |
+| Add a server so bots run around the clock (guided, no jargon) | [Adding a server](servers.md) |
 | Understand what a host does when it is demoted or hears another active host | [Host leadership limits](host-leadership.md) |
 | Create a bot and understand its profile file | [Bots and profiles](bots-and-profiles.md) |
 | Talk to a bot, approve or deny actions | [Chatting and approvals](chatting-and-approvals.md) |

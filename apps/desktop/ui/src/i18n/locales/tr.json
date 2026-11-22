@@ -13,6 +13,7 @@
     "usage": "Kullanım"
   },
   "addServer": {
+    "advanced": "Gelişmiş",
     "agentHint": "Praxi, SSH ajanında yüklü anahtarları kullanır. Parola desteklenmez.",
     "answerFailed": "Yanıt kurulum işine ulaşmadı. Bu pencereyi kapatıp yeniden başlat.",
     "auth": "Giriş",
@@ -21,10 +22,71 @@
     "cancelNote": "İptal, çalışan adımın önce bitmesine izin verir.",
     "cancelled": "Kurulum iptal edildi",
     "cancelledBody": "Başka bir şey yapılmadı. İstediğin zaman yeniden başlayabilirsin.",
+    "checks": {
+      "login": {
+        "fix": "Kullanıcı adını ve anahtar dosyasını kontrol et. Aşağıdaki açıklamaya bak.",
+        "pass": "Giriş yapıldı",
+        "pending": "Bekliyor",
+        "running": "Anahtarın deneniyor…",
+        "title": "Giriş çalışıyor"
+      },
+      "ports": {
+        "fix": "Sunucu internette github.com'a erişebilmeli ve Praxi'nin portu boş olmalı. Güvenlik duvarında dışarı HTTPS'ye izin ver.",
+        "pass": "Her şey yolunda",
+        "pending": "Bekliyor",
+        "running": "Deneniyor…",
+        "title": "Ağ ve portlar uygun"
+      },
+      "reach": {
+        "fix": "Adresi, sunucunun açık olduğunu ve güvenlik duvarında 22 numaralı bağlantı noktasının açık olduğunu kontrol et.",
+        "pass": "Cevap verdi",
+        "pending": "Bekliyor",
+        "running": "Kapıyı çalıyor…",
+        "title": "Sunucu cevap veriyor"
+      },
+      "room": {
+        "fix": "Praxi yaklaşık 1 GB bellek (tarayıcıyla daha fazla) ve 8 GB boş disk ister. Daha büyük bir sunucu seç ya da yer aç.",
+        "pass": "Yeterli yer var",
+        "pending": "Bekliyor",
+        "running": "Ölçülüyor…",
+        "title": "Bellek ve disk yeterli"
+      },
+      "system": {
+        "fix": "Ubuntu 22.04 veya daha yenisini kullan; kullanıcının yönetici yetkisi (sudo) olmalı ve şifre sormamalı.",
+        "pass": "Destekleniyor",
+        "pending": "Bekliyor",
+        "running": "Sisteme bakılıyor…",
+        "title": "Sistem destekleniyor"
+      },
+      "title": "Kurulumdan önceki kontroller"
+    },
+    "choose": {
+      "home": "Evdeki başka bir bilgisayarı kullan",
+      "homeHint": "Sürekli açık bırakacağın eski bir PC ya da mini PC.",
+      "oracle": "Ücretsiz, hep açık bir sunucu al",
+      "oracleHint": "Oracle Cloud ücretsiz katmanı için kısa bir rehber. Praxi hesabını ya da şifreni asla görmez.",
+      "ssh": "Zaten bir sunucum var",
+      "sshHint": "Adresini ve giriş için bir anahtar dosyasını (SSH) biliyorsun.",
+      "title": "Hangisi sana uyuyor?"
+    },
     "connect": "Bağlan",
     "copied": "Ayrıntılar kopyalandı.",
     "copy": "Ayrıntıları kopyala",
     "copyFailed": "Kopyalanamadı.",
+    "done": {
+      "open": {
+        "body": "Üstteki bilgisayar menüsünden sunucuyu seç. Sonra botlarıyla sohbet edebilir, ekranını izleyebilir ve terminalini açabilirsin.",
+        "title": "Nasıl açılır"
+      },
+      "stop": {
+        "body": "Bilgisayar menüsünden Sunucular'ı aç. Kaldır, sunucuyu yalnızca bu bilgisayarda unutturur; sunucudaki hiçbir şey silinmez.",
+        "title": "Nasıl durdurulur ya da kaldırılır"
+      },
+      "where": {
+        "body": "Bu sunucudaki botların orada, 7/24 çalışır. Bu bilgisayar onları yalnızca gösterir ve sohbet etmeni sağlar.",
+        "title": "Ne nerede çalışır"
+      }
+    },
     "doneNoScreen": "Bilgisayar listende. İzlenecek bir ekranı henüz yok.",
     "doneScreen": "Bilgisayar listende. Botlarıyla sohbet edebilir ve ekranını izleyebilirsin.",
     "doneTitle": "{{name}} bağlandı",
@@ -33,6 +95,18 @@
       "auth": {
         "fix": "Kullanıcı adını kontrol et (Ubuntu imajları ubuntu, Oracle Linux opc kullanır) ve doğru anahtar dosyasını seç.",
         "msg": "Sunucu girişi kabul etmedi."
+      },
+      "auth_agent": {
+        "fix": "SSH ajanın boş olabilir. Anahtar dosyası seçeneğine geç ve indirdiğin anahtarı seç, ya da ssh-add ile ekleyip yeniden dene.",
+        "msg": "Sunucu SSH ajanındaki anahtarları kabul etmedi."
+      },
+      "auth_key": {
+        "fix": "Bu, \"permission denied (publickey)\" mesajıdır. Üç şeye bak: kullanıcı adı (Ubuntu imajlarında ubuntu, Oracle Linux'ta opc, bazılarında root); bu sunucuya ait anahtar dosyasını seçtiğin; ve anahtarın sunucu oluşturulurken eklendiği.",
+        "msg": "Sunucu anahtarını kabul etmedi."
+      },
+      "bad_address": {
+        "fix": "Yazım hatası olup olmadığına bak. Adresi sağlayıcının sayfasından yeniden kopyala.",
+        "msg": "Bu adres yok."
       },
       "generic": {
         "fix": "Yeniden dene. Sürekli başarısız olursa ayrıntıları kopyala.",
@@ -54,6 +128,14 @@
         "fix": "Bu bilgisayardaki SSH programı sunucununkinden eski olabilir. OpenSSH istemcisini güncelle (Windows: Ayarlar > İsteğe bağlı özellikler ya da Git for Windows kur), sonra yeniden dene.",
         "msg": "Praxi sunucuya ulaştı ama kimliğini okuyamadı."
       },
+      "key_passphrase": {
+        "fix": "Praxi bunu senin yerine yazamaz. Anahtarı SSH ajanında aç (ssh-add) ve SSH ajanı'nı seç, ya da parolasız bir anahtar kullan.",
+        "msg": "Bu anahtar bir parola ile kilitli."
+      },
+      "key_permissions": {
+        "fix": "Mac veya Linux'ta şunu çalıştır: chmod 600 ve ardından anahtar dosyanın yolu. Windows'ta dosyaya sağ tıkla, Özellikler, Güvenlik'i aç ve yalnızca kendi kullanıcına erişim bırak.",
+        "msg": "Anahtar dosyan başkaları tarafından okunabiliyor, bu yüzden reddedildi."
+      },
       "needs_sudo": {
         "fix": "Varsayılan bulut kullanıcısı gibi parolasız sudo'su olan bir kullanıcı kullan.",
         "msg": "Bu kullanıcı parolasız yönetici komutu çalıştıramıyor."
@@ -74,6 +156,18 @@
         "fix": "Yeniden dene. Sürekli başarısız olursa ayrıntıları kopyala ve sunucudaki servisi kontrol et.",
         "msg": "Praxi bu bilgisayarı sunucuyla eşleştiremedi."
       },
+      "password_only": {
+        "fix": "Praxi şifre kullanmaz. Sağlayıcına sunucuya nasıl SSH anahtarı eklenir diye sor, sonra yeniden dene.",
+        "msg": "Bu sunucu yalnızca şifre kabul ediyor."
+      },
+      "port_closed": {
+        "fix": "22 numaralı bağlantı noktası büyük ihtimalle kapalı. Sağlayıcının güvenlik duvarında ya da güvenlik listesinde 22 numaralı TCP girişine izin ver ve adresin açık (public) adres olduğundan emin ol.",
+        "msg": "Sunucu zamanında cevap vermedi."
+      },
+      "port_refused": {
+        "fix": "Sunucu açık ama orada SSH hizmeti çalışmıyor. Başlat (sudo systemctl start ssh) ya da openssh-server'ı yeniden kur.",
+        "msg": "Sunucu bağlantıyı reddetti."
+      },
       "preflight": {
         "fix": "Hangisi olduğunu görmek için ayrıntıları kopyala. Praxi Ubuntu 22.04 veya üstü, yeterli bellek ve disk ile systemd ister.",
         "msg": "Sunucu bir gereksinimi karşılamıyor."
@@ -85,24 +179,90 @@
       "ssh_client": {
         "fix": "OpenSSH istemcisini kur, sonra yeniden dene.",
         "msg": "Praxi bu bilgisayarda SSH programını bulamadı."
+      },
+      "wrong_port": {
+        "fix": "Portu değiştirmişsin. Sağlayıcın başka bir port vermediyse Gelişmiş'i açıp 22'ye geri al.",
+        "msg": "Bu portta dinleyen bir şey yok."
       }
     },
-    "formInvalid": "Sunucu adresini ve geçerli bir port gir.",
+    "home": {
+      "go": "Adresi buldum",
+      "lead": "Sürekli açık kalan her bilgisayar sunucu olabilir. Praxi, Ubuntu Linux 22.04 veya daha yenisiyle en iyi çalışır.",
+      "one": "O bilgisayara Ubuntu kur ve SSH hizmetini aç (paketin adı openssh-server).",
+      "three": "Adresini modemin cihaz listesinden bul; 192.168.1.20 gibi görünür.",
+      "title": "Evdeki başka bir bilgisayarı kullan",
+      "two": "Mümkünse kabloyla modeme bağla ve asla uyku moduna girmediğinden emin ol."
+    },
     "host": "Sunucu adresi",
+    "hostHint": "Örnek: 203.0.113.7 veya sunucum.example.com",
     "hostKeyBody": "Bu bilgisayar {{host}} adresine ilk kez bağlanıyor. Sağlayıcının konsolu bir parmak izi gösteriyorsa bununla karşılaştır.",
     "hostKeyNo": "Hayır, dur",
     "hostKeyTitle": "Bu senin sunucun mu?",
     "hostKeyYes": "Evet, bu sunucuya güven",
+    "intro": {
+      "go": "Sunucu kur",
+      "optional": "Bu isteğe bağlıdır. Botların zaten bu bilgisayarda çalışıyor. Sunucuyu yalnızca botların 7/24 çalışsın istiyorsan ekle.",
+      "optionalTitle": "Sunucuya ihtiyacın yok",
+      "skip": "Hayır, bu bilgisayarı kullan",
+      "title": "Sunucu nedir?",
+      "what": "Sunucu, gece gündüz açık duran başka bir bilgisayardır; genellikle internetten kiralanır. Botların orada yaşayabilir, böylece kendi bilgisayarın kapalıyken de çalışmaya devam ederler."
+    },
     "keyFile": "Özel anahtar dosyası",
     "keyHint": "Yalnızca yol kullanılır. Praxi anahtarın kendisini kopyalamaz ve saklamaz.",
-    "keyMissing": "Bir özel anahtar dosyası seç ya da SSH ajanına geç.",
     "lead": "Kiraladığın bir sunucuyu bağla. Kopyalanacak bilet yok.",
+    "logEmpty": "Henüz gösterilecek bir şey yok.",
     "manual": "Bunun yerine eşleştirme biletim var",
     "noDaemon": "Yerel Praxi servisi çalışmıyor. Uygulamayı yeniden başlatıp yeniden dene.",
+    "noKeys": ".ssh klasöründe anahtar dosyası bulunamadı. İndirdiğin anahtar dosyasının yolunu yaz.",
+    "oracle": {
+      "haveIt": "Bilgilerim hazır",
+      "lead": "Bu adımları web tarayıcında yap ve bitirdikçe işaretle. Yaklaşık 20 dakika sürer.",
+      "privacy": "Bunların hepsini Oracle'ın kendi sitesinde yaparsın. Praxi Oracle hesabını, şifreni ve kartını görmez.",
+      "ready": "Hepsi tamam, devam et",
+      "step": {
+        "account": {
+          "body": "oracle.com/cloud/free adresine git ve kaydol. Gerçek biri olduğunu doğrulamak için kart istenir; ücretsiz katmandan para çekilmez.",
+          "title": "Ücretsiz bir Oracle Cloud hesabı aç"
+        },
+        "address": {
+          "body": "Makine Running olunca Public IP adresini kopyala. Kullanıcı adı ubuntu'dur.",
+          "title": "Açık adresi kopyala"
+        },
+        "firewall": {
+          "body": "Varsayılan ağ 22 numaralı bağlantı noktasına (SSH) zaten izin verir. Kuralları değiştirdiysen 22 numaralı TCP girişine izin ver.",
+          "title": "SSH'ye izin verildiğini kontrol et"
+        },
+        "instance": {
+          "body": "Konsolda Compute, sonra Create instance seç. Ubuntu 22.04 veya daha yeni imajı ve Always Free yazan bir şekil seç.",
+          "title": "Bir sanal makine oluştur"
+        },
+        "ssh_key": {
+          "body": "Form içinde Generate a key pair seçip özel anahtarı indir. Bu dosyayı sakla; sonraki adımda seçeceksin.",
+          "title": "Oracle sana bir anahtar üretsin"
+        }
+      },
+      "title": "Oracle Cloud'dan ücretsiz sunucu al"
+    },
+    "passwordNote": "Praxi şifreyle değil anahtar dosyasıyla giriş yapar; yani hiçbir şifre yazılmaz, kaydedilmez ya da gönderilmez. Sağlayıcın sana yalnızca şifre verdiyse, önce sağlayıcının yardım sayfasından bir anahtar oluştur.",
     "port": "Port",
+    "portHint": "Neredeyse her zaman 22. Sağlayıcın söylemediyse değiştirme.",
+    "problem": {
+      "hostEmpty": "Sunucunun adresini yaz.",
+      "hostPort": ":port kısmını sil. Port 22 değilse Gelişmiş'i aç.",
+      "hostScheme": "Adresin önündeki ssh:// gibi kısmı sil. Yalnızca adresin kendisini yaz.",
+      "hostSpaces": "Adres boşluk içeremez.",
+      "hostUser": "Burada yalnızca adresi yaz. Kullanıcı adı sonraki kutuya gider.",
+      "keyEmpty": "Özel anahtar dosyanı seç.",
+      "keyPublic": "Bu, açık anahtara (.pub) benziyor. Özel olanı seç: aynı ad, sonunda .pub yok.",
+      "portInvalid": "Port 1 ile 65535 arasında bir sayıdır. Normalde 22.",
+      "userInvalid": "Yalnızca harf, rakam, nokta, tire veya alt çizgi kullan."
+    },
     "progress": "Kurulum ilerlemesi",
-    "releaseNote": "Praxi, zaten Praxi çalıştıran bir sunucuyu ekleyebilir. Senin için kurması yayımlanmış bir sürüm gerektirir; henüz yok.",
+    "releaseNote": "Praxi, zaten Praxi çalıştıran bir sunucuyu ekleyebilir. Senin için kurması yayınlanmış bir sürüm gerektirir; henüz yok.",
     "retry": "Yeniden dene",
+    "retryResume": "Buradan yeniden dene",
+    "sayHello": "Botuna merhaba de",
+    "showLog": "Teknik günlüğü göster",
     "stage": {
       "check": "Sistemi denetle",
       "connect": "Bağlan ve sunucuyu doğrula",
@@ -121,9 +281,11 @@
       "waiting": "Yanıtın gerekiyor",
       "warn": "Tamam, bir notla"
     },
+    "stepOf": "Adım {{n}} / 3",
     "title": "Sunucu ekle",
     "useServer": "Bu sunucuyu kullan",
     "user": "Kullanıcı",
+    "userHint": "Oracle ve Ubuntu: ubuntu. Oracle Linux: opc.",
     "viewScreen": "Ekranı gör"
   },
   "addSkill": {
@@ -3851,6 +4013,27 @@
     "typeCode": "Bu kodu o sayfaya yaz.",
     "verifying": "Giriş sunucuda doğrulanıyor…",
     "waitingDevice": "O sayfada işlemi bitirmen bekleniyor. Bu pencere kendiliğinden güncellenir."
+  },
+  "servers": {
+    "add": "Sunucu ekle",
+    "checkNow": "Şimdi kontrol et",
+    "empty": "Henüz sunucu yok. Sorun değil: botların bu bilgisayarda çalışıyor.",
+    "lead": "Sunucular, bu bilgisayar kapalıyken botlarını çalışır tutar.",
+    "remove": "Kaldır",
+    "removeBody": "Bu bilgisayar sunucuyu ve eşleşmesini unutur. Sunucunun kendisine, botlarına ve dosyalarına dokunulmaz; çalışmaya devam ederler. Sonra yeniden ekleyebilirsin.",
+    "removeConfirm": "Sunucuyu kaldır",
+    "removeFailed": "Sunucu kaldırılamadı. Yeniden dene.",
+    "removeTitle": "{{name}} kaldırılsın mı?",
+    "removed": "{{name}} bu bilgisayardan kaldırıldı.",
+    "status": {
+      "connected": "Çevrimiçi",
+      "connecting": "Bağlanıyor…",
+      "idle": "Şu an bağlı değil",
+      "offline": "Çevrimdışı",
+      "unreachable": "Ulaşılamıyor"
+    },
+    "title": "Sunucuların",
+    "updateHelp": "Bir sunucuyu güncellemek için terminalini açıp Praxi güncellemesini orada çalıştır. Tek tıkla güncelleme henüz yok."
   },
   "settings": {
     "accent": {

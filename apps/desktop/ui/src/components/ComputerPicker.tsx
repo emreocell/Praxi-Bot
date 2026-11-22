@@ -11,6 +11,7 @@ import { useLiveView } from "../state/LiveViewContext";
 import { useServerTerminal } from "../state/ServerTerminalContext";
 import styles from "./ComputerPicker.module.css";
 import { AddServerModal } from "./AddServerModal";
+import { ServersModal } from "./ServersModal";
 import { setHostComputerAccess } from "./ComputerAccess";
 import { CopySetupModal } from "./CopySetupModal";
 import { PairHostModal } from "./PairHostModal";
@@ -34,6 +35,7 @@ export function ComputerPicker() {
   const [open, setOpen] = useState(() => isMockMode() && new URLSearchParams(window.location.search).get("menu") === "1");
   const [addOpen, setAddOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
+  const [serversOpen, setServersOpen] = useState(false);
   const [syncHost, setSyncHost] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const trigger = useRef<HTMLButtonElement | null>(null);
@@ -186,6 +188,7 @@ export function ComputerPicker() {
         ) : null}
         <div className={styles.hr} role="separator" />
         {item("computer-add", <Plus aria-hidden="true" className={styles.icon} />, t("home.menu.add"), () => setAddOpen(true))}
+        {item("computer-servers", <Server aria-hidden="true" className={styles.icon} />, t("servers.title"), () => setServersOpen(true))}
         {unadopted.map((h) =>
           item(`home-make-${h.id}`, <House aria-hidden="true" className={styles.icon} />, t("home.menu.makeHome", { name: h.name }), () => setSyncHost(h.id))
         )}
@@ -209,6 +212,14 @@ export function ComputerPicker() {
         onManual={() => {
           setAddOpen(false);
           setPairOpen(true);
+        }}
+      />
+      <ServersModal
+        open={serversOpen}
+        onClose={() => setServersOpen(false)}
+        onAdd={() => {
+          setServersOpen(false);
+          setAddOpen(true);
         }}
       />
       <PairHostModal open={pairOpen} onClose={() => setPairOpen(false)} />

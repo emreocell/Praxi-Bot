@@ -1,16 +1,19 @@
 import {
+  ArrowLeft,
   Check,
   CircleCheck,
   CircleDashed,
   CircleX,
+  Cloud,
   Copy,
+  House,
+  KeyRound,
   Loader2,
   Monitor,
   Server,
-  ShieldQuestion,
   TriangleAlert
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { isMockMode } from "../api/mockMode";
@@ -18,13 +21,26 @@ import type { HostSetupJob, SshKeyHint, StartHostSetupInput } from "../api/types
 import {
   afterKeyAnswer,
   copyDetails,
-  failure,
   isActive,
   STAGES,
   stageStates,
-  type StageState,
   wizardView
 } from "../lib/hostSetup";
+import {
+  checkForm,
+  checklist,
+  diagnose,
+  initialWizard,
+  logLines,
+  ORACLE_STEPS,
+  progressPercent,
+  stepNumber,
+  toInput,
+  wizardReducer,
+  type CheckState,
+  type WizardState,
+  type FieldProblem
+} from "../lib/serverWizard";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./AddServerModal.module.css";
 import dialog from "./Dialog.module.css";
@@ -63,8 +79,6 @@ export function AddServerModal({
   );
 }
 
-type Auth = "key" | "agent";
-
 function Content({ onClose, onManual }: { onClose: () => void; onManual: () => void }) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -72,15 +86,12 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
   // The wizard always talks to THIS computer's daemon, never to a selected host.
   const api = isMockMode() ? client : localApi;
 
-  const [host, setHost] = useState("");
-  const [user, setUser] = useState("ubuntu");
-  const [port, setPort] = useState("22");
-  const [auth, setAuth] = useState<Auth>("key");
-  const [keyPath, setKeyPath] = useState("");
+  const [w, dispatch] = useReducer(wizardReducer, initialWizard);
   const [keys, setKeys] = useState<SshKeyHint[]>([]);
   const [job, setJob] = useState<HostSetupJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [touched, setTouched] = useState(false);
   const input = useRef<StartHostSetupInput | null>(null);
   const jobId = job?.id ?? null;
   const active = job ? isActive(job) : false;
@@ -99,7 +110,10 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
     api
       .getHostSetup(id)
       .then((j) => {
-        if (live) setJob(j);
+        if (live) {
+          setJob(j);
+          dispatch({ type: "run" });
+        }
       })
       .catch(() => {
         resumeJobId = null;
@@ -116,7 +130,7 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
       .then((k) => {
         if (live) {
           setKeys(k);
-          setKeyPath((p) => p || k[0]?.path || "");
+          if (k[0]) dispatch({ type: "set", field: "keyPath", value: k[0].path });
         }
       })
       .catch(() => undefined);
@@ -162,6 +176,7 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
       try {
         input.current = body;
         setJob(await api.startHostSetup(body));
+        dispatch({ type: "run" });
       } catch (e) {
         setError(humanLine(e));
       } finally {
@@ -171,22 +186,11 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
     [api, t]
   );
 
+  const check = checkForm(w);
   const submit = () => {
-    const portNumber = Number(port);
-    if (!host.trim() || !Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
-      setError(t("addServer.formInvalid"));
-      return;
-    }
-    if (auth === "key" && !keyPath.trim()) {
-      setError(t("addServer.keyMissing"));
-      return;
-    }
-    void start({
-      host: host.trim(),
-      user: user.trim() || "ubuntu",
-      port: portNumber,
-      key_path: auth === "key" ? keyPath.trim() : null
-    });
+    setTouched(true);
+    if (!check.ok) return;
+    void start(toInput(w));
   };
 
   const answerKey = (accept: boolean) => {
@@ -198,8 +202,6 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
       .answerHostSetupKey(jobId, accept)
       .then(setJob)
       .catch(() => {
-        // The answer did not arrive (the job is gone or no longer waiting): say so
-        // on this page and show the job as the daemon has it.
         setError(t("addServer.answerFailed"));
         api
           .getHostSetup(jobId)
@@ -216,51 +218,176 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
     onClose();
   };
 
-  const view = wizardView(job);
+  const view = w.page === "run" ? wizardView(job) : "form";
   const hasScreen = (job?.view_targets ?? 0) > 0;
+  const n = stepNumber(w.page);
+  const subtitle = job && w.page === "run" ? job.target : n ? t("addServer.stepOf", { n, total: 3 }) : t("addServer.lead");
+  const back = (
+    <Button variant="ghost" onClick={() => dispatch({ type: "back" })} data-testid="add-server-back">
+      <ArrowLeft aria-hidden="true" />
+      {t("common.back")}
+    </Button>
+  );
+  const manualLink = (
+    <button type="button" className={styles.link} onClick={onManual}>
+      {t("addServer.manual")}
+    </button>
+  );
+
   return (
-    <div className={dialog.root} data-testid="add-server" data-view={view}>
+    <div className={dialog.root} data-testid="add-server" data-view={view} data-page={w.page}>
       <DialogHeader
         title={t("addServer.title")}
-        subtitle={job ? job.target : t("addServer.lead")}
+        subtitle={subtitle}
         leading={<Server aria-hidden="true" className={styles.headIcon} />}
         onClose={cancelAndClose}
       />
-      {view === "form" ? (
+
+      {w.page === "intro" ? (
+        <>
+          <div className={dialog.body}>
+            <h3 className={styles.pageTitle}>{t("addServer.intro.title")}</h3>
+            <p className={styles.para}>{t("addServer.intro.what")}</p>
+            <Callout tone="info" title={t("addServer.intro.optionalTitle")}>
+              {t("addServer.intro.optional")}
+            </Callout>
+          </div>
+          <DialogFooter note={manualLink}>
+            <Button variant="ghost" onClick={onClose} data-testid="add-server-skip">
+              {t("addServer.intro.skip")}
+            </Button>
+            <Button variant="primary" onClick={() => dispatch({ type: "next" })} data-testid="add-server-next">
+              {t("addServer.intro.go")}
+            </Button>
+          </DialogFooter>
+        </>
+      ) : null}
+
+      {w.page === "choose" ? (
+        <>
+          <div className={dialog.body}>
+            <h3 className={styles.pageTitle}>{t("addServer.choose.title")}</h3>
+            <div className={styles.choices} role="group" aria-label={t("addServer.choose.title")}>
+              {(
+                [
+                  ["ssh", <KeyRound key="k" aria-hidden="true" />],
+                  ["oracle", <Cloud key="c" aria-hidden="true" />],
+                  ["home", <House key="h" aria-hidden="true" />]
+                ] as const
+              ).map(([id, icon]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={styles.choice}
+                  data-testid={`choose-${id}`}
+                  onClick={() => dispatch({ type: "choose", path: id })}
+                >
+                  <span className={styles.choiceIcon}>{icon}</span>
+                  <span className={styles.stageText}>
+                    <b>{t(`addServer.choose.${id}`)}</b>
+                    <small>{t(`addServer.choose.${id}Hint`)}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <DialogFooter note={manualLink}>{back}</DialogFooter>
+        </>
+      ) : null}
+
+      {w.page === "oracle" ? (
+        <>
+          <div className={dialog.body}>
+            <h3 className={styles.pageTitle}>{t("addServer.oracle.title")}</h3>
+            <p className={styles.para}>{t("addServer.oracle.lead")}</p>
+            <ol className={styles.guide}>
+              {ORACLE_STEPS.map((id) => {
+                const on = w.oracleDone.includes(id);
+                return (
+                  <li key={id} className={styles.guideItem} data-on={on}>
+                    <label className={styles.guideLabel}>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => dispatch({ type: "tick", id })}
+                        data-testid={`oracle-${id}`}
+                      />
+                      <span className={styles.stageText}>
+                        <b>{t(`addServer.oracle.step.${id}.title`)}</b>
+                        <small>{t(`addServer.oracle.step.${id}.body`)}</small>
+                      </span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ol>
+            <Callout tone="info">{t("addServer.oracle.privacy")}</Callout>
+          </div>
+          <DialogFooter>
+            {back}
+            <Button variant="primary" onClick={() => dispatch({ type: "next" })} data-testid="add-server-next">
+              {w.oracleDone.length === ORACLE_STEPS.length ? t("addServer.oracle.ready") : t("addServer.oracle.haveIt")}
+            </Button>
+          </DialogFooter>
+        </>
+      ) : null}
+
+      {w.page === "home" ? (
+        <>
+          <div className={dialog.body}>
+            <h3 className={styles.pageTitle}>{t("addServer.home.title")}</h3>
+            <p className={styles.para}>{t("addServer.home.lead")}</p>
+            <ol className={styles.numbered}>
+              {(["one", "two", "three"] as const).map((k) => (
+                <li key={k}>{t(`addServer.home.${k}`)}</li>
+              ))}
+            </ol>
+          </div>
+          <DialogFooter>
+            {back}
+            <Button variant="primary" onClick={() => dispatch({ type: "choose", path: "ssh" })}>
+              {t("addServer.home.go")}
+            </Button>
+          </DialogFooter>
+        </>
+      ) : null}
+
+      {w.page === "details" ? (
         <>
           <div className={dialog.body}>
             <div className={styles.row}>
-              <Field label={t("addServer.host")} htmlFor="as-host">
+              <Field
+                label={t("addServer.host")}
+                htmlFor="as-host"
+                hint={t("addServer.hostHint")}
+                error={touched || w.host ? problemText(t, check.host) : undefined}
+              >
                 <input
                   id="as-host"
                   className={form.input}
-                  value={host}
+                  value={w.host}
                   placeholder="203.0.113.7"
                   autoComplete="off"
                   spellCheck={false}
                   data-autofocus
                   data-testid="add-server-host"
-                  onChange={(e) => setHost(e.target.value)}
+                  aria-invalid={check.host && (touched || w.host) ? true : undefined}
+                  onChange={(e) => dispatch({ type: "set", field: "host", value: e.target.value })}
                 />
               </Field>
-              <Field label={t("addServer.user")} htmlFor="as-user">
+              <Field
+                label={t("addServer.user")}
+                htmlFor="as-user"
+                hint={t("addServer.userHint")}
+                error={problemText(t, check.user)}
+              >
                 <input
                   id="as-user"
                   className={form.input}
-                  value={user}
+                  value={w.user}
                   autoComplete="off"
                   spellCheck={false}
-                  onChange={(e) => setUser(e.target.value)}
-                />
-              </Field>
-              <Field label={t("addServer.port")} htmlFor="as-port">
-                <input
-                  id="as-port"
-                  className={form.input}
-                  value={port}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  onChange={(e) => setPort(e.target.value)}
+                  onChange={(e) => dispatch({ type: "set", field: "user", value: e.target.value })}
                 />
               </Field>
             </div>
@@ -271,18 +398,23 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
                     key={a}
                     type="button"
                     role="radio"
-                    aria-checked={auth === a}
+                    aria-checked={w.auth === a}
                     className={styles.segItem}
-                    data-on={auth === a}
-                    onClick={() => setAuth(a)}
+                    data-on={w.auth === a}
+                    onClick={() => dispatch({ type: "auth", auth: a })}
                   >
                     {t(`addServer.auth_${a}`)}
                   </button>
                 ))}
               </div>
             </Field>
-            {auth === "key" ? (
-              <Field label={t("addServer.keyFile")} htmlFor="as-key" hint={t("addServer.keyHint")}>
+            {w.auth === "key" ? (
+              <Field
+                label={t("addServer.keyFile")}
+                htmlFor="as-key"
+                hint={t("addServer.keyHint")}
+                error={touched || w.keyPath ? problemText(t, check.key) : undefined}
+              >
                 {keys.length > 0 ? (
                   <div className={styles.keys} role="radiogroup" aria-label={t("addServer.keyFile")}>
                     {keys.map((k) => (
@@ -290,73 +422,77 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
                         key={k.path}
                         type="button"
                         role="radio"
-                        aria-checked={keyPath === k.path}
+                        aria-checked={w.keyPath === k.path}
                         className={styles.keyItem}
-                        data-on={keyPath === k.path}
+                        data-on={w.keyPath === k.path}
                         title={k.path}
-                        onClick={() => setKeyPath(k.path)}
+                        onClick={() => dispatch({ type: "set", field: "keyPath", value: k.path })}
                       >
-                        {keyPath === k.path ? <Check aria-hidden="true" /> : null}
+                        {w.keyPath === k.path ? <Check aria-hidden="true" /> : null}
                         {k.name}
                       </button>
                     ))}
                   </div>
-                ) : null}
+                ) : (
+                  <p className={styles.note}>{t("addServer.noKeys")}</p>
+                )}
                 <input
                   id="as-key"
                   className={`${form.input} ${styles.mono}`}
-                  value={keyPath}
+                  value={w.keyPath}
                   placeholder="~/.ssh/id_ed25519"
                   autoComplete="off"
                   spellCheck={false}
-                  onChange={(e) => setKeyPath(e.target.value)}
+                  onChange={(e) => dispatch({ type: "set", field: "keyPath", value: e.target.value })}
                 />
               </Field>
             ) : (
               <Callout tone="info">{t("addServer.agentHint")}</Callout>
             )}
+            <Callout tone="info">{t("addServer.passwordNote")}</Callout>
             <Callout tone="info">{t("addServer.releaseNote")}</Callout>
+            <details className={styles.advanced}>
+              <summary>{t("addServer.advanced")}</summary>
+              <Field
+                label={t("addServer.port")}
+                htmlFor="as-port"
+                hint={t("addServer.portHint")}
+                error={problemText(t, check.port)}
+              >
+                <input
+                  id="as-port"
+                  className={form.input}
+                  value={w.port}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  onChange={(e) => dispatch({ type: "set", field: "port", value: e.target.value })}
+                />
+              </Field>
+            </details>
             {error ? (
               <p className={form.error} role="alert">
                 {error}
               </p>
             ) : null}
           </div>
-          <DialogFooter
-            note={
-              <button type="button" className={styles.link} onClick={onManual}>
-                {t("addServer.manual")}
-              </button>
-            }
-          >
-            <Button variant="ghost" onClick={onClose}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              variant="primary"
-              disabled={busy || !host.trim()}
-              onClick={submit}
-              data-testid="add-server-start"
-            >
+          <DialogFooter note={manualLink}>
+            {back}
+            <Button variant="primary" disabled={busy} onClick={submit} data-testid="add-server-start">
               {busy ? t("addServer.starting") : t("addServer.connect")}
             </Button>
           </DialogFooter>
         </>
       ) : null}
-      {job && view !== "form" ? (
+
+      {w.page === "run" && job ? (
         <>
           <div className={dialog.body}>
-            <Progress job={job} />
+            {view === "progress" || view === "failed" ? <Checklist job={job} /> : null}
+            {view === "progress" ? <Bar job={job} /> : null}
             {job.state === "awaiting_host_key" && job.host_key ? (
-              <div
-                className={styles.keyCard}
-                role="group"
-                aria-label={t("addServer.hostKeyTitle")}
-              >
+              <div className={styles.keyCard} role="group" aria-label={t("addServer.hostKeyTitle")}>
                 <p className={styles.keyTitle}>{t("addServer.hostKeyTitle")}</p>
-                <p className={styles.keyText}>
-                  {t("addServer.hostKeyBody", { host: job.host_key.host })}
-                </p>
+                <p className={styles.keyText}>{t("addServer.hostKeyBody", { host: job.host_key.host })}</p>
                 <code className={styles.fingerprint} data-testid="host-key-fingerprint">
                   {job.host_key.fingerprint}
                 </code>
@@ -364,11 +500,7 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
                   <Button variant="ghost" onClick={() => answerKey(false)}>
                     {t("addServer.hostKeyNo")}
                   </Button>
-                  <Button
-                    variant="primary"
-                    onClick={() => answerKey(true)}
-                    data-testid="host-key-trust"
-                  >
+                  <Button variant="primary" onClick={() => answerKey(true)} data-testid="host-key-trust">
                     {t("addServer.hostKeyYes")}
                   </Button>
                 </div>
@@ -379,21 +511,17 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
                 {error}
               </p>
             ) : null}
-            {view === "failed" ? <Failure job={job} /> : null}
+            {view === "failed" ? <Failure job={job} typed={w} /> : null}
             {view === "done" ? (
-              <Callout
-                tone="success"
-                title={t("addServer.doneTitle", { name: job.host_name ?? job.target })}
-              >
-                {hasScreen ? t("addServer.doneScreen") : t("addServer.doneNoScreen")}
-              </Callout>
-            ) : null}
+              <Success job={job} hasScreen={hasScreen} />
+            ) : (
+              <details className={styles.advanced} data-testid="add-server-log">
+                <summary>{t("addServer.showLog")}</summary>
+                <pre className={styles.log}>{logLines(job).join("\n") || t("addServer.logEmpty")}</pre>
+              </details>
+            )}
           </div>
-          <DialogFooter
-            note={
-              view === "progress" && job.state === "running" ? t("addServer.cancelNote") : undefined
-            }
-          >
+          <DialogFooter note={view === "progress" && job.state === "running" ? t("addServer.cancelNote") : undefined}>
             {view === "progress" ? (
               <Button variant="ghost" onClick={cancelAndClose} data-testid="add-server-cancel">
                 {t("common.cancel")}
@@ -414,7 +542,13 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
                   <Copy aria-hidden="true" />
                   {t("addServer.copy")}
                 </Button>
-                <Button variant="ghost" onClick={() => setJob(null)}>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setJob(null);
+                    dispatch({ type: "edit" });
+                  }}
+                >
                   {t("addServer.edit")}
                 </Button>
                 <Button
@@ -423,7 +557,7 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
                   onClick={() => input.current && void start(input.current)}
                   data-testid="add-server-retry"
                 >
-                  {t("addServer.retry")}
+                  {t("addServer.retryResume")}
                 </Button>
               </>
             ) : null}
@@ -442,7 +576,7 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
                   data-testid="add-server-use"
                 >
                   {hasScreen ? <Monitor aria-hidden="true" /> : <Server aria-hidden="true" />}
-                  {hasScreen ? t("addServer.viewScreen") : t("addServer.useServer")}
+                  {t("addServer.sayHello")}
                 </Button>
               </>
             ) : null}
@@ -453,42 +587,40 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
   );
 }
 
-function StateIcon({ state }: { state: StageState }) {
+type TFn = (key: string) => string;
+
+function problemText(t: TFn, p: FieldProblem | null): string | undefined {
+  return p ? t(`addServer.problem.${p}`) : undefined;
+}
+
+function CheckIcon({ state }: { state: CheckState }) {
   switch (state) {
     case "running":
       return <Loader2 aria-hidden="true" className={styles.spin} />;
-    case "waiting":
-      return <ShieldQuestion aria-hidden="true" />;
-    case "done":
-    case "skipped":
+    case "pass":
       return <CircleCheck aria-hidden="true" />;
     case "warn":
       return <TriangleAlert aria-hidden="true" />;
-    case "failed":
+    case "fail":
       return <CircleX aria-hidden="true" />;
     default:
       return <CircleDashed aria-hidden="true" />;
   }
 }
 
-function Progress({ job }: { job: HostSetupJob }) {
+/** The friendly pre-flight list: one row per question, with the fix text under a problem. */
+function Checklist({ job }: { job: HostSetupJob }) {
   const { t } = useTranslation();
-  const states = stageStates(job);
   return (
-    <ol className={styles.stages} aria-label={t("addServer.progress")}>
-      {STAGES.map((stage) => (
-        <li
-          key={stage}
-          className={styles.stage}
-          data-state={states[stage]}
-          data-testid={`stage-${stage}`}
-        >
+    <ol className={styles.stages} aria-label={t("addServer.checks.title")} data-testid="add-server-checks">
+      {checklist(job).map(({ id, state }) => (
+        <li key={id} className={styles.stage} data-state={state === "pass" ? "done" : state === "pending" ? "pending" : state} data-testid={`check-${id}`}>
           <span className={styles.stageIcon}>
-            <StateIcon state={states[stage]} />
+            <CheckIcon state={state} />
           </span>
           <span className={styles.stageText}>
-            <b>{t(`addServer.stage.${stage}`)}</b>
-            <small>{t(`addServer.state.${states[stage]}`)}</small>
+            <b>{t(`addServer.checks.${id}.title`)}</b>
+            <small>{t(state === "fail" || state === "warn" ? `addServer.checks.${id}.fix` : `addServer.checks.${id}.${state}`)}</small>
           </span>
         </li>
       ))}
@@ -496,10 +628,55 @@ function Progress({ job }: { job: HostSetupJob }) {
   );
 }
 
-function Failure({ job }: { job: HostSetupJob }) {
+/** A real progress bar over the five engine rows. */
+function Bar({ job }: { job: HostSetupJob }) {
   const { t } = useTranslation();
-  const f = failure(job);
-  if (!f) {
+  const pct = progressPercent(job);
+  const states = stageStates(job);
+  const current = STAGES.find((s) => states[s] === "running" || states[s] === "waiting");
+  return (
+    <div className={styles.barBox}>
+      <div
+        className={styles.bar}
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-label={t("addServer.progress")}
+        data-testid="add-server-bar"
+      >
+        <span className={styles.barFill} style={{ inlineSize: `${pct}%` }} />
+      </div>
+      <p className={styles.note}>
+        {pct}% · {current ? t(`addServer.stage.${current}`) : t("addServer.state.pending")}
+      </p>
+    </div>
+  );
+}
+
+function Success({ job, hasScreen }: { job: HostSetupJob; hasScreen: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Callout tone="success" title={t("addServer.doneTitle", { name: job.host_name ?? job.target })}>
+        {hasScreen ? t("addServer.doneScreen") : t("addServer.doneNoScreen")}
+      </Callout>
+      <dl className={styles.facts}>
+        {(["where", "open", "stop"] as const).map((k) => (
+          <div key={k}>
+            <dt>{t(`addServer.done.${k}.title`)}</dt>
+            <dd>{t(`addServer.done.${k}.body`)}</dd>
+          </div>
+        ))}
+      </dl>
+    </>
+  );
+}
+
+function Failure({ job, typed }: { job: HostSetupJob; typed: WizardState }) {
+  const { t } = useTranslation();
+  const d = diagnose(job, typed);
+  if (!d) {
     return (
       <Callout tone="warning" title={t("addServer.cancelled")} role="status">
         {t("addServer.cancelledBody")}
@@ -507,8 +684,8 @@ function Failure({ job }: { job: HostSetupJob }) {
     );
   }
   return (
-    <Callout tone="danger" title={t(`addServer.fail.${f.code}.msg`)} role="alert">
-      {t(`addServer.fail.${f.code}.fix`)}
+    <Callout tone="danger" title={t(`addServer.fail.${d.code}.msg`)} role="alert">
+      {t(`addServer.fail.${d.code}.fix`)}
     </Callout>
   );
 }

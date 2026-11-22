@@ -278,10 +278,12 @@ export async function flows(ctx) {
     await page.getByTestId('computer-picker').click();
     await page.getByTestId('computer-add').click();
     await page.getByTestId('add-server').waitFor(T);
+    // Step 0 explains what a server is, then the person chooses a path.
+    await page.getByTestId('add-server-next').click();
+    await page.getByTestId('choose-ssh').click();
     const start = page.getByTestId('add-server-start');
-    if (await start.isEnabled()) throw new Error('Start is enabled with an empty host');
     await page.getByTestId('add-server-host').fill('not a host !!');
-    // The daemon judges the name: a bad one must come back as a human sentence, with no SSH attempt.
+    // A typo is explained in plain words at once, with no SSH attempt.
     await start.click();
     const alert = page.getByTestId('add-server').getByRole('alert').first();
     await alert.waitFor(T);

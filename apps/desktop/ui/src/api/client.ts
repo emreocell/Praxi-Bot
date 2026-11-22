@@ -597,6 +597,10 @@ export class ApiClient {
       headers: { "x-praxi-owner-key": ownerKey }
     });
   }
+  /** Forget a paired server on this computer only; nothing on the server is deleted. */
+  forgetHost(id: string): Promise<void> {
+    return this.request("DELETE", `/hosts/${encodeURIComponent(id)}`);
+  }
   disconnectHost(id: string): Promise<void> {
     return this.request("DELETE", `/hosts/${encodeURIComponent(id)}/connect`);
   }
