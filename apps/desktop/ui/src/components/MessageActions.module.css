@@ -48,7 +48,7 @@
 :global([data-message-row]:focus-within) .actions,
 .actions:has([data-copied="true"], [aria-expanded="true"], [aria-pressed="true"]) {
   border-color: var(--color-border);
-  background-color: color-mix(in srgb, var(--color-surface-elevated) 84%, transparent);
+  background-color: var(--on-wallpaper-fill);
   opacity: 1;
 }
 
@@ -118,7 +118,7 @@
 @media (hover: none) {
   .actions {
     border-color: var(--color-border);
-    background-color: color-mix(in srgb, var(--color-surface-elevated) 84%, transparent);
+    background-color: var(--on-wallpaper-fill);
     opacity: 1;
   }
 }

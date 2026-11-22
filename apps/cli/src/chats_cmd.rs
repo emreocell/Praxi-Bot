@@ -87,10 +87,7 @@ async fn list(c: &Client, bot: Option<&str>, json: bool, out: &mut dyn Write) ->
         return Ok(());
     }
     for chat in chats {
-        let title = chat["title"]
-            .as_str()
-            .unwrap_or("?")
-            .replace(['\r', '\n'], " ");
+        let title = printable(chat["title"].as_str().unwrap_or("?"));
         let flags = match (chat["pinned"].as_bool(), chat["archived"].as_bool()) {
             (Some(true), _) => " [pinned]",
             (_, Some(true)) => " [archived]",
@@ -104,6 +101,14 @@ async fn list(c: &Client, bot: Option<&str>, json: bool, out: &mut dyn Write) ->
         )?;
     }
     Ok(())
+}
+
+/// Replace every Unicode control character with a space so titles cannot emit
+/// terminal escape sequences or split lines.
+fn printable(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 async fn export(
@@ -413,5 +418,36 @@ mod tests {
             assert!(error.to_string().contains("symlink"), "{error}");
             assert_eq!(std::fs::read(&target).unwrap(), b"keep");
         }
+    }
+
+    #[tokio::test]
+    async fn list_sanitizes_control_characters_in_titles_and_keeps_unicode() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/chats"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                chat(1, 10, "\u{1b}[2JProje\tnotları\0"),
+                chat(2, 10, "Türkçe başlık — üğışçö"),
+            ])))
+            .mount(&server)
+            .await;
+        let client = Client::new(&server.uri(), "tok".into());
+
+        let mut out = Vec::new();
+        run(&client, &ChatsCmd::List { bot: None }, false, &mut out)
+            .await
+            .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "{text}");
+        for line in &lines {
+            assert!(
+                !line.chars().any(char::is_control),
+                "control character leaked into output: {line:?}"
+            );
+        }
+        assert!(lines[0].contains("Proje"), "{text}");
+        assert!(lines[0].contains("notları"), "{text}");
+        assert!(lines[1].contains("Türkçe başlık — üğışçö"), "{text}");
     }
 }

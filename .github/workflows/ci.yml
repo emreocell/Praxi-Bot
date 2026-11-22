@@ -79,6 +79,9 @@ jobs:
       - name: Check every guide page is linked from the guide index
         run: python3 scripts/check_guide_index.py
 
+      - name: Test CI report parser
+        run: python3 -m unittest discover -s scripts/tests -p test_ci_report.py -v
+
   build-and-test:
     name: ${{ matrix.name }}
     needs: changes
@@ -97,8 +100,12 @@ jobs:
             suite: embeddings
             name: Local Embeddings (windows-latest)
           - os: ubuntu-latest
-            suite: all
+            suite: workspace
             name: Build & Test (ubuntu-latest)
+          # Keep the same feature checks on Linux, parallel with the workspace suite.
+          - os: ubuntu-latest
+            suite: embeddings
+            name: Local Embeddings (ubuntu-latest)
     env:
       # Keep file and line information in backtraces while reducing the debug
       # data Cargo writes, links, and restores from the dependency cache.
@@ -125,6 +132,8 @@ jobs:
         with:
           # The feature-enabled lane saves a different set of compiled dependencies.
           key: ${{ matrix.suite == 'embeddings' && 'local-embeddings' || '' }}
+          # PRs restore main's cache; avoid costly PR-only uploads and cache eviction.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check formatting
         if: matrix.suite != 'embeddings'
@@ -136,7 +145,7 @@ jobs:
 
       # Workspace feature unification enables the server and masks proxy-only lint failures.
       - name: Run Clippy for the remote API without the server feature
-        if: (success() || failure()) && runner.os == 'Linux'
+        if: (success() || failure()) && runner.os == 'Linux' && matrix.suite == 'workspace'
         run: cargo clippy -p remote-api --all-targets -- -D warnings
 
       # Run even when clippy failed so one gate cannot hide another's evidence.

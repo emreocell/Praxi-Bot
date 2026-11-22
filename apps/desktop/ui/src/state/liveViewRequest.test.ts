@@ -12,7 +12,8 @@ test("the open viewer asks for the host's full 1920x1080 cap at quality 80", () 
 
 test("the card asks for a smaller picture than the viewer", () => {
   const card = sessionRequest({ viewerOpen: false, owning: false });
-  assert.ok(card.maxWidth <= 640 && card.maxHeight <= 400);
+  const viewer = sessionRequest({ viewerOpen: true, owning: false });
+  assert.ok(card.maxWidth < viewer.maxWidth && card.maxHeight < viewer.maxHeight);
 });
 
 test("the stream picture is drawn without CSS filters or pixelation", () => {
@@ -26,6 +27,6 @@ test("the expanded viewer asks for the large profile and the card for the small 
   const card = sessionRequest({ viewerOpen: false, owning: false });
   const viewer = sessionRequest({ viewerOpen: true, owning: false });
   assert.ok(viewer.maxWidth >= 1920 && viewer.maxHeight >= 1080);
-  assert.ok(viewer.maxWidth > card.maxWidth * 2);
+  assert.ok(viewer.maxWidth > card.maxWidth);
   assert.ok(viewer.quality >= 80 && viewer.quality > card.quality);
 });

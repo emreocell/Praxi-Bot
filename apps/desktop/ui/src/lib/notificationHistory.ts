@@ -1,3 +1,4 @@
+import type { HoldReason } from "./botMute.ts";
 import type { NotifyKind } from "./notifyRules.ts";
 
 /** Newest entries kept; older ones fall off. */
@@ -15,8 +16,10 @@ export interface HistoryEntry {
   botName: string;
   chatId: string;
   ts: number;
-  /** true = a toast was shown; false = held by quiet hours. */
+  /** true = a toast was shown; false = held back (see `heldBy`). */
   shown: boolean;
+  /** Why a held toast was held; absent on shown entries.  Older stored entries mean quiet hours. */
+  heldBy?: HoldReason;
   read: boolean;
 }
 
@@ -47,6 +50,7 @@ export function parseHistory(raw: unknown, now: number): HistoryEntry[] {
       chatId: str(o.chatId),
       ts: o.ts,
       shown: o.shown === true,
+      ...(o.shown === true ? {} : { heldBy: o.heldBy === "muted" ? ("muted" as const) : ("quiet" as const) }),
       read: o.read === true
     });
   }

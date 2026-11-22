@@ -346,11 +346,7 @@ impl Shared {
                 };
                 // Runtime values are accepted only by the explicit human entry.
                 // Excluding these candidates also closes K1/K2/K3 fuzzy replay.
-                if wf
-                    .params
-                    .iter()
-                    .any(|p| p.name.starts_with("recorded_secret_"))
-                {
+                if wf.params.iter().any(workflow_replay::Param::is_secret) {
                     continue;
                 }
                 let version = wf.to_toml().map_or_else(
@@ -837,12 +833,7 @@ impl TurnExecutor {
                 };
             }
         };
-        if !human
-            && wf
-                .params
-                .iter()
-                .any(|p| p.name.starts_with("recorded_secret_"))
-        {
+        if !human && wf.params.iter().any(workflow_replay::Param::is_secret) {
             return Err(xe("runtime parameters require the human replay endpoint"));
         }
         if wf

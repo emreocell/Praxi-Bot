@@ -370,13 +370,21 @@ Once the package is installed, open the pages with `man 1 bot` or
 
 ### `bot skills`
 
-Review local skills and explicitly trust the reviewed content. This stays on
-this machine; it is not a daemon command.
+Review, install and manage skills. These are local, explicit commands on this
+machine; they are not daemon commands and never agent tools, so a bot cannot
+install a skill.
 
 | Subcommand | Meaning |
 | --- | --- |
 | `bot skills review <NAME>` | Print every file in full and its review fingerprint. Option: `--bot-id <BOT_ID>` |
 | `bot skills trust <NAME> --reviewed <FINGERPRINT>` | Trust exactly the content `review` printed. Option: `--bot-id <BOT_ID>`. A later change needs another review |
+| `bot skills install <SOURCE>` | Install from an `https://`/`ssh://` git URL, an https index (`--name <SKILL>`) or a local folder. Prints the risk report first. Options: `--rev`, `--subdir`, `--name`, `--accept <FINGERPRINT>` |
+| `bot skills update [NAME]` | Re-fetch hub-installed skills, show what changed (new findings, risk, commit) and ask before replacing. `--accept <FINGERPRINT>` with a NAME |
+| `bot skills uninstall <NAME>` | Remove the skill folder, its lock entry and its usage counters |
+| `bot skills list` | Name, version, source, pinned commit, risk, usage; flags missing or locally modified skills |
+| `bot skills sync` | Reinstall locked skills whose folder is missing, verifying the locked hash |
+
+See [Skills: install a skill](skills.md#install-a-skill).
 
 ### `bot token`
 

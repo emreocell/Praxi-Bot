@@ -243,8 +243,8 @@
   padding: var(--space-1) var(--space-3);
   border: var(--size-border) solid var(--color-border);
   border-radius: var(--radius-pill);
-  background-color: var(--color-surface);
-  color: var(--color-text-muted);
+  background-color: var(--on-wallpaper-fill);
+  color: var(--on-wallpaper-muted);
   font-size: var(--font-size-xs);
   cursor: default;
 }
@@ -426,8 +426,8 @@
   padding: var(--space-2) var(--space-3);
   border: var(--size-border) solid var(--color-border-strong);
   border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--color-text-muted);
+  background: var(--on-wallpaper-fill);
+  color: var(--on-wallpaper-text);
   font: inherit;
   font-size: var(--font-size-xs);
   cursor: pointer;
@@ -446,10 +446,6 @@
   box-shadow: var(--shadow-focus);
 }
 
-:global(:root[data-has-background="true"]) .starter {
-  background-color: color-mix(in srgb, var(--color-surface-elevated-opaque) 72%, transparent);
-  color: var(--color-text);
-}
 
 .chainRow {
   display: flex;
@@ -817,8 +813,8 @@
   padding: var(--space-1) var(--space-2);
   border: none;
   border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--color-text-muted);
+  background: var(--on-wallpaper-fill);
+  color: var(--on-wallpaper-text);
   font: inherit;
   font-size: var(--font-size-xs);
   cursor: pointer;
@@ -926,3 +922,51 @@
     transition: none;
   }
 }
+
+/* One wallpaper plate contract: opaque fill, readable secondary ink, stable border. */
+.hint,
+.emptyConversation h1,
+.conversationLabel,
+.runStopped,
+.rememberDone,
+.authorName {
+  align-self: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--on-wallpaper-fill);
+  color: var(--on-wallpaper-muted);
+}
+
+.authorName { align-self: flex-start; }
+
+.emptyConversation h1 { color: var(--on-wallpaper-text); }
+
+.rememberRow { flex-wrap: wrap; }
+.rememberRow > button {
+  background-color: var(--on-wallpaper-fill);
+  color: var(--on-wallpaper-text);
+  border: var(--size-border) solid var(--on-wallpaper-border);
+}
+.rememberRow > button:hover { background-color: var(--on-wallpaper-hover); }
+.starter { border-color: var(--on-wallpaper-border); }
+.starter:hover { background-color: var(--on-wallpaper-hover); color: var(--on-wallpaper-text); }
+
+.menu { max-height: min(calc(var(--size-list-max) * 2), 65dvh); display: flex; flex-direction: column; }
+.menuList { min-height: var(--space-0); }
+.menuGroupList { margin: var(--space-0); padding: var(--space-0); list-style: none; }
+.menuGroup {
+  margin: var(--space-0);
+  padding: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}
+.menuCopy { display: flex; flex: 1; flex-direction: column; gap: var(--space-1); min-width: var(--space-0); }
+.menuLabel { white-space: normal; overflow-wrap: anywhere; }
+.menuLabel mark { background-color: var(--color-accent-subtle); color: var(--color-accent-text); font-weight: var(--font-weight-semibold); }
+.menuDetail { overflow: visible; white-space: normal; overflow-wrap: anywhere; line-height: var(--line-height-normal); }
+.menuKeys { flex-wrap: wrap; color: var(--color-text-muted); }
+.menuEmpty { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3); color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.menuEmpty svg { flex: none; width: var(--size-icon-sm); height: var(--size-icon-sm); }

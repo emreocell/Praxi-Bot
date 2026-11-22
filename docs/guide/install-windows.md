@@ -43,11 +43,16 @@ ghost icon.
 - **Switch back to the native title bar**: open **Settings → Appearance** and
   turn on **Window frame** if you prefer standard OS window borders. On
   non-Windows platforms, the native frame stays on by default.
-- **Wallpaper veil**: with a wallpaper on (**Settings → Appearance →
+- **Wallpaper veil & Cloud motion**: with a wallpaper on (**Settings → Appearance →
   Wallpaper**), the **Wallpaper veil** slider (0–100 %, default 35 %) sets how
   strongly a soft, theme-tinted veil covers the whole wallpaper. The wallpaper
   stays visible behind the entire window; messages sit on light plates, so text
-  keeps at least 4.5:1 contrast at every slider value.
+  keeps at least 4.5:1 contrast at every slider value. **Cloud motion**
+  (**Off** / **Subtle** / **Live**, default **Subtle**) lets you switch between a
+  static frame, the calm 1 px / 4 s drift, or layered WebGL clouds capped at
+  30 fps (which pause when hidden, unfocused, on battery saver, or under reduced
+  motion, and fall back to the static wallpaper if WebGL is unavailable). See
+  [Live cloud wallpaper measurements](../design/live-cloud-wallpaper-measurement.md).
 - **Limits**: integrated window controls run only inside the desktop app shell,
   not when previewing the UI in a web browser. This is purely visual window
   chrome and does not change daemon permissions.

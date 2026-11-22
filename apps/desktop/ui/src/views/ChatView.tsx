@@ -8,7 +8,13 @@ import {
   Phone,
   Plus,
   Square,
-  Terminal,
+  CalendarClock,
+  CircleHelp,
+  Download,
+  LayoutGrid,
+  Settings2,
+  Brain,
+  Search,
   Zap
 } from "lucide-react";
 import {
@@ -109,15 +115,11 @@ import { brandIcon } from "../lib/brandIcons";
 import { type Chain, chainOrderTs, groupRunItems } from "../lib/thinkingChain";
 import { type SendWith, shouldSend } from "../lib/settingsPrefs";
 import { isProcessingRunState } from "../lib/runState";
-import { rank } from "../lib/fuzzy";
+import { commandOptions, mentionOptions, optionGroups } from "../lib/composerMenu";
 import {
   applyCompletion,
   detectTrigger,
-  mentionHandle,
-  SLASH_COMMANDS,
   APP_COMMAND_EVENT,
-  APP_COMMANDS,
-  LOCAL_COMMANDS,
   isExportCommand,
   appCommandFor
 } from "../lib/slash";
@@ -159,14 +161,10 @@ const STARTERS = [
   "remind"
 ] as const;
 
-const SLASH_ICONS: Record<string, typeof Plus> = { new: Plus, stop: Square };
-
-interface MenuBot {
-  id: string;
-  name: string;
-  color?: string;
-  avatar?: string | null;
-}
+const SLASH_ICONS: Record<string, typeof Plus> = {
+  new: Plus, stop: Square, export: Download, help: CircleHelp,
+  settings: Settings2, models: Brain, apps: LayoutGrid, schedules: CalendarClock
+};
 
 type Entry =
   | { kind: "day"; key: string; ts: number }
@@ -189,7 +187,7 @@ type RememberState = "idle" | "busy" | "saved" | "hidden";
 /** A finished, successful turn that did not just run a command (`/new`). */
 /** Icon of a slash command in the menu. */
 function SlashIcon({ name }: { name: string }) {
-  const Icon = SLASH_ICONS[name] ?? Terminal;
+  const Icon = SLASH_ICONS[name] ?? Search;
   return <Icon />;
 }
 
@@ -322,6 +320,8 @@ export function ChatView({
   const activeRunIdRef = useRef<string | null>(null);
   const [caret, setCaret] = useState(0);
   const [menuIdx, setMenuIdx] = useState(0);
+  // Session-local recency; message content and cross-host bot ids are never persisted.
+  const [recentCommands, setRecentCommands] = useState<string[]>([]);
   const [menuDismissed, setMenuDismissed] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [inputScroll, setInputScroll] = useState(0);
@@ -681,33 +681,11 @@ export function ChatView({
     if (!triggerKind || dismissKey === menuDismissed) {
       return [];
     }
-    if (triggerKind === "slash") {
-      return rank([...SLASH_COMMANDS, ...LOCAL_COMMANDS, ...APP_COMMANDS], triggerQuery, (c) => ({
-        text: c.name,
-        keywords: [t(c.i18nKey)]
-      })).map((r) => ({
-        id: r.item.name,
-        label: `/${r.item.name}`,
-        detail: t(r.item.i18nKey),
-        insert: r.item.name,
-        bot: undefined as MenuBot | undefined
-      }));
-    }
-    return rank(bots, triggerQuery, (b) => ({
-      text: mentionHandle(botView(b).name)
-    })).map((r) => {
-      const v = botView(r.item);
-      return {
-        id: r.item.id,
-        label: `@${mentionHandle(v.name)}`,
-        detail: v.executor.split("/").pop() ?? "",
-        insert: mentionHandle(v.name),
-        bot: { id: r.item.id, name: v.name, color: v.color, avatar: v.avatar } as
-          | MenuBot
-          | undefined
-      };
-    });
-  }, [triggerKind, triggerQuery, dismissKey, menuDismissed, bots, t]);
+    const options = triggerKind === "slash"
+      ? commandOptions(triggerQuery, recentCommands, t)
+      : mentionOptions(bots, chats, triggerQuery, new Map(chats.map((c) => [c.id, chatActivityMs(runs, needs, c.id)])));
+    return optionGroups(options).flatMap((group) => options.filter((o) => o.group === group));
+  }, [triggerKind, triggerQuery, dismissKey, menuDismissed, bots, chats, runs, needs, recentCommands, t]);
   // once the trigger is gone a later one (even an identical one) starts fresh
   useEffect(() => {
     if (dismissKey === null) {
@@ -716,7 +694,7 @@ export function ChatView({
   }, [dismissKey]);
   const menuId = useId();
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const menuOpen = menuItems.length > 0;
+  const menuOpen = triggerKind !== null && dismissKey !== menuDismissed;
   const menuActive = Math.min(menuIdx, Math.max(menuItems.length - 1, 0));
 
   // keep the arrow-key selection visible in a long menu
@@ -733,6 +711,7 @@ export function ChatView({
     if (!item || !trigger) {
       return;
     }
+    if (trigger.kind === "slash") setRecentCommands((prev) => [item.id, ...prev.filter((id) => id !== item.id)].slice(0, 5));
     const next = applyCompletion(text, trigger, item.insert);
     setText(next.text);
     setCaret(next.caret);
@@ -959,15 +938,15 @@ export function ChatView({
       const n = menuItems.length;
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setMenuIdx((menuActive + 1) % n);
+        setMenuIdx((menuActive + 1) % Math.max(n, 1));
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        setMenuIdx((menuActive - 1 + n) % n);
+        setMenuIdx((menuActive - 1 + n) % Math.max(n, 1));
         return;
       }
-      if (e.key === "Enter" || e.key === "Tab") {
+      if (n > 0 && (e.key === "Enter" || e.key === "Tab")) {
         e.preventDefault();
         complete(menuActive);
         return;
@@ -1810,7 +1789,7 @@ export function ChatView({
                   ? t("chat.slash.menu")
                   : t("chat.slash.mentionMenu")}
               </p>
-              <ul
+              <div
                 className={styles.menuList}
                 id={menuId}
                 role="listbox"
@@ -1820,10 +1799,15 @@ export function ChatView({
                     : t("chat.slash.mentionMenu")
                 }
               >
-                {menuItems.map((m, i) => (
-                  <li
+                {optionGroups(menuItems).map((group) => (
+                  <div key={group} role="group" aria-label={t(`chat.menu.groups.${group}`)}>
+                    <p className={styles.menuGroup} aria-hidden="true">{t(`chat.menu.groups.${group}`)}</p>
+                    <div className={styles.menuGroupList}>
+                {menuItems.map((m, i) => m.group !== group ? null : (
+                  <div
                     key={m.id}
                     id={`${menuId}-${i}`}
+                    data-bot-id={m.bot?.id}
                     role="option"
                     aria-selected={i === menuActive}
                     className={[
@@ -1848,13 +1832,19 @@ export function ChatView({
                         <SlashIcon name={m.id} />
                       )}
                     </span>
-                    <span className={styles.menuLabel}>{m.label}</span>
-                    {m.detail ? (
-                      <span className={styles.menuDetail}>{m.detail}</span>
-                    ) : null}
-                  </li>
+                    <span className={styles.menuCopy}>
+                      <span className={styles.menuLabel}>{Array.from(m.label).map((char, index) =>
+                        m.indices.includes(index) ? <mark key={index}>{char}</mark> : <span key={index}>{char}</span>
+                      )}</span>
+                      {m.detail ? <span className={styles.menuDetail}>{m.detail}</span> : null}
+                    </span>
+                  </div>
                 ))}
-              </ul>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {menuItems.length === 0 ? <p className={styles.menuEmpty} role="status"><Search aria-hidden="true" />{t("chat.menu.empty")}</p> : null}
               <p className={styles.menuKeys} aria-hidden="true">
                 <kbd>↑</kbd>
                 <kbd>↓</kbd> {t("chat.menu.navigate")}
@@ -1891,7 +1881,7 @@ export function ChatView({
             aria-expanded={menuOpen}
             aria-controls={menuOpen ? menuId : undefined}
             aria-activedescendant={
-              menuOpen ? `${menuId}-${menuActive}` : undefined
+              menuOpen && menuItems.length > 0 ? `${menuId}-${menuActive}` : undefined
             }
             placeholder={
               awaitingApproval

@@ -1,3 +1,4 @@
+import { StreamQuality } from "../components/StreamQuality";
 import {
   ArrowLeft,
   Globe,
@@ -111,7 +112,9 @@ export function LiveViewer({
     canClearForeignPause,
     enqueueInput,
     resetInputState,
-    setComposing
+    setComposing,
+    qualityMode,
+    setQualityMode
   } = view;
 
   const viewFailure = streamFailure ?? (!frameUrl ? targetsError : null);
@@ -440,6 +443,7 @@ export function LiveViewer({
         </div>
 
         <div className={styles.headerRight}>
+          <StreamQuality mode={qualityMode} onChange={setQualityMode} />
           <PeerLinkBadge enabled={source === "home" && !isLocalClient} className={styles.stateBadge} />
           <span
             className={styles.stateBadge}
@@ -465,7 +469,7 @@ export function LiveViewer({
         </div>
       </header>
 
-      {otherOwner || state.lastError || viewFailure || state.disconnected || state.needsResync ? (
+      {otherOwner || state.lastError || viewFailure || state.disconnected || state.needsResync || state.streamStale ? (
         <div className={styles.statusLine} role="status">
           {otherOwner ? (
             <strong>{t("liveView.otherOwner", { owner: otherOwner })}</strong>
@@ -484,6 +488,10 @@ export function LiveViewer({
             </span>
           ) : state.disconnected ? (
             <span className={styles.errorInline}>{t("liveView.reconnecting")}</span>
+          ) : state.streamStale ? (
+            <span className={styles.errorInline} data-testid="live-viewer-stalled">
+              {t("computerCard.stalled")}
+            </span>
           ) : state.needsResync ? (
             <span className={styles.errorInline}>
               {t("liveView.reasons.resync_required")}

@@ -3,15 +3,23 @@ import { test } from "node:test";
 import {
   BAYER8,
   bayerThreshold,
+  buildDitherBytes,
   buildField,
+  DEFAULT_WALLPAPER_MOTION,
   diagonalThreshold,
   driftOffset,
+  isBatterySaver,
+  LIVE_FRAME_INTERVAL_MS,
   nextDriftDelay,
   packPalette,
+  packPaletteRgb,
   parseWallpaper,
+  parseWallpaperMotion,
   quantize,
   renderField,
   resolveWallpaper,
+  shouldAnimateWallpaper,
+  startWallpaper,
   WALLPAPERS,
   WALLPAPER_KINDS
 } from "./wallpaper.ts";
@@ -93,5 +101,161 @@ test("renderField only paints palette colours and drifting shifts the picture", 
     const set = new Set(packed);
     assert.ok(t0.every((w) => set.has(w)), kind);
     assert.notDeepEqual(t0, t1);
+  }
+});
+
+test("motion setting defaults to subtle, parses valid modes, and battery saver guards discharging <= 20%", () => {
+  assert.equal(DEFAULT_WALLPAPER_MOTION, "subtle");
+  assert.equal(parseWallpaperMotion(undefined), "subtle");
+  assert.equal(parseWallpaperMotion("bogus"), "subtle");
+  for (const m of ["off", "subtle", "live"] as const) assert.equal(parseWallpaperMotion(m), m);
+
+  assert.equal(isBatterySaver(null), false);
+  assert.equal(isBatterySaver({ charging: false, level: 0.2 }), true);
+  assert.equal(isBatterySaver({ charging: false, level: 0.21 }), false);
+  assert.equal(isBatterySaver({ charging: true, level: 0.1 }), false);
+});
+
+test("shouldAnimateWallpaper pauses on off, hidden, unfocused, reduced motion, or battery saver", () => {
+  const base = { motion: "live" as const, hidden: false, focused: true, reducedMotion: false, batterySaver: false };
+  assert.equal(shouldAnimateWallpaper(base), true);
+  assert.equal(shouldAnimateWallpaper({ ...base, motion: "subtle" }), true);
+  assert.equal(shouldAnimateWallpaper({ ...base, motion: "off" }), false);
+  assert.equal(shouldAnimateWallpaper({ ...base, hidden: true }), false);
+  assert.equal(shouldAnimateWallpaper({ ...base, focused: false }), false);
+  assert.equal(shouldAnimateWallpaper({ ...base, reducedMotion: true }), false);
+  assert.equal(shouldAnimateWallpaper({ ...base, batterySaver: true }), false);
+});
+
+test("WebGL dither bytes and RGB palette packing preserve all 4 palette stops and 64 ordered thresholds", () => {
+  const rgb = packPaletteRgb(WALLPAPERS.night.palette);
+  assert.equal(rgb.length, 12);
+  assert.ok(rgb.every((v) => v >= 0 && v <= 1));
+  const bytes = buildDitherBytes("diagonal");
+  assert.equal(bytes.length, 64);
+  assert.ok(bytes.every((b) => b >= 0 && b <= 255));
+});
+
+test("startWallpaper in live mode falls back to static 2D when WebGL is unavailable", () => {
+  const origWin = globalThis.window;
+  const origDoc = globalThis.document;
+  let putCount = 0;
+  let drawnCount = 0;
+  const fakeCtx = {
+    createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    putImageData: () => {
+      putCount++;
+    }
+  };
+  const fakeCanvas = {
+    width: 0,
+    height: 0,
+    getContext: (kind: string) => (kind === "2d" ? fakeCtx : null),
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  } as unknown as HTMLCanvasElement;
+  (globalThis as Record<string, unknown>).window = {
+    innerWidth: 640,
+    innerHeight: 400,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  (globalThis as Record<string, unknown>).document = {
+    hidden: false,
+    hasFocus: () => true,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  try {
+    const handle = startWallpaper(
+      fakeCanvas,
+      "night",
+      () => {
+        drawnCount++;
+      },
+      { motion: "live", createLive: () => null }
+    );
+    assert.equal(putCount, 1);
+    assert.equal(drawnCount, 1);
+    handle.stop();
+  } finally {
+    (globalThis as Record<string, unknown>).window = origWin;
+    (globalThis as Record<string, unknown>).document = origDoc;
+  }
+});
+
+test("startWallpaper live mode pauses when unfocused/battery-saver/reduced-motion and caps at 30 fps", async () => {
+  const origWin = globalThis.window;
+  const origDoc = globalThis.document;
+  const listeners: Record<string, Array<() => void>> = {};
+  let focused = true;
+  let batterySaver = false;
+  let reduced = false;
+  let nowMs = 0;
+  const draws: number[] = [];
+  let disposed = false;
+
+  (globalThis as Record<string, unknown>).window = {
+    innerWidth: 640,
+    innerHeight: 400,
+    addEventListener: (ev: string, fn: () => void) => {
+      (listeners[ev] ??= []).push(fn);
+    },
+    removeEventListener: () => {}
+  };
+  (globalThis as Record<string, unknown>).document = {
+    hidden: false,
+    hasFocus: () => focused,
+    addEventListener: (ev: string, fn: () => void) => {
+      (listeners[ev] ??= []).push(fn);
+    },
+    removeEventListener: () => {}
+  };
+  try {
+    const fakeCanvas = { width: 0, height: 0 } as unknown as HTMLCanvasElement;
+    const handle = startWallpaper(
+      fakeCanvas,
+      "sky",
+      undefined,
+      {
+        motion: "live",
+        now: () => nowMs,
+        focused: () => focused,
+        batterySaver: () => batterySaver,
+        reducedMotion: () => reduced,
+        createLive: () => ({
+          resize: () => {},
+          draw: (sec: number) => draws.push(sec),
+          readPixelsRgba: () => null,
+          dispose: () => {
+            disposed = true;
+          }
+        })
+      }
+    );
+    assert.equal(draws.length, 1);
+    // While unfocused, blur stops scheduling new frames.
+    focused = false;
+    listeners.blur?.forEach((fn) => fn());
+    const countAfterBlur = draws.length;
+    nowMs += Math.ceil(LIVE_FRAME_INTERVAL_MS * 3);
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(draws.length, countAfterBlur);
+
+    // Battery saver / reduced motion also prevent resuming on focus.
+    batterySaver = true;
+    focused = true;
+    listeners.focus?.forEach((fn) => fn());
+    assert.equal(draws.length, countAfterBlur);
+    batterySaver = false;
+    reduced = true;
+    listeners.focus?.forEach((fn) => fn());
+    assert.equal(draws.length, countAfterBlur);
+
+    handle.stop();
+    assert.equal(disposed, true);
+  } finally {
+    (globalThis as Record<string, unknown>).window = origWin;
+    (globalThis as Record<string, unknown>).document = origDoc;
   }
 });

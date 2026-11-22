@@ -130,6 +130,11 @@
   --color-surface-active: #2d2e33;
   --color-surface-opaque: #191a1f;
   --color-surface-elevated-opaque: #24252a;
+  --on-wallpaper-fill: #24252a;
+  --on-wallpaper-hover: #2d2e33;
+  --on-wallpaper-text: #ecedf1;
+  --on-wallpaper-muted: #999a9e;
+  --on-wallpaper-border: #7f8084;
   --color-text: #ecedf1;
   --color-text-secondary: #c3c4c8;
   --color-text-muted: #999a9e;
@@ -195,7 +200,6 @@
   --center-highlight: inset 0 0 0 transparent;
   --center-shadow: var(--shadow-card);
   --center-scrim: transparent;
-  --message-plate-fill: transparent;
   --composer-fill: var(--color-surface-elevated);
   --composer-filter: none;
   --float-fill: #191a1f;
@@ -203,5 +207,6 @@
   --float-border: color-mix(in srgb, #ecedf1 14%, transparent);
   --float-highlight: inset 0 1px 0 color-mix(in srgb, #ecedf1 4%, transparent);
   --bubble-glass-fill: color-mix(in srgb, #24252a 55%, transparent);
+  --message-plate-fill: transparent;
   --radius-shell: calc(var(--radius-card) * 1.35);
 }

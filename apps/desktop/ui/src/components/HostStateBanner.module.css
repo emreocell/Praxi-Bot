@@ -36,3 +36,6 @@
   flex: 1;
   min-width: var(--space-0);
 }
+
+.root { flex-wrap: wrap; }
+.root > button { max-width: 100%; height: auto; white-space: normal; overflow-wrap: anywhere; }

@@ -450,6 +450,13 @@ export function buildTokens(
     "--color-surface-active": d.hover,
     "--color-surface-opaque": d.surface,
     "--color-surface-elevated-opaque": d.raised,
+    // Opaque plates for small text and controls directly over any wallpaper.
+    // Never inherit glass alpha or veil preferences: contrast must be wallpaper independent.
+    "--on-wallpaper-fill": d.raised,
+    "--on-wallpaper-hover": d.hover,
+    "--on-wallpaper-text": d.text,
+    "--on-wallpaper-muted": d.muted,
+    "--on-wallpaper-border": d.lineStrong,
     "--color-text": d.text,
     "--color-text-secondary": d.secondary,
     "--color-text-muted": d.muted,

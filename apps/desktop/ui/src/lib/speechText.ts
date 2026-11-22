@@ -56,7 +56,7 @@ export function markdownToSpeech(markdown: string, labels: SpeechLabels): string
     .join("\n")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/<[^>\n]+>/g, "")
+    .replace(/<\/?[a-zA-Z][^>\n]*>/g, "")
     .replace(/https?:\/\/\S+/g, "")
     .replace(/(\*\*|__|~~)(.+?)\1/g, "$2")
     .replace(/(^|[\s(])[*_]([^*_\n]+)[*_](?=[\s).,!?;:]|$)/g, "$1$2")

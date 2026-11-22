@@ -209,3 +209,10 @@
     transition: none;
   }
 }
+
+/* The same header container drives all three slots, including the host menu trigger. */
+/* stylelint-disable-next-line unit-disallowed-list -- header container breakpoint */
+@container chat-header (width < 40em) {
+  .name, .chevron { display: none; }
+  .trigger { flex-shrink: 0; padding-inline: var(--space-2); }
+}

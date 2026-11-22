@@ -44,9 +44,25 @@ fn record_launch(args: &[String]) {
         "cwd",
         &std::env::current_dir().unwrap().display().to_string(),
     );
-    let mut keys: Vec<String> = std::env::vars().map(|(k, _)| k).collect();
-    keys.sort();
-    log("env", &keys.join("\n"));
+    log("pid", &std::process::id().to_string());
+    log(
+        "env",
+        &serde_json::to_string(&std::env::vars().collect::<std::collections::BTreeMap<_, _>>())
+            .unwrap(),
+    );
+    match std::env::var("FAKE_MODE").unwrap_or_default().as_str() {
+        "hang" => std::thread::sleep(std::time::Duration::from_secs(120)),
+        "exit" => {
+            eprintln!("PRIVATE_DIAGNOSTIC");
+            std::process::exit(17);
+        }
+        "flood" => {
+            print!("{}", "x".repeat(1024 * 1024 + 10));
+            std::io::stdout().flush().unwrap();
+            std::process::exit(0);
+        }
+        _ => {}
+    }
 }
 
 fn claude(args: &[String]) {
@@ -82,6 +98,9 @@ fn claude(args: &[String]) {
     );
     emit(&json!({"type":"system","subtype":"init"}));
     emit(
+        &json!({"type":"stream_event","event":{"delta":{"type":"thinking_delta","thinking":"PRIVATE_THINKING"}}}),
+    );
+    emit(
         &json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"native "}}}),
     );
     emit(
@@ -102,8 +121,19 @@ fn acp(args: &[String]) {
     let new = read(&mut stdin);
     log("session_new", &new["params"].to_string());
     emit(&json!({"jsonrpc":"2.0","id":new["id"],"result":{"sessionId":"s1"}}));
-    let prompt = read(&mut stdin);
+    let mut prompt = read(&mut stdin);
+    while matches!(
+        prompt["method"].as_str(),
+        Some("session/set_mode" | "session/set_model")
+    ) {
+        emit(&json!({"jsonrpc":"2.0","id":prompt["id"],"result":{}}));
+        prompt = read(&mut stdin);
+    }
     log("prompt", &prompt["params"]["prompt"][0]["text"].to_string());
+    emit(
+        &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{
+        "sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"PRIVATE_THINKING"}}}}),
+    );
     emit(
         &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{
         "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"native acp"}}}}),
@@ -122,6 +152,36 @@ fn acp(args: &[String]) {
     emit(&json!({"jsonrpc":"2.0","id":prompt["id"],"result":{"stopReason":"end_turn"}}));
 }
 
+fn codex(args: &[String]) {
+    record_launch(args);
+    let mut stdin = std::io::stdin().lock();
+    let init = read(&mut stdin);
+    emit(&json!({"jsonrpc":"2.0","id":init["id"],"result":{}}));
+    assert_eq!(read(&mut stdin)["method"], "initialized");
+    let thread = read(&mut stdin);
+    log("thread", &thread.to_string());
+    let policy = thread["params"]["sandbox"].as_str().unwrap();
+    let policy = if policy == "danger-full-access" {
+        "dangerFullAccess"
+    } else {
+        "workspaceWrite"
+    };
+    emit(&json!({"jsonrpc":"2.0","id":thread["id"],"result":{
+        "thread":{"id":"t1"},"sandbox":{"type":policy},
+        "approvalPolicy":thread["params"]["approvalPolicy"]}}));
+    let turn = read(&mut stdin);
+    log("prompt", &turn["params"]["input"].to_string());
+    emit(
+        &json!({"jsonrpc":"2.0","method":"item/reasoning/summaryTextDelta","params":{"delta":"PRIVATE_THINKING"}}),
+    );
+    emit(
+        &json!({"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"delta":"native codex"}}),
+    );
+    emit(
+        &json!({"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed"}}}),
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // `cursor-agent status [--format json]`: the sign-in probe of the Cursor engine.
@@ -129,7 +189,13 @@ fn main() {
         println!("{{\"isAuthenticated\":true}}");
         return;
     }
-    if args.iter().any(|a| a == "acp" || a == "--acp") {
+    if args == ["--version"] && std::env::var("FAKE_DRIVER").as_deref() == Ok("codex") {
+        println!("codex-cli 0.134.0");
+        return;
+    }
+    if args.first().is_some_and(|a| a == "app-server") {
+        codex(&args);
+    } else if args.iter().any(|a| a == "acp" || a == "--acp") {
         acp(&args);
     } else {
         claude(&args);

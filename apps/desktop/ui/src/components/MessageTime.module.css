@@ -1,12 +1,14 @@
 .time {
   flex: none;
   align-self: flex-end;
-  padding: var(--space-1) var(--space-0);
-  color: var(--color-text-faint);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background-color: var(--on-wallpaper-fill);
+  color: var(--on-wallpaper-muted);
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  opacity: 0.75;
+  opacity: 1;
   transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
 }
 

@@ -15,6 +15,16 @@ test("the limit form rejects amounts under $1 and junk, accepts a comma decimal"
   assert.equal(parseLimitInput(" 40 "), 40);
 });
 
+test("a thousands separator is rejected instead of being read as a decimal point", () => {
+  assert.equal(parseLimitInput("1.000"), null);
+  assert.equal(parseLimitInput("1,000"), null);
+  assert.equal(parseLimitInput("2.500"), null);
+  assert.equal(parseLimitInput("1000"), 1000);
+  assert.equal(parseLimitInput("12.5"), 12.5);
+  assert.equal(parseLimitInput("1000000"), 1_000_000);
+  assert.equal(parseLimitInput("1000001"), null);
+});
+
 test("pace says off without a limit, reached/warn from spend, over/under from the forecast", () => {
   assert.equal(paceOf({ ...base, limit_usd: null }), "off");
   assert.equal(paceOf({ ...base, spent_usd: 100 }), "reached");

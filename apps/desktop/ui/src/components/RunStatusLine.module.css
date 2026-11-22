@@ -12,7 +12,9 @@
   align-items: center;
   gap: var(--space-2);
   min-height: calc(var(--space-1) * 5.5);
-  padding-inline: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  background-color: var(--on-wallpaper-fill);
   color: var(--color-text-muted);
   font-size: var(--font-size-ui-sm);
 }
@@ -61,7 +63,7 @@
   border: none;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--color-text-faint);
+  color: var(--on-wallpaper-muted);
   font: inherit;
   font-size: var(--font-size-caption);
   cursor: pointer;
@@ -79,7 +81,7 @@
 
 .time {
   margin-left: auto;
-  color: var(--color-text-faint);
+  color: var(--on-wallpaper-muted);
   font-family: var(--font-mono);
   font-size: var(--font-size-caption);
   font-variant-numeric: tabular-nums;

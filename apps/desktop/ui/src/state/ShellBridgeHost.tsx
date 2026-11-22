@@ -7,7 +7,8 @@ import {
   notificationText,
   resolveNotificationAction
 } from "../lib/notifyRules";
-import { shouldHold, type QuietHours } from "../lib/quietHours";
+import { holdReason } from "../lib/botMute";
+import type { QuietHours } from "../lib/quietHours";
 import { recordNotification } from "../store/notificationHistoryStore";
 import { brandIcon } from "../lib/brandIcons";
 import { useDecisionActions } from "../components/PendingDecisions";
@@ -34,6 +35,7 @@ import type { RunState } from "./timeline";
 export interface ShellBridgeSettings extends NotifyPrefs {
   notifyPrivate: boolean;
   quietHours: QuietHours;
+  mutedBotIds: string[];
 }
 
 /**
@@ -145,10 +147,11 @@ export function ShellBridgeHost({
           tRef.current(k, v),
           appName
         );
-        // Quiet hours hold the toast; it still lands in the history, and a pending
-        // approval stays in "Needs you" regardless.
+        // Quiet hours or a bot mute hold the toast; it still lands in the history, and a
+        // pending approval stays in "Needs you" regardless (a mute never holds one).
         const now = new Date();
-        const hold = shouldHold(now, s.quietHours, d.kind === "needsYou");
+        const held = holdReason(now, s.quietHours, d.kind, d.botId, s.mutedBotIds);
+        const hold = held !== null;
         recordNotification({
           id: `${env.ts_ms}-${d.runId}-${d.kind}-${d.approval?.callId ?? ""}`,
           kind: d.kind,
@@ -159,6 +162,7 @@ export function ShellBridgeHost({
           chatId: d.chatId,
           ts: now.getTime(),
           shown: !hold,
+          ...(held ? { heldBy: held } : {}),
           read: false
         });
         if (hold) {

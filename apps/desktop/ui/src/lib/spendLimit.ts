@@ -5,8 +5,14 @@ export const MAX_LIMIT_USD = 1_000_000;
 
 /** A limit typed by the user: at least $1, at most $1,000,000; a comma decimal is accepted. */
 export function parseLimitInput(raw: string): number | null {
-  const v = Number(raw.trim().replace(",", "."));
-  return raw.trim() !== "" && Number.isFinite(v) && v >= MIN_LIMIT_USD && v <= MAX_LIMIT_USD ? v : null;
+  const text = raw.trim();
+  // Digits with at most two decimals. A thousands separator ("1.000", "1,000") is rejected, not
+  // read as a decimal point, so a limit of one thousand is never saved as one.
+  if (!/^\d+(?:[.,]\d{1,2})?$/.test(text)) {
+    return null;
+  }
+  const v = Number(text.replace(",", "."));
+  return v >= MIN_LIMIT_USD && v <= MAX_LIMIT_USD ? v : null;
 }
 
 /** Where the month stands against the limit (drives the tone and the sentence under the bar). */

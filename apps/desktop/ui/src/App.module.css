@@ -369,7 +369,7 @@
   justify-self: start;
   padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-pill);
-  background-color: var(--message-plate-fill);
+  background-color: var(--on-wallpaper-fill);
 }
 :global(:root[data-veil="on"]) .windowActions {
   justify-self: end;
@@ -579,7 +579,7 @@
 .titleBar {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
   flex-shrink: 0;
   gap: var(--space-3);
@@ -773,3 +773,23 @@
   filter: grayscale(0.6);
   pointer-events: none;
 }
+
+.titleBar { container: chat-header / inline-size; }
+.runtimeName { min-width: var(--space-0); overflow: hidden; text-overflow: ellipsis; }
+.liveDot, .botChip > :first-child, .botChip > svg { flex-shrink: 0; }
+.botChip { min-width: var(--space-0); justify-self: center; background-color: var(--on-wallpaper-fill); }
+.runtimeLabel, .windowActions { min-width: var(--space-0); max-width: 100%; }
+.windowActions > :first-child { min-width: var(--space-0); }
+.runtimeLabel { border-radius: var(--radius-pill); padding: var(--space-1) var(--space-2); background-color: var(--on-wallpaper-fill); color: var(--on-wallpaper-muted); }
+/* stylelint-disable-next-line unit-disallowed-list -- header container breakpoint */
+@container chat-header (width < 40em) {
+  .windowActions { gap: var(--space-1); }
+  .botChip { gap: var(--space-1); padding-inline: var(--space-1); }
+}
+/* stylelint-disable-next-line unit-disallowed-list -- header container breakpoint */
+@container chat-header (width < 34em) {
+  .runtimeName, .botChipName { display: none; }
+  .runtimeLabel { justify-self: start; }
+}
+
+.runtimeIcon { flex: none; width: var(--size-icon-sm); height: var(--size-icon-sm); }

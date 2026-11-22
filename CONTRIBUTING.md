@@ -142,6 +142,11 @@ Testing) and the UI checks below. It also checks that `docs/api/openapi.json` an
 `pnpm --dir apps/desktop/ui gen:api`, and commit both files. Pull requests that only change
 documentation skip the long Rust jobs. A PR is merged only when CI is green.
 
+To measure recent CI runs locally, use `python scripts/ci_report.py --runs 30`.
+See [reading CI timing reports](docs/contributing/ci-report.md) for prerequisites,
+queue/run-time definitions, JUnit artifacts and flaky-candidate limitations, and
+the [November 2026 findings](docs/contributing/ci-report-2026-11.md) for the first sample.
+
 The CLI reference is checked too: `apps/cli/tests/cli_reference.rs` fails when a visible
 command, long flag or environment variable is missing from `docs/guide/cli-reference.md`, or
 when a heading names a command that no longer exists. Update the guide, or add a reasoned entry

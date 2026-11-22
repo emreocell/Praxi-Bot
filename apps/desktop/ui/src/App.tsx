@@ -1,4 +1,4 @@
-import { BellDot, BellRing, ChevronDown, FlaskConical, GripVertical, Star, LoaderCircle, MessageSquare, Plus, Search, ServerOff, Settings2 } from "lucide-react";
+import { BellDot, BellRing, ChevronDown, FlaskConical, GripVertical, Star, LoaderCircle, MessageSquare, Monitor, Plus, Search, Server, ServerOff, Settings2 } from "lucide-react";
 import { unreadBotIds } from "./lib/unread";
 import { useReadState } from "./store/readStateStore";
 import { ApiError } from "./api/client";
@@ -61,6 +61,7 @@ import { chatTitleLabel } from "./lib/chatTitle";
 import { APP_COMMAND_EVENT, type AppCommandTarget } from "./lib/slash";
 import { editorSection } from "./lib/botEditor";
 import { BOT_COLORS, botView, draftFromBot } from "./lib/botProfile";
+import { isBotMuted, setBotMuted } from "./lib/botMute";
 import { makeBotMain } from "./lib/botOrder";
 import {
   backFromChatOpensPanel,
@@ -816,7 +817,7 @@ function AppShell() {
       style={{ "--size-sidebar-width": `${railWidth}px` } as CSSProperties}
       backdrop={
         wallpaperKind ? (
-          <Wallpaper kind={wallpaperKind} />
+          <Wallpaper kind={wallpaperKind} motion={settings.wallpaperMotion} />
         ) : settings.backdrop !== NO_BACKDROP && settings.backdrop !== CUSTOM_BACKDROP ? (
           <Backdrop
             scene={settings.backdrop}
@@ -873,6 +874,16 @@ function AppShell() {
               isMain={bots[0]?.id === selectedBot.id}
               mainBotName={bots[0] ? botView(bots[0]).name : undefined}
               onMakeMain={botIds.length > 1 ? () => saveBotOrder(makeBotMain(botIds, selectedBot.id)) : undefined}
+              notifyMuted={isBotMuted(settings.mutedBotIds, selectedBot.id)}
+              onToggleNotifyMute={() =>
+                updateSettings({
+                  mutedBotIds: setBotMuted(
+                    settings.mutedBotIds,
+                    selectedBot.id,
+                    !isBotMuted(settings.mutedBotIds, selectedBot.id)
+                  )
+                })
+              }
             />
           ) : null}
         </SidePanel>
@@ -959,7 +970,7 @@ function AppShell() {
     >
       <div id="main-content" tabIndex={-1} className={styles.mainColumn}>
         <div className={styles.titleBar} data-tauri-drag-region>
-          <span className={styles.runtimeLabel} data-tauri-drag-region><i className={styles.liveDot} aria-hidden="true" />{home.kind === "host" && !workLocalNow ? home.name || t("computerPicker.host") : t("account.localComputer")}</span>
+          <span className={styles.runtimeLabel} data-tauri-drag-region title={home.kind === "host" && !workLocalNow ? home.name || t("computerPicker.host") : t("account.localComputer")}><i className={styles.liveDot} aria-hidden="true" />{home.kind === "host" && !workLocalNow ? <Server className={styles.runtimeIcon} aria-hidden="true" /> : <Monitor className={styles.runtimeIcon} aria-hidden="true" />}<span className={styles.runtimeName}>{home.kind === "host" && !workLocalNow ? home.name || t("computerPicker.host") : t("account.localComputer")}</span></span>
           {botInView && panelBotView ? (
             <button
               ref={chipRef}
@@ -968,6 +979,7 @@ function AppShell() {
               aria-expanded={panelVisible}
               aria-controls="bot-panel"
               title={t("botPanel.toggle")}
+              aria-label={`${panelBotView.name}: ${t("botPanel.toggle")}`}
               data-testid="bot-chip"
               onClick={togglePanel}
             >

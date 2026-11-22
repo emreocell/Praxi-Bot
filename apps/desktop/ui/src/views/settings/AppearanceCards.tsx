@@ -422,9 +422,18 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
       t("appearance.wallpaper.description"),
       row(
         "wallpaper",
-        <WallpaperPicker value={settings.wallpaper} themeId={theme.id} themeIsDark={!isLightColor(theme.bg)} veil={settings.wallpaperVeil} onVeil={(wallpaperVeil) => update({ wallpaperVeil }, { deferSave: true })} onChange={(wallpaper) => update({ wallpaper })} />
+        <WallpaperPicker
+          value={settings.wallpaper}
+          motion={settings.wallpaperMotion}
+          themeId={theme.id}
+          themeIsDark={!isLightColor(theme.bg)}
+          veil={settings.wallpaperVeil}
+          onVeil={(wallpaperVeil) => update({ wallpaperVeil }, { deferSave: true })}
+          onMotion={(wallpaperMotion) => update({ wallpaperMotion })}
+          onChange={(wallpaper) => update({ wallpaper })}
+        />
       ),
-      { keywords: "wallpaper sky clouds dither halftone animated duvar kagidi bulut gokyuzu hintergrund wolken" }
+      { keywords: "wallpaper sky clouds dither halftone animated live subtle motion duvar kagidi bulut gokyuzu canli hafif hareket hintergrund wolken lebendig" }
     ),
     card(
       "corners",

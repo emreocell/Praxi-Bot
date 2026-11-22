@@ -24,3 +24,11 @@ test("code and tables are summarised, formatting marks removed", () => {
     "Result\nDone: see the docs and run.\nfirst\nsecond\n(code omitted)\n(table omitted)\nBye"
   );
 });
+
+test("comparison signs are read aloud, real tags are still dropped", () => {
+  assert.equal(
+    markdownToSpeech("Eğer x < 10 ve y > 5 ise devam et.", labels),
+    "Eğer x < 10 ve y > 5 ise devam et."
+  );
+  assert.equal(markdownToSpeech("a <b>bold</b> <https://example.com/x> c", labels), "a bold c");
+});

@@ -310,6 +310,11 @@
       "description": "Slowly drifting dithered clouds behind the panels. Off by default; pauses when the window is hidden.",
       "dusk": "Dusk",
       "hint": "Follow theme picks Night for Obsidian, Sky for Cobalt, Dusk for Raven and Warm for Clay. It replaces the backdrop while on, and reduced motion shows one still frame.",
+      "motion": "Cloud motion",
+      "motionHint": "Subtle drifts one pixel every few seconds. Live gently animates layered clouds at up to 30 fps and pauses when hidden, unfocused, or on battery saver.",
+      "motionLive": "Live",
+      "motionOff": "Off",
+      "motionSubtle": "Subtle",
       "night": "Night",
       "off": "Off",
       "sky": "Sky",
@@ -861,6 +866,8 @@
       "toolsOnHint": "Reading is allowed. Sending always follows the permission mode of this bot, and asks first by default."
     },
     "makeMain": "Make main bot",
+    "muteNotify": "Mute run notifications",
+    "muteNotifyHint": "Finished and failed runs of this bot stay silent and go to the notification history. Approvals and questions still notify.",
     "myComputer": "My computer",
     "needsDesktop": "{{name}} has no desktop session, so there is no screen to show. To add one, run this on this computer:",
     "noChatMatches": "No chats match",
@@ -1308,6 +1315,14 @@
     },
     "menu": {
       "close": "close",
+      "empty": "No matches. Try a different command or bot name.",
+      "groups": {
+        "app": "Workspace",
+        "bots": "All bots",
+        "chat": "Conversation",
+        "pinned": "Pinned",
+        "recent": "Recent"
+      },
       "navigate": "navigate",
       "select": "select"
     },
@@ -1841,6 +1856,7 @@
     "show": "Show screen",
     "sideBot": "Bot's",
     "sideMine": "Mine",
+    "stalled": "No new picture for a moment…",
     "status": {
       "local": "{{system}} · the bot works here",
       "localNoSystem": "The bot works here",
@@ -3088,6 +3104,15 @@
       "title": "Bot paused, waiting for you"
     },
     "privacyNotice": "Screen pixels cannot be redacted (may show passwords or OTPs); this stream stays in memory only and is never sent to model providers.",
+    "quality": {
+      "auto": "Auto",
+      "autoHint": "Sharp, and lighter automatically when this computer or the connection cannot keep up",
+      "high": "High",
+      "highHint": "Largest and sharpest picture (up to 1920×1080), uses the most data",
+      "label": "Picture quality",
+      "saver": "Data saver",
+      "saverHint": "Smaller picture, uses the least data"
+    },
     "queryFailed": "Could not load the screen list. It is retried automatically.",
     "reacquireAction": "Reacquire control",
     "reasons": {
@@ -3393,6 +3418,7 @@
     "clear": "Clear history",
     "empty": "No notifications yet.",
     "held": "Held (quiet hours)",
+    "heldMuted": "Held (bot muted)",
     "kind": {
       "failed": "Run failed",
       "longRun": "Long run finished",

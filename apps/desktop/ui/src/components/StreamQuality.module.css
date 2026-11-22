@@ -1,0 +1,24 @@
+.group {
+  display: inline-flex;
+  padding: var(--size-border-thick);
+  border-radius: var(--radius-md);
+  background-color: color-mix(in srgb, var(--color-media-scrim) 70%, transparent);
+}
+
+.group button {
+  padding: var(--size-border-thick) calc(var(--u) * 1.75);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-on-media);
+  font: inherit;
+  font-size: var(--font-size-micro);
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.group button[aria-pressed="true"] {
+  background-color: var(--color-surface-active);
+  color: var(--color-text);
+  opacity: 1;
+}

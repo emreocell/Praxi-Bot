@@ -26,3 +26,6 @@
 .hint {
   color: var(--color-text-muted);
 }
+
+.root { flex-wrap: wrap; }
+.root > button { max-width: 100%; height: auto; white-space: normal; overflow-wrap: anywhere; }

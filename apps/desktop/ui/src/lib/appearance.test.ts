@@ -92,6 +92,7 @@ test("valid new values round-trip", () => {
     ownBubble: "accent",
     backdrop: "reed2",
     wallpaper: "off",
+    wallpaperMotion: "live",
     wallpaperVeil: 35,
     backdropDim: 33.4,
     panelTransparency: 80,
@@ -167,8 +168,10 @@ test("URL overrides (mock review screenshots) are validated and optional", () =>
   assert.equal(a.corners, "round");
   assert.equal(a.backdrop, "silk");
   assert.equal(a.backdropDim, 30);
-  const b = appearanceFromQuery(q("theme=moss&accent=%23e11d48&style=bogus"), DEFAULT_APPEARANCE);
+  const b = appearanceFromQuery(q("theme=moss&accent=%23e11d48&style=bogus&wallpaper=night&motion=live"), DEFAULT_APPEARANCE);
   assert.equal(b.accentColor, "#e11d48");
   assert.equal(b.uiStyle, "solid");
+  assert.equal(b.wallpaper, "night");
+  assert.equal(b.wallpaperMotion, "live");
   assert.equal(appearanceFromQuery(q("accent=bot"), { ...DEFAULT_APPEARANCE, accentColor: "theme" }).accentColor, "bot");
 });

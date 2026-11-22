@@ -1,32 +1,30 @@
 .wrap {
   display: flex;
   justify-content: center;
-  padding: var(--space-2) var(--space-5);
+  padding: var(--space-2) var(--space-3);
   flex-shrink: 0;
+  container: pause-banner / inline-size;
 }
-
 .banner {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  max-width: 100%;
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-pill);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-2) var(--space-3);
+  width: 100%;
+  max-width: var(--size-content-max);
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
   border: var(--size-border) solid var(--color-warning);
-  background-color: var(--color-accent-subtle);
-  color: var(--color-text);
+  background-color: var(--on-wallpaper-fill);
+  color: var(--on-wallpaper-text);
   font-size: var(--font-size-sm);
 }
-
-.text {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-0);
-  min-width: 0;
-}
-
-.actions {
-  display: inline-flex;
-  gap: var(--space-2);
+.banner > svg { width: var(--size-icon-sm); height: var(--size-icon-sm); }
+.text { display: flex; flex-direction: column; gap: var(--space-1); min-width: var(--space-0); overflow-wrap: anywhere; }
+.actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); min-width: var(--space-0); }
+.actions > button { flex: 1 1 auto; min-width: var(--space-0); max-width: 100%; height: auto; min-height: var(--size-control-sm); white-space: normal; overflow-wrap: anywhere; }
+/* stylelint-disable-next-line unit-disallowed-list -- banner container breakpoint */
+@container pause-banner (width >= 50em) {
+  .banner { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
+  .actions { grid-column: auto; }
 }

@@ -109,3 +109,13 @@
     animation: none;
   }
 }
+
+.title, .text, .suggestTitle {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background-color: var(--on-wallpaper-fill);
+  color: var(--on-wallpaper-muted);
+}
+.title { color: var(--on-wallpaper-text); }
+.suggestChip { background-color: var(--on-wallpaper-fill); color: var(--on-wallpaper-text); border-color: var(--on-wallpaper-border); }
+.suggestChip:hover:not(:disabled) { background-color: var(--on-wallpaper-hover); }

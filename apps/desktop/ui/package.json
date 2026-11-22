@@ -11,12 +11,14 @@
     "gen:api": "openapi-typescript ../../../docs/api/openapi.json -o src/api/schema.d.ts",
     "check:i18n": "node scripts/sort-locales.mjs --check && node scripts/check-i18n.mjs",
     "sort:i18n": "node scripts/sort-locales.mjs",
-    "test": "node --test \"src/**/*.test.ts\"",
+    "test": "node --test \"src/**/*.test.ts\" && pnpm test:contrast",
     "check:themes": "node ../../../packages/ui/scripts/check-themes.mjs",
     "check:layout": "node ../../../packages/ui/scripts/check-layout.mjs",
     "check:layout:browser": "node scripts/check-layout-browser.mjs",
     "check:a11y": "node scripts/check-a11y.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "test:contrast": "vitest run tests/wallpaper.contrast.spec.ts",
+    "check:chat-ui": "node scripts/check-chat-ui.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
@@ -41,6 +43,7 @@
     "axe-core": "^4.14.1",
     "openapi-typescript": "^7.13.0",
     "playwright-core": "^1.65.1",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "vitest": "^5.1.1"
   }
 }

@@ -66,7 +66,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Create, import, update or delete shared skills through the local API | [Managing shared skills](skill-management-api.md) |
 | Connect external apps (OAuth, Composio, and MCP servers in the desktop app) | [Connecting apps](apps.md) |
 | Configure external MCP servers by hand (`mcp.toml` and API) | [MCP servers](mcp-servers.md) |
-| Let another MCP agent use a selected Praxi bot | [Praxi as an MCP server](mcp-server.md) |
+| Let another MCP agent use a selected Praxi bot; client recipes and troubleshooting | [Praxi as an MCP server](mcp-server.md) |
 | Pick a provider, use the Gemini free tier | [Providers and models](providers-and-models.md) |
 | Understand how the model picker names and ranks models | [Model picker metadata](model-catalog.md) |
 | Let a lighter model answer simple first turns | [Optional model tiering](model-tiering.md) |

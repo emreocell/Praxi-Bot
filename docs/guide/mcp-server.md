@@ -75,7 +75,7 @@ The examples use `<BOT-UUID>` and `<CREDENTIAL-ID>` as placeholders.
 
 ### Claude Code
 
-Documented in the Claude Code "Connect Claude Code to tools via MCP" page. Options
+See the official [Claude Code MCP guide](https://code.claude.com/docs/en/mcp). Options
 go before the server name, and `--` separates the command:
 
 ```sh
@@ -104,7 +104,7 @@ environment variables, which matters for calls that wait for an approval.
 
 ### Claude Desktop
 
-Documented in the "Connect to local MCP servers" quickstart of modelcontextprotocol.io.
+See the official [local MCP server quickstart](https://modelcontextprotocol.io/docs/develop/connect-local-servers).
 Open Settings, Developer, Edit Config, or edit `claude_desktop_config.json`
 directly:
 
@@ -112,8 +112,7 @@ directly:
 | --- | --- |
 | macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
-
-Claude Desktop is not offered for Linux; use another client there.
+| Linux | `~/.config/Claude/claude_desktop_config.json` |
 
 ```json
 {
@@ -126,12 +125,12 @@ Claude Desktop is not offered for Linux; use another client there.
 }
 ```
 
-On Windows write backslashes doubled in JSON (`"C:\Tools\bot.exe"`). Restart
+On Windows write backslashes doubled in JSON (`"C:\\Tools\\bot.exe"`). Restart
 Claude Desktop after every edit.
 
 ### Cursor
 
-Documented on Cursor's "Model Context Protocol" page. Global file
+See the official [Cursor MCP setup guide](https://prod.cursor.com/help/customization/mcp). Global file
 `~/.cursor/mcp.json` (`%USERPROFILE%\.cursor\mcp.json` on Windows), or
 `.cursor/mcp.json` inside a project:
 
@@ -146,12 +145,13 @@ Documented on Cursor's "Model Context Protocol" page. Global file
 }
 ```
 
-Enable the server under Settings, MCP (or Tools & Integrations).
+Save the file, restart Cursor, then open Customize → MCPs to check the server.
 
 ### VS Code (GitHub Copilot, agent mode)
 
-Documented on the VS Code "Use MCP servers" page. The top-level key is
-`servers`, not `mcpServers`. Workspace file `.vscode/mcp.json`, or the user
+See the official [VS Code MCP configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
+The example below uses the editor-managed format with the top-level key
+`servers`. Workspace file `.vscode/mcp.json`, or the user
 profile file opened with the **MCP: Open User Configuration** command (under
 `%APPDATA%\Code\User\mcp.json`, `~/Library/Application Support/Code/User/mcp.json`
 or `~/.config/Code/User/mcp.json`):
@@ -188,19 +188,21 @@ is prompted and stored in VS Code's secret storage, not in the file:
 ```
 
 Start the server from the "Start" code lens above the entry, then use agent mode.
+This recipe is for editor-managed MCP. The newer Copilot harness uses portable
+`mcpServers` configuration; VS Code input variables are specific to the editor
+format and are not forwarded to harness sessions.
 
 ### Zed
 
-Documented on Zed's "Model Context Protocol" page. Zed calls them context
+See the official [Zed MCP guide](https://zed.dev/docs/ai/mcp). Zed calls them context
 servers and keeps them in the settings file (`~/.config/zed/settings.json` on
 macOS and Linux, `%APPDATA%\Zed\settings.json` on Windows; open it with the
-`zed: open settings` command):
+`zed: open settings file` command):
 
 ```json
 {
   "context_servers": {
     "praxi": {
-      "source": "custom",
       "command": "bot",
       "args": ["mcp", "serve", "--bot", "<BOT-UUID>", "--token-id", "<CREDENTIAL-ID>"],
       "env": {}
@@ -209,8 +211,7 @@ macOS and Linux, `%APPDATA%\Zed\settings.json` on Windows; open it with the
 }
 ```
 
-Older Zed releases omit `"source": "custom"`. The Agent panel settings show a
-green dot once the server initialized.
+The Agent panel settings show a green dot once the server initialized.
 
 ### Generic stdio client
 
@@ -224,28 +225,35 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
 
 ### Verification status
 
-These snippets follow the configuration formats documented on the pages named
-above. They were **not** run against installed copies of each client, so no
+These snippets follow the official configuration pages linked above, checked on
+2026-11-22. They are **unverified in installed clients**: they were not run
+against installed copies of each client, so no
 client version is claimed as verified. What *is* tested in CI is the server side
 every client depends on: `apps/cli/src/mcp_serve/compat_tests.rs` drives raw
 JSON-RPC frames (protocol-version negotiation, capabilities, `tools/list` and
 cursors, `tools/call` results with `isError`, `ping`, unknown methods, batches,
 invalid JSON, oversized frames and `notifications/cancelled`), and
-`apps/cli/tests/` runs the real process. If you confirm a recipe on a specific
+`apps/cli/tests/mcp_server_cancellation.rs` drives the real process against a real
+loopback daemon with a fake provider: actual tool catalog and annotations,
+task start/status/result/cancel, large valid input, over-limit rejection,
+live expiry/revocation, rate limiting, and cancellation during a pending
+computer approval. The hermetic tests use an encrypted-file credential store;
+they do not verify OS keychain access from client launch environments.
+If you confirm a recipe on a specific
 client version, please add it here.
 
 ## Task tools
 
 The default layer is `--allow tasks`, requiring scope `mcp:tasks`.
 
-| Tool | Arguments | Result |
-| --- | --- | --- |
-| `bot_list` | `{}` | The selected bot's id and name |
-| `task_start` | `{ "text": "...", "bot": "optional selected UUID" }` | New run id |
-| `task_status` | `{ "run": "UUID" }` | State and external-agent attribution |
-| `task_result` | `{ "run": "UUID" }` | Readiness, bounded redacted text and error flag |
-| `task_cancel` | `{ "run": "UUID" }` | Cancellation acknowledgment |
-| `schedule_list` | `{}` | This bot's schedule ids, names and enabled states |
+| Tool | Arguments | Result | Read-only hint |
+| --- | --- | --- | --- |
+| `bot_list` | `{}` | The selected bot's id and name | Yes |
+| `task_start` | `{ "text": "...", "bot": "optional selected UUID" }` | New run id | No |
+| `task_status` | `{ "run": "UUID" }` | State and external-agent attribution | Yes |
+| `task_result` | `{ "run": "UUID" }` | Readiness, bounded redacted text and error flag | Yes |
+| `task_cancel` | `{ "run": "UUID" }` | Cancellation acknowledgment | No |
+| `schedule_list` | `{}` | This bot's schedule ids, names and enabled states | Yes |
 
 Every task starts in its own fresh chat. Task start returns immediately; use
 status/result while the bot works or waits for approval. A credential can inspect
@@ -341,9 +349,9 @@ labels and public ids only, and a failed audit write prevents the action.
 
 ## Troubleshooting
 
-“No matching scoped token” means that no live credential permits this bot and
+`no matching scoped token; run bot token create first` means that no live credential permits this bot and
 the requested layers. Create a matching credential as the owner, or select its
-id. “Multiple matching scoped tokens” requires `--token-id`. An expired or
+id. `multiple matching scoped tokens; specify --token-id` requires that flag. An expired or
 revoked credential cannot reconnect.
 
 If a call is waiting, review the approval in Praxi. If a bot uses a native CLI
@@ -356,9 +364,11 @@ the rolling rate window before retrying.
 | Message or symptom | Cause and fix |
 | --- | --- |
 | `cannot unlock the scoped credential store without an interactive prompt` | The process cannot reach the secret store: the OS keychain is locked or unavailable in the client's launch environment (SSH session, service, sandboxed launcher), or the store is an encrypted file and `BOT_SECRETS_PASSPHRASE` is unset. Launch the client from a normal desktop session, or select the file backend with `--secrets-backend file` and provide the passphrase through the client's environment or input mechanism. |
-| `No matching scoped token` right after `bot token create` | The server looked in a different data directory than the one that created the credential. Pass the same `--data-dir` (before `mcp`) to both commands, or set `BOT_DATA_DIR` for both. |
+| `no matching scoped token; run bot token create first` right after `bot token create` | The server looked in a different data directory than the one that created the credential. Pass the same `--data-dir` (before `mcp`) to both commands, or set `BOT_DATA_DIR` for both. |
 | Server shows as failed or `MCP stdio initialization failed` | The client could not start `bot` (use an absolute path), or the daemon is not running on the expected port (`--port`, `--url`). Run the exact command by hand and read its stderr. |
-| Tool results say the credential expired or was revoked | Create a new credential and update `--token-id`. An expired or revoked credential cannot reconnect. |
+| `MCP daemon refused the request (401)` after a working connection | The scoped credential may have expired or been revoked. Create a matching credential and update `--token-id`. The server deliberately hides daemon error details. |
+| `MCP daemon refused the request (403)` | The credential does not permit the selected bot, layer or operation. Create a matching scoped credential or choose a permitted operation. |
+| `MCP daemon refused the request (429)` | The credential reached the rolling call limit or the active-run limit. Wait for the rate window, or finish/cancel an existing run. |
 | A call hangs, then the client reports a timeout | The call is waiting for **Approve once** in Praxi. Approve it there, or raise the client's tool timeout (Claude Code: `MCP_TOOL_TIMEOUT`). A client-side cancel stops the call and its pending approval. |
 | `tools/list` with a `cursor` fails with `-32602` | The tool list is a single page and the server never issues a cursor; send no cursor. |
 | Client sends JSON-RPC batches | Batching was removed in MCP 2025-06-18 and is rejected with `-32600`. Update the client. |

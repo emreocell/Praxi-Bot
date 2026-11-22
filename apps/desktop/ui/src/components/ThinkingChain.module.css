@@ -276,3 +276,12 @@
     transition: none;
   }
 }
+
+.chain {
+  padding: var(--space-2);
+  border-radius: var(--radius-card);
+  background-color: var(--on-wallpaper-fill);
+  color: var(--on-wallpaper-text);
+}
+.head, .thought, .stepTime, .more { color: var(--on-wallpaper-muted); }
+.head:hover, .step:hover, .step:focus-within { background-color: var(--on-wallpaper-hover); }

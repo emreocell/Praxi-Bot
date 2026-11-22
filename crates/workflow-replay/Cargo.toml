@@ -27,6 +27,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tool-registry = { path = "../tool-registry", version = "0.1.0" }
 toml.workspace = true
+url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

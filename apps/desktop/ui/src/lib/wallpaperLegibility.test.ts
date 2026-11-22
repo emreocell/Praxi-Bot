@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { buildThemeTokens, parseVeil, planSurfaces, TEXT_TARGET, veilAlpha, VEIL_DEFAULT, VEIL_MAX, VEIL_MIN } from "ui/surface-model";
 import { contrastRatio, deriveTheme, paletteById } from "ui/theme-model";
 import { evaluateTone, makeToneSource } from "./backdropTone.ts";
-import { buildField, packPalette, renderField, WALLPAPERS, WALLPAPER_DIM, WALLPAPER_KINDS } from "./wallpaper.ts";
+import { buildField, hexToRgb, packPalette, renderField, WALLPAPERS, WALLPAPER_DIM, WALLPAPER_KINDS } from "./wallpaper.ts";
 
 /** The real wallpaper pixels at 1280x800 / its own scale, as an RGBA tone source. */
 function sourceFor(kind: (typeof WALLPAPER_KINDS)[number]) {
@@ -86,3 +86,39 @@ test("veil helpers: parse clamps, alpha is monotonic and capped", () => {
   assert.equal(veilAlpha(0), 0);
   assert.ok(veilAlpha(100) <= 0.5 && veilAlpha(60) < veilAlpha(61));
 });
+
+/* ---- Live clouds worst-case palette coverage (any drifted frame keeps contrast) ---- */
+
+for (const kind of WALLPAPER_KINDS) {
+  for (const id of ["obsidian", "cobalt", "raven", "clay"]) {
+    test(`${kind} live-cloud palette under ${id}: worst-case solid sky/cloud patches keep >= 4.5:1 / >= 7:1 contrast`, () => {
+      const style = WALLPAPERS[kind];
+      // Build a synthetic 64x64 source split evenly into all 4 palette stops (worst solid cell of any frame).
+      const w = 64;
+      const h = 64;
+      const rgba = new Uint8ClampedArray(w * h * 4);
+      const rgbs = style.palette.map(hexToRgb);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = ((y >> 4) + (x >> 4)) % rgbs.length;
+          const [r, g, b] = rgbs[idx];
+          const p = (y * w + x) * 4;
+          rgba[p] = r;
+          rgba[p + 1] = g;
+          rgba[p + 2] = b;
+          rgba[p + 3] = 255;
+        }
+      }
+      const source = makeToneSource(rgba, w, h, 20);
+      const theme = paletteById(id)!;
+      const d = deriveTheme(theme);
+      const tone = evaluateTone(source, { bg: d.bg, dim: WALLPAPER_DIM / 100 });
+      for (const veil of [VEIL_MIN, VEIL_DEFAULT, VEIL_MAX]) {
+        const plan = planSurfaces(d, "glass", true, { transparency: 100, blur: 28, transparentChat: true, tone, veil });
+        for (const layer of plan.layers) {
+          assert.ok(contrastRatio(d.text, layer.color) >= layer.textMin);
+        }
+      }
+    });
+  }
+}

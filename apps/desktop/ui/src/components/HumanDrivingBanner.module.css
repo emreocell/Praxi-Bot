@@ -11,3 +11,6 @@
   color: var(--color-text);
   font-size: var(--font-size-sm);
 }
+
+.banner { flex-wrap: wrap; }
+.banner > button { max-width: 100%; height: auto; white-space: normal; overflow-wrap: anywhere; }
