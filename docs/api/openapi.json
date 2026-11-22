@@ -18981,7 +18981,7 @@
       },
       "McpServerInput": {
         "type": "object",
-        "description": "Body of `POST /v1/mcp/servers`: the `mcp-bridge` server config.  Secrets go\nin `secret_headers` / `secret_env` as secret **names** (store the value with\n`POST /v1/secrets/{name}`).",
+        "description": "Body of `POST /v1/mcp/servers`: the `mcp-bridge` server config.  Secrets go\nin `secret_headers` / `secret_env` as secret **names** (store the value with\n`POST /v1/secrets/{name}`). The boolean switches are independent.",
         "required": [
           "transport"
         ],

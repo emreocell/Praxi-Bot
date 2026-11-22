@@ -36,7 +36,7 @@ fn generic_mcp(name: &str) -> Arc<crate::tests::TestTool> {
     ))
 }
 
-fn use_tool(id: &str, name: &str, input: Value) -> crate::tests::Reply {
+fn use_tool(id: &str, name: &str, input: &Value) -> crate::tests::Reply {
     calls(&[(id, "use_tool", json!({"name": name, "input": input}))])
 }
 
@@ -63,23 +63,23 @@ async fn page_actions_after_a_web_page_do_not_ask_on_full_but_a_private_read_bri
         "secret notes",
     ));
     let fake = Fake::new(vec![
-        use_tool("c1", "mcp:pw/browser_snapshot", json!({})),
-        use_tool("c2", "mcp:pw/browser_click", json!({"ref": "e1"})),
+        use_tool("c1", "mcp:pw/browser_snapshot", &json!({})),
+        use_tool("c2", "mcp:pw/browser_click", &json!({"ref": "e1"})),
         use_tool(
             "c3",
             "mcp:pw/browser_evaluate",
-            json!({"function": "() => 1"}),
+            &json!({"function": "() => 1"}),
         ),
         calls(&[("c4", "fs_read", json!({"path": "notes.txt"}))]),
         use_tool(
             "c5",
             "mcp:pw/browser_navigate",
-            json!({"url": "https://example.com/?q=1"}),
+            &json!({"url": "https://example.com/?q=1"}),
         ),
         use_tool(
             "c6",
             "mcp:pw/browser_navigate",
-            json!({"url": "https://example.com/?q=2"}),
+            &json!({"url": "https://example.com/?q=2"}),
         ),
         text("done"),
     ]);
@@ -138,12 +138,12 @@ async fn a_task_grant_covers_one_tool_and_stops_once_the_run_reads_something_pri
         "secret",
     ));
     let fake = Fake::new(vec![
-        use_tool("c1", "mcp:pw/browser_snapshot", json!({})),
-        use_tool("c2", "mcp:crm/update", json!({"id": 1})),
-        use_tool("c3", "mcp:crm/update", json!({"id": 2})),
-        use_tool("c4", "mcp:crm/delete", json!({"id": 3})),
+        use_tool("c1", "mcp:pw/browser_snapshot", &json!({})),
+        use_tool("c2", "mcp:crm/update", &json!({"id": 1})),
+        use_tool("c3", "mcp:crm/update", &json!({"id": 2})),
+        use_tool("c4", "mcp:crm/delete", &json!({"id": 3})),
         calls(&[("c5", "fs_read", json!({"path": "a.txt"}))]),
-        use_tool("c6", "mcp:crm/update", json!({"id": 4})),
+        use_tool("c6", "mcp:crm/update", &json!({"id": 4})),
         text("done"),
     ]);
     let lp = make_loop(
@@ -187,7 +187,7 @@ async fn the_task_scope_is_refused_on_a_card_that_did_not_offer_it() {
         "ran",
     ));
     let fake = Fake::new(vec![
-        use_tool("c1", "mcp:pw/browser_snapshot", json!({})),
+        use_tool("c1", "mcp:pw/browser_snapshot", &json!({})),
         calls(&[("c2", "shell_run", json!({"command": "ls"}))]),
         text("done"),
     ]);

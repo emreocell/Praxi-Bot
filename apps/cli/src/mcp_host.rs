@@ -764,17 +764,15 @@ fn merge_update(
     if let Some(v) = obj.get("tool_exclude") {
         cfg.tool_exclude = json_strings(v, "tool_exclude")?;
     }
-    if let Some(v) = obj.get("trust_hints") {
-        cfg.trust_hints = json_bool(v, "trust_hints")?;
-    }
-    if let Some(v) = obj.get("public_content") {
-        cfg.public_content = json_bool(v, "public_content")?;
-    }
-    if let Some(v) = obj.get("local_only") {
-        cfg.local_only = json_bool(v, "local_only")?;
-    }
-    if let Some(v) = obj.get("browser") {
-        cfg.browser = json_bool(v, "browser")?;
+    for (key, slot) in [
+        ("trust_hints", &mut cfg.trust_hints),
+        ("public_content", &mut cfg.public_content),
+        ("local_only", &mut cfg.local_only),
+        ("browser", &mut cfg.browser),
+    ] {
+        if let Some(v) = obj.get(key) {
+            *slot = json_bool(v, key)?;
+        }
     }
     if let Some(v) = obj.get("category") {
         cfg.category = if v.is_null() {

@@ -624,6 +624,9 @@ pub struct SecretRequestInfo {
     pub replace: bool,
 }
 
+// Independent offer flags of one card; folding them into an enum would hide which
+// combinations the daemon allows.
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct Pending {
     pub tx: oneshot::Sender<Verdict>,
     /// The card carries tool details or the tool is always-ask: only a
@@ -1735,6 +1738,7 @@ impl Shared {
     }
 
     /// Per-run context, built on first use (also after a restart).
+    #[allow(clippy::too_many_lines)] // One constructor: every per-run field in one place.
     pub fn ctx(&self, run: &Run) -> Result<Arc<RunCtx>, ExecError> {
         if let Some(c) = self.runs.lock().get(&run.id) {
             return Ok(Arc::clone(c));

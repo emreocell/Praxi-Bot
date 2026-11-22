@@ -5988,7 +5988,7 @@ export interface components {
         /**
          * @description Body of `POST /v1/mcp/servers`: the `mcp-bridge` server config.  Secrets go
          *     in `secret_headers` / `secret_env` as secret **names** (store the value with
-         *     `POST /v1/secrets/{name}`).
+         *     `POST /v1/secrets/{name}`). The boolean switches are independent.
          */
         McpServerInput: {
             /** @description Arguments (stdio, with `transport: "stdio"`). */

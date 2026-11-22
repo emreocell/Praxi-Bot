@@ -187,7 +187,8 @@ pub enum McpTransportInput {
 
 /// Body of `POST /v1/mcp/servers`: the `mcp-bridge` server config.  Secrets go
 /// in `secret_headers` / `secret_env` as secret **names** (store the value with
-/// `POST /v1/secrets/{name}`).
+/// `POST /v1/secrets/{name}`). The boolean switches are independent.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct McpServerInput {
     /// HTTP OAuth identity; client secrets are secret-store references.
