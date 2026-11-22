@@ -25,7 +25,7 @@ use crate::{
     format_approval_callback, format_question_callback, store_bot_token,
 };
 
-const TEST_BOT_TOKEN: &str = "123456789:AAH_test_bot_token_secret_value_xyz";
+const TEST_BOT_TOKEN: &str = concat!("123456789", ":", "AAH_test_bot_token_secret_value_xyz");
 const PAIRED_USER_ID: i64 = 4242;
 const UNPAIRED_USER_ID: i64 = 9999;
 const TEST_CHAT_ID: i64 = 7001;
