@@ -23,9 +23,6 @@ allow = [
     "Unlicense",
     # webpki-roots / webpki-root-certs (Mozilla CA bundle data, via iroh and the optional fastembed feature)
     "CDLA-Permissive-2.0",
-    # libbz2-rs-sys (bzip2 0.6, a build dependency of sherpa-onnx-sys behind the optional
-    # `local-voice` feature): the BSD-style bzip2/libbzip2 licence.
-    "bzip2-1.0.6",
 ]
 
 [bans]
