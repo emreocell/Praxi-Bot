@@ -1510,6 +1510,8 @@ fn api_routes() -> Router<AppState> {
             get(spend_routes::get_spend_limit).put(spend_routes::put_spend_limit),
         )
         .route("/v1/voice", get(vo::get_voice).put(vo::update_voice))
+        .route("/v1/voice/local", get(vo::get_local_voice))
+        .route("/v1/voice/local/install", post(vo::install_local_voice))
         .route(
             "/v1/voice/transcribe",
             post(vo::transcribe).layer(axum::extract::DefaultBodyLimit::max(vo::MAX_BODY_BYTES)),

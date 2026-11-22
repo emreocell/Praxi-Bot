@@ -191,6 +191,8 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/email/accounts/{}/send-test"),
     ("PUT", "/v1/web/search"),
     ("PUT", "/v1/voice"),
+    // downloads hundreds of MB onto the owner's disk
+    ("POST", "/v1/voice/local/install"),
     ("PUT", "/v1/composio/key"),
     ("DELETE", "/v1/composio/key"),
     ("POST", "/v1/composio/login"),

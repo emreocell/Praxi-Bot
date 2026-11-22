@@ -26,6 +26,7 @@ impl VoiceControl for FakeVoice {
             stt_provider: crate::voice::VoiceProvider::Whisper,
             gemini_model: "gemini-3.5-transcribe-live".into(),
             gemini_key_set: false,
+            local_model: "whisper-small".into(),
             stt_base_url: "https://stt.example/v1".into(),
             stt_model: "whisper-1".into(),
             stt_key_set: self.key.lock().is_some(),
@@ -120,4 +121,26 @@ async fn gemini_key_is_validated_and_never_echoed() {
     .await;
     assert_eq!(r.status, StatusCode::OK);
     assert!(!String::from_utf8_lossy(&r.body).contains("AIza-gemini-secret"));
+}
+
+#[tokio::test]
+async fn local_voice_routes_default_to_unavailable_and_install_is_owner_only() {
+    let (t, _v) = with_voice();
+    let r = call(&t, Method::GET, "/v1/voice/local", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["available"], json!(false));
+    // The embedder says no: a plain 422, never a download.
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/voice/local/install",
+        Some(json!({"model": "whisper-small"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        crate::owner::OWNER_ROUTES
+            .iter()
+            .any(|(m, p)| *m == "POST" && *p == "/v1/voice/local/install")
+    );
 }
