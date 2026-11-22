@@ -14,7 +14,7 @@
   },
   "addServer": {
     "advanced": "Erweitert",
-    "agentHint": "Praxi verwendet die Schlüssel, die bereits in deinem SSH-Agent geladen sind. Passwörter werden nicht unterstützt.",
+    "agentHint": "Praxi verwendet die Schlüssel, die dein Computer schon für die Server-Anmeldung geladen hat (SSH-Agent). Passwörter werden nicht unterstützt.",
     "answerFailed": "Die Antwort hat die Einrichtung nicht erreicht. Schließe dieses Fenster und beginne von vorn.",
     "auth": "Anmeldung",
     "auth_agent": "SSH-Agent",
@@ -195,7 +195,7 @@
     },
     "host": "Serveradresse",
     "hostHint": "Beispiel: 203.0.113.7 oder meinserver.example.com",
-    "hostKeyBody": "Dieser Computer verbindet sich zum ersten Mal mit {{host}}. Vergleiche diesen Fingerabdruck mit dem in der Konsole deines Anbieters, falls dort einer angezeigt wird.",
+    "hostKeyBody": "Dieser Computer verbindet sich zum ersten Mal mit {{host}}. Der Fingerabdruck unten ist ein Code, der den Server eindeutig kennzeichnet. Vergleiche ihn mit dem in der Konsole deines Anbieters, falls dort einer angezeigt wird.",
     "hostKeyNo": "Nein, stoppen",
     "hostKeyTitle": "Ist das dein Server?",
     "hostKeyYes": "Ja, diesem Server vertrauen",
@@ -209,7 +209,7 @@
     },
     "keyFile": "Private Schlüsseldatei",
     "keyHint": "Nur der Pfad wird verwendet. Praxi kopiert oder speichert den Schlüssel selbst nie.",
-    "lead": "Verbinde einen Server, den du mietest. Kein Ticket zu kopieren.",
+    "lead": "Verbinde einen Server, den du mietest. Praxi übernimmt die Einrichtung.",
     "logEmpty": "Noch nichts zu zeigen.",
     "manual": "Ich habe stattdessen ein Kopplungsticket",
     "noDaemon": "Der lokale Praxi-Dienst läuft nicht. Starte die App neu und versuche es erneut.",
@@ -258,7 +258,7 @@
       "userInvalid": "Nutze nur Buchstaben, Zahlen, Punkte, Bindestriche oder Unterstriche."
     },
     "progress": "Einrichtungsfortschritt",
-    "releaseNote": "Praxi kann einen Server hinzufügen, auf dem Praxi schon läuft. Die Installation für dich braucht eine veröffentlichte Version, die es noch nicht gibt.",
+    "releaseNote": "Auf dem Server muss Praxi vorerst schon installiert sein. Praxi für dich auf einem leeren Server zu installieren ist noch nicht möglich.",
     "retry": "Erneut versuchen",
     "retryResume": "Ab hier erneut versuchen",
     "sayHello": "Sag deinem Bot Hallo",
@@ -3659,7 +3659,7 @@
   },
   "newBot": {
     "advanced": "Erweiterte Einstellungen",
-    "autonomy": "Autonomie",
+    "autonomy": "Wie viel er allein darf",
     "autonomyCustom": "Verwendet die Berechtigungsvorlage {{preset}}.",
     "autonomyHints": {
       "ask": "Liest Dateien, prüft den Bildschirm und durchsucht das Web ohne Nachfrage; fragt vor jeder Änderung, jedem Senden, Seitenabruf, Klick oder Befehl.",
@@ -4073,7 +4073,7 @@
       "confirmParsed": "Prüfe, ob das gemeint war, und drücke dann Erstellen.",
       "create": "Erstellen",
       "cron": "Cron-Ausdruck",
-      "cronHint": "Fünf Felder, optional gefolgt von einer Zeitzone.",
+      "cronHint": "Für alle, die Cron kennen: fünf Felder, zum Beispiel 0 9 * * 1-5 bedeutet werktags 9:00 Uhr. Danach kann eine Zeitzone folgen.",
       "customHint": "Beschreibe es mit eigenen Worten, zum Beispiel „jeden Montag um 8“.",
       "date": "An welchem Tag?",
       "editTitle": "Geplante Aufgabe bearbeiten",
@@ -4155,6 +4155,7 @@
     "movedTo": "Auf {{name}} verschoben: Er läuft dort und ist auf diesem Computer eingefroren.",
     "never": "Nie",
     "new": "Neuer Zeitplan",
+    "newNeedsBot": "Erstelle zuerst einen Bot, dann kannst du etwas für ihn planen.",
     "nextRun": "Nächster Lauf",
     "nextRuns": "Nächste 5 Läufe",
     "nextRunsEmpty": "Keine bevorstehenden Läufe.",
@@ -4215,6 +4216,7 @@
     "subtitle": "Dinge, die deine Bots nach Zeitplan tun: jeden Morgen, jede Stunde oder einmalig.",
     "title": "Geplante Aufgaben",
     "viewCalendar": "Kalender",
+    "viewLabel": "Ansicht",
     "viewList": "Liste",
     "when": "Wann"
   },
@@ -4294,7 +4296,7 @@
   },
   "servers": {
     "add": "Server hinzufügen",
-    "checkNow": "Jetzt prüfen",
+    "checkNow": "Zu diesem Server wechseln",
     "empty": "Noch kein Server. Das ist in Ordnung: Deine Bots laufen auf diesem Computer.",
     "lead": "Server halten deine Bots am Laufen, wenn dieser Computer aus ist.",
     "remove": "Entfernen",

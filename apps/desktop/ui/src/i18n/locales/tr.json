@@ -14,7 +14,7 @@
   },
   "addServer": {
     "advanced": "Gelişmiş",
-    "agentHint": "Praxi, SSH ajanında yüklü anahtarları kullanır. Parola desteklenmez.",
+    "agentHint": "Praxi, bilgisayarının sunuculara girmek için zaten yüklediği anahtarları (SSH ajanı) kullanır. Parola desteklenmez.",
     "answerFailed": "Yanıt kurulum işine ulaşmadı. Bu pencereyi kapatıp yeniden başlat.",
     "auth": "Giriş",
     "auth_agent": "SSH ajanı",
@@ -195,7 +195,7 @@
     },
     "host": "Sunucu adresi",
     "hostHint": "Örnek: 203.0.113.7 veya sunucum.example.com",
-    "hostKeyBody": "Bu bilgisayar {{host}} adresine ilk kez bağlanıyor. Sağlayıcının konsolu bir parmak izi gösteriyorsa bununla karşılaştır.",
+    "hostKeyBody": "Bu bilgisayar {{host}} adresine ilk kez bağlanıyor. Aşağıdaki parmak izi, sunucuyu tanımlayan bir koddur. Sağlayıcının konsolu bir parmak izi gösteriyorsa bununla karşılaştır.",
     "hostKeyNo": "Hayır, dur",
     "hostKeyTitle": "Bu senin sunucun mu?",
     "hostKeyYes": "Evet, bu sunucuya güven",
@@ -209,7 +209,7 @@
     },
     "keyFile": "Özel anahtar dosyası",
     "keyHint": "Yalnızca yol kullanılır. Praxi anahtarın kendisini kopyalamaz ve saklamaz.",
-    "lead": "Kiraladığın bir sunucuyu bağla. Kopyalanacak bilet yok.",
+    "lead": "Kiraladığın bir sunucuya bağlan. Kurulumu Praxi senin yerine yapar.",
     "logEmpty": "Henüz gösterilecek bir şey yok.",
     "manual": "Bunun yerine eşleştirme biletim var",
     "noDaemon": "Yerel Praxi servisi çalışmıyor. Uygulamayı yeniden başlatıp yeniden dene.",
@@ -258,7 +258,7 @@
       "userInvalid": "Yalnızca harf, rakam, nokta, tire veya alt çizgi kullan."
     },
     "progress": "Kurulum ilerlemesi",
-    "releaseNote": "Praxi, zaten Praxi çalıştıran bir sunucuyu ekleyebilir. Senin için kurması yayınlanmış bir sürüm gerektirir; henüz yok.",
+    "releaseNote": "Şimdilik sunucuda Praxi'nin kurulu olması gerekir. Boş bir sunucuya senin için Praxi kurmak henüz mümkün değil.",
     "retry": "Yeniden dene",
     "retryResume": "Buradan yeniden dene",
     "sayHello": "Botuna merhaba de",
@@ -3659,7 +3659,7 @@
   },
   "newBot": {
     "advanced": "Gelişmiş ayarlar",
-    "autonomy": "Özerklik",
+    "autonomy": "Kendi başına ne kadar yapabilir",
     "autonomyCustom": "{{preset}} izin profili kullanılıyor.",
     "autonomyHints": {
       "ask": "Dosya okuma, ekran görüntüsü ve web aramasını sormadan yapar; her değişiklik, gönderim, sayfa açma, tıklama ve komuttan önce sorar.",
@@ -4073,7 +4073,7 @@
       "confirmParsed": "Bunu kastettiğinizi kontrol edin, sonra Oluştur'a basın.",
       "create": "Oluştur",
       "cron": "Cron ifadesi",
-      "cronHint": "Beş alan; istersen sonuna bir saat dilimi ekle.",
+      "cronHint": "Cron bilenler için: beş alan; örneğin 0 9 * * 1-5 hafta içi 09:00 demektir. Sonuna saat dilimi eklenebilir.",
       "customHint": "Kendi cümlenle anlat, örneğin \"her pazartesi 08:00\".",
       "date": "Hangi gün?",
       "editTitle": "Zamanlanmış görevi düzenle",
@@ -4155,6 +4155,7 @@
     "movedTo": "{{name}} sunucusuna taşındı: orada çalışır, bu bilgisayarda dondurulmuştur.",
     "never": "Hiç",
     "new": "Yeni zamanlama",
+    "newNeedsBot": "Önce bir bot oluştur, sonra onun için bir şey zamanlayabilirsin.",
     "nextRun": "Sonraki çalışma",
     "nextRuns": "Sonraki 5 çalışma",
     "nextRunsEmpty": "Yaklaşan çalışma yok.",
@@ -4215,6 +4216,7 @@
     "subtitle": "Botlarının zamanlayıcıyla yaptığı işler: her sabah, her saat ya da bir kez.",
     "title": "Zamanlanmış görevler",
     "viewCalendar": "Takvim",
+    "viewLabel": "Görünüm",
     "viewList": "Liste",
     "when": "Ne zaman"
   },
@@ -4294,7 +4296,7 @@
   },
   "servers": {
     "add": "Sunucu ekle",
-    "checkNow": "Şimdi kontrol et",
+    "checkNow": "Bu sunucuya geç",
     "empty": "Henüz sunucu yok. Sorun değil: botların bu bilgisayarda çalışıyor.",
     "lead": "Sunucular, bu bilgisayar kapalıyken botlarını çalışır tutar.",
     "remove": "Kaldır",

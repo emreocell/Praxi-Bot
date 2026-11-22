@@ -93,6 +93,7 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
   const [busy, setBusy] = useState(false);
   const [touched, setTouched] = useState(false);
   const input = useRef<StartHostSetupInput | null>(null);
+  const keyCard = useRef<HTMLDivElement | null>(null);
   const jobId = job?.id ?? null;
   const active = job ? isActive(job) : false;
   resumeJobId = jobId && active ? jobId : jobId ? null : resumeJobId;
@@ -158,6 +159,13 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
       window.clearInterval(id);
     };
   }, [api, jobId, active]);
+
+  // The question "is this your server?" appears by itself while the user is looking at the
+  // progress list: move the keyboard onto it so it is read out and one Tab reaches the answers.
+  const asking = job?.state === "awaiting_host_key" && Boolean(job.host_key);
+  useEffect(() => {
+    if (asking) keyCard.current?.focus();
+  }, [asking]);
 
   // A finished setup: the new server shows up in the computer list.
   const succeeded = job?.state === "succeeded";
@@ -490,7 +498,14 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
             {view === "progress" || view === "failed" ? <Checklist job={job} /> : null}
             {view === "progress" ? <Bar job={job} /> : null}
             {job.state === "awaiting_host_key" && job.host_key ? (
-              <div className={styles.keyCard} role="group" aria-label={t("addServer.hostKeyTitle")}>
+              <div
+                className={styles.keyCard}
+                role="group"
+                aria-label={t("addServer.hostKeyTitle")}
+                tabIndex={-1}
+                ref={keyCard}
+                data-testid="host-key-card"
+              >
                 <p className={styles.keyTitle}>{t("addServer.hostKeyTitle")}</p>
                 <p className={styles.keyText}>{t("addServer.hostKeyBody", { host: job.host_key.host })}</p>
                 <code className={styles.fingerprint} data-testid="host-key-fingerprint">
