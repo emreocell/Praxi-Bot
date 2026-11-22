@@ -3730,7 +3730,9 @@
       "bot": "Bot",
       "chat": "Chat",
       "navigate": "Navigate",
-      "schedule": "Schedule"
+      "recentChat": "Recent chat",
+      "schedule": "Schedule",
+      "settings": "Settings"
     },
     "help": "Help and answers",
     "helpKeywords": "help questions faq how do I what is guide",
@@ -3739,6 +3741,7 @@
     "placeholder": "Type a command…",
     "runSchedule": "Run now: {{name}}",
     "scheduleStarted": "Schedule started",
+    "settingsPage": "Settings: {{name}}",
     "shortcuts": "Keyboard shortcuts",
     "switchBot": "Switch to {{name}}",
     "title": "Command palette"

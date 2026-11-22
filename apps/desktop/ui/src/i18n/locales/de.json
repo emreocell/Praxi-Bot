@@ -3730,7 +3730,9 @@
       "bot": "Bot",
       "chat": "Chat",
       "navigate": "Navigieren",
-      "schedule": "Zeitplan"
+      "recentChat": "Letzter Chat",
+      "schedule": "Zeitplan",
+      "settings": "Einstellungen"
     },
     "help": "Hilfe und Antworten",
     "helpKeywords": "hilfe fragen faq wie was ist anleitung",
@@ -3739,6 +3741,7 @@
     "placeholder": "Befehl eingeben …",
     "runSchedule": "Jetzt ausführen: {{name}}",
     "scheduleStarted": "Zeitplan gestartet",
+    "settingsPage": "Einstellungen: {{name}}",
     "shortcuts": "Tastaturkürzel",
     "switchBot": "Zu {{name}} wechseln",
     "title": "Befehlspalette"

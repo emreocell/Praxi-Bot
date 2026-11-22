@@ -140,6 +140,7 @@ import { OPEN_BOT_LIMITS_EVENT } from "./lib/botLimits";
 import type { BotEditorSection } from "./lib/botEditor";
 import { EngineConsentProvider } from "./state/EngineConsent";
 import type { SettingsSectionId } from "./views/settings/types";
+import type { SettingsPageId } from "./lib/settingsPages";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { i18n, type SupportedLanguage } from "./i18n";
 import {
@@ -244,7 +245,7 @@ function AppShell() {
   }, []);
   const [recordingHotkey, setRecordingHotkey] = useState<boolean>(false);
   const [autostartError, setAutostartError] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState<SettingsSectionId | null>(
+  const [settingsOpen, setSettingsOpen] = useState<SettingsSectionId | SettingsPageId | null>(
     null
   );
   const [appsOpen, setAppsOpen] = useState(false);
@@ -1172,6 +1173,7 @@ function AppShell() {
         onScreen={handlePaletteScreen}
         onBot={goToBot}
         onChat={(chatId, botId) => go({ kind: "chat", chatId, botId })}
+        onSettingsPage={(page) => setSettingsOpen(page)}
         onHelp={() => setHelpOpen(true)}
       />
       <SettingsModal

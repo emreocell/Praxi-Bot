@@ -3730,7 +3730,9 @@
       "bot": "Bot",
       "chat": "Sohbet",
       "navigate": "Gezinti",
-      "schedule": "Zamanlama"
+      "recentChat": "Son sohbet",
+      "schedule": "Zamanlama",
+      "settings": "Ayarlar"
     },
     "help": "Yardım ve cevaplar",
     "helpKeywords": "yardım sorular sss nasıl nedir kılavuz",
@@ -3739,6 +3741,7 @@
     "placeholder": "Bir komut yaz…",
     "runSchedule": "Şimdi çalıştır: {{name}}",
     "scheduleStarted": "Zamanlama başlatıldı",
+    "settingsPage": "Ayarlar: {{name}}",
     "shortcuts": "Klavye kısayolları",
     "switchBot": "{{name}} botuna geç",
     "title": "Komut paleti"
