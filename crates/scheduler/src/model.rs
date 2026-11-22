@@ -713,8 +713,10 @@ pub enum AttemptRun {
     None,
     /// The run ended failed or cancelled; a new attempt may start.
     Failed,
-    /// The run is live, paused, waiting for approval, or already succeeded.
+    /// The run is live, paused, or waiting for approval.
     Active,
+    /// The run already finished successfully: the side effect happened.
+    Succeeded,
 }
 
 /// A persisted schedule definition and its runtime state.

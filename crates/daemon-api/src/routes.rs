@@ -2760,16 +2760,31 @@ pub(crate) async fn list_schedule_history(
                 .map_or_else(|| occ.state.as_str().to_owned(), |r| r.state.clone()),
             other => other.as_str().to_owned(),
         };
+        let attempt_state = crate::schedule::attempt_run_of(
+            s.storage(),
+            s.user_id(),
+            sc.id,
+            occ.due_ms,
+            occ.attempt,
+        );
+        // The durable run key can say "done" when the row never got the outcome
+        // (a crash right after the side effect): show it as succeeded, not interrupted.
+        let status = if matches!(
+            occ.state,
+            scheduler::OccurrenceState::Interrupted | scheduler::OccurrenceState::Missed
+        ) && attempt_state == scheduler::AttemptRun::Succeeded
+        {
+            "succeeded".to_owned()
+        } else {
+            status
+        };
         let retryable = occ.state.is_retryable()
             && sc.enabled
             && occ.retry_count < scheduler::MAX_OCCURRENCE_RETRIES
-            && crate::schedule::attempt_run_of(
-                s.storage(),
-                s.user_id(),
-                sc.id,
-                occ.due_ms,
-                occ.attempt,
-            ) != scheduler::AttemptRun::Active;
+            && matches!(
+                attempt_state,
+                scheduler::AttemptRun::None | scheduler::AttemptRun::Failed
+            );
         let started_at_ms = run.as_ref().map(|r| r.created_at_ms);
         let finished_at_ms = run.as_ref().and_then(|r| {
             matches!(r.state.as_str(), "succeeded" | "failed" | "cancelled")

@@ -186,6 +186,21 @@ impl Scheduler {
             Err(error) => tracing::error!(%error, "failed to recover unresolved schedule intents"),
         }
 
+        // A run that finished under its durable key before the process died is
+        // done, not interrupted: the key outlives the occurrence row.
+        match inner.store.interrupted_attempts() {
+            Ok(rows) => {
+                for (id, due, attempt) in rows {
+                    if inner.executor.attempt_run(id, due, attempt) == AttemptRun::Succeeded
+                        && let Err(error) = inner.store.resolve_interrupted_as_succeeded(id, due)
+                    {
+                        tracing::error!(%error, "failed to settle an interrupted occurrence");
+                    }
+                }
+            }
+            Err(error) => tracing::error!(%error, "failed to list interrupted occurrences"),
+        }
+
         // Run the startup recovery/misfire pass synchronously so any schedule
         // already overdue at startup is handled deterministically before the
         // caller advances a fake clock.

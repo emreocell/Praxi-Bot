@@ -1473,6 +1473,60 @@ fn dispatched_row(store: &ScheduleStore, t0: i64) -> (Schedule, i64) {
     (sched, due)
 }
 
+/// Executor whose durable run key reports a fixed outcome for every attempt.
+struct KeyedExecutor(crate::AttemptRun);
+
+#[async_trait]
+impl ScheduleExecutor for KeyedExecutor {
+    async fn execute(&self, _schedule: &Schedule) -> Result<()> {
+        Ok(())
+    }
+
+    fn attempt_run(&self, _id: TaskId, _due: i64, _attempt: u32) -> crate::AttemptRun {
+        self.0
+    }
+}
+
+#[tokio::test]
+async fn startup_settles_an_interrupted_occurrence_whose_run_key_says_done() {
+    use crate::{AttemptRun, OccurrenceState};
+    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
+    let (sched, due) = dispatched_row(&store, 1_700_000_000_000);
+    store
+        .claim_occurrence(sched.id, sched.revision, due, 1)
+        .unwrap()
+        .unwrap();
+    // The side effect finished, then the process was killed before the outcome was written.
+    let first = Scheduler::start_with_clock(
+        Arc::clone(&store),
+        Arc::new(KeyedExecutor(AttemptRun::Succeeded)),
+        Arc::new(FakeClock::new(1_700_000_000_000)),
+    );
+    first.settle().await;
+    let occ = store.get_occurrence(sched.id, due).unwrap().unwrap();
+    assert_eq!(occ.state, OccurrenceState::Succeeded);
+
+    // Without a finished run the same crash stays visibly interrupted, and a row
+    // left in `started` by a hard kill is reconciled too.
+    let store = Arc::new(ScheduleStore::open_in_memory().unwrap());
+    let (sched, due) = dispatched_row(&store, 1_700_000_000_000);
+    store
+        .conn()
+        .execute(
+            "UPDATE occurrences SET state = 'started' WHERE schedule_id = ?1",
+            rusqlite::params![sched.id.to_string()],
+        )
+        .unwrap();
+    let second = Scheduler::start_with_clock(
+        Arc::clone(&store),
+        Arc::new(KeyedExecutor(AttemptRun::None)),
+        Arc::new(FakeClock::new(1_700_000_000_000)),
+    );
+    second.settle().await;
+    let occ = store.get_occurrence(sched.id, due).unwrap().unwrap();
+    assert_eq!(occ.state, OccurrenceState::Interrupted);
+}
+
 #[test]
 fn retry_after_restart_never_restarts_a_run_that_already_started() {
     use crate::AttemptRun;
