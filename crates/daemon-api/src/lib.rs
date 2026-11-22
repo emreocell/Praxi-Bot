@@ -44,6 +44,7 @@ mod knowledge;
 pub mod knowledge_runtime;
 mod knowledge_settings;
 pub mod live_view;
+mod local_models;
 pub mod mcp;
 mod mcp_routes;
 pub mod mcp_server;
@@ -1341,6 +1342,7 @@ fn api_routes() -> Router<AppState> {
         .route("/v1/policy", get(r::get_policy).put(r::put_policy))
         .route("/v1/providers", get(r::list_providers))
         .route("/v1/providers/detected", get(r::detect_providers))
+        .route("/v1/local-models", get(local_models::get_local_models))
         .route("/v1/providers/cli/enable", post(r::enable_cli_provider))
         .route("/v1/providers/cli/disable", post(r::disable_cli_provider))
         .route("/v1/providers/cli", get(cli_engines::list))

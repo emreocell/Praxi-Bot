@@ -87,6 +87,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
                 || daemon_safe_mode(env.port),
         ),
         core::check_disk(env.data_dir),
+        check_local_models(env.data_dir),
         check_resources(),
         check_telegram(env),
         core::check_unicode_path(env.data_dir),
@@ -518,6 +519,12 @@ fn check_peer_relay(env: &DoctorEnv<'_>) -> Check {
             "check outbound relay access and run `bot serve --peer`; no inbound port is required",
         ),
     }
+}
+
+fn check_local_models(data_dir: &Path) -> Check {
+    let hw = provider_catalog::probe_hardware(data_dir);
+    let advice = provider_catalog::recommend(&hw, &provider_catalog::catalog_candidates());
+    core::check_local_models(&hw, &advice)
 }
 
 fn check_resources() -> Check {

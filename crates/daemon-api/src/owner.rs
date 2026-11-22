@@ -150,6 +150,8 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/providers/cli/disable"),
     ("POST", "/v1/providers/cli/{}/models/refresh"),
     ("POST", "/v1/providers/reload"),
+    // hardware summary (RAM, GPU, free disk) is a machine fingerprint: owner only
+    ("GET", "/v1/local-models"),
     ("POST", "/v1/components/{}/install"),
     ("POST", "/v1/mcp/servers"),
     ("PUT", "/v1/mcp/servers/{}"),

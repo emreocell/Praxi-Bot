@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { brandIcon } from "../lib/brandIcons";
 import { formatClock, formatStamp, formatStepDuration, type MessageTimes } from "../lib/messageTime";
 import { type Chain, chainSeconds, type ChainStep } from "../lib/thinkingChain";
+import { buildRows, chainSummary, collapsedRows, type ChainRow } from "../lib/chainRows";
 import { isInFlight, isOrphanStep, isSlowStep } from "../lib/stepStuck";
 import { describeTool, stepPhase } from "../lib/toolLabels";
 import type { ToolItem } from "../state/timeline";
@@ -149,6 +150,66 @@ function Step({ step, times, live }: { step: ChainStep; times: MessageTimes; liv
   );
 }
 
+
+/** Live chains up to this many rows stay open as before; longer ones fold. */
+const LIVE_OPEN_ROWS = 3;
+
+/** Several finished calls of one app or tool as ONE row ("Playwright - browser evaluate x9 - 12 s"). */
+function GroupRow({ tools, sameAction, times, live }: { tools: ToolItem[]; sameAction: boolean; times: MessageTimes; live: boolean }) {
+  const { t, i18n } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  const first = tools[0] as ToolItem;
+  const label = describeTool(first.name, first.input, brandName);
+  const totalMs = tools.reduce((sum, x) => sum + (stepMs(x) ?? 0), 0);
+  const text = sameAction
+    ? t("chat.chain.groupSame", { what: t(`${label.key}.done`, label.values), count: tools.length })
+    : t("chat.chain.groupApp", { app: String(label.values.app ?? label.values.name ?? ""), count: tools.length });
+  const time =
+    times === "off"
+      ? null
+      : formatStepDuration(totalMs, i18n.language, {
+          s: t("chat.duration.shortSeconds"),
+          m: t("chat.duration.shortMinutes")
+        });
+  return (
+    <li className={styles.step} data-testid="tool-group">
+      <StepIcon icon={label.icon} brand={label.brand} size={17} />
+      <div className={styles.stepMain}>
+        <div className={styles.stepLine}>
+          <b className={styles.stepLabel}>{text}</b>
+          <button
+            type="button"
+            className={styles.more}
+            aria-expanded={open}
+            aria-controls={panelId}
+            aria-label={`${t("chat.chain.details")}: ${text}`}
+            title={t("chat.chain.details")}
+            onClick={() => setOpen((o) => !o)}
+          >
+            <ChevronRight className={open ? styles.moreOpen : undefined} />
+          </button>
+          {time ? <span className={styles.stepTime}>{time}</span> : null}
+        </div>
+        {open ? (
+          <ol id={panelId} className={styles.steps}>
+            {tools.map((x) => (
+              <ToolStep key={x.key} tool={x} times={times} live={live} />
+            ))}
+          </ol>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+function RowView({ row, times, live }: { row: ChainRow; times: MessageTimes; live: boolean }) {
+  if (row.kind === "group") {
+    return <GroupRow tools={row.tools} sameAction={row.sameAction} times={times} live={live} />;
+  }
+  return <Step step={row.kind === "thought" ? row.step : { kind: "tool", key: row.key, tool: row.tool }} times={times} live={live} />;
+}
+
 /**
  * Tool calls and short thoughts folded into one line ("Thought for 12
  * seconds"); opening it lists the steps in plain words with source chips.
@@ -168,12 +229,28 @@ export function ThinkingChain({
   const { t, i18n } = useTranslation();
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const listId = useId();
-  const open = userOpen ?? chain.live;
+  const rows = buildRows(chain.steps);
+  const open = userOpen ?? (chain.live && rows.length <= LIVE_OPEN_ROWS);
+  const summary = chainSummary(chain);
+  const brandLabel = (id: string) => {
+    const b = brandName(id);
+    if (b) return b;
+    const h = id.replace(/[_\-.:/]+/g, " ").trim();
+    return h.charAt(0).toUpperCase() + h.slice(1);
+  };
+  const what = summary.names.slice(0, 2).map(brandLabel).join(", ");
   const title = chain.live
     ? t("chat.chain.working")
-    : t("chat.chain.thought", {
-        duration: formatSpan(t, chainSeconds(chain))
-      });
+    : summary.steps >= 2
+      ? t(what ? "chat.chain.summary" : "chat.chain.summaryPlain", {
+          count: summary.steps,
+          what,
+          duration: formatSpan(t, chainSeconds(chain))
+        })
+      : t("chat.chain.thought", {
+          duration: formatSpan(t, chainSeconds(chain))
+        });
+  const folded = open ? null : collapsedRows(rows, chain.live);
   const span =
     times === "off"
       ? undefined
@@ -213,8 +290,14 @@ export function ThinkingChain({
       </button>
       {open ? (
         <ol id={listId} className={styles.steps}>
-          {chain.steps.map((s) => (
-            <Step key={s.key} step={s} times={times} live={chain.live} />
+          {rows.map((r) => (
+            <RowView key={r.key} row={r} times={times} live={chain.live} />
+          ))}
+        </ol>
+      ) : folded && folded.shown.length > 0 ? (
+        <ol id={listId} className={styles.steps} data-testid="chain-folded">
+          {folded.shown.map((r) => (
+            <RowView key={r.key} row={r} times={times} live={chain.live} />
           ))}
         </ol>
       ) : null}

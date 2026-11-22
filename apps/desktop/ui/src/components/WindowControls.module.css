@@ -1,12 +1,21 @@
 /* Integrated window controls: same surface as the app, Windows-style hit areas. */
-.controls {
+/* The strip is the first --titlebar-h of the window: drag area + controls, never covered. */
+.strip {
   position: fixed;
   top: 0;
+  left: 0;
   right: 0;
   z-index: 1000;
   display: flex;
+  justify-content: flex-end;
   align-items: stretch;
-  height: var(--space-8);
+  height: var(--titlebar-h);
+}
+
+.controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
   -webkit-app-region: no-drag;
 }
 

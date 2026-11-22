@@ -6,6 +6,7 @@
 
   /* Spacing tokens */
   --space-0: 0px;
+  --space-half: 2px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -13,6 +14,7 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+  --titlebar-h: var(--space-8);
   --space-10: 40px;
   --space-12: 48px;
   --space-16: 64px;
@@ -34,6 +36,7 @@
   --size-control-sm: 30px;
   --size-control-md: 36px;
   --size-control-lg: 42px;
+  --size-list-max: 210px;
   --size-sidebar-width: 260px;
   --size-content-max: 760px;
   --size-preview-height: 120px;
@@ -47,6 +50,7 @@
   --corner-scale: 1;
   --radius-sm: calc(6px * var(--corner-scale));
   --radius-md: calc(8px * var(--corner-scale));
+  --radius-control: calc(10px * var(--corner-scale));
   --radius-card: calc(12px * var(--corner-scale));
   --radius-pill: 9999px;
 
@@ -191,6 +195,7 @@
   --center-highlight: inset 0 0 0 transparent;
   --center-shadow: var(--shadow-card);
   --center-scrim: transparent;
+  --message-plate-fill: transparent;
   --composer-fill: var(--color-surface-elevated);
   --composer-filter: none;
   --float-fill: #191a1f;

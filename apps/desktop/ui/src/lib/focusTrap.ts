@@ -38,3 +38,22 @@ export function trapTarget<T>(
   }
   return active === last || !inCycle ? first : null;
 }
+
+/**
+ * Element to focus when a dialog or palette closes: the trigger that was active when it opened
+ * if still connected to the document, or `fallback` when the original trigger unmounted (e.g. a
+ * menu item inside a popover that closed as the dialog opened).
+ */
+export function returnFocusTarget<T>(
+  previous: T | null,
+  isConnected: (el: T) => boolean,
+  fallback: T | null = null
+): T | null {
+  if (previous !== null && isConnected(previous)) {
+    return previous;
+  }
+  if (fallback !== null && isConnected(fallback)) {
+    return fallback;
+  }
+  return null;
+}

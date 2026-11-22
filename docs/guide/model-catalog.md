@@ -133,6 +133,27 @@ are shorter. OpenRouter's three candidates use its verified exact ids, not
 first-party ids. No `:free` model is pinned as a recommendation or default. A
 `free` note is added only when an OpenRouter `:free` id appears in the live list.
 
+## Local models: hardware and recommendations
+
+`GET /v1/local-models` (owner only) reports what this computer can run with Ollama or
+LM Studio. It is best effort and read-only:
+
+- **Hardware probe.** RAM, logical cores, free disk in the data directory, and the GPU name and
+  video memory from `nvidia-smi` when it is installed (fixed arguments, no shell, 1.5 s limit,
+  16 KiB output cap). Apple silicon counts its unified memory. Anything that cannot be read is
+  reported as unknown, never guessed.
+- **Recommender.** Candidates are the curated `ollama` rows of the model table; a model's size
+  class is the parameter count in its own id tag (`qwen3:8b` is 8 billion). Each gets a verdict
+  (runs well, runs slowly, too large) from conservative 4-bit estimates. `recommended` is the
+  largest model that fits and has room on disk; with unknown memory or an empty catalog it is
+  null ("no recommendation"). The `ollama pull <id>` command is only built from plain ids and is
+  shown for copying; Praxi never runs it.
+- **Where it shows.** First-run wizard (when Ollama is chosen), Settings > AI > Local models,
+  and `bot doctor` (an informational line computed in-process). `GET /v1/doctor` deliberately
+  omits it: the hardware fingerprint is owner-only.
+- **Privacy.** The hardware summary stays on this computer: it is never sent to a model, a
+  provider or telemetry.
+
 ## Limits of a model listing
 
 A live model list and curated recommendation cannot prove that an account has

@@ -257,6 +257,25 @@ fn disk_check_thresholds() {
 }
 
 #[test]
+fn local_models_line_is_informational_and_names_the_pull_command() {
+    use provider_catalog::{GpuInfo, HardwareInfo, catalog_candidates, recommend};
+    let mut hw = HardwareInfo::unknown("linux", "x86_64");
+    hw.ram_bytes = Some(32 << 30);
+    hw.gpu = Some(GpuInfo {
+        name: "NVIDIA GeForce RTX 4090".into(),
+        vram_bytes: Some(24 << 30),
+    });
+    let c = check_local_models(&hw, &recommend(&hw, &catalog_candidates()));
+    assert_eq!(c.status, Status::Ok);
+    assert!(c.detail.contains("RTX 4090") && c.detail.contains("ollama pull"));
+    // Nothing known: neutral, and honest about it.
+    let none = HardwareInfo::unknown("linux", "x86_64");
+    let c = check_local_models(&none, &recommend(&none, &catalog_candidates()));
+    assert_eq!(c.status, Status::Skipped);
+    assert!(c.detail.contains("no recommendation"));
+}
+
+#[test]
 fn unavailable_capabilities_are_neutral_never_failures() {
     let caps = [
         CapabilityStatus {

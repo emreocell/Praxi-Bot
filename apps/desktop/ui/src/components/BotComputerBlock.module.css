@@ -116,7 +116,7 @@
   overflow: hidden;
   isolation: isolate;
   border: var(--size-border) solid var(--color-border);
-  border-radius: calc(var(--radius-md) * 1.25);
+  border-radius: var(--radius-control);
   background-color: var(--color-background);
 }
 

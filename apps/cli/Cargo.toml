@@ -53,6 +53,7 @@ dialoguer = { version = "0.12", default-features = false, features = ["password"
 parking_lot.workspace = true
 permission-engine = { path = "../../crates/permission-engine", version = "0.1.0" }
 futures-util.workspace = true
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 protocol.workspace = true
 provider-catalog = { path = "../../crates/provider-catalog", version = "0.1.0" }
 reqwest.workspace = true

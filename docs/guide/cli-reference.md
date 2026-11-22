@@ -122,8 +122,17 @@ The passphrase comes from a hidden prompt, `--passphrase-file <FILE>` or
 | `--replace` | `restore` | Swap existing bots and chats for the backup (the old state goes to a `backup-*` folder) |
 | `--allow-policy-relaxation` | `restore` | Accept a backup whose permission policy is more permissive |
 
-`bot restore <FILE>` restores plaintext archives made by older versions; see
+### `bot restore <FILE>`
+
+Restore a plaintext archive made by an older version. Stop the daemon first;
+it refuses while `bot serve` holds the data directory or a daemon answers on
+`--port`. Encrypted backups use `bot backup restore`. See
 [Restoring older plaintext backups](backup-and-restore.md).
+
+| Option | Meaning |
+| --- | --- |
+| `--replace` | Swap existing bots and chats for the backup; the old state goes to a `backup-*` folder inside the data directory |
+| `--allow-policy-relaxation` | Accept a backup whose permission policy is more permissive than the current one |
 
 ### `bot status`
 
@@ -215,9 +224,22 @@ Manage the e-mail accounts of the running daemon (see [email](email.md)). Change
 | Subcommand | Meaning |
 | --- | --- |
 | `bot providers list` | List configured providers (`*` = global default) |
+| `bot providers detect-local` | Look for a local model server (Ollama, LM Studio, llama.cpp) on loopback and print what it found as JSON. Contacts only `127.0.0.1` |
 | `bot providers add <ID>` | Add or update a provider. Built-in catalog IDs: `anthropic`, `deepseek`, `gemini`, `gemini-openai-compat`, `lmstudio`, `ollama`, `openrouter`. Options: `--base-url <URL>` (custom OpenAI-compatible provider), `--key-env <VAR>`, `--model <MODEL>`, `--no-test` |
 | `bot providers test [ID]` | Test a provider's connection (the default provider when omitted) |
 | `bot providers default <ID>` | Set the global default provider. Option: `--model <MODEL>` |
+
+### `bot catalog`
+
+Validate the curated model catalog, check its freshness, or compare it with a
+provider model list (see [model catalog](model-catalog.md)). Offline by
+default; `--live` is the only network call and is opt-in.
+
+| Subcommand | Meaning |
+| --- | --- |
+| `bot catalog check` | Validate `model_metadata.json`, the provider catalog entries, and optionally the docs table. Options: `--metadata <FILE>`, `--docs <FILE>`, `--max-age-days <DAYS>` (default 90), `--strict` (exit non-zero when stale) |
+| `bot catalog diff <PROVIDER> [SNAPSHOT]` | Compare the committed catalog for a provider with a JSON or TOML model-list snapshot. Options: `--live` (query the configured provider with its stored key), `--metadata <FILE>` |
+| `bot catalog render-docs` | Print the Markdown provider table generated from `model_metadata.json`. Option: `--metadata <FILE>` |
 
 ### `bot secrets`
 
@@ -382,8 +404,8 @@ and [host operations](host-operations.md)).
 | `bot host screen [KEY]` | Let a paired desktop watch, and take over, this host's screen. Run it on the host; the grant survives restarts. Give a device key from `bot host devices`, or `--all-desktops` (exactly one of the two). `--view-only` watches without takeover or input. `--revoke` removes the grant |
 | `bot host admin [KEY]` | Let a paired desktop send model keys, bots and settings to this host. Run it on the host. Give a device key, or `--all-desktops`. `--revoke` withdraws it. New desktop invites already grant this |
 | `bot host add <TARGET>` | Install Praxi on your own Ubuntu/Debian server over SSH and pair it with this computer (idempotent; run it again to resume). `<TARGET>` is `user@server` or a saved name. `--ssh-port <PORT>` (default 22; not the daemon `--port`). `--key <FILE>` (otherwise the ssh-agent; passwords are not supported). `--name <NAME>` (default: derived from the address). `--yes` accepts a new host key without asking; a changed key is never accepted. `--no-desktop` skips the virtual display and desktop session |
-| `bot host repair <TARGET>` | Re-run the install, migrating a plain `bot serve` install to host mode in place (data is kept and snapshotted first). Same target options as `add` |
-| `bot host upgrade <TARGET>` | Install this app's version on a server that runs an older one. Same target options as `add` |
+| `bot host repair <TARGET>` | Re-run the install, migrating a plain `bot serve` install to host mode in place (data is kept and snapshotted first). Same target options as `add`: `--ssh-port <PORT>`, `--key <FILE>`, `--name <NAME>`, `--yes`, `--no-desktop` |
+| `bot host upgrade <TARGET>` | Install this app's version on a server that runs an older one. Same target options as `add`: `--ssh-port <PORT>`, `--key <FILE>`, `--name <NAME>`, `--yes`, `--no-desktop` |
 | `bot host remove <NAME>` | Forget a server and revoke this computer on it. `<NAME>` is a saved name or `user@server`. `--uninstall` also uninstalls Praxi on the server and keeps its data. `--purge` uninstalls and deletes the server's data, config and praxi user (conflicts with `--uninstall`); `--yes` skips the typed confirmation for `--purge`. `--ssh-port` and `--key` are the same as on `add` |
 
 `add`, `repair`, `upgrade` and `remove` run in this terminal over SSH. They are

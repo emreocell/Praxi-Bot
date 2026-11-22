@@ -62,6 +62,12 @@ export interface SurfaceOptions {
   transparentChat: boolean;
   /** Sampled colours of the backdrop (after its dim layer); `undefined` = assume the worst case. */
   tone?: BackdropTone;
+  /**
+   * Wallpaper veil 0..100 (see `VEIL_*`).  Set only while a wallpaper is drawn: the chat scrim then
+   * becomes a light full-window veil and messages get their own legible plates.  `undefined` keeps
+   * the classic column scrim.
+   */
+  veil?: number;
 }
 
 export const DEFAULT_SURFACE: SurfaceOptions = {
@@ -77,6 +83,19 @@ const clampNumber = (v: unknown, min: number, max: number, fallback: number): nu
 
 export const parsePanelTransparency = (v: unknown): number =>
   clampNumber(v, PANEL_TRANSPARENCY_MIN, PANEL_TRANSPARENCY_MAX, PANEL_TRANSPARENCY_DEFAULT);
+/**
+ * Wallpaper veil (percent): the soft, full-window tint laid over a wallpaper behind a clear chat area.
+ * It only softens the scene; reading contrast comes from the plates under the messages, which are
+ * planned against the veiled worst pixel, so every slider value stays legible.
+ */
+export const VEIL_MIN = 0;
+export const VEIL_MAX = 100;
+export const VEIL_DEFAULT = 35;
+/** Alpha of the veil at 100 %. */
+export const VEIL_MAX_ALPHA = 0.5;
+export const parseVeil = (v: unknown): number => clampNumber(v, VEIL_MIN, VEIL_MAX, VEIL_DEFAULT);
+export const veilAlpha = (veil: number): number => Math.round(parseVeil(veil) * VEIL_MAX_ALPHA) / 100;
+
 export const parsePanelBlur = (v: unknown): number => clampNumber(v, PANEL_BLUR_MIN, PANEL_BLUR_MAX, PANEL_BLUR_DEFAULT);
 export const parseTransparentChat = (v: unknown): boolean => v === true || v === "true" || v === "1";
 
@@ -266,6 +285,10 @@ export interface SurfacePlan {
   /** Colour and alpha of the theme-tinted scrim under the reading column of a clear chat area. */
   scrimTint: string;
   scrimAlpha: number;
+  /** Wallpaper veil mode: the scrim is a light full-window veil and messages sit on plates. */
+  veil: boolean;
+  /** Alpha of the message plates in veil mode (0 otherwise). */
+  plateAlpha: number;
   /** Floating surfaces (modals, popovers, menus, toasts). */
   floatTint: string;
   floatAlpha: number;
@@ -328,7 +351,15 @@ export function planSurfaces(
   // Fine, high-contrast detail (dither, dots, grain) is noisy behind text even when the contrast
   // ratio passes; the gap between the per-pixel and the blurred extreme measures it.
   const busy = tone.detail !== undefined && contrastRatio(tone.detail.light, tone.detail.dark) >= BUSY_DETAIL;
-  const scrimAlpha = clearChat ? round2(Math.max(busy ? BUSY_SCRIM_MIN : 0, floorOver(tone.peak, scrimTint, aaa))) : 0;
+  const veil = clearChat && opts.veil !== undefined;
+  const scrimAlpha = !clearChat
+    ? 0
+    : veil
+      ? round2(veilAlpha(opts.veil ?? VEIL_DEFAULT))
+      : round2(Math.max(busy ? BUSY_SCRIM_MIN : 0, floorOver(tone.peak, scrimTint, aaa)));
+  // Veil mode: text sits on plates (bubbles, assistant text blocks), laid over the veiled worst pixel.
+  const underVeil = (c: string) => mix(c, scrimTint, scrimAlpha);
+  const plateAlpha = veil ? round2(Math.max(0.55, floorOver(tone.peak, d.raised, aa, underVeil))) : 0;
 
   const floatTint = d.light ? mix(d.raised, "#ffffff", 0.3) : d.surface;
   // A modal darkens what is behind it: on a light theme that is the worst case for dark text.  (On a
@@ -354,8 +385,12 @@ export function planSurfaces(
   }
   if (clearChat) {
     const scrim = behind(tone.peak, scrimTint, scrimAlpha);
-    layers.push({ name: "chat scrim", color: scrim, textMin: TEXT_TARGET });
-    layers.push({ name: "bubble on scrim", color: mix(scrim, d.raised, CARD_ALPHA.raised), textMin: 4.5 });
+    if (veil) {
+      layers.push({ name: "message plate", color: behind(tone.peak, d.raised, plateAlpha, underVeil), textMin: 4.5 });
+    } else {
+      layers.push({ name: "chat scrim", color: scrim, textMin: TEXT_TARGET });
+      layers.push({ name: "bubble on scrim", color: mix(scrim, d.raised, CARD_ALPHA.raised), textMin: 4.5 });
+    }
     layers.push({ name: "composer", color: behind(blurred ? tone.soft : tone.peak, d.raised, composerAlpha), textMin: 4.5 });
   }
   if (floatAlpha < 1) {
@@ -375,6 +410,8 @@ export function planSurfaces(
     clearChat,
     scrimTint,
     scrimAlpha,
+    veil,
+    plateAlpha,
     floatTint,
     floatAlpha,
     composerAlpha,
@@ -483,7 +520,8 @@ export function surfaceTokens(d: DerivedTheme, accent: string, plan: SurfacePlan
     "--float-highlight": glassy
       ? `inset 0 1px 0 ${alpha("#ffffff", d.light ? 0.8 : 0.12)}`
       : `inset 0 1px 0 ${alpha(d.text, 0.04)}`,
-    "--bubble-glass-fill": alpha(d.raised, plan.clearChat ? Math.max(0.6, plan.composerAlpha - 0.1) : 0.55),
+    "--bubble-glass-fill": alpha(d.raised, plan.veil ? plan.plateAlpha : plan.clearChat ? Math.max(0.6, plan.composerAlpha - 0.1) : 0.55),
+    "--message-plate-fill": plan.veil ? alpha(d.raised, plan.plateAlpha) : "transparent",
     "--radius-shell": "calc(var(--radius-card) * 1.35)"
   };
   if (plan.layers.length) {

@@ -315,6 +315,10 @@
       "sky": "Gökyüzü",
       "theme": "Temayı izle",
       "title": "Duvar kağıdı",
+      "veil": "Duvar kağıdı perdesi",
+      "veilClear": "Net",
+      "veilHint": "Duvar kağıdının tamamı üzerinde yumuşak bir ton. Mesajlar kendi hafif zeminlerinde durur, bu yüzden metin her ayarda okunaklı kalır.",
+      "veilSoft": "Yumuşak",
       "warm": "Sıcak"
     }
   },
@@ -1192,11 +1196,15 @@
     },
     "chain": {
       "details": "Ayrıntılar",
+      "groupApp": "{{app}} ×{{count}}",
+      "groupSame": "{{what}} ×{{count}}",
       "problems_one": "{{count}} adım başarısız",
       "problems_other": "{{count}} adım başarısız",
       "slow": "Normalden uzun sürüyor",
       "started": "Başlangıç {{start}}",
       "startedFinished": "Başlangıç {{start}} · bitiş {{end}}",
+      "summary": "{{count}} adım · {{what}} · {{duration}}",
+      "summaryPlain": "{{count}} adım · {{duration}}",
       "thought": "{{duration}} düşündü",
       "working": "Adım adım ilerliyor"
     },
@@ -3120,6 +3128,29 @@
     "viewOnly": "Salt izleme",
     "watchAction": "Devral"
   },
+  "localModels": {
+    "bestEffort": "Bunlar tahmindir, garanti değildir. Praxi komutları sizin yerinize çalıştırmaz ve bu donanım bilgisi bu bilgisayarda kalır.",
+    "cardDescription": "Ollama veya LM Studio için bu bilgisayara uyanlar. En iyi tahmin.",
+    "cardTitle": "Yerel modeller",
+    "copied": "Kopyalandı",
+    "copy": "Komutu kopyala",
+    "cores": "{{count}} işlemci iş parçacığı",
+    "disk": "{{size}} boş disk",
+    "fitFast": "rahat çalışır",
+    "fitSlow": "çalışır, ama yavaş",
+    "lmstudio": "LM Studio'da yaklaşık {{size}}B parametreye kadar modeller burada rahat çalışmalı.",
+    "noDisk": "disk alanı yetersiz",
+    "noGpu": "bulunamadı",
+    "none": "Bu bilgisayar için öneri yok.",
+    "ollamaMissing": "Ollama kurulu değil. ollama.com adresinden kurun, sonra yukarıdaki komutu bir terminalde çalıştırın.",
+    "ollamaStopped": "Ollama kurulu ama çalışmıyor. Ollama uygulamasını açın (veya `ollama serve` çalıştırın), sonra bir model indirin.",
+    "ramGpu": "{{ram}} bellek · ekran kartı: {{gpu}}",
+    "recommended": "Bu bilgisayar için önerilen: {{name}}.",
+    "title": "Bu bilgisayar neleri çalıştırabilir",
+    "unified": "{{ram}} ortak bellek (Apple silikon)",
+    "unknown": "Bu bilgisayarın donanımı okunamadı, bu yüzden öneri yok. Küçük bir modelle (yaklaşık 4B) başlayın, iyi çalışırsa büyütün.",
+    "unknownValue": "bilinmiyor"
+  },
   "main": {
     "clearSelection": "Genel görünüme dön",
     "daemonConnectingDescription": "Bu bilgisayardaki yerleşik Praxi-Bot arka plan servisine bağlanılıyor.",
@@ -3322,6 +3353,16 @@
     "title": "Yeni bot"
   },
   "notify": {
+    "action": {
+      "allow": "İzin ver",
+      "always": "Her zaman izin ver",
+      "deny": "Reddet"
+    },
+    "approval": {
+      "mcp": "{{bot}}, {{app}} uygulamasını kullanmak istiyor ({{action}})",
+      "other": "{{bot}} devam etmek istiyor: {{what}}",
+      "title": "Onayınız gerekiyor"
+    },
     "detail": {
       "failed": "Başarısız: {{detail}}",
       "longRun": "{{detail}}",
@@ -4246,7 +4287,8 @@
   },
   "shell": {
     "panelGrip": "Bot panelini boyutlandır (ok tuşları)",
-    "railGrip": "Kenar şeridini boyutlandır (ok tuşları)"
+    "railGrip": "Kenar şeridini boyutlandır (ok tuşları)",
+    "skipToMain": "Ana içeriğe geç"
   },
   "sidebar": {
     "apps": "Uygulamalar",
@@ -4497,10 +4539,16 @@
     "stt": {
       "clearKey": "Anahtarı sil",
       "description": "Kayıtların nerede yazıya çevrileceği: OpenAI uyumlu bir servis (bulut sağlayıcı ya da yerel whisper sunucusu).",
+      "geminiKey": "Gemini API anahtarı",
+      "geminiModel": "Gemini modeli",
+      "geminiPrivacy": "Gemini Live ile konuşman, yalnızca sesle yazarken ya da sesli görüşmedeyken, daemon üzerinden Google'a gider. Anahtar gizli bilgi deposunda kalır. Yalnızca yazıya dökülen metin kullanılır; modelin kendi yanıtı yok sayılır.",
       "key": "API anahtarı",
       "keyStored": "Anahtar kayıtlı (değiştirmek için yaz)",
       "model": "Model",
       "privacy": "Kayıt yalnızca mikrofona bastığında ve yalnızca bu adrese gönderilir. Anahtar gizli bilgi deposunda kalır.",
+      "provider": "Sağlayıcı",
+      "providerGemini": "Gemini Live",
+      "providerWhisper": "Whisper uyumlu (OpenAI / yerel)",
       "save": "Kaydet",
       "saved": "Sesle yazma ayarları kaydedildi",
       "title": "Sesle yazma servisi",

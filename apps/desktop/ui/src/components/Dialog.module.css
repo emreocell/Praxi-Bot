@@ -23,7 +23,7 @@
   min-width: var(--space-0);
   display: flex;
   flex-direction: column;
-  gap: calc(var(--space-1) / 2);
+  gap: var(--space-half);
 }
 
 .title {
@@ -280,7 +280,7 @@
   flex: none;
   width: var(--size-icon);
   height: var(--size-icon);
-  margin-top: calc(var(--space-1) / 2);
+  margin-top: var(--space-half);
   color: var(--color-text-muted);
 }
 

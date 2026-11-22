@@ -387,3 +387,38 @@ To stop runaway runs, each turn is capped by default at 40 model steps, 2
 million tokens, 120 seconds per tool call and 300 seconds per model call, and
 stops when it repeats an identical tool call several times in a row. Very long
 tool output is saved to a file and only a short preview is shown to the model.
+
+## Notifications and approvals
+
+When the window is not focused and a run needs your approval, the desktop app
+shows a short notification in plain words ("Praxi wants to use Playwright
+(browser evaluate)"), never the raw call, its arguments or computer ids. With
+"private notifications" on, only a generic text is shown.
+
+**Windows.** The toast has buttons: **Allow** (this call only), **Always allow**
+and **Deny**. A button runs the same approval path as the card in the chat: it
+is checked against the approval that is pending at that moment, "Always allow"
+appears only when the card would offer it, and it needs the same owner
+authority as the card button. Approvals that carry something you must read
+first (a payload to review, a schedule, a bot profile, a computer-control
+grant, anything that sends a message or email) get a toast without buttons:
+clicking it opens the app on the card. Clicking the toast itself (not a button)
+always brings the app to the front.
+
+Limits: the buttons work only while the desktop app is running (it is a tray
+app, so closing the window is fine; quitting it is not). A toast that you left
+in the Action Center after the approval was answered, expired or decided
+elsewhere does nothing harmful: the app re-checks and opens the approvals list
+instead. Windows may collapse the buttons into a menu on small toasts, and
+Focus Assist can hold notifications back.
+
+**macOS and Linux.** The notification plugin cannot show action buttons there,
+so the notification is plain text; open the app to answer on the card.
+
+## The step list in the chat
+
+A run's tool calls are folded to keep the chat quiet: repeated calls of the same
+app become one row ("Playwright ×9"), a finished run shows one summary line
+("16 steps · Playwright · 2 minutes") that opens the full timeline, and failed
+or refused steps and the step running right now are always visible. Opening a
+row shows the individual steps with their times.

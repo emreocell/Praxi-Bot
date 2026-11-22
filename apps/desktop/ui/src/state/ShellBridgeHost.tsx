@@ -4,18 +4,28 @@ import type { GlobalEnvelope } from "../api/types";
 import {
   decideNotification,
   type NotifyPrefs,
-  notificationText
+  notificationText,
+  resolveNotificationAction
 } from "../lib/notifyRules";
+import { brandIcon } from "../lib/brandIcons";
+import { useDecisionActions } from "../components/PendingDecisions";
 import {
   isAppFocused,
   onShellEvent,
+  SHELL_EVENT_NOTIFICATION_ACTION,
   SHELL_EVENT_NOTIFICATION_ACTIVATED,
   SHELL_EVENT_TRAY_OPEN_NEEDS,
   SHELL_EVENT_TRAY_STOP_ALL,
   setNeedsCount,
   setTrayLabels,
-  showNotification
+  showNotification,
+  takeNotificationActions
 } from "../lib/shell";
+
+const appName = (server: string): string | null => {
+  const b = brandIcon(server);
+  return b.known ? b.name : null;
+};
 import { useDaemon } from "./DaemonContext";
 import type { RunState } from "./timeline";
 
@@ -50,6 +60,12 @@ export function ShellBridgeHost({
   openChatRef.current = onOpenChat;
   const openNeedsRef = useRef(onOpenNeeds);
   openNeedsRef.current = onOpenNeeds;
+  const needsRef = useRef(needs);
+  needsRef.current = needs;
+  // The same decision path as the approval card (owner key for a standing choice included).
+  const { decide } = useDecisionActions();
+  const decideRef = useRef(decide);
+  decideRef.current = decide;
 
   // 1. notifications (live events only: the stream replays history on start)
   useEffect(() => {
@@ -123,7 +139,8 @@ export function ShellBridgeHost({
         const bot = botsRef.current.find((b) => b.id === d.botId);
         const name = bot?.name ?? "Praxi-Bot";
         const text = notificationText(d, name, s.notifyPrivate, (k, v) =>
-          tRef.current(k, v)
+          tRef.current(k, v),
+          appName
         );
         void showNotification({ ...text, chatId: d.chatId || undefined }).catch(
           () => {}
@@ -162,6 +179,39 @@ export function ShellBridgeHost({
           }
         }
       ),
+      // A toast button: the event is only a nudge. The presses come from the shell's own queue and
+      // are checked against the approval that is pending now, then decided like a card click.
+      onShellEvent<null>(SHELL_EVENT_NOTIFICATION_ACTION, () => {
+        void takeNotificationActions()
+          .then(async (presses) => {
+            for (const press of presses) {
+              const tool = needsRef.current.find(
+                (n) => n.kind === "approval" && n.callId === press.call_id
+              )?.tool;
+              const res = resolveNotificationAction(
+                press.action,
+                tool
+                  ? {
+                      callId: press.call_id,
+                      toolName: tool.name,
+                      input: tool.input,
+                      details: tool.details
+                    }
+                  : undefined
+              );
+              if (res.kind === "open") {
+                openNeedsRef.current();
+                continue;
+              }
+              try {
+                await decideRef.current(press.call_id)(res.decision, res.scope);
+              } catch {
+                openNeedsRef.current();
+              }
+            }
+          })
+          .catch(() => {});
+      }),
       onShellEvent<null>(SHELL_EVENT_TRAY_OPEN_NEEDS, () =>
         openNeedsRef.current()
       ),

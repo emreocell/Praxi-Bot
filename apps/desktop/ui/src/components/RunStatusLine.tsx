@@ -68,6 +68,7 @@ export function RunStatusLine({
   }
   const elapsed = lastStart.current !== null ? formatElapsed(now - lastStart.current) : null;
   const approval = model?.kind === "waiting";
+  const urgent = approval || stop?.phase === "failed" || stop?.phase === "unconfirmed";
   const text =
     stop?.phase === "stopping"
       ? t("runStatus.stopping")
@@ -90,11 +91,16 @@ export function RunStatusLine({
           className={styles.status}
           data-kind={stop?.phase === "failed" ? "failed" : approval ? "approval" : "run"}
           data-testid="run-status"
-          role="status"
-          aria-live="polite"
         >
           <span className={styles.pulse} aria-hidden="true" />
-          <span className={styles.text}>{botName ? `${botName} · ${text}` : text}</span>
+          <span
+            className={styles.text}
+            role={urgent ? "alert" : "status"}
+            aria-live={urgent ? "assertive" : "polite"}
+            aria-atomic="true"
+          >
+            {botName ? `${botName} · ${text}` : text}
+          </span>
           <span className={styles.actions}>
             {approval && onJump ? (
               <button type="button" className={styles.link} onClick={onJump} data-testid="show-pending">

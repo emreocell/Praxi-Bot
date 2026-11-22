@@ -13,7 +13,7 @@
   height: min(calc(var(--space-16) * 7), 60vh);
   min-height: calc(var(--space-16) * 3);
   border-radius: var(--radius-card);
-  background-color: var(--color-surface-elevated-opaque, var(--color-background));
+  background-color: var(--color-surface-elevated-opaque);
   box-shadow:
     0 0 0 var(--size-border) var(--color-border-strong),
     0 var(--space-8) calc(var(--space-16) + var(--space-2)) calc(var(--space-4) * -1) var(--color-shadow);

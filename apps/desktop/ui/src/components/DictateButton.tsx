@@ -3,10 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { ApiError } from "../api/client";
-import { blobToBase64, dictationSupported, pickRecordingMime } from "../lib/dictation";
+import { dictationSupported, pickRecordingMime } from "../lib/dictation";
 import { humanLine } from "../lib/humanError";
 import { micErrorKey } from "../lib/micError";
 import { stopSpeaking } from "../lib/speaker";
+import { transcribePayload } from "../lib/voiceAudio";
 import { useDaemon } from "../state/DaemonContext";
 import { useToast } from "./Toast";
 
@@ -59,7 +60,7 @@ export function DictateButton({ onText, className }: { onText: (text: string) =>
       rec.onstop = () => {
         release();
         const type = rec.mimeType || mime || "audio/webm";
-        void send(new Blob(chunks, { type }), type);
+        void send(new Blob(chunks, { type }));
       };
       recorder.current = rec;
       rec.start();
@@ -72,16 +73,19 @@ export function DictateButton({ onText, className }: { onText: (text: string) =>
     }
   };
 
-  const send = async (blob: Blob, type: string) => {
+  const send = async (blob: Blob) => {
     if (!client || blob.size === 0) {
       setPhase("idle");
       return;
     }
     setPhase("sending");
     try {
+      const provider = await client
+        .getVoice()
+        .then((c) => c.stt_provider)
+        .catch(() => undefined);
       const out = await client.transcribe({
-        audio_base64: await blobToBase64(blob),
-        mime: type.split(";")[0] ?? type,
+        ...(await transcribePayload(blob, provider)),
         language: i18n.language.split("-")[0]
       });
       onText(out.text);

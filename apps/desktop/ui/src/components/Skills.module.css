@@ -91,7 +91,7 @@
 
 .itemMark {
   display: inline-flex;
-  margin-top: calc(var(--space-1) / 2);
+  margin-top: var(--space-half);
 }
 
 .itemText {
@@ -413,7 +413,7 @@
 .panelTools {
   display: inline-flex;
   align-items: center;
-  gap: calc(var(--space-1) / 2);
+  gap: var(--space-half);
 }
 
 .panelTool {
@@ -504,7 +504,7 @@
 
 .panelChip {
   max-width: 100%;
-  padding: calc(var(--space-1) / 2) var(--space-2);
+  padding: var(--space-half) var(--space-2);
   overflow: hidden;
   border-radius: var(--radius-pill);
   background-color: color-mix(in srgb, var(--color-text) 7%, transparent);

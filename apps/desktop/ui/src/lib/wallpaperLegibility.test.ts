@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildThemeTokens, planSurfaces, TEXT_TARGET } from "ui/surface-model";
+import { buildThemeTokens, parseVeil, planSurfaces, TEXT_TARGET, veilAlpha, VEIL_DEFAULT, VEIL_MAX, VEIL_MIN } from "ui/surface-model";
 import { contrastRatio, deriveTheme, paletteById } from "ui/theme-model";
 import { evaluateTone, makeToneSource } from "./backdropTone.ts";
 import { buildField, packPalette, renderField, WALLPAPERS, WALLPAPER_DIM, WALLPAPER_KINDS } from "./wallpaper.ts";
@@ -38,3 +38,51 @@ for (const kind of WALLPAPER_KINDS) {
     });
   }
 }
+
+/* ---- Wallpaper veil: a light full-window scrim, readability from the message plates ---- */
+
+for (const kind of WALLPAPER_KINDS) {
+  for (const id of ["obsidian", "cobalt", "raven", "clay"]) {
+    test(`${kind} wallpaper under ${id}: veil 0 / default / 100 keeps body text >= 4.5:1 on the worst pixels`, () => {
+      const theme = paletteById(id)!;
+      const d = deriveTheme(theme);
+      const tone = evaluateTone(sourceFor(kind), { bg: d.bg, dim: WALLPAPER_DIM / 100 });
+      for (const veil of [VEIL_MIN, VEIL_DEFAULT, VEIL_MAX]) {
+        const opts = { transparency: 100, blur: 28, transparentChat: true, tone, veil };
+        const plan = planSurfaces(d, "glass", true, opts);
+        assert.ok(plan.veil, "veil mode on");
+        assert.ok(plan.layers.some((l) => l.name === "message plate"));
+        for (const layer of plan.layers) {
+          const r = contrastRatio(d.text, layer.color);
+          assert.ok(r >= layer.textMin, `veil ${veil} ${layer.name}: body text ${r.toFixed(2)} < ${layer.textMin}`);
+          assert.ok(r >= 4.5);
+        }
+        const tokens = buildThemeTokens(theme, d.accent ?? "#3b82f6", "glass", true, opts);
+        for (const layer of plan.layers) {
+          for (const key of ["--color-text-secondary", "--color-text-muted"]) {
+            const r = contrastRatio(tokens[key], layer.color);
+            assert.ok(r >= 4.5, `veil ${veil} ${layer.name}: ${key} ${r.toFixed(2)} < 4.5`);
+          }
+        }
+      }
+    });
+    test(`${kind} wallpaper under ${id}: the default veil stays light (never heavier than the old column scrim above 0.2)`, () => {
+      const theme = paletteById(id)!;
+      const d = deriveTheme(theme);
+      const tone = evaluateTone(sourceFor(kind), { bg: d.bg, dim: WALLPAPER_DIM / 100 });
+      const base = { transparency: 100, blur: 28, transparentChat: true, tone };
+      const old = planSurfaces(d, "glass", true, base).scrimAlpha;
+      const soft = planSurfaces(d, "glass", true, { ...base, veil: VEIL_DEFAULT }).scrimAlpha;
+      assert.ok(soft <= 0.2, `default veil ${soft} should be <= 0.2`);
+      assert.ok(old <= 0.2 || soft < old, `veil ${soft} should be lighter than the old scrim ${old}`);
+    });
+  }
+}
+
+test("veil helpers: parse clamps, alpha is monotonic and capped", () => {
+  assert.equal(parseVeil("nonsense"), VEIL_DEFAULT);
+  assert.equal(parseVeil(500), VEIL_MAX);
+  assert.equal(parseVeil(-3), VEIL_MIN);
+  assert.equal(veilAlpha(0), 0);
+  assert.ok(veilAlpha(100) <= 0.5 && veilAlpha(60) < veilAlpha(61));
+});

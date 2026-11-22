@@ -12,7 +12,7 @@
 .dot[data-state="waiting"] { background-color: var(--color-warning); }
 .dot[data-state="done"] { background-color: var(--color-success); }
 .dot[data-state="failed"] { background-color: var(--color-danger); }
-.text { display: flex; flex: 1; flex-direction: column; gap: calc(var(--space-1) / 2); min-width: var(--space-0); }
+.text { display: flex; flex: 1; flex-direction: column; gap: var(--space-half); min-width: var(--space-0); }
 .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-ui); font-weight: var(--font-weight-medium); }
 .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .state[data-state="waiting"] { color: var(--color-warning); }

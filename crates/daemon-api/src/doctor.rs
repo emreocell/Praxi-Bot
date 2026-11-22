@@ -1047,6 +1047,50 @@ pub fn disk_check(free: Result<u64, String>) -> Check {
     }
 }
 
+/// `local models`: an informational line with the detected hardware and the best-fitting curated
+/// local model. Never a warning or failure: a machine without a GPU is not broken. Best effort,
+/// local only.
+#[must_use]
+pub fn check_local_models(
+    hw: &provider_catalog::HardwareInfo,
+    advice: &provider_catalog::LocalAdvice,
+) -> Check {
+    const ID: &str = "local_models";
+    const N: &str = "local models";
+    let gib = |b: u64| format!("{} GiB", (b + (1 << 29)) >> 30);
+    let ram = hw
+        .ram_bytes
+        .map_or_else(|| "RAM unknown".to_owned(), |b| format!("{} RAM", gib(b)));
+    let gpu = if hw.unified_memory {
+        "unified memory (Apple silicon)".to_owned()
+    } else {
+        match &hw.gpu {
+            Some(g) => match g.vram_bytes {
+                Some(v) => format!("{} ({} VRAM)", g.name, gib(v)),
+                None => g.name.clone(),
+            },
+            None => "GPU unknown".to_owned(),
+        }
+    };
+    let pick = match &advice.recommended {
+        Some(id) => advice
+            .models
+            .iter()
+            .find(|m| &m.model_id == id)
+            .map_or_else(
+                || "no recommendation".to_owned(),
+                |m| format!("suggested: `{}`", m.pull_command),
+            ),
+        None => "no recommendation".to_owned(),
+    };
+    let detail = format!("{ram}, {gpu}; {pick} (best effort, nothing is installed for you)");
+    if hw.ram_bytes.is_none() {
+        Check::skipped(ID, N, detail)
+    } else {
+        Check::ok(ID, N, detail)
+    }
+}
+
 /// Newest modification time of the files directly inside `dir`.
 #[must_use]
 pub fn newest_mtime(dir: &Path) -> Option<SystemTime> {

@@ -54,6 +54,9 @@
 }
 
 .link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--space-6);
   padding: var(--space-0) var(--space-1);
   border: none;
   border-radius: var(--radius-sm);

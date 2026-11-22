@@ -35,13 +35,19 @@ window to the front.
 
 On Windows, the desktop app disables the native window frame by default and
 draws its own minimize, maximize/restore, and close buttons in the top-right
-corner of the title bar (staying pinned above the right-hand bot panel when
-open). The app executable, window, and NSIS installer also use the full Praxi
+corner of a reserved title-bar strip. The sidebar and the right-hand bot panel
+start below that strip, so they never cover the controls; drag the strip to
+move the window and double-click it to maximize. The app executable, window, and NSIS installer also use the full Praxi
 ghost icon.
 
 - **Switch back to the native title bar**: open **Settings → Appearance** and
   turn on **Window frame** if you prefer standard OS window borders. On
   non-Windows platforms, the native frame stays on by default.
+- **Wallpaper veil**: with a wallpaper on (**Settings → Appearance →
+  Wallpaper**), the **Wallpaper veil** slider (0–100 %, default 35 %) sets how
+  strongly a soft, theme-tinted veil covers the whole wallpaper. The wallpaper
+  stays visible behind the entire window; messages sit on light plates, so text
+  keeps at least 4.5:1 contrast at every slider value.
 - **Limits**: integrated window controls run only inside the desktop app shell,
   not when previewing the UI in a web browser. This is purely visual window
   chrome and does not change daemon permissions.

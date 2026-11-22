@@ -12,7 +12,7 @@ default). There is no separate voice code path in the daemon.
 
 ## Before you start
 
-- Configure a dictation transcription service in **Settings → General**. If none
+- Configure a dictation transcription service (Whisper-compatible or Gemini Live) in **Settings → General**. If none
   is configured, starting a call stops immediately with a prompt to add one.
 - Allow microphone access for the Praxi desktop app.
 - Use headphones if possible. The app asks the WebView for echo cancellation,
@@ -20,6 +20,23 @@ default). There is no separate voice code path in the daemon.
   early.
 - Voice call mode is available only in the **desktop app**, not in the `bot` CLI
   or [Telegram](telegram.md).
+
+## Choosing the speech-to-text provider
+
+**Settings → General → Dictation service** has a **Provider** menu that applies to both
+dictation and voice calls:
+
+- **Whisper-compatible (OpenAI / local)**: an OpenAI-style `/audio/transcriptions`
+  service, cloud or a local server (the default).
+- **Gemini Live**: Google's Live API, used only to turn your speech into text. Paste a
+  Gemini API key (from Google AI Studio) and, optionally, another Live model name; the
+  default is `gemini-3.5-transcribe-live`. The key goes straight into the secret store and
+  is never shown again. The daemon, not the app window, talks to Google, one short
+  connection per utterance. Only the transcript is used: the answer still comes from the
+  bot model you chose, and the Live model's own reply is ignored.
+
+Audio leaves your machine only while you dictate or are in a call, and only to the service
+you configured. Free-tier keys are subject to Google's own limits and terms.
 
 ## Starting and using a call
 

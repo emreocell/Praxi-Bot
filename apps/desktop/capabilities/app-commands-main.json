@@ -29,6 +29,7 @@
     "allow-get-autostart",
     "allow-set-autostart",
     "allow-notify-show",
+    "allow-notify-take-actions",
     "allow-set-needs-count",
     "allow-set-tray-labels"
   ]

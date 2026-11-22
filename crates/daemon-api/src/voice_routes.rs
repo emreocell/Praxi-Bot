@@ -73,6 +73,13 @@ pub(crate) async fn update_voice(
             "`stt_key` must be 1 to {MAX_KEY_BYTES} bytes without line breaks or NUL"
         )));
     }
+    if let Some(k) = &input.gemini_key
+        && (k.is_empty() || k.len() > MAX_KEY_BYTES || k.contains(['\0', '\r', '\n']))
+    {
+        return Err(ApiError::bad_request(format!(
+            "`gemini_key` must be 1 to {MAX_KEY_BYTES} bytes without line breaks or NUL"
+        )));
+    }
     Ok(Json(control.update(input).await?))
 }
 

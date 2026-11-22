@@ -75,3 +75,13 @@
 }
 
 .cover { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+@media (prefers-reduced-motion: reduce) {
+  .preview {
+    transition: none;
+  }
+
+  .tile:hover .preview {
+    transform: none;
+  }
+}

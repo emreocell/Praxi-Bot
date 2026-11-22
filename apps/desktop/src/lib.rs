@@ -1170,6 +1170,7 @@ pub fn run() {
             set_autostart,
             autostart_supported,
             shell::notify_show,
+            shell::notify_take_actions,
             shell::set_needs_count,
             shell::set_tray_labels,
         ])
@@ -1434,6 +1435,7 @@ mod acl_tests {
         ("get_autostart", "MAIN_ONLY"),
         ("set_autostart", "MAIN_ONLY"),
         ("notify_show", "MAIN_ONLY"),
+        ("notify_take_actions", "MAIN_ONLY"),
         ("set_needs_count", "MAIN_ONLY"),
         ("set_tray_labels", "MAIN_ONLY"),
     ];
@@ -1629,6 +1631,7 @@ mod acl_tests {
                 "simulate_bot_run",
                 "set_stop_hotkey",
                 "notify_show",
+                "notify_take_actions",
                 "set_needs_count",
                 "set_tray_labels",
             ] {

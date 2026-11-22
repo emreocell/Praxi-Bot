@@ -21,7 +21,9 @@ import {
   DEFAULT_SURFACE,
   parsePanelBlur,
   parsePanelTransparency,
-  parseTransparentChat
+  parseTransparentChat,
+  parseVeil,
+  VEIL_DEFAULT
 } from "ui/surface-model";
 import { DEFAULT_WALLPAPER, parseWallpaper, type WallpaperSetting } from "./wallpaper.ts";
 import { DEFAULT_BACKDROP_DIM, NO_BACKDROP, parseBackdrop, parseBackdropDim } from "./backdropCatalog.ts";
@@ -40,6 +42,8 @@ export interface AppearanceSettings {
   backdrop: string;
   /** Animated dithered-cloud wallpaper (`off` by default); takes the backdrop's place while on. */
   wallpaper: WallpaperSetting;
+  /** Strength of the soft veil over the wallpaper, 0-100 %. */
+  wallpaperVeil: number;
   /** 20..88: how much of the theme background covers the scene. */
   backdropDim: number;
   /** 0..100: tinted / glass panels, 0 = most opaque, 100 = the legibility floor. */
@@ -71,6 +75,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   ownBubble: "tint",
   backdrop: NO_BACKDROP,
   wallpaper: DEFAULT_WALLPAPER,
+  wallpaperVeil: VEIL_DEFAULT,
   backdropDim: DEFAULT_BACKDROP_DIM,
   panelTransparency: DEFAULT_SURFACE.transparency,
   panelBlur: DEFAULT_SURFACE.blur,
@@ -106,6 +111,7 @@ export function normalizeAppearance(raw: Record<string, unknown>): AppearanceSet
     ownBubble: parseOwnBubble(raw.ownBubble),
     backdrop: parseBackdrop(raw.backdrop),
     wallpaper: parseWallpaper(raw.wallpaper),
+    wallpaperVeil: parseVeil(raw.wallpaperVeil),
     backdropDim: parseBackdropDim(raw.backdropDim),
     panelTransparency: parsePanelTransparency(raw.panelTransparency),
     panelBlur: parsePanelBlur(raw.panelBlur),
@@ -160,6 +166,7 @@ export function appearanceFromQuery(
     ownBubble: q("meb") ?? saved.ownBubble,
     backdrop: q("backdrop") ?? saved.backdrop,
     wallpaper: q("wallpaper") ?? saved.wallpaper,
+    wallpaperVeil: q("veil") !== undefined ? parseVeil(q("veil")) : saved.wallpaperVeil,
     backdropDim: q("dim") ?? saved.backdropDim,
     panelTransparency: q("alpha") ?? saved.panelTransparency,
     panelBlur: q("blur") ?? saved.panelBlur,

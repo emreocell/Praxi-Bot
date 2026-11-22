@@ -21,6 +21,7 @@ export function Wallpaper({ kind }: { kind: WallpaperKind }) {
   return (
     <div className={styles.root} aria-hidden="true" style={{ "--backdrop-dim": WALLPAPER_DIM / 100 } as CSSProperties}>
       <canvas ref={ref} className={styles.canvas} style={{ imageRendering: "pixelated" }} />
+      <div className={styles.veil} />
     </div>
   );
 }

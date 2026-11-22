@@ -50,3 +50,9 @@
 .popover:focus-visible {
   outline: none;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .popover {
+    animation: none;
+  }
+}

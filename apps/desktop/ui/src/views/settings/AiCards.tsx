@@ -13,6 +13,7 @@ import { useProviders } from "../../state/useProviders";
 import pageStyles from "./AiPage.module.css";
 import { ProvidersSection } from "../SettingsSections";
 import { ApiKeyPaste } from "./ApiKeyPaste";
+import { LocalModelsAdvice } from "../../components/LocalModelsAdvice";
 import { EnginesCard } from "./HomeCards";
 import { KnowledgeCard } from "./KnowledgeCard";
 import { MemoryCard } from "./MemoryCard";
@@ -104,6 +105,15 @@ export function aiCards(t: TFunction): CardDef[] {
       description: t("settingsModal.ai.detected.description"),
       keywords: "cli claude codex cursor gemini opencode chatgpt account hesap algilanan bulunan",
       node: <EnginesCard />
+    },
+    {
+      id: "localModels",
+      section: "ai",
+      kind: "block",
+      title: t("localModels.cardTitle"),
+      description: t("localModels.cardDescription"),
+      keywords: "ollama lmstudio local model hardware gpu ram yerel donanim lokal modell hardware",
+      node: <LocalModelsAdvice />
     },
     {
       id: "keys",

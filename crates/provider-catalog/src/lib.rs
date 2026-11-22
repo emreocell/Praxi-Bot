@@ -12,7 +12,9 @@ pub mod entry;
 pub mod error;
 pub mod factory;
 pub mod gemini;
+pub mod hardware;
 mod limits;
+pub mod local_advice;
 pub mod local_detect;
 pub mod model_metadata;
 pub mod openai_compat;
@@ -45,6 +47,8 @@ pub use entry::{
 pub use error::ProviderError;
 pub use factory::{build_chat_provider, build_embedding_provider};
 pub use gemini::GeminiProvider;
+pub use hardware::{GpuInfo, HardwareInfo, probe_hardware};
+pub use local_advice::{LocalAdvice, Recommendation, catalog_candidates, recommend};
 pub use local_detect::{LocalServer, detect_local_servers};
 pub use model_metadata::{
     CuratedModels, ModelKind, ModelMetadata, ProviderMetadata, embedded_metadata, model_metadata,

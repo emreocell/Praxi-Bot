@@ -225,7 +225,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: calc(var(--space-1) / 2) var(--space-2);
+  padding: var(--space-half) var(--space-2);
   border: var(--size-border) solid var(--color-border);
   border-radius: var(--radius-pill);
   background: transparent;
@@ -252,7 +252,7 @@
   position: absolute;
   top: calc(var(--space-6) * -1);
   left: var(--space-0);
-  padding: calc(var(--space-1) / 2) var(--space-2);
+  padding: var(--space-half) var(--space-2);
   border-radius: var(--radius-md);
   background-color: var(--color-accent);
   color: var(--color-accent-contrast);

@@ -39,6 +39,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "set_autostart",
     "autostart_supported",
     "notify_show",
+    "notify_take_actions",
     "set_needs_count",
     "set_tray_labels",
 ];

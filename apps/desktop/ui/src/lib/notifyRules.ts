@@ -1,5 +1,7 @@
 import type { GlobalEnvelope } from "../api/types.ts";
-import type { RunState } from "../state/timeline.ts";
+import type { RunState, ToolItem } from "../state/timeline.ts";
+import { isBatchable } from "./approvalBatch.ts";
+import { describeTool, isSendTool, resolveToolCall } from "./toolLabels.ts";
 
 /** A run that took longer than this notifies when it finishes (unfocused). */
 export const LONG_RUN_MS = 30_000;
@@ -19,6 +21,79 @@ export interface NotifyDecision {
   botId: string;
   /** What the notification is about: approval summary, question, or error. */
   detail: string;
+  /** Set for an approval: what the call is, so the toast can say it in words and offer buttons. */
+  approval?: ApprovalFacts;
+}
+
+export interface ApprovalFacts {
+  callId: string;
+  toolName: string;
+  input: unknown;
+  details: unknown;
+}
+
+export type NotifyActionId = "allow" | "always" | "deny";
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Does the approval card offer a standing "always" choice?  Mirrors ApprovalCard: not for a
+ * once-only call (older events: any details mean once only) and not for a taint-gate card.
+ */
+export function alwaysOffered(details: unknown): boolean {
+  const facts = isObject(details) ? details : undefined;
+  const onceOnly =
+    typeof facts?.once_only === "boolean" ? facts.once_only : details != null;
+  return !onceOnly && facts?.why !== "egress" && facts?.why !== "executes";
+}
+
+/**
+ * The buttons a toast may carry for this approval.  Only a plain approval gets any: a call that
+ * carries a payload to review, a schedule, a bot profile, a control grant or an outbound send
+ * keeps its card (the owner has to read it), so its toast only opens the app.
+ * Always-allow is offered exactly when the card would offer it.
+ */
+export function approvalActions(a: ApprovalFacts): NotifyActionId[] {
+  const probe = {
+    status: "awaiting_approval",
+    details: a.details
+  } as Pick<ToolItem, "status" | "details"> as ToolItem;
+  const real = resolveToolCall(a.toolName, a.input).name;
+  if (!isBatchable(probe) || isSendTool(a.toolName) || isSendTool(real)) {
+    return [];
+  }
+  return alwaysOffered(a.details) ? ["allow", "always", "deny"] : ["allow", "deny"];
+}
+
+/** What a pressed toast button does: decide through the card's own path, or just open the app. */
+export type ActionResolution =
+  | { kind: "decide"; decision: "approve" | "deny"; scope?: "once" | "always" }
+  | { kind: "open" };
+
+/**
+ * Re-check a pressed button against the approval that is pending NOW (it may have been answered,
+ * or changed, since the toast appeared).  `pending` is undefined when the call is no longer waiting.
+ * Hook for c474's scopes: "allow" is `once` here; a per-task scope would be chosen in this one place.
+ */
+export function resolveNotificationAction(
+  action: string,
+  pending: ApprovalFacts | undefined
+): ActionResolution {
+  if (!pending) {
+    return { kind: "open" };
+  }
+  const offered = approvalActions(pending);
+  if (action === "deny" && offered.includes("deny")) {
+    return { kind: "decide", decision: "deny" };
+  }
+  if (action === "allow" && offered.includes("allow")) {
+    return { kind: "decide", decision: "approve", scope: "once" };
+  }
+  if (action === "always" && offered.includes("always")) {
+    return { kind: "decide", decision: "approve", scope: "always" };
+  }
+  return { kind: "open" };
 }
 
 export interface NotifyContext {
@@ -63,7 +138,18 @@ export function decideNotification(
   switch (e.type) {
     case "approval_needed":
       return ctx.prefs.notifyNeedsYou
-        ? { kind: "needsYou", runId: e.run_id, ...base, detail: e.summary }
+        ? {
+            kind: "needsYou",
+            runId: e.run_id,
+            ...base,
+            detail: e.summary,
+            approval: {
+              callId: e.call_id,
+              toolName: e.tool_name,
+              input: e.input,
+              details: e.details
+            }
+          }
         : null;
     case "question_asked":
       return ctx.prefs.notifyNeedsYou
@@ -91,6 +177,42 @@ export function decideNotification(
 export interface NotificationText {
   title: string;
   body: string;
+  /** Toast buttons (Windows only; elsewhere the notification stays plain). */
+  actions?: { id: NotifyActionId; label: string }[];
+  /** The approval the buttons decide. */
+  callId?: string;
+}
+
+type AppName = (server: string) => string | null;
+
+/** `mcp:playwright/browser_evaluate` and `playwright.browser_evaluate` are the same call. */
+function canonicalTool(name: string): string {
+  const m = /^mcp:([^/]+)\/(.+)$/.exec(name);
+  return m ? `${m[1]}.${m[2]}` : name;
+}
+
+/**
+ * One human sentence for an approval ("Praxi wants to use Playwright (browser evaluate)"):
+ * never the raw summary, the arguments, a device id or the `pc:` prefix.
+ */
+export function approvalSentence(
+  a: ApprovalFacts,
+  botName: string,
+  t: Translate,
+  brandName?: AppName
+): string {
+  const label = describeTool(canonicalTool(a.toolName), a.input, brandName);
+  if (label.key.startsWith("chat.step.mcp")) {
+    return t("notify.approval.mcp", {
+      bot: botName,
+      app: String(label.values.app ?? ""),
+      action: String(label.values.action ?? "")
+    });
+  }
+  return t("notify.approval.other", {
+    bot: botName,
+    what: t(`${label.key}.running`, label.values)
+  });
 }
 
 type Translate = (key: string, values?: Record<string, string>) => string;
@@ -110,11 +232,23 @@ export function notificationText(
   d: NotifyDecision,
   botName: string,
   privateMode: boolean,
-  t: Translate
+  t: Translate,
+  brandName?: AppName
 ): NotificationText {
   const generic = t(`notify.generic.${d.kind}`);
   if (privateMode || !d.detail) {
     return { title: botName, body: generic };
+  }
+  if (d.approval) {
+    const actions = approvalActions(d.approval).map((id) => ({
+      id,
+      label: t(`notify.action.${id}`)
+    }));
+    return {
+      title: t("notify.approval.title"),
+      body: approvalSentence(d.approval, botName, t, brandName),
+      ...(actions.length > 0 ? { actions, callId: d.approval.callId } : {})
+    };
   }
   return {
     title: botName,

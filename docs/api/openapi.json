@@ -7213,6 +7213,42 @@
         ]
       }
     },
+    "/v1/local-models": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "What this machine can run locally. Local owner only: a hardware summary is a fingerprint.",
+        "operationId": "get_local_models",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalModelsDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/mcp-server/call": {
       "post": {
         "tags": [
@@ -16144,6 +16180,15 @@
           }
         }
       },
+      "FitDto": {
+        "type": "string",
+        "description": "How a model is expected to run here.",
+        "enum": [
+          "comfortable",
+          "slow",
+          "too_large"
+        ]
+      },
       "FrameAck": {
         "type": "object",
         "description": "`POST /v1/view/sessions/{id}/ack`: the newest frame this viewer has put on screen. Unlike\n`SessionUpdate` it changes nothing else and never forces a refresh, so a viewer can send\nit after every frame; the host paces its frames by it.",
@@ -16370,6 +16415,65 @@
           }
         ],
         "description": "What an \"always allow\" grant covers."
+      },
+      "HardwareDto": {
+        "type": "object",
+        "description": "Detected hardware. Every field is null/false when it could not be determined.",
+        "required": [
+          "unified_memory",
+          "os",
+          "arch"
+        ],
+        "properties": {
+          "arch": {
+            "type": "string"
+          },
+          "free_disk_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "gpu_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "gpu_vram_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "logical_cores": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "os": {
+            "type": "string"
+          },
+          "ram_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "unified_memory": {
+            "type": "boolean",
+            "description": "Apple silicon: the GPU shares system memory."
+          }
+        }
       },
       "Health": {
         "type": "object",
@@ -18446,6 +18550,148 @@
           }
         }
       },
+      "LocalAdviceDto": {
+        "type": "object",
+        "description": "Advice for this machine. `recommended` null means \"no recommendation\".",
+        "required": [
+          "basis",
+          "models"
+        ],
+        "properties": {
+          "basis": {
+            "$ref": "#/components/schemas/MemoryBasisDto"
+          },
+          "budget_gib": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "max_comfortable_billions": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Largest comfortable size class in billions of parameters, for runtimes without a curated\nlist (LM Studio)."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalModelDto"
+            },
+            "description": "Best first."
+          },
+          "recommended": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "LocalModelDto": {
+        "type": "object",
+        "description": "One curated local model with its verdict.",
+        "required": [
+          "model_id",
+          "display_name",
+          "params_billions",
+          "fit",
+          "needs_gib",
+          "pull_command"
+        ],
+        "properties": {
+          "disk_ok": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "False when free disk space is smaller than the estimated download."
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "fit": {
+            "$ref": "#/components/schemas/FitDto"
+          },
+          "model_id": {
+            "type": "string",
+            "description": "Exact catalog id (for example `qwen3:8b`)."
+          },
+          "needs_gib": {
+            "type": "number",
+            "format": "double",
+            "description": "Estimated memory need in GiB."
+          },
+          "params_billions": {
+            "type": "number",
+            "format": "double",
+            "description": "Size class in billions of parameters."
+          },
+          "pull_command": {
+            "type": "string",
+            "description": "The command to copy; Praxi never runs it."
+          }
+        }
+      },
+      "LocalModelsDto": {
+        "type": "object",
+        "description": "Response of `GET /v1/local-models`.",
+        "required": [
+          "hardware",
+          "advice",
+          "runtimes"
+        ],
+        "properties": {
+          "advice": {
+            "$ref": "#/components/schemas/LocalAdviceDto"
+          },
+          "hardware": {
+            "$ref": "#/components/schemas/HardwareDto"
+          },
+          "runtimes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalRuntimeDto"
+            }
+          }
+        }
+      },
+      "LocalRuntimeDto": {
+        "type": "object",
+        "description": "State of one local runtime.",
+        "required": [
+          "id",
+          "running",
+          "installed_models"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "`ollama` or `lmstudio`."
+          },
+          "installed": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The executable was found on PATH (Ollama only; LM Studio is a desktop app, so null)."
+          },
+          "installed_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Models the running server reports."
+          },
+          "running": {
+            "type": "boolean",
+            "description": "The server answered on its loopback port."
+          }
+        }
+      },
       "ManagedSkillDto": {
         "type": "object",
         "description": "Metadata only; the response never includes instruction bodies or files.",
@@ -19514,6 +19760,16 @@
           }
         ],
         "description": "Detailed transport of an MCP server body (the `McpServerConfig` shape)."
+      },
+      "MemoryBasisDto": {
+        "type": "string",
+        "description": "Which memory the verdicts are measured against.",
+        "enum": [
+          "vram",
+          "unified",
+          "cpu_ram",
+          "unknown"
+        ]
       },
       "MemoryItemDto": {
         "type": "object",
@@ -22803,7 +23059,7 @@
           },
           "mime": {
             "type": "string",
-            "description": "MIME type of the recording, e.g. `audio/webm`."
+            "description": "MIME type of the recording, e.g. `audio/webm` (Whisper) or `audio/pcm` (Gemini Live: 16-bit LE, 16 kHz, mono)."
           }
         }
       },
@@ -23112,11 +23368,22 @@
         "type": "object",
         "description": "Dictation configuration (`GET /v1/voice`): non-secret fields only.",
         "required": [
+          "stt_provider",
+          "gemini_model",
+          "gemini_key_set",
           "stt_base_url",
           "stt_model",
           "stt_key_set"
         ],
         "properties": {
+          "gemini_key_set": {
+            "type": "boolean",
+            "description": "Whether a Gemini API key is stored (never returned)."
+          },
+          "gemini_model": {
+            "type": "string",
+            "description": "Gemini Live model used for transcription (e.g. `gemini-3.5-transcribe-live`)."
+          },
           "stt_base_url": {
             "type": "string",
             "description": "Base URL of the OpenAI-compatible transcription service (without `/audio/transcriptions`)."
@@ -23128,6 +23395,10 @@
           "stt_model": {
             "type": "string",
             "description": "Model name sent with each request."
+          },
+          "stt_provider": {
+            "$ref": "#/components/schemas/VoiceProvider",
+            "description": "The active speech-to-text provider."
           }
         }
       },
@@ -23135,12 +23406,33 @@
         "type": "object",
         "description": "Body of `PUT /v1/voice`; omitted fields keep their value.",
         "properties": {
+          "clear_gemini_key": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Remove the stored Gemini key."
+          },
           "clear_stt_key": {
             "type": [
               "boolean",
               "null"
             ],
             "description": "Remove the stored key."
+          },
+          "gemini_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Gemini API key (**write-only**: secret store, never returned or logged)."
+          },
+          "gemini_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Gemini Live model name."
           },
           "stt_base_url": {
             "type": [
@@ -23162,8 +23454,27 @@
               "null"
             ],
             "description": "Model name."
+          },
+          "stt_provider": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VoiceProvider",
+                "description": "Switch the provider."
+              }
+            ]
           }
         }
+      },
+      "VoiceProvider": {
+        "type": "string",
+        "description": "Which service turns speech into text.",
+        "enum": [
+          "whisper",
+          "gemini_live"
+        ]
       },
       "WebSearchConfigDto": {
         "type": "object",

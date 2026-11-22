@@ -9,9 +9,26 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+/// Which service turns speech into text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceProvider {
+    /// An OpenAI-compatible `/audio/transcriptions` service (cloud or local). Takes `MediaRecorder` audio.
+    #[default]
+    Whisper,
+    /// Gemini Live API (server-side WebSocket, input transcription only). Takes `audio/pcm` 16 kHz mono.
+    GeminiLive,
+}
+
 /// Dictation configuration (`GET /v1/voice`): non-secret fields only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct VoiceConfigDto {
+    /// The active speech-to-text provider.
+    pub stt_provider: VoiceProvider,
+    /// Gemini Live model used for transcription (e.g. `gemini-3.5-transcribe-live`).
+    pub gemini_model: String,
+    /// Whether a Gemini API key is stored (never returned).
+    pub gemini_key_set: bool,
     /// Base URL of the OpenAI-compatible transcription service (without `/audio/transcriptions`).
     pub stt_base_url: String,
     /// Model name sent with each request.
@@ -23,6 +40,18 @@ pub struct VoiceConfigDto {
 /// Body of `PUT /v1/voice`; omitted fields keep their value.
 #[derive(Clone, Default, Deserialize, ToSchema)]
 pub struct VoiceConfigInput {
+    /// Switch the provider.
+    #[serde(default)]
+    pub stt_provider: Option<VoiceProvider>,
+    /// Gemini Live model name.
+    #[serde(default)]
+    pub gemini_model: Option<String>,
+    /// Gemini API key (**write-only**: secret store, never returned or logged).
+    #[serde(default)]
+    pub gemini_key: Option<String>,
+    /// Remove the stored Gemini key.
+    #[serde(default)]
+    pub clear_gemini_key: Option<bool>,
     /// `https://...`, or `http://` for a loopback server only.
     #[serde(default)]
     pub stt_base_url: Option<String>,
@@ -40,6 +69,13 @@ pub struct VoiceConfigInput {
 impl std::fmt::Debug for VoiceConfigInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VoiceConfigInput")
+            .field("stt_provider", &self.stt_provider)
+            .field("gemini_model", &self.gemini_model)
+            .field(
+                "gemini_key",
+                &self.gemini_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field("clear_gemini_key", &self.clear_gemini_key)
             .field("stt_base_url", &self.stt_base_url)
             .field("stt_model", &self.stt_model)
             .field("stt_key", &self.stt_key.as_ref().map(|_| "<redacted>"))
@@ -53,7 +89,7 @@ impl std::fmt::Debug for VoiceConfigInput {
 pub struct TranscribeInput {
     /// The recording, base64 (standard alphabet).
     pub audio_base64: String,
-    /// MIME type of the recording, e.g. `audio/webm`.
+    /// MIME type of the recording, e.g. `audio/webm` (Whisper) or `audio/pcm` (Gemini Live: 16-bit LE, 16 kHz, mono).
     pub mime: String,
     /// Optional ISO-639-1 language hint (`en`, `tr`, `de`).
     #[serde(default)]

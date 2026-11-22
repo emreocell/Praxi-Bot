@@ -131,7 +131,7 @@
   height: var(--space-10);
   padding: 0 var(--space-3);
   border: none;
-  border-radius: calc(var(--radius-md) * 1.25);
+  border-radius: var(--radius-control);
   background: none;
   color: var(--color-text);
   font-family: inherit;

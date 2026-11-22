@@ -1,40 +1,55 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
-import type { VoiceConfig } from "../../api/types";
+import type { VoiceConfig, VoiceConfigInput } from "../../api/types";
 import formStyles from "../../components/Form.module.css";
 import { SettingRow } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { humanLine } from "../../lib/humanError";
 import { useDaemon } from "../../state/DaemonContext";
 
-/** Where dictation audio is transcribed (an OpenAI-compatible service); the key is write-only. */
+/** Where dictation / voice-call audio is transcribed; keys are write-only (secret store). */
 export function DictationCard() {
   const { t } = useTranslation();
   const toast = useToast();
   const { client } = useDaemon();
   const [config, setConfig] = useState<VoiceConfig | null>(null);
+  const [provider, setProvider] = useState<VoiceConfig["stt_provider"]>("whisper");
   const [url, setUrl] = useState("");
   const [model, setModel] = useState("");
+  const [geminiModel, setGeminiModel] = useState("");
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
 
   const apply = useCallback((c: VoiceConfig) => {
     setConfig(c);
+    setProvider(c.stt_provider);
     setUrl(c.stt_base_url);
     setModel(c.stt_model);
+    setGeminiModel(c.gemini_model);
   }, []);
   useEffect(() => {
     client?.getVoice().then(apply).catch(() => undefined);
   }, [client, apply]);
 
-  const save = async (input: { stt_key?: string; clear_stt_key?: boolean } = {}) => {
+  const gemini = provider === "gemini_live";
+  const keyStored = gemini ? config?.gemini_key_set : config?.stt_key_set;
+
+  const save = async (extra: Partial<VoiceConfigInput> = {}) => {
     if (!client) {
       return;
     }
     setBusy(true);
     try {
-      apply(await client.updateVoice({ stt_base_url: url, stt_model: model, ...input }));
+      apply(
+        await client.updateVoice({
+          stt_provider: provider,
+          stt_base_url: url,
+          stt_model: model,
+          gemini_model: geminiModel,
+          ...extra
+        })
+      );
       setKey("");
       toast.show(t("voice.stt.saved"), "success");
     } catch (e) {
@@ -47,36 +62,64 @@ export function DictationCard() {
   if (!config) {
     return null;
   }
+  const privacy = gemini ? t("voice.stt.geminiPrivacy") : t("voice.stt.privacy");
+  const secretInput = gemini ? { gemini_key: key } : { stt_key: key };
   return (
-    <SettingRow stacked title={t("voice.stt.title")} description={`${t("voice.stt.description")} ${t("voice.stt.privacy")}`}>
-      <input
+    <SettingRow stacked title={t("voice.stt.title")} description={`${t("voice.stt.description")} ${privacy}`}>
+      <select
         className={formStyles.input}
-        aria-label={t("voice.stt.url")}
-        value={url}
-        placeholder="https://api.openai.com/v1"
-        onChange={(e) => setUrl(e.target.value)}
-      />
-      <input
-        className={formStyles.input}
-        aria-label={t("voice.stt.model")}
-        value={model}
-        placeholder="whisper-1"
-        onChange={(e) => setModel(e.target.value)}
-      />
+        aria-label={t("voice.stt.provider")}
+        value={provider}
+        onChange={(e) => setProvider(e.target.value as VoiceConfig["stt_provider"])}
+      >
+        <option value="whisper">{t("voice.stt.providerWhisper")}</option>
+        <option value="gemini_live">{t("voice.stt.providerGemini")}</option>
+      </select>
+      {gemini ? (
+        <input
+          className={formStyles.input}
+          aria-label={t("voice.stt.geminiModel")}
+          value={geminiModel}
+          placeholder="gemini-3.5-transcribe-live"
+          onChange={(e) => setGeminiModel(e.target.value)}
+        />
+      ) : (
+        <>
+          <input
+            className={formStyles.input}
+            aria-label={t("voice.stt.url")}
+            value={url}
+            placeholder="https://api.openai.com/v1"
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <input
+            className={formStyles.input}
+            aria-label={t("voice.stt.model")}
+            value={model}
+            placeholder="whisper-1"
+            onChange={(e) => setModel(e.target.value)}
+          />
+        </>
+      )}
       <input
         className={formStyles.input}
         type="password"
         autoComplete="off"
-        aria-label={t("voice.stt.key")}
+        aria-label={gemini ? t("voice.stt.geminiKey") : t("voice.stt.key")}
         value={key}
-        placeholder={config.stt_key_set ? t("voice.stt.keyStored") : t("voice.stt.key")}
+        placeholder={keyStored ? t("voice.stt.keyStored") : gemini ? t("voice.stt.geminiKey") : t("voice.stt.key")}
         onChange={(e) => setKey(e.target.value)}
       />
-      <Button size="sm" disabled={busy} onClick={() => void save(key ? { stt_key: key } : {})}>
+      <Button size="sm" disabled={busy} onClick={() => void save(key ? secretInput : {})}>
         {t("voice.stt.save")}
       </Button>
-      {config.stt_key_set ? (
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void save({ clear_stt_key: true })}>
+      {keyStored ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => void save(gemini ? { clear_gemini_key: true } : { clear_stt_key: true })}
+        >
           {t("voice.stt.clearKey")}
         </Button>
       ) : null}

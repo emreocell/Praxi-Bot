@@ -194,7 +194,7 @@
   align-items: center;
   gap: var(--space-1);
   max-width: 100%;
-  padding: calc(var(--space-1) / 2) var(--space-2);
+  padding: var(--space-half) var(--space-2);
   border-radius: var(--radius-pill);
   background-color: color-mix(in srgb, var(--color-text) 7%, transparent);
   color: var(--color-text-muted);

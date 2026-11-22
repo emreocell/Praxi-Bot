@@ -36,7 +36,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 - **Unread markers.** Bots with unseen replies or pending decisions show a dot in the left rail, and the open chat marks the first unseen reply with a **New messages** divider. See [Unread markers](chatting-and-approvals.md#unread-markers).
 - **Praxi as the default main bot and per-computer "Make main bot".** Fresh desktop setups default to **Praxi** (white ghost) as the main bot. Each computer (This computer and every paired host) keeps its own bot order and main bot, set with the star button (**Make main bot**) in the bot panel header. See [Main bot and bot order](bots-and-profiles.md#main-bot-and-bot-order-desktop-app).
 - **Hands-free voice call mode.** Tap the phone button in the desktop chat composer to talk to a bot with automatic voice activity detection, sentence-by-sentence speech, barge-in, push-to-talk, and click-only approvals. See [Voice call mode](voice-call.md).
-- **Integrated window controls and complete ghost app icon.** On Windows, the desktop app hides the native window frame by default and draws its own minimize, maximize/restore, and close controls above the right panel, alongside the complete Praxi ghost icon. See [Window controls and appearance](install-windows.md#window-controls-and-appearance).
+- **Integrated window controls and complete ghost app icon.** On Windows, the desktop app hides the native window frame by default and draws its own minimize, maximize/restore, and close controls in a reserved title-bar strip above the panels, alongside the complete Praxi ghost icon. See [Window controls and appearance](install-windows.md#window-controls-and-appearance).
 - **Refined satin-matte bot avatars.** Bots can use one of 16 procedural SVG shapes with layered lighting, living eyes, state motion (respecting reduced motion), or a custom uploaded image/GIF. See [Bot avatars](bots-and-profiles.md#bot-avatars-desktop-app).
 - **Host-status commands without approval fatigue.** Fixed read-only status commands (`uptime`, `df -h`, `free -m`, `uname -a`, and similar) on an always-on host's own computer no longer taint the run or trigger repeated executor asks. See [Host-status commands on an always-on host](chatting-and-approvals.md#host-status-commands-on-an-always-on-host).
 - **Paired server as a bot's browser computer.** A local bot with `[runtime] computer = "server:<key>"` keeps its model calls, files, shell, and approvals on your computer while running `browser_*` inside an isolated browser on the paired server. See [Computer target](bots-and-profiles.md#computer-target) and [Using a paired server as a bot's browser computer](remote-host.md#using-a-paired-server-as-a-bots-browser-computer).
@@ -84,6 +84,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Understand what protects you | [Security model](security.md) |
 | Look up a term | [Glossary](glossary.md) |
 | See keyboard shortcuts | [Keyboard shortcuts](keyboard-shortcuts.md) |
+| Use Praxi with a keyboard, screen reader, high-contrast theme, or reduced motion | [Accessibility](accessibility.md) |
 | Something does not work | [Troubleshooting](troubleshooting.md), [FAQ](faq.md) |
 
 ## The pieces

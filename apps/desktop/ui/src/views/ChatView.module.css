@@ -368,6 +368,22 @@
   border: none;
 }
 
+/* Wallpaper veil: text that would sit straight on the wallpaper gets a translucent plate (alpha planned
+   by the surface model against the worst wallpaper pixel; no blur per message, they scroll). */
+:global(:root[data-veil="on"][data-bubble="plain"]) .assistantBubble {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--bubble-radius);
+  background-color: var(--message-plate-fill);
+}
+:global(:root[data-veil="on"][data-bubble="line"]) .assistantBubble {
+  background-color: var(--message-plate-fill);
+}
+:global(:root[data-veil="on"][data-bubble="glass"]) .userBubble,
+:global(:root[data-veil="on"][data-bubble="line"]) .userBubble {
+  background-color: var(--message-plate-fill);
+  background-image: linear-gradient(color-mix(in srgb, var(--color-accent) 22%, transparent), color-mix(in srgb, var(--color-accent) 22%, transparent));
+}
+
 /* ---- Empty chat (198 D) ---- */
 .timelineEmpty {
   min-height: 100%;
@@ -482,10 +498,8 @@
 }
 
 .box:focus-within {
-  border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-border-strong));
-  box-shadow:
-    var(--shadow-card),
-    0 0 0 var(--space-1) color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-color: var(--color-focus);
+  box-shadow: var(--shadow-focus), var(--shadow-card);
 }
 
 .input {
@@ -652,7 +666,7 @@
   margin: var(--space-0);
   padding: var(--space-0);
   list-style: none;
-  max-height: calc(var(--size-control-lg) * 5);
+  max-height: var(--size-list-max);
   overflow-y: auto;
 }
 
@@ -856,7 +870,7 @@
 }
 
 .box:focus-within {
-  border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-border-strong));
+  border-color: var(--color-focus);
 }
 
 .jump {

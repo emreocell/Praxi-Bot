@@ -1,5 +1,5 @@
 import { BrainCircuit, ChartNoAxesCombined, Mail, Monitor, Palette, Search, Settings2, RefreshCw, Stethoscope, X } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "../components/Modal";
 import { SettingGroup } from "../components/SettingsUi";
@@ -118,6 +118,38 @@ export function SettingsModal({
   const groups = SETTINGS_SECTIONS.filter((s) =>
     visible.some((c) => c.section === s)
   );
+  const enabledSections = SETTINGS_NAV_GROUPS.flatMap((g) => g.sections).filter(
+    (s) => !(searching && !sectionsWithHits.has(s))
+  );
+  const onNavKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (
+      e.key !== "ArrowDown" &&
+      e.key !== "ArrowUp" &&
+      e.key !== "Home" &&
+      e.key !== "End"
+    ) {
+      return;
+    }
+    if (enabledSections.length === 0) {
+      return;
+    }
+    e.preventDefault();
+    const cur = Math.max(0, enabledSections.indexOf(section));
+    const nextIdx =
+      e.key === "Home"
+        ? 0
+        : e.key === "End"
+          ? enabledSections.length - 1
+          : e.key === "ArrowDown"
+            ? (cur + 1) % enabledSections.length
+            : (cur - 1 + enabledSections.length) % enabledSections.length;
+    const next = enabledSections[nextIdx];
+    setQuery("");
+    setSection(next);
+    e.currentTarget
+      .querySelector<HTMLElement>(`[data-testid="settings-nav-${next}"]`)
+      ?.focus();
+  };
 
   return (
     <Modal open={open} onClose={onClose} label={t("settingsModal.title")}>
@@ -133,7 +165,7 @@ export function SettingsModal({
           onChange={(e) => setQuery(e.target.value)}
         />
         </div>
-        <div className={styles.navScroll}>
+        <div className={styles.navScroll} onKeyDown={onNavKeyDown}>
           {SETTINGS_NAV_GROUPS.map((g) => (
             <div key={g.id} className={styles.navList} role="group" aria-label={t(`settingsModal.navGroups.${g.id}`)}>
               <span className={styles.navGroupLabel} aria-hidden="true">{t(`settingsModal.navGroups.${g.id}`)}</span>

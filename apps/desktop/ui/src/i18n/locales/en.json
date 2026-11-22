@@ -315,6 +315,10 @@
       "sky": "Sky",
       "theme": "Follow theme",
       "title": "Wallpaper",
+      "veil": "Wallpaper veil",
+      "veilClear": "Clear",
+      "veilHint": "A soft tint over the whole wallpaper. Messages sit on their own light plates, so text stays readable at any setting.",
+      "veilSoft": "Soft",
       "warm": "Warm"
     }
   },
@@ -1192,11 +1196,15 @@
     },
     "chain": {
       "details": "Details",
+      "groupApp": "{{app}} ×{{count}}",
+      "groupSame": "{{what}} ×{{count}}",
       "problems_one": "{{count}} step failed",
       "problems_other": "{{count}} steps failed",
       "slow": "Taking longer than usual",
       "started": "Started {{start}}",
       "startedFinished": "Started {{start}} · finished {{end}}",
+      "summary": "{{count}} steps · {{what}} · {{duration}}",
+      "summaryPlain": "{{count}} steps · {{duration}}",
       "thought": "Thought for {{duration}}",
       "working": "Working step by step"
     },
@@ -3120,6 +3128,29 @@
     "viewOnly": "View only",
     "watchAction": "Take control"
   },
+  "localModels": {
+    "bestEffort": "These are estimates, not guarantees. Praxi never runs the commands for you, and this hardware information stays on this computer.",
+    "cardDescription": "What fits on this computer for Ollama or LM Studio. Best effort.",
+    "cardTitle": "Local models",
+    "copied": "Copied",
+    "copy": "Copy command",
+    "cores": "{{count}} processor threads",
+    "disk": "{{size}} free disk",
+    "fitFast": "runs well",
+    "fitSlow": "runs, but slowly",
+    "lmstudio": "In LM Studio, models up to about {{size}}B parameters should run comfortably here.",
+    "noDisk": "not enough disk space",
+    "noGpu": "none found",
+    "none": "No recommendation for this computer.",
+    "ollamaMissing": "Ollama is not installed. Install it from ollama.com, then run the command above in a terminal.",
+    "ollamaStopped": "Ollama is installed but not running. Open the Ollama app (or run `ollama serve`), then pull a model.",
+    "ramGpu": "{{ram}} memory · graphics: {{gpu}}",
+    "recommended": "Suggested for this computer: {{name}}.",
+    "title": "What this computer can run",
+    "unified": "{{ram}} shared memory (Apple silicon)",
+    "unknown": "Could not read this computer's hardware, so there is no recommendation. Start with a small model (about 4B) and go up if it runs well.",
+    "unknownValue": "unknown"
+  },
   "main": {
     "clearSelection": "Back to overview",
     "daemonConnectingDescription": "Connecting to the bundled Praxi-Bot background service on this computer.",
@@ -3322,6 +3353,16 @@
     "title": "New bot"
   },
   "notify": {
+    "action": {
+      "allow": "Allow",
+      "always": "Always allow",
+      "deny": "Deny"
+    },
+    "approval": {
+      "mcp": "{{bot}} wants to use {{app}} ({{action}})",
+      "other": "{{bot}} wants to continue: {{what}}",
+      "title": "Approval needed"
+    },
     "detail": {
       "failed": "Failed: {{detail}}",
       "longRun": "{{detail}}",
@@ -4246,7 +4287,8 @@
   },
   "shell": {
     "panelGrip": "Resize bot panel (arrow keys)",
-    "railGrip": "Resize sidebar (arrow keys)"
+    "railGrip": "Resize sidebar (arrow keys)",
+    "skipToMain": "Skip to main content"
   },
   "sidebar": {
     "apps": "Apps",
@@ -4497,10 +4539,16 @@
     "stt": {
       "clearKey": "Remove key",
       "description": "Where your recordings are transcribed: an OpenAI-compatible service (a cloud provider or a local whisper server).",
+      "geminiKey": "Gemini API key",
+      "geminiModel": "Gemini model",
+      "geminiPrivacy": "With Gemini Live your speech goes to Google, through the daemon, only while you dictate or are in a voice call. The key stays in the secret store. Only the transcript is used; the model's own answer is ignored.",
       "key": "API key",
       "keyStored": "Key stored (type to replace)",
       "model": "Model",
       "privacy": "A recording is sent only when you press the microphone, and only to this address. The key stays in the secret store.",
+      "provider": "Provider",
+      "providerGemini": "Gemini Live",
+      "providerWhisper": "Whisper-compatible (OpenAI / local)",
       "save": "Save",
       "saved": "Dictation settings saved",
       "title": "Dictation service",

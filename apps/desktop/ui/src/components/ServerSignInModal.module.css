@@ -101,13 +101,13 @@
   display: block;
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
-  background: var(--color-surface-2, var(--color-surface));
+  background: var(--color-surface);
   overflow-wrap: anywhere;
 }
 
 .problem {
   margin: var(--space-0);
-  color: var(--color-danger, var(--color-text));
+  color: var(--color-danger);
   font-size: var(--font-size-sm);
 }
 

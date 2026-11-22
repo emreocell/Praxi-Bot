@@ -1,4 +1,4 @@
-import { type CSSProperties } from "react";
+import { type CSSProperties, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { BOT_SHAPES, BotAvatar, type BotShapeId } from "ui";
 import { BOT_COLORS } from "../lib/botProfile";
@@ -15,9 +15,33 @@ export function CharacterShapeGrid({
   onChange: (shape: BotShapeId) => void;
 }) {
   const { t } = useTranslation();
+  const activeIdx = Math.max(
+    0,
+    BOT_SHAPES.findIndex((s) => s.id === value)
+  );
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const step =
+      e.key === "ArrowRight" || e.key === "ArrowDown"
+        ? 1
+        : e.key === "ArrowLeft" || e.key === "ArrowUp"
+          ? -1
+          : 0;
+    if (!step) {
+      return;
+    }
+    e.preventDefault();
+    const next = BOT_SHAPES[(activeIdx + step + BOT_SHAPES.length) % BOT_SHAPES.length];
+    onChange(next.id);
+    e.currentTarget.querySelector<HTMLElement>(`[data-testid="shape-${next.id}"]`)?.focus();
+  };
   return (
-    <div className={styles.shapeGrid} role="group" aria-label={t("newBot.shapeGroup")}>
-      {BOT_SHAPES.map((s) => {
+    <div
+      className={styles.shapeGrid}
+      role="group"
+      aria-label={t("newBot.shapeGroup")}
+      onKeyDown={onKeyDown}
+    >
+      {BOT_SHAPES.map((s, idx) => {
         const label = t(`newBot.shapes.${s.id}`);
         const active = value === s.id;
         return (
@@ -30,6 +54,7 @@ export function CharacterShapeGrid({
             title={label}
             aria-label={label}
             aria-pressed={active}
+            tabIndex={idx === activeIdx ? 0 : -1}
             data-testid={`shape-${s.id}`}
             onClick={() => onChange(s.id)}
           >
@@ -58,15 +83,36 @@ export function CharacterColorRow({
 }) {
   const { t } = useTranslation();
   const normalized = value.trim().toLowerCase();
-  const isPreset = BOT_COLORS.some((c) => c.toLowerCase() === normalized);
+  const presetIdx = BOT_COLORS.findIndex((c) => c.toLowerCase() === normalized);
+  const isPreset = presetIdx >= 0;
+  const activeIdx = isPreset ? presetIdx : 0;
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement | null)?.tagName === "INPUT") {
+      return;
+    }
+    const step =
+      e.key === "ArrowRight" || e.key === "ArrowDown"
+        ? 1
+        : e.key === "ArrowLeft" || e.key === "ArrowUp"
+          ? -1
+          : 0;
+    if (!step) {
+      return;
+    }
+    e.preventDefault();
+    const next = BOT_COLORS[(activeIdx + step + BOT_COLORS.length) % BOT_COLORS.length];
+    onChange(next);
+    e.currentTarget.querySelector<HTMLElement>(`[data-testid="color-${next.slice(1)}"]`)?.focus();
+  };
   return (
     <div
       className={styles.swatchRow}
       style={centered ? undefined : { justifyContent: "flex-start" }}
       role="group"
       aria-label={t("botForm.color")}
+      onKeyDown={onKeyDown}
     >
-      {BOT_COLORS.map((hex) => {
+      {BOT_COLORS.map((hex, idx) => {
         const active = normalized === hex.toLowerCase();
         return (
           <button
@@ -78,6 +124,7 @@ export function CharacterColorRow({
             style={{ "--swatch-color": hex } as CSSProperties}
             aria-label={hex}
             aria-pressed={active}
+            tabIndex={idx === activeIdx ? 0 : -1}
             data-testid={`color-${hex.slice(1)}`}
             onClick={() => onChange(hex)}
           />

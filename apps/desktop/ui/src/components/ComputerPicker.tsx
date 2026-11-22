@@ -96,6 +96,7 @@ export function ComputerPicker() {
       disabled={extra?.disabled}
       onClick={() => {
         setOpen(false);
+        trigger.current?.focus();
         onClick();
       }}
     >

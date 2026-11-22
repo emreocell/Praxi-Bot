@@ -23,6 +23,9 @@ struct FakeVoice {
 impl VoiceControl for FakeVoice {
     fn get(&self) -> VoiceConfigDto {
         VoiceConfigDto {
+            stt_provider: crate::voice::VoiceProvider::Whisper,
+            gemini_model: "gemini-3.5-transcribe-live".into(),
+            gemini_key_set: false,
             stt_base_url: "https://stt.example/v1".into(),
             stt_model: "whisper-1".into(),
             stt_key_set: self.key.lock().is_some(),
@@ -30,7 +33,7 @@ impl VoiceControl for FakeVoice {
     }
 
     async fn update(&self, input: VoiceConfigInput) -> Result<VoiceConfigDto, VoiceControlError> {
-        if let Some(k) = input.stt_key {
+        if let Some(k) = input.stt_key.or(input.gemini_key) {
             *self.key.lock() = Some(k);
         }
         Ok(self.get())
@@ -95,4 +98,26 @@ async fn voice_key_is_write_only_and_transcribe_validates_input() {
         let r = call(&t, Method::POST, "/v1/voice/transcribe", Some(bad)).await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST);
     }
+}
+
+#[tokio::test]
+async fn gemini_key_is_validated_and_never_echoed() {
+    let (t, _v) = with_voice();
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/voice",
+        Some(json!({"stt_provider": "gemini_live", "gemini_key": "AIza-secret\nx"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/voice",
+        Some(json!({"stt_provider": "gemini_live", "gemini_key": "AIza-gemini-secret"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(!String::from_utf8_lossy(&r.body).contains("AIza-gemini-secret"));
 }

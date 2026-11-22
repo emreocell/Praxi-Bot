@@ -291,7 +291,8 @@ fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> 
     }
     if (check_path == "/v1/providers/cli"
         || check_path.starts_with("/v1/providers/cli/")
-        || check_path == "/v1/providers/detected")
+        || check_path == "/v1/providers/detected"
+        || check_path == "/v1/local-models")
         || (*method == Method::POST && PEER_DENIED_POST_PATHS.contains(&check_path))
     {
         return Some("host-local provider management is not allowed for peers");

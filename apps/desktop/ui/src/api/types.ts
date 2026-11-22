@@ -140,6 +140,7 @@ export type ProvidersDto = S["ProvidersDto"];
 export type ConfiguredProviderDto = S["ConfiguredProviderDto"];
 export type CatalogProviderDto = S["CatalogProviderDto"];
 export type DetectedProviderDto = S["DetectedProviderDto"];
+export type LocalModelsDto = S["LocalModelsDto"];
 export type DoctorCheck = S["Check"];
 export type DoctorStatus = S["Status"];
 export type RepairId = S["Repair"];

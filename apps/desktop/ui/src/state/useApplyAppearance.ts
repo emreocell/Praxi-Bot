@@ -49,7 +49,10 @@ type FullAppearanceInput = AppearanceInput &
     | "panelBlur"
     | "transparentChat"
     | "transparencyOverride"
-  >;
+  > & {
+    /** Wallpaper veil (0-100) while a wallpaper is drawn; undefined otherwise. */
+    veil?: number;
+  };
 
 /** Write the appearance onto <html> (no React): also used before the first render. */
 export function paintAppearance(
@@ -76,6 +79,7 @@ export function paintAppearance(
             transparency: f.panelTransparency,
             blur: f.panelBlur,
             transparentChat: f.transparentChat,
+            veil: f.veil,
             tone
           }
         }
@@ -161,6 +165,7 @@ export function useApplyAppearance(
     full?.panelTransparency,
     full?.panelBlur,
     full?.transparentChat,
+    full?.veil,
     full?.transparencyOverride,
     theme.id,
     theme.bg,

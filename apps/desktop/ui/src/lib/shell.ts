@@ -5,6 +5,8 @@ import { isTauriRuntime } from "../overlay/events";
 
 /** Events the Rust shell emits (tray menu, notification clicks). */
 export const SHELL_EVENT_NOTIFICATION_ACTIVATED = "shell:notification_activated";
+/** A toast button was pressed: carries nothing, the UI drains `notify_take_actions`. */
+export const SHELL_EVENT_NOTIFICATION_ACTION = "shell:notification_action";
 export const SHELL_EVENT_TRAY_OPEN_NEEDS = "shell:tray_open_needs";
 export const SHELL_EVENT_TRAY_STOP_ALL = "shell:tray_stop_all";
 
@@ -13,6 +15,19 @@ export interface NativeNotification {
   body: string;
   /** Chat to open when the notification is clicked. */
   chatId?: string;
+  /** Approval the buttons decide (Windows toasts only). */
+  callId?: string;
+  actions?: { id: string; label: string }[];
+}
+
+export interface ToastAction {
+  call_id: string;
+  action: string;
+}
+
+/** Toast button presses since the last call (queued by the shell; never trusted from events). */
+export async function takeNotificationActions(): Promise<ToastAction[]> {
+  return isTauriRuntime() ? invoke<ToastAction[]>("notify_take_actions") : [];
 }
 
 /** Whether the user is looking at the main window. */
@@ -46,7 +61,9 @@ export async function showNotification(n: NativeNotification): Promise<void> {
     await invoke("notify_show", {
       title: n.title,
       body: n.body,
-      chatId: n.chatId ?? null
+      chatId: n.chatId ?? null,
+      callId: n.callId ?? null,
+      actions: n.actions ?? null
     });
     return;
   }

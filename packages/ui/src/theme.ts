@@ -215,5 +215,6 @@ export function applyTheme(theme: ThemeDef, overrides?: ThemeOverrides): void {
   const backdropActive = overrides?.backdropActive === true;
   root.dataset.backdrop = backdropActive ? "on" : "off";
   root.dataset.chat = clearChat ? "clear" : "pane";
+  root.dataset.veil = clearChat && surface.veil !== undefined ? "on" : "off";
   root.dataset.float = backdropActive || style === "glass" || style === "tinted" ? "on" : "off";
 }

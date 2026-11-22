@@ -2044,6 +2044,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/local-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What this machine can run locally. Local owner only: a hardware summary is a fingerprint. */
+        get: operations["get_local_models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mcp-server/call": {
         parameters: {
             query?: never;
@@ -5006,6 +5023,11 @@ export interface components {
             updated_at_ms: number;
         };
         /**
+         * @description How a model is expected to run here.
+         * @enum {string}
+         */
+        FitDto: "comfortable" | "slow" | "too_large";
+        /**
          * @description `POST /v1/view/sessions/{id}/ack`: the newest frame this viewer has put on screen. Unlike
          *     `SessionUpdate` it changes nothing else and never forces a refresh, so a viewer can send
          *     it after every frame; the host paces its frames by it.
@@ -5087,6 +5109,22 @@ export interface components {
             scope: string;
             /** @description Tool name. */
             tool: string;
+        };
+        /** @description Detected hardware. Every field is null/false when it could not be determined. */
+        HardwareDto: {
+            arch: string;
+            /** Format: int64 */
+            free_disk_bytes?: number | null;
+            gpu_name?: string | null;
+            /** Format: int64 */
+            gpu_vram_bytes?: number | null;
+            /** Format: int32 */
+            logical_cores?: number | null;
+            os: string;
+            /** Format: int64 */
+            ram_bytes?: number | null;
+            /** @description Apple silicon: the GPU shares system memory. */
+            unified_memory: boolean;
         };
         /** @description `GET /v1/health`. */
         Health: {
@@ -5773,6 +5811,59 @@ export interface components {
              */
             gseq: number;
         };
+        /** @description Advice for this machine. `recommended` null means "no recommendation". */
+        LocalAdviceDto: {
+            basis: components["schemas"]["MemoryBasisDto"];
+            /** Format: double */
+            budget_gib?: number | null;
+            /**
+             * Format: double
+             * @description Largest comfortable size class in billions of parameters, for runtimes without a curated
+             *     list (LM Studio).
+             */
+            max_comfortable_billions?: number | null;
+            /** @description Best first. */
+            models: components["schemas"]["LocalModelDto"][];
+            recommended?: string | null;
+        };
+        /** @description One curated local model with its verdict. */
+        LocalModelDto: {
+            /** @description False when free disk space is smaller than the estimated download. */
+            disk_ok?: boolean | null;
+            display_name: string;
+            fit: components["schemas"]["FitDto"];
+            /** @description Exact catalog id (for example `qwen3:8b`). */
+            model_id: string;
+            /**
+             * Format: double
+             * @description Estimated memory need in GiB.
+             */
+            needs_gib: number;
+            /**
+             * Format: double
+             * @description Size class in billions of parameters.
+             */
+            params_billions: number;
+            /** @description The command to copy; Praxi never runs it. */
+            pull_command: string;
+        };
+        /** @description Response of `GET /v1/local-models`. */
+        LocalModelsDto: {
+            advice: components["schemas"]["LocalAdviceDto"];
+            hardware: components["schemas"]["HardwareDto"];
+            runtimes: components["schemas"]["LocalRuntimeDto"][];
+        };
+        /** @description State of one local runtime. */
+        LocalRuntimeDto: {
+            /** @description `ollama` or `lmstudio`. */
+            id: string;
+            /** @description The executable was found on PATH (Ollama only; LM Studio is a desktop app, so null). */
+            installed?: boolean | null;
+            /** @description Models the running server reports. */
+            installed_models: string[];
+            /** @description The server answered on its loopback port. */
+            running: boolean;
+        };
         /** @description Metadata only; the response never includes instruction bodies or files. */
         ManagedSkillDto: {
             description: string;
@@ -6167,6 +6258,11 @@ export interface components {
             /** @description Endpoint URL. */
             url: string;
         };
+        /**
+         * @description Which memory the verdicts are measured against.
+         * @enum {string}
+         */
+        MemoryBasisDto: "vram" | "unified" | "cpu_ram" | "unknown";
         /** @description One stored memory item and its active undo journal state. */
         MemoryItemDto: {
             /**
@@ -7522,7 +7618,7 @@ export interface components {
             audio_base64: string;
             /** @description Optional ISO-639-1 language hint (`en`, `tr`, `de`). */
             language?: string | null;
-            /** @description MIME type of the recording, e.g. `audio/webm`. */
+            /** @description MIME type of the recording, e.g. `audio/webm` (Whisper) or `audio/pcm` (Gemini Live: 16-bit LE, 16 kHz, mono). */
             mime: string;
         };
         /** @description Result of `POST /v1/voice/transcribe`. */
@@ -7652,24 +7748,42 @@ export interface components {
         ViewState: "watch" | "acquiring" | "active" | "paused" | "unavailable" | "closed";
         /** @description Dictation configuration (`GET /v1/voice`): non-secret fields only. */
         VoiceConfigDto: {
+            /** @description Whether a Gemini API key is stored (never returned). */
+            gemini_key_set: boolean;
+            /** @description Gemini Live model used for transcription (e.g. `gemini-3.5-transcribe-live`). */
+            gemini_model: string;
             /** @description Base URL of the OpenAI-compatible transcription service (without `/audio/transcriptions`). */
             stt_base_url: string;
             /** @description Whether an API key is stored (never returned). */
             stt_key_set: boolean;
             /** @description Model name sent with each request. */
             stt_model: string;
+            /** @description The active speech-to-text provider. */
+            stt_provider: components["schemas"]["VoiceProvider"];
         };
         /** @description Body of `PUT /v1/voice`; omitted fields keep their value. */
         VoiceConfigInput: {
+            /** @description Remove the stored Gemini key. */
+            clear_gemini_key?: boolean | null;
             /** @description Remove the stored key. */
             clear_stt_key?: boolean | null;
+            /** @description Gemini API key (**write-only**: secret store, never returned or logged). */
+            gemini_key?: string | null;
+            /** @description Gemini Live model name. */
+            gemini_model?: string | null;
             /** @description `https://...`, or `http://` for a loopback server only. */
             stt_base_url?: string | null;
             /** @description API key (**write-only**: stored in the secret store, never returned or logged). */
             stt_key?: string | null;
             /** @description Model name. */
             stt_model?: string | null;
+            stt_provider?: null | components["schemas"]["VoiceProvider"];
         };
+        /**
+         * @description Which service turns speech into text.
+         * @enum {string}
+         */
+        VoiceProvider: "whisper" | "gemini_live";
         /**
          * @description Current web search configuration (`GET /v1/web/search`): non-secret fields
          *     only.
@@ -12547,6 +12661,34 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_local_models: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalModelsDto"];
+                };
+            };
+            /** @description caller is not the local owner */
             403: {
                 headers: {
                     [name: string]: unknown;

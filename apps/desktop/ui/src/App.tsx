@@ -483,7 +483,17 @@ function AppShell() {
   }, [settings.windowFrame]);
 
   // Native frame off (the default on Windows): the app draws the window controls.
-  const customChrome = isTauriRuntime() && !settings.windowFrame;
+  // `?mock=1&chrome=1` previews the strip in a plain browser (inert buttons) for layout checks.
+  const previewChrome = isMockMode() && new URLSearchParams(window.location.search).get("chrome") === "1";
+  const customChrome = (isTauriRuntime() && !settings.windowFrame) || previewChrome;
+  // Panels start below the reserved strip (see Sidebar.module.css); html[data-chrome] drives that.
+  useEffect(() => {
+    if (!customChrome) return undefined;
+    document.documentElement.dataset.chrome = "custom";
+    return () => {
+      delete document.documentElement.dataset.chrome;
+    };
+  }, [customChrome]);
 
   const handleLanguageChange = (language: SupportedLanguage) => {
     void i18n.changeLanguage(language);
@@ -540,7 +550,7 @@ function AppShell() {
   const shellSettings = useMemo(
     () =>
       wallpaperKind
-        ? { ...settings, backdrop: wallpaperSceneId(wallpaperKind), backdropDim: WALLPAPER_DIM }
+        ? { ...settings, backdrop: wallpaperSceneId(wallpaperKind), backdropDim: WALLPAPER_DIM, veil: settings.wallpaperVeil }
         : settings,
     [settings, wallpaperKind]
   );
@@ -863,6 +873,22 @@ function AppShell() {
       }
       sidebar={
         <Sidebar className={[styles.rail, mini ? styles.railMini : ""].filter(Boolean).join(" ")} data-rail-tier={railTier(railWidth)}>
+          <a
+            href="#main-content"
+            className={styles.skipLink}
+            data-testid="skip-to-main"
+            onClick={(e) => {
+              e.preventDefault();
+              const main = document.getElementById("main-content");
+              const target =
+                main?.querySelector<HTMLElement>(
+                  "textarea:not([disabled]), [data-autofocus], h1[tabindex], button:not([disabled]), [href], input:not([disabled])"
+                ) ?? main;
+              target?.focus();
+            }}
+          >
+            {t("shell.skipToMain")}
+          </a>
           <ResizeGrip
             side="end"
             label={t("shell.railGrip")}
@@ -924,7 +950,7 @@ function AppShell() {
         </Sidebar>
       }
     >
-      <div className={styles.mainColumn}>
+      <div id="main-content" tabIndex={-1} className={styles.mainColumn}>
         <div className={styles.titleBar} data-tauri-drag-region>
           <span className={styles.runtimeLabel} data-tauri-drag-region><i className={styles.liveDot} aria-hidden="true" />{home.kind === "host" && !workLocalNow ? home.name || t("computerPicker.host") : t("account.localComputer")}</span>
           {botInView && panelBotView ? (
@@ -943,7 +969,7 @@ function AppShell() {
               <ChevronDown aria-hidden="true" />
             </button>
           ) : <span />}
-          <div className={`${styles.windowActions} ${customChrome ? styles.windowActionsReserve : ""}`} data-tauri-drag-region>
+          <div className={styles.windowActions} data-tauri-drag-region>
             <ComputerPicker />
             <button className={styles.iconButton} title={t("account.settings")} aria-label={t("account.settings")} onClick={() => setSettingsOpen("general")}><Settings2 /></button>
           </div>

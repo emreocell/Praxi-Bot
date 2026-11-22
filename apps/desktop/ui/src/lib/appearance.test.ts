@@ -92,6 +92,7 @@ test("valid new values round-trip", () => {
     ownBubble: "accent",
     backdrop: "reed2",
     wallpaper: "off",
+    wallpaperVeil: 35,
     backdropDim: 33.4,
     panelTransparency: 80,
     panelBlur: 40,

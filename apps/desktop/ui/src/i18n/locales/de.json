@@ -315,6 +315,10 @@
       "sky": "Himmel",
       "theme": "Design folgen",
       "title": "Hintergrundbild",
+      "veil": "Hintergrund-Schleier",
+      "veilClear": "Klar",
+      "veilHint": "Ein sanfter Schleier über dem ganzen Hintergrund. Nachrichten liegen auf eigenen hellen Flächen, daher bleibt der Text bei jeder Einstellung lesbar.",
+      "veilSoft": "Sanft",
       "warm": "Warm"
     }
   },
@@ -1192,11 +1196,15 @@
     },
     "chain": {
       "details": "Details",
+      "groupApp": "{{app}} ×{{count}}",
+      "groupSame": "{{what}} ×{{count}}",
       "problems_one": "{{count}} Schritt fehlgeschlagen",
       "problems_other": "{{count}} Schritte fehlgeschlagen",
       "slow": "Dauert länger als üblich",
       "started": "Gestartet {{start}}",
       "startedFinished": "Gestartet {{start}} · beendet {{end}}",
+      "summary": "{{count}} Schritte · {{what}} · {{duration}}",
+      "summaryPlain": "{{count}} Schritte · {{duration}}",
       "thought": "Nachgedacht: {{duration}}",
       "working": "Arbeitet Schritt für Schritt"
     },
@@ -3120,6 +3128,29 @@
     "viewOnly": "Nur ansehen",
     "watchAction": "Kontrolle übernehmen"
   },
+  "localModels": {
+    "bestEffort": "Das sind Schätzungen, keine Garantien. Praxi führt die Befehle nie für dich aus, und diese Hardware-Informationen bleiben auf diesem Computer.",
+    "cardDescription": "Was auf diesen Computer passt, für Ollama oder LM Studio. Nach bestem Wissen geschätzt.",
+    "cardTitle": "Lokale Modelle",
+    "copied": "Kopiert",
+    "copy": "Befehl kopieren",
+    "cores": "{{count}} Prozessor-Threads",
+    "disk": "{{size}} freier Speicherplatz",
+    "fitFast": "läuft gut",
+    "fitSlow": "läuft, aber langsam",
+    "lmstudio": "In LM Studio sollten Modelle bis etwa {{size}}B Parameter hier komfortabel laufen.",
+    "noDisk": "zu wenig Speicherplatz",
+    "noGpu": "keine gefunden",
+    "none": "Keine Empfehlung für diesen Computer.",
+    "ollamaMissing": "Ollama ist nicht installiert. Installiere es von ollama.com und führe dann den obigen Befehl in einem Terminal aus.",
+    "ollamaStopped": "Ollama ist installiert, läuft aber nicht. Öffne die Ollama-App (oder führe `ollama serve` aus) und lade dann ein Modell.",
+    "ramGpu": "{{ram}} Arbeitsspeicher · Grafik: {{gpu}}",
+    "recommended": "Empfohlen für diesen Computer: {{name}}.",
+    "title": "Was dieser Computer ausführen kann",
+    "unified": "{{ram}} gemeinsamer Speicher (Apple Silicon)",
+    "unknown": "Die Hardware dieses Computers konnte nicht gelesen werden, daher gibt es keine Empfehlung. Beginne mit einem kleinen Modell (etwa 4B) und gehe höher, wenn es gut läuft.",
+    "unknownValue": "unbekannt"
+  },
   "main": {
     "clearSelection": "Zurück zur Übersicht",
     "daemonConnectingDescription": "Verbindung zum mitgelieferten Praxi-Bot-Hintergrunddienst auf diesem Computer wird hergestellt.",
@@ -3322,6 +3353,16 @@
     "title": "Neuer Bot"
   },
   "notify": {
+    "action": {
+      "allow": "Erlauben",
+      "always": "Immer erlauben",
+      "deny": "Ablehnen"
+    },
+    "approval": {
+      "mcp": "{{bot}} möchte {{app}} verwenden ({{action}})",
+      "other": "{{bot}} möchte fortfahren: {{what}}",
+      "title": "Genehmigung erforderlich"
+    },
     "detail": {
       "failed": "Fehlgeschlagen: {{detail}}",
       "longRun": "{{detail}}",
@@ -4246,7 +4287,8 @@
   },
   "shell": {
     "panelGrip": "Bot-Panel in der Größe ändern (Pfeiltasten)",
-    "railGrip": "Seitenleiste in der Größe ändern (Pfeiltasten)"
+    "railGrip": "Seitenleiste in der Größe ändern (Pfeiltasten)",
+    "skipToMain": "Zum Hauptinhalt springen"
   },
   "sidebar": {
     "apps": "Apps",
@@ -4497,10 +4539,16 @@
     "stt": {
       "clearKey": "Schlüssel entfernen",
       "description": "Wo deine Aufnahmen transkribiert werden: ein OpenAI-kompatibler Dienst (Cloud-Anbieter oder lokaler Whisper-Server).",
+      "geminiKey": "Gemini-API-Schlüssel",
+      "geminiModel": "Gemini-Modell",
+      "geminiPrivacy": "Mit Gemini Live geht deine Sprache über den Daemon an Google, nur während du diktierst oder im Sprachgespräch bist. Der Schlüssel bleibt im Schlüsselspeicher. Nur das Transkript wird verwendet; die eigene Antwort des Modells wird ignoriert.",
       "key": "API-Schlüssel",
       "keyStored": "Schlüssel gespeichert (zum Ersetzen eintippen)",
       "model": "Modell",
       "privacy": "Eine Aufnahme wird nur gesendet, wenn du das Mikrofon drückst, und nur an diese Adresse. Der Schlüssel bleibt im Schlüsselspeicher.",
+      "provider": "Anbieter",
+      "providerGemini": "Gemini Live",
+      "providerWhisper": "Whisper-kompatibel (OpenAI / lokal)",
       "save": "Speichern",
       "saved": "Diktiereinstellungen gespeichert",
       "title": "Diktierdienst",

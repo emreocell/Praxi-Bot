@@ -220,7 +220,7 @@
   height: var(--size-panel-button);
   padding: var(--space-0);
   border: var(--size-border) solid var(--color-border);
-  border-radius: calc(var(--radius-md) * 1.25);
+  border-radius: var(--radius-control);
   background-color: var(--color-surface-elevated);
   color: var(--color-text-secondary);
   cursor: pointer;
@@ -251,7 +251,7 @@
   height: var(--size-panel-button);
   padding: var(--space-0) var(--space-3);
   border: none;
-  border-radius: calc(var(--radius-md) * 1.25);
+  border-radius: var(--radius-control);
   font-family: inherit;
   font-size: var(--font-size-ui);
   font-weight: var(--font-weight-medium);
@@ -316,7 +316,7 @@
 .list {
   display: flex;
   flex-direction: column;
-  gap: calc(var(--space-1) / 2);
+  gap: var(--space-half);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -374,7 +374,7 @@
 
 .chatState {
   flex: none;
-  padding: calc(var(--space-1) / 2) var(--space-2);
+  padding: var(--space-half) var(--space-2);
   border-radius: var(--radius-pill);
   background-color: color-mix(in srgb, var(--color-success) 14%, transparent);
   color: var(--color-success);
@@ -415,7 +415,7 @@
   display: inline-flex;
   align-self: center;
   padding: var(--size-border-thick);
-  border-radius: calc(var(--radius-md) * 1.25);
+  border-radius: var(--radius-control);
   background-color: var(--color-surface-elevated);
 }
 
@@ -563,6 +563,12 @@
   color: var(--color-text);
   font: inherit;
   font-size: var(--font-size-sm);
+}
+
+.chatSearch:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-focus);
 }
 
 .chatSearchEmpty {

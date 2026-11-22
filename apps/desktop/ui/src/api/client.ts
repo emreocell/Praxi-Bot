@@ -39,6 +39,7 @@ import type {
   UpdateChatInput,
   ConfiguredProviderDto,
   CliEngineDto,
+  LocalModelsDto,
   CliInstallApproval,
   ControlModeName,
   ControlStateDto,
@@ -448,6 +449,11 @@ export class ApiClient {
       throw new ApiError(res.status, code, message, parsed, this.hostName ?? undefined);
     }
     return res;
+  }
+
+  /** Hardware summary and local-model advice (`GET /v1/local-models`, owner only; best effort). */
+  localModels(): Promise<LocalModelsDto> {
+    return this.request("GET", "/local-models");
   }
 
   cliEngines(refresh = false): Promise<CliEngineDto[]> {

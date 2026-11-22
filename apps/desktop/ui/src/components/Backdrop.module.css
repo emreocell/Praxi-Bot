@@ -20,6 +20,13 @@
   opacity: var(--backdrop-dim);
 }
 
+/* Wallpaper veil: a soft, flat, full-window tint (theme-tinted, strength from the Wallpaper veil slider). */
+.veil {
+  position: absolute;
+  inset: var(--space-0);
+  background-color: var(--center-scrim);
+}
+
 .thumb {
   display: block;
   width: 100%;

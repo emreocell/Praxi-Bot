@@ -236,3 +236,11 @@
 .panel[data-open="true"] {
   backdrop-filter: var(--shell-filter);
 }
+
+/* Integrated window controls (native frame off: Windows / Linux default): the first --titlebar-h of
+   the window is a reserved strip (drag area + minimize / maximize / close, WindowControls) and the
+   layout's content box starts below it, so the panels never cover the controls at any width or panel
+   state.  The backdrop layers are absolutely positioned and still fill the whole window. */
+:global(:root[data-chrome="custom"]) .layout {
+  padding-top: var(--titlebar-h);
+}

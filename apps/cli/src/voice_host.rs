@@ -13,12 +13,17 @@ use std::time::Duration;
 use async_trait::async_trait;
 use daemon_api::voice::{
     TranscribeOutput, VoiceConfigDto, VoiceConfigInput, VoiceControl, VoiceControlError,
+    VoiceProvider,
 };
 use secret_store::SecretStore;
 use serde::{Deserialize, Serialize};
 
 const VOICE_FILE: &str = "voice.json";
 const KEY_NAME: &str = "voice/stt";
+const GEMINI_KEY_NAME: &str = "voice/gemini";
+const DEFAULT_GEMINI_MODEL: &str = "gemini-3.5-transcribe-live";
+/// Longest accepted Gemini utterance: 120 s of 16 kHz 16-bit mono PCM.
+const MAX_GEMINI_PCM_BYTES: usize = 120 * 32_000;
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_MODEL: &str = "whisper-1";
 const MAX_FIELD_CHARS: usize = 300;
@@ -29,6 +34,14 @@ struct VoiceFile {
     stt_base_url: String,
     #[serde(default = "default_model")]
     stt_model: String,
+    #[serde(default)]
+    stt_provider: VoiceProvider,
+    #[serde(default = "default_gemini_model")]
+    gemini_model: String,
+}
+
+fn default_gemini_model() -> String {
+    DEFAULT_GEMINI_MODEL.to_owned()
 }
 
 fn default_base_url() -> String {
@@ -44,6 +57,8 @@ impl Default for VoiceFile {
         Self {
             stt_base_url: default_base_url(),
             stt_model: default_model(),
+            stt_provider: VoiceProvider::default(),
+            gemini_model: default_gemini_model(),
         }
     }
 }
@@ -55,6 +70,7 @@ pub struct VoiceHost {
     secrets: Option<Arc<dyn SecretStore>>,
     http: reqwest::Client,
     update_lock: tokio::sync::Mutex<()>,
+    gemini_ws_base: String,
 }
 
 impl VoiceHost {
@@ -71,6 +87,7 @@ impl VoiceHost {
                 .build()
                 .unwrap_or_default(),
             update_lock: tokio::sync::Mutex::new(()),
+            gemini_ws_base: crate::voice_gemini::DEFAULT_WS_BASE.to_owned(),
         }
     }
 
@@ -98,9 +115,13 @@ impl VoiceHost {
     }
 
     fn key(&self) -> Option<String> {
+        self.secret(KEY_NAME)
+    }
+
+    fn secret(&self, name: &str) -> Option<String> {
         let store = self.secrets.as_ref()?;
         store
-            .get(KEY_NAME)
+            .get(name)
             .ok()
             .flatten()
             .map(|v| v.expose().to_owned())
@@ -112,6 +133,9 @@ impl VoiceHost {
             stt_base_url: file.stt_base_url.clone(),
             stt_model: file.stt_model.clone(),
             stt_key_set: self.key().is_some(),
+            stt_provider: file.stt_provider,
+            gemini_model: file.gemini_model.clone(),
+            gemini_key_set: self.secret(GEMINI_KEY_NAME).is_some(),
         }
     }
 }
@@ -200,6 +224,11 @@ impl VoiceControl for VoiceHost {
     }
 
     async fn update(&self, input: VoiceConfigInput) -> Result<VoiceConfigDto, VoiceControlError> {
+        if input.clear_gemini_key == Some(true) && input.gemini_key.is_some() {
+            return Err(VoiceControlError::Invalid(
+                "cannot both set and clear gemini_key in the same request".into(),
+            ));
+        }
         if input.clear_stt_key == Some(true) && input.stt_key.is_some() {
             return Err(VoiceControlError::Invalid(
                 "cannot both set and clear stt_key in the same request".into(),
@@ -227,7 +256,46 @@ impl VoiceControl for VoiceHost {
                 m.to_owned()
             };
         }
+        if let Some(p) = input.stt_provider {
+            file.stt_provider = p;
+        }
+        if let Some(m) = &input.gemini_model {
+            let m = m.trim();
+            if m.chars().count() > 100
+                || !m
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+            {
+                return Err(VoiceControlError::Invalid(
+                    "`gemini_model` is not a valid model name".into(),
+                ));
+            }
+            file.gemini_model = if m.is_empty() {
+                default_gemini_model()
+            } else {
+                m.to_owned()
+            };
+        }
         let store = self.secrets.as_ref().map(Arc::clone);
+        if let Some(key) = input.gemini_key {
+            let Some(store) = store.clone() else {
+                return Err(VoiceControlError::Invalid(
+                    "secret store is not available to store the key".into(),
+                ));
+            };
+            tokio::task::spawn_blocking(move || store.set(GEMINI_KEY_NAME, &key))
+                .await
+                .map_err(|e| VoiceControlError::Internal(format!("secret task failed: {e}")))?
+                .map_err(|e| VoiceControlError::Internal(format!("cannot store secret: {e}")))?;
+        } else if input.clear_gemini_key == Some(true)
+            && let Some(store) = store.clone()
+        {
+            tokio::task::spawn_blocking(move || {
+                let _ = store.delete(GEMINI_KEY_NAME);
+            })
+            .await
+            .map_err(|e| VoiceControlError::Internal(format!("secret task failed: {e}")))?;
+        }
         if let Some(key) = input.stt_key {
             let Some(store) = store else {
                 return Err(VoiceControlError::Invalid(
@@ -258,6 +326,25 @@ impl VoiceControl for VoiceHost {
         language: Option<String>,
     ) -> Result<TranscribeOutput, VoiceControlError> {
         let file = self.load();
+        if file.stt_provider == VoiceProvider::GeminiLive {
+            let key = self
+                .secret(GEMINI_KEY_NAME)
+                .ok_or(VoiceControlError::NotConfigured)?;
+            let base = crate::voice_gemini::validate_ws_base(&self.gemini_ws_base)?;
+            if mime.split(';').next().map(str::trim) != Some("audio/pcm") {
+                return Err(VoiceControlError::Invalid(
+                    "Gemini Live needs `audio/pcm` (16-bit little-endian, 16 kHz, mono)".into(),
+                ));
+            }
+            if audio.len() > MAX_GEMINI_PCM_BYTES {
+                return Err(VoiceControlError::Invalid(
+                    "the recording is longer than 120 seconds".into(),
+                ));
+            }
+            let text = crate::voice_gemini::transcribe_pcm(&base, &key, &file.gemini_model, &audio)
+                .await?;
+            return Ok(TranscribeOutput { text });
+        }
         let local = validate_base_url(&file.stt_base_url, self.daemon_port)?;
         let key = self.key();
         // A cloud service needs a key; a loopback server may run without one.
@@ -347,5 +434,34 @@ mod tests {
         assert!(s.contains("name=\"language\"\r\n\r\ntr\r\n"));
         assert!(s.contains("filename=\"audio.webm\""));
         assert!(s.contains("AUDIO\r\n--B--"));
+    }
+
+    #[tokio::test]
+    async fn gemini_provider_needs_a_key_and_a_valid_model() {
+        let dir = std::env::temp_dir().join(format!("praxi-voice-test-{}", rand_u64()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = VoiceHost::new(&dir, 7000, None);
+        let dto = host
+            .update(VoiceConfigInput {
+                stt_provider: Some(VoiceProvider::GeminiLive),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(dto.stt_provider, VoiceProvider::GeminiLive);
+        assert!(!dto.gemini_key_set);
+        let err = host
+            .transcribe(vec![0; 64], "audio/pcm".into(), None)
+            .await
+            .unwrap_err();
+        assert_eq!(err, VoiceControlError::NotConfigured);
+        let bad = host
+            .update(VoiceConfigInput {
+                gemini_model: Some("x y".into()),
+                ..Default::default()
+            })
+            .await;
+        assert!(matches!(bad, Err(VoiceControlError::Invalid(_))));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

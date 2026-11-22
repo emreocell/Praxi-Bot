@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import styles from "./SettingsUi.module.css";
 
 /** One setting: title and description on the left, the control on the right. */
@@ -42,14 +42,40 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void;
   label: string;
 }) {
+  const activeIdx = Math.max(
+    0,
+    options.findIndex((o) => o.value === value)
+  );
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const step =
+      e.key === "ArrowRight" || e.key === "ArrowDown"
+        ? 1
+        : e.key === "ArrowLeft" || e.key === "ArrowUp"
+          ? -1
+          : 0;
+    if (!step || options.length === 0) {
+      return;
+    }
+    e.preventDefault();
+    const nextIdx = (activeIdx + step + options.length) % options.length;
+    onChange(options[nextIdx].value);
+    const radios = e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]');
+    radios[nextIdx]?.focus();
+  };
   return (
-    <div className={styles.segmented} role="radiogroup" aria-label={label}>
-      {options.map((o) => (
+    <div
+      className={styles.segmented}
+      role="radiogroup"
+      aria-label={label}
+      onKeyDown={onKeyDown}
+    >
+      {options.map((o, idx) => (
         <button
           key={o.value}
           type="button"
           role="radio"
           aria-checked={o.value === value}
+          tabIndex={idx === activeIdx ? 0 : -1}
           data-testid={o.testId}
           className={[
             styles.segment,

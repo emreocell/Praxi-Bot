@@ -1,9 +1,14 @@
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { isTabStop, returnFocusTarget, trapTarget } from "../lib/focusTrap";
 import { rank } from "../lib/fuzzy";
+import { appInert } from "../lib/inertStack";
 import { layerStack } from "../lib/modalStack";
 import styles from "./CommandPalette.module.css";
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([disabled])';
 
 export interface PaletteCommand {
   id: string;
@@ -45,6 +50,7 @@ export function CommandPalette({
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
 
@@ -53,13 +59,24 @@ export function CommandPalette({
   const seqRef = useRef(0);
   if (seqRef.current === 0) seqRef.current = layerStack.next();
   useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const dialogNode = dialogRef.current;
     const seq = seqRef.current;
     layerStack.add(seq);
-    return () => layerStack.remove(seq);
-  }, []);
-
-  useEffect(() => {
+    appInert.acquire(seq);
     inputRef.current?.focus();
+    return () => {
+      layerStack.remove(seq);
+      appInert.release(seq);
+      const active = document.activeElement as HTMLElement | null;
+      const stillInPalette =
+        !active ||
+        active === document.body ||
+        (dialogNode?.contains(active) ?? false);
+      if (stillInPalette) {
+        returnFocusTarget(previous, (el) => el.isConnected)?.focus?.();
+      }
+    };
   }, []);
 
   const results = useMemo(
@@ -103,6 +120,24 @@ export function CommandPalette({
       e.preventDefault();
       e.stopPropagation();
       onClose();
+    } else if (e.key === "Tab" && dialogRef.current) {
+      const node = dialogRef.current;
+      const items = [...node.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) =>
+        isTabStop({
+          tabIndex: el.tabIndex,
+          rects: el.getClientRects().length,
+          inert: el.closest("[inert]") !== null
+        })
+      );
+      const current = document.activeElement as HTMLElement | null;
+      const target = trapTarget(items, current, node, e.shiftKey);
+      if (target === "none") {
+        e.preventDefault();
+        inputRef.current?.focus();
+      } else if (target) {
+        e.preventDefault();
+        target.focus();
+      }
     }
   };
 
@@ -119,6 +154,7 @@ export function CommandPalette({
       data-testid="command-palette"
     >
       <div
+        ref={dialogRef}
         className={styles.dialog}
         role="dialog"
         aria-modal="true"

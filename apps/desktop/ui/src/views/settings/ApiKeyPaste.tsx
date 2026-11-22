@@ -25,7 +25,10 @@ function openAdvanced() {
   const d = document.getElementById("ai-advanced-providers");
   if (d instanceof HTMLDetailsElement) {
     d.open = true;
-    d.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    const instant =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    d.scrollIntoView({ block: "nearest", behavior: instant ? "instant" : "smooth" });
   }
 }
 

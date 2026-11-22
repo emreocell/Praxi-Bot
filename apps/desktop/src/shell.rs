@@ -17,6 +17,11 @@ use crate::daemon::DaemonHandle;
 
 /// A notification was clicked (payload: [`ActivatedPayload`]).
 pub const EVENT_NOTIFICATION_ACTIVATED: &str = "shell:notification_activated";
+/// A toast action button ("Allow", "Always allow", "Deny") was pressed (no payload; see [`ActionPayload`]).
+/// Only Windows toasts have buttons; the UI decides through the same approval path as the card.
+pub const EVENT_NOTIFICATION_ACTION: &str = "shell:notification_action";
+// The event carries NO decision: webview windows can emit events, so a decision in an event
+// could be forged. The press is queued here and the main window drains it (`notify_take_actions`).
 /// Tray menu "Needs you" was chosen.
 pub const EVENT_TRAY_OPEN_NEEDS: &str = "shell:tray_open_needs";
 /// Tray menu "Stop all" was chosen (the UI cancels the daemon's runs).
@@ -33,6 +38,65 @@ const MENU_QUIT: &str = "tray.quit";
 pub struct ActivatedPayload {
     /// The chat the notification was about, if any.
     pub chat_id: Option<String>,
+}
+
+/// One queued toast button press (returned by `notify_take_actions`).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ActionPayload {
+    /// The approval call the toast was about.
+    pub call_id: String,
+    /// `allow`, `always` or `deny`.
+    pub action: String,
+}
+
+/// One button the UI asked for on a toast.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NotifyAction {
+    /// `allow`, `always` or `deny`; anything else is refused.
+    pub id: String,
+    /// Button text (already translated by the UI).
+    pub label: String,
+}
+
+#[cfg(any(windows, test))]
+const ACTION_PREFIX: &str = "praxi-action|";
+const ACTION_IDS: [&str; 3] = ["allow", "always", "deny"];
+
+/// The button argument carried through the toast: `praxi-action|<id>|<call id>`.
+#[cfg(any(windows, test))]
+fn action_argument(id: &str, call_id: &str) -> String {
+    format!("{ACTION_PREFIX}{id}|{call_id}")
+}
+
+/// Parse a toast activation argument back; `None` for a body click or anything foreign.
+#[cfg(any(windows, test))]
+fn parse_action_argument(arg: &str) -> Option<ActionPayload> {
+    let rest = arg.strip_prefix(ACTION_PREFIX)?;
+    let (id, call_id) = rest.split_once('|')?;
+    if !ACTION_IDS.contains(&id) || call_id.is_empty() {
+        return None;
+    }
+    Some(ActionPayload {
+        call_id: call_id.to_owned(),
+        action: id.to_owned(),
+    })
+}
+
+/// Buttons are only built for a plausible call id and the three known actions.
+fn checked_actions(call_id: Option<&str>, actions: Vec<NotifyAction>) -> Vec<NotifyAction> {
+    let Some(call_id) = call_id else {
+        return Vec::new();
+    };
+    if call_id.is_empty() || call_id.len() > 128 || call_id.contains('|') {
+        return Vec::new();
+    }
+    actions
+        .into_iter()
+        .filter(|a| {
+            ACTION_IDS.contains(&a.id.as_str()) && !a.label.is_empty() && a.label.len() <= 60
+        })
+        .take(ACTION_IDS.len())
+        .collect()
 }
 
 /// Tray strings; `{n}` in the `needs*` templates is the count.  Sent by the UI
@@ -97,6 +161,8 @@ pub struct TrayState {
     labels: Mutex<TrayLabels>,
     needs: Mutex<u32>,
     parts: Mutex<Option<TrayParts>>,
+    /// Toast button presses not yet taken by the main window.
+    actions: Mutex<Vec<ActionPayload>>,
 }
 
 impl TrayState {
@@ -242,6 +308,20 @@ pub fn set_tray_labels(
     Ok(())
 }
 
+/// Hand over (and clear) the toast button presses that happened since the last call.
+///
+/// # Errors
+/// If the caller is not the main window.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // tauri commands take owned arguments
+pub fn notify_take_actions(
+    window: tauri::Window,
+    state: State<'_, TrayState>,
+) -> Result<Vec<ActionPayload>, String> {
+    crate::window_gate::require_window(&window, crate::window_gate::MAIN_ONLY)?;
+    Ok(std::mem::take(&mut *state.actions.lock()))
+}
+
 /// Show a native notification; clicking it brings the app to the front and
 /// emits [`EVENT_NOTIFICATION_ACTIVATED`] so the UI can open the chat.
 ///
@@ -255,9 +335,12 @@ pub fn notify_show(
     title: String,
     body: String,
     chat_id: Option<String>,
+    call_id: Option<String>,
+    actions: Option<Vec<NotifyAction>>,
 ) -> Result<(), String> {
     crate::window_gate::require_window(&window, crate::window_gate::MAIN_ONLY)?;
-    show_native(&app, &title, &body, chat_id)
+    let actions = checked_actions(call_id.as_deref(), actions.unwrap_or_default());
+    show_native(&app, &title, &body, chat_id, call_id.as_deref(), &actions)
 }
 
 /// The desktop notification plugin cannot report clicks, so on Windows the
@@ -269,6 +352,8 @@ fn show_native(
     title: &str,
     body: &str,
     chat_id: Option<String>,
+    call_id: Option<&str>,
+    actions: &[NotifyAction],
 ) -> Result<(), String> {
     use std::path::Path;
 
@@ -288,10 +373,27 @@ fn show_native(
         app.config().identifier.clone()
     };
     let handle = app.clone();
-    Toast::new(&app_id)
-        .title(title)
-        .text1(body)
-        .on_activated(move |_| {
+    let mut toast = Toast::new(&app_id).title(title).text1(body);
+    if let Some(call_id) = call_id {
+        for a in actions {
+            toast = toast.add_button(&a.label, &action_argument(&a.id, call_id));
+        }
+    }
+    toast
+        .on_activated(move |arg| {
+            // A button press decides in the background (the UI runs the same approval path as
+            // the card); a click on the toast body brings the app to the approval.
+            if let Some(payload) = arg.as_deref().and_then(parse_action_argument) {
+                {
+                    let state = handle.state::<TrayState>();
+                    let mut queue = state.actions.lock();
+                    if queue.len() < 16 {
+                        queue.push(payload);
+                    }
+                }
+                let _ = handle.emit(EVENT_NOTIFICATION_ACTION, ());
+                return Ok(());
+            }
             focus_main(&handle);
             let _ = handle.emit(
                 EVENT_NOTIFICATION_ACTIVATED,
@@ -311,7 +413,10 @@ fn show_native(
     title: &str,
     body: &str,
     _chat_id: Option<String>,
+    _call_id: Option<&str>,
+    _actions: &[NotifyAction],
 ) -> Result<(), String> {
+    // The desktop notification plugin has no action buttons on macOS / Linux: plain text only.
     use tauri_plugin_notification::NotificationExt;
 
     app.notification()
@@ -324,7 +429,37 @@ fn show_native(
 
 #[cfg(test)]
 mod tests {
-    use super::{TrayLabels, tooltip_for, with_count};
+    use super::{
+        ActionPayload, NotifyAction, TrayLabels, action_argument, checked_actions,
+        parse_action_argument, tooltip_for, with_count,
+    };
+
+    #[test]
+    fn toast_action_argument_round_trips_and_rejects_foreign_text() {
+        let arg = action_argument("always", "call-1");
+        assert_eq!(
+            parse_action_argument(&arg),
+            Some(ActionPayload {
+                call_id: "call-1".to_owned(),
+                action: "always".to_owned()
+            })
+        );
+        assert_eq!(parse_action_argument("praxi-action|wipe|call-1"), None);
+        assert_eq!(parse_action_argument("something else"), None);
+        assert_eq!(parse_action_argument("praxi-action|allow|"), None);
+    }
+
+    #[test]
+    fn only_known_actions_with_a_plausible_call_id_become_buttons() {
+        let a = |id: &str| NotifyAction {
+            id: id.to_owned(),
+            label: "x".to_owned(),
+        };
+        let kept = checked_actions(Some("c1"), vec![a("allow"), a("format"), a("deny")]);
+        assert_eq!(kept.len(), 2);
+        assert!(checked_actions(None, vec![a("allow")]).is_empty());
+        assert!(checked_actions(Some("a|b"), vec![a("allow")]).is_empty());
+    }
 
     #[test]
     fn count_fills_the_placeholder() {

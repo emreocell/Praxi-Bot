@@ -3,10 +3,11 @@ import { useTranslation } from "react-i18next";
 import { ApiError } from "../../api/client";
 import { isMockMode } from "../../api/mockMode";
 import { effectiveVoice } from "../../lib/botVoice";
-import { blobToBase64, dictationSupported, pickRecordingMime } from "../../lib/dictation";
+import { dictationSupported, pickRecordingMime } from "../../lib/dictation";
 import { micErrorKey } from "../../lib/micError";
 import { speechSupported } from "../../lib/speaker";
 import { markdownToSpeech } from "../../lib/speechText";
+import { transcribePayload } from "../../lib/voiceAudio";
 import { callReducer, initialCallState, type CallState } from "../../lib/voiceCall/callMachine";
 import { cancelQueuedSpeech, queueSpeech, setDrainedHandler } from "../../lib/voiceCall/callSpeaker";
 import { takeSpeakable } from "../../lib/voiceCall/sentences";
@@ -166,10 +167,12 @@ export function useVoiceCall({ botId, runs, awaitingApproval, sendText }: VoiceC
       }
       let text: string;
       try {
-        const type = blob.type || "audio/webm";
+        const provider = await client
+          .getVoice()
+          .then((c) => c.stt_provider)
+          .catch(() => undefined);
         const out = await client.transcribe({
-          audio_base64: await blobToBase64(blob),
-          mime: type.split(";")[0] ?? type,
+          ...(await transcribePayload(blob, provider)),
           language: i18n.language.split("-")[0]
         });
         text = out.text.trim();

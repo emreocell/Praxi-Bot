@@ -15,6 +15,7 @@ import type {
   CreateSessionInput,
   DetectedProviderDto,
   DoctorCheck,
+  LocalModelsDto,
   EmailAccount,
   EmailAccountInput,
   InputBatch,
@@ -1498,6 +1499,8 @@ export class MockApiClient extends ApiClient {
           forecast_usd: (spent / Math.max(1, now - start)) * (end - start)
         });
       }
+      case "GET /local-models":
+        return ok(MOCK_LOCAL_MODELS);
       case "GET /doctor": {
         const checks = structuredClone(this.doctorChecks);
         return ok({ ok: checks.every((c) => c.status !== "fail"), checks });
@@ -1991,11 +1994,30 @@ export class MockApiClient extends ApiClient {
     return merged;
   }
 
-  private voice = { stt_base_url: "https://api.openai.com/v1", stt_model: "whisper-1", stt_key_set: false };
+  private voice = {
+    stt_base_url: "https://api.openai.com/v1",
+    stt_model: "whisper-1",
+    stt_key_set: false,
+    stt_provider: "whisper",
+    gemini_model: "gemini-3.5-transcribe-live",
+    gemini_key_set: false
+  };
 
   private voiceConfig(body: unknown): unknown {
-    const b = (body ?? {}) as { stt_base_url?: string; stt_model?: string; stt_key?: string; clear_stt_key?: boolean };
+    const b = (body ?? {}) as {
+      stt_base_url?: string;
+      stt_model?: string;
+      stt_key?: string;
+      clear_stt_key?: boolean;
+      stt_provider?: string;
+      gemini_model?: string;
+      gemini_key?: string;
+      clear_gemini_key?: boolean;
+    };
     this.voice = {
+      stt_provider: b.stt_provider || this.voice.stt_provider,
+      gemini_model: b.gemini_model || this.voice.gemini_model,
+      gemini_key_set: b.clear_gemini_key ? false : b.gemini_key ? true : this.voice.gemini_key_set,
       stt_base_url: b.stt_base_url || this.voice.stt_base_url,
       stt_model: b.stt_model || this.voice.stt_model,
       stt_key_set: b.clear_stt_key ? false : b.stt_key ? true : this.voice.stt_key_set
@@ -2310,3 +2332,32 @@ export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["even
   }
   return out;
 }
+
+/** Sample for design review: a 16 GB laptop with an 8 GB GPU, Ollama installed but not running. */
+const MOCK_LOCAL_MODELS: LocalModelsDto = {
+  hardware: {
+    ram_bytes: 16 * 1024 ** 3,
+    logical_cores: 12,
+    gpu_name: "NVIDIA GeForce RTX 4060 Laptop GPU",
+    gpu_vram_bytes: 8 * 1024 ** 3,
+    unified_memory: false,
+    free_disk_bytes: 220 * 1024 ** 3,
+    os: "windows",
+    arch: "x86_64"
+  },
+  advice: {
+    basis: "vram",
+    budget_gib: 8,
+    max_comfortable_billions: 8,
+    recommended: "qwen3:8b",
+    models: [
+      { model_id: "qwen3:8b", display_name: "Qwen 3 8B", params_billions: 8, fit: "comfortable", needs_gib: 6.7, pull_command: "ollama pull qwen3:8b", disk_ok: true },
+      { model_id: "qwen3:4b", display_name: "Qwen 3 4B", params_billions: 4, fit: "comfortable", needs_gib: 4.1, pull_command: "ollama pull qwen3:4b", disk_ok: true },
+      { model_id: "qwen3:30b", display_name: "Qwen 3 30B", params_billions: 30, fit: "too_large", needs_gib: 21, pull_command: "ollama pull qwen3:30b", disk_ok: true }
+    ]
+  },
+  runtimes: [
+    { id: "ollama", installed: true, running: false, installed_models: [] },
+    { id: "lmstudio", running: false, installed_models: [] }
+  ]
+};
