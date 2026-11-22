@@ -1,0 +1,130 @@
+[
+  {
+    "doc": "de/backup-and-restore.md",
+    "title": "Ältere unverschlüsselte Backups wiederherstellen",
+    "headings": [],
+    "summary": "Aktuelle Versionen erstellen verschlüsselte Backups; siehe Verschlüsseltes Backup und Wiederherstellung."
+  },
+  {
+    "doc": "de/bot-spending-limits.md",
+    "title": "Ausgabenlimits für Bots",
+    "headings": [
+      "Was du einstellen kannst",
+      "Der Standard für neue Bots",
+      "Was am Limit passiert",
+      "Wie der Verbrauch gezählt wird",
+      "Wer Limits ändern darf"
+    ],
+    "summary": "Jeder Bot kann ein Tages-, Wochen- und Monatslimit dafür bekommen, was seine Modellaufrufe verbrauchen dürfen."
+  },
+  {
+    "doc": "de/calendar.md",
+    "title": "Kalender (CalDAV)",
+    "headings": [
+      "Einrichten",
+      "Werkzeuge",
+      "Sicherheit"
+    ],
+    "summary": "Bots können in einem CalDAV-Kalender (Nextcloud, Radicale, Fastmail, iCloud, Synology ...) Termine lesen und"
+  },
+  {
+    "doc": "de/computer-use.md",
+    "title": "Computersteuerung auf deinem eigenen PC",
+    "headings": [
+      "Was ein Bot tun kann",
+      "Sicherheit",
+      "Nicht überprüft"
+    ],
+    "summary": "Bots können in Apps auf deinem Windows-PC arbeiten, wenn der Chat Dieser Computer nutzt und der"
+  },
+  {
+    "doc": "de/faq.md",
+    "title": "FAQ",
+    "headings": [
+      "Ist Praxi einsatzbereit?",
+      "Verlässt etwas meinen Rechner?",
+      "Kostet es Geld?",
+      "Welche Betriebssysteme funktionieren?",
+      "Kann ich es ohne Terminal benutzen?",
+      "Kann der Bot etwas tun, ohne mich zu fragen?",
+      "Wie stoppe ich einen Bot sofort?",
+      "Kann ich mehrere Bots betreiben?",
+      "Wo sind meine Daten, und wie sichere ich sie?",
+      "Wie sichere ich in Docker?",
+      "Wie mache ich einen Bot schneller und günstiger?",
+      "Kann ich einen Workflow aufzeichnen, indem ich ihn vormache?",
+      "Gibt es ein Langzeitgedächtnis?",
+      "Kann ich MCP-Server oder Plugins hinzufügen?",
+      "Kann ein Bot einen anderen Computer steuern?",
+      "Welche anderen Messenger werden unterstützt?",
+      "Gibt es Sprach-, Bild- oder Videoerzeugung?",
+      "Kann ich Deutsch benutzen?",
+      "Wie aktualisiere ich?",
+      "Wie deinstalliere ich?",
+      "Wo melde ich Fehler oder wie trage ich bei?"
+    ],
+    "summary": "Es befindet sich in früher Entwicklung. In der README steht, dass es keine stabile API und keine Releases gibt und"
+  },
+  {
+    "doc": "de/glossary.md",
+    "title": "Glossar",
+    "headings": [],
+    "summary": "Alphabetische Übersicht der wichtigsten Begriffe, die in Praxi, im Benutzerhandbuch und im Code vorkommen."
+  },
+  {
+    "doc": "de/home-assistant.md",
+    "title": "Home Assistant",
+    "headings": [
+      "Einrichten",
+      "Werkzeuge",
+      "Sicherheit"
+    ],
+    "summary": "Bots können deine Home-Assistant-Entitäten lesen und Dienste aufrufen (ein Licht einschalten, einen Thermostat"
+  },
+  {
+    "doc": "de/index.md",
+    "title": "Benutzerhandbuch (Deutsch)",
+    "headings": [
+      "Übersetzte Seiten"
+    ],
+    "summary": "Dieser Teil des Handbuchs enthält die am häufigsten gebrauchten Seiten in einfachem Deutsch. Seiten, die noch"
+  },
+  {
+    "doc": "de/schedules.md",
+    "title": "Geplante Jobs, einfach erklärt",
+    "headings": [
+      "Deinen ersten Job erstellen",
+      "In Worten eintippen",
+      "Erweitert (eingeklappt)",
+      "Wenn der Computer aus war",
+      "Jetzt ausführen, pausieren, bearbeiten, löschen",
+      "Verlauf und Probleme",
+      "Dich benachrichtigen",
+      "Sicherheit"
+    ],
+    "summary": "Ein geplanter Job lässt einen Bot zu den Zeiten, die du wählst, von selbst etwas tun:"
+  },
+  {
+    "doc": "de/settings.md",
+    "title": "Einstellungen",
+    "headings": [
+      "Die Seiten",
+      "Suche",
+      "Einfach und Erweitert",
+      "Sicherheitsstufen",
+      "Auf Empfehlung zurücksetzen",
+      "Kleine Bildschirme"
+    ],
+    "summary": "Öffne die Einstellungen über das Kontomenü. Alles steckt auf zehn Seiten mit schlichten Namen."
+  },
+  {
+    "doc": "de/telegram.md",
+    "title": "Telegram",
+    "headings": [
+      "Im Chat",
+      "Sprache",
+      "Gut zu wissen"
+    ],
+    "summary": "Sprich von deinem Handy aus mit deinen Bots. Der Daemon betreibt einen Telegram-Kanal: Du schreibst deinem Bot,"
+  }
+]

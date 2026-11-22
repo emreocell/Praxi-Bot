@@ -6568,6 +6568,7 @@ name = "provider-catalog"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "flate2",
  "fs4",
  "futures",
  "httpdate",
@@ -6576,13 +6577,16 @@ dependencies = [
  "secret-store",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sysinfo",
+ "tar",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "toml 0.8.2",
  "toml_edit 0.20.2",
  "wiremock",
+ "zip",
 ]
 
 [[package]]

@@ -1039,6 +1039,23 @@ impl ScheduleStore {
         Ok(changed > 0)
     }
 
+    /// Delete every schedule of `bot_id` (its triggers, occurrences and
+    /// history go with them) and return how many were removed. Used when the
+    /// bot itself is deleted, so no job keeps firing for a bot that is gone.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn delete_by_bot(&self, bot_id: BotId) -> Result<usize> {
+        let changed = self.conn().execute(
+            "DELETE FROM schedules WHERE bot_id = ?1",
+            [bot_id.to_string()],
+        )?;
+        if changed > 0 {
+            self.notify();
+        }
+        Ok(changed)
+    }
+
     /// Delete a schedule only if it still has this definition `revision` and
     /// `origin` (compare-and-set: an edit that landed meanwhile is not deleted).
     /// `Ok(false)` when the row is gone or changed.

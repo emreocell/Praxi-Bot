@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { GlobalEnvelope } from "../api/types";
+import { scheduleNotifyOf } from "../lib/scheduleNotify";
 import {
   decideNotification,
   type NotifyPrefs,
@@ -136,7 +137,8 @@ export function ShellBridgeHost({
           run,
           appStartMs,
           focused,
-          prefs: s
+          prefs: s,
+          ...(run?.scheduleId ? { scheduleNotify: scheduleNotifyOf(run.scheduleId) } : {})
         });
         if (!d) {
           return;

@@ -1,0 +1,20 @@
+name: skill-maps
+description: "Starter skill maps: the bot loads it with skill_read for a matching request, no approval is needed to read a skill, and the text reaches the next model call."
+policy: approve_destructive
+tools:
+  - { name: skill_read, effect: read, category: fs, output: "# maps
+Free, no account needed." }
+user: "How far is the airport from the city centre and how do I get there?"
+script:
+  - tool_calls: [{ id: c1, tool: skill_read, args: { name: maps } }]
+  - text: "I followed the maps skill."
+expect:
+  state: succeeded
+  model_calls: 2
+  tool_calls: [skill_read]
+  tool_runs: { skill_read: 1 }
+  no_approval_tools: [skill_read]
+  permissions:
+    - { tool: skill_read, decision: allowed }
+  requests:
+    - { request: 1, tool_messages_contain: ["maps", "Free, no account needed"] }

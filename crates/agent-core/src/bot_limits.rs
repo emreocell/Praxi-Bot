@@ -315,9 +315,18 @@ impl BotLimitState {
 }
 
 /// Conservative prompt and completion tokens of the next call.
-pub(crate) fn estimate_tokens(prompt_seen: Option<u64>, max_tokens: Option<u32>) -> (u64, u64) {
+///
+/// The prompt is the largest seen so far in the run (or a default for the first
+/// call), raised to the request's own size estimate when that is bigger.
+pub(crate) fn estimate_tokens(
+    prompt_seen: Option<u64>,
+    prompt_hint: Option<u64>,
+    max_tokens: Option<u32>,
+) -> (u64, u64) {
     (
-        prompt_seen.unwrap_or(DEFAULT_PROMPT_TOKENS),
+        prompt_seen
+            .unwrap_or(DEFAULT_PROMPT_TOKENS)
+            .max(prompt_hint.unwrap_or(0)),
         max_tokens.map_or(DEFAULT_COMPLETION_TOKENS, u64::from),
     )
 }

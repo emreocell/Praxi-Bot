@@ -51,6 +51,19 @@ pub trait DesktopBackend: Send + Sync {
     /// List all visible windows.
     async fn windows(&self) -> Result<Vec<WindowInfo>, DesktopError>;
 
+    /// Bring a top-level window to the foreground. A remote approval can bind
+    /// the operation to the observed process identity.
+    async fn focus(&self, _window_id: u64, _guard: Option<ActGuard>) -> Result<(), DesktopError> {
+        Err(DesktopError::Unsupported(
+            "window focus is unavailable".into(),
+        ))
+    }
+
+    /// Identify a specific window for a focus approval.
+    async fn focus_target(&self, _window_id: u64) -> Result<Option<InputTarget>, DesktopError> {
+        Ok(None)
+    }
+
     /// Launch an application and return the new process ID.
     async fn launch(&self, app: AppSpec) -> Result<Pid, DesktopError>;
 
@@ -84,6 +97,17 @@ pub trait DesktopBackend: Send + Sync {
         Err(DesktopError::GuardRefused(
             "not sent: this computer cannot check the target window before sending input".into(),
         ))
+    }
+
+    /// Dispatch an individually approved action with live receiver checks.
+    /// Backends may support additional actions here without broadening the
+    /// action set covered by a task-wide grant.
+    async fn act_approved(
+        &self,
+        action: Action,
+        guard: ActGuard,
+    ) -> Result<ActionResult, DesktopError> {
+        self.act_guarded(action, guard).await
     }
 
     /// Whether `keys` open a launcher or switch windows (Win/Super, Ctrl+Esc,

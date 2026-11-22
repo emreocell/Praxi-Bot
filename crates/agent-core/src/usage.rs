@@ -406,10 +406,11 @@ fn check_bot_limits(
     sh: &Arc<Shared>,
     ctx: &RunCtx,
     model: &str,
-) -> Result<Option<(crate::bot_limits::Reservation, f64, u64)>, String> {
+    prompt_hint: Option<u64>,
+) -> Result<Option<(crate::bot_limits::Reservation, f64, u64, u64)>, String> {
     use crate::bot_limits::{
-        BOT_LIMIT_REACHED, Metric, Period, PeriodLimit, Reservation, crossed_alerts,
-        estimate_tokens, find_breach, load_limits, period_usage,
+        BOT_LIMIT_REACHED, Period, PeriodLimit, Reservation, crossed_alerts, estimate_tokens,
+        find_breach, load_limits, period_usage,
     };
     let unavailable = |what: &str| {
         format!(
@@ -428,7 +429,7 @@ fn check_bot_limits(
         .max_run_prompt_tokens(ctx.user_id, ctx.run_id)
         .ok()
         .flatten();
-    let (prompt_est, completion_est) = estimate_tokens(prompt_seen, sh.cfg.max_tokens);
+    let (prompt_est, completion_est) = estimate_tokens(prompt_seen, prompt_hint, sh.cfg.max_tokens);
     let est_tokens = prompt_est.saturating_add(completion_est);
     let est_usd = price.map(|p| p.cost(prompt_est, completion_est, None));
 
@@ -446,14 +447,6 @@ fn check_bot_limits(
     let reserved = map.get(&ctx.bot_id).copied().unwrap_or_default();
     if let Some(b) = find_breach(&limits, &usage, reserved, est_usd, est_tokens) {
         drop(map);
-        let (used, limit) = if b.metric == Metric::Usd {
-            (format!("${:.2}", b.used), format!("${:.2}", b.limit))
-        } else {
-            (
-                format!("{:.0} tokens", b.used),
-                format!("{:.0} tokens", b.limit),
-            )
-        };
         let _ = sh.audit_usage_record(
             ctx.user_id,
             ctx.run_id,
@@ -464,16 +457,7 @@ fn check_bot_limits(
                 "model": model, "resets_ms": b.resets_ms,
             }),
         );
-        return Err(format!(
-            "[{BOT_LIMIT_REACHED} period={} metric={} resets_ms={}] This bot's {} limit of \
-             {limit} is used up or would be exceeded by the next call ({used} used or in \
-             flight). The model was not called. Raise the limit in the bot's settings, wait \
-             until it resets, or stop here.",
-            b.period.as_str(),
-            b.metric.as_str(),
-            b.resets_ms,
-            b.period.as_str(),
-        ));
+        return Err(breach_message(&b));
     }
     let entry = map.entry(ctx.bot_id).or_default();
     entry.usd += est_usd.unwrap_or(0.0);
@@ -491,7 +475,31 @@ fn check_bot_limits(
         },
         est_usd.unwrap_or(0.0),
         est_tokens,
+        prompt_est,
     )))
+}
+
+/// The stable, plain-language error of a broken hard limit.
+fn breach_message(b: &crate::bot_limits::Breach) -> String {
+    use crate::bot_limits::{BOT_LIMIT_REACHED, Metric};
+    let (used, limit) = if b.metric == Metric::Usd {
+        (format!("${:.2}", b.used), format!("${:.2}", b.limit))
+    } else {
+        (
+            format!("{:.0} tokens", b.used),
+            format!("{:.0} tokens", b.limit),
+        )
+    };
+    format!(
+        "[{BOT_LIMIT_REACHED} period={} metric={} resets_ms={}] This bot's {} limit of \
+         {limit} is used up or would be exceeded by the next call ({used} used or in \
+         flight). The model was not called or was stopped. Raise the limit in the bot's \
+         settings, wait until it resets, or stop here.",
+        b.period.as_str(),
+        b.metric.as_str(),
+        b.resets_ms,
+        b.period.as_str(),
+    )
 }
 
 /// Issue one bot-limit notification at most once per period, bot, measure,
@@ -566,7 +574,15 @@ pub(crate) struct CallGuard {
     reserved_usd: f64,
     /// Per-bot limit estimate held while the call is in flight.
     bot_reservation: Option<crate::bot_limits::Reservation>,
+    bot: protocol::BotId,
+    /// Prompt tokens assumed at admission (0 when no limit applies).
+    prompt_est: u64,
+    /// Streamed bytes at which the hard limits are checked next.
+    next_check_bytes: usize,
 }
+
+/// Streamed text is re-checked against the hard limits every this many bytes.
+const STREAM_CHECK_BYTES: usize = 1024;
 
 impl CallGuard {
     pub(crate) fn start(
@@ -574,6 +590,18 @@ impl CallGuard {
         ctx: &RunCtx,
         model: &str,
         purpose: CallPurpose,
+    ) -> Result<Self, String> {
+        Self::start_with_prompt(sh, ctx, model, purpose, None)
+    }
+
+    /// Like [`Self::start`], with an estimate of the request's prompt tokens so
+    /// a large first prompt is counted at admission, not only after usage.
+    pub(crate) fn start_with_prompt(
+        sh: &Arc<Shared>,
+        ctx: &RunCtx,
+        model: &str,
+        purpose: CallPurpose,
+        prompt_hint: Option<u64>,
     ) -> Result<Self, String> {
         let steps = sh
             .storage
@@ -593,12 +621,15 @@ impl CallGuard {
             "cached_tokens": null, "cost_usd": null,
         });
         let mut detail = detail;
-        let bot_reservation = check_bot_limits(sh, ctx, model)?.map(|(r, usd, tokens)| {
-            // What the call counts as when the provider reports no usage.
-            detail["limit_estimate_usd"] = json!(usd);
-            detail["limit_estimate_tokens"] = json!(tokens);
-            r
-        });
+        let mut prompt_est = 0;
+        let bot_reservation =
+            check_bot_limits(sh, ctx, model, prompt_hint)?.map(|(r, usd, tokens, prompt)| {
+                // What the call counts as when the provider reports no usage.
+                detail["limit_estimate_usd"] = json!(usd);
+                detail["limit_estimate_tokens"] = json!(tokens);
+                prompt_est = prompt;
+                r
+            });
         let reserved_usd = match check_spend_limit(sh, ctx, model) {
             Ok(v) => v,
             Err(e) => {
@@ -622,7 +653,98 @@ impl CallGuard {
             started: Instant::now(),
             reserved_usd,
             bot_reservation,
+            bot: ctx.bot_id,
+            prompt_est,
+            next_check_bytes: STREAM_CHECK_BYTES,
         })
+    }
+
+    /// Called while a reply streams in (`streamed_bytes` so far): stop the call
+    /// when what it has produced, on top of the recorded and in-flight usage of
+    /// the bot, would break a hard limit. The unreported call is then counted
+    /// by this larger estimate instead of the admission one.
+    ///
+    /// # Errors
+    /// The typed limit message; the caller must stop reading the stream.
+    pub(crate) fn stream_progress(&mut self, streamed_bytes: usize) -> Result<(), String> {
+        use crate::bot_limits::{
+            BotReserved, Period, PeriodLimit, find_breach, load_limits, period_usage,
+        };
+        let Some(mut own) = self.bot_reservation else {
+            return Ok(());
+        };
+        if streamed_bytes < self.next_check_bytes {
+            return Ok(());
+        }
+        self.next_check_bytes = streamed_bytes + STREAM_CHECK_BYTES;
+        let fail = |what: &str| {
+            format!(
+                "[{} period=unknown metric=unknown resets_ms=0] Bot spending limits could not \
+                 be checked ({what}), so the reply was stopped.",
+                crate::bot_limits::BOT_LIMIT_REACHED
+            )
+        };
+        let sh = &self.sh;
+        let limits = load_limits(&sh.storage, self.bot).map_err(|e| fail(&e))?;
+        let now = storage::now_ms();
+        // About 3 bytes per token: more tokens than most text, so we err towards stopping.
+        let completion = (streamed_bytes as u64).div_ceil(3);
+        let actual_tokens = self.prompt_est.saturating_add(completion);
+        let actual_usd = self.detail["model"]
+            .as_str()
+            .and_then(|m| sh.price_for(m))
+            .map(|p| p.cost(self.prompt_est, completion, None));
+        let others = {
+            let map = sh.spend.bot.reserved.lock();
+            let all = map.get(&self.bot).copied().unwrap_or_default();
+            BotReserved {
+                usd: (all.usd - own.usd).max(0.0),
+                tokens: all.tokens.saturating_sub(own.tokens),
+                calls: all.calls.saturating_sub(1),
+            }
+        };
+        let mut usage = Vec::new();
+        for p in Period::ALL {
+            if *limits.period(p) == PeriodLimit::default() {
+                continue;
+            }
+            let u = period_usage(&sh.storage, self.user, self.bot, p, now)
+                .map_err(|_| fail("usage ledger unavailable"))?;
+            usage.push((p, u));
+        }
+        let breach = find_breach(&limits, &usage, others, actual_usd, actual_tokens);
+        // The call outgrew its admission reservation: hold the growth in the
+        // shared in-flight total at once, so other chats, subagents and
+        // scheduled runs of this bot are admitted against the real size.
+        let grow_tokens = actual_tokens.saturating_sub(own.tokens);
+        let grow_usd = actual_usd.map_or(0.0, |u| (u - own.usd).max(0.0));
+        if grow_tokens > 0 || grow_usd > 0.0 {
+            if let Some(e) = sh.spend.bot.reserved.lock().get_mut(&self.bot) {
+                e.tokens = e.tokens.saturating_add(grow_tokens);
+                e.usd += grow_usd;
+            }
+            own.tokens = own.tokens.saturating_add(grow_tokens);
+            own.usd += grow_usd;
+            self.bot_reservation = Some(own);
+        }
+        if actual_tokens > self.detail["limit_estimate_tokens"].as_u64().unwrap_or(0) {
+            self.detail["limit_estimate_tokens"] = json!(actual_tokens);
+            if let Some(usd) = actual_usd {
+                self.detail["limit_estimate_usd"] = json!(usd);
+            }
+        }
+        let Some(b) = breach else { return Ok(()) };
+        let _ = sh.audit_usage_record(
+            self.user,
+            self.run,
+            "bot_limit.blocked",
+            &json!({
+                "bot_id": self.bot.to_string(), "period": b.period.as_str(),
+                "metric": b.metric.as_str(), "limit": b.limit, "used": b.used,
+                "model": self.detail["model"], "resets_ms": b.resets_ms, "streaming": true,
+            }),
+        );
+        Err(breach_message(&b))
     }
 
     /// The model tier this call ran on, when tiering is active for the step.

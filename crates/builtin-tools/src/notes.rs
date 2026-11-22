@@ -19,7 +19,9 @@
 //!   asks before the bot persists or deletes anything. Only two tools exist
 //!   because the direct tool budget is nearly full (see `docs/design/agent-tools.md`).
 //! * Text that looks like a credential (`secret_store::detect_secrets`) is
-//!   refused. Size limits: 32 KiB per note, 100 notes, 512 KiB per bot.
+//!   refused, also when it hides in a fenced block (backtick or tilde fences of
+//!   any length), is split over lines, or only forms a key once appended to the
+//!   existing note. Writes to one note are serialised by a per-note lock. Size limits: 32 KiB per note, 100 notes, 512 KiB per bot.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -73,8 +75,50 @@ struct NotesTool {
     op: Op,
     dir: PathBuf,
     spill: PathBuf,
-    /// One lock for the whole instance family: read-modify-write is atomic.
-    lock: Arc<tokio::sync::Mutex<()>>,
+    /// Per-note locks (shared by the instance family): two writers of the same
+    /// note never interleave their read-modify-write.
+    locks: Arc<NoteLocks>,
+}
+
+type NoteGate = Arc<tokio::sync::Mutex<()>>;
+
+/// One async lock per (bot file, note name), plus a short sync lock around
+/// the book file itself (notes of one bot share a file).
+#[derive(Default)]
+struct NoteLocks {
+    per_note: std::sync::Mutex<BTreeMap<(String, String), NoteGate>>,
+    file: std::sync::Mutex<()>,
+}
+
+impl NoteLocks {
+    fn note(&self, bot: &str, name: &str) -> NoteGate {
+        let mut map = self
+            .per_note
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        map.entry((bot.to_owned(), name.to_owned()))
+            .or_default()
+            .clone()
+    }
+}
+
+/// Does `text` hold something that looks like a credential, even when it is
+/// wrapped in a code fence or broken over lines?
+fn looks_secret(text: &str) -> bool {
+    if !secret_store::detect_secrets(text).is_empty() {
+        return true;
+    }
+    // Drop fence lines (``` or ~~~, any length, optional info string) and join
+    // the remaining lines, so a key split by a line break is whole again.
+    let mut joined = String::with_capacity(text.len());
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            continue;
+        }
+        joined.push_str(t.trim_end_matches('\\'));
+    }
+    joined != text && !secret_store::detect_secrets(&joined).is_empty()
 }
 
 #[derive(Deserialize)]
@@ -108,7 +152,7 @@ enum WriteMode {
 pub fn tools(data_dir: &std::path::Path) -> Vec<Arc<dyn Tool>> {
     let dir = data_dir.join("notes");
     let spill = data_dir.join("spill");
-    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    let locks = Arc::new(NoteLocks::default());
     let cat = PermissionCategory::Fs;
     let defs: [(Op, ToolSpec); 2] = [
         (
@@ -146,7 +190,7 @@ pub fn tools(data_dir: &std::path::Path) -> Vec<Arc<dyn Tool>> {
                 op,
                 dir: dir.clone(),
                 spill: spill.clone(),
-                lock: lock.clone(),
+                locks: locks.clone(),
             }) as Arc<dyn Tool>
         })
         .collect()
@@ -229,11 +273,17 @@ impl Tool for NotesTool {
             .filter(|b| !b.is_empty())
             .ok_or_else(|| ToolError::InvalidInput("notes need a calling bot".into()))?
             .to_owned();
-        let _guard = self.lock.lock().await;
         match self.op {
             Op::Read => {
                 let i: ReadIn = parse(input)?;
-                let book = self.load(&bot)?;
+                let book = {
+                    let _f = self
+                        .locks
+                        .file
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    self.load(&bot)?
+                };
                 let (text, untrusted) = match (i.name, i.query) {
                     (Some(name), None) => {
                         let name = valid_name(&name)?;
@@ -303,11 +353,13 @@ impl Tool for NotesTool {
             Op::Write => {
                 let i: WriteIn = parse(input)?;
                 let name = valid_name(&i.name)?;
-                if !secret_store::detect_secrets(&i.text).is_empty() {
-                    return Err(ToolError::InvalidInput(
-                        "that text looks like a password or key; notes never store secrets".into(),
-                    ));
-                }
+                let note_lock = self.locks.note(&bot, &name);
+                let _note = note_lock.lock().await;
+                let _file = self
+                    .locks
+                    .file
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let mut book = self.load(&bot)?;
                 let old = book.notes.get(&name).cloned();
                 if i.mode == WriteMode::Delete {
@@ -324,6 +376,11 @@ impl Tool for NotesTool {
                     (WriteMode::Append, Some(o)) => format!("{}\n{}", o.text, i.text),
                     _ => i.text,
                 };
+                if looks_secret(&text) {
+                    return Err(ToolError::InvalidInput(
+                        "that text looks like a password or key; notes never store secrets".into(),
+                    ));
+                }
                 if text.len() > MAX_NOTE_BYTES {
                     return Err(ToolError::InvalidInput(format!(
                         "a note holds at most {MAX_NOTE_BYTES} bytes"
@@ -474,6 +531,106 @@ mod tests {
         let ex = o.exposure.clone().unwrap();
         assert!(ex.ingests_untrusted && ex.reads_private);
         assert!(text(&o).starts_with("<untrusted_note_data>"));
+    }
+
+    #[tokio::test]
+    async fn refuses_fenced_split_and_appended_secrets() {
+        let d = tempfile::tempdir().unwrap();
+        let ts = tools(d.path());
+        let w = get(&ts, "notes_write");
+        let key = format!("sk-ant-api03-{}", "A1b2C3d4E5".repeat(8));
+        let (first, second) = key.split_at(18);
+        assert!(
+            secret_store::detect_secrets(first).is_empty()
+                && secret_store::detect_secrets(second).is_empty()
+        );
+        let cases = [
+            format!(
+                "~~~~~text
+{key}
+~~~~~"
+            ),
+            format!(
+                "`````
+{key}
+`````"
+            ),
+            format!(
+                "{first}
+{second}"
+            ),
+            format!(
+                "```
+{first}
+```
+```
+{second}
+```"
+            ),
+        ];
+        for (i, c) in cases.iter().enumerate() {
+            assert!(
+                w.call(&ctx("a", false), json!({"name":"k","text":c}))
+                    .await
+                    .is_err(),
+                "case {i}"
+            );
+        }
+        // Two harmless appends that together form a key are refused.
+        w.call(&ctx("a", false), json!({"name":"s","text":first}))
+            .await
+            .unwrap();
+        assert!(
+            w.call(
+                &ctx("a", false),
+                json!({"name":"s","text":second,"mode":"append"})
+            )
+            .await
+            .is_err()
+        );
+        // Normal notes with fences and several lines still work.
+        w.call(
+            &ctx("a", false),
+            json!({"name":"n","text":"```rust
+let x = 1;
+```
+- milk
+- eggs"}),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn concurrent_appends_to_one_note_are_not_lost() {
+        let dir = tempfile::tempdir().unwrap();
+        let ts = tools(dir.path());
+        let w = get(&ts, "notes_write");
+        let mut set = tokio::task::JoinSet::new();
+        for i in 0..24 {
+            let w = w.clone();
+            let name = if i % 2 == 0 { "one" } else { "two" };
+            set.spawn(async move {
+                w.call(
+                    &ctx("a", false),
+                    json!({"name":name,"text":format!("line{i}"),"mode":"append"}),
+                )
+                .await
+                .unwrap();
+            });
+        }
+        while set.join_next().await.is_some() {}
+        let reader = get(&ts, "notes_read");
+        for (name, par) in [("one", 0), ("two", 1)] {
+            let o = reader
+                .call(&ctx("a", false), json!({"name":name}))
+                .await
+                .unwrap();
+            let body = text(&o);
+            for i in (0..24).filter(|i| i % 2 == par) {
+                assert!(body.contains(&format!("line{i}")), "{name} lost line{i}");
+            }
+        }
     }
 
     #[test]

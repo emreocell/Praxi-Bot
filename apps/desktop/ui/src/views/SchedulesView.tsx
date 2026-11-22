@@ -1,15 +1,21 @@
 import {
   ArrowUpRight,
+  CalendarCheck,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  HardDrive,
+  Inbox,
   LayoutList,
+  type LucideIcon,
   PenLine,
   Play,
   Plus,
   RefreshCw,
   RotateCcw,
-  Trash2
+  Sun,
+  Trash2,
+  TrendingDown
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -22,7 +28,21 @@ import type {
 } from "../api/types";
 import formStyles from "../components/Form.module.css";
 import { botView } from "../lib/botProfile";
+import scheduleTemplateFile from "../data/scheduleTemplates.json";
 import { humanLine } from "../lib/humanError";
+import {
+  FREQUENCIES,
+  type Frequency,
+  simpleProblem,
+  simpleSpec
+} from "../lib/scheduleBuilder";
+import {
+  type ScheduleNotify,
+  SCHEDULE_NOTIFY_CHOICES,
+  scheduleNotifyOf,
+  writeScheduleNotify
+} from "../lib/scheduleNotify";
+import { type ScheduleTemplate, templateText } from "../lib/scheduleTemplates";
 import {
   affectsSchedules,
   buildInput,
@@ -41,7 +61,6 @@ import {
   placeScheduleCalendarEvents,
   runsOfSchedule,
   type ScheduleDraft,
-  type ScheduleKind,
   scheduleStatus,
   sortSchedules,
   specLabel,
@@ -54,6 +73,15 @@ import styles from "./SchedulesView.module.css";
 function errorText(e: unknown): string {
   return humanLine(e);
 }
+
+const TEMPLATES = scheduleTemplateFile.templates as ScheduleTemplate[];
+const TEMPLATE_ICONS: Record<string, LucideIcon> = {
+  sun: Sun,
+  "calendar-check": CalendarCheck,
+  inbox: Inbox,
+  "trending-down": TrendingDown,
+  "hard-drive": HardDrive
+};
 
 const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
@@ -195,7 +223,11 @@ export function SchedulesView({
             <p className={styles.subtitle}>{t("schedules.subtitle")}</p>
           </div>
           <div className={styles.headerActions}>
-            <div className={styles.filterGroup} role="group" aria-label={t("schedules.title")}>
+            <div
+              className={styles.filterGroup}
+              role="group"
+              aria-label={t("schedules.title")}
+            >
               <Button
                 size="sm"
                 variant={viewMode === "list" ? "secondary" : "ghost"}
@@ -425,7 +457,9 @@ export function SchedulesView({
                         data-testid="schedule-moved"
                       >
                         <p className={formStyles.hint}>
-                          {t("schedules.movedTo", { name: s.moved_to })}
+                          {t("schedules.movedTo", {
+                            name: s.moved_to
+                          })}
                         </p>
                         {confirmReclaimId === s.id ? (
                           <p className={formStyles.error} role="alert">
@@ -460,7 +494,9 @@ export function SchedulesView({
                                   throw e;
                                 }
                               },
-                              t("schedules.reclaimed", { name: s.name })
+                              t("schedules.reclaimed", {
+                                name: s.name
+                              })
                             );
                           }}
                         >
@@ -764,12 +800,7 @@ function ScheduleCalendar({
 
   const cells = useMemo(
     () =>
-      placeScheduleCalendarEvents(
-        days,
-        schedules,
-        upcomingById,
-        historyById
-      ),
+      placeScheduleCalendarEvents(days, schedules, upcomingById, historyById),
     [days, schedules, upcomingById, historyById]
   );
 
@@ -802,7 +833,11 @@ function ScheduleCalendar({
   };
 
   return (
-    <Card padding="md" className={styles.calCard} data-testid="schedule-calendar">
+    <Card
+      padding="md"
+      className={styles.calCard}
+      data-testid="schedule-calendar"
+    >
       <div className={styles.calToolbar}>
         <h2 className={styles.calMonthTitle}>{monthLabel}</h2>
         <div className={styles.calNav}>
@@ -841,7 +876,9 @@ function ScheduleCalendar({
 
       <div
         role="grid"
-        aria-label={t("schedules.calendar.gridLabel", { month: monthLabel })}
+        aria-label={t("schedules.calendar.gridLabel", {
+          month: monthLabel
+        })}
       >
         <div className={styles.calWeekdays} role="row">
           {weekdayHeaders.map((label) => (
@@ -912,12 +949,17 @@ function ScheduleCalendar({
       </div>
 
       {selectedCell ? (
-        <div className={styles.calDetail} data-testid="schedule-calendar-detail">
+        <div
+          className={styles.calDetail}
+          data-testid="schedule-calendar-detail"
+        >
           <h3 className={styles.calDetailHeading}>{selectedCell.dayKey}</h3>
           {selectedCell.upcoming.length === 0 &&
           selectedCell.outcomes.length === 0 ? (
             <p className={formStyles.hint}>
-              {t("schedules.calendar.dayEmpty", { date: selectedCell.dayKey })}
+              {t("schedules.calendar.dayEmpty", {
+                date: selectedCell.dayKey
+              })}
             </p>
           ) : (
             <>
@@ -1040,6 +1082,33 @@ function ScheduleForm({
   } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notify, setNotify] = useState<ScheduleNotify>(() =>
+    editing ? scheduleNotifyOf(editing.id) : "problems"
+  );
+  const patchSimple = (p: Partial<ScheduleDraft["simple"]>) =>
+    setDraft((d) => ({ ...d, simple: { ...d.simple, ...p } }));
+  const pickFrequency = (f: Frequency) =>
+    setDraft((d) => ({
+      ...d,
+      kind: f === "custom" ? "natural" : "simple",
+      simple: { ...d.simple, freq: f }
+    }));
+  const applyTemplate = (tpl: ScheduleTemplate) => {
+    const x = templateText(tpl, i18n.language);
+    setDraft((d) => ({
+      ...d,
+      name: x.name,
+      prompt: x.prompt,
+      kind: "simple",
+      simple: {
+        ...d.simple,
+        freq: tpl.freq,
+        time: tpl.time,
+        weekday: tpl.weekday ?? d.simple.weekday
+      }
+    }));
+    setProblem(null);
+  };
   const patch = (p: Partial<ScheduleDraft>) =>
     setDraft((d) => ({ ...d, ...p }));
   const keepsPayload =
@@ -1055,12 +1124,19 @@ function ScheduleForm({
       ...(tz ? { timeZone: tz } : {})
     });
 
+  const simpleSpecNow =
+    draft.kind === "simple" &&
+    simpleProblem(draft.simple, selectedTz, Date.now()) === null
+      ? simpleSpec(draft.simple, selectedTz)
+      : null;
   const previewKey =
-    draft.kind === "natural"
-      ? `natural:${draft.text.trim()}:${selectedTz}`
-      : draft.kind === "cron"
-        ? `cron:${draft.cron.trim()}:${draft.tz ?? ""}`
-        : "keep";
+    draft.kind === "simple"
+      ? `simple:${JSON.stringify(simpleSpecNow)}`
+      : draft.kind === "natural"
+        ? `natural:${draft.text.trim()}:${selectedTz}`
+        : draft.kind === "cron"
+          ? `cron:${draft.cron.trim()}:${draft.tz ?? ""}`
+          : "keep";
 
   const runPreview = async (): Promise<ParsedSchedule | null> => {
     if (!client) {
@@ -1072,6 +1148,9 @@ function ScheduleForm({
     if (draft.kind === "cron" && draft.cron.trim() === "") {
       return null;
     }
+    if (draft.kind === "simple" && simpleSpecNow === null) {
+      return null;
+    }
     if (preview && preview.key === previewKey) {
       return preview.result;
     }
@@ -1079,11 +1158,16 @@ function ScheduleForm({
       const result =
         draft.kind === "natural"
           ? await client.parseSchedule(draft.text.trim(), selectedTz)
-          : await client.previewSchedule({
-              spec: { cron: draft.cron.trim() },
-              tz: draft.tz?.trim() || undefined,
-              count: 5
-            });
+          : draft.kind === "simple"
+            ? await client.previewSchedule({
+                spec: simpleSpecNow,
+                count: 5
+              })
+            : await client.previewSchedule({
+                spec: { cron: draft.cron.trim() },
+                tz: draft.tz?.trim() || undefined,
+                count: 5
+              });
       setPreview({ key: previewKey, result });
       setProblem(null);
       return result;
@@ -1100,6 +1184,14 @@ function ScheduleForm({
     }
   };
 
+  // The easy builder shows the next runs as soon as the choices are complete.
+  useEffect(() => {
+    if (draft.kind === "simple" && simpleSpecNow !== null) {
+      void runPreview();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewKey]);
+
   const submit = async () => {
     const invalid = validateDraft(draft, editing);
     if (invalid) {
@@ -1109,22 +1201,40 @@ function ScheduleForm({
     if (!client) {
       return;
     }
+    if (draft.kind === "simple") {
+      const why = simpleProblem(draft.simple, selectedTz, Date.now());
+      if (why) {
+        setProblem(t(`schedules.form.simpleProblem.${why}`));
+        return;
+      }
+    }
     setBusy(true);
     try {
       let spec: unknown = null;
       if (draft.kind === "natural") {
+        const shown = preview && preview.key === previewKey;
         const parsed = await runPreview();
         if (!parsed) {
           return;
         }
+        if (!shown) {
+          // First show what was understood; the person confirms with a second press.
+          setProblem(t("schedules.form.confirmParsed"));
+          return;
+        }
         spec = parsed.spec;
+      } else if (draft.kind === "simple") {
+        spec = simpleSpecNow;
       }
       const input = buildInput(draft, spec, editing);
+      let savedId: string;
       if (editing) {
         await client.updateSchedule(editing.id, input);
+        savedId = editing.id;
       } else {
-        await client.createSchedule(input);
+        savedId = (await client.createSchedule(input)).id;
       }
+      writeScheduleNotify(savedId, notify);
       await onSaved();
     } catch (e) {
       setProblem(errorText(e));
@@ -1133,9 +1243,6 @@ function ScheduleForm({
     }
   };
 
-  const kinds: ScheduleKind[] = editing
-    ? ["keep", "natural", "cron"]
-    : ["natural", "cron"];
   const heading = editing
     ? t("schedules.form.editTitle")
     : t("schedules.form.newTitle");
@@ -1157,6 +1264,38 @@ function ScheduleForm({
         }}
       >
         <h2 className={styles.formTitle}>{heading}</h2>
+
+        {!editing ? (
+          <div className={formStyles.field}>
+            <span className={formStyles.label}>
+              {t("schedules.form.templates.title")}
+            </span>
+            <div className={styles.templateRow}>
+              {TEMPLATES.map((tpl) => {
+                const x = templateText(tpl, i18n.language);
+                const Icon = TEMPLATE_ICONS[tpl.icon] ?? Sun;
+                return (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    className={styles.template}
+                    data-testid={`schedule-template-${tpl.id}`}
+                    onClick={() => applyTemplate(tpl)}
+                  >
+                    <span className={styles.templateName}>
+                      <Icon size={16} aria-hidden="true" />
+                      {x.name}
+                    </span>
+                    <span className={styles.templateBlurb}>{x.blurb}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <span className={formStyles.hint}>
+              {t("schedules.form.templates.hint")}
+            </span>
+          </div>
+        ) : null}
 
         <label className={formStyles.field}>
           <span className={formStyles.label}>{t("schedules.form.name")}</span>
@@ -1193,18 +1332,43 @@ function ScheduleForm({
           <legend className={formStyles.label}>
             {t("schedules.form.when")}
           </legend>
-          <div className={styles.kindRow} role="radiogroup">
-            {kinds.map((k) => (
-              <label key={k} className={styles.radio}>
-                <input
-                  type="radio"
-                  name="schedule-kind"
-                  checked={draft.kind === k}
-                  onChange={() => patch({ kind: k })}
-                />
-                <span>{t(`schedules.form.kind.${k}`)}</span>
-              </label>
-            ))}
+          <div
+            className={styles.chipRow}
+            role="radiogroup"
+            aria-label={t("schedules.form.freq.label")}
+          >
+            {editing ? (
+              <button
+                type="button"
+                role="radio"
+                aria-checked={draft.kind === "keep"}
+                className={styles.chip}
+                onClick={() => patch({ kind: "keep" })}
+              >
+                {t("schedules.form.kind.keep")}
+              </button>
+            ) : null}
+            {FREQUENCIES.map((f) => {
+              const on =
+                draft.kind === "keep" || draft.kind === "cron"
+                  ? false
+                  : f === "custom"
+                    ? draft.kind === "natural"
+                    : draft.kind === "simple" && draft.simple.freq === f;
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  className={styles.chip}
+                  data-testid={`schedule-freq-${f}`}
+                  onClick={() => pickFrequency(f)}
+                >
+                  {t(`schedules.form.freq.${f}`)}
+                </button>
+              );
+            })}
           </div>
 
           {draft.kind === "keep" && editing ? (
@@ -1242,6 +1406,99 @@ function ScheduleForm({
             </label>
           ) : null}
 
+          {draft.kind === "simple" ? (
+            <div className={formStyles.field}>
+              <div className={formStyles.row}>
+                {draft.simple.freq === "once" ? (
+                  <label className={formStyles.field}>
+                    <span className={formStyles.label}>
+                      {t("schedules.form.date")}
+                    </span>
+                    <input
+                      type="date"
+                      className={formStyles.input}
+                      value={draft.simple.date}
+                      onChange={(e) =>
+                        patchSimple({
+                          date: e.target.value
+                        })
+                      }
+                    />
+                  </label>
+                ) : null}
+                {draft.simple.freq === "weekly" ? (
+                  <label className={formStyles.field}>
+                    <span className={formStyles.label}>
+                      {t("schedules.form.weekday")}
+                    </span>
+                    <select
+                      className={formStyles.select}
+                      value={draft.simple.weekday}
+                      onChange={(e) =>
+                        patchSimple({
+                          weekday: Number(e.target.value)
+                        })
+                      }
+                    >
+                      {[1, 2, 3, 4, 5, 6, 0].map((d) => (
+                        <option key={d} value={d}>
+                          {new Date(
+                            Date.UTC(2024, 0, 7 + d)
+                          ).toLocaleDateString(i18n.language, {
+                            weekday: "long",
+                            timeZone: "UTC"
+                          })}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                {draft.simple.freq === "monthly" ? (
+                  <label className={formStyles.field}>
+                    <span className={formStyles.label}>
+                      {t("schedules.form.monthDay")}
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={28}
+                      className={formStyles.input}
+                      value={draft.simple.monthDay}
+                      onChange={(e) =>
+                        patchSimple({
+                          monthDay: Number(e.target.value)
+                        })
+                      }
+                    />
+                    <span className={formStyles.hint}>
+                      {t("schedules.form.monthDayHint")}
+                    </span>
+                  </label>
+                ) : null}
+                <label className={formStyles.field}>
+                  <span className={formStyles.label}>
+                    {t("schedules.form.time")}
+                  </span>
+                  <input
+                    type="time"
+                    className={formStyles.input}
+                    value={draft.simple.time}
+                    onChange={(e) =>
+                      patchSimple({
+                        time: e.target.value
+                      })
+                    }
+                  />
+                </label>
+              </div>
+              <span className={formStyles.hint}>
+                {t("schedules.form.tzShown", {
+                  tz: selectedTz
+                })}
+              </span>
+            </div>
+          ) : null}
+
           {draft.kind === "natural" ? (
             <div className={formStyles.field}>
               <div className={formStyles.row}>
@@ -1263,38 +1520,17 @@ function ScheduleForm({
               </div>
               {!activePreview ? (
                 <span className={formStyles.hint}>
-                  {t("schedules.form.textHint", { tz: selectedTz })}
+                  {t("schedules.form.customHint")}{" "}
+                  {t("schedules.form.textHint", {
+                    tz: selectedTz
+                  })}
                 </span>
               ) : null}
             </div>
           ) : null}
 
-          {draft.kind === "cron" ? (
-            <div className={formStyles.field}>
-              <div className={formStyles.row}>
-                <input
-                  className={`${formStyles.input} ${formStyles.grow}`}
-                  value={draft.cron}
-                  placeholder="0 9 * * 1-5 Europe/Istanbul"
-                  aria-label={t("schedules.form.cron")}
-                  onChange={(e) => patch({ cron: e.target.value })}
-                />
-                <Button
-                  size="md"
-                  variant="secondary"
-                  disabled={draft.cron.trim() === ""}
-                  onClick={() => void runPreview()}
-                >
-                  {t("schedules.form.preview")}
-                </Button>
-              </div>
-              <span className={formStyles.hint}>
-                {t("schedules.form.cronHint")}
-              </span>
-            </div>
-          ) : null}
-
-          {activePreview || (draft.kind === "keep" && previewRuns.length > 0) ? (
+          {activePreview ||
+          (draft.kind === "keep" && previewRuns.length > 0) ? (
             <div
               className={styles.previewBox}
               role="status"
@@ -1307,7 +1543,9 @@ function ScheduleForm({
                     const next = activePreview.next_run_at_ms;
                     return `${t(l.i18nKey, l.values)} · ${
                       next !== null && next !== undefined
-                        ? t("schedules.form.firstRun", { when: fmt(next) })
+                        ? t("schedules.form.firstRun", {
+                            when: fmt(next)
+                          })
                         : t("schedules.form.noFirstRun")
                     }`;
                   })()}
@@ -1323,13 +1561,18 @@ function ScheduleForm({
                   <ol className={styles.previewList}>
                     {previewRuns.slice(0, 5).map((ms) => (
                       <li key={ms}>
-                        {fmt(ms, draft.kind === "keep" ? undefined : selectedTz)}
+                        {fmt(
+                          ms,
+                          draft.kind === "keep" ? undefined : selectedTz
+                        )}
                       </li>
                     ))}
                   </ol>
                 </>
               ) : (
-                <p className={formStyles.hint}>{t("schedules.nextRunsEmpty")}</p>
+                <p className={formStyles.hint}>
+                  {t("schedules.nextRunsEmpty")}
+                </p>
               )}
             </div>
           ) : null}
@@ -1353,24 +1596,106 @@ function ScheduleForm({
           </label>
         )}
 
-        <label className={formStyles.field}>
-          <span className={formStyles.label}>
-            {t("schedules.form.misfire")}
-          </span>
-          <select
-            className={formStyles.select}
-            value={draft.misfire}
-            onChange={(e) =>
-              patch({ misfire: e.target.value as ScheduleDraft["misfire"] })
-            }
+        <fieldset className={styles.fieldset}>
+          <legend className={formStyles.label}>
+            {t("schedules.form.notify.label")}
+          </legend>
+          <div
+            className={styles.chipRow}
+            role="radiogroup"
+            aria-label={t("schedules.form.notify.label")}
           >
-            {MISFIRE_POLICIES.map((m) => (
-              <option key={m} value={m}>
-                {t(`schedules.form.misfirePolicy.${m}`)}
-              </option>
+            {SCHEDULE_NOTIFY_CHOICES.map((c) => (
+              <button
+                key={c}
+                type="button"
+                role="radio"
+                aria-checked={notify === c}
+                className={styles.chip}
+                data-testid={`schedule-notify-${c}`}
+                onClick={() => setNotify(c)}
+              >
+                {t(`schedules.form.notify.${c}`)}
+              </button>
             ))}
-          </select>
-        </label>
+          </div>
+          <span className={formStyles.hint}>
+            {t("schedules.form.notify.hint")}
+          </span>
+        </fieldset>
+
+        <details
+          className={styles.advanced}
+          open={draft.kind === "cron"}
+          data-testid="schedule-advanced"
+        >
+          <summary>{t("schedules.form.advanced")}</summary>
+          <div className={styles.advancedBody}>
+            <span className={formStyles.hint}>
+              {t("schedules.form.advancedHint")}
+            </span>
+            <label className={styles.radio}>
+              <input
+                type="checkbox"
+                checked={draft.kind === "cron"}
+                onChange={(e) =>
+                  patch({
+                    kind: e.target.checked ? "cron" : "simple"
+                  })
+                }
+              />
+              <span>{t("schedules.form.kind.cron")}</span>
+            </label>
+            {draft.kind === "cron" ? (
+              <div className={formStyles.field}>
+                <div className={formStyles.row}>
+                  <input
+                    className={`${formStyles.input} ${formStyles.grow}`}
+                    value={draft.cron}
+                    placeholder="0 9 * * 1-5 Europe/Istanbul"
+                    aria-label={t("schedules.form.cron")}
+                    onChange={(e) => patch({ cron: e.target.value })}
+                  />
+                  <Button
+                    size="md"
+                    variant="secondary"
+                    disabled={draft.cron.trim() === ""}
+                    onClick={() => void runPreview()}
+                  >
+                    {t("schedules.form.preview")}
+                  </Button>
+                </div>
+                <span className={formStyles.hint}>
+                  {t("schedules.form.cronHint")}
+                </span>
+              </div>
+            ) : null}
+
+            <span className={formStyles.hint}>
+              {t("schedules.form.misfireHint")}
+            </span>
+            <label className={formStyles.field}>
+              <span className={formStyles.label}>
+                {t("schedules.form.misfire")}
+              </span>
+              <select
+                className={formStyles.select}
+                value={draft.misfire}
+                onChange={(e) =>
+                  patch({
+                    misfire: e.target.value as ScheduleDraft["misfire"]
+                  })
+                }
+              >
+                {MISFIRE_POLICIES.map((m) => (
+                  <option key={m} value={m}>
+                    {t(`schedules.form.misfirePolicy.${m}`)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </details>
 
         <label className={styles.toggle}>
           <input

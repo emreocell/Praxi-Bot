@@ -95,6 +95,7 @@ import { useApplyAppearance } from "./state/useApplyAppearance";
 import { usePanelReserve } from "./state/usePanelReserve";
 import { useViewportWidth } from "./state/useViewportWidth";
 import { PaletteHost, type PaletteScreen } from "./state/PaletteHost";
+import { DigestNotifier } from "./state/DigestNotifier";
 import { ShellBridgeHost } from "./state/ShellBridgeHost";
 import { AddSkillModal } from "./components/AddSkillModal";
 import { useToast } from "./components/Toast";
@@ -140,6 +141,7 @@ import { OPEN_BOT_LIMITS_EVENT } from "./lib/botLimits";
 import type { BotEditorSection } from "./lib/botEditor";
 import { EngineConsentProvider } from "./state/EngineConsent";
 import type { SettingsSectionId } from "./views/settings/types";
+import type { SettingsPageId } from "./lib/settingsPages";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { i18n, type SupportedLanguage } from "./i18n";
 import {
@@ -244,7 +246,7 @@ function AppShell() {
   }, []);
   const [recordingHotkey, setRecordingHotkey] = useState<boolean>(false);
   const [autostartError, setAutostartError] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState<SettingsSectionId | null>(
+  const [settingsOpen, setSettingsOpen] = useState<SettingsSectionId | SettingsPageId | null>(
     null
   );
   const [appsOpen, setAppsOpen] = useState(false);
@@ -1013,6 +1015,13 @@ function AppShell() {
           onOpenChat={openChat}
           onOpenNeeds={openNeeds}
         />
+        <DigestNotifier
+          digestTime={settings.digestTime}
+          digestLastDay={settings.digestLastDay}
+          quietHours={settings.quietHours}
+          isPrivate={settings.notifyPrivate}
+          onHandled={(day) => updateSettings({ digestLastDay: day })}
+        />
         <HumanDrivingBanner />
         {runBanner}
         {settings.onboardingSkipped && !settings.onboardingCompleted && route.kind !== "onboarding" ? (
@@ -1172,6 +1181,7 @@ function AppShell() {
         onScreen={handlePaletteScreen}
         onBot={goToBot}
         onChat={(chatId, botId) => go({ kind: "chat", chatId, botId })}
+        onSettingsPage={(page) => setSettingsOpen(page)}
         onHelp={() => setHelpOpen(true)}
       />
       <SettingsModal

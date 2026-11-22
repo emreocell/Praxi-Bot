@@ -6,6 +6,7 @@ import { isMockMode, MOCK_BASE_URL } from "../../api/mockMode";
 import type { CliEngineDto, ProvidersDto } from "../../api/types";
 import { BrandIcon } from "../../components/BrandIcon";
 import { BrandMark } from "../../components/BrandMark";
+import { LocalInstallCard } from "../../components/LocalInstallCard";
 import { LocalModelsAdvice } from "../../components/LocalModelsAdvice";
 import { ModelPicker } from "../../components/ModelPicker";
 import { detectKeyProvider, keyTargets, looksLikeKey, saveProviderKey, scrubSecret } from "../../lib/apiKey";
@@ -404,7 +405,12 @@ export function BrainStep({
         </section>
       ) : null}
 
-      {group === "ollama" && !connected ? <LocalModelsAdvice /> : null}
+      {group === "ollama" && !connected ? (
+        <>
+          <LocalInstallCard />
+          <LocalModelsAdvice />
+        </>
+      ) : null}
 
       {otherLocal.length > 0 && !connected ? (
         <section className={styles.block} aria-labelledby="fr-local">

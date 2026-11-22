@@ -14,7 +14,7 @@ import { isNetworkFailure, type EnsureHost } from "../lib/hostRecovery";
 import { type Connection, connectDaemon, type StartupDiagnostics, startupDiagnostics } from "../api/connection";
 import { subscribeEvents } from "../api/events";
 import { MOCK_HOST_ID, mockHostScenario } from "../api/mockHostScenario";
-import { MOCK_BASE_URL } from "../api/mockMode";
+import { isMockMode, MOCK_BASE_URL } from "../api/mockMode";
 import type {
   Bot,
   Chat,
@@ -37,9 +37,9 @@ import {
   giveUpConnecting,
   type HostStateMemory,
   type HostUiState,
-  liveRunIds,
   settleHostState
 } from "../lib/hostState";
+import { stopLiveRuns } from "../lib/runLocation";
 import { type Home, homeFromInfo, LOCAL_HOME, wantedComputer } from "../lib/home";
 import { markRemoteBaseUrl } from "../lib/liveViewState";
 import { orderBots } from "../lib/botOrder";
@@ -59,6 +59,7 @@ import {
 } from "./timeline";
 import { humanLine, type ServiceProblem } from "../lib/humanError";
 import { isProcessingRunState } from "../lib/runState";
+import { readRunPlace, writeRunPlace } from "../lib/runLocation";
 
 export type Phase = "connecting" | "ready" | "error";
 
@@ -539,7 +540,11 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   const [hostList, setHostList] = useState<HostLinkList | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [home, setHome] = useState<Home>(LOCAL_HOME);
-  const [workLocalNow, setWorkLocalNow] = useState(false);
+  const [workLocalNow, setWorkLocalNowState] = useState(() => !isMockMode() && readRunPlace() === "this");
+  const setWorkLocalNow = useCallback((on: boolean) => {
+    setWorkLocalNowState(on);
+    writeRunPlace(on ? "this" : "server");
+  }, []);
   const data = useDaemonData(localConn, LOCAL_COMPUTER);
 
   // The local daemon's own client: it owns the pairing store and the channels.
@@ -580,7 +585,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     if (new URLSearchParams(window.location.search).get("temp") === "local") {
       activeIdRef.current = LOCAL_COMPUTER;
       setActiveId(LOCAL_COMPUTER);
-      setWorkLocalNow(true);
+      setWorkLocalNowState(true);
       return;
     }
     if (scenario === "offline") {
@@ -898,7 +903,10 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     localApi: localClient,
     refreshHosts,
     pairHost,
-    stopHostRuns: async () => 0
+    stopHostRuns: async () => {
+      const c = localClientRef.current;
+      return c ? stopLiveRuns(c) : 0;
+    }
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -947,16 +955,7 @@ export function HostSession({ children }: { children: ReactNode }) {
   }
   const stopHostRuns = useCallback(async () => {
     const c = clientRef.current;
-    if (!c) {
-      return 0;
-    }
-    // Listed scope with what the host itself reports as live right now.
-    const ids = liveRunIds(await c.listRuns());
-    if (ids.length === 0) {
-      return 0;
-    }
-    await c.stopRuns({ stop_id: crypto.randomUUID(), run_ids: ids, scope: "listed" });
-    return ids.length;
+    return c ? stopLiveRuns(c) : 0;
   }, []);
 
   // The home stopped answering: keep showing the last known bots and chats, greyed out.

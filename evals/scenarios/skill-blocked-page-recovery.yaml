@@ -1,0 +1,20 @@
+name: skill-blocked-page-recovery
+description: "Starter skill blocked-page-recovery: the bot loads it with skill_read for a matching request, no approval is needed to read a skill, and the text reaches the next model call."
+policy: approve_destructive
+tools:
+  - { name: skill_read, effect: read, category: fs, output: "# blocked-page-recovery
+When web_extract fails with 403 or 429." }
+user: "The article returns 403 forbidden, find a readable copy."
+script:
+  - tool_calls: [{ id: c1, tool: skill_read, args: { name: blocked-page-recovery } }]
+  - text: "I followed the blocked-page-recovery skill."
+expect:
+  state: succeeded
+  model_calls: 2
+  tool_calls: [skill_read]
+  tool_runs: { skill_read: 1 }
+  no_approval_tools: [skill_read]
+  permissions:
+    - { tool: skill_read, decision: allowed }
+  requests:
+    - { request: 1, tool_messages_contain: ["blocked-page-recovery", "When web_extract fails with 403 or 429"] }

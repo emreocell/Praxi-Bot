@@ -932,6 +932,7 @@
     },
     "color": "Farbe",
     "colorCustom": "Eigene Farbe",
+    "colorSwatch": "Farbe {{hex}}",
     "computer": "Computer",
     "editTitle": "Bot bearbeiten",
     "engine": {
@@ -999,7 +1000,7 @@
   "botLimits": {
     "card": {
       "body": {
-        "tokens": "Dieser Bot hat sein Token-Limit aufgebraucht. Der Lauf wurde gestoppt, bevor das Modell aufgerufen wurde, es wurde also nichts überschritten.",
+        "tokens": "Dieser Bot hat sein Nutzungslimit (die Textmenge, die das Modell lesen und schreiben darf) aufgebraucht. Der Lauf wurde gestoppt, bevor das Modell aufgerufen wurde, es wurde also nichts überschritten.",
         "usd": "Dieser Bot hat sein Ausgabenlimit aufgebraucht. Der Lauf wurde gestoppt, bevor das Modell aufgerufen wurde, es wurde also nichts überschritten."
       },
       "raise": "Limit erhöhen",
@@ -1014,15 +1015,15 @@
       "waiting": "Okay. Der Bot kann wieder arbeiten, sobald das Limit am {{when}} zurückgesetzt wird.",
       "waitingUnknown": "Okay. Der Bot kann wieder arbeiten, sobald das Limit zurückgesetzt wird."
     },
-    "defaultNote": "Dieser Bot hat noch keine gespeicherten Limits, deshalb gilt eine sichere Obergrenze von {{usd}} oder {{tokens}} Tokens pro Tag. Erhöhe sie hier, wenn der Bot mehr braucht.",
+    "defaultNote": "Dieser Bot hat noch keine gespeicherten Limits, deshalb gilt eine sichere Obergrenze von {{usd}} oder {{amount}} Textbausteine pro Tag. Erhöhe sie hier, wenn der Bot mehr braucht.",
     "field": {
-      "hard_tokens": "Stoppen bei (Tokens)",
+      "hard_tokens": "Stoppen bei (Nutzung)",
       "hard_usd": "Stoppen bei (USD)",
-      "soft_tokens": "Warnen bei (Tokens)",
+      "soft_tokens": "Warnen bei (Nutzung)",
       "soft_usd": "Warnen bei (USD)"
     },
-    "hint": "Eine Warnung benachrichtigt dich nur bei 80 % und 100 %. Ein Stopp beendet den Lauf, bevor das Modell aufgerufen wird. Bei Modellen mit unbekanntem Preis zählen nur Tokens. Zeitpläne und Kanalnachrichten folgen denselben Limits.",
-    "invalid": "Gib einen positiven Betrag ein (Geld ab 0,01, Tokens als ganze Zahl) oder lass das Feld leer.",
+    "hint": "Eine Warnung benachrichtigt dich nur bei 80 % und 100 %. Ein Stopp beendet den Lauf, bevor das Modell aufgerufen wird. Bei Modellen mit unbekanntem Preis zählt nur die Nutzung. Zeitpläne und Kanalnachrichten folgen denselben Limits.",
+    "invalid": "Gib einen positiven Betrag ein (Geld ab 0,01, Nutzung als ganze Zahl) oder lass das Feld leer.",
     "order": "Die Warnschwelle darf nicht über der Stoppschwelle liegen.",
     "period": {
       "daily": "Pro Tag",
@@ -1035,7 +1036,7 @@
     "saving": "Wird gespeichert…",
     "unlimited": "Kein Limit",
     "unreported": "{{count}} Aufrufe meldeten keine Nutzung und werden mit einer vorsichtigen Schätzung gezählt.",
-    "used": "{{usd}} und {{tokens}} Tokens verbraucht. Zurückgesetzt am {{when}}."
+    "used": "{{usd}} und {{amount}} Textbausteine verbraucht. Zurückgesetzt am {{when}}."
   },
   "botPanel": {
     "botsComputer": "Computer von {{bot}} · {{name}}",
@@ -2004,6 +2005,9 @@
     "deny": "Ablehnen",
     "description": "Gekoppelte Server können diesen Computer bitten, den Bildschirm anzusehen und darauf zu handeln, nur wenn du es erlaubst.",
     "details": "Genau",
+    "enableAction": "Bildschirm und Eingaben erlauben",
+    "enableHint": "Erlaube {{name}}, den Bildschirm dieses PCs zu sehen und zu bedienen. Eingaben brauchen weiterhin deine Zustimmung.",
+    "enableTitle": "Computerzugriff einschalten",
     "explain": "Standardmäßig aus. Wenn an, können die Bots des Servers den Bildschirm dieses Computers ansehen. Alles, was klickt, tippt oder etwas öffnet, fragt dich weiterhin zuerst, und Stopp hat immer Vorrang.",
     "family": {
       "browser": "Die Bots auf {{name}} dürfen den Browser dieses Computers verwenden",
@@ -2090,12 +2094,7 @@
     },
     "localHint": "Läuft hier, auf diesem PC",
     "makeHome": "Diesen Server zum Zuhause meiner Bots machen …",
-    "menu": "Computer",
-    "stopFailed": "Der Host konnte nicht erreicht werden, um seine Läufe zu stoppen.",
-    "stopHost": "Alle Läufe auf dem Host stoppen",
-    "stopHostHint": "Stoppt, was dort gerade läuft",
-    "stopNone": "Auf dem Host läuft nichts.",
-    "stopped": "Läufe auf dem Host gestoppt: {{count}}."
+    "menu": "Computer"
   },
   "control": {
     "starting": "Arbeitet …"
@@ -2174,6 +2173,22 @@
     "runningLabel": "Bot-Lauf aktiv",
     "sectionTitle": "Entwickler",
     "simulateBotRun": "Bot-Lauf simulieren"
+  },
+  "digest": {
+    "cost": "{{calls}} Modellaufrufe, {{cost}}.",
+    "done": "Erledigt: {{count}}",
+    "empty": "Deine Bots haben heute noch nichts getan.",
+    "failed": "Fehlgeschlagen: {{count}}",
+    "noCalls": "Noch keine Modellaufrufe.",
+    "notifyPrivate": "Deine Tageszusammenfassung ist fertig. Öffne die App, um sie zu lesen.",
+    "notifyTitle": "Deine Bots heute",
+    "ofLimit": "Das sind {{percent}} des Tageslimits.",
+    "running": "Laufen: {{count}}",
+    "stopped": "Gestoppt: {{count}}",
+    "subtitle": "Was deine Bots seit Mitternacht getan haben und was es gekostet hat.",
+    "title": "Heute",
+    "totalCost": "Kosten: {{cost}}",
+    "waiting": "Warten auf dich: {{count}}"
   },
   "engineConsent": {
     "allow": "{{cli}} erlauben",
@@ -2986,6 +3001,8 @@
   "help": {
     "center": {
       "allDocs": "Ganze Anleitung öffnen",
+      "guideNote": "Die Handbuchseiten sind vorerst auf Englisch.",
+      "guideTitle": "Im vollständigen Handbuch",
       "intro": "Kurze Antworten auf die Fragen, die am häufigsten zuerst kommen. Tippe ein Wort, um zu suchen.",
       "noMatch": "Keine Antwort gefunden. Versuche ein einfaches Wort oder öffne unten die ganze Anleitung.",
       "readMore": "Mehr in der Anleitung lesen",
@@ -3039,19 +3056,19 @@
       "title": "{{name}} ist jetzt das Zuhause deiner Bots"
     },
     "banner": {
-      "back": "Zurück zu {{name}}",
+      "back": "Zu {{name}} wechseln",
       "offline": "Der Computer deiner Bots ist offline. Verbindung wird wiederhergestellt … Die Liste ist die zuletzt gesehene.",
-      "temporary": "Du arbeitest vorerst auf diesem Computer. Deine Bots leben auf {{name}}.",
-      "workHere": "Vorerst auf diesem Computer arbeiten"
+      "temporary": "Deine Bots laufen auf diesem Computer. {{name}} bleibt eingerichtet, du kannst jederzeit dorthin wechseln.",
+      "workHere": "Diesen Computer verwenden"
     },
     "chip": {
       "connecting": "{{name}} · verbindet",
       "degraded": "{{name}} · eingeschränkt",
       "local": "Dieser Computer",
       "offline": "{{name}} · offline",
-      "online": "{{name}} · online",
+      "online": "{{name}}",
       "starting": "{{name}} · startet",
-      "temporary": "Dieser Computer · vorerst"
+      "temporary": "Dieser Computer"
     },
     "copy": "Kopieren",
     "engines": {
@@ -3076,19 +3093,12 @@
     "hint": "auf {{name}}",
     "menu": {
       "add": "Server hinzufügen",
-      "backHome": "Zurück zu {{name}}",
-      "backHomeHint": "Du arbeitest vorerst auf diesem Computer.",
       "makeHome": "{{name}} zum Zuhause meiner Bots machen",
       "pcOff": "Aus · deine Bots können diesen Computer nicht nutzen",
       "pcOn": "An · jede Aktion fragt dich hier",
-      "stop": "Alles auf {{name}} stoppen",
-      "stopHint": "Stoppt jeden Lauf, der dort gerade läuft.",
       "sync": "Meine Einrichtung mit {{name}} synchronisieren",
       "terminal": "Terminal auf dem Server",
-      "title": "Der Computer deiner Bots",
-      "viewScreen": "Seinen Bildschirm ansehen",
-      "workHere": "Vorerst auf diesem Computer arbeiten",
-      "workHereHint": "Zeigt die eigenen Bots dieses Computers, bis du zurückgehst."
+      "viewScreen": "Seinen Bildschirm ansehen"
     },
     "saved": "Gespeichert.",
     "target": {
@@ -3100,13 +3110,6 @@
   },
   "homeMenu": {
     "lastSync": "Letzte Synchronisierung: {{when}}",
-    "lives": {
-      "connecting": "Deine Bots leben hier · verbindet",
-      "local": "Deine Bots leben hier",
-      "offline": "Deine Bots leben hier · offline",
-      "online": "Deine Bots leben hier · online",
-      "temporary": "Vorerst arbeiten deine Bots auf diesem Computer"
-    },
     "pcOff": "Deine Bots können diesen Computer nicht nutzen",
     "pcOn": "Jede Aktion fragt dich hier",
     "sync": "Einrichtung synchronisieren",
@@ -3428,6 +3431,34 @@
     "viewOnly": "Nur ansehen",
     "watchAction": "Kontrolle übernehmen"
   },
+  "localInstall": {
+    "cancel": "Download stoppen",
+    "disclosure": "Das Programm stammt von github.com/ggml-org/llama.cpp, das Modell von huggingface.co. Praxi prüft jede Datei anhand einer festen Prüfsumme und lehnt eine abweichende Datei ab. Sie können jederzeit anhalten; ein angehaltener Download wird später fortgesetzt.",
+    "download": "Downloadgröße: {{size}} (plus {{runtime}} für das Programm, das es ausführt).",
+    "errorChecksum": "Die heruntergeladene Datei stimmte nicht mit der erwarteten überein und wurde gelöscht. Versuchen Sie es später erneut.",
+    "errorDisk": "Es ist nicht genug freier Speicherplatz vorhanden. Schaffen Sie Platz und versuchen Sie es erneut.",
+    "errorNetwork": "Der Download wurde unterbrochen. Prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.",
+    "errorOther": "Bei der Installation ist etwas schiefgelaufen. Versuchen Sie es erneut.",
+    "errorPortBusy": "Ein anderes Programm belegt bereits Port 8080. Beenden Sie es und versuchen Sie es erneut.",
+    "errorStartFailed": "Das Modell konnte nicht gestartet werden. Versuchen Sie ein kleineres Modell.",
+    "errorUnsupported": "Lokale Modelle mit einem Klick sind für diesen Computer noch nicht verfügbar.",
+    "fitFast": "läuft gut",
+    "fitSlow": "läuft, aber langsam",
+    "install": "Installieren und starten",
+    "intro": "Laden Sie ein kleines KI-Modell herunter und führen Sie es auf diesem Computer aus. Solange Sie es nutzen, verlässt nichts von dem, was Sie schreiben, diesen Computer.",
+    "licence": "Lizenz: {{licence}}",
+    "noDisk": "nicht genug Speicherplatz",
+    "phaseCancelled": "Angehalten. Sie können neu starten; der Download wird dort fortgesetzt, wo er stand.",
+    "phaseDownloadingModel": "Modell wird heruntergeladen… {{percent}} %",
+    "phaseDownloadingRuntime": "Programm wird heruntergeladen… {{percent}} %",
+    "phaseReady": "Läuft auf diesem Computer. Wählen Sie „llama.cpp“ als Anbieter; Praxi findet es automatisch.",
+    "phaseStarting": "Modell wird gestartet (das kann eine Minute dauern)…",
+    "phaseUnpacking": "Programm wird entpackt…",
+    "recommended": "Empfohlen",
+    "stop": "Lokales Modell beenden",
+    "title": "Lokales Modell mit einem Klick",
+    "tooLarge": "zu groß für diesen Computer"
+  },
   "localModels": {
     "bestEffort": "Das sind Schätzungen, keine Garantien. Praxi führt die Befehle nie für dich aus, und diese Hardware-Informationen bleiben auf diesem Computer.",
     "cardDescription": "Was auf diesen Computer passt, für Ollama oder LM Studio. Nach bestem Wissen geschätzt.",
@@ -3668,12 +3699,14 @@
     "detail": {
       "failed": "Fehlgeschlagen: {{detail}}",
       "longRun": "{{detail}}",
-      "needsYou": "{{detail}}"
+      "needsYou": "{{detail}}",
+      "scheduleDone": "{{detail}}"
     },
     "generic": {
       "failed": "Ein Lauf ist fehlgeschlagen.",
       "longRun": "Eine lange Aufgabe abgeschlossen.",
-      "needsYou": "Braucht deine Aufmerksamkeit."
+      "needsYou": "Braucht deine Aufmerksamkeit.",
+      "scheduleDone": "Ein geplanter Auftrag ist fertig."
     }
   },
   "notifyHistory": {
@@ -3684,9 +3717,11 @@
     "held": "Zurückgehalten (Ruhezeit)",
     "heldMuted": "Zurückgehalten (Bot stummgeschaltet)",
     "kind": {
+      "digest": "Tageszusammenfassung",
       "failed": "Lauf fehlgeschlagen",
       "longRun": "Langer Lauf beendet",
-      "needsYou": "Braucht dich"
+      "needsYou": "Braucht dich",
+      "scheduleDone": "Geplanter Auftrag fertig"
     },
     "markAllRead": "Alle als gelesen markieren",
     "openNeeds": "„Braucht dich“ öffnen",
@@ -3732,7 +3767,9 @@
       "bot": "Bot",
       "chat": "Chat",
       "navigate": "Navigieren",
-      "schedule": "Zeitplan"
+      "recentChat": "Letzter Chat",
+      "schedule": "Zeitplan",
+      "settings": "Einstellungen"
     },
     "help": "Hilfe und Antworten",
     "helpKeywords": "hilfe fragen faq wie was ist anleitung",
@@ -3741,6 +3778,7 @@
     "placeholder": "Befehl eingeben …",
     "runSchedule": "Jetzt ausführen: {{name}}",
     "scheduleStarted": "Zeitplan gestartet",
+    "settingsPage": "Einstellungen: {{name}}",
     "shortcuts": "Tastaturkürzel",
     "switchBot": "Zu {{name}} wechseln",
     "title": "Befehlspalette"
@@ -3873,6 +3911,77 @@
     "resets": "Wird zurückgesetzt {{when}}",
     "title": "Verbleibendes Kontingent"
   },
+  "runLocation": {
+    "addHint": "Optional. Deine Bots laufen weiter, auch wenn dieser Computer aus ist.",
+    "on": "Auf {{name}}",
+    "serverHint": "Immer an, auch wenn dieser Computer aus ist",
+    "serverState": {
+      "connecting": "verbindet",
+      "degraded": "eingeschränkt",
+      "offline": "offline",
+      "online": "online",
+      "starting": "startet"
+    },
+    "status": {
+      "connecting": "Verbindung zu {{name}} wird aufgebaut…",
+      "degraded": "Deine Bots laufen auf {{name}} · eingeschränkt",
+      "local": "Deine Bots laufen auf diesem Computer",
+      "offline": "{{name}} ist offline",
+      "online": "Deine Bots laufen auf {{name}} · online",
+      "starting": "Deine Bots laufen auf {{name}} · startet",
+      "temporary": "Deine Bots laufen auf diesem Computer"
+    },
+    "stopAll": "Alles beenden, was auf {{name}} läuft",
+    "stopBody": "Die gerade auf {{name}} laufenden {{count}} Durchläufe werden beendet. Bereits erledigte Arbeit bleibt erhalten.",
+    "stopBody_one": "Der gerade auf {{name}} laufende Durchlauf ({{count}}) wird beendet. Bereits erledigte Arbeit bleibt erhalten.",
+    "stopConfirm": "{{count}} Durchläufe beenden",
+    "stopConfirm_one": "{{count}} Durchlauf beenden",
+    "stopFailed": "{{name}} ist nicht erreichbar, die Durchläufe konnten nicht beendet werden.",
+    "stopHint": "Gerade laufen {{count}} Durchläufe",
+    "stopHint_one": "Gerade läuft {{count}} Durchlauf",
+    "stopIdle": "Gerade läuft nichts",
+    "stopNone": "Auf {{name}} lief nichts.",
+    "stopTitle": "Alles auf {{name}} beenden?",
+    "stopped": "{{count}} Durchläufe auf {{name}} beendet.",
+    "stopped_one": "{{count}} Durchlauf auf {{name}} beendet.",
+    "switchBody": "Auf {{from}} laufen noch {{count}} Durchläufe. Nichts wird beendet: Sie laufen dort weiter, und du kannst jederzeit zurückwechseln.",
+    "switchBody_one": "Auf {{from}} läuft noch {{count}} Durchlauf. Nichts wird beendet: Er läuft dort weiter, und du kannst jederzeit zurückwechseln.",
+    "switchConfirm": "Zu {{to}} wechseln",
+    "switchTitle": "Zu {{to}} wechseln?",
+    "thisComputer": "Dieser Computer",
+    "thisComputerHint": "Deine Bots laufen hier. Kein Server nötig.",
+    "title": "Wo laufen meine Bots?"
+  },
+  "runReport": {
+    "answered": "Du hast geantwortet",
+    "approved": "Du hast es erlaubt",
+    "asked": "Hat dir eine Frage gestellt",
+    "askedCredential": "Hat nach einem Passwort oder Schlüssel gefragt",
+    "button": "Zeitverlauf",
+    "credentialCancelled": "Du hast abgebrochen",
+    "credentialSaved": "Du hast es gespeichert",
+    "declined": "Nicht erlaubt",
+    "exportHtml": "Als Webseite speichern",
+    "exportMarkdown": "Als Text speichern",
+    "exported": "Bericht gespeichert",
+    "footer": "Mit Praxi erstellt. Private Details sind nicht enthalten.",
+    "hint": "Sieh Schritt für Schritt, was der Bot in diesem Lauf getan hat",
+    "noSteps": "Der Bot hat in diesem Lauf keine Werkzeuge benutzt.",
+    "outcome": "Ergebnis",
+    "outcomes": {
+      "done": "Fertig",
+      "failed": "Fehlgeschlagen",
+      "stopped": "Von dir gestoppt",
+      "unfinished": "Nicht abgeschlossen"
+    },
+    "privacy": "Private Details bleiben draußen: Was eingegeben, gelesen oder beantwortet wurde, wird nicht gezeigt, und alles, was wie ein Passwort oder Schlüssel aussieht, wird verborgen.",
+    "started": "Gestartet",
+    "title": "Was der Bot getan hat",
+    "took": "Dauer",
+    "tookTime": "Dauerte {{time}}",
+    "unanswered": "Keine Antwort",
+    "waitingForYou": "Wartet auf dich"
+  },
   "runStatus": {
     "showCard": "Anzeigen",
     "stopping": "Wird gestoppt …",
@@ -3933,14 +4042,28 @@
     "filterAll": "Alle",
     "filterIssues": "Fehlgeschlagen & verpasst",
     "form": {
+      "advanced": "Erweitert",
+      "advancedHint": "Für Leute, die cron kennen. Die meisten können das überspringen.",
       "botFixed": "Der Bot eines Zeitplans kann nicht geändert werden.",
-      "cannotParse": "Diese Formulierung wurde nicht verstanden. Versuche „every day at 9“ oder verwende Cron.",
+      "cannotParse": "Das habe ich nicht verstanden. Versuche „every day at 9“, „weekdays at 8:30“ oder „her gün 09:00“ oder nutze den Reiter Einfach.",
       "cannotPreview": "Vorschau für diesen Zeitplan nicht möglich. Prüfe Syntax und Zeitzone.",
+      "confirmParsed": "Prüfe, ob das gemeint war, und drücke dann Erstellen.",
       "create": "Erstellen",
       "cron": "Cron-Ausdruck",
       "cronHint": "Fünf Felder, optional gefolgt von einer Zeitzone.",
+      "customHint": "Beschreibe es mit eigenen Worten, zum Beispiel „jeden Montag um 8“.",
+      "date": "An welchem Tag?",
       "editTitle": "Geplante Aufgabe bearbeiten",
       "firstRun": "erster Lauf {{when}}",
+      "freq": {
+        "custom": "Anderes",
+        "daily": "Jeden Tag",
+        "label": "Wie oft?",
+        "monthly": "Jeden Monat",
+        "once": "Einmal",
+        "weekdays": "Werktags",
+        "weekly": "Jede Woche"
+      },
       "invalid": {
         "bot": "Wähle einen Bot.",
         "cron": "Gib einen Cron-Ausdruck ein.",
@@ -3952,28 +4075,52 @@
       "kind": {
         "cron": "Cron",
         "keep": "Aktuellen behalten",
-        "natural": "In Worten"
+        "natural": "In Worten",
+        "simple": "Einfach"
       },
-      "misfire": "Wenn die App zur geplanten Zeit aus war",
+      "misfire": "Wenn der Computer zur geplanten Zeit aus war",
+      "misfireHint": "Legt fest, was passiert, wenn der Computer zur geplanten Zeit aus war oder schlief.",
       "misfirePolicy": {
-        "run_all": "Jede verpasste Zeit ausführen",
-        "run_once": "Einmal bei Rückkehr ausführen",
-        "skip": "Überspringen"
+        "run_all": "Nachholen: jeden verpassten Termin ausführen (bis zu 10)",
+        "run_once": "Einmal ausführen, sobald der Computer wieder da ist",
+        "skip": "Überspringen und auf den nächsten Termin warten"
       },
+      "monthDay": "An welchem Tag im Monat?",
+      "monthDayHint": "Tag 1 bis 28, damit es in jedem Monat klappt.",
       "name": "Name",
       "newTitle": "Neue geplante Aufgabe",
       "nextRunsTitle": "Nächste 5 Läufe ({{tz}})",
       "noFirstRun": "kein bevorstehender Lauf",
+      "notify": {
+        "always": "Jedes Mal",
+        "hint": "Wird auf diesem Computer gespeichert. Braucht der Bot dein OK, erfährst du es immer.",
+        "label": "Mich benachrichtigen",
+        "never": "Nie",
+        "problems": "Nur bei Problemen"
+      },
+      "parsedAs": "Verstanden als: {{what}}",
       "payloadKept": "Dieser Zeitplan führt einen Workflow oder ein Werkzeug aus; dieser Teil bleibt unverändert.",
       "preview": "Vorschau",
       "prompt": "Prompt",
       "promptHint": "Was der Bot jedes Mal tun soll.",
       "save": "Speichern",
+      "simpleProblem": {
+        "date": "Wähle den Tag, an dem es laufen soll.",
+        "past": "Diese Zeit ist schon vorbei. Wähle eine spätere.",
+        "time": "Wähle eine Uhrzeit wie 09:00."
+      },
+      "templates": {
+        "hint": "Wähle eines, um das Formular auszufüllen. Danach kannst du alles ändern.",
+        "title": "Mit einem Beispiel beginnen"
+      },
       "text": "Zeitplan in Worten",
       "textHint": "Englisch oder Türkisch. Zeiten verwenden {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
+      "time": "Um wie viel Uhr?",
       "tz": "Zeitzone",
       "tzCronHint": "Wird verwendet, wenn der Cron-Ausdruck 5 Felder ohne Zeitzone hat.",
+      "tzShown": "Die Zeiten gelten in {{tz}}.",
+      "weekday": "An welchem Wochentag?",
       "when": "Wann"
     },
     "history": "Ausführungsverlauf",
@@ -4182,6 +4329,12 @@
       },
       "noFile": "Kein Hintergrundbild ausgewählt",
       "title": "Hintergrundbild"
+    },
+    "digest": {
+      "enabled": "Tägliche Zusammenfassung senden",
+      "enabledHint": "Eine kurze Benachrichtigung pro Tag: was deine Bots getan haben und was es gekostet hat. Ruhezeiten gelten: währenddessen landet sie nur im Benachrichtigungsverlauf.",
+      "time": "Senden um",
+      "title": "Tageszusammenfassung"
     },
     "hotkey": {
       "currentLabel": "Aktives Kürzel",
@@ -5025,7 +5178,7 @@
     "total": "Gesamt",
     "trend": {
       "ariaLabel": "Täglicher {{metric}}-Verlauf über {{days}} Tage",
-      "dayReadout": "{{day}} · {{calls}} Aufrufe · {{tokens}} Tokens · {{cost}}",
+      "dayReadout": "{{day}} · {{calls}} Aufrufe · {{amount}} Tokens · {{cost}}",
       "hoverHint": "Fahre über einen Tag oder fokussiere ihn, um die Summen zu sehen.",
       "metric": "Diagramm-Kennzahl",
       "metrics": {

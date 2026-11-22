@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { BotAvatar, Button, Card } from "ui";
 import type { UsageSummary } from "../api/types";
 import formStyles from "../components/Form.module.css";
+import { DailyDigestCard } from "../components/DailyDigestCard";
 import { QuotaBlock } from "../components/QuotaRings";
 import { SpendLimitCard } from "../components/SpendLimitCard";
 import { useToast } from "../components/Toast";
@@ -115,6 +116,8 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
             <p className={styles.subtitle}>{t("usage.subtitle")}</p>
           </header>
         )}
+
+        <DailyDigestCard refreshKey={finished} />
 
         <QuotaBlock />
 

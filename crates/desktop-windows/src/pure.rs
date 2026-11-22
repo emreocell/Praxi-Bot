@@ -1216,3 +1216,35 @@ mod key_properties {
         }
     }
 }
+/// Packaged application IDs have a package family and an application name.
+/// Keep shell paths, protocols and inline arguments out of this route.
+#[must_use]
+pub fn valid_packaged_app_id(id: &str) -> bool {
+    let valid = |part: &str| {
+        !part.is_empty()
+            && part
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+    };
+    id.len() <= 128
+        && id.split_once('!').is_some_and(|(package, app)| {
+            package
+                .rsplit_once('_')
+                .is_some_and(|(name, publisher)| valid(name) && valid(publisher))
+                && valid(app)
+        })
+}
+
+#[cfg(test)]
+#[test]
+fn packaged_app_id_is_not_a_shell_path_or_command() {
+    assert!(valid_packaged_app_id(
+        "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"
+    ));
+    assert!(!valid_packaged_app_id(
+        "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App /arg"
+    ));
+    assert!(!valid_packaged_app_id(
+        "shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"
+    ));
+}

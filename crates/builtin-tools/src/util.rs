@@ -37,9 +37,8 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // `browser_click`'s `prompt_text` can too; the gate treats a click
         // that includes `prompt_text` as egress.
         "browser_snapshot" | "browser_screenshot" | "browser_wait" | "desktop_get_state"
-        | "desktop_list_apps" | "desktop_click" | "desktop_scroll" | "browser_scroll" => {
-            ContentClass::untrusted_private()
-        }
+        | "desktop_list_apps" | "desktop_wait" | "desktop_focus" | "desktop_click"
+        | "desktop_scroll" | "browser_scroll" => ContentClass::untrusted_private(),
         // The user's own files and the list of their own windows: private, and not untrusted
         // by themselves (nothing in them was written by an outsider). A file that ARRIVED from
         // outside (Downloads, attachments, mail) is marked untrusted per call by the loop

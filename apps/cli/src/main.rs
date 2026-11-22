@@ -23,6 +23,7 @@ mod host_links;
 mod host_provision;
 mod host_runtime;
 mod host_setup;
+mod import_cmd;
 mod mcp_host;
 mod mcp_paste;
 mod mcp_serve;
@@ -252,6 +253,12 @@ enum Command {
     Profile {
         #[command(subcommand)]
         action: profile_cmd::ProfileCmd,
+    },
+    #[allow(clippy::doc_markdown)] // help text; product names stay plain
+    /// Bring MCP servers and skills from Claude, OpenClaw or Hermes (preview first).
+    Import {
+        #[command(subcommand)]
+        action: import_cmd::ImportCmd,
     },
     /// Answer a pending question from a bot.
     Answer {
@@ -487,6 +494,10 @@ struct DoctorCmd {
     /// Write a redacted diagnostic bundle (JSON, no secrets) to this file.
     #[arg(long, value_name = "FILE")]
     report: Option<PathBuf>,
+    /// Compare this computer's clock with the `Date` header of this HTTPS URL
+    /// (off by default; sends one HEAD request only when given).
+    #[arg(long, value_name = "HTTPS_URL")]
+    time_url: Option<String>,
 }
 
 #[derive(Args)]
@@ -771,6 +782,9 @@ fn run() -> Result<()> {
         Command::Skills { action } => {
             return skills_cmd::run(&data_dir, action, &mut std::io::stdout());
         }
+        Command::Import {
+            action: import_cmd::ImportCmd::Detect,
+        } => return import_cmd::detect(&data_dir, cli.json, &mut std::io::stdout()),
         Command::Mcp {
             action: McpCmd::Serve(args),
         } => return mcp_serve::run(&cli, args, &data_dir),
@@ -801,6 +815,7 @@ fn run() -> Result<()> {
         | Command::Chats { .. }
         | Command::Bots { .. }
         | Command::Profile { .. }
+        | Command::Import { .. }
         | Command::Approve { .. }
         | Command::Answer { .. }
         | Command::Schedules { .. }
@@ -908,6 +923,7 @@ fn run() -> Result<()> {
         | Command::Chats { .. }
         | Command::Bots { .. }
         | Command::Profile { .. }
+        | Command::Import { .. }
         | Command::Approve { .. }
         | Command::Answer { .. }
         | Command::Schedules { .. }
@@ -995,6 +1011,7 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
         }),
         detected: detect_cli_accounts(),
         desktop: serve::local_desktop(&mut |_| {}).map(|d| d.capabilities()),
+        time_url: c.time_url.as_deref(),
     };
     let checks = doctor::run_checks(&env);
     if cli.json {
@@ -1269,6 +1286,9 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
                 action: BotsCmd::Add { file },
             } => remote::bots_add(&c, file, json, &mut out).await,
             Command::Profile { action } => profile_cmd::run(&c, action, json, &mut out).await,
+            Command::Import {
+                action: import_cmd::ImportCmd::Run { from, yes },
+            } => import_cmd::run(&c, data_dir, from.as_deref(), *yes, json, &mut out).await,
             Command::Chat {
                 bot_id,
                 message,
@@ -1516,6 +1536,9 @@ fn run_setup(c: &SetupCmd, env: &SetupEnv<'_>) -> Result<()> {
             "No default model was selected, so no bot was created. Set one with `bot providers default {} --model <MODEL>`, then create a bot with `bot bots add <FILE>`.",
             out.provider_id
         ),
+    }
+    if let Some(hint) = import_cmd::setup_hint(env.data_dir) {
+        println!("{hint}");
     }
     Ok(())
 }
@@ -2118,6 +2141,7 @@ mod tests {
             browser_error: None,
             detected: None,
             desktop: None,
+            time_url: None,
         });
         let prov = checks.iter().find(|c| c.title == "providers").unwrap();
         assert!(prov.detail.contains("no LLM provider"), "{}", prov.detail);

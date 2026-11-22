@@ -192,3 +192,18 @@ test("a pressed button is re-checked against the pending approval and uses the c
   assert.deepEqual(resolveNotificationAction("allow", undefined), { kind: "open" });
   assert.deepEqual(resolveNotificationAction("format-disk", appr()), { kind: "open" });
 });
+
+test("a scheduled job follows the notification choice; an approval always notifies", () => {
+  const finished = (error: string | null): DaemonEvent =>
+    ({ type: "run_finished", run_id: "r1", error }) as DaemonEvent;
+  const pick = (e: DaemonEvent, c: "always" | "problems" | "never") =>
+    decideNotification(env(e, 11_000), ctx({ scheduleNotify: c }));
+  // always: a quiet success is announced too
+  assert.equal(pick(finished(null), "always")?.kind, "scheduleDone");
+  // only problems: success is silent, a failure still notifies
+  assert.equal(pick(finished(null), "problems"), null);
+  assert.equal(pick(finished("boom"), "problems")?.kind, "failed");
+  // never: nothing at the end of the run, but a pending approval is never hidden
+  assert.equal(pick(finished("boom"), "never"), null);
+  assert.equal(pick(approval, "never")?.kind, "needsYou");
+});

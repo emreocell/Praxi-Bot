@@ -537,6 +537,39 @@ async fn bots_crud() {
 }
 
 #[tokio::test]
+async fn deleting_a_bot_also_deletes_its_scheduled_jobs() {
+    let t = setup();
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({"profile_toml": PROFILE, "name": "Sched"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    let bot = r.json()["id"].as_str().unwrap().to_owned();
+    let body = json!({"bot_id":bot,"name":"daily","spec":{"every":{"seconds":3600}},"payload":{"kind":"agent_prompt","text":"hi"}});
+    let made = call(&t, Method::POST, "/v1/schedules", Some(body)).await;
+    assert_eq!(made.status, StatusCode::CREATED, "{:?}", made.json());
+    let id = made.json()["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        call(&t, Method::DELETE, &format!("/v1/bots/{bot}"), None)
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    // The API hides the job of a missing bot either way, so look at the store:
+    // an orphan there would still be due and could only fail on every run.
+    let left = t
+        .state
+        .schedule_store()
+        .unwrap()
+        .list_by_bot(protocol::BotId(bot.parse().unwrap()))
+        .unwrap();
+    assert!(left.is_empty(), "{id} still scheduled for a deleted bot");
+}
+
+#[tokio::test]
 async fn bot_with_chats_cannot_be_deleted() {
     let t = setup();
     let (bot, _) = make_chat(&t).await;

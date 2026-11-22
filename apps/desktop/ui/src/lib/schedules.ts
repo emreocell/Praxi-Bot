@@ -4,6 +4,10 @@ import type {
   ScheduleInput
 } from "../api/types";
 import type { RunState } from "../state/timeline.ts";
+import {
+  DEFAULT_SIMPLE,
+  type SimpleSchedule
+} from "./scheduleBuilder.ts";
 
 /** `ScheduleDto::spec`: when a schedule fires. */
 export type ScheduleSpec =
@@ -171,16 +175,17 @@ export function affectsSchedules(event: {
   );
 }
 
-export type ScheduleKind = "natural" | "cron" | "keep";
+export type ScheduleKind = "simple" | "natural" | "cron" | "keep";
 
 export interface ScheduleDraft {
   name: string;
   botId: string;
   /**
-   * `natural` = phrase parsed by the daemon, `cron` = raw expression,
-   * `keep` = edit without changing the stored `spec`.
+   * `simple` = the chips and time picker, `natural` = phrase parsed by the daemon,
+   * `cron` = raw expression (Advanced), `keep` = edit without changing the stored `spec`.
    */
   kind: ScheduleKind;
+  simple: SimpleSchedule;
   text: string;
   cron: string;
   tz?: string;
@@ -193,7 +198,8 @@ export function emptyDraft(botId: string): ScheduleDraft {
   return {
     name: "",
     botId,
-    kind: "natural",
+    kind: "simple",
+    simple: { ...DEFAULT_SIMPLE },
     text: "",
     cron: "",
     prompt: "",
@@ -211,6 +217,7 @@ export function draftFromSchedule(s: Schedule): ScheduleDraft {
     name: s.name,
     botId: s.bot_id,
     kind: spec && "cron" in spec ? "cron" : "keep",
+    simple: { ...DEFAULT_SIMPLE },
     text: "",
     cron: spec && "cron" in spec ? spec.cron : "",
     prompt: payload.kind === "agent_prompt" ? payload.text : "",
@@ -262,9 +269,10 @@ export function buildInput(
 ): ScheduleInput {
   let resolved: unknown;
   switch (d.kind) {
+    case "simple":
     case "natural":
       if (spec === null || spec === undefined) {
-        throw new Error("natural-language schedule was not parsed");
+        throw new Error("schedule was not resolved");
       }
       resolved = spec;
       break;

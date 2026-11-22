@@ -342,6 +342,14 @@ impl PcDesktop {
 
 #[async_trait]
 impl DesktopBackend for PcDesktop {
+    async fn focus(
+        &self,
+        window_id: u64,
+        guard: Option<desktop_api::ActGuard>,
+    ) -> Result<(), DesktopError> {
+        self.backend()?.focus(window_id, guard).await
+    }
+
     async fn snapshot(&self, scope: Option<u64>) -> Result<Snapshot, DesktopError> {
         self.backend()?.snapshot(scope).await
     }

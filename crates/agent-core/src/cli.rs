@@ -204,11 +204,18 @@ fn sanitize_tool_label(label: &str) -> String {
 struct RecordingHost {
     inner: Host,
     text: parking_lot::Mutex<String>,
+    /// Bytes of CLI text so far, read by the limit watcher while the turn runs.
+    progress: Option<Arc<std::sync::atomic::AtomicUsize>>,
 }
 #[async_trait]
 impl TurnHost for RecordingHost {
     fn text(&self, text: &str) {
-        self.text.lock().push_str(text);
+        let mut all = self.text.lock();
+        all.push_str(text);
+        if let Some(p) = &self.progress {
+            p.store(all.len(), std::sync::atomic::Ordering::Relaxed);
+        }
+        drop(all);
         self.inner.text(text);
     }
     async fn call(&self, name: &str, input: Value) -> ToolReply {
@@ -256,13 +263,26 @@ impl TurnExecutor {
         })
     }
 
-    #[allow(clippy::too_many_lines)] // Governed and native branches share the request assembly.
+    #[cfg(test)]
     pub(crate) async fn exec_cli(
         &self,
         run: &Run,
         req: &ChatRequest,
         specs: &[ToolSpec],
         cancel: &CancellationToken,
+    ) -> Result<ModelOut, ExecError> {
+        self.exec_cli_watched(run, req, specs, cancel, None).await
+    }
+
+    /// [`Self::exec_cli`] that publishes the CLI's text length in `progress`.
+    #[allow(clippy::too_many_lines)] // Governed and native branches share the request assembly.
+    pub(crate) async fn exec_cli_watched(
+        &self,
+        run: &Run,
+        req: &ChatRequest,
+        specs: &[ToolSpec],
+        cancel: &CancellationToken,
+        progress: Option<Arc<std::sync::atomic::AtomicUsize>>,
     ) -> Result<ModelOut, ExecError> {
         // Safe mode: a coding CLI runs its own shell and files, outside our gate.
         if self.sh.cfg.safe_mode {
@@ -304,6 +324,7 @@ impl TurnExecutor {
                 executed: parking_lot::Mutex::new(Vec::new()),
             },
             text: parking_lot::Mutex::new(String::new()),
+            progress,
         });
         let mut system = String::new();
         let mut prompt = String::new();

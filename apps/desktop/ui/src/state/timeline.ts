@@ -102,6 +102,9 @@ export type TimelineItem =
 /** What the daemon reports (error event and `run_finished.error`) for a run the user stopped. */
 export const RUN_CANCELLED = "cancelled";
 
+/** Shown for a run the daemon stopped listing without a finish event: we cannot know how it ended. */
+export const RUN_INTERRUPTED = "Interrupted: the daemon no longer lists this run, so how it ended is unknown.";
+
 export interface RunState {
   id: string;
   chatId: string;
@@ -761,7 +764,14 @@ export function reconcile(
       }
       return i;
     });
-    if (runChanged) {
+    // The daemon is the source of truth for "is it running": an unfinished run it does not list as
+    // live lost its end event (stopped elsewhere, daemon restart, dropped stream). Close it, or the
+    // panel keeps showing its step as running forever while Stop finds nothing to stop.
+    const orphan = run.finishedMs === undefined && run.startedMs < asOfMs && !liveRunIds.has(id);
+    if (orphan) {
+      changed = true;
+      runs[id] = { ...run, items: closeOpenItems(items), finishedMs: asOfMs, error: RUN_INTERRUPTED, stopped: false };
+    } else if (runChanged) {
       changed = true;
       runs[id] = { ...run, items };
     } else {

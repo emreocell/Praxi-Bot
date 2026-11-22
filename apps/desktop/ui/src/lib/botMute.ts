@@ -33,7 +33,7 @@ export function setBotMuted(muted: string[], botId: string, on: boolean): string
 
 /** The kinds a mute silences: never "needsYou". */
 export function isMuteable(kind: NotifyKind): boolean {
-  return kind === "longRun" || kind === "failed";
+  return kind === "longRun" || kind === "failed" || kind === "scheduleDone";
 }
 
 export type HoldReason = "quiet" | "muted";

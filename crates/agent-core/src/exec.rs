@@ -740,10 +740,18 @@ impl TurnExecutor {
             crate::CallPurpose::Executor
         };
         if primary.starts_with("cli:") {
-            let mut call =
-                crate::usage::CallGuard::start(&self.sh, &ctx, &primary, purpose).map_err(xe)?;
+            let mut call = crate::usage::CallGuard::start_with_prompt(
+                &self.sh,
+                &ctx,
+                &primary,
+                purpose,
+                prompt_hint(&req),
+            )
+            .map_err(xe)?;
             call.tier(tier_active.then_some(crate::tiering::STANDARD));
-            let mut out = self.exec_cli(run, &req, &specs, cancel).await?;
+            let mut out = self
+                .exec_cli_limited(&mut call, run, &req, &specs, cancel)
+                .await?;
             out.metadata = metadata;
             if let Some(usage) = &out.usage {
                 call.usage(usage);
@@ -1046,7 +1054,7 @@ impl TurnExecutor {
         }
     }
 
-    async fn stream_once(
+    pub(crate) async fn stream_once(
         &self,
         ctx: &RunCtx,
         run: &Run,
@@ -1057,11 +1065,17 @@ impl TurnExecutor {
     ) -> Result<ModelOut, ProviderError> {
         // A CLI selected by the HTTP fallback chain is also a whole session.
         if req.model.0.starts_with("cli:") {
-            let mut call = crate::usage::CallGuard::start(&self.sh, ctx, &req.model.0, purpose)
-                .map_err(ProviderError::InvalidRequest)?;
+            let mut call = crate::usage::CallGuard::start_with_prompt(
+                &self.sh,
+                ctx,
+                &req.model.0,
+                purpose,
+                prompt_hint(&req),
+            )
+            .map_err(ProviderError::InvalidRequest)?;
             call.tier(tier);
             let out = self
-                .exec_cli(run, &req, specs, &CancellationToken::new())
+                .exec_cli_limited(&mut call, run, &req, specs, &CancellationToken::new())
                 .await
                 .map_err(|e| ProviderError::InvalidRequest(e.0))?;
             if let Some(usage) = &out.usage {
@@ -1071,14 +1085,25 @@ impl TurnExecutor {
         }
         let model = req.model.clone();
         let provider = self.sh.providers.read().pick(&model)?;
-        let mut call = crate::usage::CallGuard::start(&self.sh, ctx, &model.0, purpose)
-            .map_err(ProviderError::InvalidRequest)?;
+        let prompt_hint = prompt_hint(&req);
+        let mut call = crate::usage::CallGuard::start_with_prompt(
+            &self.sh,
+            ctx,
+            &model.0,
+            purpose,
+            prompt_hint,
+        )
+        .map_err(ProviderError::InvalidRequest)?;
         call.tier(tier);
         let mut stream = provider.stream(req).await?;
         let mut out = ModelOut {
             model: model.0,
             ..ModelOut::default()
         };
+        // Bytes of tool-call name and arguments seen as deltas / as whole calls
+        // (a provider may send either or both; the larger one is the size).
+        let mut tool_bytes = 0usize;
+        let mut tool_bytes_done = 0usize;
         while let Some(chunk) = stream.next().await {
             match chunk? {
                 ChatChunk::TextDelta(t) => {
@@ -1090,8 +1115,13 @@ impl TurnExecutor {
                         }),
                     );
                     out.text.push_str(&t);
+                    call.stream_progress(out.text.len() + tool_bytes.max(tool_bytes_done))
+                        .map_err(ProviderError::InvalidRequest)?;
                 }
                 ChatChunk::ToolCall(mut tc) => {
+                    tool_bytes_done += tc.name.len() + tc.arguments.len();
+                    call.stream_progress(out.text.len() + tool_bytes.max(tool_bytes_done))
+                        .map_err(ProviderError::InvalidRequest)?;
                     if let Some(real) = specs.iter().find(|s| expose(&s.name) == tc.name) {
                         tc.name.clone_from(&real.name);
                     }
@@ -1105,10 +1135,53 @@ impl TurnExecutor {
                     out.finish = format!("{finish_reason:?}");
                     break;
                 }
-                ChatChunk::ToolCallDelta { .. } => {}
+                // Tool-call arguments are output too: a huge one must hit the cap.
+                ChatChunk::ToolCallDelta {
+                    name, input_delta, ..
+                } => {
+                    tool_bytes += name.map_or(0, |n| n.len()) + input_delta.len();
+                    call.stream_progress(out.text.len() + tool_bytes.max(tool_bytes_done))
+                        .map_err(ProviderError::InvalidRequest)?;
+                }
             }
         }
         Ok(out)
+    }
+
+    /// Run a CLI session under the bot limits: the session is cancelled as soon
+    /// as its text, on top of the bot's recorded and in-flight usage, would
+    /// break a hard limit.
+    async fn exec_cli_limited(
+        &self,
+        call: &mut crate::usage::CallGuard,
+        run: &Run,
+        req: &ChatRequest,
+        specs: &[ToolSpec],
+        cancel: &CancellationToken,
+    ) -> Result<ModelOut, ExecError> {
+        let progress = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let stop = cancel.child_token();
+        let session = self.exec_cli_watched(run, req, specs, &stop, Some(progress.clone()));
+        tokio::pin!(session);
+        let mut tick = tokio::time::interval(std::time::Duration::from_millis(250));
+        loop {
+            tokio::select! {
+                out = &mut session => return out,
+                _ = tick.tick() => {
+                    let bytes = progress.load(std::sync::atomic::Ordering::Relaxed);
+                    if let Err(limit) = call.stream_progress(bytes) {
+                        stop.cancel();
+                        // Let the session wind down (kills the child process).
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_secs(10),
+                            &mut session,
+                        )
+                        .await;
+                        return Err(xe(limit));
+                    }
+                }
+            }
+        }
     }
 
     // ---- tool step ----
@@ -1925,4 +1998,12 @@ fn render_output(out: &ToolOutput) -> String {
         ));
     }
     parts.join("\n")
+}
+
+/// Bytes / 3 of the serialized request: more tokens than real text, so a large
+/// prompt is not waved through on the default first-call guess.
+fn prompt_hint(req: &ChatRequest) -> Option<u64> {
+    serde_json::to_vec(req)
+        .ok()
+        .map(|b| (b.len() as u64).div_ceil(3))
 }

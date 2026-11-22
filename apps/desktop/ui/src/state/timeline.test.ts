@@ -12,6 +12,7 @@ import {
   type EventsState,
   needsYou,
   reconcile,
+  RUN_INTERRUPTED,
   restorePending,
   runText,
   type ToolItem
@@ -562,4 +563,20 @@ test("a run that ends closes an approved step still running, so no spinner outli
   assert.equal((s.runs[RUN].items[0] as ToolItem).status, "running");
   s = feed(s, { type: "run_finished", run_id: RUN, error: "cancelled" });
   assert.equal((s.runs[RUN].items[0] as ToolItem).status, "expired");
+});
+
+test("reconcile closes a run the daemon no longer lists as live, so its step stops showing as running", () => {
+  let s = started();
+  s = feed(s, { type: "tool_call_requested", run_id: RUN, call_id: "o1", tool_name: "browser_open", input: {} }, 1000);
+  // the daemon lists it as live: untouched
+  const live = reconcile(s, new Set(), new Set([RUN]), 5000).runs[RUN];
+  assert.equal(live.finishedMs, undefined);
+  // not listed (its end event was lost): finished, not an error, the step no longer runs
+  const gone = reconcile(s, new Set(), new Set(), 5000).runs[RUN];
+  assert.equal(gone.finishedMs, 5000);
+  assert.equal(gone.stopped, false);
+  assert.equal(gone.error, RUN_INTERRUPTED);
+  assert.equal((gone.items[0] as ToolItem).status, "expired");
+  // a run younger than the poll is never judged
+  assert.equal(reconcile(s, new Set(), new Set(), 500).runs[RUN].finishedMs, undefined);
 });

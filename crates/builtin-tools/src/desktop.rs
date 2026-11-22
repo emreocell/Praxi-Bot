@@ -107,8 +107,8 @@ struct State {
     targets: BTreeMap<u32, (String, Option<ControlRect>)>,
     /// Indexes of password fields in the last observation (`secure` state).
     secure: BTreeSet<u32>,
-    /// Screen origin of the window the last snapshot described.
-    window_origin: (f64, f64),
+    /// Screen bounds of the window the last snapshot described.
+    window_bounds: Option<desktop_api::snapshot::Rect>,
 }
 
 /// Longest edge of a screenshot saved for the model. Larger captures are
@@ -202,7 +202,9 @@ struct Shared {
 enum Op {
     ListApps,
     Launch,
+    Focus,
     GetState,
+    Wait,
     Click,
     Type,
     SetValue,
@@ -526,6 +528,55 @@ impl Shared {
         })
     }
 
+    fn locate(
+        &self,
+        run_id: &str,
+        pointer: &PointerIn,
+    ) -> Result<(Target, String, Option<ControlRect>), ToolError> {
+        match (&pointer.index, pointer.x, pointer.y) {
+            (Some(index), None, None) => {
+                let index = parse_ref(index)?;
+                let target = self.target(run_id, index, pointer.expect_gen)?;
+                let (label, rect) = self.describe(run_id, index)?;
+                Ok((target, label, rect))
+            }
+            (None, Some(x), Some(y)) => {
+                let mut states = self.state.lock();
+                let state = states
+                    .get(run_id)
+                    .filter(|s| s.generation.is_some())
+                    .ok_or_else(|| exec_err(NO_OBSERVATION_MSG))?;
+                let bounds = state
+                    .window_bounds
+                    .ok_or_else(|| exec_err(NO_OBSERVATION_MSG))?;
+                if pointer.expect_gen.is_some() && pointer.expect_gen != state.generation {
+                    return Err(exec_err(format!(
+                        "point belongs to an older observation{STALE_HINT}"
+                    )));
+                }
+                if !(x >= bounds.x
+                    && x < bounds.x + bounds.width
+                    && y >= bounds.y
+                    && y < bounds.y + bounds.height)
+                {
+                    return Err(exec_err("point is outside the observed window"));
+                }
+                Ok((
+                    Target::ByCoordinate {
+                        x,
+                        y,
+                        space: CoordinateSpace::Absolute,
+                    },
+                    format!("screen point ({x:.0}, {y:.0})"),
+                    Some(point_rect(x, y)),
+                ))
+            }
+            _ => Err(ToolError::InvalidInput(
+                "give one index or both x and y".into(),
+            )),
+        }
+    }
+
     /// A fresh observation is never taken while a pause, a human takeover or a
     /// local override is in force: the model must not read the screen then.
     fn refuse_observation_while_latched(&self) -> Result<(), ToolError> {
@@ -561,13 +612,6 @@ impl Shared {
         }
         .instrument(tracing::info_span!("desktop.gate", run_id, action))
         .await
-    }
-
-    fn default_method(r: ElementRef) -> ClickMethod {
-        match r {
-            ElementRef::Index(_) => ClickMethod::Accessibility,
-            ElementRef::Mark(_) => ClickMethod::Global,
-        }
     }
 
     /// An unobserved run has no preferred window: `snapshot(None)` observes the
@@ -650,7 +694,7 @@ impl Shared {
                 let mut states = self.state.lock();
                 let st = states.entry(run_id);
                 st.window_id = Some(snap.window.id);
-                st.window_origin = (snap.window.bounds.x, snap.window.bounds.y);
+                st.window_bounds = Some(snap.window.bounds);
                 st.generation = Some(snap.generation);
                 st.observation_epoch = observation_epoch;
                 st.marks.clear();
@@ -909,7 +953,7 @@ pub fn tools_dynamic_with_secrets(
             Op::Launch,
             spec(
                 "desktop_launch",
-                "Start, open or run an application, program, document or URI (launch an app, open a file with it) and list windows. This is the way to open apps. Examples: {\"executable\":\"notepad.exe\"}, {\"executable\":\"calc.exe\"}, a folder in Explorer {\"executable\":\"explorer.exe\",\"args\":[\"C:\\Users\"]}. Windows Settings pages are URIs, not programs: {\"executable\":\"ms-settings:display\"} (also ms-settings:network, ms-settings:bluetooth, ms-settings:about); never open Explorer for them. Other URI examples: calculator:, ms-clock:. Do not use it for web pages (http/https): use the browser tools for those. Never start an app by typing its name into some window; always launch it with this tool.",
+                "Launch an application or open a document or URI on the selected interactive desktop. Examples: {\"executable\":\"notepad.exe\"}, {\"executable\":\"ms-settings:display\"}, {\"executable\":\"appx:Microsoft.WindowsCalculator_8wekyb3d8bbwe!App\"}. For a packaged Windows app use appx: followed by its installed AppUserModelID, without args. Use desktop_focus for a window that is already open. Use browser tools for web pages.",
                 json!({"type":"object","properties":{
                     "executable":{"type":"string","description":"Program name, file path or URI such as ms-settings:display."},
                     "args":{"type":"array","items":{"type":"string"},"description":"Arguments."}
@@ -919,16 +963,41 @@ pub fn tools_dynamic_with_secrets(
             ),
         ),
         (
+            Op::Focus,
+            spec(
+                "desktop_focus",
+                "Bring an existing desktop window to the foreground and read its accessibility tree. Pass the window_id from desktop_list_apps. Example: {\"window_id\":3}",
+                json!({"type":"object","properties":{"window_id":{"type":"integer"}},"required":["window_id"]}),
+                Effect::Write,
+                d,
+            ),
+        ),
+        (
             Op::GetState,
             spec(
                 "desktop_get_state",
-                "Read the UI tree of a window as numbered elements. Use these numbers as index in other desktop tools (pass gen from this observation). Large windows: use interactive_only or query to shrink the output; indexes stay the same. Example: {\"title\":\"Notepad\"}",
+                "Read one window's accessibility tree with element names, roles and screen bounds. Pass the window_id from desktop_list_apps, then use its element indexes and gen in desktop actions. Use interactive_only or query to shrink a large tree. Add screenshot only if accessibility does not expose the needed target. Example: {\"window_id\":3,\"interactive_only\":true}",
                 json!({"type":"object","properties":{
                     "window_id":{"type":"integer","description":"Window id from desktop_list_apps."},
                     "title":{"type":"string","description":"Part of the window title."},
-                    "screenshot":{"type":"boolean","description":"Also save a screenshot and return its file path."},
+                    "screenshot":{"type":"boolean","description":"Also save a screenshot scoped to the observed window and return its file path."},
                     "interactive_only":{"type":"boolean","description":"Only list interactive elements (buttons, fields, links...) and the focused one."},
                     "query":{"type":"string","description":"Only list elements whose name, value or role contains this text (case-insensitive)."}
+                }}),
+                Effect::Read,
+                d,
+            ),
+        ),
+        (
+            Op::Wait,
+            spec(
+                "desktop_wait",
+                "Wait up to 10 seconds for a window by title or ID, or for an element name or role within it. Start with desktop_list_apps to establish screen access. Example: {\"title\":\"WhatsApp\",\"timeout_ms\":5000}",
+                json!({"type":"object","properties":{
+                    "window_id":{"type":"integer"},
+                    "title":{"type":"string","description":"Part of the window title."},
+                    "query":{"type":"string","description":"Part of the element name or role."},
+                    "timeout_ms":{"type":"integer","minimum":100,"maximum":10000}
                 }}),
                 Effect::Read,
                 d,
@@ -938,8 +1007,12 @@ pub fn tools_dynamic_with_secrets(
             Op::Click,
             spec(
                 "desktop_click",
-                "Click a button, link or other element (mouse click). Returns the refreshed UI tree. Pass gen from the observation you read the index from. Example: {\"index\":12,\"gen\":3}",
-                json!({"type":"object","properties":{"index":index_prop,"gen":gen_prop,"method":method_prop},"required":["index","gen"]}),
+                "Click by element index and gen. If the accessibility tree lacks the target, pass screen x and y within the observed window. Returns the refreshed UI tree. Example: {\"index\":12,\"gen\":3}",
+                json!({"type":"object","properties":{
+                    "index":index_prop,"gen":gen_prop,"method":method_prop,
+                    "x":{"type":"number","description":"Physical screen x within the observed window."},
+                    "y":{"type":"number","description":"Physical screen y within the observed window."}
+                },"oneOf":[{"required":["index","gen"]},{"required":["x","y"]}]}),
                 Effect::Write,
                 d,
             ),
@@ -948,13 +1021,15 @@ pub fn tools_dynamic_with_secrets(
             Op::Type,
             spec(
                 "desktop_type",
-                "Click an element to focus it, then type text with the keyboard (enter text). Give exactly one of `text` (what you type) or `secret` (the name of a secret the owner stored, from secrets_list: it is typed for you and you never see the value). Not for starting apps (use desktop_launch). Returns the refreshed UI tree. Pass gen from the observation you read the index from. Example: {\"index\":5,\"gen\":3,\"text\":\"hello\"}",
+                "Focus an input by index and gen, or by screen x and y within the observed window, then type text. An owner-stored secret requires an element index. Password fields are refused on Windows. Returns the refreshed UI tree. Example: {\"index\":5,\"gen\":3,\"text\":\"hello\"}",
                 json!({"type":"object","properties":{
                     "index":index_prop,
                     "gen":gen_prop,
+                    "x":{"type":"number","description":"Physical screen x within the observed window."},
+                    "y":{"type":"number","description":"Physical screen y within the observed window."},
                     "text":{"type":"string","description":"Text to type. Not with `secret`."},
                     "secret":{"type":"string","description":"Name of an owner-stored secret to type instead of `text`."}
-                },"required":["index","gen"]}),
+                },"oneOf":[{"required":["index","gen"]},{"required":["x","y","text"]}]}),
                 Effect::Write,
                 d,
             ),
@@ -978,12 +1053,14 @@ pub fn tools_dynamic_with_secrets(
             Op::Key,
             spec(
                 "desktop_key",
-                "Press a keyboard key or shortcut chord (Enter, Tab, Ctrl+S, Ctrl+Shift+N), optionally after focusing an element (index: pass gen from the observation you read the index from). Example: {\"keys\":[\"ctrl\",\"s\"]}",
+                "Press a keyboard key or shortcut chord in the observed window. Optionally focus a target first with index and gen, or with screen x and y. Example: {\"keys\":[\"ctrl\",\"s\"]}",
                 json!({"type":"object","properties":{
                     "keys":{"description":"Key names, e.g. [\"ctrl\",\"s\"], [\"Return\"] or \"ctrl+s\".","oneOf":[
                         {"type":"array","items":{"type":"string"},"minItems":1},{"type":"string"}]},
                     "index":index_prop,
-                    "gen":gen_prop
+                    "gen":gen_prop,
+                    "x":{"type":"number","description":"Physical screen x within the observed window."},
+                    "y":{"type":"number","description":"Physical screen y within the observed window."}
                 },"required":["keys"]}),
                 Effect::Write,
                 d,
@@ -993,7 +1070,7 @@ pub fn tools_dynamic_with_secrets(
             Op::Scroll,
             spec(
                 "desktop_scroll",
-                "Scroll an element (positive dy = down). With index, pass gen from the observation you read the index from. Example: {\"index\":3,\"dy\":5}",
+                "Scroll by element index and gen, or by screen x and y within the observed window. Positive dy scrolls down. Example: {\"index\":3,\"gen\":2,\"dy\":5}",
                 json!({"type":"object","properties":{
                     "index":index_prop,
                     "gen":gen_prop,
@@ -1002,7 +1079,7 @@ pub fn tools_dynamic_with_secrets(
                     "dx":{"type":"number","description":"Horizontal amount."},
                     "dy":{"type":"number","description":"Vertical amount."}
                 }}),
-                Effect::Read,
+                Effect::Write,
                 d,
             ),
         ),
@@ -1062,18 +1139,32 @@ struct LaunchIn {
 }
 
 #[derive(Deserialize)]
+struct FocusIn {
+    window_id: u64,
+}
+
+#[derive(Deserialize)]
+struct WaitIn {
+    window_id: Option<u64>,
+    title: Option<String>,
+    query: Option<String>,
+    timeout_ms: Option<u64>,
+}
+
+#[derive(Deserialize)]
 struct ClickIn {
-    index: Value,
-    #[serde(rename = "gen")]
-    expect_gen: Option<u64>,
+    #[serde(flatten)]
+    pointer: PointerIn,
     method: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct TypeIn {
-    index: Value,
+struct PointerIn {
+    index: Option<Value>,
     #[serde(rename = "gen")]
     expect_gen: Option<u64>,
+    x: Option<f64>,
+    y: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -1086,18 +1177,14 @@ struct SetValueIn {
 #[derive(Deserialize)]
 struct KeyIn {
     keys: Value,
-    index: Option<Value>,
-    #[serde(rename = "gen")]
-    expect_gen: Option<u64>,
+    #[serde(flatten)]
+    pointer: PointerIn,
 }
 
 #[derive(Deserialize)]
 struct ScrollIn {
-    index: Option<Value>,
-    #[serde(rename = "gen")]
-    expect_gen: Option<u64>,
-    x: Option<f64>,
-    y: Option<f64>,
+    #[serde(flatten)]
+    pointer: PointerIn,
     #[serde(default)]
     dx: f64,
     #[serde(default)]
@@ -1287,7 +1374,7 @@ impl DesktopTool {
         input: Value,
         guard: Option<ActGuard>,
     ) -> Result<String, ToolError> {
-        let observing = matches!(self.op, Op::ListApps | Op::GetState);
+        let observing = matches!(self.op, Op::ListApps | Op::GetState | Op::Wait);
         let gate = self.shared.control.clone();
         let epoch = gate.as_ref().map(|g| g.observation_epoch());
         let text = self.run_inner(run_id, input, guard.as_ref()).await?;
@@ -1315,7 +1402,7 @@ impl DesktopTool {
         guard: Option<&ActGuard>,
     ) -> Result<String, ToolError> {
         let sh = &self.shared;
-        if matches!(self.op, Op::ListApps | Op::GetState)
+        if matches!(self.op, Op::ListApps | Op::GetState | Op::Wait)
             && let Some(message) = sh.control.as_ref().and_then(|g| g.observation_refused())
         {
             return Err(exec_err(message));
@@ -1396,6 +1483,76 @@ impl DesktopTool {
                 }
                 Ok(out)
             }
+            Op::Focus => {
+                let FocusIn { window_id } = parse(input)?;
+                let backend = sh.backend(run_id)?;
+                let window = backend
+                    .windows()
+                    .await
+                    .map_err(|e| derr(&e))?
+                    .into_iter()
+                    .find(|w| w.id == window_id)
+                    .ok_or_else(|| exec_err("window not found; list apps again"))?;
+                let permit = sh
+                    .gate(run_id, "focus", window.title, Some(rect_of(window.bounds)))
+                    .await?;
+                if permit.needs_observation() {
+                    return Err(exec_err(
+                        "Control changed; list apps again before focusing a window",
+                    ));
+                }
+                permit
+                    .protect(async move { backend.focus(window_id, None).await })
+                    .await
+                    .map_err(exec_err)?
+                    .map_err(|e| derr(&e))?;
+                let tree = sh
+                    .refresh(run_id, Some(window_id), &ObsFilter::default())
+                    .await?;
+                Ok(format!("focused window id={window_id}\n{tree}"))
+            }
+            Op::Wait => {
+                let WaitIn {
+                    window_id,
+                    title,
+                    query,
+                    timeout_ms,
+                } = parse(input)?;
+                let title = title
+                    .map(|s| s.trim().to_lowercase())
+                    .filter(|s| !s.is_empty());
+                let query = query
+                    .map(|s| s.trim().to_lowercase())
+                    .filter(|s| !s.is_empty());
+                let window_id =
+                    window_id.or_else(|| title.is_none().then(|| sh.scope(run_id)).flatten());
+                if title.is_none() && window_id.is_none() {
+                    return Err(ToolError::InvalidInput(
+                        "supply a window_id or title".into(),
+                    ));
+                }
+                let backend = sh.backend(run_id)?;
+                let ms = timeout_ms.unwrap_or(3000).clamp(100, 10000);
+                tokio::time::timeout(Duration::from_millis(ms), async {
+                    loop {
+                        sh.refuse_observation_while_latched()?;
+                        let windows = backend.windows().await.map_err(|e| derr(&e))?;
+                        let window = windows.iter().find(|w| {
+                            window_id.is_none_or(|id| id == w.id)
+                                && title.as_ref().is_none_or(|t| w.title.to_lowercase().contains(t))
+                        });
+                        if let Some(w) = window {
+                            let Some(needle) = &query else { return Ok(window_line(w)); };
+                            let tree = backend.snapshot(Some(w.id)).await.map_err(|e| derr(&e))?;
+                            if tree.nodes.iter().any(|n| n.name.to_lowercase().contains(needle)
+                                || n.role.to_lowercase().contains(needle)) {
+                                return Ok(format!("matching element found in {}\nRead desktop_get_state for its current index and gen.", window_line(w)));
+                            }
+                        }
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                }).await.map_err(|_| exec_err(format!("window or element did not appear within {ms} ms")))?
+            }
             Op::GetState => {
                 let i: StateIn = parse(input)?;
                 let scope = if let Some(id) = i.window_id {
@@ -1427,18 +1584,20 @@ impl DesktopTool {
                 };
                 let mut text = sh.refresh(run_id, scope, &filter).await?;
                 if i.screenshot {
-                    let region =
-                        scope.map_or(Region::FullScreen, |window_id| Region::Window { window_id });
+                    let window_id = sh.observed_scope(run_id)?;
+                    let region = Region::Window { window_id };
                     let backend = sh.backend(run_id)?;
                     let img = backend
                         .screenshot(region, Quality::Medium)
                         .await
                         .map_err(|e| derr(&e))?;
-                    let origin = {
+                    let (ox, oy) = {
                         let mut states = sh.state.lock();
-                        states.get(run_id).map_or((0.0, 0.0), |st| st.window_origin)
+                        states
+                            .get(run_id)
+                            .and_then(|st| st.window_bounds)
+                            .map_or((0.0, 0.0), |bounds| (bounds.x, bounds.y))
                     };
-                    let (ox, oy) = if scope.is_some() { origin } else { (0.0, 0.0) };
                     let capture_w = f64::from(img.width);
                     let capture_h = f64::from(img.height);
                     let img = shrink_screenshot_for_model(img);
@@ -1458,13 +1617,12 @@ impl DesktopTool {
             }
             Op::Click => {
                 let i: ClickIn = parse(input)?;
-                if i.expect_gen.is_none() {
-                    return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
-                }
-                let r = parse_ref(&i.index)?;
-                let method = parse_method(i.method.as_deref(), Shared::default_method(r))?;
-                let target = sh.target(run_id, r, i.expect_gen)?;
-                let (label, rect) = sh.describe(run_id, r)?;
+                let (target, label, rect) = sh.locate(run_id, &i.pointer)?;
+                let default_method = match target {
+                    Target::ByIndex { .. } => ClickMethod::Accessibility,
+                    Target::ByCoordinate { .. } => ClickMethod::Global,
+                };
+                let method = parse_method(i.method.as_deref(), default_method)?;
                 let permit = sh.gate(run_id, "click", label, rect).await?;
                 if permit.needs_observation()
                     || sh.state.lock().get(run_id).is_some_and(|s| {
@@ -1487,13 +1645,13 @@ impl DesktopTool {
             }
             Op::Type => {
                 let what = source(&input, "text")?;
-                let i: TypeIn = parse(input)?;
-                if i.expect_gen.is_none() {
-                    return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
+                let pointer: PointerIn = parse(input)?;
+                if matches!(&what, Source::Secret(_)) && pointer.index.is_none() {
+                    return Err(ToolError::InvalidInput(
+                        "secret input needs an element index".into(),
+                    ));
                 }
-                let r = parse_ref(&i.index)?;
-                let target = sh.target(run_id, r, i.expect_gen)?;
-                let (label, rect) = sh.describe(run_id, r)?;
+                let (target, label, rect) = sh.locate(run_id, &pointer)?;
                 let permit = sh.gate(run_id, "type", label, rect).await?;
                 if permit.needs_observation()
                     || sh.state.lock().get(run_id).is_some_and(|s| {
@@ -1593,20 +1751,14 @@ impl DesktopTool {
                 // Even a shortcut without an element index needs an observation
                 // owned by this run before it can affect the shared desktop.
                 sh.observed_scope(run_id)?;
-                let focus = i.index.as_ref().map(parse_ref).transpose()?;
-                if focus.is_some() && i.expect_gen.is_none() {
-                    return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
-                }
-                let focus_target = focus
-                    .map(|r| sh.target(run_id, r, i.expect_gen))
-                    .transpose()?;
-                let (label, rect) = match focus {
-                    Some(r) => {
-                        let (l, rect) = sh.describe(run_id, r)?;
-                        (format!("{} in {l}", keys.join("+")), rect)
-                    }
-                    None => (keys.join("+"), None),
-                };
+                let pointer = &i.pointer;
+                let (focus_target, label, rect) =
+                    if pointer.index.is_some() || pointer.x.is_some() || pointer.y.is_some() {
+                        let (target, label, rect) = sh.locate(run_id, pointer)?;
+                        (Some(target), format!("{} in {label}", keys.join("+")), rect)
+                    } else {
+                        (None, keys.join("+"), None)
+                    };
                 let permit = sh.gate(run_id, "key", label, rect).await?;
                 if permit.needs_observation()
                     || sh.state.lock().get(run_id).is_some_and(|s| {
@@ -1641,28 +1793,7 @@ impl DesktopTool {
             }
             Op::Scroll => {
                 let i: ScrollIn = parse(input)?;
-                sh.observed_scope(run_id)?;
-                if i.index.is_some() && i.expect_gen.is_none() {
-                    return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
-                }
-                let (label, rect) = match (&i.index, i.x, i.y) {
-                    (Some(idx), _, _) => sh.describe(run_id, parse_ref(idx)?)?,
-                    (None, Some(x), Some(y)) => ("point".to_owned(), Some(point_rect(x, y))),
-                    _ => (String::new(), None),
-                };
-                let target = match (&i.index, i.x, i.y) {
-                    (Some(idx), _, _) => sh.target(run_id, parse_ref(idx)?, i.expect_gen)?,
-                    (None, Some(x), Some(y)) => Target::ByCoordinate {
-                        x,
-                        y,
-                        space: CoordinateSpace::Absolute,
-                    },
-                    _ => {
-                        return Err(ToolError::InvalidInput(
-                            "give index, or both x and y".into(),
-                        ));
-                    }
-                };
+                let (target, label, rect) = sh.locate(run_id, &i.pointer)?;
                 let permit = sh.gate(run_id, "scroll", label, rect).await?;
                 if permit.needs_observation()
                     || sh.state.lock().get(run_id).is_some_and(|s| {
@@ -2217,6 +2348,59 @@ mod tests {
                 method: ClickMethod::Accessibility
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn click_by_coordinates_stays_inside_the_observed_window() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t) = build(fake.clone(), None);
+        let ctx = ToolContext::default();
+        let err = get(&t, "desktop_click")
+            .call(&ctx, json!({"x": 150, "y": 250}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("desktop_get_state"));
+        get(&t, "desktop_get_state")
+            .call(&ctx, json!({}))
+            .await
+            .unwrap();
+        let err = get(&t, "desktop_click")
+            .call(&ctx, json!({"x": 50, "y": 250}))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("outside the observed window"),
+            "{err}"
+        );
+        assert!(fake.actions.lock().is_empty());
+        get(&t, "desktop_click")
+            .call(&ctx, json!({"x": 150, "y": 250}))
+            .await
+            .unwrap();
+        assert!(matches!(
+            &fake.actions.lock()[0],
+            Action::Click {
+                target: Target::ByCoordinate { .. },
+                method: ClickMethod::Global
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn wait_finds_a_window_by_title_and_times_out_otherwise() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t) = build(fake, None);
+        let ctx = ToolContext::default();
+        let ok = get(&t, "desktop_wait")
+            .call(&ctx, json!({"title": "notepad", "timeout_ms": 500}))
+            .await
+            .unwrap();
+        assert!(text(&ok).contains("Fake Notepad"), "{}", text(&ok));
+        let err = get(&t, "desktop_wait")
+            .call(&ctx, json!({"title": "no such window", "timeout_ms": 300}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("did not appear"), "{err}");
     }
 
     #[tokio::test]

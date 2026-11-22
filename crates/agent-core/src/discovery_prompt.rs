@@ -61,7 +61,7 @@ pc_* tools act on the USER'S computer, not yours. Use them ONLY when the user's 
 
 /// The added lines about the user's own screen (fixed text, cache-stable).
 const DESKTOP_LINE: &str = "
-browser_* tools drive a separate managed browser: about:blank or no tabs there says nothing about the user's own browser. Questions about what the user sees, watches or has open (their screen, browser, apps) are answered by observing the desktop: call desktop_list_apps (the focused window title is often enough; a browser title holds the page or video name), then use_tool desktop_get_state with screenshot if needed. Never refuse on privacy grounds and never offer to look instead of looking.";
+browser_* tools drive a separate managed browser: about:blank or no tabs there says nothing about the user's own browser. For desktop tasks, discover desktop_list_apps first, then call it to find the window. Use desktop_get_state with its window_id to read the accessibility tree. Use the element index and gen from that tree for input. Request a window screenshot only when the tree does not expose what you need. Questions about what the user sees or has open are answered by observing. Never refuse on privacy grounds and never offer to look instead of looking. Wait for approvals and report a denied or unavailable tool as such.";
 
 /// Desktop guidance for a bot living on a server: its desktop is its own screen.
 const OWN_SCREEN_LINE: &str = "
@@ -186,7 +186,8 @@ plain \"open a browser\" or \"run a command\", use YOUR OWN tools. If no pc_* to
                 out,
                 "Where you run: you live on a server ({SERVER_OS}); shell_run, files and scripts run THERE in {SERVER_SHELL}, \
 never on the user's computer. The desktop_* tools act on the user's computer \"{name}\" ({pc_os}) because the user chose \
-\"My computer\" for this chat: give desktop_launch only {pc_os} program names and paths, never a {SERVER_OS} path."
+\"My computer\" for this chat. Use those tools for interactive apps. Call desktop_list_apps, then desktop_get_state with the window ID. \
+Use desktop_launch for a missing app, with a program name or AppUserModelID valid on that PC."
             );
         }
         // Placed by `server_place_block`, never by this table.
@@ -478,6 +479,7 @@ mod tests {
         let t = place_block(&place(ComputerLabel::Pc, false)).unwrap();
         assert!(t.contains("\"Praxi desktop\" (Windows)"));
         assert!(t.contains("shell_run, files and scripts run THERE"));
+        assert!(t.contains("desktop_get_state with the window ID"));
     }
     #[test]
     fn nothing_permitted_means_no_block() {

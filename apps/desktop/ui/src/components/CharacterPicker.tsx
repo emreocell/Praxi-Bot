@@ -122,7 +122,8 @@ export function CharacterColorRow({
               .filter(Boolean)
               .join(" ")}
             style={{ "--swatch-color": hex } as CSSProperties}
-            aria-label={hex}
+            aria-label={t("botForm.colorSwatch", { hex })}
+            title={t("botForm.colorSwatch", { hex })}
             aria-pressed={active}
             tabIndex={idx === activeIdx ? 0 : -1}
             data-testid={`color-${hex.slice(1)}`}

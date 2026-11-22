@@ -441,6 +441,8 @@ mod tests {
             "desktop_list_apps",
             "desktop_launch",
             "desktop_get_state",
+            "desktop_focus",
+            "desktop_wait",
             "desktop_click",
             "desktop_type",
             "desktop_set_value",
@@ -512,7 +514,9 @@ mod tests {
             ("desktop_type", W, De),
             ("desktop_set_value", W, De),
             ("desktop_key", W, De),
-            ("desktop_scroll", R, De),
+            ("desktop_scroll", W, De),
+            ("desktop_focus", W, De),
+            ("desktop_wait", R, De),
             ("desktop_drag", W, De),
             ("browser_open", W, B),
             ("browser_snapshot", R, B),
@@ -1114,7 +1118,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 35 + 6 + 2);
+        assert_eq!(added, 37 + 6 + 2);
 
         // Verification of email tools and their effects
         let send_tool = reg
