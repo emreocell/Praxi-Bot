@@ -9,8 +9,8 @@ use builtin_tools::{GateRequest, ToolGate, cwd_for, raw_command_for};
 use computer_target::ComputerLabel;
 use parking_lot::Mutex;
 use permission_engine::{
-    ActionRequest, AllowReason, AutonomyMode, CallFacts, Decision, Impact, Policy, balanced_lane,
-    egress_must_ask, executes_must_ask,
+    ActionRequest, AllowReason, AutonomyMode, CallFacts, Decision, EgressReach, Impact, Policy,
+    balanced_lane, egress_must_ask, executes_must_ask,
 };
 use protocol::event::{ApprovalNeeded, QuestionAsked, ToolCallApproved, ToolCallDenied};
 use protocol::{BotId, Event, InitiatorKind, PermissionCategory, RunId, ToolCallId};
@@ -25,8 +25,8 @@ use crate::AUDIT_GRANT_ALWAYS;
 use crate::history::truncate_utf8;
 use crate::scoped_grant::{self, Derived, Scope, ScopeKind};
 use crate::shared::{
-    ApprovalScope, ControlGrant, Grant, GrantTarget, Pending, RunCtx, Shared, Verdict,
-    control_kind_of,
+    ApprovalScope, ControlGrant, Grant, GrantTarget, Pending, RunCtx, RunToolGrant, Shared,
+    Verdict, control_kind_of,
 };
 use crate::taint;
 
@@ -444,7 +444,11 @@ impl Shared {
         let remembered = must_ask
             && ctx.initiator == InitiatorKind::Human
             && self.remembered_origin(ctx, name, category, input);
-        let must_ask = must_ask && !control_covered && !remembered;
+        // "Allow for this task" for this one MCP tool: the egress term and a plain policy ask,
+        // until the run reads something new. Always-ask tools, external callers and floors are
+        // decided below before it is looked at.
+        let run_tool_covered = self.run_tool_covers(ctx, name, input);
+        let must_ask = must_ask && !control_covered && !remembered && !run_tool_covered;
         // A tool that delegates future authority is confirmed every time:
         // an allow becomes a plain ask, and no grant waives it (a deny stays).
         // The same holds for a call that types an owner-stored secret
@@ -497,7 +501,8 @@ impl Shared {
         if must_ask {
             return (d, None);
         }
-        let granted = control_covered || self.plain_granted(ctx, name, category, input);
+        let granted =
+            control_covered || run_tool_covered || self.plain_granted(ctx, name, category, input);
         let read_skip = effect == Effect::Read
             && if name.starts_with(builtin_tools::pc::PC_PREFIX) {
                 !pc_read_pending
@@ -797,15 +802,53 @@ impl Shared {
     /// when `prompt_text` is set. A call that starts a program chosen by its
     /// arguments also asks after untrusted content, and the egress waiver does
     /// not cover it.
+    ///
+    /// An action inside the browser the owner connected as a browser (an MCP
+    /// server of kind `browser` or the built-in Playwright preset, marked on
+    /// the tool's class by the bridge from owner configuration) passes while
+    /// the run has read only untrusted content, and asks once it has read
+    /// something private.
     pub(crate) fn gate_must_ask(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
         let class = self.content_class(ctx, name, input);
         let exposure = ctx.taint.lock().exposure;
+        let reach = if name == "web_search" {
+            EgressReach::ConfiguredSearch
+        } else if class.in_owner_browser {
+            EgressReach::OwnerBrowser
+        } else {
+            EgressReach::Arbitrary
+        };
         egress_must_ask(
             exposure,
             taint::call_can_egress(name, class, input),
-            name == "web_search",
+            reach,
             ctx.profile.permissions.allow_egress_after_reads,
         ) || executes_must_ask(exposure, class.executes)
+    }
+
+    /// The tools "allow for this task" ([`ApprovalScope::RunTool`]) can name:
+    /// one tool of one MCP server (`mcp:<server>/<tool>`), nothing else.
+    pub(crate) fn run_tool_eligible(name: &str) -> bool {
+        name.strip_prefix("mcp:")
+            .and_then(|rest| rest.split_once('/'))
+            .is_some_and(|(server, tool)| !server.is_empty() && !tool.is_empty())
+    }
+
+    /// An "allow for this task" grant of this run covers this call: the same
+    /// tool, a run that has read nothing new since the grant, and never a
+    /// program start after untrusted content (that asks every time).
+    fn run_tool_covers(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
+        if !Self::run_tool_eligible(name) {
+            return false;
+        }
+        let exposure = ctx.taint.lock().exposure;
+        if executes_must_ask(exposure, self.content_class(ctx, name, input).executes) {
+            return false;
+        }
+        ctx.tool_grants
+            .lock()
+            .iter()
+            .any(|g| g.covers(name, exposure))
     }
 
     /// Content class of tool `name` for this run's bot. A native step that
@@ -946,6 +989,9 @@ impl Shared {
         }
         if executes_must_ask(ctx.taint.lock().exposure, class.executes) {
             taint::note_executes_on_egress(&mut details);
+        }
+        if class.in_owner_browser {
+            taint::note_owner_browser(&mut details, name, input);
         }
         taint::finalize_egress_record(&mut details);
         Some(details)
@@ -1218,6 +1264,8 @@ impl Shared {
                 once_only,
                 grantable,
                 gate_grant: false,
+                run_tool: false,
+                always_refused: false,
             },
         );
         *self.parked.lock().entry(ctx.run_id).or_insert(0) += 1;
@@ -1543,9 +1591,29 @@ impl Shared {
         // Daemon-authored facts for the card: why it asks, and whether a standing choice
         // ("always for this chat") may be offered at all.
         let why = self.ask_kind(ctx, name, category, input);
+        let exposure = ctx.taint.lock().exposure;
+        // "Allow for this task": one MCP tool, this run. Not for an always-ask tool, a floor, a
+        // program start after untrusted content, or an external caller.
+        let run_tool = Self::run_tool_eligible(name)
+            && matches!(why, "egress" | "policy")
+            && !matches!(
+                ctx.initiator,
+                InitiatorKind::ExternalAgent | InitiatorKind::ExternalSchedule
+            );
+        // A standing tool grant for an MCP tool is not offered once the run read something
+        // private: the owner decides that on a clean card, never next to private data.
+        let always_refused = Self::run_tool_eligible(name) && exposure.has_private();
+        let always_offered =
+            !once_only && !always_refused && !matches!(why, "egress" | "executes" | "always_ask");
+        let class = self.content_class(ctx, name, input);
         if let Some(obj) = details.get_or_insert_with(|| json!({})).as_object_mut() {
             obj.insert("why".into(), json!(why));
             obj.insert("once_only".into(), json!(once_only));
+            obj.insert("run_grant".into(), json!(run_tool));
+            obj.insert("always_offered".into(), json!(always_offered));
+            if class.in_owner_browser {
+                obj.insert("browser_action".into(), json!(true));
+            }
             if let Some(sc) = memory.as_ref().filter(|_| !once_only) {
                 obj.insert(
                     "memory".into(),
@@ -1556,6 +1624,8 @@ impl Shared {
         let (approval_id, mut guard, rx) = self.park(ctx, call_id, &summary, once_only, grantable);
         if let Some(p) = self.pending.lock().get_mut(&call_id) {
             p.gate_grant = gate_grant || (memory.is_some() && !once_only);
+            p.run_tool = run_tool;
+            p.always_refused = always_refused;
         }
         let parked_at = policy_revision(self);
         self.remember_parked(call_id, ctx, name, effect, category, input);
@@ -2114,6 +2184,20 @@ impl ExecPermit {
                     self.category,
                     &self.name,
                 );
+            }
+            ApprovalScope::RunTool => {
+                // `approve` refuses this scope unless the card offered it. The grant keeps the
+                // exposure of this moment: a later new kind of read makes the next call ask.
+                if Shared::run_tool_eligible(&self.name) {
+                    let grant = RunToolGrant {
+                        tool: self.name.clone(),
+                        exposure: self.ctx.taint.lock().exposure,
+                    };
+                    let mut grants = self.ctx.tool_grants.lock();
+                    if !grants.contains(&grant) {
+                        grants.push(grant);
+                    }
+                }
             }
             ApprovalScope::RunControl => {
                 // `approve` refuses this scope unless the card offered it, so a

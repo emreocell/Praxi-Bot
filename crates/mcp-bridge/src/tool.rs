@@ -8,6 +8,7 @@ use rmcp::model::{
     ResourceContents, ServerCapabilities, Tool as McpTool,
 };
 use serde_json::{Value, json};
+use tool_registry::browser_mcp::{self, BrowserToolKind};
 use tool_registry::{
     ContentClass, ContentPart, Effect, Platform, Tool, ToolContext, ToolError, ToolOutput, ToolSpec,
 };
@@ -77,6 +78,41 @@ pub(crate) fn clean_description(raw: &str) -> String {
     out
 }
 
+/// How a tool of an owner-connected browser server is judged; `None` for a
+/// server the owner did not connect as a browser (see
+/// [`McpServerConfig::is_browser`]). Judged from the name the server
+/// registered, never from the model's arguments.
+pub(crate) fn browser_kind(config: &McpServerConfig, remote_tool: &str) -> Option<BrowserToolKind> {
+    config
+        .is_browser()
+        .then(|| browser_mcp::classify(remote_tool))
+}
+
+/// Content class and effect of one remote tool.
+///
+/// * Generic MCP: untrusted, private unless the server is public, egress
+///   unless it is local-only; `Destructive` unless trusted hints say read-only.
+/// * In-page tool of an owner-connected browser: untrusted (a page is web
+///   content, not the user's private data), egress unless local-only, and
+///   marked as acting inside the owner's browser; `Write` (it is not
+///   destructive), `Read` with a trusted read-only hint.
+/// * Code outside the page, or a file move, on such a server: every flag,
+///   a program start for code, `Destructive`, and the adapter always asks.
+fn class_of(config: &McpServerConfig, tool: &McpTool) -> (ContentClass, Effect) {
+    let effect = effect_of(tool, config.trust_hints);
+    browser_kind(config, &tool.name)
+        .and_then(|kind| browser_mcp::rules(kind, config.local_only, effect == Effect::Read))
+        .map_or_else(
+            || {
+                (
+                    ContentClass::declared(true, !config.public_content, !config.local_only),
+                    effect,
+                )
+            },
+            |(content, effect, _)| (content, effect),
+        )
+}
+
 pub(crate) fn spec_of(config: &McpServerConfig, tool: &McpTool) -> ToolSpec {
     let server = config.id.as_str();
     let description = tool
@@ -91,17 +127,18 @@ pub(crate) fn spec_of(config: &McpServerConfig, tool: &McpTool) -> ToolSpec {
                 .filter(|t| !t.trim().is_empty())
         })
         .unwrap_or_else(|| format!("MCP tool `{}` of server `{server}`", tool.name));
+    let (content, effect) = class_of(config, tool);
     ToolSpec {
         name: qualified_name(server, &tool.name),
         description,
         input_schema: normalise_schema(&tool.input_schema),
-        effect: effect_of(tool, config.trust_hints),
+        effect,
         category: config.effective_category(),
         platforms: vec![Platform::All],
         // MCP results are untrusted. They are private unless the server is
         // marked public, and they are egress unless the server is local-only.
-        content: ContentClass::declared(true, !config.public_content, !config.local_only)
-            .with_external_metadata(),
+        // An owner-connected browser has its own rules (see `class_of`).
+        content: content.with_external_metadata(),
     }
 }
 
@@ -125,6 +162,16 @@ pub(crate) struct McpToolAdapter {
     spec: ToolSpec,
     remote_name: String,
     server: Arc<Server>,
+    /// Code outside the page or a file move on an owner-connected browser:
+    /// every call asks, whatever the level, grant or exposure.
+    always_ask: bool,
+}
+
+/// Whether a tool of this server must ask on every call.
+pub(crate) fn always_asks(config: &McpServerConfig, remote_tool: &str) -> bool {
+    browser_kind(config, remote_tool)
+        .and_then(|kind| browser_mcp::rules(kind, config.local_only, false))
+        .is_some_and(|(_, _, always)| always)
 }
 
 impl McpToolAdapter {
@@ -132,9 +179,25 @@ impl McpToolAdapter {
         Self {
             spec: spec_of(server.config(), tool),
             remote_name: tool.name.to_string(),
+            always_ask: always_asks(server.config(), &tool.name),
             server,
         }
     }
+}
+
+/// The card of an always-asking browser tool: which server and tool, and every
+/// argument the call would send. An always-ask tool must describe itself.
+fn always_ask_details(server: &str, remote_tool: &str, input: &Value) -> Value {
+    json!({
+        "kind": "mcp_call",
+        "server": server,
+        "tool": remote_tool,
+        "arguments": input,
+        "reason_code": match browser_mcp::classify(remote_tool) {
+            BrowserToolKind::File => "browser_file",
+            _ => "browser_code",
+        },
+    })
 }
 
 #[async_trait]
@@ -145,6 +208,20 @@ impl Tool for McpToolAdapter {
 
     fn visible_to(&self, bot_id: Option<&str>) -> bool {
         bot_listed(self.server.bots().as_deref(), bot_id)
+    }
+
+    fn always_ask(&self) -> bool {
+        self.always_ask
+    }
+
+    async fn approval_details(
+        &self,
+        _ctx: &ToolContext,
+        input: &Value,
+    ) -> Result<Option<Value>, ToolError> {
+        Ok(self
+            .always_ask
+            .then(|| always_ask_details(self.server.id(), &self.remote_name, input)))
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
@@ -621,6 +698,47 @@ mod tests {
         let spec = spec_of(&cfg, &tool(None));
         assert!(!spec.content.egress);
         assert!(spec.content.is_declared());
+    }
+
+    #[test]
+    fn an_owner_browser_splits_page_actions_from_code_and_files() {
+        let named = |n: &str| {
+            let mut t = tool(None);
+            t.name = n.to_owned().into();
+            t
+        };
+        let generic = McpServerConfig::stdio("pw", "npx", ["-y", "@playwright/mcp@latest"]);
+        let browser = McpServerConfig::stdio("pw", "npx", ["-y", "@playwright/mcp@0.0.86"]);
+        // Not a browser: the generic class, no page marker, no forced ask.
+        let spec = spec_of(&generic, &named("browser_click"));
+        assert!(spec.content.reads_private && !spec.content.in_owner_browser);
+        assert_eq!(spec.effect, Effect::Destructive);
+        assert!(!always_asks(&generic, "browser_run_code_unsafe"));
+        // A page action of the owner's browser: untrusted, not private, egress, not destructive.
+        let spec = spec_of(&browser, &named("browser_evaluate"));
+        assert!(spec.content.ingests_untrusted && !spec.content.reads_private);
+        assert!(spec.content.egress && spec.content.in_owner_browser && !spec.content.executes);
+        assert_eq!(spec.effect, Effect::Write);
+        assert!(!always_asks(&browser, "browser_evaluate"));
+        // Code outside the page and file moves always ask and are never page actions.
+        for n in ["browser_run_code_unsafe", "browser_file_upload"] {
+            let spec = spec_of(&browser, &named(n));
+            assert!(
+                !spec.content.in_owner_browser && spec.content.reads_private,
+                "{n}"
+            );
+            assert_eq!(spec.effect, Effect::Destructive, "{n}");
+            assert!(always_asks(&browser, n), "{n}");
+        }
+        assert!(
+            spec_of(&browser, &named("browser_run_code_unsafe"))
+                .content
+                .executes
+        );
+        // An unknown tool of the browser keeps the generic class.
+        let spec = spec_of(&browser, &named("browser_start_tracing"));
+        assert!(spec.content.reads_private && !spec.content.in_owner_browser);
+        assert!(!always_asks(&browser, "browser_start_tracing"));
     }
 
     #[test]

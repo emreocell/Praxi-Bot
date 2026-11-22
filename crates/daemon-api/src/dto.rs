@@ -516,6 +516,10 @@ pub enum Scope {
     /// names, for the rest of this run only. Accepted only on a card whose
     /// `details.control_grant.offered` is true; refused everywhere else.
     RunControl,
+    /// "Allow for this task": the same MCP server and tool for the rest of this run only. Never
+    /// persisted, never another tool; it stops covering once the run reads something new (private
+    /// data after a web page). Accepted only on a card whose `details.run_grant` is true.
+    RunTool,
 }
 
 /// `POST /v1/approvals/{call_id}`.

@@ -62,6 +62,8 @@ impl FakeMcp {
             trust_hints: input.trust_hints,
             public_content: input.public_content,
             local_only: input.local_only,
+            browser: input.browser,
+            is_browser: input.browser,
             bots: input.bots.clone(),
         }
     }

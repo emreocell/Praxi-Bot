@@ -106,6 +106,14 @@ pub enum ApprovalScope {
     /// inherited by sub-agents. Accepted only on a card for which the daemon
     /// resolved an eligible control target.
     RunControl,
+    /// This one tool (same MCP server and tool) for the rest of this run only:
+    /// never persisted, not inherited by sub-agents, never another tool. It
+    /// covers the egress gate and a plain policy ask, never an always-ask
+    /// tool, a floor, a program start after untrusted content, or an external
+    /// caller. It stops covering as soon as the run has read something it had
+    /// not read when the grant was given (private data after a web page): the
+    /// next call asks again. Accepted only on a card that offered it.
+    RunTool,
 }
 
 /// What a persisted "always allow" grant covers.
@@ -627,6 +635,11 @@ pub(crate) struct Pending {
     /// The card is a taint-gate card that offers "always for this chat": creating that grant
     /// takes the owner's authority (the API token alone is not enough).
     pub gate_grant: bool,
+    /// The card offers [`ApprovalScope::RunTool`].
+    pub run_tool: bool,
+    /// A tool-wide standing grant ("always for this bot") is refused for this card: an MCP
+    /// tool in a run that has read something private.
+    pub always_refused: bool,
 }
 
 /// Browser actions that act on the page open right now: their allowance is bound to its origin.
@@ -788,10 +801,34 @@ pub(crate) struct RunCtx {
     /// Run-scoped control grants (card 243-1). In memory, per run: gone when
     /// the run ends and not copied to a sub-agent's own context.
     pub control_grants: Mutex<Vec<ControlGrant>>,
+    /// Run-scoped tool grants ("allow for this task", [`ApprovalScope::RunTool`]):
+    /// the tool name and the run's exposure when the owner gave it. In memory,
+    /// per run: gone when the run ends and not copied to a sub-agent.
+    pub tool_grants: Mutex<Vec<RunToolGrant>>,
     /// Origin the browser page was on when the current page action was resolved (read from the
     /// browser itself; `None`: unknown, so the action stays once-only). Set by the loop right
     /// before the decision and handed to the tool as `expected_origin`.
     pub page_origin: Mutex<Option<String>>,
+}
+
+/// "Allow this tool for this task": one tool, this run, at most the exposure
+/// the run had when the owner gave it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RunToolGrant {
+    /// Registry name (`mcp:<server>/<tool>`).
+    pub tool: String,
+    /// What the run had read when the grant was given.
+    pub exposure: permission_engine::ContentExposure,
+}
+
+impl RunToolGrant {
+    /// Same tool, and the run has read nothing of a kind it had not read when
+    /// the grant was given.
+    pub(crate) fn covers(&self, tool: &str, now: permission_engine::ContentExposure) -> bool {
+        self.tool == tool
+            && (!now.untrusted || self.exposure.untrusted)
+            && (!now.private || self.exposure.private)
+    }
 }
 
 /// "Let this run type into this program" on one computer.
@@ -1803,6 +1840,7 @@ impl Shared {
             }),
             taint: Mutex::new(taint),
             control_grants: Mutex::new(Vec::new()),
+            tool_grants: Mutex::new(Vec::new()),
             page_origin: Mutex::new(None),
         });
         Ok(Arc::clone(self.runs.lock().entry(run.id).or_insert(ctx)))

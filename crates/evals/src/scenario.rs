@@ -292,6 +292,14 @@ pub struct FakeToolSpec {
     /// The call starts an arbitrary program (a run tainted by untrusted content asks).
     #[serde(default)]
     pub executes: bool,
+    /// A tool of an MCP server the owner connected as a browser (name
+    /// `mcp:<server>/<tool>`). Content class, effect and always-ask come from
+    /// `tool_registry::browser_mcp`, exactly as the MCP bridge registers them;
+    /// `content`, `effect` and `executes` are ignored. A tool name the browser
+    /// rules do not know keeps the generic MCP class (untrusted, private,
+    /// egress, destructive).
+    #[serde(default)]
+    pub browser_mcp: bool,
 }
 
 /// Token usage reported with a scripted reply.

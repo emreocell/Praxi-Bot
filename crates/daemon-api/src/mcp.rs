@@ -131,6 +131,16 @@ pub struct McpServerDto {
     /// Tools cannot send data off the machine. Default `false`: every tool is egress.
     #[serde(default)]
     pub local_only: bool,
+    /// The owner connected this server as a browser (Playwright and similar). Its in-page tools
+    /// do not ask after a web page alone; they ask once the run read private data. Code outside
+    /// the page and file moves always ask. The built-in Playwright preset counts as a browser
+    /// without it (`is_browser`).
+    #[serde(default)]
+    pub browser: bool,
+    /// Whether the daemon treats this server as a browser: `browser`, or the exact built-in
+    /// Playwright preset.
+    #[serde(default)]
+    pub is_browser: bool,
     /// Bots that may use the server; `null` = all bots.
     pub bots: Option<Vec<String>>,
 }
@@ -225,6 +235,9 @@ pub struct McpServerInput {
     /// Tools cannot send data off the machine. Default `false` (every tool is egress).
     #[serde(default)]
     pub local_only: bool,
+    /// The owner connects this server as a browser (see `McpServerDto::browser`). Default `false`.
+    #[serde(default)]
+    pub browser: bool,
     /// Permission category of the tools; default `accounts`; `meta` is rejected.
     #[serde(default)]
     pub category: Option<String>,
@@ -291,6 +304,9 @@ pub struct McpServerPatch {
     /// Tools cannot send data off the machine. Omit to keep the stored value.
     #[serde(default)]
     pub local_only: Option<bool>,
+    /// The owner connects this server as a browser. Omit to keep the stored value.
+    #[serde(default)]
+    pub browser: Option<bool>,
     /// Permission category of the tools; `null` clears it; `meta` is rejected.
     #[serde(default)]
     #[schema(nullable = true)]

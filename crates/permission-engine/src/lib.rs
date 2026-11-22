@@ -14,7 +14,7 @@ pub mod resolver;
 // Re-export shared types from the protocol crate.
 pub use protocol::{InitiatorKind, PermissionCategory};
 
-pub use egress::{ContentExposure, egress_must_ask, executes_must_ask};
+pub use egress::{ContentExposure, EgressReach, egress_must_ask, executes_must_ask};
 pub use error::PolicyError;
 pub use host_info::is_host_status_command;
 pub use modes::{AllowReason, AutonomyMode, CallFacts, Impact, balanced_lane};

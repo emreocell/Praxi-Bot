@@ -307,8 +307,18 @@ pub fn describe_details(details: &Value) -> Option<String> {
         .unwrap_or_else(|| "unknown".to_owned());
     let computer = computer.unwrap_or_default();
     let control = control_grant_text(details).unwrap_or_default();
+    // An action in the owner's connected browser is not a plain upload: say so.
+    let what = if egress_value(details)
+        .and_then(|e| e.get("reason_code"))
+        .and_then(Value::as_str)
+        == Some("egress_browser")
+    {
+        "act in your browser on"
+    } else {
+        "send data to"
+    };
     Some(format!(
-        "{computer}{control}{block}DAEMON SUMMARY: send data to {host}.\n"
+        "{computer}{control}{block}DAEMON SUMMARY: {what} {host}.\n"
     ))
 }
 
@@ -686,7 +696,19 @@ fn egress_text(details: &Value) -> Option<String> {
                 .collect()
         })
         .unwrap_or_default();
+    // One plain sentence of what will happen (daemon wording; the model's text
+    // only fills the address), before the long explanation.
+    let action = egress_show(
+        egress
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        false,
+    );
     let mut out = String::new();
+    if !action.is_empty() {
+        out.push_str(&quoted("ACTION", &format!("Praxi wants to {action}.")));
+    }
     if !reason.is_empty() {
         out.push_str(&quoted("EGRESS REASON", &reason));
     }
@@ -1075,6 +1097,31 @@ mod tests {
         let last = both.lines().last().unwrap();
         assert!(last.starts_with("DAEMON SUMMARY:"), "{last}");
         assert!(!last.contains("send data to"), "{last}");
+    }
+
+    #[test]
+    fn a_browser_card_starts_with_one_plain_sentence_and_names_the_tool_once() {
+        let details = json!({
+            "kind": "egress",
+            "reason_code": "egress_browser",
+            "action": "open https://example.com/start in your browser",
+            "reason": "this run read file notes.txt, which includes private data, and now wants to open https://example.com/start in your browser (playwright)",
+            "read": ["file notes.txt"],
+            "host": "example.com",
+            "payload": "url: https://example.com/start",
+            "payload_kind": "body"
+        });
+        let text = describe_details(&details).unwrap();
+        let action = text.find("ACTION BEGINS").expect("action block");
+        let reason = text.find("EGRESS REASON BEGINS").unwrap();
+        assert!(action < reason, "the plain sentence comes first");
+        assert!(text.contains("> Praxi wants to open https:"), "{text}");
+        assert!(!text.contains("browser_navigate"), "{text}");
+        let last = text.lines().last().unwrap();
+        assert!(
+            last.starts_with("DAEMON SUMMARY: act in your browser on example"),
+            "{last}"
+        );
     }
 
     #[test]

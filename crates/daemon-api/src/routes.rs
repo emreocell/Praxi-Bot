@@ -1251,7 +1251,10 @@ pub(crate) async fn decide_approval(
     // "Always allow for this chat" on a taint-gate card is a standing grant: it takes the
     // owner's authority (`x-praxi-owner-key`), not just the API token or a paired peer.
     if matches!(input.decision, Decision::Approve)
-        && !matches!(input.scope, Scope::Once | Scope::RunControl)
+        && !matches!(
+            input.scope,
+            Scope::Once | Scope::RunControl | Scope::RunTool
+        )
         && s.agent().approval_is_gate_grant(call_id)
     {
         s.require_owner(&headers)?;
@@ -1264,6 +1267,7 @@ pub(crate) async fn decide_approval(
                 Scope::Always => ApprovalScope::Always,
                 Scope::AlwaysCategory => ApprovalScope::AlwaysCategory,
                 Scope::RunControl => ApprovalScope::RunControl,
+                Scope::RunTool => ApprovalScope::RunTool,
             };
             s.agent().approve(call_id, scope, s.user_id())?;
         }

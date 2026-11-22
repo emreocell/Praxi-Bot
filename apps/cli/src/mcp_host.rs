@@ -344,6 +344,8 @@ impl McpHost {
             trust_hints: cfg.trust_hints,
             public_content: cfg.public_content,
             local_only: cfg.local_only,
+            browser: cfg.browser,
+            is_browser: cfg.is_browser(),
             bots: cfg.bots.clone(),
         }
     }
@@ -771,6 +773,9 @@ fn merge_update(
     if let Some(v) = obj.get("local_only") {
         cfg.local_only = json_bool(v, "local_only")?;
     }
+    if let Some(v) = obj.get("browser") {
+        cfg.browser = json_bool(v, "browser")?;
+    }
     if let Some(v) = obj.get("category") {
         cfg.category = if v.is_null() {
             None
@@ -873,6 +878,7 @@ fn to_config(name: &str, input: McpServerInput) -> Result<McpServerConfig, McpCo
         trust_hints: input.trust_hints,
         public_content: input.public_content,
         local_only: input.local_only,
+        browser: input.browser,
         category,
         secret_headers: input.secret_headers,
         secret_env: input.secret_env,
