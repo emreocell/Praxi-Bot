@@ -23,7 +23,7 @@ export interface HistoryEntry {
   read: boolean;
 }
 
-const KINDS: readonly NotifyKind[] = ["needsYou", "longRun", "failed", "scheduleDone"];
+const KINDS: readonly NotifyKind[] = ["needsYou", "longRun", "failed", "scheduleDone", "digest"];
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 

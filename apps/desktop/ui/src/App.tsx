@@ -95,6 +95,7 @@ import { useApplyAppearance } from "./state/useApplyAppearance";
 import { usePanelReserve } from "./state/usePanelReserve";
 import { useViewportWidth } from "./state/useViewportWidth";
 import { PaletteHost, type PaletteScreen } from "./state/PaletteHost";
+import { DigestNotifier } from "./state/DigestNotifier";
 import { ShellBridgeHost } from "./state/ShellBridgeHost";
 import { AddSkillModal } from "./components/AddSkillModal";
 import { useToast } from "./components/Toast";
@@ -1013,6 +1014,13 @@ function AppShell() {
           settings={settings}
           onOpenChat={openChat}
           onOpenNeeds={openNeeds}
+        />
+        <DigestNotifier
+          digestTime={settings.digestTime}
+          digestLastDay={settings.digestLastDay}
+          quietHours={settings.quietHours}
+          isPrivate={settings.notifyPrivate}
+          onHandled={(day) => updateSettings({ digestLastDay: day })}
         />
         <HumanDrivingBanner />
         {runBanner}
