@@ -67,7 +67,7 @@ try {
   await send('Runtime.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1365, height: 1100, deviceScaleFactor: 1, mobile: false });
   for (const theme of ['obsidian', 'clay', 'cobalt', 'porcelain']) {
-    await send('Page.navigate', { url: `${base}/?mock=1&screen=settings&section=ai&lang=en&theme=${theme}&style=solid` });
+    await send('Page.navigate', { url: `${base}/?mock=1&screen=settings&section=data&lang=en&theme=${theme}&style=solid` });
     await waitFor(`Array.from(document.querySelectorAll('h3')).some(e => e.textContent === 'Knowledge and shared brain')`, 'knowledge card');
     await waitFor(`Array.from(document.querySelectorAll('summary')).some(e => e.textContent === 'Add source')`, 'loaded source management');
     await evaluate(`globalThis.kcard = Array.from(document.querySelectorAll('h3')).filter(e => e.textContent === 'Knowledge and shared brain').at(-1).parentElement;

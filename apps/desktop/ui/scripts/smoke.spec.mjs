@@ -259,9 +259,9 @@ export async function flows(ctx) {
     await send(page, '@Nova say hi');
     await page.getByTestId('guest-author').first().waitFor(T);
   });
-  await run(s, 'Settings > AI lists providers and the CLI engines section renders', async (page) => {
+  await run(s, 'Settings > Bots & models lists providers and the CLI engines section renders', async (page) => {
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await page.getByText('AI', { exact: true }).first().click();
+    await page.getByTestId('settings-nav-models').click();
     await page.getByTestId('api-key-paste').waitFor(T);
     await page.getByTestId('detected-accounts-block').waitFor(T);
     await page.getByText('stub', { exact: false }).first().waitFor(T);
