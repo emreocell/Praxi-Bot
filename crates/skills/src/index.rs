@@ -15,8 +15,9 @@ use crate::bundled::BUNDLED;
 use crate::scoped_store::{self, ScopeLock};
 use crate::skill::{Skill, SkillContext, Source, parse_skill};
 
-/// Byte budget of [`SkillIndex::prompt_block`].
-pub const PROMPT_BUDGET_BYTES: usize = 1536;
+/// Byte budget of [`SkillIndex::prompt_block`]. Sized so the bundled skills
+/// (starter pack included) still leave room for the owner's own skills.
+pub const PROMPT_BUDGET_BYTES: usize = 2048;
 /// Largest extra file `skill_read` returns.
 pub const MAX_FILE_BYTES: u64 = 256 * 1024;
 /// File name of the skill definition.
