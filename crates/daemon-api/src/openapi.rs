@@ -84,6 +84,7 @@ impl Modify for Security {
     paths(
         crate::chat_history::search,
         crate::chat_history::export,
+        crate::chat_history::import,
         changes::get_run_changes,
         changes::preview_restore,
         changes::restore_changes,

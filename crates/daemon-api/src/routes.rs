@@ -1048,10 +1048,11 @@ pub(crate) async fn list_messages(
                 .or_insert_with(|| s.storage().get_run(run).ok().flatten().map(|r| r.bot_id.0)),
             None => None,
         };
-        let source = (m.role == "user")
-            .then(|| s.storage().message_source(m.id).ok())
-            .flatten()
-            .filter(|v| !v.is_empty());
+        let source = s
+            .storage()
+            .message_source(m.id)
+            .ok()
+            .filter(|source| !source.is_empty());
         let (content, attachments) = if m.role == "user" {
             let (text, ids) = agent_core::attachments::split_marker(&m.content);
             let dtos = ids

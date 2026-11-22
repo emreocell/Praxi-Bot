@@ -136,7 +136,11 @@ async fn export_redacts_credentials_and_private_content_and_only_summarizes_tool
     .unwrap();
     let text = agent_core::attachments::with_marker(&format!("visible {CANARY}"), &[attachment.id]);
     message(&t, &chat, &text, false, "user");
-    message(&t, &chat, "private-content-canary", true, "assistant");
+    let private = message(&t, &chat, "private-content-canary", true, "assistant");
+    t.state
+        .storage()
+        .set_message_source(private, "imported")
+        .unwrap();
     message(&t, &chat, "sensitive-tool-output", false, "tool");
     let old = message(&t, &chat, "superseded-canary", false, "user");
     t.state
@@ -176,6 +180,13 @@ async fn export_redacts_credentials_and_private_content_and_only_summarizes_tool
             assert_eq!(r.json()["format_version"], 1);
             assert_eq!(r.json()["messages"][0]["attachments"], json!(["notes.txt"]));
             assert_eq!(r.json()["messages"].as_array().unwrap().len(), 2);
+            assert!(
+                r.json()["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|message| message["source"] == "imported")
+            );
             assert_eq!(r.json()["steps"].as_array().unwrap().len(), 1);
         }
     }
@@ -184,6 +195,89 @@ async fn export_redacts_credentials_and_private_content_and_only_summarizes_tool
         call(&t, Method::GET, &format!("/v1/chats/{chat}/export"), None)
             .await
             .status,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn import_creates_untrusted_history_and_never_runs_tool_rows() {
+    let t = setup();
+    let (bot, _) = make_chat(&t).await;
+    let run = RunId::new();
+    let doc = json!({
+        "format_version": 1,
+        "chat_id": Uuid::from_u128(90),
+        "title": "Imported notes",
+        "created_at_ms": 0,
+        "messages": [
+            {"id": Uuid::from_u128(91), "run_id": run, "role": "user", "created_at_ms": 0, "content": "hello"},
+            {"role": "assistant", "content": "hi"}
+        ],
+        "steps": [{"run_id": run, "name": "shell_run", "status": "succeeded", "created_at_ms": 0}],
+        "approvals": [{"run_id": run, "outcome": "allowed", "created_at_ms": 0}]
+    });
+    let path = format!("/v1/chats/import?bot_id={bot}");
+    assert_eq!(
+        call_token_only(&t, Method::POST, &path, Some(doc.clone()))
+            .await
+            .status,
+        StatusCode::FORBIDDEN
+    );
+    let r = call(&t, Method::POST, &path, Some(doc.clone())).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json());
+    let chat = r.json()["chat_id"].as_str().unwrap().to_owned();
+    assert_eq!(r.json()["messages"], 2);
+    assert_eq!(r.json()["steps_ignored"], 1);
+    assert_eq!(r.json()["approvals_ignored"], 1);
+
+    let chat_id = ChatId(chat.parse().unwrap());
+    let messages = t.state.storage().list_messages(chat_id).unwrap();
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0].role, "user");
+    assert_eq!(messages[1].role, "assistant");
+    assert_eq!(messages[2].role, agent_core::control_note::IMPORTED_ROLE);
+    for message in &messages {
+        assert!(message.exposure_untrusted);
+        assert_eq!(
+            t.state.storage().message_source(message.id).unwrap(),
+            "imported"
+        );
+    }
+    assert_eq!(
+        t.state
+            .storage()
+            .chat_step_summaries(t.state.user_id(), chat_id)
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        t.state
+            .storage()
+            .chat_approval_summaries(t.state.user_id(), chat_id)
+            .unwrap()
+            .len(),
+        0
+    );
+
+    let mut newer = doc.clone();
+    newer["format_version"] = json!(2);
+    assert_eq!(
+        call(&t, Method::POST, &path, Some(newer)).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    let mut forged_role = doc.clone();
+    forged_role["messages"][0]["role"] = json!("tool");
+    assert_eq!(
+        call(&t, Method::POST, &path, Some(forged_role))
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+    let mut too_many = doc;
+    too_many["messages"] = json!(vec![json!({"role":"user","content":""}); 1001]);
+    assert_eq!(
+        call(&t, Method::POST, &path, Some(too_many)).await.status,
         StatusCode::BAD_REQUEST
     );
 }
