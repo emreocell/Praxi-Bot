@@ -29,7 +29,7 @@ use tool_registry::{ContentPart, Tool, ToolContext, ToolOutput, ToolSpec};
 use crate::approval::ExecPermit;
 use crate::compaction::Compaction;
 use crate::history::{
-    GUARD_NOTE, build_messages, expose, status_of, step_output, tool_defs, truncate_utf8,
+    GUARD_NOTE, build_messages, status_of, step_output, tool_defs, truncate_utf8,
 };
 use crate::router::{RoutePlan, route_hints};
 use crate::shared::{
@@ -509,10 +509,17 @@ impl TurnExecutor {
         }
     }
 
-    fn is_read(&self, ctx: &RunCtx, hints: &[String], name: &str, args: &str) -> bool {
+    fn is_read(
+        &self,
+        ctx: &RunCtx,
+        hints: &[String],
+        offered: Option<&[String]>,
+        name: &str,
+        args: &str,
+    ) -> bool {
         let input: Value = serde_json::from_str(args).unwrap_or(Value::Null);
         self.sh
-            .resolve_call(&ctx.profile, ctx.bot_id, name, &input, hints)
+            .resolve_offered(ctx, name, &input, hints, offered)
             .and_then(|r| r.spec)
             .is_some_and(|s| s.effect == tool_registry::Effect::Read)
     }
@@ -553,12 +560,22 @@ impl TurnExecutor {
             .iter()
             .map(|c| call_key(&c.name, &c.arguments))
             .collect();
-        let group_all_reads =
-            self.is_read(ctx, &hints, &remaining[0].name, &remaining[0].arguments);
-        let take = if group_all_reads {
+        let read = |c: &provider_catalog::ToolCall| {
+            self.is_read(
+                ctx,
+                &hints,
+                mo.offered_tools.as_deref(),
+                &c.name,
+                &c.arguments,
+            )
+        };
+        let group_all_reads = read(&remaining[0]);
+        // Activations are idempotent, but commit each one before budgeting
+        // the next so a parallel reply cannot oversubscribe the surface.
+        let take = if group_all_reads && remaining[0].name != agent_router::TOOL_DESCRIBE {
             remaining
                 .iter()
-                .take_while(|c| self.is_read(ctx, &hints, &c.name, &c.arguments))
+                .take_while(|c| c.name != agent_router::TOOL_DESCRIBE && read(c))
                 .count()
         } else {
             1
@@ -585,6 +602,9 @@ impl TurnExecutor {
             });
         }
         let mut input = json!({ "calls": calls });
+        if let Some(offered) = mo.offered_tools {
+            input["offered_tools"] = json!(offered);
+        }
         if let Some(model) = crate::tiering::light_reply_model(&history[mi]) {
             input["tier"] = json!(crate::tiering::LIGHT);
             input["tier_model"] = json!(model);
@@ -612,19 +632,52 @@ impl TurnExecutor {
             .as_bool()
             .unwrap_or(false)
             .then(|| step.input["guard"].as_str().unwrap_or("guard").to_owned());
+        let origin = crate::tiering::light_origin(&steps);
+        // Planning fails conservatively to standard when this read fails, but
+        // dispatch must still verify the durable transition before continuing.
+        let upgraded = origin.is_some() && self.tier_was_upgraded(&ctx)?;
+        let tier_active =
+            origin.is_some() || step.input["tier"].is_string() || self.light_model(&ctx).is_some();
+        let tier_light = step.input["tier"] == crate::tiering::LIGHT
+            && self
+                .light_model(&ctx)
+                .is_some_and(|model| Some(model) == origin)
+            && guard_reason.is_none()
+            && !upgraded;
+        let mut primary = if tier_light {
+            self.light_model(&ctx)
+                .unwrap_or(&ctx.profile.models.executor)
+                .to_owned()
+        } else {
+            ctx.profile.models.executor.clone()
+        };
+        if !primary.contains('/') && !primary.starts_with("cli:") {
+            let default_id = self.sh.providers.read().default_id().to_owned();
+            if default_id.starts_with("cli:") {
+                primary = format!("{default_id}/{primary}");
+            }
+        }
+        let deferred = !self.sh.cfg.legacy_tool_surface && !primary.starts_with("cli:");
         let hints = route_hints(&steps);
         let specs = if guard_reason.is_some() {
             Vec::new()
+        } else if deferred {
+            self.sh.deferred_specs(
+                &ctx,
+                &crate::discovery::activations(&steps),
+                tier_light || ctx.profile.models.direct_tools_only,
+            )
         } else {
-            self.sh.model_specs(&ctx.profile, ctx.bot_id, &hints.tools)
+            let mut specs = self.sh.model_specs(&ctx.profile, ctx.bot_id, &hints.tools);
+            if !self.sh.cfg.legacy_tool_surface {
+                crate::discovery::bound_legacy(&mut specs);
+            }
+            specs
         };
         // Descriptions and schemas of external tools are in this request.
         // Recorded now, and again on the step output so a restart does not
         // ask the current tool list whether they were shown.
-        let metadata = metadata_facts(&specs);
-        for fact in &metadata {
-            fact_note(&ctx, fact);
-        }
+        let mut metadata = Vec::new();
         let note = guard_reason
             .as_deref()
             .map(|r| GUARD_NOTE.replace("{reason}", r));
@@ -691,25 +744,6 @@ impl TurnExecutor {
             let at = messages.len() - usize::from(note.is_some());
             messages.insert(at, Message::text(MessageRole::User, digest));
         }
-        let origin = crate::tiering::light_origin(&steps);
-        // Planning fails conservatively to standard when this read fails, but
-        // dispatch must still verify the durable transition before continuing.
-        let upgraded = origin.is_some() && self.tier_was_upgraded(&ctx)?;
-        let tier_active =
-            origin.is_some() || step.input["tier"].is_string() || self.light_model(&ctx).is_some();
-        let tier_light = step.input["tier"] == crate::tiering::LIGHT
-            && self
-                .light_model(&ctx)
-                .is_some_and(|model| Some(model) == origin)
-            && guard_reason.is_none()
-            && !upgraded;
-        let mut primary = if tier_light {
-            self.light_model(&ctx)
-                .unwrap_or(&ctx.profile.models.executor)
-                .to_owned()
-        } else {
-            ctx.profile.models.executor.clone()
-        };
         if let Some(from) = origin {
             if let Some(reason) = step.input["tier_upgrade_reason"].as_str() {
                 self.emit_tier_upgrade(&ctx, from, reason)?;
@@ -723,14 +757,7 @@ impl TurnExecutor {
                 self.emit_tier_upgrade(&ctx, from, "guard_close")?;
             }
         }
-        if !primary.contains('/') && !primary.starts_with("cli:") {
-            let default_id = self.sh.providers.read().default_id().to_owned();
-            if default_id.starts_with("cli:") {
-                primary = format!("{default_id}/{primary}");
-            }
-        }
         let mut req = ChatRequest::new(ModelRef(primary.clone()), messages);
-        req.tools = tool_defs(&specs);
         req.max_tokens = self.sh.cfg.max_tokens;
         req.temperature = self.sh.cfg.temperature;
 
@@ -740,6 +767,7 @@ impl TurnExecutor {
             crate::CallPurpose::Executor
         };
         if primary.starts_with("cli:") {
+            note_metadata(&ctx, &specs, &mut metadata);
             let mut call =
                 crate::usage::CallGuard::start(&self.sh, &ctx, &primary, purpose).map_err(xe)?;
             call.tier(tier_active.then_some(crate::tiering::STANDARD));
@@ -787,6 +815,23 @@ impl TurnExecutor {
                 );
             }
             req.model = ModelRef((*name).clone());
+            let alternative;
+            let offered = if deferred && guard_reason.is_none() && name.starts_with("cli:") {
+                let mut cli_specs = self.sh.model_specs(&ctx.profile, ctx.bot_id, &hints.tools);
+                crate::discovery::bound_legacy(&mut cli_specs);
+                alternative = cli_specs;
+                &alternative
+            } else if deferred && tier_light && i > 0 && !ctx.profile.models.direct_tools_only {
+                alternative =
+                    self.sh
+                        .deferred_specs(&ctx, &crate::discovery::activations(&steps), false);
+                &alternative
+            } else {
+                &specs
+            };
+            let using_deferred = deferred && !name.starts_with("cli:");
+            req.tools = tool_defs(offered, using_deferred);
+            note_metadata(&ctx, offered, &mut metadata);
             let timeout = self.sh.cfg.guards.model_timeout;
             let attempt = tokio::time::timeout(
                 timeout,
@@ -794,7 +839,7 @@ impl TurnExecutor {
                     &ctx,
                     run,
                     &req,
-                    &specs,
+                    offered,
                     purpose,
                     tier_active.then_some(if tier_light && name.as_str() == primary {
                         crate::tiering::LIGHT
@@ -806,7 +851,10 @@ impl TurnExecutor {
             .await
             .unwrap_or(Err(ProviderError::Timeout));
             match attempt {
-                Ok(out) => {
+                Ok(mut out) => {
+                    if using_deferred {
+                        out.offered_tools = Some(offered.iter().map(|s| s.name.clone()).collect());
+                    }
                     result = Some(out);
                     break;
                 }
@@ -876,6 +924,7 @@ impl TurnExecutor {
                 self.light_call_blocker(
                     &ctx,
                     &hints.tools,
+                    out.offered_tools.as_deref(),
                     out.tool_calls
                         .iter()
                         .map(|c| (c.name.as_str(), c.arguments.as_str())),
@@ -1074,6 +1123,14 @@ impl TurnExecutor {
         let mut call = crate::usage::CallGuard::start(&self.sh, ctx, &model.0, purpose)
             .map_err(ProviderError::InvalidRequest)?;
         call.tier(tier);
+        let aliases: std::collections::HashMap<_, _> = req
+            .tools
+            .iter()
+            .zip(specs)
+            .filter_map(|(wire, spec)| {
+                Some((wire["function"]["name"].as_str()?.to_owned(), &spec.name))
+            })
+            .collect();
         let mut stream = provider.stream(req).await?;
         let mut out = ModelOut {
             model: model.0,
@@ -1092,8 +1149,8 @@ impl TurnExecutor {
                     out.text.push_str(&t);
                 }
                 ChatChunk::ToolCall(mut tc) => {
-                    if let Some(real) = specs.iter().find(|s| expose(&s.name) == tc.name) {
-                        tc.name.clone_from(&real.name);
+                    if let Some(real) = aliases.get(&tc.name) {
+                        tc.name.clone_from(real);
                     }
                     out.tool_calls.push(tc);
                 }
@@ -1127,7 +1184,15 @@ impl TurnExecutor {
         let ctx = self.sh.ctx(run)?;
         let calls: Vec<CallRec> =
             serde_json::from_value(step.input["calls"].clone()).map_err(xe)?;
-        let hints = route_hints(&self.sh.storage.list_steps(run.id).map_err(xe)?).tools;
+        let history = self.sh.storage.list_steps(run.id).map_err(xe)?;
+        let hints = route_hints(&history).tools;
+        let offered: Option<Vec<String>> = step
+            .input
+            .get("offered_tools")
+            .map(|value| serde_json::from_value(value.clone()))
+            .transpose()
+            .map_err(xe)?;
+        let active = crate::discovery::activations(&history);
         let light = step.input["tier"] == crate::tiering::LIGHT;
         if light
             && step.input["tier_model"]
@@ -1140,6 +1205,7 @@ impl TurnExecutor {
             && let Some(reason) = self.light_call_blocker(
                 &ctx,
                 &hints,
+                offered.as_deref(),
                 calls
                     .iter()
                     .map(|c| (c.name.as_str(), c.arguments.as_str())),
@@ -1152,6 +1218,7 @@ impl TurnExecutor {
         let mut uuids = Vec::with_capacity(calls.len());
         let mut invalid_calls = std::collections::HashSet::new();
         let mut knowledge_requests = std::collections::HashMap::new();
+        let mut activation_requests = std::collections::HashMap::new();
         for call in &calls {
             let call_uuid = ToolCallId::new();
             uuids.push(call_uuid);
@@ -1184,12 +1251,26 @@ impl TurnExecutor {
             };
             let Some(resolved) =
                 self.sh
-                    .resolve_call(&ctx.profile, ctx.bot_id, &call.name, &input, &hints)
+                    .resolve_offered(&ctx, &call.name, &input, &hints, offered.as_deref())
             else {
                 invalid_calls.insert(call_uuid);
                 slots.push(err(format!("unknown tool {:?}", call.name)));
                 continue;
             };
+            if call.name == agent_router::TOOL_DESCRIBE
+                && let Some(name) = input["name"].as_str()
+            {
+                match self.sh.check_activation(&ctx, name, &active) {
+                    Ok(true) => {
+                        activation_requests.insert(call_uuid, name.to_owned());
+                    }
+                    Ok(false) => {}
+                    Err(message) => {
+                        slots.push(err(message.into()));
+                        continue;
+                    }
+                }
+            }
             let meta = resolved
                 .spec
                 .as_ref()
@@ -1571,6 +1652,11 @@ impl TurnExecutor {
                 is_error,
                 text,
                 spill_path,
+                activated_tool: if !is_error && fact.ran {
+                    activation_requests.remove(&call_uuid)
+                } else {
+                    None
+                },
                 fact: Some(fact),
                 tier_executed: light.then_some(duration_ms.is_some()),
                 tier_invalid: light.then(|| invalid_calls.contains(&call_uuid)),
@@ -1803,6 +1889,15 @@ fn fact_note(ctx: &RunCtx, fact: &taint::ExecFact) {
         return;
     }
     fact.apply(&mut ctx.taint.lock());
+}
+
+fn note_metadata(ctx: &RunCtx, specs: &[ToolSpec], facts: &mut Vec<taint::ExecFact>) {
+    for fact in metadata_facts(specs) {
+        if !facts.iter().any(|f| f.label == fact.label) {
+            fact_note(ctx, &fact);
+            facts.push(fact);
+        }
+    }
 }
 
 /// External descriptions and schemas included in `specs`, as they were at

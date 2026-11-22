@@ -204,7 +204,10 @@ impl FakeTool {
         let tool = Arc::new(Self {
             spec: ToolSpec {
                 name: s.name.clone(),
-                description: format!("fake tool {}", s.name),
+                description: s
+                    .description
+                    .clone()
+                    .unwrap_or_else(|| format!("fake tool {}", s.name)),
                 input_schema: json!({"type": "object"}),
                 effect,
                 category: match s.category {
@@ -222,7 +225,11 @@ impl FakeTool {
                 },
                 platforms: vec![Platform::All],
 
-                content,
+                content: if s.name.starts_with("mcp:") && s.description.is_some() {
+                    content.with_external_metadata()
+                } else {
+                    content
+                },
             },
             always_ask,
             runs: Arc::clone(&runs),

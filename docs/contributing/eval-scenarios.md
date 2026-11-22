@@ -20,3 +20,9 @@ For the full scenario schema, tool content classes, and baseline commands, see:
 5. Use only synthetic domains (`example.com`, `example.test`, `evil.example`, `lookalike.example`) and synthetic tokens.
 6. Run `cargo test -p evals` and `cargo run -p evals --bin bot-eval -- run --tier 1 --filter inj- --repeat 3 --out run.jsonl`.
 7. If a new scenario reveals an undisclosed gate bypass, do **not** publish exploit details in a PR or public issue — follow [`SECURITY.md`](../../SECURITY.md).
+
+Set `deferred_tools: true` to exercise the deferred surface in scripted
+scenarios. A fake MCP tool's optional `description` is ingested as untrusted
+catalog metadata. Use `expect.requests` to check the tools offered before and
+after activation and `approval_cards[].text_not_contains` to check the entire
+approval summary and details for catalog prose.

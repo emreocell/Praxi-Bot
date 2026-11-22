@@ -20,8 +20,11 @@ use crate::shared::{
     schedule_id_of,
 };
 
-/// Providers (OpenAI-style) reject `.` in function names; expose `a.b` as `a__b`.
-pub(crate) fn expose(name: &str) -> String {
+fn expose(name: &str, deferred: bool) -> String {
+    if deferred {
+        return agent_router::provider_tool_name(name);
+    }
+    // Match the dotted aliases in historical model exchanges.
     name.replace('.', "__")
 }
 
@@ -57,14 +60,14 @@ pub(crate) fn system_prompt(profile: &BotProfile, subagent: bool, skills: Option
     s
 }
 
-pub(crate) fn tool_defs(specs: &[ToolSpec]) -> Vec<Value> {
+pub(crate) fn tool_defs(specs: &[ToolSpec], deferred: bool) -> Vec<Value> {
     specs
         .iter()
         .map(|s| {
             json!({
                 "type": "function",
                 "function": {
-                    "name": expose(&s.name),
+                    "name": expose(&s.name, deferred),
                     "description": s.description,
                     "parameters": s.input_schema,
                 }
@@ -74,7 +77,8 @@ pub(crate) fn tool_defs(specs: &[ToolSpec]) -> Vec<Value> {
 }
 
 /// The one-per-turn nudge after a silent end following tool calls.
-pub(crate) const NUDGE_TEXT: &str = "You looked up tools but did not use them. Call use_tool with the tool you found, or answer the user.";
+pub(crate) const NUDGE_TEXT: &str =
+    "Continue using the tools available to you, or answer the user.";
 
 /// Note appended to the closing, tool-less model call after a guard stopped the turn.
 pub(crate) const GUARD_NOTE: &str = "The turn was stopped by a safety limit ({reason}). Tools are no longer available. Summarize the progress made so far and what is left to do, in plain text.";
@@ -433,7 +437,7 @@ pub(crate) fn build_messages(
                         .tool_calls
                         .into_iter()
                         .map(|c| ToolCall {
-                            name: expose(&c.name),
+                            name: expose(&c.name, mo.offered_tools.is_some()),
                             ..c
                         })
                         .collect(),
@@ -2172,6 +2176,6 @@ mod tests {
 
     #[test]
     fn exposes_dotted_names() {
-        assert_eq!(expose("fs.read_file"), "fs__read_file");
+        assert_eq!(expose("fs.read_file", false), "fs__read_file");
     }
 }

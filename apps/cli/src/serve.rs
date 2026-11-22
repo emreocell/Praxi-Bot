@@ -1987,11 +1987,6 @@ host = "smtp.example.com"
         for want in ["spawn_subagent", "skill_list", "skill_read", "skill_write"] {
             assert!(names.iter().any(|n| n == want), "{want} in {names:?}");
         }
-        assert!(
-            names.len() <= LoopConfig::default().discovery_threshold,
-            "{} built-in tools exceed the direct limit",
-            names.len()
-        );
         assert!(names.iter().any(|n| n == "workflow_run"), "{names:?}");
         let idx = load_skills(dir.path());
         assert!(idx.write_dir().is_none());

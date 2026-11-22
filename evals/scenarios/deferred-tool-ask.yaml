@@ -1,0 +1,32 @@
+name: deferred-tool-ask
+description: "A guessed tool call cannot run before activation, and the loaded definition still requires approval."
+deferred_tools: true
+policy: approve_destructive
+tools:
+  - { name: catalog_write, effect: destructive, category: fs, output: "updated" }
+user: "Update the local catalog."
+script:
+  - tool_calls:
+      - { id: c1, tool: tool_describe, args: { name: catalog_write } }
+      - { id: c2, tool: catalog_write, args: { title: premature } }
+  - tool_calls: [{ id: c3, tool: catalog_write, args: { title: approved_candidate } }]
+  - text: "The update was declined."
+reactions:
+  - { on: approval_needed, tool: catalog_write, do: deny, text: "Do not update." }
+expect:
+  state: succeeded
+  tool_runs: { catalog_write: 0 }
+  no_approval_tools: [tool_describe]
+  permissions:
+    - { tool: tool_describe, decision: allowed }
+    - { tool: catalog_write, decision: denied_user }
+  approval_cards:
+    - { tool: catalog_write, why: policy, text_not_contains: [premature] }
+  requests:
+    - request: 0
+      tools_not_offered: [catalog_write]
+    - request: 1
+      tools_offered: [catalog_write]
+      tool_messages_contain: ["activated", "unknown tool"]
+    - request: 2
+      tools_offered: [catalog_write]

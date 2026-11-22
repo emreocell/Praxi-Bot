@@ -12,15 +12,7 @@ use secret_store::{Redactor, SecretStore};
 use storage::EventJournal;
 use task_runtime::RetryPolicy;
 
-/// Profile-visible, non-namespaced tool count above which the model sees the
-/// discovery tools instead of every tool, unless
-/// [`LoopConfig::discovery_threshold`] says otherwise.  Namespaced (`mcp:`)
-/// tools never count.  Same value as the router's own default.
-///
-/// The built-in set (with `spawn_subagent`, the skill and the workflow tools)
-/// is just over the router's own default of 25; the model should see these
-/// directly and only switch to `find_tool` / `use_tool` once plugins or MCP
-/// servers add many more.
+/// Maximum number of tool definitions on a model request.
 pub const DEFAULT_DIRECT_TOOL_LIMIT: usize = agent_router::DEFAULT_DISCOVERY_THRESHOLD;
 
 /// Default [`LoopConfig::schedule_approval_timeout`]: 30 minutes.
@@ -324,6 +316,7 @@ pub const DEFAULT_WAIT_FOR_PC_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 
 
 /// Configuration of an [`AgentLoop`](crate::AgentLoop).
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // Independent settings for the loop and replay.
 pub struct LoopConfig {
     /// Root computer runs admitted at once on the small host; children share a slot.
     pub max_computer_runs: usize,
@@ -342,10 +335,10 @@ pub struct LoopConfig {
     pub max_tokens: Option<u32>,
     /// Sampling temperature.
     pub temperature: Option<f64>,
-    /// Registry size above which the model sees the `find_tool` /
-    /// `get_tool_details` / `use_tool` discovery tools instead of every tool
-    /// (default [`DEFAULT_DIRECT_TOOL_LIMIT`]).
+    /// Direct-tool threshold for the legacy surface used by CLI sessions and replays.
     pub discovery_threshold: usize,
+    /// Reproduce the original tool definitions for recorded model exchanges.
+    pub legacy_tool_surface: bool,
     /// Thresholds and budgets of the K0-K3 decision ladder.
     pub ladder: agent_router::LadderConfig,
     /// Hard cap on the whole routing decision of a turn; when it is hit the
@@ -403,6 +396,7 @@ impl Default for LoopConfig {
             max_tokens: None,
             temperature: None,
             discovery_threshold: DEFAULT_DIRECT_TOOL_LIMIT,
+            legacy_tool_surface: false,
             ladder: agent_router::LadderConfig::default(),
             router_budget: Duration::from_secs(2),
             redactor: None,

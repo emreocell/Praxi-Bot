@@ -115,6 +115,7 @@ async fn run_with_source(
     }
     let redactor = scenario_redactor(s);
     let extras = TurnExtras {
+        deferred_tools: s.deferred_tools,
         redactor,
         fs_home: s.fs.as_ref().map(|_| workspace.path().join("project")),
         initiator: match s.initiator {
@@ -631,6 +632,18 @@ fn check_card_details(
     card: &protocol::event::ApprovalNeeded,
     out: &mut Vec<String>,
 ) {
+    let details_text = card
+        .details
+        .as_ref()
+        .map_or_else(String::new, serde_json::Value::to_string);
+    for needle in &want.text_not_contains {
+        if card.summary.contains(needle) || details_text.contains(needle) {
+            out.push(format!(
+                "approval_cards: {} contained forbidden text {needle:?}",
+                want.tool
+            ));
+        }
+    }
     let needs_details = want.kind.is_some()
         || want.why.is_some()
         || want.host_contains.is_some()

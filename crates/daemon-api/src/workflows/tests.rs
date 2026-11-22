@@ -144,6 +144,7 @@ fn setup_with(dir: tempfile::TempDir, safe_mode: bool, existing: Option<ChatId>)
         agent_core::Providers::single(provider.clone()),
         agent_core::LoopConfig {
             global_policy: permission_engine::Policy::full(),
+            legacy_tool_surface: true,
             redactor: Some(agent_core::SharedRedactor::default()),
             safe_mode,
             ..Default::default()
