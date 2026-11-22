@@ -183,7 +183,7 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       title: t("settingsModal.webSearch.title"),
       description: t("settingsModal.webSearch.description"),
       keywords: "web search searxng brave tavily duckduckgo bing arama internet",
-      node: <WebSearchCard />
+      node: <SettingsCard title={t("settingsModal.webSearch.title")} description={t("settingsModal.webSearch.description")}><WebSearchCard /></SettingsCard>
     }
   ];
 }
