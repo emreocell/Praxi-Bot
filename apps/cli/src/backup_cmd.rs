@@ -501,20 +501,19 @@ fn restore_encrypted(
     // touched, so a wrong passphrase or damaged file can never overwrite state.
     let found = inspect(&cmd.file, &passphrase)?;
     let m = &found.manifest;
+    // Progress notes go to stderr so stdout stays empty when the restore fails.
     if !json_out {
-        writeln!(
-            out,
+        eprintln!(
             "Backup: {} files, {} bytes, created with Praxi {}.",
             m.files.len(),
             found.bytes,
             m.app_version
-        )?;
-        if data_dir.join("bot.db").is_file() {
-            writeln!(
-                out,
+        );
+        if cmd.replace && data_dir.join("bot.db").is_file() {
+            eprintln!(
                 "Replacing the bots, chats, memory, skills, workflows and settings in {} (the current state is kept in a `backup-*` folder).",
                 data_dir.display()
-            )?;
+            );
         }
     }
     let opts = ImportOptions {
