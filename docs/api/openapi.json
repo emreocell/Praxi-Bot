@@ -8537,6 +8537,183 @@
         ]
       }
     },
+    "/v1/profile-share/export": {
+      "post": {
+        "tags": [
+          "bots"
+        ],
+        "summary": "Export one bot as a shareable profile file. Owner key required.",
+        "operationId": "export_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportOutput"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/profile-share/import": {
+      "post": {
+        "tags": [
+          "bots"
+        ],
+        "summary": "Create a bot from a profile file under the confirmed permission ceiling.\nOwner key required.",
+        "operationId": "import_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/profile-share/preview": {
+      "post": {
+        "tags": [
+          "bots"
+        ],
+        "summary": "Show what a profile file would be allowed to do. Creates nothing.",
+        "operationId": "preview_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/profile-share/templates": {
+      "get": {
+        "tags": [
+          "bots"
+        ],
+        "summary": "The built-in template gallery.",
+        "operationId": "profile_templates",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SharedProfile"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/providers": {
       "get": {
         "tags": [
@@ -13416,6 +13593,29 @@
           }
         }
       },
+      "CategoryPreview": {
+        "type": "object",
+        "description": "Requested versus granted level of one category.",
+        "required": [
+          "category",
+          "requested",
+          "granted"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Category name (`fs`, `shell`, ...)."
+          },
+          "granted": {
+            "$ref": "#/components/schemas/ShareLevel",
+            "description": "What the bot will get."
+          },
+          "requested": {
+            "$ref": "#/components/schemas/ShareLevel",
+            "description": "What the file asked for."
+          }
+        }
+      },
       "Cause": {
         "type": "string",
         "enum": [
@@ -15894,6 +16094,25 @@
           }
         }
       },
+      "ExportInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/profile-share/export`.",
+        "required": [
+          "bot_id"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Bot to export."
+          },
+          "include_schedules": {
+            "type": "boolean",
+            "description": "Also export the bot's text-prompt schedules as ideas (never as live schedules)."
+          }
+        },
+        "additionalProperties": false
+      },
       "ExportMessage": {
         "type": "object",
         "required": [
@@ -15931,6 +16150,24 @@
               "null"
             ],
             "format": "uuid"
+          }
+        }
+      },
+      "ExportOutput": {
+        "type": "object",
+        "description": "An exported profile file.",
+        "required": [
+          "filename",
+          "contents"
+        ],
+        "properties": {
+          "contents": {
+            "type": "string",
+            "description": "The file's text."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Suggested file name (`<name>.praxi-bot.json`)."
           }
         }
       },
@@ -17475,6 +17712,49 @@
           }
         }
       },
+      "ImportInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/profile-share/preview` and `/import`.",
+        "required": [
+          "contents"
+        ],
+        "properties": {
+          "computer_files": {
+            "type": "boolean",
+            "description": "Allow the whole computer for file tools. Default: no files until folders are chosen."
+          },
+          "contents": {
+            "type": "string",
+            "description": "The file's text (at most 64 KiB)."
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Main model (`provider/model`). Required to import when the file's own\nmodel is not available here."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name override."
+          },
+          "permission_level": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SharePreset",
+                "description": "Highest level the new bot may get; default `read-only`. The file can\nonly be lowered to it, never raised."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "ImportMessage": {
         "type": "object",
         "required": [
@@ -17532,6 +17812,156 @@
           }
         },
         "additionalProperties": false
+      },
+      "ImportOutput": {
+        "type": "object",
+        "description": "Result of an import.",
+        "required": [
+          "bot",
+          "preview"
+        ],
+        "properties": {
+          "bot": {
+            "$ref": "#/components/schemas/BotDto",
+            "description": "The new bot."
+          },
+          "preview": {
+            "$ref": "#/components/schemas/ImportPreview",
+            "description": "What it was allowed."
+          }
+        }
+      },
+      "ImportPreview": {
+        "type": "object",
+        "description": "What the profile will be allowed to do, shown before the bot is created.",
+        "required": [
+          "name",
+          "persona",
+          "requested_level",
+          "granted_level",
+          "categories",
+          "all_tools",
+          "tools_allow",
+          "tools_exclude",
+          "can_run_shell",
+          "can_use_files",
+          "can_control_desktop",
+          "can_use_browser",
+          "can_run_scripts",
+          "can_use_own_computer",
+          "skills",
+          "schedule_ideas",
+          "notes"
+        ],
+        "properties": {
+          "all_tools": {
+            "type": "boolean",
+            "description": "The tool allow list stays empty, meaning every tool (within the level)."
+          },
+          "can_control_desktop": {
+            "type": "boolean",
+            "description": "The bot could control the desktop."
+          },
+          "can_run_scripts": {
+            "type": "boolean",
+            "description": "The bot could run scripts."
+          },
+          "can_run_shell": {
+            "type": "boolean",
+            "description": "The bot could run shell commands."
+          },
+          "can_use_browser": {
+            "type": "boolean",
+            "description": "The bot could use a browser."
+          },
+          "can_use_files": {
+            "type": "boolean",
+            "description": "The bot could read or change files."
+          },
+          "can_use_own_computer": {
+            "type": "boolean",
+            "description": "The bot could act on the user's own computer (`pc_*`)."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryPreview"
+            },
+            "description": "Every category, requested versus granted."
+          },
+          "granted_level": {
+            "$ref": "#/components/schemas/SharePreset",
+            "description": "Level the bot will get (never above the importer's ceiling)."
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Preferred language."
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Main model the bot will use; `null` until one is chosen."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name the bot will get."
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewNote"
+            },
+            "description": "What was lowered, dropped or left out, and why."
+          },
+          "persona": {
+            "type": "string",
+            "description": "Persona text, in full: it is the bot's instructions and comes from a stranger."
+          },
+          "requested_level": {
+            "$ref": "#/components/schemas/SharePreset",
+            "description": "Level the file asked for."
+          },
+          "requested_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Model the file prefers."
+          },
+          "schedule_ideas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleIdea"
+            },
+            "description": "Schedule ideas (text only; none is created)."
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillPreview"
+            },
+            "description": "Skills the profile expects."
+          },
+          "tools_allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tool patterns the bot may use."
+          },
+          "tools_exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tool patterns removed."
+          }
+        }
       },
       "ImportRun": {
         "type": "object",
@@ -20420,6 +20850,26 @@
           }
         }
       },
+      "PreviewNote": {
+        "type": "object",
+        "description": "One note in the preview. `code` is stable (the UI translates it).",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "`level_lowered`, `rule_lowered`, `tool_dropped_unknown`,\n`tool_dropped_binding`, `tools_all_unknown`, `model_cli_dropped`,\n`model_unavailable`, `model_dropped`, `skill_missing`,\n`schedules_not_created`, `files_none`."
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What it is about (tool pattern, category, model, skill), if anything."
+          }
+        }
+      },
       "PreviewSchedule": {
         "type": "object",
         "description": "Body of `POST /v1/schedules/preview`.",
@@ -21617,6 +22067,32 @@
           }
         }
       },
+      "ScheduleIdea": {
+        "type": "object",
+        "description": "A scheduled-task idea: text only.",
+        "required": [
+          "title",
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "What the bot should do."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short title."
+          },
+          "when": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When, in plain words (\"every weekday at 8\")."
+          }
+        },
+        "additionalProperties": false
+      },
       "ScheduleIdsInput": {
         "type": "object",
         "required": [
@@ -22028,6 +22504,258 @@
           }
         }
       },
+      "ShareLevel": {
+        "type": "string",
+        "description": "A category level (`allow-with-limits` is not shareable: it resolves to ask).",
+        "enum": [
+          "deny",
+          "ask",
+          "allow"
+        ]
+      },
+      "SharePreset": {
+        "type": "string",
+        "description": "Permission level names, least to most permissive.",
+        "enum": [
+          "read-only",
+          "read-and-draft",
+          "approve-destructive",
+          "full"
+        ]
+      },
+      "SharedBot": {
+        "type": "object",
+        "description": "`bot` section.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Preferred language code."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "persona": {
+            "type": "string",
+            "description": "Persona / instructions."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SharedModels": {
+        "type": "object",
+        "description": "`models` section: `provider/model` references.",
+        "properties": {
+          "classifier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Router classifier model.",
+            "default": null
+          },
+          "executor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Preferred main model.",
+            "default": null
+          },
+          "fallback": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Fallback models.",
+            "default": []
+          },
+          "light": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Light model for simple first turns.",
+            "default": null
+          },
+          "planner": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Planner model.",
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "SharedPermissions": {
+        "type": "object",
+        "description": "`permissions` section.",
+        "properties": {
+          "categories": {
+            "type": "object",
+            "description": "Category rules layered over the preset.",
+            "default": {},
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SharedRule"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "preset": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SharePreset",
+                "description": "Requested level (unset = the app default, approve-destructive)."
+              }
+            ],
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "SharedProfile": {
+        "type": "object",
+        "description": "The shareable profile file (`*.praxi-bot.json`).",
+        "required": [
+          "format",
+          "format_version",
+          "bot"
+        ],
+        "properties": {
+          "bot": {
+            "$ref": "#/components/schemas/SharedBot",
+            "description": "Identity and instructions."
+          },
+          "format": {
+            "type": "string",
+            "description": "Always `praxi-bot-profile`."
+          },
+          "format_version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Schema version (`1`).",
+            "minimum": 0
+          },
+          "meta": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TemplateMeta",
+                "description": "Template metadata (gallery files only; never written by an export)."
+              }
+            ]
+          },
+          "models": {
+            "$ref": "#/components/schemas/SharedModels",
+            "description": "Model preference (a hint; the importer picks what is available)."
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/SharedPermissions",
+            "description": "Permission level and category rules (a request, clamped on import)."
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleIdea"
+            },
+            "description": "Scheduled-task ideas (never created by import)."
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SharedSkill"
+            },
+            "description": "Skills the bot expects (references; never installed or trusted by import)."
+          },
+          "tools": {
+            "$ref": "#/components/schemas/SharedTools",
+            "description": "Tool selection."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SharedRule": {
+        "type": "object",
+        "description": "A per-category rule.",
+        "required": [
+          "level"
+        ],
+        "properties": {
+          "by_initiator": {
+            "type": "object",
+            "description": "Per-initiator overrides (`human`, `schedule`, `routine`, ...).",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ShareLevel"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "level": {
+            "$ref": "#/components/schemas/ShareLevel",
+            "description": "Level for every initiator without an override."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SharedSkill": {
+        "type": "object",
+        "description": "A skill reference.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Skill name (a plain identifier, never a path)."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version the author used."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SharedTools": {
+        "type": "object",
+        "description": "`tools` section: allow / exclude globs over tool names.",
+        "properties": {
+          "allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Empty = every tool (still bounded by the permission level).",
+            "default": []
+          },
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Always removed.",
+            "default": []
+          }
+        },
+        "additionalProperties": false
+      },
       "SkillAssignmentModeDto": {
         "type": "string",
         "description": "Per-bot skill assignment mode.",
@@ -22206,6 +22934,31 @@
           "shared": {
             "type": "string",
             "description": "Shared owner-managed skill folder."
+          }
+        }
+      },
+      "SkillPreview": {
+        "type": "object",
+        "description": "A skill reference with its local state.",
+        "required": [
+          "name",
+          "installed"
+        ],
+        "properties": {
+          "installed": {
+            "type": "boolean",
+            "description": "A skill with this name is installed here (it keeps its own review state;\nimport neither installs nor trusts anything)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Skill name."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Author's version."
           }
         }
       },
@@ -22934,6 +23687,42 @@
             "$ref": "#/components/schemas/Reason"
           }
         }
+      },
+      "TemplateMeta": {
+        "type": "object",
+        "description": "Gallery metadata: id and per-language names and descriptions.",
+        "required": [
+          "id",
+          "names",
+          "descriptions"
+        ],
+        "properties": {
+          "descriptions": {
+            "type": "object",
+            "description": "One-sentence description per language code.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable template id (`researcher`, ...)."
+          },
+          "names": {
+            "type": "object",
+            "description": "Display name per language code (`en`, `tr`, `de`).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "TerminalInfo": {
         "type": "object",

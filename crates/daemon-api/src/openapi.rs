@@ -35,6 +35,8 @@ use crate::mcp_routes;
 use crate::mcp_server;
 use crate::memory;
 use crate::peer;
+use crate::profile_share;
+use crate::profile_share_routes;
 use crate::routes;
 use crate::secret_request_routes;
 use crate::skill_hub;
@@ -254,6 +256,10 @@ impl Modify for Security {
         routes::latest_cursor,
         routes::list_approvals,
         routes::list_bots,
+        profile_share_routes::export_profile,
+        profile_share_routes::import_profile,
+        profile_share_routes::preview_profile,
+        profile_share_routes::profile_templates,
         routes::list_channels,
         routes::list_chats,
         routes::list_grants,
@@ -496,6 +502,25 @@ impl Modify for Security {
         host_import::CheckBotsInput,
         host_import::CheckBotsReport,
         host_import::ImportBotInput,
+        profile_share::CategoryPreview,
+        profile_share::ImportPreview,
+        profile_share::PreviewNote,
+        profile_share::ScheduleIdea,
+        profile_share::ShareLevel,
+        profile_share::SharePreset,
+        profile_share::SharedBot,
+        profile_share::SharedModels,
+        profile_share::SharedPermissions,
+        profile_share::SharedProfile,
+        profile_share::SharedRule,
+        profile_share::SharedSkill,
+        profile_share::SharedTools,
+        profile_share::SkillPreview,
+        profile_share::TemplateMeta,
+        profile_share_routes::ExportInput,
+        profile_share_routes::ExportOutput,
+        profile_share_routes::ImportInput,
+        profile_share_routes::ImportOutput,
         host_import::ImportBotResult,
         host_import::ImportChat,
         host_import::ImportChatsInput,

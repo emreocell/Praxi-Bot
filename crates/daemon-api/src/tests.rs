@@ -40,6 +40,7 @@ mod mcp;
 mod memory;
 mod model_catalog;
 mod peer_knowledge;
+mod profile_share;
 mod safe_mode;
 mod schedules;
 mod secret_requests;

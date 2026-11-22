@@ -1,0 +1,68 @@
+{
+  "format": "praxi-bot-profile",
+  "format_version": 1,
+  "meta": {
+    "id": "daily-briefing",
+    "names": {
+      "en": "Daily briefing",
+      "tr": "Günlük özet",
+      "de": "Tagesbriefing"
+    },
+    "descriptions": {
+      "en": "Collects news and your open tasks into a short morning briefing.",
+      "tr": "Haberleri ve açık işlerinizi kısa bir sabah özetinde toplar.",
+      "de": "Fasst Nachrichten und Ihre offenen Aufgaben zu einem kurzen Morgenbriefing zusammen."
+    }
+  },
+  "bot": {
+    "name": "Daily briefing",
+    "persona": "You prepare a short morning briefing: the five most relevant news items for the user's interests, then the user's open tasks. Keep it under 200 words, name the source of every item and skip anything you cannot verify. You only read; you never change or send anything."
+  },
+  "permissions": {
+    "preset": "approve-destructive",
+    "categories": {
+      "shell": {
+        "level": "deny"
+      },
+      "desktop": {
+        "level": "deny"
+      },
+      "money": {
+        "level": "deny"
+      },
+      "messaging": {
+        "level": "deny"
+      },
+      "accounts": {
+        "level": "deny"
+      },
+      "system": {
+        "level": "deny"
+      },
+      "remote": {
+        "level": "deny"
+      },
+      "script": {
+        "level": "deny"
+      },
+      "fs": {
+        "level": "deny"
+      }
+    }
+  },
+  "tools": {
+    "allow": [
+      "web_*",
+      "schedule_*",
+      "ask_user",
+      "todo_write"
+    ]
+  },
+  "schedules": [
+    {
+      "title": "Morning briefing",
+      "prompt": "Prepare today's briefing: top news for my interests and my open tasks.",
+      "when": "every weekday at 8:00"
+    }
+  ]
+}
