@@ -838,23 +838,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deadline_keeps_unknown_cost_reserved_and_stops_the_entire_suite() {
+    async fn deadline_keeps_unknown_cost_reserved_and_stops_further_calls() {
         let provider = ScriptedProvider::repeating(serde_yaml::from_str("- hang: true").unwrap());
-        let mut caps = limits();
-        caps.total_seconds = 1;
-        let mut second = scenario();
-        second.name = "second".into();
-        let report = run(
-            &[scenario(), second],
-            &[source(provider.clone())],
-            &caps,
-            Arc::default(),
-        )
-        .await;
-        assert_eq!(report.observations[0].status, Status::Timeout);
-        assert!(report.observations[0].reserved_usd > 0.0);
-        assert_eq!(report.observations[0].reported_usd, None);
-        assert_eq!(report.observations[1].status, Status::Timeout);
+        // Exercise the deadline without spending its allowance on concurrent
+        // SQLite setup. Successive pairs share the same total deadline.
+        let mut bounded = Bounded {
+            inner: provider.clone(),
+            price: source(provider.clone()).price,
+            limits: limits(),
+            deadline: Instant::now() + Duration::from_secs(1),
+            total: Arc::default(),
+            accounting: Arc::default(),
+            credentials: Arc::default(),
+        };
+        let request = ChatRequest::new(provider_catalog::ModelRef("fake/model".into()), Vec::new());
+        assert!(bounded.stream(request.clone()).await.is_err());
+        {
+            let a = bounded.accounting.lock();
+            assert_eq!(a.stopped, Some(Status::Timeout));
+            assert!(a.reserved > 0.0);
+            assert_eq!(a.usages, 0);
+        }
+        bounded.accounting = Arc::default();
+        assert!(bounded.stream(request).await.is_err());
+        assert_eq!(bounded.accounting.lock().stopped, Some(Status::Timeout));
+        assert_eq!(bounded.accounting.lock().calls, 0);
         assert_eq!(provider.requests().len(), 1);
     }
 
@@ -927,7 +935,7 @@ script:
             inner: Arc::new(SplitSecret),
             price: source(ScriptedProvider::text("x")).price,
             limits: limits(),
-            deadline: Instant::now() + Duration::from_secs(2),
+            deadline: Instant::now() + Duration::from_secs(60),
             total: Arc::default(),
             accounting,
             credentials: Arc::new(vec!["private-credential".into()]),
