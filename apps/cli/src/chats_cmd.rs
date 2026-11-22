@@ -1,6 +1,6 @@
 //! `bot chats list|export|import`: read, archive and load chat transcripts.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use clap::Subcommand;
@@ -164,37 +164,11 @@ async fn import(
 ) -> Result<()> {
     let bot =
         uuid::Uuid::parse_str(bot).map_err(|_| fail(exit::REJECTED, "bot id must be a UUID"))?;
-    let size = std::fs::metadata(file)
-        .map_err(|error| {
-            fail(
-                exit::GENERIC,
-                format!("cannot read {}: {error}", file.display()),
-            )
-        })?
-        .len();
-    if size > MAX_IMPORT_FILE_BYTES {
-        return Err(fail(
-            exit::REJECTED,
-            format!(
-                "{} is larger than the {} MiB import limit",
-                file.display(),
-                MAX_IMPORT_FILE_BYTES / (1024 * 1024)
-            ),
-        ));
-    }
-    let data = std::fs::read(file).map_err(|error| {
-        fail(
-            exit::GENERIC,
-            format!("cannot read {}: {error}", file.display()),
-        )
-    })?;
-    let doc: serde_json::Value = serde_json::from_slice(&data).map_err(|error| {
+    let data = read_import_file(file)?;
+    let doc: serde_json::Value = serde_json::from_slice(&data).map_err(|_| {
         fail(
             exit::REJECTED,
-            format!(
-                "{} is not a valid JSON chat export: {error}",
-                file.display()
-            ),
+            format!("{} is not a valid JSON chat export", file.display()),
         )
     })?;
     let report = c
@@ -217,6 +191,85 @@ async fn import(
         )?;
     }
     Ok(())
+}
+
+/// Read a regular import file without following a symlink. On Unix the
+/// `O_NOFOLLOW` open closes the check/open race; the opened handle is also
+/// checked and read with a hard byte cap.
+fn read_import_file(path: &std::path::Path) -> Result<Vec<u8>> {
+    let meta = std::fs::symlink_metadata(path).map_err(|error| {
+        fail(
+            exit::GENERIC,
+            format!("cannot read {}: {error}", path.display()),
+        )
+    })?;
+    if meta.file_type().is_symlink() {
+        return Err(fail(
+            exit::REJECTED,
+            format!(
+                "refusing to import through symlink {}; pass the regular file",
+                path.display()
+            ),
+        ));
+    }
+    if !meta.is_file() {
+        return Err(fail(
+            exit::REJECTED,
+            format!("{} is not a regular file", path.display()),
+        ));
+    }
+    if meta.len() > MAX_IMPORT_FILE_BYTES {
+        return Err(too_large(path));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options.open(path).map_err(|error| {
+        fail(
+            exit::GENERIC,
+            format!("cannot read {}: {error}", path.display()),
+        )
+    })?;
+    let opened = file.metadata().map_err(|error| {
+        fail(
+            exit::GENERIC,
+            format!("cannot inspect {}: {error}", path.display()),
+        )
+    })?;
+    if !opened.is_file() {
+        return Err(fail(
+            exit::REJECTED,
+            format!("{} is not a regular file", path.display()),
+        ));
+    }
+    let mut data = Vec::new();
+    file.take(MAX_IMPORT_FILE_BYTES + 1)
+        .read_to_end(&mut data)
+        .map_err(|error| {
+            fail(
+                exit::GENERIC,
+                format!("cannot read {}: {error}", path.display()),
+            )
+        })?;
+    if data.len() as u64 > MAX_IMPORT_FILE_BYTES {
+        return Err(too_large(path));
+    }
+    Ok(data)
+}
+
+fn too_large(path: &std::path::Path) -> Box<dyn std::error::Error> {
+    fail(
+        exit::REJECTED,
+        format!(
+            "{} is larger than the {} MiB import limit",
+            path.display(),
+            MAX_IMPORT_FILE_BYTES / (1024 * 1024)
+        ),
+    )
 }
 
 /// Create a private export file. `create_new` refuses an existing path and a
@@ -523,6 +576,35 @@ mod tests {
             &client,
             &ChatsCmd::Import {
                 file,
+                bot: uuid::Uuid::from_u128(4).to_string(),
+            },
+            false,
+            &mut Vec::new(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<crate::client::ExitError>()
+                .map(|error| error.code),
+            Some(exit::REJECTED)
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn import_refuses_a_symlink_even_when_it_points_at_json() {
+        let server = MockServer::start().await;
+        let client = Client::new(&server.uri(), "tok".into());
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("chat.json");
+        std::fs::write(&target, b"{\"format_version\":1,\"messages\":[]}").unwrap();
+        let link = dir.path().join("link.json");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let error = run(
+            &client,
+            &ChatsCmd::Import {
+                file: link,
                 bot: uuid::Uuid::from_u128(4).to_string(),
             },
             false,
