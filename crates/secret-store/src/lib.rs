@@ -9,6 +9,9 @@
 //!   at the provider / MCP boundary (ADR-0012).
 //! - [`detect_secrets`]: precision-first detection of a pasted credential in a
 //!   chat message (see `docs/design/secret-detection.md`).
+//! - [`scan_text`]: gitleaks-derived rule scan (keyword prefilter, lazy regexes)
+//!   returning [`Finding`]s (rule id and span, never the value), for warnings
+//!   before a secret is sent and for leak tests.
 //! - [`Redactor`]: masks known secret values and common key shapes in any
 //!   string (tool output, logs, events).
 
@@ -22,6 +25,8 @@ mod open;
 #[cfg(windows)]
 mod publish;
 mod redact;
+mod rules;
+mod scan;
 mod secret;
 mod transaction;
 mod wipe;
@@ -41,6 +46,7 @@ pub use open::{
     secrets_file_path,
 };
 pub use redact::{REDACTED, Redactor, secret_variants};
+pub use scan::{Finding, scan_text};
 pub use secret::{
     FILL_PREFIX, RESERVED_PREFIX, SecretRef, SecretStore, SecretValue, is_fill_name,
     is_host_credential, is_managed_oauth_name, is_reserved_name, refuse_fill_namespace, resolve,

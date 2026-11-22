@@ -7599,6 +7599,7 @@ dependencies = [
 name = "secret-store"
 version = "0.1.0"
 dependencies = [
+ "aho-corasick",
  "argon2",
  "base64 0.22.1",
  "chacha20poly1305",

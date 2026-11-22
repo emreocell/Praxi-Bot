@@ -1,7 +1,6 @@
 //! Leak detection: mask secrets in arbitrary text.
 
-use regex::Regex;
-
+use crate::scan;
 use crate::secret::SecretStore;
 
 /// Replacement text for masked secrets.
@@ -11,8 +10,9 @@ pub const REDACTED: &str = "[REDACTED]";
 const MIN_SECRET_LEN: usize = 6;
 
 /// Always-on shapes of common credentials as `(id, regex)`. The ids are
-/// stable names that [`crate::detect`] maps to kinds; the redactor only uses
-/// the regexes.
+/// stable names that [`crate::detect`] maps to kinds. [`crate::scan`] runs
+/// them next to the generated gitleaks rule table (lazily compiled, behind a
+/// keyword prefilter), so the redactor masks both.
 pub(crate) const SHAPES: &[(&str, &str)] = &[
     // OpenAI / Anthropic / OpenRouter style keys.
     ("openai_style", r"sk-[A-Za-z0-9_-]{16,}"),
@@ -99,7 +99,6 @@ fn percent_encode(value: &str, strict: bool, form: bool, lower: bool) -> String 
 #[derive(Debug, Clone)]
 pub struct Redactor {
     values: Vec<String>,
-    patterns: Vec<Regex>,
 }
 
 impl Default for Redactor {
@@ -109,19 +108,11 @@ impl Default for Redactor {
 }
 
 impl Redactor {
-    /// A redactor with only the built-in patterns.
-    ///
-    /// # Panics
-    /// Never in practice: the built-in patterns are valid regexes.
+    /// A redactor with only the built-in patterns (compiled lazily, once per
+    /// process, on first use).
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            values: Vec::new(),
-            patterns: SHAPES
-                .iter()
-                .map(|(_, p)| Regex::new(p).expect("built-in pattern is valid"))
-                .collect(),
-        }
+        Self { values: Vec::new() }
     }
 
     /// Register a concrete secret value (ignored when very short).
@@ -156,19 +147,13 @@ impl Redactor {
                 out = out.replace(v.as_str(), REDACTED);
             }
         }
-        for re in &self.patterns {
-            if re.is_match(&out) {
-                out = re.replace_all(&out, REDACTED).into_owned();
-            }
-        }
-        out
+        scan::mask(&out, REDACTED)
     }
 
     /// Whether `text` contains anything that would be masked.
     #[must_use]
     pub fn contains_secret(&self, text: &str) -> bool {
-        self.values.iter().any(|v| text.contains(v.as_str()))
-            || self.patterns.iter().any(|re| re.is_match(text))
+        self.values.iter().any(|v| text.contains(v.as_str())) || !scan::scan_text(text).is_empty()
     }
 }
 
