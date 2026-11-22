@@ -1,7 +1,13 @@
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, FileUp } from "lucide-react";
 import { Button } from "ui";
+import { ProfileImportView, type ProfileSource } from "../components/ProfileImportView";
+import {
+  type SharedProfile,
+  templateDescription,
+  templateName
+} from "../lib/profileShare";
 import type { Bot } from "../api/types";
 import { BotAvatarUploadField, useBotFormDeps } from "../components/BotAdvancedFields";
 import {
@@ -50,7 +56,7 @@ function NewBotDialogContent({
   onDone: (botId: string) => void;
   onClose: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { client, bots, conn, refreshBots, activeComputerId, activeHostName } = useDaemon();
   const { askEngine, applyEngine } = useEngineConsent();
   const host = activeComputerId === LOCAL_COMPUTER ? null : { name: activeHostName ?? t("computerPicker.host") };
@@ -65,6 +71,22 @@ function NewBotDialogContent({
   } = useBotFormDeps(client, undefined, true);
 
   const [createdBot, setCreatedBot] = useState<Bot | null>(null);
+  // Gallery templates and "Import from file" open the preview view instead of this form.
+  const [importSource, setImportSource] = useState<ProfileSource | null>(null);
+  const [gallery, setGallery] = useState<SharedProfile[]>([]);
+  useEffect(() => {
+    if (!client) return undefined;
+    let cancelled = false;
+    client
+      .profileTemplates()
+      .then((list) => {
+        if (!cancelled) setGallery(list);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
   const [templateId, setTemplateId] = useState<BotTemplateId | null>("blank");
   const [draft, setDraft] = useState<BotDraft>(() => ({
     ...draftFromBot(undefined),
@@ -204,6 +226,17 @@ function NewBotDialogContent({
     void save();
   };
 
+  if (importSource) {
+    return (
+      <ProfileImportView
+        source={importSource}
+        providersDto={providersDto}
+        onBack={() => setImportSource(null)}
+        onDone={onDone}
+      />
+    );
+  }
+
   return (
     <form className={styles.modalForm} onSubmit={handleSubmit} noValidate>
       <DialogHeader
@@ -235,6 +268,45 @@ function NewBotDialogContent({
             );
           })}
         </div>
+
+        {!createdBot ? (
+          <section
+            className={styles.gallery}
+            aria-label={t("profileShare.galleryLabel")}
+            data-testid="profile-gallery"
+          >
+            <div className={styles.galleryCards}>
+              {gallery.map((p) => (
+                <button
+                  key={p.meta?.id ?? p.bot.name}
+                  type="button"
+                  className={styles.galleryCard}
+                  data-testid={`gallery-${p.meta?.id ?? ""}`}
+                  onClick={() =>
+                    setImportSource({
+                      kind: "template",
+                      contents: JSON.stringify(p),
+                      requested: p.permissions?.preset ?? undefined
+                    })
+                  }
+                >
+                  <span className={styles.galleryName}>{templateName(p, i18n.language)}</span>
+                  <span className={styles.galleryDesc}>
+                    {templateDescription(p, i18n.language)}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="profile-import-open"
+              onClick={() => setImportSource({ kind: "file" })}
+            >
+              <FileUp aria-hidden="true" /> {t("profileShare.importFromFile")}
+            </Button>
+          </section>
+        ) : null}
 
         <BotIdentityPicker
           previewId={createdBot?.id ?? "new-bot-preview"}

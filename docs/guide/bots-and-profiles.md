@@ -184,8 +184,53 @@ permissive than the bot that started it.
 ## Planned
 
 The design documents describe things that are not part of the profile yet:
-runtime selection (which computer a bot controls), memory settings, per-bot
-connector accounts, and a profile import/export format for sharing bots.
+runtime selection (which computer a bot controls), memory settings and per-bot
+connector accounts.
+
+## Sharing a bot: profile files and the template gallery
+
+A bot's **shareable profile** is one JSON file (`*.praxi-bot.json`,
+`"format": "praxi-bot-profile"`, `"format_version": 1`). It carries the name,
+the instructions (persona), the model preference, the tool selection
+(`allow` / `exclude`), the permission level and per-category rules, the skills
+the bot expects (name and version only) and, optionally, scheduled-task ideas.
+
+**Never in the file:** API keys and other secrets, vault entries, "always
+allow" grants, the egress waiver (`allow_egress_after_reads`), memory,
+knowledge sources, chats, connected apps and accounts (`mcp:*` tools), trusted
+or other folders, CLI engine settings, the computer target, paired devices and
+the avatar. The file is built from an allow-list, not by deleting fields, and
+an export is refused when the persona looks like it holds a secret.
+
+- Export: the **Export profile** button in the bot's settings, or
+  `bot profile export <BOT_ID> [--out FILE] [--schedules]`. Owner only.
+- Import: **New bot → Import from file** or
+  `bot profile import FILE [--level LEVEL] [--model provider/model] [--yes]`.
+  Import first shows a **preview**: the level the file asked for and the level
+  the bot will get, every category, whether it could run shell commands, use
+  files, the desktop, a browser or scripts, the tools, the skills it expects,
+  what was left out, and the full persona text. Nothing is created until you
+  confirm.
+- **A ceiling, not a request.** You choose the highest permission level the
+  new bot may get (default `read-only`). The file's level and every category or
+  per-initiator rule are lowered to it, never raised. Unknown tools, app
+  bindings and command-line engines are dropped with a note; an emptied tool
+  list never turns into "every tool". File access starts at "no folders" until
+  you allow the whole computer or choose folders. Skills are only listed
+  (nothing is installed or trusted by an import), and scheduled-task ideas are
+  shown but never created.
+- Strictness: files over 64 KiB, unknown fields, a newer `format_version`,
+  control or bidirectional-override characters, path-like skill names and
+  secret-looking text are refused. Importing never reads a path or fetches a
+  URL named in the file.
+- **Template gallery.** The new-bot dialog offers built-in templates
+  (Researcher, Inbox triage, Daily briefing, Coder, Family helper) with English,
+  Turkish and German names. They are data files in
+  `crates/daemon-api/templates/` in the same format; a test checks that every
+  template parses and imports under a ceiling. They go through the same preview.
+
+Export and import are written to the audit log (`profile.export`,
+`profile.import`). Paired devices cannot reach these routes.
 
 
 ### Computer target

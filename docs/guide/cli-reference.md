@@ -185,6 +185,16 @@ and JSON files as the desktop app.
 | `bot bots list` | List bots |
 | `bot bots add <FILE>` | Create a bot from a profile TOML file |
 
+### `bot profile`
+
+Share a bot as one file without secrets (see
+[Bots and profiles](bots-and-profiles.md#sharing-a-bot-profile-files-and-the-template-gallery)).
+
+| Subcommand | Meaning |
+| --- | --- |
+| `bot profile export <BOT_ID> [--out FILE] [--schedules]` | Write the bot's shareable profile (never overwrites a file) |
+| `bot profile import <FILE> [--level LEVEL] [--model M] [--name N] [--computer-files] [--yes]` | Show what the profile may do; with `--yes` create the bot, never above `--level` (default `read-only`) |
+
 ### `bot approve <TOOL_CALL_ID>`
 
 Approve or deny a pending tool call.

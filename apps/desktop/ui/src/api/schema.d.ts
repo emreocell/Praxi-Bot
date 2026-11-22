@@ -2408,6 +2408,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/profile-share/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Export one bot as a shareable profile file. Owner key required. */
+        post: operations["export_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/profile-share/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a bot from a profile file under the confirmed permission ceiling.
+         *     Owner key required.
+         */
+        post: operations["import_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/profile-share/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Show what a profile file would be allowed to do. Creates nothing. */
+        post: operations["preview_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/profile-share/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The built-in template gallery. */
+        get: operations["profile_templates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers": {
         parameters: {
             query?: never;
@@ -3932,6 +4003,15 @@ export interface components {
             /** @description `true` when `allow` holds only because of a category grant. */
             via_grant: boolean;
         };
+        /** @description Requested versus granted level of one category. */
+        CategoryPreview: {
+            /** @description Category name (`fs`, `shell`, ...). */
+            category: string;
+            /** @description What the bot will get. */
+            granted: components["schemas"]["ShareLevel"];
+            /** @description What the file asked for. */
+            requested: components["schemas"]["ShareLevel"];
+        };
         /** @enum {string} */
         Cause: "idle" | "action" | "refresh";
         /**
@@ -4934,6 +5014,16 @@ export interface components {
             /** Format: uuid */
             run_id: string;
         };
+        /** @description Body of `POST /v1/profile-share/export`. */
+        ExportInput: {
+            /**
+             * Format: uuid
+             * @description Bot to export.
+             */
+            bot_id: string;
+            /** @description Also export the bot's text-prompt schedules as ideas (never as live schedules). */
+            include_schedules?: boolean;
+        };
         ExportMessage: {
             /** @description Display names only: no paths, URLs, extracted text or bytes. */
             attachments: string[];
@@ -4945,6 +5035,13 @@ export interface components {
             role: string;
             /** Format: uuid */
             run_id?: string | null;
+        };
+        /** @description An exported profile file. */
+        ExportOutput: {
+            /** @description The file's text. */
+            contents: string;
+            /** @description Suggested file name (`<name>.praxi-bot.json`). */
+            filename: string;
         };
         ExportStep: {
             /** Format: int64 */
@@ -5487,6 +5584,21 @@ export interface components {
             /** Format: int32 */
             runs: number;
         };
+        /** @description Body of `POST /v1/profile-share/preview` and `/import`. */
+        ImportInput: {
+            /** @description Allow the whole computer for file tools. Default: no files until folders are chosen. */
+            computer_files?: boolean;
+            /** @description The file's text (at most 64 KiB). */
+            contents: string;
+            /**
+             * @description Main model (`provider/model`). Required to import when the file's own
+             *     model is not available here.
+             */
+            model?: string | null;
+            /** @description Name override. */
+            name?: string | null;
+            permission_level?: null | components["schemas"]["SharePreset"];
+        };
         ImportMessage: {
             /** Format: uuid */
             chat_id: string;
@@ -5504,6 +5616,56 @@ export interface components {
             role: string;
             /** Format: uuid */
             run_id?: string | null;
+        };
+        /** @description Result of an import. */
+        ImportOutput: {
+            /** @description The new bot. */
+            bot: components["schemas"]["BotDto"];
+            /** @description What it was allowed. */
+            preview: components["schemas"]["ImportPreview"];
+        };
+        /** @description What the profile will be allowed to do, shown before the bot is created. */
+        ImportPreview: {
+            /** @description The tool allow list stays empty, meaning every tool (within the level). */
+            all_tools: boolean;
+            /** @description The bot could control the desktop. */
+            can_control_desktop: boolean;
+            /** @description The bot could run scripts. */
+            can_run_scripts: boolean;
+            /** @description The bot could run shell commands. */
+            can_run_shell: boolean;
+            /** @description The bot could use a browser. */
+            can_use_browser: boolean;
+            /** @description The bot could read or change files. */
+            can_use_files: boolean;
+            /** @description The bot could act on the user's own computer (`pc_*`). */
+            can_use_own_computer: boolean;
+            /** @description Every category, requested versus granted. */
+            categories: components["schemas"]["CategoryPreview"][];
+            /** @description Level the bot will get (never above the importer's ceiling). */
+            granted_level: components["schemas"]["SharePreset"];
+            /** @description Preferred language. */
+            language?: string | null;
+            /** @description Main model the bot will use; `null` until one is chosen. */
+            model?: string | null;
+            /** @description Name the bot will get. */
+            name: string;
+            /** @description What was lowered, dropped or left out, and why. */
+            notes: components["schemas"]["PreviewNote"][];
+            /** @description Persona text, in full: it is the bot's instructions and comes from a stranger. */
+            persona: string;
+            /** @description Level the file asked for. */
+            requested_level: components["schemas"]["SharePreset"];
+            /** @description Model the file prefers. */
+            requested_model?: string | null;
+            /** @description Schedule ideas (text only; none is created). */
+            schedule_ideas: components["schemas"]["ScheduleIdea"][];
+            /** @description Skills the profile expects. */
+            skills: components["schemas"]["SkillPreview"][];
+            /** @description Tool patterns the bot may use. */
+            tools_allow: string[];
+            /** @description Tool patterns removed. */
+            tools_exclude: string[];
         };
         /** @description Run metadata only: no error text, no spawn parameters, no computer identity. */
         ImportRun: {
@@ -6536,6 +6698,18 @@ export interface components {
             /** @description `read-only`, `approve-destructive`, `read-and-draft` or `full`. */
             preset?: string | null;
         };
+        /** @description One note in the preview. `code` is stable (the UI translates it). */
+        PreviewNote: {
+            /**
+             * @description `level_lowered`, `rule_lowered`, `tool_dropped_unknown`,
+             *     `tool_dropped_binding`, `tools_all_unknown`, `model_cli_dropped`,
+             *     `model_unavailable`, `model_dropped`, `skill_missing`,
+             *     `schedules_not_created`, `files_none`.
+             */
+            code: string;
+            /** @description What it is about (tool pattern, category, model, skill), if anything. */
+            subject?: string | null;
+        };
         /** @description Body of `POST /v1/schedules/preview`. */
         PreviewSchedule: {
             /** @description Number of upcoming occurrences to compute (default 5, max 100). */
@@ -7035,6 +7209,15 @@ export interface components {
              */
             status: string;
         };
+        /** @description A scheduled-task idea: text only. */
+        ScheduleIdea: {
+            /** @description What the bot should do. */
+            prompt: string;
+            /** @description Short title. */
+            title: string;
+            /** @description When, in plain words ("every weekday at 8"). */
+            when?: string | null;
+        };
         ScheduleIdsInput: {
             ids: string[];
         };
@@ -7193,6 +7376,117 @@ export interface components {
             value: string;
         };
         /**
+         * @description A category level (`allow-with-limits` is not shareable: it resolves to ask).
+         * @enum {string}
+         */
+        ShareLevel: "deny" | "ask" | "allow";
+        /**
+         * @description Permission level names, least to most permissive.
+         * @enum {string}
+         */
+        SharePreset: "read-only" | "read-and-draft" | "approve-destructive" | "full";
+        /** @description `bot` section. */
+        SharedBot: {
+            /** @description Preferred language code. */
+            language?: string | null;
+            /** @description Display name. */
+            name: string;
+            /** @description Persona / instructions. */
+            persona?: string;
+        };
+        /** @description `models` section: `provider/model` references. */
+        SharedModels: {
+            /**
+             * @description Router classifier model.
+             * @default null
+             */
+            classifier: string | null;
+            /**
+             * @description Preferred main model.
+             * @default null
+             */
+            executor: string | null;
+            /**
+             * @description Fallback models.
+             * @default []
+             */
+            fallback: string[];
+            /**
+             * @description Light model for simple first turns.
+             * @default null
+             */
+            light: string | null;
+            /**
+             * @description Planner model.
+             * @default null
+             */
+            planner: string | null;
+        };
+        /** @description `permissions` section. */
+        SharedPermissions: {
+            /**
+             * @description Category rules layered over the preset.
+             * @default {}
+             */
+            categories: {
+                [key: string]: components["schemas"]["SharedRule"];
+            };
+            /** @default null */
+            preset: null | components["schemas"]["SharePreset"];
+        };
+        /** @description The shareable profile file (`*.praxi-bot.json`). */
+        SharedProfile: {
+            /** @description Identity and instructions. */
+            bot: components["schemas"]["SharedBot"];
+            /** @description Always `praxi-bot-profile`. */
+            format: string;
+            /**
+             * Format: int32
+             * @description Schema version (`1`).
+             */
+            format_version: number;
+            meta?: null | components["schemas"]["TemplateMeta"];
+            /** @description Model preference (a hint; the importer picks what is available). */
+            models?: components["schemas"]["SharedModels"];
+            /** @description Permission level and category rules (a request, clamped on import). */
+            permissions?: components["schemas"]["SharedPermissions"];
+            /** @description Scheduled-task ideas (never created by import). */
+            schedules?: components["schemas"]["ScheduleIdea"][];
+            /** @description Skills the bot expects (references; never installed or trusted by import). */
+            skills?: components["schemas"]["SharedSkill"][];
+            /** @description Tool selection. */
+            tools?: components["schemas"]["SharedTools"];
+        };
+        /** @description A per-category rule. */
+        SharedRule: {
+            /** @description Per-initiator overrides (`human`, `schedule`, `routine`, ...). */
+            by_initiator?: {
+                [key: string]: components["schemas"]["ShareLevel"];
+            };
+            /** @description Level for every initiator without an override. */
+            level: components["schemas"]["ShareLevel"];
+        };
+        /** @description A skill reference. */
+        SharedSkill: {
+            /** @description Skill name (a plain identifier, never a path). */
+            name: string;
+            /** @description Version the author used. */
+            version?: string | null;
+        };
+        /** @description `tools` section: allow / exclude globs over tool names. */
+        SharedTools: {
+            /**
+             * @description Empty = every tool (still bounded by the permission level).
+             * @default []
+             */
+            allow: string[];
+            /**
+             * @description Always removed.
+             * @default []
+             */
+            exclude: string[];
+        };
+        /**
          * @description Per-bot skill assignment mode.
          * @enum {string}
          */
@@ -7254,6 +7548,18 @@ export interface components {
             bundled: string;
             /** @description Shared owner-managed skill folder. */
             shared: string;
+        };
+        /** @description A skill reference with its local state. */
+        SkillPreview: {
+            /**
+             * @description A skill with this name is installed here (it keeps its own review state;
+             *     import neither installs nor trusts anything).
+             */
+            installed: boolean;
+            /** @description Skill name. */
+            name: string;
+            /** @description Author's version. */
+            version?: string | null;
         };
         /** @description Auto-suggestion triggers declared in a skill's `when:` frontmatter. */
         SkillRequiresDto: {
@@ -7567,6 +7873,19 @@ export interface components {
             host_id: string;
             kind: components["schemas"]["TargetKind"];
             reason: components["schemas"]["Reason"];
+        };
+        /** @description Gallery metadata: id and per-language names and descriptions. */
+        TemplateMeta: {
+            /** @description One-sentence description per language code. */
+            descriptions: {
+                [key: string]: string;
+            };
+            /** @description Stable template id (`researcher`, ...). */
+            id: string;
+            /** @description Display name per language code (`en`, `tr`, `de`). */
+            names: {
+                [key: string]: string;
+            };
         };
         TerminalInfo: {
             /** Format: int32 */
@@ -13538,6 +13857,126 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    export_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportOutput"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    import_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportOutput"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    preview_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportPreview"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    profile_templates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedProfile"][];
                 };
             };
         };

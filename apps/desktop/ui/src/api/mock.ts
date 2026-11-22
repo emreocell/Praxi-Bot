@@ -1648,6 +1648,11 @@ export class MockApiClient extends ApiClient {
       case "POST /secrets":
         this.secrets.set(seg[1] ?? "", Date.now());
         return ok(undefined);
+      case "GET /profile-share":
+        return ok([]);
+      case "POST /profile-share":
+        // Preview, import and export need the daemon's validator; the demo has none.
+        throw new ApiError(422, "bad_profile", "profile sharing needs a running daemon");
       case "POST /bots": {
         const input = opts.body as { name: string; config: unknown };
         if (this.bots.some((b) => b.name.toLowerCase() === input.name.toLowerCase())) {
