@@ -42,4 +42,8 @@ pub const COMMAND_NAMES: &[&str] = &[
     "notify_take_actions",
     "set_needs_count",
     "set_tray_labels",
+    "update_status",
+    "update_check",
+    "update_install",
+    "update_rollback",
 ];

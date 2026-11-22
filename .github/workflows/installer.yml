@@ -84,8 +84,24 @@ jobs:
           Remove-Item $pfx
           "WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
-      - name: Build installer (unsigned)
-        run: pnpm build:desktop
+      # In-app updates (docs/updates.md). Without the updater key the installer is built exactly
+      # as before and the app has updates switched off; no unsigned update can ever be produced.
+      - name: Build installer
+        shell: pwsh
+        env:
+          PRAXI_UPDATER_PUBKEY: ${{ vars.PRAXI_UPDATER_PUBKEY }}
+          PRAXI_UPDATER_ENDPOINT: ${{ vars.PRAXI_UPDATER_ENDPOINT }}
+          PRAXI_UPDATER_ROLLBACK_ENDPOINT: ${{ vars.PRAXI_UPDATER_ROLLBACK_ENDPOINT }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ($env:TAURI_SIGNING_PRIVATE_KEY -and $env:PRAXI_UPDATER_PUBKEY) {
+            Write-Host "Updater signing key present: also producing signed update artifacts"
+            pnpm build:desktop --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          } else {
+            Write-Host "No updater signing key: building the installer without update artifacts"
+            pnpm build:desktop
+          }
 
       - name: Smoke test installer
         shell: pwsh

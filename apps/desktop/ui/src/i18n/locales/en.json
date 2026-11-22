@@ -4963,16 +4963,41 @@
     "title": "Settings",
     "updates": {
       "appVersion": "Desktop app",
+      "available": "Version {{version}} is available.",
+      "check": {
+        "action": "Check for updates",
+        "description": "Looks for a newer version and shows what is new. Nothing is installed until you choose to.",
+        "title": "Check for updates",
+        "working": "Checking…"
+      },
       "daemon": "Daemon",
       "daemonDescription": "Local bot serve process.",
       "description": "App and daemon versions.",
       "devBuild": "Dev build",
-      "how": {
-        "description": "Releases are distributed separately; check the project docs for upgrade steps.",
-        "title": "How updates work"
+      "errors": {
+        "busy": "An update is already in progress.",
+        "failed": "The update did not work. Nothing was changed. Please try again later.",
+        "network": "Could not reach the update server. Check your internet connection and try again.",
+        "no_rollback": "No earlier version is available to go back to.",
+        "not_configured": "Updates are not set up in this build.",
+        "nothing_to_install": "Please check for updates first.",
+        "signature": "The update could not be verified as genuine, so it was NOT installed. Nothing was changed."
+      },
+      "install": {
+        "action": "Update now",
+        "hint": "The update is checked for authenticity before it is installed. Praxi-Bot restarts when it is done.",
+        "working": "Updating…"
+      },
+      "notConfigured": "This build of Praxi-Bot has no update service set up, so it cannot update itself. Download the newest version from the project page instead.",
+      "rollback": {
+        "action": "Go back to the previous version",
+        "description": "Version {{version}} did not start properly. You can go back to the last version that worked.",
+        "title": "Something went wrong with the update",
+        "working": "Going back…"
       },
       "title": "Updates",
-      "unknown": "Unknown"
+      "unknown": "Unknown",
+      "upToDate": "You have the latest version."
     },
     "webSearch": {
       "backends": {

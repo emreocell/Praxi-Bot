@@ -4963,16 +4963,41 @@
     "title": "Einstellungen",
     "updates": {
       "appVersion": "Desktop-App",
+      "available": "Version {{version}} ist verfügbar.",
+      "check": {
+        "action": "Nach Updates suchen",
+        "description": "Sucht nach einer neueren Version und zeigt, was neu ist. Es wird nichts installiert, bevor Sie es wollen.",
+        "title": "Nach Updates suchen",
+        "working": "Suche läuft…"
+      },
       "daemon": "Daemon",
       "daemonDescription": "Lokaler bot-serve-Prozess.",
       "description": "App- und Daemon-Versionen.",
       "devBuild": "Entwicklungs-Build",
-      "how": {
-        "description": "Releases werden separat verteilt; die Schritte zum Upgrade findest du in der Projektdokumentation.",
-        "title": "So funktionieren Updates"
+      "errors": {
+        "busy": "Ein Update läuft bereits.",
+        "failed": "Das Update hat nicht funktioniert. Es wurde nichts verändert. Bitte versuchen Sie es später erneut.",
+        "network": "Der Update-Server ist nicht erreichbar. Prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.",
+        "no_rollback": "Es gibt keine frühere Version, zu der Sie zurückkehren können.",
+        "not_configured": "Updates sind in dieser Version nicht eingerichtet.",
+        "nothing_to_install": "Bitte suchen Sie zuerst nach Updates.",
+        "signature": "Das Update konnte nicht als echt bestätigt werden und wurde deshalb NICHT installiert. Es wurde nichts verändert."
+      },
+      "install": {
+        "action": "Jetzt aktualisieren",
+        "hint": "Das Update wird vor der Installation auf Echtheit geprüft. Praxi-Bot startet danach neu.",
+        "working": "Wird aktualisiert…"
+      },
+      "notConfigured": "Diese Version von Praxi-Bot hat keinen Update-Dienst und kann sich nicht selbst aktualisieren. Laden Sie die neueste Version von der Projektseite herunter.",
+      "rollback": {
+        "action": "Zur vorherigen Version zurückkehren",
+        "description": "Version {{version}} ist nicht richtig gestartet. Sie können zur letzten funktionierenden Version zurückkehren.",
+        "title": "Beim Update ist etwas schiefgelaufen",
+        "working": "Kehrt zurück…"
       },
       "title": "Updates",
-      "unknown": "Unbekannt"
+      "unknown": "Unbekannt",
+      "upToDate": "Sie haben die neueste Version."
     },
     "webSearch": {
       "backends": {

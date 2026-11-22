@@ -31,6 +31,10 @@
     "allow-notify-show",
     "allow-notify-take-actions",
     "allow-set-needs-count",
-    "allow-set-tray-labels"
+    "allow-set-tray-labels",
+    "allow-update-status",
+    "allow-update-check",
+    "allow-update-install",
+    "allow-update-rollback"
   ]
 }

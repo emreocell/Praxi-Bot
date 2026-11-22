@@ -4963,16 +4963,41 @@
     "title": "Ayarlar",
     "updates": {
       "appVersion": "Masaüstü uygulaması",
+      "available": "{{version}} sürümü hazır.",
+      "check": {
+        "action": "Güncellemeleri denetle",
+        "description": "Daha yeni bir sürüm olup olmadığına bakar ve yenilikleri gösterir. Siz seçmeden hiçbir şey kurulmaz.",
+        "title": "Güncellemeleri denetle",
+        "working": "Denetleniyor…"
+      },
       "daemon": "Daemon",
       "daemonDescription": "Yerel arka plan bot servisi.",
       "description": "Uygulama ve daemon sürümleri.",
       "devBuild": "Geliştirme derlemesi",
-      "how": {
-        "description": "Sürümler ayrı dağıtılır; yükseltme adımları için proje belgelerine bak.",
-        "title": "Güncellemeler nasıl çalışır"
+      "errors": {
+        "busy": "Bir güncelleme zaten sürüyor.",
+        "failed": "Güncelleme çalışmadı. Hiçbir şey değişmedi. Lütfen daha sonra yeniden deneyin.",
+        "network": "Güncelleme sunucusuna ulaşılamadı. İnternet bağlantınızı kontrol edip yeniden deneyin.",
+        "no_rollback": "Geri dönülebilecek daha eski bir sürüm yok.",
+        "not_configured": "Bu sürümde güncelleme kurulu değil.",
+        "nothing_to_install": "Lütfen önce güncellemeleri denetleyin.",
+        "signature": "Güncellemenin gerçek olduğu doğrulanamadı, bu yüzden KURULMADI. Hiçbir şey değişmedi."
+      },
+      "install": {
+        "action": "Şimdi güncelle",
+        "hint": "Güncelleme kurulmadan önce gerçekliği denetlenir. İşlem bitince Praxi-Bot yeniden açılır.",
+        "working": "Güncelleniyor…"
+      },
+      "notConfigured": "Praxi-Bot'un bu sürümünde güncelleme hizmeti kurulu değil, bu yüzden kendini güncelleyemez. En yeni sürümü proje sayfasından indirin.",
+      "rollback": {
+        "action": "Önceki sürüme dön",
+        "description": "{{version}} sürümü düzgün açılmadı. Çalışan son sürüme geri dönebilirsiniz.",
+        "title": "Güncellemede bir sorun çıktı",
+        "working": "Geri dönülüyor…"
       },
       "title": "Güncellemeler",
-      "unknown": "Bilinmiyor"
+      "unknown": "Bilinmiyor",
+      "upToDate": "En son sürümü kullanıyorsunuz."
     },
     "webSearch": {
       "backends": {
