@@ -10816,6 +10816,7 @@ dependencies = [
  "tokio",
  "toml 0.8.2",
  "tool-registry",
+ "url",
  "uuid",
 ]
 

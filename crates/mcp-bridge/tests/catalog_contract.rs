@@ -47,6 +47,12 @@ const FIXTURES: &[&str] = &[
     "notion-remote",
     "stripe",
     "atlassian",
+    "vercel",
+    "figma",
+    "posthog",
+    "intercom",
+    "paypal",
+    "mongodb",
 ];
 
 const HTTP_REASON: &str = "streamable-HTTP entry: a 403/429 at the HTTP transport needs a scripted HTTP MCP server, which the test seams do not have; the tool-level 403/429 path is covered through the stdio fake";
@@ -58,6 +64,11 @@ const CANNOT_FAKE_YET: &[(&str, &str, &str)] = &[
     ("notion-remote", "transport_http_status", HTTP_REASON),
     ("stripe", "transport_http_status", HTTP_REASON),
     ("atlassian", "transport_http_status", HTTP_REASON),
+    ("vercel", "transport_http_status", HTTP_REASON),
+    ("figma", "transport_http_status", HTTP_REASON),
+    ("posthog", "transport_http_status", HTTP_REASON),
+    ("intercom", "transport_http_status", HTTP_REASON),
+    ("paypal", "transport_http_status", HTTP_REASON),
 ];
 
 /// Known violations of the contract: (entry id or `*`, leg, why). Each must

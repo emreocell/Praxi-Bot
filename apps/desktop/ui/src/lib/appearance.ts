@@ -25,7 +25,14 @@ import {
   parseVeil,
   VEIL_DEFAULT
 } from "ui/surface-model";
-import { DEFAULT_WALLPAPER, parseWallpaper, type WallpaperSetting } from "./wallpaper.ts";
+import {
+  DEFAULT_WALLPAPER,
+  DEFAULT_WALLPAPER_MOTION,
+  parseWallpaper,
+  parseWallpaperMotion,
+  type WallpaperMotion,
+  type WallpaperSetting
+} from "./wallpaper.ts";
 import { DEFAULT_BACKDROP_DIM, NO_BACKDROP, parseBackdrop, parseBackdropDim } from "./backdropCatalog.ts";
 
 /** Everything the Appearance page controls (persisted inside `AppSettings`). */
@@ -42,6 +49,8 @@ export interface AppearanceSettings {
   backdrop: string;
   /** Animated dithered-cloud wallpaper (`off` by default); takes the backdrop's place while on. */
   wallpaper: WallpaperSetting;
+  /** Cloud motion mode (`off`, `subtle` default, `live` 30 fps WebGL). */
+  wallpaperMotion: WallpaperMotion;
   /** Strength of the soft veil over the wallpaper, 0-100 %. */
   wallpaperVeil: number;
   /** 20..88: how much of the theme background covers the scene. */
@@ -75,6 +84,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   ownBubble: "tint",
   backdrop: NO_BACKDROP,
   wallpaper: DEFAULT_WALLPAPER,
+  wallpaperMotion: DEFAULT_WALLPAPER_MOTION,
   wallpaperVeil: VEIL_DEFAULT,
   backdropDim: DEFAULT_BACKDROP_DIM,
   panelTransparency: DEFAULT_SURFACE.transparency,
@@ -111,6 +121,7 @@ export function normalizeAppearance(raw: Record<string, unknown>): AppearanceSet
     ownBubble: parseOwnBubble(raw.ownBubble),
     backdrop: parseBackdrop(raw.backdrop),
     wallpaper: parseWallpaper(raw.wallpaper),
+    wallpaperMotion: parseWallpaperMotion(raw.wallpaperMotion),
     wallpaperVeil: parseVeil(raw.wallpaperVeil),
     backdropDim: parseBackdropDim(raw.backdropDim),
     panelTransparency: parsePanelTransparency(raw.panelTransparency),
@@ -166,6 +177,7 @@ export function appearanceFromQuery(
     ownBubble: q("meb") ?? saved.ownBubble,
     backdrop: q("backdrop") ?? saved.backdrop,
     wallpaper: q("wallpaper") ?? saved.wallpaper,
+    wallpaperMotion: q("motion") ?? q("wallpaperMotion") ?? saved.wallpaperMotion,
     wallpaperVeil: q("veil") !== undefined ? parseVeil(q("veil")) : saved.wallpaperVeil,
     backdropDim: q("dim") ?? saved.backdropDim,
     panelTransparency: q("alpha") ?? saved.panelTransparency,

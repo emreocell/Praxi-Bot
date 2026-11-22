@@ -82,6 +82,14 @@ import {
 import { useDaemon } from "./DaemonContext.tsx";
 import { TakeoverStop } from "./takeoverStop.ts";
 import { sessionRequest } from "./liveViewRequest.ts";
+import {
+  adaptLevelFor,
+  adaptStep,
+  INITIAL_ADAPT,
+  type AdaptState,
+  type QualityMode
+} from "../lib/liveViewAdaptive.ts";
+import { loadQualityMode, saveQualityMode } from "../lib/liveViewQualityPref.ts";
 import { humanLine } from "../lib/humanError";
 
 const SESSION_HEARTBEAT_MS = 5000;
@@ -113,6 +121,9 @@ interface LiveViewContextValue {
   selectTarget: (targetId: string) => void;
   refreshTargets: () => Promise<void>;
   setCardDemand: (active: boolean, botId: string | null) => void;
+  /** The owner's picture-quality choice (Auto adapts to this computer and the link). */
+  qualityMode: QualityMode;
+  setQualityMode: (mode: QualityMode) => void;
   requestTakeover: () => Promise<void>;
   releaseTakeover: (humanAction?: HumanAction | null) => Promise<void>;
   retryRelease: () => Promise<void>;
@@ -247,6 +258,18 @@ export function LiveViewProvider({
   const [streamFailure, setStreamFailure] = useState<string | null>(null);
   const [viewerTimedOut, setViewerTimedOut] = useState(false);
   const [streamAttempt, setStreamAttempt] = useState(0);
+  const [qualityMode, setQualityModeState] = useState<QualityMode>(() => loadQualityMode());
+  const [adaptLevel, setAdaptLevel] = useState(0);
+  const adaptRef = useRef<AdaptState>(INITIAL_ADAPT);
+  const qualityModeRef = useRef<QualityMode>(qualityMode);
+  qualityModeRef.current = qualityMode;
+  const setQualityMode = useCallback((mode: QualityMode) => {
+    adaptRef.current = INITIAL_ADAPT;
+    setAdaptLevel(0);
+    setQualityModeState(mode);
+    saveQualityMode(mode);
+  }, []);
+  const deviceRatio = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
   const retryStream = useCallback(() => {
     if (!isControlBusy(stateRef.current)) {
       setStreamFailure(null);
@@ -539,7 +562,13 @@ export function LiveViewProvider({
     maxWidth: desiredMaxWidth,
     maxHeight: desiredMaxHeight,
     quality: desiredQuality
-  } = sessionRequest({ viewerOpen, owning });
+  } = sessionRequest({
+    viewerOpen,
+    owning,
+    mode: qualityMode,
+    level: adaptLevelFor(qualityMode, { ...INITIAL_ADAPT, level: adaptLevel }),
+    dpr: deviceRatio
+  });
 
   const activeSessionRef = useRef<SessionInfo | null>(null);
 
@@ -675,6 +704,15 @@ export function LiveViewProvider({
             }
           }
 
+          if (qualityModeRef.current === "auto") {
+            const next = adaptStep(adaptRef.current, {
+              decodeMs: metrics.decodeMs,
+              bufferedFrames: metrics.bufferedFrames
+            });
+            if (next.level !== adaptRef.current.level) setAdaptLevel(next.level);
+            adaptRef.current = next;
+          }
+
           const geometryChanged =
             lastGeometrySentRef.current !== frame.header.geometry_revision;
           const due =
@@ -707,8 +745,15 @@ export function LiveViewProvider({
             target_id: selectedTarget.target_id,
             profile: sessionProfile(stateRef.current),
             codecs: selectedTarget.capabilities.codecs,
-            max_width: sessionRequest({ viewerOpen, owning: false }).maxWidth,
-            max_height: sessionRequest({ viewerOpen, owning: false }).maxHeight,
+            ...(() => {
+              const r = sessionRequest({
+                viewerOpen,
+                owning: false,
+                mode: qualityModeRef.current,
+                dpr: window.devicePixelRatio || 1
+              });
+              return { max_width: r.maxWidth, max_height: r.maxHeight };
+            })(),
             // An automatically chosen screen is bound to the focused bot: the
             // daemon refuses another bot's browser. An explicit pick is not.
             ...(preferredTargetId === null && botFocus ? { bot_id: botFocus } : {})
@@ -1290,6 +1335,8 @@ export function LiveViewProvider({
       selectTarget,
       refreshTargets,
       setCardDemand,
+      qualityMode,
+      setQualityMode,
       requestTakeover,
       releaseTakeover,
       retryRelease,
@@ -1330,6 +1377,8 @@ export function LiveViewProvider({
       selectTarget,
       refreshTargets,
       setCardDemand,
+      qualityMode,
+      setQualityMode,
       requestTakeover,
       releaseTakeover,
       retryRelease,

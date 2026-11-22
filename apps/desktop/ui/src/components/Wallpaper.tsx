@@ -1,26 +1,53 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { publishSceneSource, sampleCanvasSource } from "../lib/backdropTone";
-import { buildField, packPalette, renderField, startWallpaper, WALLPAPERS, wallpaperSceneId, WALLPAPER_DIM, type WallpaperKind } from "../lib/wallpaper";
+import {
+  buildField,
+  DEFAULT_WALLPAPER_MOTION,
+  packPalette,
+  renderField,
+  startWallpaper,
+  WALLPAPERS,
+  wallpaperSceneId,
+  WALLPAPER_DIM,
+  type WallpaperKind,
+  type WallpaperMotion
+} from "../lib/wallpaper";
 import styles from "./Backdrop.module.css";
 
 /** Full-window animated wallpaper (dithered clouds); stands in for <Backdrop> when one is chosen. */
-export function Wallpaper({ kind }: { kind: WallpaperKind }) {
+export function Wallpaper({ kind, motion = DEFAULT_WALLPAPER_MOTION }: { kind: WallpaperKind; motion?: WallpaperMotion }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
+  const [webglLost, setWebglLost] = useState(false);
+  useEffect(() => {
+    setWebglLost(false);
+  }, [kind, motion]);
+
+  const effectiveMotion: WallpaperMotion = motion === "live" && webglLost ? "off" : motion;
+  const canvasKey = `${effectiveMotion === "live" ? "live" : "2d"}-${webglLost ? "fb" : "ok"}`;
+
   useEffect(() => {
     const cv = ref.current;
     if (!cv) return undefined;
     const scene = wallpaperSceneId(kind);
     document.body.classList.add("has-wallpaper");
-    const handle = startWallpaper(cv, kind, () => publishSceneSource(scene, sampleCanvasSource(cv, window.innerWidth)));
+    const handle = startWallpaper(
+      cv,
+      kind,
+      (source) => publishSceneSource(scene, source !== undefined ? source : sampleCanvasSource(cv, window.innerWidth)),
+      {
+        motion: effectiveMotion,
+        onContextLost: () => setWebglLost(true)
+      }
+    );
     return () => {
       handle.stop();
       publishSceneSource(scene, null);
       document.body.classList.remove("has-wallpaper");
     };
-  }, [kind]);
+  }, [kind, effectiveMotion]);
   return (
     <div className={styles.root} aria-hidden="true" style={{ "--backdrop-dim": WALLPAPER_DIM / 100 } as CSSProperties}>
-      <canvas ref={ref} className={styles.canvas} style={{ imageRendering: "pixelated" }} />
+      <canvas key={canvasKey} ref={ref} className={styles.canvas} style={{ imageRendering: "pixelated" }} />
       <div className={styles.veil} />
     </div>
   );

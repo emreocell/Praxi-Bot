@@ -1,0 +1,39 @@
+# Groq — low-latency OpenAI-compatible inference API.
+# Sources:
+#   https://console.groq.com/docs/openai
+#   https://console.groq.com/docs/models
+#   https://console.groq.com/docs/rate-limits
+# Auth: HTTP Bearer token from GROQ_API_KEY (`Authorization: Bearer <key>`).
+# Rate limits: enforced per model across RPM, RPD, TPM and TPD and vary by
+# organization tier (entry Free/Developer tiers typically cap around 30 RPM and
+# 1,000-14,400 RPD depending on the model). Exceeded limits return HTTP 429;
+# check Groq Console -> Settings -> Limits for your active quotas.
+id = "groq"
+kind = "open_ai_compatible"
+base_url = "https://api.groq.com/openai/v1"
+auth = { ApiKeyEnv = "GROQ_API_KEY" }
+models_endpoint = "https://api.groq.com/openai/v1/models"
+
+[capabilities]
+tools = true
+vision = false
+streaming = true
+json_mode = true
+
+[compat_flags]
+strip_system_role = false
+
+[[models]]
+id = "llama-3.3-70b-versatile"
+context_window = 131072
+max_output_tokens = 32768
+
+[[models]]
+id = "llama-3.1-8b-instant"
+context_window = 131072
+max_output_tokens = 131072
+
+[[models]]
+id = "openai/gpt-oss-120b"
+context_window = 131072
+max_output_tokens = 65536

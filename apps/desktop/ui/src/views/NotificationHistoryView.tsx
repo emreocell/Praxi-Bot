@@ -82,7 +82,13 @@ export function NotificationHistoryView({
                     <span className={styles.meta}>
                       <span>{new Date(n.ts).toLocaleString(i18n.language)}</span>
                       <span className={n.shown ? undefined : styles.held}>
-                        {t(n.shown ? "notifyHistory.shown" : "notifyHistory.held")}
+                        {t(
+                          n.shown
+                            ? "notifyHistory.shown"
+                            : n.heldBy === "muted"
+                              ? "notifyHistory.heldMuted"
+                              : "notifyHistory.held"
+                        )}
                       </span>
                       {n.read ? null : <span>{t("notifyHistory.unread")}</span>}
                     </span>

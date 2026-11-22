@@ -310,6 +310,11 @@
       "description": "Panellerin arkasında çok yavaş kayan, noktalı (dither) bulutlar. Varsayılan olarak kapalı; pencere gizlenince durur.",
       "dusk": "Alacakaranlık",
       "hint": "Temayı izle: Obsidian için Gece, Cobalt için Gökyüzü, Raven için Alacakaranlık, Clay için Sıcak seçilir. Açıkken arka planın yerini alır; hareket azaltma açıksa tek bir durağan kare gösterilir.",
+      "motion": "Bulut hareketi",
+      "motionHint": "Hafif mod birkaç saniyede bir piksel kayar. Canlı mod katmanlı bulutları en fazla 30 fps ile akıcı oynatır; pencere gizlenince, odak kaybolunca veya pil tasarrufunda durur.",
+      "motionLive": "Canlı",
+      "motionOff": "Kapalı",
+      "motionSubtle": "Hafif",
       "night": "Gece",
       "off": "Kapalı",
       "sky": "Gökyüzü",
@@ -861,6 +866,8 @@
       "toolsOnHint": "Okumaya izin var. Göndermek her zaman bu botun izin moduna uyar ve varsayılan olarak önce sorar."
     },
     "makeMain": "Ana bot yap",
+    "muteNotify": "Çalışma bildirimlerini sessize al",
+    "muteNotifyHint": "Bu botun biten ve başarısız çalışmaları sessiz kalır ve bildirim geçmişine düşer. Onaylar ve sorular yine bildirilir.",
     "myComputer": "Benim bilgisayarım",
     "needsDesktop": "{{name}} sunucusunda masaüstü oturumu yok, bu yüzden gösterilecek ekran yok. Eklemek için bu bilgisayarda şunu çalıştır:",
     "noChatMatches": "Eşleşen sohbet yok",
@@ -1841,6 +1848,7 @@
     "show": "Ekranı göster",
     "sideBot": "Botun",
     "sideMine": "Benim",
+    "stalled": "Bir süredir yeni görüntü gelmedi…",
     "status": {
       "local": "{{system}} · bot burada çalışıyor",
       "localNoSystem": "Bot burada çalışıyor",
@@ -3088,6 +3096,15 @@
       "title": "Bot duraklatıldı, seni bekliyor"
     },
     "privacyNotice": "Ekran pikselleri maskelenemez (parola/OTP içerebilir); bu akış yalnızca bellekte tutulur ve model sağlayıcılarına gönderilmez.",
+    "quality": {
+      "auto": "Otomatik",
+      "autoHint": "Net görüntü; bilgisayar veya bağlantı yetişemezse kendiliğinden hafifler",
+      "high": "Yüksek",
+      "highHint": "En büyük ve en net görüntü (1920×1080’e kadar), en çok veriyi kullanır",
+      "label": "Görüntü kalitesi",
+      "saver": "Veri tasarrufu",
+      "saverHint": "Daha küçük görüntü, en az veri kullanır"
+    },
     "queryFailed": "Ekran listesi yüklenemedi. Otomatik olarak yeniden denenecek.",
     "reacquireAction": "Kontrolü yeniden devral",
     "reasons": {
@@ -3393,6 +3410,7 @@
     "clear": "Geçmişi temizle",
     "empty": "Henüz bildirim yok.",
     "held": "Tutuldu (sessiz saatler)",
+    "heldMuted": "Tutuldu (bot sessizde)",
     "kind": {
       "failed": "Çalışma başarısız",
       "longRun": "Uzun çalışma bitti",

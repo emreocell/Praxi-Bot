@@ -23,6 +23,27 @@ test("drops entries past the retention age, also when parsing storage", () => {
   assert.deepEqual(parseHistory([old, e("ok", now), { kind: "bogus", ts: 1, id: "x" }, 5], now).map((x) => x.id), ["ok"]);
 });
 
+test("parsing keeps why a toast was held; older held entries mean quiet hours", () => {
+  const parsed = parseHistory(
+    [
+      e("muted", now, { heldBy: "muted" }),
+      e("old-held", now - 1),
+      e("shown", now - 2, { shown: true, heldBy: "muted" }),
+      { ...e("bogus", now - 3), heldBy: "later" }
+    ],
+    now
+  );
+  assert.deepEqual(
+    parsed.map((x) => [x.id, x.heldBy]),
+    [
+      ["muted", "muted"],
+      ["old-held", "quiet"],
+      ["shown", undefined],
+      ["bogus", "quiet"]
+    ]
+  );
+});
+
 test("mark one / all read and unread count; clear is an empty list", () => {
   let list = [e("a", now), e("b", now - 1)];
   assert.equal(unreadCount(list), 2);

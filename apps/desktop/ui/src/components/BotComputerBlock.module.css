@@ -379,3 +379,35 @@
     animation: none;
   }
 }
+
+.quality {
+  position: absolute;
+  top: calc(var(--u) * 1.5);
+  right: calc(var(--u) * 1.5);
+  z-index: 2;
+}
+
+.stalled {
+  position: absolute;
+  inset: var(--space-0);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  background-color: color-mix(in srgb, var(--color-media-scrim) 55%, transparent);
+  color: var(--color-on-media);
+  font-size: var(--font-size-sm);
+}
+
+.stalled > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  animation: spin 800ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stalled > svg {
+    animation: none;
+  }
+}

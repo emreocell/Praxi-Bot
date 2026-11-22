@@ -84,9 +84,12 @@ const BUILTIN_CATALOG_SOURCES: &[&str] = &[
     include_str!("../../../providers/catalog/deepseek.toml"),
     include_str!("../../../providers/catalog/gemini-openai-compat.toml"),
     include_str!("../../../providers/catalog/gemini.toml"),
+    include_str!("../../../providers/catalog/groq.toml"),
     include_str!("../../../providers/catalog/lmstudio.toml"),
+    include_str!("../../../providers/catalog/mistral.toml"),
     include_str!("../../../providers/catalog/ollama.toml"),
     include_str!("../../../providers/catalog/openrouter.toml"),
+    include_str!("../../../providers/catalog/together.toml"),
 ];
 
 /// Names of the environment variables that hold provider API keys: every

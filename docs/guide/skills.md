@@ -67,6 +67,54 @@ Invalid skill files are skipped with an issue noted, not fatal.
 Skills also feed the router: the keyword and embedding search of the decision
 ladder (K2) can suggest a skill for a request (see [Workflows](workflows.md)).
 
+## Install a skill
+
+Skills written by other people are untrusted content. `bot skills install`
+never runs anything from a skill; it copies files into `<data dir>/skills/`
+after you have seen what is in them.
+
+```text
+bot skills install https://github.com/someone/praxi-skills.git --subdir github-triage
+```
+
+1. The skill is fetched into a temporary folder, validated and scanned. You see
+   the name, version, source, **pinned commit**, file count, and every finding
+   of the static scan (scripts, network use, credential patterns, prompt
+   injection phrases, obfuscated payloads), plus a warning when the folder holds
+   script or binary files.
+2. You confirm in the terminal, or pass `--accept <fingerprint>` (the
+   fingerprint printed in the report). The fingerprint covers every file path
+   and byte, so content that changed since you looked is refused.
+3. The files are copied into your data folder and recorded in
+   `<data dir>/skills.lock.json` (source, commit, content hash, time).
+
+Rules that always apply: git and index sources always need the fingerprint,
+and the CLI asks for it for local folders too; archives with symlinks, special
+files, paths outside the folder or too many/too large files are refused; index
+entries must pin a full commit hash. The scan is advisory: **no findings never
+means safe**, read the files.
+
+```text
+bot skills install https://example.com/index.json --name github-triage   # from an index
+bot skills install ./my-skill                                            # local folder
+bot skills list                  # source, commit, risk, usage, MODIFIED/MISSING flags
+bot skills update github-triage  # shows new findings and risk change, asks first
+bot skills update                # check every hub-installed skill
+bot skills uninstall github-triage
+bot skills sync                  # restore skills whose folder is missing (verifies hashes)
+```
+
+An update re-fetches the recorded source and prints a diff of the scan result
+against the installed copy (new and gone findings, risk before/after, old and
+new commit). Replacing needs the new fingerprint, so approving the old version
+does not approve the new one. Uninstall removes the folder, the lock entry and
+the usage counters. `sync` refuses to restore a skill whose content no longer
+matches the locked hash.
+
+A running daemon picks up installed, updated and removed skills the next time
+it reloads its skills; restart it if a change does not show up. Installed
+skills land in the shared layer, so a bot can read them like any other skill.
+
 ## Managing shared skills through the API
 
 The local owner (not a paired device) can create, import, update and delete

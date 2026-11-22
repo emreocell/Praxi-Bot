@@ -310,6 +310,11 @@
       "description": "Langsam ziehende, gerasterte Wolken hinter den Panels. Standardmäßig aus; pausiert, wenn das Fenster verborgen ist.",
       "dusk": "Dämmerung",
       "hint": "„Design folgen“ wählt Nacht für Obsidian, Himmel für Cobalt, Dämmerung für Raven und Warm für Clay. Es ersetzt den Hintergrund, solange es aktiv ist; bei reduzierter Bewegung wird ein einzelnes Standbild gezeigt.",
+      "motion": "Wolkenbewegung",
+      "motionHint": "Dezent verschiebt alle paar Sekunden um ein Pixel. Lebendig animiert geschichtete Wolken sanft mit bis zu 30 fps und pausiert bei verborgenem Fenster, fehlendem Fokus oder im Energiesparmodus.",
+      "motionLive": "Lebendig",
+      "motionOff": "Aus",
+      "motionSubtle": "Dezent",
       "night": "Nacht",
       "off": "Aus",
       "sky": "Himmel",
@@ -861,6 +866,8 @@
       "toolsOnHint": "Lesen ist erlaubt. Senden richtet sich immer nach dem Berechtigungsmodus dieses Bots und fragt standardmäßig zuerst nach."
     },
     "makeMain": "Zum Haupt-Bot machen",
+    "muteNotify": "Lauf-Benachrichtigungen stummschalten",
+    "muteNotifyHint": "Beendete und fehlgeschlagene Läufe dieses Bots bleiben still und landen im Benachrichtigungsverlauf. Freigaben und Fragen melden sich weiterhin.",
     "myComputer": "Mein Computer",
     "needsDesktop": "{{name}} hat keine Desktop-Sitzung, daher gibt es keinen Bildschirm zum Anzeigen. Um eine hinzuzufügen, führe auf diesem Computer aus:",
     "noChatMatches": "Keine passenden Chats",
@@ -1841,6 +1848,7 @@
     "show": "Bildschirm anzeigen",
     "sideBot": "Vom Bot",
     "sideMine": "Von mir",
+    "stalled": "Seit einem Moment kommt kein neues Bild…",
     "status": {
       "local": "{{system}} · der Bot arbeitet hier",
       "localNoSystem": "Der Bot arbeitet hier",
@@ -3088,6 +3096,15 @@
       "title": "Bot pausiert, wartet auf dich"
     },
     "privacyNotice": "Bildschirmpixel lassen sich nicht schwärzen (können Passwörter oder OTPs zeigen); dieser Stream bleibt nur im Arbeitsspeicher und wird nie an Modellanbieter gesendet.",
+    "quality": {
+      "auto": "Automatisch",
+      "autoHint": "Scharf und automatisch leichter, wenn dieser Computer oder die Verbindung nicht mithält",
+      "high": "Hoch",
+      "highHint": "Größtes und schärfstes Bild (bis 1920×1080), verbraucht am meisten Daten",
+      "label": "Bildqualität",
+      "saver": "Datensparen",
+      "saverHint": "Kleineres Bild, verbraucht am wenigsten Daten"
+    },
     "queryFailed": "Die Bildschirmliste konnte nicht geladen werden. Es wird automatisch erneut versucht.",
     "reacquireAction": "Kontrolle erneut übernehmen",
     "reasons": {
@@ -3393,6 +3410,7 @@
     "clear": "Verlauf löschen",
     "empty": "Noch keine Benachrichtigungen.",
     "held": "Zurückgehalten (Ruhezeit)",
+    "heldMuted": "Zurückgehalten (Bot stummgeschaltet)",
     "kind": {
       "failed": "Lauf fehlgeschlagen",
       "longRun": "Langer Lauf beendet",

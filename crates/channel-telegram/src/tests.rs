@@ -3811,3 +3811,333 @@ fn voice_and_photo_messages_become_unsupported_not_dropped() {
     let incoming = update(v).into_incoming().unwrap();
     assert_eq!(incoming.kind, IncomingKind::Unsupported("photo".into()));
 }
+
+// --- Per-chat language (`/lang`, #237) ---
+
+const SECOND_USER_ID: i64 = 4343;
+const SECOND_CHAT_ID: i64 = 7002;
+
+fn text_update_from(update_id: i64, user_id: i64, chat_id: i64, text: &str, lang: &str) -> Update {
+    let mut v = text_update(update_id, user_id, chat_id, text);
+    v["message"]["from"]["language_code"] = json!(lang);
+    update(v)
+}
+
+async fn replies_to(server: &MockServer, chat_id: i64) -> Vec<String> {
+    let reqs = server.received_requests().await.unwrap();
+    sent_messages(&reqs)
+        .into_iter()
+        .filter(|m| m["chat_id"] == chat_id)
+        .map(|m| m["text"].as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
+fn no_bot_channel(server: &MockServer, cfg: TelegramConfig) -> TelegramChannel {
+    TelegramChannel::new(
+        cfg.with_api_base_url(server.uri()),
+        Arc::new(FakeDaemon::new(Vec::new())),
+    )
+    .unwrap()
+}
+
+#[test]
+fn state_files_without_or_with_unknown_languages_load_as_english() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("telegram_state.json");
+    std::fs::write(
+        &path,
+        r#"{"version":1,"paired_users":[1,2],"chat_bots":{},"chat_threads":{}}"#,
+    )
+    .unwrap();
+    let store = crate::PairingStore::open(&path).unwrap();
+    assert!(store.is_paired(1));
+    assert_eq!(store.chat_language(1), crate::messages::Language::EN);
+
+    std::fs::write(
+        &path,
+        r#"{"paired_users":[1,2],"chat_languages":{"1":"tr","2":"de"}}"#,
+    )
+    .unwrap();
+    let store = crate::PairingStore::open(&path).unwrap();
+    assert_eq!(store.chat_language(1), crate::messages::Language::TR);
+    assert_eq!(store.chat_language(2), crate::messages::Language::EN);
+}
+
+#[tokio::test]
+async fn configured_and_already_paired_chats_stay_english_until_lang() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let channel = no_bot_channel(
+        &server,
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_paired_users([PAIRED_USER_ID])
+            .with_desktop_language("tr"),
+    );
+    let code = channel.create_pair_code();
+    for (id, text) in [(1, "/bots"), (2, &format!("/pair {code}")), (3, "/bots")] {
+        channel
+            .handle_update(text_update_from(
+                id,
+                PAIRED_USER_ID,
+                TEST_CHAT_ID,
+                text,
+                "tr",
+            ))
+            .await
+            .unwrap();
+    }
+    channel
+        .handle_update(text_update_from(
+            4,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/lang",
+            "tr",
+        ))
+        .await
+        .unwrap();
+    channel
+        .handle_update(text_update_from(
+            5,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/lang TR",
+            "tr",
+        ))
+        .await
+        .unwrap();
+    channel
+        .handle_update(text_update_from(
+            6,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/bots",
+            "tr",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        replies_to(&server, TEST_CHAT_ID).await,
+        [
+            "No bots configured.",
+            "✅ Your Telegram account is already paired.",
+            "No bots configured.",
+            "This chat uses English. To change it, send /lang en or /lang tr.",
+            "Bu sohbet artık Türkçe.",
+            "Henüz bir bot ayarlanmamış.",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_new_pairing_prefers_telegram_code_then_desktop_then_english() {
+    // (Telegram code, desktop language, expected reply to /bots)
+    let cases = [
+        (Some("tr-TR"), Some("en"), "Henüz bir bot ayarlanmamış."),
+        (Some("en"), Some("tr"), "No bots configured."),
+        (Some("de"), Some("tr"), "Henüz bir bot ayarlanmamış."),
+        (None, Some("tr"), "Henüz bir bot ayarlanmamış."),
+        (Some("de"), Some("fr"), "No bots configured."),
+        (None, None, "No bots configured."),
+    ];
+    for (telegram, desktop, expected) in cases {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let mut cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN);
+        if let Some(desktop) = desktop {
+            cfg = cfg.with_desktop_language(desktop);
+        }
+        let channel = no_bot_channel(&server, cfg);
+        let code = channel.create_pair_code();
+        let pair = format!("/pair {code}");
+        let make = |id, text: &str| {
+            let mut v = text_update(id, SECOND_USER_ID, SECOND_CHAT_ID, text);
+            if let Some(telegram) = telegram {
+                v["message"]["from"]["language_code"] = json!(telegram);
+            }
+            update(v)
+        };
+        channel.handle_update(make(1, &pair)).await.unwrap();
+        channel.handle_update(make(2, "/bots")).await.unwrap();
+        let replies = replies_to(&server, SECOND_CHAT_ID).await;
+        assert_eq!(replies.len(), 2, "{telegram:?} {desktop:?}");
+        assert_eq!(replies[1], expected, "{telegram:?} {desktop:?}");
+    }
+}
+
+/// Queue a run whose only event is an open `fs_delete` approval.
+fn queue_delete_approval(daemon: &FakeDaemon) -> (mpsc::UnboundedSender<Envelope>, ToolCallId) {
+    let run_id = RunId::new();
+    let call_id = ToolCallId::new();
+    let tx = daemon.queue_open_run(run_id);
+    tx.send(Envelope::new(
+        0,
+        Event::ApprovalNeeded(ApprovalNeeded {
+            run_id,
+            call_id,
+            tool_name: "fs_delete".into(),
+            input: json!({ "path": "/tmp/a.txt" }),
+            summary: "Delete /tmp/a.txt".into(),
+            details: None,
+        }),
+    ))
+    .unwrap();
+    (tx, call_id)
+}
+
+#[tokio::test]
+async fn language_survives_restart_and_each_chat_gets_its_own_approval_card() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("telegram_state.json");
+    let cfg = || {
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_api_base_url(server.uri())
+            .with_state_path(&state)
+            .with_paired_users([PAIRED_USER_ID, SECOND_USER_ID])
+    };
+    let first = TelegramChannel::new(cfg(), one_bot_daemon()).unwrap();
+    first
+        .handle_update(update(text_update(
+            1,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "/lang tr",
+        )))
+        .await
+        .unwrap();
+    drop(first);
+
+    let daemon = one_bot_daemon();
+    let second = TelegramChannel::new(cfg(), daemon.clone()).unwrap();
+    let mut senders = Vec::new();
+    let mut call_ids = Vec::new();
+    for (id, user, chat) in [
+        (2, PAIRED_USER_ID, TEST_CHAT_ID),
+        (3, SECOND_USER_ID, SECOND_CHAT_ID),
+    ] {
+        let (tx, call_id) = queue_delete_approval(&daemon);
+        senders.push(tx);
+        call_ids.push(call_id);
+        second
+            .handle_update(update(text_update(id, user, chat, "delete a.txt")))
+            .await
+            .unwrap();
+    }
+
+    let reqs = server.received_requests().await.unwrap();
+    let cards: Vec<Value> = sent_messages(&reqs)
+        .into_iter()
+        .filter(|m| m.get("reply_markup").is_some())
+        .collect();
+    assert_eq!(cards.len(), 2);
+    let expected = [
+        (
+            TEST_CHAT_ID,
+            "⚠️ Onay gerekiyor (fs_delete)",
+            ["Bir kez onayla", "Her zaman onayla", "Reddet"],
+        ),
+        (
+            SECOND_CHAT_ID,
+            "⚠️ Approval needed (fs_delete)",
+            ["Approve once", "Always", "Deny"],
+        ),
+    ];
+    for ((card, (chat, heading, labels)), call_id) in
+        cards.iter().zip(expected).zip(call_ids.iter().copied())
+    {
+        assert_eq!(card["chat_id"], chat);
+        assert_eq!(card["text"], format!("{heading}\nDelete /tmp/a.txt"));
+        let row = card["reply_markup"]["inline_keyboard"][0]
+            .as_array()
+            .unwrap();
+        let texts: Vec<&str> = row.iter().map(|b| b["text"].as_str().unwrap()).collect();
+        assert_eq!(texts, labels);
+        let data: Vec<String> = row
+            .iter()
+            .map(|b| b["callback_data"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            data,
+            ["once", "always", "deny"].map(|d| format_approval_callback(call_id, d))
+        );
+    }
+
+    // The Turkish chat's button answer is Turkish; the English chat is untouched.
+    let data = format_approval_callback(call_ids[0], "deny");
+    second
+        .handle_update(update(callback_update(
+            4,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "cb-tr",
+            &data,
+        )))
+        .await
+        .unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(
+        callback_answers(&reqs).last().unwrap()["text"],
+        "Reddedildi"
+    );
+    assert_eq!(
+        second.pairing().chat_language(SECOND_CHAT_ID),
+        crate::messages::Language::EN
+    );
+    drop(senders);
+}
+
+#[tokio::test]
+async fn a_failed_language_save_changes_nothing_and_confirms_nothing() {
+    use crate::messages::Language;
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("telegram_state.json");
+    let channel = no_bot_channel(
+        &server,
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_state_path(&path)
+            .with_paired_users([PAIRED_USER_ID]),
+    );
+    let pairing = channel.pairing();
+    let before = std::fs::read(&path).unwrap();
+    let code = channel.create_pair_code();
+    pairing.fail_saves(true);
+
+    // Store level: neither a choice nor a new pairing leaves a partial change.
+    assert!(
+        pairing
+            .set_chat_language(TEST_CHAT_ID, Language::TR)
+            .is_err()
+    );
+    assert!(
+        pairing
+            .redeem_code_in_chat(SECOND_USER_ID, &code, SECOND_CHAT_ID, Language::TR)
+            .is_err()
+    );
+    assert!(!pairing.is_paired(SECOND_USER_ID));
+    assert_eq!(pairing.chat_language(SECOND_CHAT_ID), Language::EN);
+
+    // Bridge level: the /lang handler itself fails and confirms nothing.
+    let lang_tr = update(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "/lang tr"))
+        .into_incoming()
+        .unwrap();
+    assert!(channel.handle_incoming(lang_tr.clone()).await.is_err());
+    assert_eq!(pairing.chat_language(TEST_CHAT_ID), Language::EN);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(
+        replies_to(&server, TEST_CHAT_ID).await,
+        Vec::<String>::new()
+    );
+
+    pairing.fail_saves(false);
+    channel.handle_incoming(lang_tr).await.unwrap();
+    assert_eq!(
+        replies_to(&server, TEST_CHAT_ID).await,
+        ["Bu sohbet artık Türkçe."]
+    );
+    let reopened = crate::PairingStore::open(&path).unwrap();
+    assert_eq!(reopened.chat_language(TEST_CHAT_ID), Language::TR);
+}

@@ -1,0 +1,32 @@
+# Mistral AI — OpenAI-compatible chat and coding models API.
+# Sources:
+#   https://docs.mistral.ai/api
+#   https://docs.mistral.ai/models
+# Auth: HTTP Bearer token from MISTRAL_API_KEY (`Authorization: Bearer <key>`).
+# Rate limits: workspace-scoped RPS/RPM, TPM and monthly token caps scaled by
+# billing tier (Free Mode through Tier 4+). Responses include
+# `X-RateLimit-Remaining` headers and return HTTP 429 when exceeded; check
+# the Mistral Admin Panel Limits page for your workspace quotas.
+id = "mistral"
+kind = "open_ai_compatible"
+base_url = "https://api.mistral.ai/v1"
+auth = { ApiKeyEnv = "MISTRAL_API_KEY" }
+models_endpoint = "https://api.mistral.ai/v1/models"
+
+[capabilities]
+tools = true
+vision = true
+streaming = true
+json_mode = true
+
+[compat_flags]
+strip_system_role = false
+
+[[models]]
+id = "mistral-large-latest"
+
+[[models]]
+id = "mistral-small-latest"
+
+[[models]]
+id = "codestral-latest"

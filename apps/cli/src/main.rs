@@ -7,6 +7,7 @@ mod catalog_cmd;
 mod channels;
 #[cfg(test)]
 mod channels_tests;
+mod chats_cmd;
 mod cli_artifacts;
 mod client;
 mod commands;
@@ -235,6 +236,11 @@ enum Command {
         /// How to handle the message when the chat already has a running turn.
         #[arg(long, value_parser = ["steer", "queue"], default_value = "queue")]
         mode: String,
+    },
+    /// List and export chats from the daemon.
+    Chats {
+        #[command(subcommand)]
+        action: chats_cmd::ChatsCmd,
     },
     /// Manage bots on the daemon.
     Bots {
@@ -600,9 +606,12 @@ const BUILTIN_CATALOG: &[&str] = &[
     include_str!("../../../providers/catalog/deepseek.toml"),
     include_str!("../../../providers/catalog/gemini-openai-compat.toml"),
     include_str!("../../../providers/catalog/gemini.toml"),
+    include_str!("../../../providers/catalog/groq.toml"),
     include_str!("../../../providers/catalog/lmstudio.toml"),
+    include_str!("../../../providers/catalog/mistral.toml"),
     include_str!("../../../providers/catalog/ollama.toml"),
     include_str!("../../../providers/catalog/openrouter.toml"),
+    include_str!("../../../providers/catalog/together.toml"),
 ];
 
 fn load_catalog(dir: Option<&PathBuf>) -> Result<Catalog> {
@@ -782,6 +791,7 @@ fn run() -> Result<()> {
         | Command::Status
         | Command::Proxy
         | Command::Chat { .. }
+        | Command::Chats { .. }
         | Command::Bots { .. }
         | Command::Approve { .. }
         | Command::Answer { .. }
@@ -887,6 +897,7 @@ fn run() -> Result<()> {
         | Command::Status
         | Command::Proxy
         | Command::Chat { .. }
+        | Command::Chats { .. }
         | Command::Bots { .. }
         | Command::Approve { .. }
         | Command::Answer { .. }
@@ -1262,6 +1273,7 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
                 };
                 remote::chat(&c, &opts, json, &mut out).await
             }
+            Command::Chats { action } => chats_cmd::run(&c, action, json, &mut out).await,
             Command::Answer { call_id, text } => {
                 remote::answer(&c, call_id, text, json, &mut out).await
             }

@@ -1,12 +1,15 @@
 /**
  * Animated, procedural wallpaper: dithered cumulus clouds.
  *
- * Nothing here ships as an image.  A cloud density field is computed once per size (periodic in x),
- * then a slow drift scrolls through it by whole columns; each redraw maps the field to a 3-4 colour
- * palette with an ordered dither (Bayer for the pixel-art looks, a diagonal line screen for Sky).
- * The pure helpers (thresholds, palette mapping, drift scheduling, "follow theme") have no DOM
- * and are unit-tested; `renderFrame` / `startWallpaper` are the only canvas code.
+ * Nothing here ships as an image.  In `subtle` mode (default), a cloud density field is computed
+ * once per size (periodic in x) and a slow drift scrolls through it by whole columns using ordered
+ * dither (Bayer / diagonal line screen).  In `live` mode, a small WebGL fragment shader renders
+ * layered, slowly drifting fbm clouds at low internal resolution with the same ordered dither
+ * post-effect, capped at 30 fps, pausing when hidden/unfocused/minimised, on battery saver, or
+ * under reduced motion, and falling back to the 2D static frame when WebGL is unavailable.
  */
+import { makeToneSource, type ToneSource } from "ui/tone-model";
+import { createLiveCloudRenderer, type LiveCloudRenderer } from "./wallpaperLive.ts";
 
 export const WALLPAPER_KINDS = ["sky", "dusk", "night", "warm"] as const;
 export type WallpaperKind = (typeof WALLPAPER_KINDS)[number];
@@ -18,6 +21,45 @@ export const DEFAULT_WALLPAPER: WallpaperSetting = "off";
 
 export function parseWallpaper(value: unknown): WallpaperSetting {
   return WALLPAPER_SETTINGS.find((w) => w === value) ?? DEFAULT_WALLPAPER;
+}
+
+/** Motion mode for the cloud wallpaper (`off` = static frame, `subtle` = 1 col / 4s, `live` = 30 fps WebGL). */
+export const WALLPAPER_MOTIONS = ["off", "subtle", "live"] as const;
+export type WallpaperMotion = (typeof WALLPAPER_MOTIONS)[number];
+export const DEFAULT_WALLPAPER_MOTION: WallpaperMotion = "subtle";
+
+export function parseWallpaperMotion(value: unknown): WallpaperMotion {
+  return WALLPAPER_MOTIONS.find((m) => m === value) ?? DEFAULT_WALLPAPER_MOTION;
+}
+
+export const LIVE_FPS_CAP = 30;
+export const LIVE_FRAME_INTERVAL_MS = 1000 / LIVE_FPS_CAP;
+export const LIVE_MAX_PIXELS = 360_000;
+export const BATTERY_SAVER_LEVEL = 0.2;
+
+export interface BatteryLike {
+  charging: boolean;
+  level: number;
+  addEventListener?(type: string, listener: () => void): void;
+  removeEventListener?(type: string, listener: () => void): void;
+}
+
+/** True when running on battery (not charging) at or below 20% charge. */
+export function isBatterySaver(battery: Pick<BatteryLike, "charging" | "level"> | null | undefined): boolean {
+  return Boolean(battery && !battery.charging && battery.level <= BATTERY_SAVER_LEVEL);
+}
+
+export interface WallpaperMotionState {
+  motion: WallpaperMotion;
+  hidden: boolean;
+  focused: boolean;
+  reducedMotion: boolean;
+  batterySaver: boolean;
+}
+
+/** Whether the wallpaper loop may run right now (pauses on off, hidden, unfocused, reduced-motion, battery saver). */
+export function shouldAnimateWallpaper(state: WallpaperMotionState): boolean {
+  return state.motion !== "off" && !state.hidden && state.focused && !state.reducedMotion && !state.batterySaver;
 }
 
 /** Shipped themes with a hand-picked wallpaper for "Follow theme". */
@@ -103,6 +145,30 @@ export function packPalette(palette: readonly string[]): Uint32Array {
     const [r, g, b] = hexToRgb(c);
     return ((0xff << 24) | (b << 16) | (g << 8) | r) >>> 0;
   });
+}
+
+/** Palette as packed RGB floats in [0, 1] for WebGL uniforms. */
+export function packPaletteRgb(palette: readonly string[]): Float32Array {
+  const out = new Float32Array(palette.length * 3);
+  for (let i = 0; i < palette.length; i++) {
+    const [r, g, b] = hexToRgb(palette[i]);
+    out[i * 3] = r / 255;
+    out[i * 3 + 1] = g / 255;
+    out[i * 3 + 2] = b / 255;
+  }
+  return out;
+}
+
+/** 8x8 dither threshold table quantized to 0..255 for the WebGL ordered-dither texture. */
+export function buildDitherBytes(screen: WallpaperStyle["screen"]): Uint8Array {
+  const thr = screen === "diagonal" ? diagonalThreshold : bayerThreshold;
+  const out = new Uint8Array(64);
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      out[y * 8 + x] = Math.round(thr(x, y) * 255);
+    }
+  }
+  return out;
 }
 
 /* ---------- drift ---------- */
@@ -344,86 +410,275 @@ export interface WallpaperHandle {
 }
 
 export interface WallpaperEnv {
+  motion?: WallpaperMotion;
   /** Current time in ms (injectable for tests). */
   now?: () => number;
   reducedMotion?: () => boolean;
+  focused?: () => boolean;
+  batterySaver?: () => boolean;
+  createLive?: typeof createLiveCloudRenderer | null;
+  onContextLost?: () => void;
 }
 
 /**
- * Draw `kind` on `canvas` and keep it drifting.  One timer fires only when the drift crosses a whole
- * column; it is cleared while the document is hidden (or minimised) and never runs under reduced motion.
- * `onDrawn` is called after the first frame of each (re)build, e.g. to sample the tone for the panels.
+ * Draw `kind` on `canvas` and animate according to `env.motion` (`off` = static frame,
+ * `subtle` = 1 col / 4 s drift, `live` = 30 fps WebGL fbm clouds with dither post-effect, falling
+ * back to the static 2D wallpaper when WebGL is unavailable).
+ *
+ * Pauses whenever the window is hidden, unfocused, or minimised, on battery saver, or under
+ * `prefers-reduced-motion`.  `onDrawn` fires after the initial / resized frame so panels can
+ * sample the backdrop tone once without per-frame reads.
  */
 export function startWallpaper(
   canvas: HTMLCanvasElement,
   kind: WallpaperKind,
-  onDrawn?: () => void,
+  onDrawn?: (source?: ToneSource | null) => void,
   env: WallpaperEnv = {}
 ): WallpaperHandle {
   const style = WALLPAPERS[kind];
   const packed = packPalette(style.palette);
   const now = env.now ?? (() => performance.now());
-  const reduced = env.reducedMotion ?? (() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const requestedMotion = env.motion ?? DEFAULT_WALLPAPER_MOTION;
+  const reducedQuery =
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)")
+      : null;
+  let focusedState = typeof document !== "undefined" && typeof document.hasFocus === "function" ? document.hasFocus() : true;
+  let batteryFlag = false;
+  let batteryHandle: BatteryLike | null = null;
+
+  const isHidden = () => (typeof document !== "undefined" ? document.hidden : false);
+  const isFocused = () => (env.focused ? env.focused() : focusedState);
+  const isReduced = () => (env.reducedMotion ? env.reducedMotion() : reducedQuery?.matches ?? false);
+  const isBattery = () => (env.batterySaver ? env.batterySaver() : batteryFlag);
+
   let field: Uint8Array = new Uint8Array(0);
   let w = 0;
   let h = 0;
   let image: ImageData | null = null;
   let words = new Uint32Array(0);
-  const ctx = canvas.getContext("2d");
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let ctx2d: CanvasRenderingContext2D | null = null;
+  let live: LiveCloudRenderer | null = null;
+  let activeMotion: WallpaperMotion = requestedMotion;
+
+  let subtleTimer: ReturnType<typeof setTimeout> | undefined;
+  let liveTimer: ReturnType<typeof setTimeout> | undefined;
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
-  const epoch = now();
+  let rafId: number | undefined;
   let stopped = false;
 
-  const draw = (): void => {
-    if (!ctx || !image) return;
-    renderField(field, w, h, driftOffset(now() - epoch, w), style, packed, words);
-    ctx.putImageData(image, 0, 0);
+  let activeElapsedMs = 0;
+  let resumeEpoch: number | null = null;
+  let lastLiveDrawAt = -Infinity;
+
+  const canAnimate = () =>
+    !stopped &&
+    shouldAnimateWallpaper({
+      motion: activeMotion,
+      hidden: isHidden(),
+      focused: isFocused(),
+      reducedMotion: isReduced(),
+      batterySaver: isBattery()
+    });
+
+  const currentElapsedMs = () =>
+    activeElapsedMs + (resumeEpoch !== null ? Math.max(0, now() - resumeEpoch) : 0);
+
+  const cancelLoops = (): void => {
+    clearTimeout(subtleTimer);
+    subtleTimer = undefined;
+    clearTimeout(liveTimer);
+    liveTimer = undefined;
+    if (rafId !== undefined && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(rafId);
+    }
+    rafId = undefined;
   };
-  const schedule = (): void => {
-    clearTimeout(timer);
-    if (stopped || document.hidden || reduced()) return;
-    timer = setTimeout(() => {
-      draw();
-      schedule();
-    }, nextDriftDelay(now() - epoch));
+
+  const draw2d = (): void => {
+    if (!ctx2d || !image) return;
+    renderField(field, w, h, driftOffset(currentElapsedMs(), w), style, packed, words);
+    ctx2d.putImageData(image, 0, 0);
   };
-  const rebuild = (): void => {
+
+  const drawLive = (): void => {
+    if (!live) return;
+    live.draw(currentElapsedMs() / 1000);
+  };
+
+  const scheduleSubtle = (): void => {
+    clearTimeout(subtleTimer);
+    if (!canAnimate() || activeMotion !== "subtle") return;
+    subtleTimer = setTimeout(() => {
+      if (!canAnimate() || activeMotion !== "subtle") return;
+      draw2d();
+      scheduleSubtle();
+    }, nextDriftDelay(currentElapsedMs()));
+  };
+
+  const scheduleLive = (): void => {
+    clearTimeout(liveTimer);
+    if (!canAnimate() || activeMotion !== "live" || !live) return;
+    const wait = Math.max(0, LIVE_FRAME_INTERVAL_MS - (now() - lastLiveDrawAt));
+    liveTimer = setTimeout(() => {
+      liveTimer = undefined;
+      if (!canAnimate() || activeMotion !== "live" || !live) return;
+      const runFrame = () => {
+        rafId = undefined;
+        if (!canAnimate() || activeMotion !== "live" || !live) return;
+        lastLiveDrawAt = now();
+        drawLive();
+        scheduleLive();
+      };
+      if (typeof requestAnimationFrame === "function") {
+        rafId = requestAnimationFrame(runFrame);
+      } else {
+        runFrame();
+      }
+    }, wait);
+  };
+
+  const syncAnimation = (redraw = false): void => {
+    if (stopped) return;
+    const shouldRun = canAnimate();
+    if (shouldRun) {
+      if (resumeEpoch === null) resumeEpoch = now();
+      if (redraw) {
+        if (activeMotion === "live" && live) {
+          lastLiveDrawAt = now();
+          drawLive();
+        } else {
+          draw2d();
+        }
+      }
+      if (activeMotion === "live" && live) scheduleLive();
+      else if (activeMotion === "subtle") scheduleSubtle();
+    } else {
+      if (resumeEpoch !== null) {
+        activeElapsedMs += Math.max(0, now() - resumeEpoch);
+        resumeEpoch = null;
+      }
+      cancelLoops();
+    }
+  };
+
+  const rebuild2d = (): void => {
+    if (!ctx2d) ctx2d = canvas.getContext("2d");
     const size = wallpaperSize(window.innerWidth, window.innerHeight, style.scale);
     w = size.w;
     h = size.h;
     canvas.width = w;
     canvas.height = h;
     field = buildField(w, h, style.cover, style.haze);
-    image = ctx ? ctx.createImageData(w, h) : null;
+    image = ctx2d ? ctx2d.createImageData(w, h) : null;
     words = image ? new Uint32Array(image.data.buffer) : new Uint32Array(0);
-    // The field wraps, so every drift offset shows the same pixels: the tone sample is exact at any time.
-    draw();
+    draw2d();
     onDrawn?.();
-    schedule();
   };
-  const onVisibility = (): void => {
-    if (document.hidden) {
-      clearTimeout(timer);
+
+  const rebuild = (): void => {
+    if (stopped) return;
+    if (activeMotion === "live" && live) {
+      const size = wallpaperSize(window.innerWidth, window.innerHeight, style.scale, LIVE_MAX_PIXELS);
+      w = size.w;
+      h = size.h;
+      live.resize(w, h);
+      lastLiveDrawAt = now();
+      drawLive();
+      const rgba = live.readPixelsRgba();
+      onDrawn?.(rgba ? makeToneSource(rgba, w, h, Math.max(1, window.innerWidth) / w) : undefined);
     } else {
-      draw();
-      schedule();
+      rebuild2d();
     }
+    syncAnimation(false);
+  };
+
+  if (requestedMotion === "live") {
+    const factory = env.createLive === undefined ? createLiveCloudRenderer : env.createLive;
+    live = factory
+      ? factory(
+          canvas,
+          {
+            paletteRgb: packPaletteRgb(style.palette),
+            ditherBytes: buildDitherBytes(style.screen),
+            cover: style.cover,
+            haze: style.haze
+          },
+          () => {
+            if (stopped) return;
+            live?.dispose();
+            live = null;
+            activeMotion = "off";
+            cancelLoops();
+            env.onContextLost?.();
+          }
+        )
+      : null;
+    if (!live) {
+      // WebGL unavailable: fall back cleanly to the static 2D cloud wallpaper.
+      activeMotion = "off";
+    }
+  }
+
+  const onVisibility = (): void => syncAnimation(!isHidden());
+  const onFocus = (): void => {
+    focusedState = true;
+    syncAnimation(true);
+  };
+  const onBlur = (): void => {
+    focusedState = false;
+    syncAnimation(false);
+  };
+  const onReducedChange = (): void => syncAnimation(false);
+  const onBatteryChange = (): void => {
+    batteryFlag = isBatterySaver(batteryHandle);
+    syncAnimation(!batteryFlag);
   };
   const onResize = (): void => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(rebuild, 150);
   };
-  document.addEventListener("visibilitychange", onVisibility);
-  window.addEventListener("resize", onResize);
+
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
+  if (typeof window !== "undefined") {
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("resize", onResize);
+  }
+  reducedQuery?.addEventListener?.("change", onReducedChange);
+
+  const nav = typeof navigator !== "undefined" ? (navigator as Navigator & { getBattery?: () => Promise<BatteryLike> }) : null;
+  if (!env.batterySaver && nav && typeof nav.getBattery === "function") {
+    void nav
+      .getBattery()
+      .then((b) => {
+        if (stopped || !b) return;
+        batteryHandle = b;
+        b.addEventListener?.("chargingchange", onBatteryChange);
+        b.addEventListener?.("levelchange", onBatteryChange);
+        onBatteryChange();
+      })
+      .catch(() => {});
+  }
+
   rebuild();
   return {
     stop() {
       stopped = true;
-      clearTimeout(timer);
+      cancelLoops();
       clearTimeout(resizeTimer);
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("resize", onResize);
+      live?.dispose();
+      live = null;
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", onFocus);
+        window.removeEventListener("blur", onBlur);
+        window.removeEventListener("resize", onResize);
+      }
+      reducedQuery?.removeEventListener?.("change", onReducedChange);
+      batteryHandle?.removeEventListener?.("chargingchange", onBatteryChange);
+      batteryHandle?.removeEventListener?.("levelchange", onBatteryChange);
+      batteryHandle = null;
     }
   };
 }

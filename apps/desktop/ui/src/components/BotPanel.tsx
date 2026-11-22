@@ -1,4 +1,6 @@
 import {
+  Bell,
+  BellOff,
   ChevronRight,
   Lock,
   PenLine,
@@ -124,7 +126,9 @@ export function BotPanel({
   onOpenMail,
   isMain = false,
   mainBotName,
-  onMakeMain
+  onMakeMain,
+  notifyMuted = false,
+  onToggleNotifyMute
 }: {
   bot: BotIdentity;
   /** `provider/model` the bot runs on. */
@@ -159,6 +163,10 @@ export function BotPanel({
   mainBotName?: string;
   /** Make this bot the main bot; omitted when there is nothing to choose. */
   onMakeMain?: () => void;
+  /** This bot's long-run / failed notifications are muted (approvals still notify). */
+  notifyMuted?: boolean;
+  /** Mute or unmute those notifications; omitted hides the switch. */
+  onToggleNotifyMute?: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const { events, refreshRuns } = useDaemon();
@@ -251,6 +259,20 @@ export function BotPanel({
           >
             <UserRound aria-hidden="true" />
           </button>
+          {onToggleNotifyMute ? (
+            // A toggle: the name stays the same, aria-pressed says whether the mute is on.
+            <button
+              type="button"
+              className={styles.iconBtn}
+              data-testid="bot-panel-mute"
+              title={`${t("botPanel.muteNotify")}. ${t("botPanel.muteNotifyHint")}`}
+              aria-label={t("botPanel.muteNotify")}
+              aria-pressed={notifyMuted}
+              onClick={onToggleNotifyMute}
+            >
+              {notifyMuted ? <BellOff aria-hidden="true" /> : <Bell aria-hidden="true" />}
+            </button>
+          ) : null}
         </div>
       </header>
 

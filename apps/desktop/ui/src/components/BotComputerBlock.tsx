@@ -1,4 +1,4 @@
-import { Eye, Globe, Maximize2, Monitor, Server, Star, Terminal } from "lucide-react";
+import { Eye, Globe, Loader2, Maximize2, Monitor, Server, Star, Terminal } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "ui";
 import { isActivelyOwningTakeover, visibleActions } from "../lib/liveViewState";
@@ -11,6 +11,9 @@ import { useDaemon } from "../state/DaemonContext";
 import { useServerTerminal } from "../state/ServerTerminalContext";
 import { computerPresence, mainBotLabel } from "../lib/computerStage";
 import { useComputerView } from "../state/useComputerView";
+import { streamHealth } from "../lib/liveViewAdaptive";
+import { cardAspect } from "../lib/liveViewSizing";
+import { StreamQuality } from "./StreamQuality";
 import styles from "./BotComputerBlock.module.css";
 
 /** This computer's system, for the status line ("Windows · bot burada çalışıyor"). */
@@ -28,6 +31,24 @@ function reasonKey(reason: UnavailableReason | null): { key: string; detail?: st
         : { key: `liveView.reasons.${reason.targetReason}` };
   }
   return { key: `computerCard.reason.${reason ?? "failed"}` };
+}
+
+/** A frozen picture is never shown as live: after a few quiet seconds the card says so. */
+function StallNotice({ lastActivityAtMs }: { lastActivityAtMs: number | null }) {
+  const { t } = useTranslation();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const health = streamHealth({ hasFrame: true, lastActivityAtMs, nowMs: now, ended: false });
+  if (health !== "stalled") return null;
+  return (
+    <div className={styles.stalled} role="status" data-testid="bot-computer-stalled">
+      <Loader2 aria-hidden="true" />
+      <span>{t("computerCard.stalled")}</span>
+    </div>
+  );
 }
 
 /** The elapsed "CANLI 0:42" label: ticks once a second while live. */
@@ -182,11 +203,20 @@ export function BotComputerBlock({
           ) : null}
         </div>
 
-        <div className={styles.view} data-kind={view.kind} data-testid="bot-computer-view">
+        <div
+          className={styles.view}
+          data-kind={view.kind}
+          data-testid="bot-computer-view"
+          style={view.kind === "live" ? { aspectRatio: cardAspect(view.resolution) } : undefined}
+        >
           {view.kind === "live" && view.frameUrl ? (
             <>
-              <img className={styles.frame} src={view.frameUrl} alt={t("computerCard.frameAlt", { name })} title={t("liveView.privacyNotice")} draggable={false} />
+              <img className={styles.frame} data-testid="bot-computer-frame" src={view.frameUrl} alt={t("computerCard.frameAlt", { name })} title={t("liveView.privacyNotice")} draggable={false} />
               <LiveClock since={view.liveSinceMs} />
+              <StallNotice lastActivityAtMs={live.state.lastActivityAtMs} />
+              <div className={styles.quality}>
+                <StreamQuality mode={live.qualityMode} onChange={live.setQualityMode} />
+              </div>
               <div className={styles.over}>
                 <button type="button" data-testid="bot-computer-big" onClick={view.bigView}>
                   <Maximize2 aria-hidden="true" />

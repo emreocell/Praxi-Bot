@@ -236,6 +236,10 @@
   box-shadow: var(--shadow-focus);
 }
 
+.iconBtn[aria-pressed="true"] {
+  color: var(--color-accent-text);
+}
+
 .iconBtn > svg {
   width: var(--size-icon-sm);
   height: var(--size-icon-sm);
