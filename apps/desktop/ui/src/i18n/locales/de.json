@@ -3912,6 +3912,36 @@
     "thisComputerHint": "Deine Bots laufen hier. Kein Server nötig.",
     "title": "Wo laufen meine Bots?"
   },
+  "runReport": {
+    "answered": "Du hast geantwortet",
+    "approved": "Du hast es erlaubt",
+    "asked": "Hat dir eine Frage gestellt",
+    "askedCredential": "Hat nach einem Passwort oder Schlüssel gefragt",
+    "button": "Zeitverlauf",
+    "credentialCancelled": "Du hast abgebrochen",
+    "credentialSaved": "Du hast es gespeichert",
+    "declined": "Nicht erlaubt",
+    "exportHtml": "Als Webseite speichern",
+    "exportMarkdown": "Als Text speichern",
+    "exported": "Bericht gespeichert",
+    "footer": "Mit Praxi erstellt. Private Details sind nicht enthalten.",
+    "hint": "Sieh Schritt für Schritt, was der Bot in diesem Lauf getan hat",
+    "noSteps": "Der Bot hat in diesem Lauf keine Werkzeuge benutzt.",
+    "outcome": "Ergebnis",
+    "outcomes": {
+      "done": "Fertig",
+      "failed": "Fehlgeschlagen",
+      "stopped": "Von dir gestoppt",
+      "unfinished": "Nicht abgeschlossen"
+    },
+    "privacy": "Private Details bleiben draußen: Was eingegeben, gelesen oder beantwortet wurde, wird nicht gezeigt, und alles, was wie ein Passwort oder Schlüssel aussieht, wird verborgen.",
+    "started": "Gestartet",
+    "title": "Was der Bot getan hat",
+    "took": "Dauer",
+    "tookTime": "Dauerte {{time}}",
+    "unanswered": "Keine Antwort",
+    "waitingForYou": "Wartet auf dich"
+  },
   "runStatus": {
     "showCard": "Anzeigen",
     "stopping": "Wird gestoppt …",
