@@ -454,6 +454,8 @@
       "all": "Alle Designs",
       "description": "Farben für die gesamte App. Flächen, Linien und gedämpfter Text werden aus zwei Farben abgeleitet.",
       "system": "System folgen",
+      "systemDark": "Dunkles Design, solange das System dunkel ist",
+      "systemLight": "Helles Design, solange das System hell ist",
       "title": "Design"
     },
     "themes": {

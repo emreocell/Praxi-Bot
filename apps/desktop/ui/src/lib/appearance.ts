@@ -7,8 +7,11 @@ import {
   paletteById,
   parseAccentPreference,
   parseCustomTheme,
+  DEFAULT_SYSTEM_PAIR,
+  parseSystemPair,
   parseThemeMode,
   themeFor,
+  type SystemPair,
   UI_STYLES,
   type AccentPreference,
   type BubbleStyle,
@@ -40,6 +43,10 @@ export interface AppearanceSettings {
   /** Palette id, `custom`, `system`, or a legacy name (`light`, `dark`). */
   themeMode: string;
   customTheme: CustomTheme;
+  /** Light palette "Follow system" uses while the OS is light. */
+  systemLightTheme: string;
+  /** Dark palette "Follow system" uses while the OS is dark. */
+  systemDarkTheme: string;
   /** `""` = the bot's colour, `"theme"` = the theme's own, or `#rrggbb`. */
   accentColor: AccentPreference;
   uiStyle: UiStyle;
@@ -77,6 +84,8 @@ export interface AppearanceSettings {
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   themeMode: "obsidian",
   customTheme: DEFAULT_CUSTOM_THEME,
+  systemLightTheme: DEFAULT_SYSTEM_PAIR.light,
+  systemDarkTheme: DEFAULT_SYSTEM_PAIR.dark,
   accentColor: "",
   uiStyle: "solid",
   corners: "soft",
@@ -111,7 +120,10 @@ export const parseOwnBubble = (v: unknown): OwnBubble => oneOf(OWN_BUBBLES, v, D
  */
 export function normalizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
   const chatPanel = raw.chatPanel === true;
+  const pair = parseSystemPair(raw.systemLightTheme, raw.systemDarkTheme);
   return {
+    systemLightTheme: pair.light,
+    systemDarkTheme: pair.dark,
     themeMode: parseThemeMode(raw.themeMode),
     customTheme: parseCustomTheme(raw.customTheme),
     accentColor: parseAccentPreference(raw.accentColor),
@@ -133,6 +145,10 @@ export function normalizeAppearance(raw: Record<string, unknown>): AppearanceSet
     photorealAvatars: raw.photorealAvatars !== false
   };
 }
+
+/** The light / dark pair "Follow system" switches between. */
+export const systemPairOf = (s: Partial<Pick<AppearanceSettings, "systemLightTheme" | "systemDarkTheme">>): SystemPair =>
+  parseSystemPair(s.systemLightTheme, s.systemDarkTheme);
 
 /** Patch to apply when the user picks a theme (a theme with its own accent selects it). */
 export function themePickPatch(

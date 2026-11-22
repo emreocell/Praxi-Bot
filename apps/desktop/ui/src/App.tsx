@@ -85,7 +85,7 @@ import { LiveViewProvider, useLiveView } from "./state/LiveViewContext";
 import { HumanDrivingBanner } from "./components/HumanDrivingBanner";
 import { LiveViewer } from "./views/LiveViewer";
 import type { LiveChatSlots } from "./views/LiveViewerChat";
-import { appearanceFromQuery } from "./lib/appearance";
+import { appearanceFromQuery, systemPairOf } from "./lib/appearance";
 import { createDebounced } from "./lib/debounce";
 import { backdropIsActive, CUSTOM_BACKDROP, NO_BACKDROP } from "./lib/backdropCatalog";
 import { Backdrop, sceneColors } from "./components/Backdrop";
@@ -562,7 +562,7 @@ function AppShell() {
   const selectedBot = bots.find((bot) => bot.id === routeBotId) ?? bots[0];
   // The wallpaper (when on) takes the backdrop's place, so the panels' glass, tone sampling and
   // floating layout all follow the existing backdrop plumbing.
-  const baseTheme = resolveTheme(settings.themeMode, settings.customTheme);
+  const baseTheme = resolveTheme(settings.themeMode, settings.customTheme, systemPairOf(settings));
   const wallpaperKind = resolveWallpaper(settings.wallpaper, baseTheme.id, !isLightColor(baseTheme.bg));
   const shellSettings = useMemo(
     () =>

@@ -454,6 +454,8 @@
       "all": "Tüm temalar",
       "description": "Tüm uygulamanın renkleri. Yüzeyler, çizgiler ve soluk metin iki renkten türetilir.",
       "system": "Sistemi izle",
+      "systemDark": "Sistem koyuyken kullanılacak tema",
+      "systemLight": "Sistem açıkken kullanılacak tema",
       "title": "Tema"
     },
     "themes": {

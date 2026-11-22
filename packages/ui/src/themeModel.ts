@@ -240,11 +240,42 @@ export function parseThemeMode(value: unknown): string {
   return paletteById(value) ? value : DEFAULT_THEME_ID;
 }
 
-/** Concrete theme for a saved mode. `prefersDark` only matters for `system`. */
-export function themeFor(mode: string, custom: CustomTheme, prefersDark: boolean): ThemeDef {
+/** The two themes "Follow system" switches between: one light, one dark palette id. */
+export interface SystemPair {
+  light: string;
+  dark: string;
+}
+
+export const DEFAULT_SYSTEM_PAIR: SystemPair = { light: "clay", dark: "obsidian" };
+
+/**
+ * Narrow a stored light / dark choice to a valid pair: the light slot only accepts a light
+ * palette and the dark slot a dark one; anything else falls back to the default of that slot.
+ */
+export function parseSystemPair(light: unknown, dark: unknown): SystemPair {
+  const pick = (id: unknown, wantLight: boolean, fallback: string): string => {
+    const p = typeof id === "string" ? paletteById(id) : undefined;
+    return p && deriveTheme(p).light === wantLight ? p.id : fallback;
+  };
+  return {
+    light: pick(light, true, DEFAULT_SYSTEM_PAIR.light),
+    dark: pick(dark, false, DEFAULT_SYSTEM_PAIR.dark)
+  };
+}
+
+/** Concrete theme for a saved mode. `prefersDark` and `pair` only matter for `system`. */
+export function themeFor(
+  mode: string,
+  custom: CustomTheme,
+  prefersDark: boolean,
+  pair: SystemPair = DEFAULT_SYSTEM_PAIR
+): ThemeDef {
   const m = parseThemeMode(mode);
   if (m === CUSTOM_THEME_ID) return { id: CUSTOM_THEME_ID, ...custom };
-  if (m === "system") return paletteById(prefersDark ? "obsidian" : "clay") as ThemeDef;
+  if (m === "system") {
+    const safe = parseSystemPair(pair.light, pair.dark);
+    return paletteById(prefersDark ? safe.dark : safe.light) as ThemeDef;
+  }
   const id = LEGACY_THEME_ALIASES[m] ?? m;
   return (paletteById(id) ?? paletteById(DEFAULT_THEME_ID)) as ThemeDef;
 }

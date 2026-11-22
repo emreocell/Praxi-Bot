@@ -454,6 +454,8 @@
       "all": "All themes",
       "description": "Colors for the whole app. Surfaces, lines and muted text are derived from two colors.",
       "system": "Follow system",
+      "systemDark": "Dark theme while the system is dark",
+      "systemLight": "Light theme while the system is light",
       "title": "Theme"
     },
     "themes": {
