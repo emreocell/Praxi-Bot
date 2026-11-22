@@ -12234,6 +12234,98 @@
         ]
       }
     },
+    "/v1/voice/local": {
+      "get": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "On-device speech models: what can be installed, licences and install state.",
+        "operationId": "get_local_voice",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalVoiceStatusDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "voice is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/voice/local/install": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Download one on-device speech model (owner only; checksum-verified, returns at once).",
+        "operationId": "install_local_voice",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalVoiceInstallInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalVoiceStatusDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "unknown model or not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "voice is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/voice/transcribe": {
       "post": {
         "tags": [
@@ -19552,6 +19644,109 @@
           }
         }
       },
+      "LocalVoiceInstallInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/voice/local/install`.",
+        "required": [
+          "model"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "A model id from `GET /v1/voice/local`."
+          }
+        }
+      },
+      "LocalVoiceModelDto": {
+        "type": "object",
+        "description": "One downloadable on-device speech model (`GET /v1/voice/local`).",
+        "required": [
+          "id",
+          "label",
+          "description",
+          "size_mb",
+          "license",
+          "license_url",
+          "source_host",
+          "installed"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "One plain sentence: what it is good for."
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable id, e.g. `whisper-small`."
+          },
+          "installed": {
+            "type": "boolean",
+            "description": "`true` when every file is on disk and its checksum was verified."
+          },
+          "label": {
+            "type": "string",
+            "description": "Short name for a picker."
+          },
+          "license": {
+            "type": "string",
+            "description": "Licence of the model weights (SPDX-style), shown before the download."
+          },
+          "license_url": {
+            "type": "string",
+            "description": "Where the licence text lives."
+          },
+          "size_mb": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Download size in megabytes.",
+            "minimum": 0
+          },
+          "source_host": {
+            "type": "string",
+            "description": "Where the files are downloaded from (host only)."
+          }
+        }
+      },
+      "LocalVoiceStatusDto": {
+        "type": "object",
+        "description": "On-device speech state (`GET /v1/voice/local`).",
+        "required": [
+          "available",
+          "vad_installed",
+          "models"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "`false` when this daemon was built without the `local-voice` feature."
+          },
+          "installing": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Id of the model being downloaded right now, if any."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plain-language reason the last download failed, if it did."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalVoiceModelDto"
+            },
+            "description": "Models the owner can install."
+          },
+          "vad_installed": {
+            "type": "boolean",
+            "description": "Whether the voice-activity model (end-of-speech detection) is installed."
+          }
+        }
+      },
       "ManagedFitDto": {
         "type": "string",
         "description": "How a model is expected to run here.",
@@ -24758,6 +24953,7 @@
           "stt_provider",
           "gemini_model",
           "gemini_key_set",
+          "local_model",
           "stt_base_url",
           "stt_model",
           "stt_key_set"
@@ -24770,6 +24966,10 @@
           "gemini_model": {
             "type": "string",
             "description": "Gemini Live model used for transcription (e.g. `gemini-3.5-transcribe-live`)."
+          },
+          "local_model": {
+            "type": "string",
+            "description": "Id of the on-device speech model used when the provider is `local_voice`."
           },
           "stt_base_url": {
             "type": "string",
@@ -24821,6 +25021,13 @@
             ],
             "description": "Gemini Live model name."
           },
+          "local_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Id of an on-device speech model from `GET /v1/voice/local`."
+          },
           "stt_base_url": {
             "type": [
               "string",
@@ -24860,7 +25067,8 @@
         "description": "Which service turns speech into text.",
         "enum": [
           "whisper",
-          "gemini_live"
+          "gemini_live",
+          "local_voice"
         ]
       },
       "WebSearchConfigDto": {

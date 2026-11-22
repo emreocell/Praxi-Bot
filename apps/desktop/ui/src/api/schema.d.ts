@@ -3492,6 +3492,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/voice/local": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** On-device speech models: what can be installed, licences and install state. */
+        get: operations["get_local_voice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/voice/local/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Download one on-device speech model (owner only; checksum-verified, returns at once). */
+        post: operations["install_local_voice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/voice/transcribe": {
         parameters: {
             query?: never;
@@ -6141,6 +6175,46 @@ export interface components {
             /** @description The server answered on its loopback port. */
             running: boolean;
         };
+        /** @description Body of `POST /v1/voice/local/install`. */
+        LocalVoiceInstallInput: {
+            /** @description A model id from `GET /v1/voice/local`. */
+            model: string;
+        };
+        /** @description One downloadable on-device speech model (`GET /v1/voice/local`). */
+        LocalVoiceModelDto: {
+            /** @description One plain sentence: what it is good for. */
+            description: string;
+            /** @description Stable id, e.g. `whisper-small`. */
+            id: string;
+            /** @description `true` when every file is on disk and its checksum was verified. */
+            installed: boolean;
+            /** @description Short name for a picker. */
+            label: string;
+            /** @description Licence of the model weights (SPDX-style), shown before the download. */
+            license: string;
+            /** @description Where the licence text lives. */
+            license_url: string;
+            /**
+             * Format: int32
+             * @description Download size in megabytes.
+             */
+            size_mb: number;
+            /** @description Where the files are downloaded from (host only). */
+            source_host: string;
+        };
+        /** @description On-device speech state (`GET /v1/voice/local`). */
+        LocalVoiceStatusDto: {
+            /** @description `false` when this daemon was built without the `local-voice` feature. */
+            available: boolean;
+            /** @description Id of the model being downloaded right now, if any. */
+            installing?: string | null;
+            /** @description Plain-language reason the last download failed, if it did. */
+            last_error?: string | null;
+            /** @description Models the owner can install. */
+            models: components["schemas"]["LocalVoiceModelDto"][];
+            /** @description Whether the voice-activity model (end-of-speech detection) is installed. */
+            vad_installed: boolean;
+        };
         /**
          * @description How a model is expected to run here.
          * @enum {string}
@@ -8274,6 +8348,8 @@ export interface components {
             gemini_key_set: boolean;
             /** @description Gemini Live model used for transcription (e.g. `gemini-3.5-transcribe-live`). */
             gemini_model: string;
+            /** @description Id of the on-device speech model used when the provider is `local_voice`. */
+            local_model: string;
             /** @description Base URL of the OpenAI-compatible transcription service (without `/audio/transcriptions`). */
             stt_base_url: string;
             /** @description Whether an API key is stored (never returned). */
@@ -8293,6 +8369,8 @@ export interface components {
             gemini_key?: string | null;
             /** @description Gemini Live model name. */
             gemini_model?: string | null;
+            /** @description Id of an on-device speech model from `GET /v1/voice/local`. */
+            local_model?: string | null;
             /** @description `https://...`, or `http://` for a loopback server only. */
             stt_base_url?: string | null;
             /** @description API key (**write-only**: stored in the secret store, never returned or logged). */
@@ -8305,7 +8383,7 @@ export interface components {
          * @description Which service turns speech into text.
          * @enum {string}
          */
-        VoiceProvider: "whisper" | "gemini_live";
+        VoiceProvider: "whisper" | "gemini_live" | "local_voice";
         /**
          * @description Current web search configuration (`GET /v1/web/search`): non-secret fields
          *     only.
@@ -16490,6 +16568,75 @@ export interface operations {
                 };
             };
             /** @description invalid config */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description voice is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_local_voice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalVoiceStatusDto"];
+                };
+            };
+            /** @description voice is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    install_local_voice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalVoiceInstallInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalVoiceStatusDto"];
+                };
+            };
+            /** @description unknown model or not available */
             422: {
                 headers: {
                     [name: string]: unknown;
