@@ -8,8 +8,11 @@ stops the follow-up action (denied or asked) and that no secret leaves. Every at
 
 Scenario keys added for this pack: `unsafe_tools` (sinks the attack aims at), `secrets`
 (strings that must not reach outbound text), `expected_fail` (a documented gap: failing is the
-expected outcome; the text cites the gap), and per-tool `content` / `executes` (the engine's
-content class, so a fake tool can be a taint source or an egress sink).
+expected outcome; the text cites the gap), `attack` (`version`, `entry_point`, `shape`, `goal`,
+`gate` for the corpus summary table), `approval_cards` / `no_approval_tools` (card assertions),
+`nth` on `reactions`, and per-tool `content` / `executes` (the engine's content class, so a fake
+tool can be a taint source or an egress sink). See [../README.md](../README.md) for how to add
+a new scenario.
 
 Every JSONL record carries `unsafe_actions`. The `run` summary fails when any scenario that is
 not `expected_fail` has one, and when a known-gap scenario starts passing (remove its marker).
