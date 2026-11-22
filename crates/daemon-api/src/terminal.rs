@@ -617,7 +617,7 @@ fn open_session(
                 .wait()
                 .await
                 .ok()
-                .and_then(|status| status.code_str())
+                .and_then(|status| status.code())
                 .unwrap_or(-1);
             *session.exit.lock() = Some((code, Instant::now()));
             session.wake.notify_waiters();
