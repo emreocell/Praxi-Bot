@@ -632,7 +632,7 @@
       "intro": "Füge von Hand einen Stdio- oder HTTP-MCP-Server hinzu.",
       "name": "Servername",
       "stdio": "Stdio",
-      "transport": "Transport",
+      "transport": "Übertragung",
       "url": "Server-URL"
     },
     "disconnect": "Trennen",
@@ -840,7 +840,7 @@
     "target": {
       "auto": "Automatisch",
       "browser": "Browser",
-      "host": "Host",
+      "host": "Server",
       "off": "Aus",
       "pc": "Dieser Computer",
       "server": "Gekoppelter Server (nur Browser)"
@@ -878,7 +878,7 @@
         "text": "Die CLI fragt, bevor sie etwas ändert. Jede Frage erscheint als Genehmigungskarte."
       },
       "auto": {
-        "name": "Auto",
+        "name": "Automatisch",
         "text": "Der automatische Prüfer der CLI entscheidet, was sicher ist. Nur dort, wo die CLI einen hat."
       },
       "full": {
@@ -937,7 +937,7 @@
     "computer": "Computer",
     "editTitle": "Bot bearbeiten",
     "engine": {
-      "title": "Engine"
+      "title": "Motor"
     },
     "executorRequired": "Das Ausführungsmodell ist erforderlich.",
     "files": {
@@ -965,7 +965,7 @@
     "name": "Name",
     "nameRequired": "Ein Name ist erforderlich.",
     "permissions": "Berechtigungen",
-    "persona": "Persona",
+    "persona": "Persönlichkeit",
     "personaPlaceholder": "Wie soll sich dieser Bot verhalten? (Systemanweisung)",
     "preset": {
       "approve-destructive": {
@@ -1031,7 +1031,7 @@
       "monthly": "Pro Monat",
       "weekly": "Pro Woche"
     },
-    "remote": "Limits lassen sich nur auf diesem Computer ändern, nicht auf einem entfernten Host.",
+    "remote": "Limits lassen sich nur auf diesem Computer ändern, nicht auf einem entfernten Server.",
     "save": "Limits speichern",
     "saved": "Limits gespeichert.",
     "saving": "Wird gespeichert…",
@@ -1925,8 +1925,8 @@
       },
       "summary": "Zusammenfassung",
       "task": "Aufgabe",
-      "title": "Subagent",
-      "toggle": "Subagent: {{task}}"
+      "title": "Unteragent",
+      "toggle": "Unteragent: {{task}}"
     },
     "timelineLabel": "Unterhaltung",
     "todo": {
@@ -1950,7 +1950,7 @@
         "requested": "Angefordert",
         "running": "Läuft"
       },
-      "subagent": "Subagent"
+      "subagent": "Unteragent"
     },
     "working": "Arbeitet …",
     "yesterdayLabel": "Gestern"
@@ -2087,7 +2087,7 @@
   },
   "computerPicker": {
     "add": "Server hinzufügen …",
-    "host": "Host",
+    "host": "Server",
     "label": "Computer: {{name}}",
     "link": {
       "connected": "Verbunden",
@@ -2214,7 +2214,7 @@
         "text": "{{cli}} fragt, bevor es etwas ändert. Jede Frage erscheint als Genehmigungskarte."
       },
       "auto": {
-        "name": "Auto",
+        "name": "Automatisch",
         "text": "Der automatische Prüfer von {{cli}} entscheidet, was sicher ist."
       },
       "full": {
@@ -2359,7 +2359,7 @@
         "title": "Dieser Computer ist nicht erreichbar"
       },
       "host_not_permitted": {
-        "hint": "Der Computer ist online, erlaubt das Terminal aber nur für den gekoppelten Desktop seines Besitzers. Koppel diesen Computer am Host erneut und versuche es dann wieder.",
+        "hint": "Der Computer ist online, erlaubt das Terminal aber nur für den gekoppelten Desktop seines Besitzers. Koppel diesen Computer am Server erneut und versuche es dann wieder.",
         "title": "Dieser Computer hat das Terminal nicht erlaubt"
       },
       "host_outdated": {
@@ -3037,7 +3037,7 @@
     "group": {
       "composer": "Chat-Eingabe",
       "dialogs": "Dialoge",
-      "global": "Global",
+      "global": "Allgemein",
       "slash": "Slash-Befehle (im Eingabefeld / tippen)"
     },
     "intro": "Praktische Kürzel, solange die App geöffnet ist.",
@@ -3346,7 +3346,7 @@
     "focusTrapHint": "Umschalt+Esc verlässt den Bildschirm-Tastaturfokus zur Schaltfläche „Ich bin fertig“.",
     "globalPauseNotice": "Das Übernehmen der Kontrolle oder das Pausieren gilt global für alle Bots.",
     "handBackAction": "Zurückgeben",
-    "hostLabel": "Host: {{host}}",
+    "hostLabel": "Server: {{host}}",
     "interactive": "Interaktiv",
     "kind": {
       "browser": "Browser",
@@ -3957,20 +3957,20 @@
       "temporary": "Deine Bots laufen auf diesem Computer"
     },
     "stopAll": "Alles beenden, was auf {{name}} läuft",
-    "stopBody": "Die gerade auf {{name}} laufenden {{count}} Durchläufe werden beendet. Bereits erledigte Arbeit bleibt erhalten.",
-    "stopBody_one": "Der gerade auf {{name}} laufende Durchlauf ({{count}}) wird beendet. Bereits erledigte Arbeit bleibt erhalten.",
-    "stopConfirm": "{{count}} Durchläufe beenden",
-    "stopConfirm_one": "{{count}} Durchlauf beenden",
-    "stopFailed": "{{name}} ist nicht erreichbar, die Durchläufe konnten nicht beendet werden.",
-    "stopHint": "Gerade laufen {{count}} Durchläufe",
-    "stopHint_one": "Gerade läuft {{count}} Durchlauf",
+    "stopBody": "Die gerade auf {{name}} laufenden {{count}} Läufe werden beendet. Bereits erledigte Arbeit bleibt erhalten.",
+    "stopBody_one": "Der gerade auf {{name}} laufende Lauf ({{count}}) wird beendet. Bereits erledigte Arbeit bleibt erhalten.",
+    "stopConfirm": "{{count}} Läufe beenden",
+    "stopConfirm_one": "{{count}} Lauf beenden",
+    "stopFailed": "{{name}} ist nicht erreichbar, die Läufe konnten nicht beendet werden.",
+    "stopHint": "Gerade laufen {{count}} Läufe",
+    "stopHint_one": "Gerade läuft {{count}} Lauf",
     "stopIdle": "Gerade läuft nichts",
     "stopNone": "Auf {{name}} lief nichts.",
     "stopTitle": "Alles auf {{name}} beenden?",
-    "stopped": "{{count}} Durchläufe auf {{name}} beendet.",
-    "stopped_one": "{{count}} Durchlauf auf {{name}} beendet.",
-    "switchBody": "Auf {{from}} laufen noch {{count}} Durchläufe. Nichts wird beendet: Sie laufen dort weiter, und du kannst jederzeit zurückwechseln.",
-    "switchBody_one": "Auf {{from}} läuft noch {{count}} Durchlauf. Nichts wird beendet: Er läuft dort weiter, und du kannst jederzeit zurückwechseln.",
+    "stopped": "{{count}} Läufe auf {{name}} beendet.",
+    "stopped_one": "{{count}} Lauf auf {{name}} beendet.",
+    "switchBody": "Auf {{from}} laufen noch {{count}} Läufe. Nichts wird beendet: Sie laufen dort weiter, und du kannst jederzeit zurückwechseln.",
+    "switchBody_one": "Auf {{from}} läuft noch {{count}} Lauf. Nichts wird beendet: Er läuft dort weiter, und du kannst jederzeit zurückwechseln.",
     "switchConfirm": "Zu {{to}} wechseln",
     "switchTitle": "Zu {{to}} wechseln?",
     "thisComputer": "Dieser Computer",
@@ -4126,7 +4126,7 @@
       "parsedAs": "Verstanden als: {{what}}",
       "payloadKept": "Dieser Zeitplan führt einen Workflow oder ein Werkzeug aus; dieser Teil bleibt unverändert.",
       "preview": "Vorschau",
-      "prompt": "Prompt",
+      "prompt": "Anweisung",
       "promptHint": "Was der Bot jedes Mal tun soll.",
       "save": "Speichern",
       "simpleProblem": {
@@ -4477,7 +4477,7 @@
       "to": "Bis"
     },
     "route": {
-      "title": "Routing"
+      "title": "Weiterleitung"
     },
     "subtitle": "Passe Designmodus, Akzentfarbe, Hintergrundmedien und Oberflächensprache an.",
     "theme": {
@@ -4600,7 +4600,7 @@
         "cli_accounts": "Coding-CLI-Konten",
         "clock": "Uhr",
         "config": "Datei mit Anbietereinstellungen",
-        "daemon": "Daemon",
+        "daemon": "Hintergrunddienst",
         "data_dir": "Datenordner",
         "desktop_automation": "Desktop-Automatisierung",
         "disk_space": "Speicherplatz",
@@ -4965,7 +4965,7 @@
     "title": "Einstellungen",
     "updates": {
       "appVersion": "Desktop-App",
-      "daemon": "Daemon",
+      "daemon": "Hintergrunddienst",
       "daemonDescription": "Lokaler bot-serve-Prozess.",
       "description": "App- und Daemon-Versionen.",
       "devBuild": "Entwicklungs-Build",
@@ -5193,7 +5193,7 @@
     "modelCalls": "Modellaufrufe",
     "noUsageShort": "{{count}} ohne Daten",
     "partialCostShort": "+ {{count}} unbekannt",
-    "prompt": "Prompt",
+    "prompt": "Anweisung",
     "range": "Zeitraum",
     "ranges": {
       "all": "Gesamte Zeit",

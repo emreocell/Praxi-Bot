@@ -4965,7 +4965,7 @@
     "title": "Ayarlar",
     "updates": {
       "appVersion": "Masaüstü uygulaması",
-      "daemon": "Daemon",
+      "daemon": "Arka plan servisi",
       "daemonDescription": "Yerel arka plan bot servisi.",
       "description": "Uygulama ve daemon sürümleri.",
       "devBuild": "Geliştirme derlemesi",
