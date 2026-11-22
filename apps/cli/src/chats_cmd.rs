@@ -22,7 +22,7 @@ pub(crate) enum ChatsCmd {
     Export {
         /// Chat id.
         chat_id: String,
-        /// Output format: `md` (default) or `json`; `--json` selects JSON.
+        /// Output format: `md` (default) or `json`; global `--json` forces JSON.
         #[arg(long, value_parser = ["md", "json"])]
         format: Option<String>,
         /// Write to this file instead of stdout.
@@ -100,7 +100,7 @@ async fn export(
 ) -> Result<()> {
     let chat_id = uuid::Uuid::parse_str(chat_id)
         .map_err(|_| fail(exit::REJECTED, "chat id must be a UUID"))?;
-    let format = format.unwrap_or(if json { "json" } else { "md" });
+    let format = if json { "json" } else { format.unwrap_or("md") };
     let api_format = if format == "json" { "json" } else { "markdown" };
     let path = format!("/v1/chats/{chat_id}/export?format={api_format}");
     let bytes = c.request_bytes(Method::GET, &path).await?;
@@ -236,6 +236,22 @@ mod tests {
             std::fs::read_to_string(json_file).unwrap(),
             "{\"format_version\":1}"
         );
+
+        // The global `--json` wins over an explicit `--format md`.
+        let mut out = Vec::new();
+        run(
+            &client,
+            &ChatsCmd::Export {
+                chat_id: chat_id.to_string(),
+                format: Some("md".into()),
+                output: None,
+            },
+            true,
+            &mut out,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out, b"{\"format_version\":1}");
 
         let file = dir.path().join("chat.md");
         let mut out = Vec::new();

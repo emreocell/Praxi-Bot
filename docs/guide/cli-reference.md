@@ -176,7 +176,7 @@ and JSON files as the desktop app.
 | Subcommand | Meaning |
 | --- | --- |
 | `bot chats list [--bot <BOT_ID>]` | List chats; `--json` prints the API array |
-| `bot chats export <CHAT_ID>` | Write one chat to stdout. Options: `--format md\|json` (default `md`; global `--json` selects JSON), `-o, --output <FILE>` writes a file instead |
+| `bot chats export <CHAT_ID>` | Write one chat to stdout. Options: `--format md\|json` (default `md`; global `--json` forces JSON), `-o, --output <FILE>` writes a file instead |
 
 ### `bot bots`
 
