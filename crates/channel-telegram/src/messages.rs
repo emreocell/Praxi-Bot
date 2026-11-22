@@ -68,6 +68,10 @@ pub(crate) enum Message<'a> {
     ApprovalIncomplete,
     LanguageSet,
     LanguageUsage { current: Language },
+    VoiceUnavailable,
+    VoiceTooLong,
+    VoiceFailed,
+    VoiceEmpty,
 }
 
 impl<'a> Message<'a> {
@@ -141,6 +145,14 @@ impl<'a> Message<'a> {
             ).into(),
             (Self::ApprovalIncomplete, false) => "Approval could not be shown completely here. Approve or deny it in the desktop app.".into(),
             (Self::ApprovalIncomplete, true) => "Onay isteğinin tamamı burada gösterilemedi. Masaüstü uygulamasında onayla veya reddet.".into(),
+            (Self::VoiceUnavailable, false) => "I can't read voice notes yet. Turn on offline voice in the desktop app (Settings > Dictation), or send your request as text.".into(),
+            (Self::VoiceUnavailable, true) => "Sesli mesajları henüz okuyamıyorum. Masaüstü uygulamasında çevrimdışı sesi aç (Ayarlar > Dikte) ya da isteğini yazıyla gönder.".into(),
+            (Self::VoiceTooLong, false) => "That voice note is too long (limit: 2 minutes). Please send a shorter one or write it.".into(),
+            (Self::VoiceTooLong, true) => "Sesli mesaj çok uzun (sınır: 2 dakika). Lütfen daha kısa gönder ya da yaz.".into(),
+            (Self::VoiceFailed, false) => "I could not turn that voice note into text. Please try again or write it.".into(),
+            (Self::VoiceFailed, true) => "Sesli mesajı metne çeviremedim. Lütfen tekrar dene ya da yaz.".into(),
+            (Self::VoiceEmpty, false) => "I did not hear any speech in that voice note.".into(),
+            (Self::VoiceEmpty, true) => "Sesli mesajda konuşma duyamadım.".into(),
             (Self::LanguageSet, false) => "This chat now uses English.".into(),
             (Self::LanguageSet, true) => "Bu sohbet artık Türkçe.".into(),
             (Self::LanguageUsage { current }, false) => {

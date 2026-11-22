@@ -61,6 +61,8 @@ struct FakeDaemon {
     subscribe_failures: Mutex<usize>,
     cancel_seen: tokio::sync::Notify,
     cancel_failures: Mutex<VecDeque<crate::TelegramError>>,
+    /// What `transcribe_voice` answers (`None` = on-device voice is off).
+    transcript: Mutex<Option<String>>,
 }
 
 impl FakeDaemon {
@@ -81,6 +83,7 @@ impl FakeDaemon {
             subscribe_failures: Mutex::new(0),
             cancel_seen: tokio::sync::Notify::new(),
             cancel_failures: Mutex::new(VecDeque::new()),
+            transcript: Mutex::new(None),
         }
     }
 
@@ -114,6 +117,12 @@ impl FakeDaemon {
 
 #[async_trait]
 impl DaemonClient for FakeDaemon {
+    async fn transcribe_voice(&self, audio: Vec<u8>, mime: &str) -> Result<Option<String>> {
+        assert_eq!(mime, "audio/ogg");
+        assert_eq!(audio, b"OGGDATA");
+        Ok(self.transcript.lock().clone())
+    }
+
     async fn list_bots(&self) -> Result<Vec<BotSummary>> {
         Ok(self.bots.clone())
     }
@@ -3796,14 +3805,17 @@ async fn app_approval_sends_all_arguments_before_the_only_approval_buttons() {
 }
 
 #[test]
-fn voice_and_photo_messages_become_unsupported_not_dropped() {
+fn voice_becomes_a_voice_note_and_photos_stay_unsupported() {
     let mut v = text_update(1, PAIRED_USER_ID, PAIRED_USER_ID, "x");
     v["message"].as_object_mut().unwrap().remove("text");
     v["message"]["voice"] = json!({"file_id": "f", "duration": 3});
     let incoming = update(v.clone()).into_incoming().unwrap();
     assert_eq!(
         incoming.kind,
-        IncomingKind::Unsupported("voice message".into())
+        IncomingKind::Voice {
+            file_id: "f".into(),
+            duration_secs: 3
+        }
     );
     v["message"].as_object_mut().unwrap().remove("voice");
     v["message"]["photo"] = json!([{"file_id": "p"}]);
@@ -4140,4 +4152,106 @@ async fn a_failed_language_save_changes_nothing_and_confirms_nothing() {
     );
     let reopened = crate::PairingStore::open(&path).unwrap();
     assert_eq!(reopened.chat_language(TEST_CHAT_ID), Language::TR);
+}
+
+// --- Voice notes (on-device transcription) ---
+
+async fn voice_note_server() -> MockServer {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getFile")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"ok": true, "result": {"file_id": "f", "file_path": "voice/file_1.oga", "file_size": 7}}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/file/bot{TEST_BOT_TOKEN}/voice/file_1.oga")))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"OGGDATA".to_vec()))
+        .mount(&server)
+        .await;
+    server
+}
+
+fn voice_update(update_id: i64, duration: u32) -> Update {
+    let mut v = text_update(update_id, PAIRED_USER_ID, TEST_CHAT_ID, "x");
+    v["message"].as_object_mut().unwrap().remove("text");
+    v["message"]["voice"] = json!({"file_id": "f", "duration": duration});
+    update(v)
+}
+
+fn voice_channel(server: &MockServer, text: Option<&str>) -> (TelegramChannel, Arc<FakeDaemon>) {
+    let daemon = one_bot_daemon();
+    *daemon.transcript.lock() = text.map(str::to_owned);
+    let channel = TelegramChannel::new(
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_api_base_url(server.uri())
+            .with_paired_users([PAIRED_USER_ID]),
+        daemon.clone(),
+    )
+    .unwrap();
+    (channel, daemon)
+}
+
+#[tokio::test]
+async fn voice_note_is_transcribed_echoed_and_never_runs_as_a_command() {
+    let server = voice_note_server().await;
+    let (channel, daemon) = voice_channel(&server, Some("/stop"));
+    channel.handle_update(voice_update(1, 3)).await.unwrap();
+    let texts = sent_texts(&server.received_requests().await.unwrap());
+    assert_eq!(texts.first().map(String::as_str), Some("🎤 /stop"));
+    // Forwarded to the bot as plain words, not interpreted as /stop.
+    assert!(daemon.cancelled_runs.lock().is_empty());
+    assert_eq!(daemon.sent_messages.lock()[0].1, "🎤 /stop");
+}
+
+#[tokio::test]
+async fn voice_note_without_on_device_voice_gets_an_honest_reply_and_is_not_forwarded() {
+    let server = voice_note_server().await;
+    let (channel, daemon) = voice_channel(&server, None);
+    channel.handle_update(voice_update(1, 3)).await.unwrap();
+    let texts = sent_texts(&server.received_requests().await.unwrap());
+    assert!(texts[0].contains("offline voice"), "{texts:?}");
+    assert!(daemon.sent_messages.lock().is_empty());
+    // Too long: refused before anything is downloaded.
+    channel.handle_update(voice_update(2, 600)).await.unwrap();
+    let texts = sent_texts(&server.received_requests().await.unwrap());
+    assert!(texts[1].contains("too long"), "{texts:?}");
+}
+
+#[tokio::test]
+async fn http_client_only_transcribes_with_the_on_device_provider() {
+    let srv = MockServer::start().await;
+    for (provider, expected) in [("whisper", None), ("local_voice", Some("hello".to_owned()))] {
+        srv.reset().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/voice"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"stt_provider": provider})),
+            )
+            .mount(&srv)
+            .await;
+        if expected.is_some() {
+            Mock::given(method("POST"))
+                .and(path("/v1/voice/transcribe"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"text": " hello "})))
+                .mount(&srv)
+                .await;
+        }
+        let client = HttpDaemonClient::new(srv.uri(), SecretValue::new("t"));
+        assert_eq!(
+            client
+                .transcribe_voice(vec![1, 2, 3], "audio/ogg")
+                .await
+                .unwrap(),
+            expected,
+            "{provider}"
+        );
+        // A cloud provider never sees the recording: no transcribe request was made for it.
+        if expected.is_none() {
+            let reqs = srv.received_requests().await.unwrap();
+            assert!(reqs.iter().all(|r| r.url.path() != "/v1/voice/transcribe"));
+        }
+    }
 }

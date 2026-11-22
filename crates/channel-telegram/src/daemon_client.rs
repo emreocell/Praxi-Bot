@@ -108,6 +108,12 @@ pub trait DaemonClient: Send + Sync {
     /// `GET /v1/bots`: list all configured bots.
     async fn list_bots(&self) -> Result<Vec<BotSummary>>;
 
+    /// Transcribe a voice note **on this computer**. `Ok(None)` means on-device voice is not
+    /// turned on: the audio is then never sent to any other service.
+    async fn transcribe_voice(&self, _audio: Vec<u8>, _mime: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
+
     /// `POST /v1/chats`: create a chat thread for `bot_id`.
     async fn create_chat(&self, bot_id: BotId, title: Option<&str>) -> Result<ChatSummary>;
 
@@ -321,6 +327,24 @@ impl DaemonClient for HttpDaemonClient {
     async fn list_bots(&self) -> Result<Vec<BotSummary>> {
         let v = self.request(Method::GET, "/v1/bots", None).await?;
         serde_json::from_value(v).map_err(|e| TelegramError::Malformed(e.to_string()))
+    }
+
+    async fn transcribe_voice(&self, audio: Vec<u8>, mime: &str) -> Result<Option<String>> {
+        use base64::Engine as _;
+        // Only the on-device provider may read a voice note: a cloud provider must never receive
+        // one implicitly just because it is configured for dictation.
+        let cfg = self.request(Method::GET, "/v1/voice", None).await?;
+        if cfg["stt_provider"].as_str() != Some("local_voice") {
+            return Ok(None);
+        }
+        let body = json!({
+            "audio_base64": base64::engine::general_purpose::STANDARD.encode(audio),
+            "mime": mime,
+        });
+        let out = self
+            .request(Method::POST, "/v1/voice/transcribe", Some(body))
+            .await?;
+        Ok(Some(out["text"].as_str().unwrap_or("").trim().to_owned()))
     }
 
     async fn create_chat(&self, bot_id: BotId, title: Option<&str>) -> Result<ChatSummary> {

@@ -59,6 +59,8 @@ const QUEUED_TTL: Duration = Duration::from_secs(30 * 60);
 /// Minimum interval between daemon lookups for a queued message's run.
 const QUEUED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Longest voice note transcribed (seconds).
+const MAX_VOICE_SECS: u32 = 120;
 /// Longest incoming text forwarded to the daemon (Telegram itself caps at 4096).
 const MAX_INCOMING_CHARS: usize = 8192;
 
@@ -1186,7 +1188,9 @@ impl TelegramChannel {
             if self.inner.pairing.should_send_refusal(user_id) {
                 // Best effort: a failing refusal (blocked bot, 429) is never fatal.
                 match msg.kind {
-                    IncomingKind::Text(_) | IncomingKind::Unsupported(_) => {
+                    IncomingKind::Text(_)
+                    | IncomingKind::Unsupported(_)
+                    | IncomingKind::Voice { .. } => {
                         let _ = self
                             .send_redacted(chat_id, UNPAIRED_REFUSAL_TEXT, None)
                             .await;
@@ -1206,6 +1210,13 @@ impl TelegramChannel {
         match msg.kind {
             IncomingKind::Text(text) => {
                 self.handle_paired_text(chat_id, &text, msg.update_id).await
+            }
+            IncomingKind::Voice {
+                file_id,
+                duration_secs,
+            } => {
+                self.handle_voice(chat_id, &file_id, duration_secs, msg.update_id)
+                    .await
             }
             IncomingKind::Unsupported(label) => {
                 self.send_redacted(
@@ -1280,6 +1291,66 @@ impl TelegramChannel {
             PairAttempt::RateLimited => {}
         }
         Ok(())
+    }
+
+    /// A paired user's voice note: transcribed on this computer, shown back so a mishearing is
+    /// visible, then handled exactly like typed text (approvals still need the buttons).
+    async fn handle_voice(
+        &self,
+        chat_id: i64,
+        file_id: &str,
+        duration_secs: u32,
+        update_id: i64,
+    ) -> Result<()> {
+        let lang = self.language(chat_id);
+        let say = |m: Message<'static>| {
+            let text = m.render(lang).into_owned();
+            async move { self.send_redacted(chat_id, &text, None).await }
+        };
+        if duration_secs > MAX_VOICE_SECS {
+            say(Message::VoiceTooLong).await?;
+            return Ok(());
+        }
+        let audio = match self.inner.bot_api.download_voice(file_id).await {
+            Ok(a) => a,
+            Err(e) => {
+                self.report_error(&e);
+                say(Message::VoiceFailed).await?;
+                return Ok(());
+            }
+        };
+        let text = match self
+            .inner
+            .api_client
+            .transcribe_voice(audio, "audio/ogg")
+            .await
+        {
+            Ok(Some(t)) => t,
+            Ok(None) => {
+                say(Message::VoiceUnavailable).await?;
+                return Ok(());
+            }
+            Err(e) => {
+                self.report_error(&e);
+                say(Message::VoiceFailed).await?;
+                return Ok(());
+            }
+        };
+        let text = text.trim();
+        if text.is_empty() {
+            say(Message::VoiceEmpty).await?;
+            return Ok(());
+        }
+        // What was heard, so the owner can correct a mistake before anything happens.
+        self.send_redacted(chat_id, &format!("🎤 {text}"), None)
+            .await?;
+        // A spoken sentence is never a slash command (/stop, /use ...): those must be typed.
+        let text = if text.starts_with('/') {
+            format!("🎤 {text}")
+        } else {
+            text.to_owned()
+        };
+        self.handle_paired_text(chat_id, &text, update_id).await
     }
 
     async fn handle_paired_text(&self, chat_id: i64, text: &str, update_id: i64) -> Result<()> {

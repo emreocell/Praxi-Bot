@@ -77,10 +77,14 @@ impl Update {
             if !is_private_chat_with(&msg.chat, &from) {
                 return None;
             }
-            let kind = match (msg.text, msg.media.label()) {
-                (Some(text), _) => IncomingKind::Text(text),
-                (None, Some(label)) => IncomingKind::Unsupported(label.to_owned()),
-                (None, None) => return None,
+            let kind = match (msg.text, msg.media.voice_note(), msg.media.label()) {
+                (Some(text), _, _) => IncomingKind::Text(text),
+                (None, Some((file_id, duration_secs)), _) => IncomingKind::Voice {
+                    file_id,
+                    duration_secs,
+                },
+                (None, None, Some(label)) => IncomingKind::Unsupported(label.to_owned()),
+                (None, None, None) => return None,
             };
             let username = from.username.or(from.first_name);
             return Some(IncomingMessage {
@@ -163,6 +167,21 @@ pub struct TgMedia {
 }
 
 impl TgMedia {
+    /// `file_id` and announced length (seconds) of a voice note, if this is one.
+    #[must_use]
+    pub fn voice_note(&self) -> Option<(String, u32)> {
+        let v = self.voice.as_ref()?;
+        let id = v.get("file_id")?.as_str()?;
+        if id.is_empty() || id.len() > 256 {
+            return None;
+        }
+        let secs = v
+            .get("duration")
+            .and_then(serde_json::Value::as_u64)
+            .map_or(0, |d| u32::try_from(d).unwrap_or(u32::MAX));
+        Some((id.to_owned(), secs))
+    }
+
     /// Human label of the attachment, if the message carries one.
     #[must_use]
     pub fn label(&self) -> Option<&'static str> {
@@ -265,6 +284,23 @@ impl InlineKeyboardMarkup {
         }
     }
 }
+
+#[derive(Debug, Serialize)]
+struct GetFileBody<'a> {
+    file_id: &'a str,
+}
+
+/// Answer of `getFile`.
+#[derive(Debug, Deserialize)]
+struct TgFile {
+    #[serde(default)]
+    file_path: Option<String>,
+    #[serde(default)]
+    file_size: Option<u64>,
+}
+
+/// Largest voice note downloaded (Telegram's own `getFile` limit is 20 MB; two minutes of Opus is far smaller).
+const MAX_VOICE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 struct GetUpdatesBody<'a> {
@@ -478,6 +514,54 @@ impl BotApiClient {
         };
         let http_timeout = Duration::from_secs(timeout_secs.saturating_add(10).max(15));
         self.post("getUpdates", &body, http_timeout).await
+    }
+
+    /// Download a voice note: `getFile`, then the file itself (size-capped, never redirected).
+    ///
+    /// # Errors
+    /// Transport or Telegram API errors, or a file that is too large or has an odd path.
+    pub async fn download_voice(&self, file_id: &str) -> Result<Vec<u8>> {
+        let file: TgFile = self
+            .post("getFile", &GetFileBody { file_id }, Duration::from_secs(15))
+            .await?;
+        let path = file
+            .file_path
+            .filter(|p| {
+                !p.is_empty()
+                    && !p.contains("..")
+                    && p.bytes().all(|b| {
+                        b.is_ascii_alphanumeric() || matches!(b, b'/' | b'_' | b'-' | b'.')
+                    })
+            })
+            .ok_or_else(|| TelegramError::Http("getFile: unusable file path".into()))?;
+        if file.file_size.is_some_and(|n| n > MAX_VOICE_BYTES) {
+            return Err(TelegramError::Http("voice note too large".into()));
+        }
+        let mut resp = self
+            .http
+            .get(format!(
+                "{}/file/bot{}/{path}",
+                self.base_url,
+                self.token.expose()
+            ))
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| self.sanitize_error(e))?;
+        if !resp.status().is_success() {
+            return Err(TelegramError::Http(format!(
+                "voice download answered {}",
+                resp.status()
+            )));
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = resp.chunk().await.map_err(|e| self.sanitize_error(e))? {
+            if (bytes.len() + chunk.len()) as u64 > MAX_VOICE_BYTES {
+                return Err(TelegramError::Http("voice note too large".into()));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(bytes)
     }
 
     /// Send a text message (with optional inline keyboard) via `sendMessage`.
