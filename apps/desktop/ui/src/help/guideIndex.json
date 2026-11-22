@@ -164,6 +164,7 @@
       "bot chats",
       "bot bots",
       "bot profile",
+      "bot import",
       "bot approve",
       "bot answer",
       "bot grants",
@@ -185,6 +186,16 @@
       "The HTTP API"
     ],
     "summary": "The command is bot. This page follows the command definitions in"
+  },
+  {
+    "doc": "computer-use.md",
+    "title": "Computer use on your own PC",
+    "headings": [
+      "What a bot can do",
+      "Safety",
+      "Not verified"
+    ],
+    "summary": "Bots can work in apps on your Windows PC when the chat uses This computer and"
   },
   {
     "doc": "decision-pool.md",
@@ -481,6 +492,21 @@
       "Letting a bot manage its own schedules"
     ],
     "summary": "A schedule makes a bot do something on its own: every weekday morning, every"
+  },
+  {
+    "doc": "schedules.md",
+    "title": "Scheduled jobs, in plain words",
+    "headings": [
+      "Make your first job",
+      "Typing it in words",
+      "Advanced (collapsed)",
+      "If the computer was off",
+      "Run now, pause, edit, delete",
+      "History and problems",
+      "Telling you about it",
+      "Safety"
+    ],
+    "summary": "A scheduled job lets a bot do something on its own, at the times you choose:"
   },
   {
     "doc": "security.md",
