@@ -3366,6 +3366,23 @@
       "needsYou": "Braucht deine Aufmerksamkeit."
     }
   },
+  "notifyHistory": {
+    "clear": "Verlauf löschen",
+    "empty": "Noch keine Benachrichtigungen.",
+    "held": "Zurückgehalten (Ruhezeit)",
+    "kind": {
+      "failed": "Lauf fehlgeschlagen",
+      "longRun": "Langer Lauf beendet",
+      "needsYou": "Braucht dich"
+    },
+    "markAllRead": "Alle als gelesen markieren",
+    "openNeeds": "„Braucht dich“ öffnen",
+    "shown": "Angezeigt",
+    "subtitle": "Was die Bots gemeldet haben und was die Ruhezeiten zurückgehalten haben. Offene Freigaben bleiben immer unter „Braucht dich“.",
+    "title": "Benachrichtigungsverlauf",
+    "unread": "Ungelesen",
+    "unreadCount": "{{count}} ungelesen"
+  },
   "overlay": {
     "actions": {
       "click": "Klicken",
@@ -3847,6 +3864,18 @@
       "test": "Verbindung testen",
       "title": "Modellanbieter"
     },
+    "quiet": {
+      "allowUrgent": "Trotzdem melden, wenn ein Bot auf mich wartet",
+      "allowUrgentHint": "Freigaben und Fragen, auf die ein Bot wartet, durchbrechen die Ruhezeit. Alles andere bleibt stumm.",
+      "days": "Tage (Tag, an dem die Ruhezeit beginnt)",
+      "enabled": "Ruhezeiten aktivieren",
+      "enabledHint": "In dieser Zeit erscheint keine Benachrichtigung. Stattdessen landet sie im Verlauf.",
+      "from": "Von",
+      "timezone": "Zeitzone",
+      "timezoneSystem": "Zeitzone dieses Computers",
+      "title": "Ruhezeiten",
+      "to": "Bis"
+    },
     "route": {
       "title": "Routing"
     },
@@ -4288,6 +4317,8 @@
     "needsYou": "Braucht dich",
     "needsYouCount": "{{count}} warten auf dich",
     "newBot": "Neuer Bot",
+    "notifications": "Benachrichtigungen",
+    "notificationsCount": "{{count}} ungelesene Benachrichtigungen",
     "reorderBot": "{{name}} neu anordnen (Pfeiltasten verschieben nach oben oder unten)",
     "reorderHint": "Zeile ziehen oder diesen Griff fokussieren und die Pfeiltaste nach oben/unten drücken",
     "reorderMoved": "{{name}} wurde auf Position {{pos}} verschoben",

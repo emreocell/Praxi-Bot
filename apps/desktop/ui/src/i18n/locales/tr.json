@@ -3366,6 +3366,23 @@
       "needsYou": "Dikkatin gerekiyor."
     }
   },
+  "notifyHistory": {
+    "clear": "Geçmişi temizle",
+    "empty": "Henüz bildirim yok.",
+    "held": "Tutuldu (sessiz saatler)",
+    "kind": {
+      "failed": "Çalışma başarısız",
+      "longRun": "Uzun çalışma bitti",
+      "needsYou": "Sizi bekliyor"
+    },
+    "markAllRead": "Tümünü okundu say",
+    "openNeeds": "Sizi bekleyenleri aç",
+    "shown": "Gösterildi",
+    "subtitle": "Botların bildirdikleri ve sessiz saatlerde tutulanlar. Bekleyen onaylar her zaman Sizi bekleyenler'de kalır.",
+    "title": "Bildirim geçmişi",
+    "unread": "Okunmadı",
+    "unreadCount": "{{count}} okunmamış"
+  },
   "overlay": {
     "actions": {
       "click": "Tıkla",
@@ -3847,6 +3864,18 @@
       "test": "Bağlantıyı sına",
       "title": "Model sağlayıcıları"
     },
+    "quiet": {
+      "allowUrgent": "Bir bot beni beklerken yine de bildir",
+      "allowUrgentHint": "Botun beklediği onay ve sorular sessiz saatleri aşar. Diğer her şey sessiz kalır.",
+      "days": "Günler (sessiz aralığın başladığı gün)",
+      "enabled": "Sessiz saatleri aç",
+      "enabledHint": "Bu saatlerde bildirim penceresi gösterilmez. Bildirimler bunun yerine geçmişe düşer.",
+      "from": "Başlangıç",
+      "timezone": "Saat dilimi",
+      "timezoneSystem": "Bu bilgisayarın saat dilimi",
+      "title": "Sessiz saatler",
+      "to": "Bitiş"
+    },
     "route": {
       "title": "Yönlendirme"
     },
@@ -4288,6 +4317,8 @@
     "needsYou": "Senden bekleyenler",
     "needsYouCount": "{{count}} öğe senden bekliyor",
     "newBot": "Yeni bot",
+    "notifications": "Bildirimler",
+    "notificationsCount": "{{count}} okunmamış bildirim",
     "reorderBot": "{{name}} sırasını değiştir (ok tuşları yukarı/aşağı taşır)",
     "reorderHint": "Satırı sürükle ya da bu tutamaca odaklanıp yukarı/aşağı ok tuşuna bas",
     "reorderMoved": "{{name}} {{pos}}. sıraya taşındı",

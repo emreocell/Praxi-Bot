@@ -1,4 +1,4 @@
-import { BellDot, ChevronDown, FlaskConical, GripVertical, Star, LoaderCircle, MessageSquare, Plus, Search, ServerOff, Settings2 } from "lucide-react";
+import { BellDot, BellRing, ChevronDown, FlaskConical, GripVertical, Star, LoaderCircle, MessageSquare, Plus, Search, ServerOff, Settings2 } from "lucide-react";
 import { unreadBotIds } from "./lib/unread";
 import { useReadState } from "./store/readStateStore";
 import { ApiError } from "./api/client";
@@ -126,6 +126,9 @@ import {
 } from "./state/DaemonContext";
 import { ChatView } from "./views/ChatView";
 import { NeedsYouView } from "./views/NeedsYouView";
+import { NotificationHistoryView } from "./views/NotificationHistoryView";
+import { unreadCount } from "./lib/notificationHistory";
+import { useNotificationHistory } from "./store/notificationHistoryStore";
 import { OnboardingView } from "./views/OnboardingView";
 import { SchedulesView } from "./views/SchedulesView";
 import { AppsModal } from "./views/AppsModal";
@@ -169,6 +172,7 @@ type Route =
   | { kind: "bot"; botId: string }
   | { kind: "chat"; chatId: string; botId: string; messageId?: string; jumpRequestId?: number }
   | { kind: "needs" }
+  | { kind: "notifications" }
   | { kind: "schedules" };
 
 function AppShell() {
@@ -636,6 +640,8 @@ function AppShell() {
     go({ kind: "chat", chatId, botId: chat?.bot_id ?? "", messageId, jumpRequestId: messageId ? Date.now() : undefined });
   };
   const openNeeds = () => go({ kind: "needs" });
+  const notifyHistory = useNotificationHistory();
+  const notifyUnread = unreadCount(notifyHistory);
   // Selecting a bot: its latest chat, or the empty state when it has none.
   const goToBot = (botId: string) => go(botLanding(botId, chats));
   const startChat = async (botId: string) => {
@@ -901,6 +907,7 @@ function AppShell() {
             <span className={styles.srOnly} role="status" aria-live="polite">{orderNote}</span>
             <div ref={reorder.containerRef} className={styles.botList} data-stale={homeStale ? "true" : undefined}>
             {needs.length > 0 ? <SidebarItem className={styles.railItem} active={route.kind === "needs"} title={t("sidebar.needsYou")} aria-label={mini ? t("sidebar.needsYouCount", { count: needs.length }) : undefined} onClick={openNeeds}><BellDot /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.needsYou")}</span><span className={styles.needsBadge} data-testid="needs-you-badge" aria-label={t("sidebar.needsYouCount", { count: needs.length })}>{needs.length}</span></SidebarItem> : null}
+            {notifyHistory.length > 0 ? <SidebarItem className={styles.railItem} active={route.kind === "notifications"} title={t("sidebar.notifications")} aria-label={mini ? t("sidebar.notificationsCount", { count: notifyUnread }) : undefined} onClick={() => go({ kind: "notifications" })}><BellRing /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.notifications")}</span>{notifyUnread > 0 ? <span className={styles.needsBadge} data-testid="notify-history-badge" aria-label={t("sidebar.notificationsCount", { count: notifyUnread })}>{notifyUnread}</span> : null}</SidebarItem> : null}
             {bots.filter(bot => bot.name.toLowerCase().includes((botSearch ?? "").toLowerCase())).map((bot) => {
               const view = botView(bot);
               const latest = botChats(chats, bot.id).find((c) => !c.archived);
@@ -1114,6 +1121,7 @@ function AppShell() {
           />
         ) : null}
         {route.kind === "needs" ? <NeedsYouView onOpenChat={openChat} /> : null}
+        {route.kind === "notifications" ? <NotificationHistoryView onOpenChat={openChat} onOpenNeeds={openNeeds} /> : null}
         {route.kind === "schedules" ? (
           <SchedulesView onOpenChat={openChat} />
         ) : null}

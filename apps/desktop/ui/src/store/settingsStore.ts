@@ -7,6 +7,7 @@ import {
   type AppearanceSettings
 } from "../lib/appearance";
 import { parseBotOrder, parseHostBotOrders } from "../lib/botOrder";
+import { DEFAULT_QUIET_HOURS, parseQuietHours, type QuietHours } from "../lib/quietHours";
 import { defaultWindowFrame } from "../lib/windowChrome";
 
 import { DEFAULT_VOICE_RATE, parseVoiceName, parseVoiceRate } from "../lib/voicePrefs";
@@ -43,6 +44,8 @@ export interface AppSettings extends AppearanceSettings {
   notifyFailed: boolean;
   /** Notifications carry only the bot name and a generic text. */
   notifyPrivate: boolean;
+  /** Quiet hours: toasts are held and kept in the notification history. */
+  quietHours: QuietHours;
   /** Debug: also show the route chip for a plain `Agent` decision at K4. */
   showAgentRoute: boolean;
   /** Display name of the account shown in the sidebar menu. */
@@ -85,6 +88,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   notifyLongRun: true,
   notifyFailed: true,
   notifyPrivate: false,
+  quietHours: DEFAULT_QUIET_HOURS,
   showAgentRoute: false,
   accountName: "",
   windowFrame: defaultWindowFrame(typeof navigator === "undefined" ? "" : navigator.userAgent),
@@ -144,6 +148,7 @@ export function loadSettingsSync(): AppSettings | null {
       ...normalizeAppearance(parsed as Record<string, unknown>),
       computerTarget: parseComputerTarget(parsed.computerTarget),
       messageTimes: parseMessageTimes(parsed.messageTimes),
+      quietHours: parseQuietHours(parsed.quietHours),
       botOrder: parseBotOrder(parsed.botOrder),
       hostBotOrders: parseHostBotOrders(parsed.hostBotOrders),
       voiceName: parseVoiceName(parsed.voiceName),
@@ -204,6 +209,7 @@ export async function loadSettings(): Promise<AppSettings> {
       const notifyFailed =
         (await store.get<boolean>("notifyFailed")) ??
         DEFAULT_SETTINGS.notifyFailed;
+      const quietHours = parseQuietHours(await store.get<unknown>("quietHours"));
       const notifyPrivate =
         (await store.get<boolean>("notifyPrivate")) ??
         DEFAULT_SETTINGS.notifyPrivate;
@@ -246,6 +252,7 @@ export async function loadSettings(): Promise<AppSettings> {
         notifyLongRun,
         notifyFailed,
         notifyPrivate,
+        quietHours,
         showAgentRoute,
         accountName,
         windowFrame,
@@ -294,6 +301,7 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
       await store.set("notifyLongRun", settings.notifyLongRun);
       await store.set("notifyFailed", settings.notifyFailed);
       await store.set("notifyPrivate", settings.notifyPrivate);
+      await store.set("quietHours", settings.quietHours);
       await store.set("showAgentRoute", settings.showAgentRoute);
       await store.set("accountName", settings.accountName);
       await store.set(WINDOW_FRAME_KEY, settings.windowFrame);

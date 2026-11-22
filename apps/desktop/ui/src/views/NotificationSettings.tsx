@@ -1,6 +1,8 @@
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { Card } from "ui";
 import formStyles from "../components/Form.module.css";
+import { type QuietHours } from "../lib/quietHours";
 import type { AppSettings } from "../store/settingsStore";
 import styles from "./NotificationSettings.module.css";
 
@@ -22,10 +24,22 @@ export function NotificationSettings({
   settings,
   onChange
 }: {
-  settings: Pick<AppSettings, Toggle>;
+  settings: Pick<AppSettings, Toggle | "quietHours">;
   onChange: (patch: Partial<AppSettings>) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const idBase = useId();
+  const q = settings.quietHours;
+  const setQuiet = (patch: Partial<QuietHours>) =>
+    onChange({ quietHours: { ...q, ...patch } });
+  const weekday = (d: number) =>
+    new Intl.DateTimeFormat(i18n.language, { weekday: "short" }).format(
+      new Date(2024, 0, 7 + d) // 2024-01-07 is a Sunday
+    );
+  const zones: string[] =
+    typeof Intl.supportedValuesOf === "function"
+      ? Intl.supportedValuesOf("timeZone")
+      : [];
 
   const row = (key: Toggle) => (
     <label key={key} className={styles.row}>
@@ -55,6 +69,101 @@ export function NotificationSettings({
       </div>
       <div className={styles.group}>{NOTIFY_TOGGLES.map(row)}</div>
       <div className={styles.group}>{row("notifyPrivate")}</div>
+      <div className={styles.group} data-testid="quiet-hours">
+        <h3 className={styles.subHeading}>{t("settings.quiet.title")}</h3>
+        <label className={styles.row}>
+          <input
+            type="checkbox"
+            className={styles.check}
+            checked={q.enabled}
+            onChange={(e) => setQuiet({ enabled: e.target.checked })}
+            data-testid="settings-quiet-enabled"
+          />
+          <span className={styles.text}>
+            <span className={styles.label}>{t("settings.quiet.enabled")}</span>
+            <span className={formStyles.hint}>{t("settings.quiet.enabledHint")}</span>
+          </span>
+        </label>
+        {q.enabled ? (
+          <>
+            <div className={styles.times}>
+              <label className={styles.field} htmlFor={`${idBase}-from`}>
+                <span className={styles.label}>{t("settings.quiet.from")}</span>
+                <input
+                  id={`${idBase}-from`}
+                  type="time"
+                  className={styles.input}
+                  value={q.from}
+                  onChange={(e) => e.target.value && setQuiet({ from: e.target.value })}
+                  data-testid="settings-quiet-from"
+                />
+              </label>
+              <label className={styles.field} htmlFor={`${idBase}-to`}>
+                <span className={styles.label}>{t("settings.quiet.to")}</span>
+                <input
+                  id={`${idBase}-to`}
+                  type="time"
+                  className={styles.input}
+                  value={q.to}
+                  onChange={(e) => e.target.value && setQuiet({ to: e.target.value })}
+                  data-testid="settings-quiet-to"
+                />
+              </label>
+              <label className={styles.field} htmlFor={`${idBase}-tz`}>
+                <span className={styles.label}>{t("settings.quiet.timezone")}</span>
+                <select
+                  id={`${idBase}-tz`}
+                  className={styles.input}
+                  value={q.timezone}
+                  onChange={(e) => setQuiet({ timezone: e.target.value })}
+                  data-testid="settings-quiet-timezone"
+                >
+                  <option value="">{t("settings.quiet.timezoneSystem")}</option>
+                  {zones.map((z) => (
+                    <option key={z} value={z}>
+                      {z}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <fieldset className={styles.days}>
+              <legend className={styles.label}>{t("settings.quiet.days")}</legend>
+              {[1, 2, 3, 4, 5, 6, 0].map((d) => (
+                <label key={d} className={styles.day}>
+                  <input
+                    type="checkbox"
+                    className={styles.check}
+                    checked={q.days.includes(d)}
+                    onChange={(e) =>
+                      setQuiet({
+                        days: e.target.checked
+                          ? [...q.days, d].sort()
+                          : q.days.filter((x) => x !== d)
+                      })
+                    }
+                    data-testid={`settings-quiet-day-${d}`}
+                  />
+                  <span className={styles.label}>{weekday(d)}</span>
+                </label>
+              ))}
+            </fieldset>
+            <label className={styles.row}>
+              <input
+                type="checkbox"
+                className={styles.check}
+                checked={q.allowUrgent}
+                onChange={(e) => setQuiet({ allowUrgent: e.target.checked })}
+                data-testid="settings-quiet-urgent"
+              />
+              <span className={styles.text}>
+                <span className={styles.label}>{t("settings.quiet.allowUrgent")}</span>
+                <span className={formStyles.hint}>{t("settings.quiet.allowUrgentHint")}</span>
+              </span>
+            </label>
+          </>
+        ) : null}
+      </div>
       <div className={styles.group}>
         <h3 className={styles.subHeading}>{t("settings.route.title")}</h3>
         {row("showAgentRoute")}

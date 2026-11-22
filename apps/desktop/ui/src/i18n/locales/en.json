@@ -3366,6 +3366,23 @@
       "needsYou": "Needs your attention."
     }
   },
+  "notifyHistory": {
+    "clear": "Clear history",
+    "empty": "No notifications yet.",
+    "held": "Held (quiet hours)",
+    "kind": {
+      "failed": "Run failed",
+      "longRun": "Long run finished",
+      "needsYou": "Needs you"
+    },
+    "markAllRead": "Mark all read",
+    "openNeeds": "Open Needs you",
+    "shown": "Shown",
+    "subtitle": "What the bots announced, and what quiet hours held back. Pending approvals always stay in Needs you.",
+    "title": "Notification history",
+    "unread": "Unread",
+    "unreadCount": "{{count}} unread"
+  },
   "overlay": {
     "actions": {
       "click": "Click",
@@ -3847,6 +3864,18 @@
       "test": "Test connection",
       "title": "Model providers"
     },
+    "quiet": {
+      "allowUrgent": "Still notify when a bot is blocked on me",
+      "allowUrgentHint": "Approvals and questions a bot is waiting on break through quiet hours. Everything else stays silent.",
+      "days": "Days (the day the quiet window starts)",
+      "enabled": "Turn on quiet hours",
+      "enabledHint": "During these hours no toast is shown. Notifications go to the history instead.",
+      "from": "From",
+      "timezone": "Time zone",
+      "timezoneSystem": "This computer's time zone",
+      "title": "Quiet hours",
+      "to": "Until"
+    },
     "route": {
       "title": "Routing"
     },
@@ -4288,6 +4317,8 @@
     "needsYou": "Needs you",
     "needsYouCount": "{{count}} waiting for you",
     "newBot": "New bot",
+    "notifications": "Notifications",
+    "notificationsCount": "{{count}} unread notifications",
     "reorderBot": "Reorder {{name}} (arrow keys move it up or down)",
     "reorderHint": "Drag the row, or focus this handle and press the up/down arrow",
     "reorderMoved": "{{name}} moved to position {{pos}}",
