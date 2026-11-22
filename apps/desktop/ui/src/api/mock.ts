@@ -1764,6 +1764,17 @@ export class MockApiClient extends ApiClient {
       case "PUT /control":
       case "POST /control":
         return ok(this.control(method, seg, opts.body));
+      case "GET /voice/local":
+        return ok(this.localVoice);
+      case "POST /voice/local/install":
+        this.localVoice = {
+          ...this.localVoice,
+          vad_installed: true,
+          models: this.localVoice.models.map((m) =>
+            m.id === (opts.body as { model?: string } | undefined)?.model ? { ...m, installed: true } : m
+          )
+        };
+        return ok(this.localVoice);
       case "GET /voice":
       case "PUT /voice":
         return ok(this.voiceConfig(opts.body));
@@ -2028,7 +2039,29 @@ export class MockApiClient extends ApiClient {
     stt_key_set: false,
     stt_provider: "whisper",
     gemini_model: "gemini-3.5-transcribe-live",
-    gemini_key_set: false
+    gemini_key_set: false,
+    local_model: "whisper-small"
+  };
+
+  private localVoice = {
+    available: true,
+    vad_installed: false,
+    installing: null as string | null,
+    last_error: null as string | null,
+    models: [
+      ["whisper-tiny", "Whisper tiny (fast, rough)", 104],
+      ["whisper-base", "Whisper base (balanced)", 161],
+      ["whisper-small", "Whisper small (most accurate)", 376]
+    ].map(([id, label, size_mb]) => ({
+      id: id as string,
+      label: label as string,
+      description: "Speech model that runs on this computer.",
+      size_mb: size_mb as number,
+      license: "MIT",
+      license_url: "https://github.com/openai/whisper/blob/main/LICENSE",
+      source_host: "huggingface.co",
+      installed: false
+    }))
   };
 
   private voiceConfig(body: unknown): unknown {
@@ -2039,12 +2072,14 @@ export class MockApiClient extends ApiClient {
       clear_stt_key?: boolean;
       stt_provider?: string;
       gemini_model?: string;
+      local_model?: string;
       gemini_key?: string;
       clear_gemini_key?: boolean;
     };
     this.voice = {
       stt_provider: b.stt_provider || this.voice.stt_provider,
       gemini_model: b.gemini_model || this.voice.gemini_model,
+      local_model: b.local_model || this.voice.local_model,
       gemini_key_set: b.clear_gemini_key ? false : b.gemini_key ? true : this.voice.gemini_key_set,
       stt_base_url: b.stt_base_url || this.voice.stt_base_url,
       stt_model: b.stt_model || this.voice.stt_model,

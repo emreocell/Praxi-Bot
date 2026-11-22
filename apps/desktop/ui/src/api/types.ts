@@ -421,6 +421,7 @@ export type EmailSendTestResponse = S["EmailSendTestResponse"];
 
 export type VoiceConfig = S["VoiceConfigDto"];
 export type VoiceConfigInput = S["VoiceConfigInput"];
+export type LocalVoiceStatus = S["LocalVoiceStatusDto"];
 export type TranscribeInput = S["TranscribeInput"];
 export type TranscribeOutput = S["TranscribeOutput"];
 

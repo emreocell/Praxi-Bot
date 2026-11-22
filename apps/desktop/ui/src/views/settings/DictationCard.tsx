@@ -8,6 +8,7 @@ import { useToast } from "../../components/Toast";
 import { humanLine } from "../../lib/humanError";
 import { sttKeyInput, type SttProvider } from "../../lib/voiceAudio";
 import { useDaemon } from "../../state/DaemonContext";
+import { LocalVoicePanel } from "./LocalVoicePanel";
 
 /** Where dictation / voice-call audio is transcribed; keys are write-only (secret store). */
 export function DictationCard() {
@@ -19,6 +20,7 @@ export function DictationCard() {
   const [url, setUrl] = useState("");
   const [model, setModel] = useState("");
   const [geminiModel, setGeminiModel] = useState("");
+  const [localModel, setLocalModel] = useState("whisper-small");
   const [drafts, setDrafts] = useState<Partial<Record<SttProvider, string>>>({});
   const [busy, setBusy] = useState(false);
 
@@ -28,12 +30,14 @@ export function DictationCard() {
     setUrl(c.stt_base_url);
     setModel(c.stt_model);
     setGeminiModel(c.gemini_model);
+    setLocalModel(c.local_model);
   }, []);
   useEffect(() => {
     client?.getVoice().then(apply).catch(() => undefined);
   }, [client, apply]);
 
   const gemini = provider === "gemini_live";
+  const local = provider === "local_voice";
   const keyStored = gemini ? config?.gemini_key_set : config?.stt_key_set;
 
   const save = async (extra: Partial<VoiceConfigInput> = {}) => {
@@ -48,6 +52,7 @@ export function DictationCard() {
           stt_base_url: url,
           stt_model: model,
           gemini_model: geminiModel,
+          local_model: localModel,
           ...extra
         })
       );
@@ -63,8 +68,8 @@ export function DictationCard() {
   if (!config) {
     return null;
   }
-  const privacy = gemini ? t("voice.stt.geminiPrivacy") : t("voice.stt.privacy");
-  const key = drafts[provider] ?? "";
+  const privacy = local ? t("voice.stt.localPrivacy") : gemini ? t("voice.stt.geminiPrivacy") : t("voice.stt.privacy");
+  const key = provider === "local_voice" ? "" : (drafts[provider] ?? "");
   return (
     <SettingRow stacked title={t("voice.stt.title")} description={`${t("voice.stt.description")} ${privacy}`}>
       <select
@@ -75,8 +80,11 @@ export function DictationCard() {
       >
         <option value="whisper">{t("voice.stt.providerWhisper")}</option>
         <option value="gemini_live">{t("voice.stt.providerGemini")}</option>
+        <option value="local_voice">{t("voice.stt.providerLocal")}</option>
       </select>
-      {gemini ? (
+      {local ? (
+        <LocalVoicePanel model={localModel} onModel={setLocalModel} />
+      ) : gemini ? (
         <input
           className={formStyles.input}
           aria-label={t("voice.stt.geminiModel")}
@@ -102,6 +110,7 @@ export function DictationCard() {
           />
         </>
       )}
+      {local ? null : (
       <input
         className={formStyles.input}
         type="password"
@@ -111,10 +120,11 @@ export function DictationCard() {
         placeholder={keyStored ? t("voice.stt.keyStored") : gemini ? t("voice.stt.geminiKey") : t("voice.stt.key")}
         onChange={(e) => setDrafts((d) => ({ ...d, [provider]: e.target.value }))}
       />
-      <Button size="sm" disabled={busy} onClick={() => void save(sttKeyInput(provider, drafts))}>
+      )}
+      <Button size="sm" disabled={busy} onClick={() => void save(provider === "local_voice" ? {} : sttKeyInput(provider, drafts))}>
         {t("voice.stt.save")}
       </Button>
-      {keyStored ? (
+      {keyStored && !local ? (
         <Button
           size="sm"
           variant="ghost"

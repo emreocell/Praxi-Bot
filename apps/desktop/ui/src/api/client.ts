@@ -138,6 +138,7 @@ import type {
   TranscribeOutput,
   VoiceConfig,
   VoiceConfigInput,
+  LocalVoiceStatus,
   WebSearchConfig,
   WebSearchConfigInput,
   WebSearchTestInput,
@@ -1386,6 +1387,16 @@ export class ApiClient {
 
   updateVoice(input: VoiceConfigInput): Promise<VoiceConfig> {
     return this.request("PUT", "/voice", { body: input });
+  }
+
+  /** On-device speech models: licences, sizes and install state. */
+  getLocalVoice(): Promise<LocalVoiceStatus> {
+    return this.request("GET", "/voice/local");
+  }
+
+  /** Start downloading an on-device speech model (checksum-verified; poll `getLocalVoice`). */
+  installLocalVoice(model: string): Promise<LocalVoiceStatus> {
+    return this.request("POST", "/voice/local/install", { body: { model } });
   }
 
   /** Dictation: the recording goes to the service the owner configured. */
