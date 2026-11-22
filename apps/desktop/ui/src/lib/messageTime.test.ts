@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   dayHeader,
+  formatClock,
+  formatDateTime,
   formatStepDuration,
   messageTimeLabel,
   parseMessageTimes
@@ -44,4 +46,15 @@ test("step duration: tenths under 10 s, whole seconds, minutes", () => {
   assert.equal(formatStepDuration(65_000, "tr", u), "1 dk 5 sn");
   assert.equal(formatStepDuration(120_000, "en", { s: "s", m: "min" }), "2 min");
   assert.equal(formatStepDuration(2400, "en", { s: "s", m: "min" }), "2.4 s");
+});
+
+test("dates in sentences follow the app language, tr and de on a 24 h clock (#642)", () => {
+  const ts = local(2026, 11, 22, 15, 4, 5);
+  assert.equal(formatDateTime(ts, "tr"), "22 Kas 2026 15:04");
+  assert.equal(formatDateTime(ts, "de"), "22. Nov. 2026, 15:04");
+  assert.equal(formatClock(ts, "tr", true), "15:04:05");
+  assert.equal(formatClock(ts, "de", true), "15:04:05");
+  // 00:xx stays 00:xx, never "24:xx" or a 12 h clock
+  assert.equal(formatDateTime(local(2026, 11, 22, 0, 7), "tr"), "22 Kas 2026 00:07");
+  assert.equal(formatDateTime(local(2026, 11, 22, 0, 7), "de"), "22. Nov. 2026, 00:07");
 });

@@ -454,6 +454,8 @@
       "all": "Tüm temalar",
       "description": "Tüm uygulamanın renkleri. Yüzeyler, çizgiler ve soluk metin iki renkten türetilir.",
       "system": "Sistemi izle",
+      "systemDark": "Sistem koyuyken kullanılacak tema",
+      "systemLight": "Sistem açıkken kullanılacak tema",
       "title": "Tema"
     },
     "themes": {
@@ -780,6 +782,7 @@
     "delete": "Botu sil",
     "deleteBlocked": "Bu botun sohbetleri var ({{count}}); bu yüzden silinemez. Yalnızca sohbeti ve çalışması olmayan bot silinebilir.",
     "deleteBlockedRuns": "Bu botun saklanan {{count}} çalışması var; bu yüzden silinemez. Yalnızca sohbeti ve çalışması olmayan bot silinebilir.",
+    "deleteBlockedRuns_one": "Bu botun saklanan {{count}} çalışması var; bu yüzden silinemez. Yalnızca sohbeti ve çalışması olmayan bot silinebilir.",
     "deleteConfirmBody": "Bot, uygulama erişimi ve e-posta hesapları kaldırılacak. Bu işlem geri alınamaz. Hâlâ sohbeti veya çalışması olan bot silinemez: bu durumda hiçbir şey kaldırılmaz ve nedenini görürsün.",
     "deleteConfirmTitle": "{{name}} silinsin mi?",
     "deleteHint": "Botu, uygulama erişimini ve e-posta hesaplarını kaldırır. Yalnızca sohbeti veya çalışması yokken yapılabilir. Geri alınamaz.",
@@ -1021,7 +1024,7 @@
       "soft_usd": "Uyarı eşiği (USD)"
     },
     "hint": "Uyarı yalnızca %80 ve %100'de bildirim verir. Durdurma, model çağrılmadan koşuyu bitirir. Fiyatı bilinmeyen modellerde yalnızca kullanım sayılır. Zamanlamalar ve kanal mesajları aynı limitlere uyar.",
-    "invalid": "Pozitif bir miktar gir (para 0,01'den başlar, kullanım tam sayı olmalı) ya da alanı boş bırak.",
+    "invalid": "Pozitif bir miktar gir (para 0,01'den başlar, kullanım tam sayı olmalı). Yalnızca rakam kullan, binlik ayracı koyma (10.000 değil 10000 yaz) ya da alanı boş bırak.",
     "order": "Uyarı eşiği durdurma eşiğinden yüksek olamaz.",
     "period": {
       "daily": "Günlük",
@@ -1034,6 +1037,7 @@
     "saving": "Kaydediliyor…",
     "unlimited": "Limit yok",
     "unreported": "{{count}} çağrı kullanım bildirmedi ve temkinli bir tahminle sayıldı.",
+    "unreported_one": "{{count}} çağrı kullanım bildirmedi ve temkinli bir tahminle sayıldı.",
     "used": "{{usd}} ve {{amount}} metin parçası kullanıldı. Sıfırlanma: {{when}}."
   },
   "botPanel": {
@@ -1186,6 +1190,7 @@
       "summaryAll": "Tüm ortak becerileri kullanır ({{count}})",
       "summaryLearned": "(+{{count}} öğrenilmiş)",
       "summaryMissing": "Atanmış {{count}} beceri diskte bulunamıyor",
+      "summaryMissing_one": "Atanmış {{count}} beceri diskte bulunamıyor",
       "summarySelected": "{{total}} ortak beceriden {{count}} tanesi",
       "tooMany": "En fazla {{max}} beceri atanabilir. Daha az beceri seç ya da “Tüm ortak beceriler” seçeneğini kullan."
     },
@@ -2999,6 +3004,20 @@
   "help": {
     "center": {
       "allDocs": "Tam kılavuzu aç",
+      "diag": {
+        "copied": "Tanılama bilgisi kopyalandı.",
+        "copy": "Kopyala",
+        "copyFailed": "Kopyalanamadı. Yukarıdaki metni seçip elle kopyalayın.",
+        "failed": "Bilgiler toplanamadı",
+        "intro": "Bir sorun mu yaşıyorsunuz? Kopyalanacak metni gösterin, okuyun, sonra hata bildirimine yapıştırın. Anahtarlar, parolalar, e-posta adresleri ve kullanıcı klasörünüz gizlenir, mesajlar eklenmez. Hiçbir yere gönderilmez.",
+        "loading": "Bilgiler toplanıyor…",
+        "offline": "Arka plan hizmetine henüz bağlanılmadı.",
+        "previewLabel": "Tanılama bilgisi önizlemesi",
+        "previewNote": "Kopyala düğmesi panonuza tam olarak şu metni koyar:",
+        "refresh": "Yenile",
+        "show": "Kopyalanacakları göster",
+        "title": "Tanılama bilgisini kopyala"
+      },
       "guideNote": "Kılavuz sayfaları şimdilik İngilizce.",
       "guideTitle": "Tam kılavuzda",
       "intro": "İnsanların ilk sorduğu soruların kısa cevapları. Aramak için bir kelime yaz.",
@@ -3213,8 +3232,10 @@
     "emailUnavailable": "E-posta listesi alınamıyor: {{error}}",
     "embed": "Anlamsal dizini oluştur veya devam ettir",
     "embeddingRemaining": "{{count}} parça kaldı",
+    "embeddingRemaining_one": "{{count}} parça kaldı",
     "embeddingRetry": "{{time}} sonrasında yeniden dene",
     "embeddingSkipped": "{{count}} parça atlandı",
+    "embeddingSkipped_one": "{{count}} parça atlandı",
     "embeddingStatus": {
       "awaiting_consent": "Kaynak izni gerekiyor",
       "cancelled": "Embedding duraklatıldı",
@@ -3230,6 +3251,7 @@
     "html": "Kaydedilen içerik HTML biçiminde",
     "importHint": "İçe aktarılan kaynaklar devre dışı başlar. Embedding sağlayıcısını yeniden seçip kaydet; ardından kaynaklara ve arama sorgularına ayrı ayrı izin ver.",
     "indexed": "{{count}} belge işlendi.",
+    "indexed_one": "{{count}} belge işlendi.",
     "kind": "Kaynak türü",
     "kinds": {
       "conversation": "Geçmiş konuşma",
@@ -3279,6 +3301,7 @@
     "select": "Seç…",
     "settings": "Arama ayarları",
     "skippedFiles": "{{count}} dosya atlandı",
+    "skippedFiles_one": "{{count}} dosya atlandı",
     "title": "Bilgi kaynakları ve ortak beyin",
     "url": "Kaydedilmiş sayfanın adresi"
   },
@@ -3464,6 +3487,7 @@
     "copied": "Kopyalandı",
     "copy": "Komutu kopyala",
     "cores": "{{count}} işlemci iş parçacığı",
+    "cores_one": "{{count}} işlemci iş parçacığı",
     "disk": "{{size}} boş disk",
     "fitFast": "rahat çalışır",
     "fitSlow": "çalışır, ama yavaş",
@@ -3530,6 +3554,7 @@
     "previewRun": "Geri çağırmayı önizle",
     "previewTitle": "Botun göreceği blok (geri çağırma önizlemesi)",
     "previewTokens": "{{count}} kayıt çağrıldı · ~{{used}} / {{budget}} token",
+    "previewTokens_one": "{{count}} kayıt çağrıldı · ~{{used}} / {{budget}} token",
     "saveEdit": "Kaydet",
     "scope": "Kapsam",
     "scopeShared": "Tüm botlarda ortak",
@@ -4172,9 +4197,13 @@
       "cron": "Cron: {{cron}}",
       "every": {
         "days": "Her {{count}} günde bir",
+        "days_one": "Her gün",
         "hours": "Her {{count}} saatte bir",
+        "hours_one": "Her saat",
         "minutes": "Her {{count}} dakikada bir",
-        "seconds": "Her {{count}} saniyede bir"
+        "minutes_one": "Her dakika",
+        "seconds": "Her {{count}} saniyede bir",
+        "seconds_one": "Her saniye"
       },
       "unknown": "Özel zamanlama"
     },
@@ -4365,7 +4394,7 @@
       "notifyPrivate": "Gizli bildirimler",
       "notifyPrivateHint": "Yalnızca bot adını ve kısa, genel bir metin gösterir; içeriği asla göstermez.",
       "showAgentRoute": "Tüm yönlendirme kararlarını göster",
-      "showAgentRouteHint": "Bot turu kendisi yürüttüğünde de bir etiket gösterir (hata ayıklama için).",
+      "showAgentRouteHint": "Bot turu tek başına yönettiğinde de bir etiket gösterir (hata ayıklama için).",
       "title": "Bildirimler"
     },
     "onboarding": {
@@ -4404,7 +4433,7 @@
     },
     "providers": {
       "add": "Sağlayıcı ekle",
-      "addAndTest": "Ekle ve sına",
+      "addAndTest": "Ekle ve test et",
       "apiKey": "API anahtarı",
       "baseUrl": "Temel URL",
       "custom": "Özel (OpenAI uyumlu)",
@@ -4430,7 +4459,7 @@
       "restart": "Arka plan servisini yeniden başlat",
       "restartHint": "Değişikliğin geçerli olması için arka plan servisini yeniden başlat.",
       "restartManual": "Değişikliğin geçerli olması için arka plan servisini kendin yeniden başlat (bu uygulama başlatmadı).",
-      "test": "Bağlantıyı sına",
+      "test": "Bağlantıyı test et",
       "title": "Model sağlayıcıları"
     },
     "quiet": {
@@ -4492,7 +4521,7 @@
           "timeout": "Kurulum on dakikayı aştığı için durduruldu. Yeniden denemeden önce çıktıyı kontrol et."
         },
         "installLabel": "Kurulum komutu",
-        "installOutput": "Kurulum çıktısı (güvenilmeyen)",
+        "installOutput": "Kurulum çıktısı (doğrulanmamış)",
         "installRunning": "Kuruluyor… bu bölümden ayrılmak verilmiş onayı iptal etmez.",
         "installSummary": "{{engine}} kur veya güncelle",
         "loginLabel": "Giriş için",
@@ -4504,7 +4533,7 @@
         "offline": "Yerel servis çalışmıyor; algılanan kodlama araçları gösterilemiyor.",
         "onThisComputer": "Bu bilgisayarda",
         "pathLabel": "Konum",
-        "problem": "Bu olmadı.",
+        "problem": "İşlem başarısız oldu.",
         "refresh": "Yeniden tara",
         "retry": "Yeniden dene",
         "signIn": "Giriş yap",
@@ -4587,7 +4616,7 @@
       "description": "Botun neden çalışmadığını kontrol eder ve sık görülen sorunları düzeltir.",
       "empty": "Hiç denetim sonucu gelmedi",
       "hints": {
-        "browser": "Chrome, Edge ya da Chromium kur (snap paketi değil).",
+        "browser": "Chrome, Edge ya da Chromium kur (snap paketini değil).",
         "catalog_freshness": "Önerilen model listesi 90 günden eski; güncel modelleri görmek için Praxi'yi güncelleyin veya `bot catalog check` çalıştırın.",
         "cli_accounts": "Bir kez terminal açıp CLI'da oturum aç (örneğin `claude` ya da `codex login`).",
         "clock": "Sistem ayarlarında otomatik tarih ve saati aç.",
@@ -4607,8 +4636,9 @@
       "loadError": "Tanılama çalıştırılamadı",
       "notOnPlatform": "Bu platformda kullanılamaz.",
       "offline": "Yerel servis çalışmıyor. Tanılama için yeniden başlat.",
-      "privacy": "Tanılama yalnızca ayarlarını okur. Bir onarım yalnızca düğmesine tıkladığında çalışır.",
+      "privacy": "Tanılama sadece ayarlarını okur. Onarım ise yalnızca ilgili düğmeye tıkladığında çalışır.",
       "problems": "{{count}} öğe ilgi bekliyor",
+      "problems_one": "{{count}} öğe ilgi bekliyor",
       "problems_other": "{{count}} öğe ilgi bekliyor",
       "repair": {
         "create_data_dir": "Klasörü oluştur",
@@ -4654,7 +4684,7 @@
         "limits": "Yazıldığı sırada ücretsiz plan: 3 gelen kutusu, ayda 3.000 e-posta, günde 100. Sınırlar değişebilir.",
         "nameHint": "Adres adı (isteğe bağlı)",
         "nameHintHelp": "@ işaretinden önceki kısım, örneğin atlas. Boş bırakırsan AgentMail seçer.",
-        "noColdOutreach": "Ortak agentmail.to alan adında soğuk tanıtım ve toplu e-posta yasaktır. Yalnızca senin ya da botunun gönderme nedeni olan postalar için kullan.",
+        "noColdOutreach": "Ortak agentmail.to alan adında istenmeyen tanıtım ve toplu e-posta göndermek yasaktır. Yalnızca senin ya da botunun gerçekten göndermesi gereken e-postalar için kullan.",
         "ownAccount": "Kendi ücretsiz AgentMail hesabın gerekir. Praxi-Bot senin yerine anahtar tutmaz: hesabındaki API anahtarını yapıştır.",
         "pricing": "Fiyat sayfasına bak",
         "title": "Bota kendi adresini ver",
@@ -4679,7 +4709,7 @@
         "imapPort": "1 ile 65535 arasında bir port gir.",
         "name": "1-64 harf, rakam, nokta, tire veya alt çizgi kullan; ad başka bir kutuda kullanılmasın.",
         "password": "Parolayı gir. Sunucu veya kullanıcı adını değiştirmek parolayı yeniden gerektirir.",
-        "senders": "Adres (ann@example.com) veya @alan_adı (@example.com) kullan.",
+        "senders": "E-posta adresi (ann@example.com) veya alan adı (@example.com) gir.",
         "smtpHost": "SMTP sunucu adını gir (boşluk ve port olmadan).",
         "smtpPort": "1 ile 65535 arasında bir port gir."
       },
@@ -4696,7 +4726,7 @@
         "imapHost": "IMAP sunucusu",
         "implicit": "TLS",
         "name": "Ad",
-        "nameHint": "Posta kutusu için kısa bir ad, örneğin is.",
+        "nameHint": "Posta kutusu için kısa bir ad, örneğin iş.",
         "password": "Parola veya uygulama parolası",
         "passwordHint": "Sistem anahtarlığında saklanır, bir daha gösterilmez. Çoğu sağlayıcı uygulama parolası ister.",
         "passwordKeep": "Kayıtlı parolayı korumak için boş bırak.",
@@ -4712,7 +4742,7 @@
         "save": "Kaydet",
         "security": "SMTP güvenliği",
         "senders": "İzinli gönderenler",
-        "sendersHint": "Adresler veya @alan_adları, her satıra bir tane. Gelecek gelen-posta özelliği için saklanır; şimdilik gelen postaya hiçbir şey tepki vermez.",
+        "sendersHint": "Adresler veya @alan adları, her satıra bir tane. Yakında eklenecek gelen posta özelliği için saklanır; şimdilik gelen e-postalara tepki verilmez.",
         "smtpHost": "SMTP sunucusu",
         "startTls": "STARTTLS",
         "username": "Kullanıcı adı",
@@ -4757,7 +4787,7 @@
         "title": "Hesap adı"
       },
       "frame": {
-        "description": "Uygulamanın kendi pencere düğmeleri yerine Windows başlık çubuğunu göster.",
+        "description": "Uygulamanın kendi pencere düğmeleri yerine sistem başlık çubuğunu göster.",
         "title": "Pencere çerçevesi"
       },
       "send": {
@@ -4890,7 +4920,7 @@
       "email": "Bağlı bir posta kutusu botların e-postalarını okumasını sağlar. Bir şey göndermeden önce yine de sana sorarlar.",
       "folders": "Botlar güvenilen klasörlerdeki dosyaları sormadan okuyup değiştirebilir. Yalnızca paylaşmaktan rahatsız olmayacağın klasörleri ekle.",
       "memory": "“Unut”, botun hatırladığını siler. Her zaman geri alınamaz.",
-      "permissions": "Burada daha fazla izin vermek botların sormadan iş yapmasına yol açar. Önce neyin ters gidebileceğini düşün.",
+      "permissions": "Burada daha fazla izin verirsen botlar sana sormadan işlem yapabilir. Önce nelerin ters gidebileceğini düşün.",
       "providers": "Bunu yalnızca sana kesin bilgi verildiyse değiştir. Yanlış bir giriş botlarının yanıt vermesini durdurabilir."
     },
     "safety": {
@@ -4914,7 +4944,7 @@
           "ask": "Para harcamak, tehlikeli komutlar ve güvenilmeyen bir sayfa okuduktan sonraki her şey.",
           "name": "Serbest",
           "own": "Dosya silmek ve mesaj göndermek dahil hemen her şey.",
-          "summary": "Botlar işe koyulur. Yalnızca en büyük riskler için sorar."
+          "summary": "Botlar işini kendisi halleder. Yalnızca en büyük risklerde durup sorar."
         }
       },
       "offline": "Yardımcıya henüz bağlı değil, bu yüzden seviye gösterilemiyor ya da değiştirilemiyor.",
@@ -4934,7 +4964,7 @@
     "updates": {
       "appVersion": "Masaüstü uygulaması",
       "daemon": "Daemon",
-      "daemonDescription": "Yerel bot serve işlemi.",
+      "daemonDescription": "Yerel arka plan bot servisi.",
       "description": "Uygulama ve daemon sürümleri.",
       "devBuild": "Geliştirme derlemesi",
       "how": {
@@ -4958,18 +4988,18 @@
       "configError": "web.toml yüklenemedi ({{message}}). Varsayılanlar gösteriliyor — aşağıda değişiklikleri kaydetmek dosyayı yenileyecektir.",
       "credentialsTitle": "Kendi sunucun ve API sağlayıcıları",
       "description": "Arama sağlayıcı öncelik sırası, API anahtarları ve canlı bağlantı testi.",
-      "fallbackNotes": "Başarılı olmadan önceki yedek hataları: {{details}}",
+      "fallbackNotes": "Başarılı olmadan önceki denemelerde alınan hatalar: {{details}}",
       "keyEmptyPlaceholder": "API anahtarı gir…",
       "keyStoredPlaceholder": "Anahtar kayıtlı (değiştirmek için yeni anahtar gir)",
-      "keyWriteOnlyHint": "Yalnızca yazılabilir: işletim sistemi gizli bilgi deposunda saklanır, geri okunmaz.",
+      "keyWriteOnlyHint": "Yalnızca kaydedilir: sistemin gizli bilgi deposunda saklanır, bir daha görüntülenmez.",
       "loadError": "Web araması ayarları yüklenemedi: {{message}}",
       "moveDown": "{{name}} sağlayıcısını aşağı taşı",
       "moveUp": "{{name}} sağlayıcısını yukarı taşı",
-      "note": "Web araması, sonuç dönen ilk etkin sağlayıcıya kadar öncelik sırasıyla dener. Değişiklikler yeniden başlatma olmadan bir sonraki turda uygulanır.",
+      "note": "Web araması, sonuç alana kadar etkin sağlayıcıları öncelik sırasıyla dener. Değişiklikler yeniden başlatma gerekmeden bir sonraki turda geçerli olur.",
       "orderHint": "Tercih ettiğin sağlayıcıları yukarı taşı. Anahtarsız yedekler hesap gerektirmez ancak zaman zaman hız sınırına takılabilir.",
       "orderTitle": "Sağlayıcı sırası ve yedekler",
       "save": "Değişiklikleri kaydet",
-      "searxngHint": "Kendi SearXNG örneğinin temel URL'si (devre dışı bırakmak için temizleyip kaydet).",
+      "searxngHint": "Kendi SearXNG sunucunun temel URL'si (kapatmak için boş bırakıp kaydet).",
       "searxngLabel": "SearXNG URL",
       "status": {
         "active": "Etkin",
@@ -4982,6 +5012,7 @@
       "test": "Test et",
       "testFailed": "Arama testi başarısız ({{ms}} ms): {{error}}",
       "testOk": "{{backend}} yanıt verdi ({{ms}} ms içinde {{count}} sonuç)",
+      "testOk_one": "{{backend}} yanıt verdi ({{ms}} ms içinde {{count}} sonuç)",
       "testQueryLabel": "Test arama sorgusu",
       "testTitle": "Bağlantı testi",
       "testing": "Test ediliyor…",
@@ -5007,6 +5038,7 @@
     "newBot": "Yeni bot",
     "notifications": "Bildirimler",
     "notificationsCount": "{{count}} okunmamış bildirim",
+    "notificationsCount_one": "{{count}} okunmamış bildirim",
     "reorderBot": "{{name}} sırasını değiştir (ok tuşları yukarı/aşağı taşır)",
     "reorderHint": "Satırı sürükle ya da bu tutamaca odaklanıp yukarı/aşağı ok tuşuna bas",
     "reorderMoved": "{{name}} {{pos}}. sıraya taşındı",
@@ -5151,7 +5183,8 @@
       "save": "Limiti ayarla",
       "spent": "Bu ay harcanan",
       "title": "Aylık harcama limiti",
-      "unpriced": "Bu ay {{count}} çağrının fiyatı bilinmiyor; sayılmadı."
+      "unpriced": "Bu ay {{count}} çağrının fiyatı bilinmiyor; sayılmadı.",
+      "unpriced_one": "Bu ay {{count}} çağrının fiyatı bilinmiyor; sayılmadı."
     },
     "loading": "Kullanım yükleniyor…",
     "model": "Model adı",
@@ -5190,7 +5223,9 @@
     },
     "unknown": "Bilinmiyor",
     "unknownCostNotice": "{{count}} çağrının fiyatı bilinmiyor ve maliyet toplamına dahil edilmedi.",
-    "unknownUsageNotice": "{{count}} çağrı token kullanım verisi bildirmedi ve ayrı sayıldı."
+    "unknownCostNotice_one": "{{count}} çağrının fiyatı bilinmiyor ve maliyet toplamına dahil edilmedi.",
+    "unknownUsageNotice": "{{count}} çağrı token kullanım verisi bildirmedi ve ayrı sayıldı.",
+    "unknownUsageNotice_one": "{{count}} çağrı token kullanım verisi bildirmedi ve ayrı sayıldı."
   },
   "voice": {
     "auto": "Otomatik (uygulama diline göre)",
@@ -5303,6 +5338,7 @@
     "pause": "Duraklat",
     "pausedStep": "Çalışma duraklatıldı — devam etmesi bekleniyor.",
     "refusedBadge": "{{count}} bot eylemi reddedildi",
+    "refusedBadge_one": "{{count}} bot eylemi reddedildi",
     "refusedBadge_other": "{{count}} bot eylemi reddedildi",
     "resume": "Devam et",
     "status": {

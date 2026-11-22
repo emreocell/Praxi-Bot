@@ -63,6 +63,7 @@ import { editorSection } from "./lib/botEditor";
 import { BOT_COLORS, botView, draftFromBot } from "./lib/botProfile";
 import { isBotMuted, setBotMuted } from "./lib/botMute";
 import { makeBotMain } from "./lib/botOrder";
+import { filterBots } from "./lib/botSearch";
 import {
   backFromChatOpensPanel,
   botChats,
@@ -85,7 +86,7 @@ import { LiveViewProvider, useLiveView } from "./state/LiveViewContext";
 import { HumanDrivingBanner } from "./components/HumanDrivingBanner";
 import { LiveViewer } from "./views/LiveViewer";
 import type { LiveChatSlots } from "./views/LiveViewerChat";
-import { appearanceFromQuery } from "./lib/appearance";
+import { appearanceFromQuery, systemPairOf } from "./lib/appearance";
 import { createDebounced } from "./lib/debounce";
 import { backdropIsActive, CUSTOM_BACKDROP, NO_BACKDROP } from "./lib/backdropCatalog";
 import { Backdrop, sceneColors } from "./components/Backdrop";
@@ -564,7 +565,7 @@ function AppShell() {
   const selectedBot = bots.find((bot) => bot.id === routeBotId) ?? bots[0];
   // The wallpaper (when on) takes the backdrop's place, so the panels' glass, tone sampling and
   // floating layout all follow the existing backdrop plumbing.
-  const baseTheme = resolveTheme(settings.themeMode, settings.customTheme);
+  const baseTheme = resolveTheme(settings.themeMode, settings.customTheme, systemPairOf(settings));
   const wallpaperKind = resolveWallpaper(settings.wallpaper, baseTheme.id, !isLightColor(baseTheme.bg));
   const shellSettings = useMemo(
     () =>
@@ -949,7 +950,7 @@ function AppShell() {
             <div ref={reorder.containerRef} className={styles.botList} data-stale={homeStale ? "true" : undefined}>
             {needs.length > 0 ? <SidebarItem className={styles.railItem} active={route.kind === "needs"} title={t("sidebar.needsYou")} aria-label={mini ? t("sidebar.needsYouCount", { count: needs.length }) : undefined} onClick={openNeeds}><BellDot /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.needsYou")}</span><span className={styles.needsBadge} data-testid="needs-you-badge" aria-label={t("sidebar.needsYouCount", { count: needs.length })}>{needs.length}</span></SidebarItem> : null}
             {notifyHistory.length > 0 ? <SidebarItem className={styles.railItem} active={route.kind === "notifications"} title={t("sidebar.notifications")} aria-label={mini ? t("sidebar.notificationsCount", { count: notifyUnread }) : undefined} onClick={() => go({ kind: "notifications" })}><BellRing /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.notifications")}</span>{notifyUnread > 0 ? <span className={styles.needsBadge} data-testid="notify-history-badge" aria-label={t("sidebar.notificationsCount", { count: notifyUnread })}>{notifyUnread}</span> : null}</SidebarItem> : null}
-            {bots.filter(bot => bot.name.toLowerCase().includes((botSearch ?? "").toLowerCase())).map((bot) => {
+            {filterBots(bots, botSearch).map((bot) => {
               const view = botView(bot);
               const latest = botChats(chats, bot.id).find((c) => !c.archived);
               const config = bot.config as { bot?: { preview?: string; state?: string; unread?: boolean } };

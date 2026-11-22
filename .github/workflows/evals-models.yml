@@ -1,0 +1,127 @@
+name: Real-model evals (opt-in template)
+
+# Disabled until a maintainer sets EVAL_NIGHTLY_ENABLED=true, model/price variables
+# and a protected `eval-nightly` environment. Never runs on pull requests.
+on:
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals-real-models
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    if: >-
+      github.repository == 'emreocell/Praxi-Bot' &&
+      github.ref == 'refs/heads/main' && vars.EVAL_NIGHTLY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: eval-nightly
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      regression: ${{ steps.result.outputs.regression }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: evals-models
+      - name: Build without provider secrets
+        run: cargo build --locked -p evals --bin bot-eval
+      - name: Retrieve previous successful report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Disabled schedules have successful workflow runs but no report. Search
+          # artifacts first so enabling the template can establish its first baseline.
+          gh api --paginate "repos/$GH_REPO/actions/artifacts?name=evals-real-models&per_page=100" \
+            --jq '.artifacts[] | select(.workflow_run.head_branch == "main" and .workflow_run.head_repository_id == .workflow_run.repository_id) | [.workflow_run.id, .expired] | @tsv' > candidates.tsv
+          while IFS=$'\t' read -r previous expired; do
+            conclusion=$(gh run view "$previous" --json conclusion,workflowName,event --jq 'select(.workflowName == "Real-model evals (opt-in template)" and (.event == "schedule" or .event == "workflow_dispatch")) | .conclusion')
+            if [ "$conclusion" = success ]; then
+              test "$expired" = false
+              # A missing/expired selected artifact fails rather than resetting history.
+              gh run download "$previous" --name evals-real-models --dir previous
+              break
+            fi
+          done < candidates.tsv
+      - name: Replay reviewed fixture scenarios
+        id: run
+        continue-on-error: true
+        env:
+          BOT_EVAL_NIGHTLY: "1"
+          # Dedicated keys with provider-side spending limits, never personal keys.
+          OPENROUTER_API_KEY: ${{ secrets.EVAL_OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.EVAL_GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.EVAL_ANTHROPIC_API_KEY }}
+          MODELS: ${{ vars.EVAL_NIGHTLY_MODELS }}
+          PRICES: ${{ vars.EVAL_NIGHTLY_PRICES }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$PRICES" > prices.toml
+          baseline=()
+          if [ -f previous/report.json ]; then baseline=(--baseline previous/report.json); fi
+          ./target/debug/bot-eval nightly --models "$MODELS" --scenarios evals/nightly \
+            --prices prices.toml --out comparison --scenario-usd 0.50 --total-usd 3 \
+            --scenario-seconds 60 --total-seconds 480 --max-drop 0.05 "${baseline[@]}"
+      - name: Publish numeric summary and regression flag
+        id: result
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          report = Path('comparison/report.json')
+          regression = report.exists() and json.loads(report.read_text())['regression'] is True
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'regression={str(regression).lower()}\n')
+          summary = Path('comparison/report.md')
+          if summary.exists():
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+                  out.write(summary.read_text())
+          PY
+      - name: Keep reports for trends
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evals-real-models
+          path: comparison/report.*
+          retention-days: 90
+          if-no-files-found: warn
+      - name: Require a completed passing comparison
+        if: always()
+        env:
+          OUTCOME: ${{ steps.run.outcome }}
+        run: test "$OUTCOME" = success
+
+  regression-issue:
+    needs: compare
+    if: always() && needs.compare.outputs.regression == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open one issue without provider credentials or untrusted report text
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --state open --search 'in:title "Nightly model comparison regression"' --json number --jq '.[0].number // empty')
+          if [ -z "$existing" ]; then
+            printf 'The opt-in model comparison exceeded its regression threshold or safety counts increased. Review the numeric reports and previous baseline in the workflow artifacts.\n\nRun: %s\n' "$RUN_URL" > issue.txt
+            gh issue create --title 'Nightly model comparison regression' --body-file issue.txt
+          fi

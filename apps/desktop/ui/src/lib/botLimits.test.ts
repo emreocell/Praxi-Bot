@@ -12,6 +12,22 @@ test("the daemon's typed stop is recognised inside a wrapped run error", () => {
   assert.equal(parseLimitReached("[bot_limit_reached period=unknown metric=unknown resets_ms=0] x")?.resetsMs, null);
 });
 
+test("limit form: a thousands separator names the field instead of shrinking the limit (#636)", () => {
+  const draft = draftFromLimits({ daily: empty, weekly: empty, monthly: empty });
+  const bad = (period: "daily" | "weekly" | "monthly", field: "hard_usd" | "hard_tokens" | "soft_usd" | "soft_tokens", text: string) =>
+    limitsFromDraft({ ...draft, [period]: { ...draft[period], [field]: text } });
+  assert.deepEqual(bad("daily", "hard_usd", "1.000"), { ok: false, period: "daily", field: "hard_usd" });
+  assert.deepEqual(bad("monthly", "hard_usd", "1,000"), { ok: false, period: "monthly", field: "hard_usd" });
+  assert.deepEqual(bad("weekly", "soft_tokens", "10.000"), { ok: false, period: "weekly", field: "soft_tokens" });
+  assert.deepEqual(bad("daily", "hard_tokens", "10,000"), { ok: false, period: "daily", field: "hard_tokens" });
+  // Forms `Number()` used to accept are no longer read as a limit either.
+  assert.deepEqual(bad("daily", "hard_tokens", "0x10"), { ok: false, period: "daily", field: "hard_tokens" });
+  assert.deepEqual(bad("daily", "hard_tokens", "1e3"), { ok: false, period: "daily", field: "hard_tokens" });
+  // Plain thousands still work.
+  const ok = bad("daily", "hard_tokens", "10000");
+  assert.ok(ok.ok && ok.limits.daily?.hard_tokens === 10_000);
+});
+
 test("limit form: empty is unlimited, junk and soft-above-hard name the bad field", () => {
   const draft = draftFromLimits({ daily: empty, weekly: empty, monthly: empty });
   const ok = limitsFromDraft({ ...draft, daily: { ...draft.daily, hard_usd: "7,5", hard_tokens: "2000000" } });

@@ -454,6 +454,8 @@
       "all": "All themes",
       "description": "Colors for the whole app. Surfaces, lines and muted text are derived from two colors.",
       "system": "Follow system",
+      "systemDark": "Dark theme while the system is dark",
+      "systemLight": "Light theme while the system is light",
       "title": "Theme"
     },
     "themes": {
@@ -779,7 +781,8 @@
     "dangerTitle": "Danger zone",
     "delete": "Delete bot",
     "deleteBlocked": "This bot still has chats ({{count}}), so it cannot be deleted. Only a bot without chats or runs can be removed.",
-    "deleteBlockedRuns": "This bot still has {{count}} retained run(s), so it cannot be deleted. Only a bot without chats or runs can be removed.",
+    "deleteBlockedRuns": "This bot still has {{count}} retained runs, so it cannot be deleted. Only a bot without chats or runs can be removed.",
+    "deleteBlockedRuns_one": "This bot still has {{count}} retained run, so it cannot be deleted. Only a bot without chats or runs can be removed.",
     "deleteConfirmBody": "The bot, its access to apps and its e-mail accounts will be removed. This cannot be undone. A bot that still has chats or runs cannot be deleted: in that case nothing is removed and you will see why.",
     "deleteConfirmTitle": "Delete {{name}}?",
     "deleteHint": "Removes the bot, its access to apps and its e-mail accounts. Only possible while it has no chats or runs. This cannot be undone.",
@@ -1021,7 +1024,7 @@
       "soft_usd": "Warn at (USD)"
     },
     "hint": "A warning only notifies you at 80% and 100%. A stop ends the run before the model is called. Models with an unknown price count usage only. Schedules and channel messages follow the same limits.",
-    "invalid": "Enter a positive amount (money from 0.01, usage as whole numbers) or leave the field empty.",
+    "invalid": "Enter a positive amount (money from 0.01, usage as whole numbers) with digits only, no thousands separator (write 10000, not 10.000), or leave the field empty.",
     "order": "The warning level must not be above the stop level.",
     "period": {
       "daily": "Per day",
@@ -1034,6 +1037,7 @@
     "saving": "Saving…",
     "unlimited": "No limit",
     "unreported": "{{count}} calls reported no usage and are counted by a cautious estimate.",
+    "unreported_one": "{{count}} call reported no usage and is counted by a cautious estimate.",
     "used": "Used {{usd}} and {{amount}} of text usage. Resets {{when}}."
   },
   "botPanel": {
@@ -1185,7 +1189,8 @@
       "searchPlaceholder": "Filter skills by name or description…",
       "summaryAll": "Uses all shared skills ({{count}})",
       "summaryLearned": "(+{{count}} learned)",
-      "summaryMissing": "{{count}} assigned skill unavailable on disk",
+      "summaryMissing": "{{count}} assigned skills unavailable on disk",
+      "summaryMissing_one": "{{count}} assigned skill unavailable on disk",
       "summarySelected": "{{count}} of {{total}} shared skills",
       "tooMany": "Only {{max}} skills can be assigned. Pick fewer skills, or use \"All shared skills\"."
     },
@@ -2999,6 +3004,20 @@
   "help": {
     "center": {
       "allDocs": "Open the full guide",
+      "diag": {
+        "copied": "Diagnostic info copied.",
+        "copy": "Copy",
+        "copyFailed": "Could not copy. Select the text above and copy it by hand.",
+        "failed": "Could not collect the information",
+        "intro": "Having a problem? Show what would be copied, read it, then paste it into a bug report. Keys, passwords, e-mail addresses and your user folder are masked, and no messages are included. Nothing is sent anywhere.",
+        "loading": "Collecting the information…",
+        "offline": "Not connected to the background service yet.",
+        "previewLabel": "Diagnostic info preview",
+        "previewNote": "This exact text is what Copy puts on your clipboard:",
+        "refresh": "Refresh",
+        "show": "Show what will be copied",
+        "title": "Copy diagnostic info"
+      },
       "guideNote": "Guide pages are in English for now.",
       "guideTitle": "In the full guide",
       "intro": "Short answers to the questions people ask first. Type a word to search.",
@@ -3213,8 +3232,10 @@
     "emailUnavailable": "Email discovery is unavailable: {{error}}",
     "embed": "Build or resume semantic index",
     "embeddingRemaining": "{{count}} chunks remaining",
+    "embeddingRemaining_one": "{{count}} chunk remaining",
     "embeddingRetry": "Retry after {{time}}",
     "embeddingSkipped": "{{count}} chunks skipped",
+    "embeddingSkipped_one": "{{count}} chunk skipped",
     "embeddingStatus": {
       "awaiting_consent": "Source permission required",
       "cancelled": "Embedding paused",
@@ -3230,6 +3251,7 @@
     "html": "The saved content is HTML",
     "importHint": "Imported sources start disabled. Select and save the embedding provider again, then authorize sources and retrieval queries separately.",
     "indexed": "Processed {{count}} documents.",
+    "indexed_one": "Processed {{count}} document.",
     "kind": "Source type",
     "kinds": {
       "conversation": "Past conversation",
@@ -3279,6 +3301,7 @@
     "select": "Choose…",
     "settings": "Retrieval settings",
     "skippedFiles": "{{count}} files skipped",
+    "skippedFiles_one": "{{count}} file skipped",
     "title": "Knowledge and shared brain",
     "url": "Saved page URL"
   },
@@ -3464,6 +3487,7 @@
     "copied": "Copied",
     "copy": "Copy command",
     "cores": "{{count}} processor threads",
+    "cores_one": "{{count}} processor thread",
     "disk": "{{size}} free disk",
     "fitFast": "runs well",
     "fitSlow": "runs, but slowly",
@@ -3530,6 +3554,7 @@
     "previewRun": "Preview recall",
     "previewTitle": "What the bot will see (recall preview)",
     "previewTokens": "{{count}} memories recalled · ~{{used}} / {{budget}} tokens",
+    "previewTokens_one": "{{count}} memory recalled · ~{{used}} / {{budget}} tokens",
     "saveEdit": "Save memory",
     "scope": "Scope",
     "scopeShared": "Shared across all bots",
@@ -4172,9 +4197,13 @@
       "cron": "Cron: {{cron}}",
       "every": {
         "days": "Every {{count}} days",
+        "days_one": "Every day",
         "hours": "Every {{count}} hours",
+        "hours_one": "Every hour",
         "minutes": "Every {{count}} minutes",
-        "seconds": "Every {{count}} seconds"
+        "minutes_one": "Every minute",
+        "seconds": "Every {{count}} seconds",
+        "seconds_one": "Every second"
       },
       "unknown": "Custom schedule"
     },
@@ -4608,7 +4637,8 @@
       "notOnPlatform": "Not available on this platform.",
       "offline": "The local service is not running. Restart it to run diagnostics.",
       "privacy": "Diagnostics only read your settings. A repair runs only when you click its button.",
-      "problems": "{{count}} item needs attention",
+      "problems": "{{count}} items need attention",
+      "problems_one": "{{count}} item needs attention",
       "problems_other": "{{count}} items need attention",
       "repair": {
         "create_data_dir": "Create folder",
@@ -4617,7 +4647,7 @@
       },
       "repairDone": "Repair finished",
       "repairFailed": "The repair did not succeed",
-      "reportCopied": "Support report copied. Keys, tokens, e-mail addresses and your user folder are masked.",
+      "reportCopied": "Support report copied. Keys, passwords, e-mail addresses and your user folder are masked.",
       "reportFailed": "Could not create the support report",
       "rerun": "Run again",
       "running": "Running diagnostics…",
@@ -4982,6 +5012,7 @@
       "test": "Test",
       "testFailed": "Search probe failed ({{ms}} ms): {{error}}",
       "testOk": "{{backend}} answered ({{count}} results in {{ms}} ms)",
+      "testOk_one": "{{backend}} answered ({{count}} result in {{ms}} ms)",
       "testQueryLabel": "Test search query",
       "testTitle": "Connectivity test",
       "testing": "Testing…",
@@ -5007,6 +5038,7 @@
     "newBot": "New bot",
     "notifications": "Notifications",
     "notificationsCount": "{{count}} unread notifications",
+    "notificationsCount_one": "{{count}} unread notification",
     "reorderBot": "Reorder {{name}} (arrow keys move it up or down)",
     "reorderHint": "Drag the row, or focus this handle and press the up/down arrow",
     "reorderMoved": "{{name}} moved to position {{pos}}",
@@ -5151,7 +5183,8 @@
       "save": "Set limit",
       "spent": "Spent this month",
       "title": "Monthly spending limit",
-      "unpriced": "{{count}} calls this month had no known price and are not counted."
+      "unpriced": "{{count}} calls this month had no known price and are not counted.",
+      "unpriced_one": "{{count}} call this month had no known price and is not counted."
     },
     "loading": "Loading usage…",
     "model": "Model",
@@ -5189,8 +5222,10 @@
       "title": "Daily trend"
     },
     "unknown": "Unknown",
-    "unknownCostNotice": "{{count}} call(s) had unknown pricing and are excluded from the cost total.",
-    "unknownUsageNotice": "{{count}} call(s) reported no token usage data and are counted separately."
+    "unknownCostNotice": "{{count}} calls had unknown pricing and are excluded from the cost total.",
+    "unknownCostNotice_one": "{{count}} call had unknown pricing and is excluded from the cost total.",
+    "unknownUsageNotice": "{{count}} calls reported no token usage data and are counted separately.",
+    "unknownUsageNotice_one": "{{count}} call reported no token usage data and is counted separately."
   },
   "voice": {
     "auto": "Automatic (matches the app language)",
@@ -5302,7 +5337,8 @@
     "idleStep": "No active bot run.",
     "pause": "Pause",
     "pausedStep": "Run paused — waiting to resume.",
-    "refusedBadge": "{{count}} bot action refused",
+    "refusedBadge": "{{count}} bot actions refused",
+    "refusedBadge_one": "{{count}} bot action refused",
     "refusedBadge_other": "{{count}} bot actions refused",
     "resume": "Resume",
     "status": {

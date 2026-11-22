@@ -6,6 +6,7 @@ import { DEFAULT_STOP_HOTKEY } from "../config/product";
 import { DOCS_INDEX_URL, docUrl, faqFor, guideFor, guideUrl, searchFaq, searchGuide } from "../lib/helpFaq";
 import { openExternal } from "../lib/externalLink";
 import { resolveKeys, SHORTCUT_GROUPS, SHORTCUTS, slashShortcuts } from "../lib/shortcuts";
+import { DiagnosticInfo } from "./DiagnosticInfo";
 import { Modal } from "./Modal";
 import styles from "./HelpModal.module.css";
 
@@ -104,6 +105,7 @@ export function HelpModal({
             </section>
           ))}
         </details>
+        <DiagnosticInfo />
         <div className={styles.actions}>
           <Button variant="ghost" size="sm" onClick={() => openExternal(DOCS_INDEX_URL)}>
             {t("help.center.allDocs")}

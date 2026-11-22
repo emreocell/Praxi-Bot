@@ -12,6 +12,7 @@ import {
   type Corners,
   type CustomTheme,
   type OwnBubble,
+  type SystemPair,
   type ThemeDef,
   type UiStyle
 } from "./themeModel";
@@ -138,8 +139,12 @@ function systemPrefersDark(): boolean {
 }
 
 /** The theme a saved mode stands for (resolves `system`, legacy names, `custom`). */
-export function resolveTheme(mode: ThemeMode, custom: CustomTheme = DEFAULT_CUSTOM_THEME): ThemeDef {
-  return themeFor(mode, custom, systemPrefersDark());
+export function resolveTheme(
+  mode: ThemeMode,
+  custom: CustomTheme = DEFAULT_CUSTOM_THEME,
+  pair?: SystemPair
+): ThemeDef {
+  return themeFor(mode, custom, systemPrefersDark(), pair);
 }
 
 export function subscribeSystemTheme(onChange: (dark: boolean) => void): () => void {

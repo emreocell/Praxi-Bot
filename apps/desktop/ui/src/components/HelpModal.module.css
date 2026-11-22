@@ -161,3 +161,17 @@
 .guideName { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); }
 .guideSummary { grid-column: 1; font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .guideNote { margin: var(--space-0); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+
+.preview {
+  margin: var(--space-0);
+  max-height: 40vh;
+  overflow: auto;
+  padding: var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

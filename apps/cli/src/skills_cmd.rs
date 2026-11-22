@@ -304,6 +304,36 @@ fn confirm(
     Ok(yes.then(|| fingerprint.to_string()))
 }
 
+/// `bot skills list --json`: one object per hub-installed skill.
+/// `state` is `ok`, `missing` (folder gone) or `modified` (differs from the lock).
+fn list_json(hub: &SkillHub, out: &mut dyn Write) -> crate::Result<()> {
+    let list = hub.list().map_err(|e| hub_err("list skills", &e))?;
+    let rows: Vec<_> = list
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "name": s.entry.name,
+                "version": s.entry.version,
+                "source": s.source_tag,
+                "commit": s.entry.commit,
+                "risk": match s.entry.risk {
+                    RiskLevel::Low => "low",
+                    RiskLevel::Medium => "medium",
+                    RiskLevel::High => "high",
+                },
+                "used": s.usage.uses,
+                "state": match (s.present, s.modified) {
+                    (false, _) => "missing",
+                    (true, true) => "modified",
+                    _ => "ok",
+                },
+            })
+        })
+        .collect();
+    writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_hub(
     hub: &SkillHub,
@@ -468,7 +498,11 @@ fn run_hub(
     Ok(())
 }
 
-pub fn run(data: &Path, action: &SkillsCmd, out: &mut dyn Write) -> crate::Result<()> {
+pub fn run(data: &Path, action: &SkillsCmd, json: bool, out: &mut dyn Write) -> crate::Result<()> {
+    if json && matches!(action, SkillsCmd::List) {
+        let hub = SkillHub::new(HubPaths::from_data_dir(data));
+        return list_json(&hub, out);
+    }
     let (SkillsCmd::Review { name, bot_id: bot }
     | SkillsCmd::Trust {
         name, bot_id: bot, ..
@@ -611,6 +645,21 @@ mod tests {
         assert!(tmp.path().join("skills/gs/SKILL.md").is_file());
         let (_, listed) = exec(&hub, &SkillsCmd::List, "", false);
         assert!(listed.contains("gs v1.0.0") && listed.contains(HASH));
+        let mut json_out = Vec::new();
+        list_json(&hub, &mut json_out).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&json_out).unwrap();
+        assert_eq!(v[0]["name"], "gs");
+        assert_eq!(v[0]["version"], "1.0.0");
+        assert_eq!(v[0]["commit"], HASH);
+        assert_eq!(v[0]["state"], "ok");
+        let mut keys: Vec<_> = v[0].as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "commit", "name", "risk", "source", "state", "used", "version"
+            ]
+        );
 
         // Unchanged upstream: nothing to do.
         let upd = SkillsCmd::Update {
@@ -785,6 +834,7 @@ mod tests {
                 name: "x".into(),
                 bot_id: Some("a".into()),
             },
+            false,
             &mut out,
         )
         .unwrap();
@@ -808,6 +858,7 @@ mod tests {
                     bot_id: Some("a".into()),
                     reviewed: review.fingerprint
                 },
+                false,
                 &mut Vec::new()
             )
             .is_err()
@@ -821,6 +872,7 @@ mod tests {
                 bot_id: Some("a".into()),
                 reviewed: current.fingerprint,
             },
+            false,
             &mut Vec::new(),
         )
         .unwrap();
