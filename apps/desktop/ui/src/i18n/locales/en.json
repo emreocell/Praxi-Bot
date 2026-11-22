@@ -4346,34 +4346,152 @@
       "appearance": "Appearance",
       "behavior": "Behavior"
     },
-    "nav": {
-      "ai": "AI",
-      "appearance": "Appearance",
-      "computer": "Computer",
-      "diagnostics": "Diagnostics",
-      "general": "General",
-      "mail": "Mail",
-      "updates": "Updates",
-      "usage": "Usage"
+    "learn": {
+      "guide": "Read more in the guide",
+      "open": "What is this?",
+      "terms": {
+        "apiKey": {
+          "body": "A secret code from an AI company, like a password. It lets the app use your account with them. Keep it private and never share it.",
+          "title": "Access key"
+        },
+        "folders": {
+          "body": "Folders on your computer that bots may work in without asking each time. Everything outside them still needs your OK.",
+          "title": "Trusted folders"
+        },
+        "memory": {
+          "body": "Facts and files a bot keeps so you do not have to repeat yourself. You can look at them and remove them.",
+          "title": "Memory and knowledge"
+        },
+        "permissions": {
+          "body": "Rules for what a bot may do. Some things it may do alone, for others it shows a card and waits for your OK.",
+          "title": "Permissions"
+        },
+        "provider": {
+          "body": "The company or program that runs the AI model your bot thinks with, for example a cloud service or a program on your own computer.",
+          "title": "AI provider"
+        },
+        "safeMode": {
+          "body": "A calm start with risky features switched off. Use it when something keeps going wrong, then turn things back on one by one.",
+          "title": "Safe mode"
+        }
+      }
+    },
+    "mode": {
+      "advanced": "Advanced",
+      "advancedOn": "Advanced settings are shown. Switch back to Simple any time.",
+      "hidden": "Show {{count}} more settings for experts",
+      "hidden_one": "Show {{count}} more setting for experts",
+      "hidden_other": "Show {{count}} more settings for experts",
+      "label": "How much to show",
+      "simple": "Simple"
     },
     "navGroups": {
-      "app": "App",
-      "bots": "Bots",
-      "personal": "Personal"
+      "app": "The app",
+      "bots": "Your bots",
+      "you": "You"
     },
     "noResults": "No matching settings.",
-    "results": "Search results",
-    "search": "Search settings",
-    "sectionDesc": {
-      "ai": "What your bots know and remember. Models are chosen per bot.",
-      "appearance": "Theme, accent colour, backdrop and shape of the app.",
-      "computer": "Where tools run, what bots may do there, and web search.",
-      "diagnostics": "Check that the app and its helper are healthy.",
-      "general": "Your name, language and how messages behave.",
-      "mail": "Mailboxes your bots can read and write with.",
-      "updates": "Which version you run and how updates reach you.",
-      "usage": "How much each model and bot has been used."
+    "pages": {
+      "advanced": {
+        "description": "Health checks, repair and version. Most people never need this page.",
+        "name": "Advanced"
+      },
+      "appearance": {
+        "description": "Colours, backdrop and the look of the app.",
+        "name": "Appearance"
+      },
+      "apps": {
+        "description": "Email and web search that your bots can use.",
+        "name": "Apps & connections"
+      },
+      "data": {
+        "description": "What bots remember, what they know, and how much you have used.",
+        "name": "Data & backup"
+      },
+      "general": {
+        "description": "Your name, language and how sending messages works.",
+        "name": "General"
+      },
+      "models": {
+        "description": "Which AI your bots think with, and what they can remember.",
+        "name": "Bots & models"
+      },
+      "notifications": {
+        "description": "When the app should tap you on the shoulder.",
+        "name": "Notifications"
+      },
+      "safety": {
+        "description": "What bots may do on their own and what they must ask you first.",
+        "name": "Safety & permissions"
+      },
+      "voice": {
+        "description": "Hear replies read aloud, or speak instead of typing.",
+        "name": "Voice"
+      },
+      "where": {
+        "description": "The computer your bots work on.",
+        "name": "Where bots run"
+      }
     },
+    "reset": {
+      "body": {
+        "app": "The settings on this page go back to what we recommend. Your bots, chats and keys are not touched.",
+        "safety": "Bots go back to the recommended level: they act on their own for safe things and ask you before deleting, sending or spending. Your “Always allow” rules stay."
+      },
+      "button": "Reset to recommended",
+      "confirm": "Reset",
+      "done": "Reset to recommended.",
+      "offline": "Can’t reach the helper that stores this setting. Check that the app is connected, then try again.",
+      "title": "Reset “{{page}}” to recommended?"
+    },
+    "results": "Search results",
+    "resultsCount": "{{count}} settings found",
+    "resultsCount_one": "{{count}} setting found",
+    "resultsCount_other": "{{count}} settings found",
+    "risk": {
+      "email": "A connected mailbox lets bots read your mail. They still ask before they send anything.",
+      "folders": "Bots can read and change files in trusted folders without asking. Only add folders you are happy to share.",
+      "memory": "“Forget” removes what a bot remembered. It cannot always be undone.",
+      "permissions": "Allowing more here lets bots act without asking you. Think about what could go wrong first.",
+      "providers": "Only change this if someone gave you exact details. A wrong entry can stop your bots from answering."
+    },
+    "safety": {
+      "custom": "You have custom rules (see Advanced). Pick a level to replace them.",
+      "description": "Pick how much freedom your bots have. You can change it any time.",
+      "lead": "Choose one level. Every bot follows it unless you gave that bot its own rules.",
+      "levels": {
+        "balanced": {
+          "ask": "Delete things, send messages or email, spend money, use your own computer.",
+          "name": "Balanced",
+          "own": "Read, browse, edit files in the work area.",
+          "summary": "Everyday work flows. Risky things need your OK."
+        },
+        "careful": {
+          "ask": "Edit or save a file, send a message or email, open a web page, run a command.",
+          "name": "Careful",
+          "own": "Read files, look things up, draft text.",
+          "summary": "Bots look, but you approve every change."
+        },
+        "handsOff": {
+          "ask": "Spending money, dangerous commands, and anything after reading an untrusted page.",
+          "name": "Hands-off",
+          "own": "Almost everything, including deleting files and sending messages.",
+          "summary": "Bots get on with it. Only the biggest risks stop to ask."
+        }
+      },
+      "offline": "Not connected to the helper yet, so the level cannot be shown or changed.",
+      "onItsOwn": "On its own",
+      "recommended": "Recommended",
+      "saved": "Saved. It applies from the bot’s next step.",
+      "title": "What bots can do on their own",
+      "willAsk": "Will ask you first"
+    },
+    "save": {
+      "idle": "Changes save by themselves",
+      "saved": "Saved",
+      "saving": "Saving…"
+    },
+    "search": "Search settings",
     "title": "Settings",
     "updates": {
       "appVersion": "Desktop app",

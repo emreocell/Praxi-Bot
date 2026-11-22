@@ -4346,34 +4346,152 @@
       "appearance": "Görünüm",
       "behavior": "Davranış"
     },
-    "nav": {
-      "ai": "Yapay zekâ",
-      "appearance": "Görünüm",
-      "computer": "Bilgisayar",
-      "diagnostics": "Tanılama",
-      "general": "Genel",
-      "mail": "E-posta",
-      "updates": "Güncellemeler",
-      "usage": "Kullanım"
+    "learn": {
+      "guide": "Rehberde devamını oku",
+      "open": "Bu ne demek?",
+      "terms": {
+        "apiKey": {
+          "body": "Bir yapay zekâ şirketinden aldığın gizli kod, bir şifre gibi. Uygulamanın o şirketteki hesabını kullanmasını sağlar. Gizli tut, kimseyle paylaşma.",
+          "title": "Erişim anahtarı"
+        },
+        "folders": {
+          "body": "Botların her seferinde sormadan çalışabildiği klasörler. Bunların dışındaki her şey için yine onayın gerekir.",
+          "title": "Güvenilen klasörler"
+        },
+        "memory": {
+          "body": "Bir botun, kendini tekrar etmek zorunda kalmaman için sakladığı bilgiler ve dosyalar. Bunlara bakabilir ve silebilirsin.",
+          "title": "Hafıza ve bilgi"
+        },
+        "permissions": {
+          "body": "Bir botun neler yapabileceğine dair kurallar. Bazı işleri tek başına yapar, bazıları için bir kart gösterip onayını bekler.",
+          "title": "İzinler"
+        },
+        "provider": {
+          "body": "Botunun düşündüğü yapay zekâ modelini çalıştıran şirket ya da program; örneğin bir bulut hizmeti ya da kendi bilgisayarındaki bir program.",
+          "title": "Yapay zekâ sağlayıcısı"
+        },
+        "safeMode": {
+          "body": "Riskli özelliklerin kapalı olduğu sakin bir başlangıç. Bir şey sürekli ters gidiyorsa kullan, sonra özellikleri tek tek geri aç.",
+          "title": "Güvenli mod"
+        }
+      }
+    },
+    "mode": {
+      "advanced": "Gelişmiş",
+      "advancedOn": "Gelişmiş ayarlar gösteriliyor. İstediğin zaman Basit görünüme dönebilirsin.",
+      "hidden": "Uzmanlara yönelik {{count}} ayarı daha göster",
+      "hidden_one": "Uzmanlara yönelik {{count}} ayarı daha göster",
+      "hidden_other": "Uzmanlara yönelik {{count}} ayarı daha göster",
+      "label": "Ne kadar gösterilsin",
+      "simple": "Basit"
     },
     "navGroups": {
       "app": "Uygulama",
-      "bots": "Botlar",
-      "personal": "Kişisel"
+      "bots": "Botların",
+      "you": "Sen"
     },
     "noResults": "Eşleşen ayar yok.",
-    "results": "Arama sonuçları",
-    "search": "Ayarlarda ara",
-    "sectionDesc": {
-      "ai": "Botlarınızın bildikleri ve hatırladıkları. Modeller bot başına seçilir.",
-      "appearance": "Tema, vurgu rengi, arka plan ve uygulamanın biçimi.",
-      "computer": "Araçların nerede çalıştığı, botların orada neler yapabileceği ve web araması.",
-      "diagnostics": "Uygulamanın ve yardımcı servisinin sağlıklı olduğunu denetleyin.",
-      "general": "Adınız, dil ve mesajların davranışı.",
-      "mail": "Botlarınızın okuyup yazabildiği posta kutuları.",
-      "updates": "Hangi sürümü kullandığınız ve güncellemelerin size nasıl ulaştığı.",
-      "usage": "Her modelin ve botun ne kadar kullanıldığı."
+    "pages": {
+      "advanced": {
+        "description": "Sağlık kontrolü, onarım ve sürüm. Çoğu kişinin bu sayfaya hiç ihtiyacı olmaz.",
+        "name": "Gelişmiş"
+      },
+      "appearance": {
+        "description": "Renkler, arka plan ve uygulamanın görünüşü.",
+        "name": "Görünüm"
+      },
+      "apps": {
+        "description": "Botlarının kullanabileceği e-posta ve web araması.",
+        "name": "Uygulamalar ve bağlantılar"
+      },
+      "data": {
+        "description": "Botların neyi hatırladığı, neyi bildiği ve ne kadar kullandığın.",
+        "name": "Veriler ve yedek"
+      },
+      "general": {
+        "description": "Adın, dilin ve mesaj gönderme ayarları.",
+        "name": "Genel"
+      },
+      "models": {
+        "description": "Botların hangi yapay zekâyla düşündüğü ve neleri hatırlayabildiği.",
+        "name": "Botlar ve modeller"
+      },
+      "notifications": {
+        "description": "Uygulamanın seni ne zaman uyaracağı.",
+        "name": "Bildirimler"
+      },
+      "safety": {
+        "description": "Botların kendi başına neler yapabileceği ve neleri önce sana soracağı.",
+        "name": "Güvenlik ve izinler"
+      },
+      "voice": {
+        "description": "Yanıtları sesli dinle ya da yazmak yerine konuş.",
+        "name": "Ses"
+      },
+      "where": {
+        "description": "Botlarının çalıştığı bilgisayar.",
+        "name": "Botlar nerede çalışır"
+      }
     },
+    "reset": {
+      "body": {
+        "app": "Bu sayfadaki ayarlar önerdiğimiz değerlere döner. Botların, sohbetlerin ve anahtarların etkilenmez.",
+        "safety": "Botlar önerilen seviyeye döner: güvenli işleri kendi başına yapar, silmeden, göndermeden ve harcamadan önce sana sorar. “Her zaman izin ver” kuralların kalır."
+      },
+      "button": "Önerilene sıfırla",
+      "confirm": "Sıfırla",
+      "done": "Önerilene sıfırlandı.",
+      "offline": "Bu ayarı saklayan yardımcıya ulaşılamıyor. Uygulamanın bağlı olduğundan emin ol, sonra tekrar dene.",
+      "title": "“{{page}}” önerilen ayarlara sıfırlansın mı?"
+    },
+    "results": "Arama sonuçları",
+    "resultsCount": "{{count}} ayar bulundu",
+    "resultsCount_one": "{{count}} ayar bulundu",
+    "resultsCount_other": "{{count}} ayar bulundu",
+    "risk": {
+      "email": "Bağlı bir posta kutusu botların e-postalarını okumasını sağlar. Bir şey göndermeden önce yine de sana sorarlar.",
+      "folders": "Botlar güvenilen klasörlerdeki dosyaları sormadan okuyup değiştirebilir. Yalnızca paylaşmaktan rahatsız olmayacağın klasörleri ekle.",
+      "memory": "“Unut”, botun hatırladığını siler. Her zaman geri alınamaz.",
+      "permissions": "Burada daha fazla izin vermek botların sormadan iş yapmasına yol açar. Önce neyin ters gidebileceğini düşün.",
+      "providers": "Bunu yalnızca sana kesin bilgi verildiyse değiştir. Yanlış bir giriş botlarının yanıt vermesini durdurabilir."
+    },
+    "safety": {
+      "custom": "Özel kuralların var (Gelişmiş’e bak). Onların yerine geçmesi için bir seviye seç.",
+      "description": "Botlarına ne kadar serbestlik vereceğini seç. İstediğin zaman değiştirebilirsin.",
+      "lead": "Bir seviye seç. Kendi kuralını vermediğin her bot buna uyar.",
+      "levels": {
+        "balanced": {
+          "ask": "Bir şeyi silmek, mesaj veya e-posta göndermek, para harcamak, kendi bilgisayarını kullanmak.",
+          "name": "Dengeli",
+          "own": "Okumak, gezinmek, çalışma alanındaki dosyaları düzenlemek.",
+          "summary": "Günlük işler akar. Riskli şeyler için onayın gerekir."
+        },
+        "careful": {
+          "ask": "Dosya düzenlemek ya da kaydetmek, mesaj veya e-posta göndermek, web sayfası açmak, komut çalıştırmak.",
+          "name": "Dikkatli",
+          "own": "Dosya okumak, bir şey aramak, metin taslağı yazmak.",
+          "summary": "Botlar bakar, her değişikliği sen onaylarsın."
+        },
+        "handsOff": {
+          "ask": "Para harcamak, tehlikeli komutlar ve güvenilmeyen bir sayfa okuduktan sonraki her şey.",
+          "name": "Serbest",
+          "own": "Dosya silmek ve mesaj göndermek dahil hemen her şey.",
+          "summary": "Botlar işe koyulur. Yalnızca en büyük riskler için sorar."
+        }
+      },
+      "offline": "Yardımcıya henüz bağlı değil, bu yüzden seviye gösterilemiyor ya da değiştirilemiyor.",
+      "onItsOwn": "Kendi başına",
+      "recommended": "Önerilen",
+      "saved": "Kaydedildi. Botun bir sonraki adımından itibaren geçerli.",
+      "title": "Botlar kendi başına neler yapabilir",
+      "willAsk": "Önce sana soracak"
+    },
+    "save": {
+      "idle": "Değişiklikler kendiliğinden kaydedilir",
+      "saved": "Kaydedildi",
+      "saving": "Kaydediliyor…"
+    },
+    "search": "Ayarlarda ara",
     "title": "Ayarlar",
     "updates": {
       "appVersion": "Masaüstü uygulaması",

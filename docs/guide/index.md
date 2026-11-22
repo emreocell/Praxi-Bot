@@ -12,7 +12,8 @@ Three ideas run through the whole product:
   permission system. By default reads are free and anything that writes, clicks,
   types, runs a command or sends a message asks you first. See
   [Chatting and approvals](chatting-and-approvals.md) and
-  [Security model](security.md).
+  [Security model](security.md). The [Settings guide](settings.md) explains the
+  three safety levels in plain words.
 - **Local first, no telemetry.** The daemon only listens on `127.0.0.1`. Your
   chats, bots and settings live in a data directory on your machine, and API
   keys go to your OS keychain (or an encrypted file). The project's design

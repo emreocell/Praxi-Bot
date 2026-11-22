@@ -4346,34 +4346,152 @@
       "appearance": "Darstellung",
       "behavior": "Verhalten"
     },
-    "nav": {
-      "ai": "KI",
-      "appearance": "Darstellung",
-      "computer": "Computer",
-      "diagnostics": "Diagnose",
-      "general": "Allgemein",
-      "mail": "E-Mail",
-      "updates": "Updates",
-      "usage": "Nutzung"
+    "learn": {
+      "guide": "Mehr im Handbuch lesen",
+      "open": "Was ist das?",
+      "terms": {
+        "apiKey": {
+          "body": "Ein geheimer Code einer KI-Firma, wie ein Passwort. Er erlaubt der App, dein Konto dort zu nutzen. Halte ihn geheim und teile ihn nie.",
+          "title": "Zugangsschlüssel"
+        },
+        "folders": {
+          "body": "Ordner auf deinem Computer, in denen Bots ohne jedes Mal zu fragen arbeiten dürfen. Alles außerhalb braucht weiterhin dein OK.",
+          "title": "Vertraute Ordner"
+        },
+        "memory": {
+          "body": "Fakten und Dateien, die sich ein Bot merkt, damit du dich nicht wiederholen musst. Du kannst sie ansehen und entfernen.",
+          "title": "Gedächtnis und Wissen"
+        },
+        "permissions": {
+          "body": "Regeln, was ein Bot tun darf. Manches erledigt er allein, bei anderem zeigt er eine Karte und wartet auf dein OK.",
+          "title": "Berechtigungen"
+        },
+        "provider": {
+          "body": "Die Firma oder das Programm, das das KI-Modell betreibt, mit dem dein Bot denkt, zum Beispiel ein Cloud-Dienst oder ein Programm auf deinem eigenen Computer.",
+          "title": "KI-Anbieter"
+        },
+        "safeMode": {
+          "body": "Ein ruhiger Start mit ausgeschalteten riskanten Funktionen. Nutze ihn, wenn etwas immer wieder schiefgeht, und schalte dann alles nach und nach wieder ein.",
+          "title": "Sicherer Modus"
+        }
+      }
+    },
+    "mode": {
+      "advanced": "Erweitert",
+      "advancedOn": "Erweiterte Einstellungen werden angezeigt. Du kannst jederzeit zu Einfach zurückwechseln.",
+      "hidden": "{{count}} weitere Einstellungen für Profis anzeigen",
+      "hidden_one": "{{count}} weitere Einstellung für Profis anzeigen",
+      "hidden_other": "{{count}} weitere Einstellungen für Profis anzeigen",
+      "label": "Wie viel anzeigen",
+      "simple": "Einfach"
     },
     "navGroups": {
-      "app": "App",
-      "bots": "Bots",
-      "personal": "Persönlich"
+      "app": "Die App",
+      "bots": "Deine Bots",
+      "you": "Du"
     },
     "noResults": "Keine passenden Einstellungen.",
-    "results": "Suchergebnisse",
-    "search": "Einstellungen suchen",
-    "sectionDesc": {
-      "ai": "Was deine Bots wissen und sich merken. Modelle werden pro Bot gewählt.",
-      "appearance": "Design, Akzentfarbe, Hintergrund und Form der App.",
-      "computer": "Wo Werkzeuge laufen, was Bots dort dürfen, und die Websuche.",
-      "diagnostics": "Prüfe, ob die App und ihr Hilfsdienst gesund sind.",
-      "general": "Dein Name, die Sprache und das Verhalten von Nachrichten.",
-      "mail": "Postfächer, die deine Bots lesen und beschreiben können.",
-      "updates": "Welche Version läuft und wie Updates zu dir kommen.",
-      "usage": "Wie stark jedes Modell und jeder Bot genutzt wurde."
+    "pages": {
+      "advanced": {
+        "description": "Gesundheitscheck, Reparatur und Version. Die meisten brauchen diese Seite nie.",
+        "name": "Erweitert"
+      },
+      "appearance": {
+        "description": "Farben, Hintergrund und das Aussehen der App.",
+        "name": "Darstellung"
+      },
+      "apps": {
+        "description": "E-Mail und Websuche, die deine Bots nutzen können.",
+        "name": "Apps & Verbindungen"
+      },
+      "data": {
+        "description": "Woran sich Bots erinnern, was sie wissen und wie viel du genutzt hast.",
+        "name": "Daten & Backup"
+      },
+      "general": {
+        "description": "Dein Name, die Sprache und wie das Senden von Nachrichten funktioniert.",
+        "name": "Allgemein"
+      },
+      "models": {
+        "description": "Mit welcher KI deine Bots denken und woran sie sich erinnern können.",
+        "name": "Bots & Modelle"
+      },
+      "notifications": {
+        "description": "Wann dich die App auf etwas aufmerksam machen soll.",
+        "name": "Benachrichtigungen"
+      },
+      "safety": {
+        "description": "Was Bots allein tun dürfen und was sie dich erst fragen müssen.",
+        "name": "Sicherheit & Berechtigungen"
+      },
+      "voice": {
+        "description": "Antworten vorlesen lassen oder sprechen statt tippen.",
+        "name": "Stimme"
+      },
+      "where": {
+        "description": "Der Computer, auf dem deine Bots arbeiten.",
+        "name": "Wo Bots laufen"
+      }
     },
+    "reset": {
+      "body": {
+        "app": "Die Einstellungen dieser Seite gehen auf unsere Empfehlung zurück. Deine Bots, Chats und Schlüssel bleiben unberührt.",
+        "safety": "Bots gehen auf die empfohlene Stufe zurück: Sichere Dinge erledigen sie allein, vor Löschen, Senden und Ausgeben fragen sie dich. Deine „Immer erlauben“-Regeln bleiben."
+      },
+      "button": "Auf Empfehlung zurücksetzen",
+      "confirm": "Zurücksetzen",
+      "done": "Auf Empfehlung zurückgesetzt.",
+      "offline": "Der Helfer, der diese Einstellung speichert, ist nicht erreichbar. Prüfe, ob die App verbunden ist, und versuche es erneut.",
+      "title": "„{{page}}“ auf die Empfehlung zurücksetzen?"
+    },
+    "results": "Suchergebnisse",
+    "resultsCount": "{{count}} Einstellungen gefunden",
+    "resultsCount_one": "{{count}} Einstellung gefunden",
+    "resultsCount_other": "{{count}} Einstellungen gefunden",
+    "risk": {
+      "email": "Ein verbundenes Postfach lässt Bots deine Mails lesen. Vor dem Senden fragen sie dich trotzdem.",
+      "folders": "Bots können Dateien in vertrauten Ordnern ohne Nachfrage lesen und ändern. Füge nur Ordner hinzu, die du gern teilst.",
+      "memory": "„Vergessen“ entfernt, was sich ein Bot gemerkt hat. Das lässt sich nicht immer rückgängig machen.",
+      "permissions": "Mehr Erlaubnis hier heißt: Bots handeln, ohne dich zu fragen. Überlege zuerst, was schiefgehen könnte.",
+      "providers": "Ändere das nur, wenn dir jemand genaue Angaben gegeben hat. Ein falscher Eintrag kann verhindern, dass deine Bots antworten."
+    },
+    "safety": {
+      "custom": "Du hast eigene Regeln (siehe Erweitert). Wähle eine Stufe, um sie zu ersetzen.",
+      "description": "Wähle, wie viel Freiheit deine Bots haben. Du kannst es jederzeit ändern.",
+      "lead": "Wähle eine Stufe. Jeder Bot folgt ihr, außer du hast ihm eigene Regeln gegeben.",
+      "levels": {
+        "balanced": {
+          "ask": "Dinge löschen, Nachrichten oder E-Mails senden, Geld ausgeben, deinen eigenen Computer nutzen.",
+          "name": "Ausgewogen",
+          "own": "Lesen, surfen, Dateien im Arbeitsbereich bearbeiten.",
+          "summary": "Der Alltag läuft. Riskantes braucht dein OK."
+        },
+        "careful": {
+          "ask": "Eine Datei ändern oder speichern, Nachricht oder E-Mail senden, eine Webseite öffnen, einen Befehl ausführen.",
+          "name": "Vorsichtig",
+          "own": "Dateien lesen, etwas nachschlagen, Texte entwerfen.",
+          "summary": "Bots schauen nur, du bestätigst jede Änderung."
+        },
+        "handsOff": {
+          "ask": "Geld ausgeben, gefährliche Befehle und alles, nachdem eine nicht vertrauenswürdige Seite gelesen wurde.",
+          "name": "Freie Hand",
+          "own": "Fast alles, auch Dateien löschen und Nachrichten senden.",
+          "summary": "Bots legen einfach los. Nur die größten Risiken fragen nach."
+        }
+      },
+      "offline": "Noch nicht mit dem Helfer verbunden, daher kann die Stufe nicht angezeigt oder geändert werden.",
+      "onItsOwn": "Allein",
+      "recommended": "Empfohlen",
+      "saved": "Gespeichert. Gilt ab dem nächsten Schritt des Bots.",
+      "title": "Was Bots allein tun dürfen",
+      "willAsk": "Fragt dich zuerst"
+    },
+    "save": {
+      "idle": "Änderungen werden automatisch gespeichert",
+      "saved": "Gespeichert",
+      "saving": "Wird gespeichert…"
+    },
+    "search": "Einstellungen suchen",
     "title": "Einstellungen",
     "updates": {
       "appVersion": "Desktop-App",

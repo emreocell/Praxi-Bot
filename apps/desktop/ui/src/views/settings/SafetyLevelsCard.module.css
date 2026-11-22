@@ -1,0 +1,24 @@
+.root { display: flex; flex-direction: column; gap: var(--space-3); }
+.lead { margin: var(--space-0); font-size: var(--font-size-sm); line-height: var(--line-height-normal); color: var(--color-text-muted); }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(var(--space-0), 1fr)); gap: var(--space-3); }
+.level {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1);
+  padding: var(--space-4); text-align: left; font-family: inherit; color: var(--color-text);
+  border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card);
+  background-color: var(--color-surface); cursor: pointer;
+}
+.level:hover:not(:disabled) { background-color: var(--color-surface-elevated); }
+.level:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+.level:disabled { opacity: 0.6; cursor: default; }
+.active, .active:hover:not(:disabled) { border-color: var(--color-accent); background-color: var(--color-surface-elevated); box-shadow: inset var(--space-1) var(--space-0) var(--color-accent); }
+.head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); width: 100%; }
+.name { font-size: var(--font-size-ui); font-weight: var(--font-weight-semibold); }
+.badge { display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-0) var(--space-2); border-radius: var(--radius-pill); background-color: var(--color-surface-elevated); color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.badge > svg { width: var(--size-icon-sm); height: var(--size-icon-sm); }
+.check { margin-left: auto; width: var(--size-icon-sm); height: var(--size-icon-sm); color: var(--color-accent); }
+.summary { font-size: var(--font-size-sm); color: var(--color-text-muted); line-height: var(--line-height-normal); }
+.group { margin-top: var(--space-2); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-muted); }
+.example { font-size: var(--font-size-sm); line-height: var(--line-height-normal); }
+.ok { margin: var(--space-0); font-size: var(--font-size-sm); color: var(--color-text-muted); }
+/* stylelint-disable-next-line unit-disallowed-list -- desktop window resize boundary */
+@media (width <= 56em) { .grid { grid-template-columns: minmax(var(--space-0), 1fr); } }
