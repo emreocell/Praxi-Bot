@@ -26,8 +26,7 @@ test("a fully omitted page is skipped instead of showing zero matches with More"
 test("the mock export never writes raw message text", async () => {
   const { MockApiClient } = await import("../api/mock.ts");
   const client = new MockApiClient();
-  const bots = await client.listBots();
-  const chats = await client.listChats(bots[0].id);
+  const chats = await client.listChats();
   const messages = await client.listMessages(chats[0].id);
   const raw = messages.find((m) => ["user", "assistant"].includes(m.role) && m.content.length > 3);
   assert.ok(raw, "mock chat has text");

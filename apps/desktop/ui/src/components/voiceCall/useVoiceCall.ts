@@ -172,7 +172,7 @@ export function useVoiceCall({ botId, runs, awaitingApproval, sendText }: VoiceC
           .then((c) => c.stt_provider)
           .catch(() => undefined);
         const out = await client.transcribe({
-          ...(await transcribePayload(blob, provider)),
+          ...(await transcribePayload(blob, provider, { mock })),
           language: i18n.language.split("-")[0]
         });
         text = out.text.trim();
@@ -201,7 +201,7 @@ export function useVoiceCall({ botId, runs, awaitingApproval, sendText }: VoiceC
         }
       }
     },
-    [client, i18n.language, sendText]
+    [client, i18n.language, mock, sendText]
   );
 
   const finishUtterance = useCallback(() => {

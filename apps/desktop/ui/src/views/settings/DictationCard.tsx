@@ -6,6 +6,7 @@ import formStyles from "../../components/Form.module.css";
 import { SettingRow } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { humanLine } from "../../lib/humanError";
+import { sttKeyInput, type SttProvider } from "../../lib/voiceAudio";
 import { useDaemon } from "../../state/DaemonContext";
 
 /** Where dictation / voice-call audio is transcribed; keys are write-only (secret store). */
@@ -18,7 +19,7 @@ export function DictationCard() {
   const [url, setUrl] = useState("");
   const [model, setModel] = useState("");
   const [geminiModel, setGeminiModel] = useState("");
-  const [key, setKey] = useState("");
+  const [drafts, setDrafts] = useState<Partial<Record<SttProvider, string>>>({});
   const [busy, setBusy] = useState(false);
 
   const apply = useCallback((c: VoiceConfig) => {
@@ -50,7 +51,7 @@ export function DictationCard() {
           ...extra
         })
       );
-      setKey("");
+      setDrafts({});
       toast.show(t("voice.stt.saved"), "success");
     } catch (e) {
       toast.show(humanLine(e), "danger");
@@ -63,7 +64,7 @@ export function DictationCard() {
     return null;
   }
   const privacy = gemini ? t("voice.stt.geminiPrivacy") : t("voice.stt.privacy");
-  const secretInput = gemini ? { gemini_key: key } : { stt_key: key };
+  const key = drafts[provider] ?? "";
   return (
     <SettingRow stacked title={t("voice.stt.title")} description={`${t("voice.stt.description")} ${privacy}`}>
       <select
@@ -108,9 +109,9 @@ export function DictationCard() {
         aria-label={gemini ? t("voice.stt.geminiKey") : t("voice.stt.key")}
         value={key}
         placeholder={keyStored ? t("voice.stt.keyStored") : gemini ? t("voice.stt.geminiKey") : t("voice.stt.key")}
-        onChange={(e) => setKey(e.target.value)}
+        onChange={(e) => setDrafts((d) => ({ ...d, [provider]: e.target.value }))}
       />
-      <Button size="sm" disabled={busy} onClick={() => void save(key ? secretInput : {})}>
+      <Button size="sm" disabled={busy} onClick={() => void save(sttKeyInput(provider, drafts))}>
         {t("voice.stt.save")}
       </Button>
       {keyStored ? (

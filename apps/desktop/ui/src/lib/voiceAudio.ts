@@ -72,11 +72,28 @@ export async function recordingToPcm16k(blob: Blob): Promise<Uint8Array> {
 /** The `transcribe` request body for the active provider: the recording as is, or PCM for Gemini Live. */
 export async function transcribePayload(
   blob: Blob,
-  provider: "whisper" | "gemini_live" | undefined
+  provider: "whisper" | "gemini_live" | undefined,
+  options: { mock?: boolean } = {}
 ): Promise<{ audio_base64: string; mime: string }> {
-  if (provider === "gemini_live") {
+  // The mock call's placeholder blob is not decodable audio; the mock daemon never reads it.
+  if (provider === "gemini_live" && !options.mock) {
     return { audio_base64: bytesToBase64(await recordingToPcm16k(blob)), mime: "audio/pcm" };
   }
   const type = blob.type || "audio/webm";
   return { audio_base64: bytesToBase64(new Uint8Array(await blob.arrayBuffer())), mime: type.split(";")[0] ?? type };
+}
+
+export type SttProvider = "whisper" | "gemini_live";
+
+/**
+ * The write-only key field of the provider being saved. Each provider keeps its own draft, so a key
+ * typed for Whisper can never be sent as `gemini_key` (or the reverse) after the select changes.
+ */
+export function sttKeyInput(
+  provider: SttProvider,
+  drafts: Partial<Record<SttProvider, string>>
+): { gemini_key: string } | { stt_key: string } | Record<string, never> {
+  const key = drafts[provider]?.trim();
+  if (!key) return {};
+  return provider === "gemini_live" ? { gemini_key: key } : { stt_key: key };
 }

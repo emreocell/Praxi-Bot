@@ -23,6 +23,9 @@ const WS_PATH: &str =
 /// 100 ms of 16 kHz 16-bit mono audio.
 const CHUNK_BYTES: usize = 3200;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// One audio frame (or `audioStreamEnd`) must be accepted by the socket within this time; a
+/// blackholed connection would otherwise hold the request open forever.
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 /// After `audioStreamEnd`: how long to wait for the final transcript.
 const FINAL_TIMEOUT: Duration = Duration::from_secs(15);
 /// Quiet time after the last transcript piece that ends the wait.
@@ -92,12 +95,44 @@ fn closed(reason: Option<String>, key: &str) -> VoiceControlError {
     VoiceControlError::Upstream(format!("Gemini Live closed the connection: {reason}"))
 }
 
+/// Deadlines of one session; tests shrink them.
+#[derive(Clone, Copy)]
+struct Limits {
+    send: Duration,
+    final_wait: Duration,
+}
+
+/// Send one frame within `limit`.
+async fn send_within<S>(ws: &mut S, limit: Duration, msg: Message) -> Result<(), VoiceControlError>
+where
+    S: futures_util::Sink<Message> + Unpin,
+{
+    tokio::time::timeout(limit, ws.send(msg))
+        .await
+        .map_err(|_| upstream("sending audio to Gemini Live timed out"))?
+        .map_err(|_| dropped())
+}
+
 /// Transcribe one utterance of raw 16-bit little-endian 16 kHz mono PCM.
 pub(crate) async fn transcribe_pcm(
     ws_base: &str,
     key: &str,
     model: &str,
     pcm: &[u8],
+) -> Result<String, VoiceControlError> {
+    let limits = Limits {
+        send: SEND_TIMEOUT,
+        final_wait: FINAL_TIMEOUT,
+    };
+    transcribe_with(ws_base, key, model, pcm, limits).await
+}
+
+async fn transcribe_with(
+    ws_base: &str,
+    key: &str,
+    model: &str,
+    pcm: &[u8],
+    limits: Limits,
 ) -> Result<String, VoiceControlError> {
     let url = format!("{ws_base}{WS_PATH}?key={key}");
     let (mut ws, _) = tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(url))
@@ -134,16 +169,20 @@ pub(crate) async fn transcribe_pcm(
     for chunk in pcm.chunks(CHUNK_BYTES) {
         let m = serde_json::json!({"realtimeInput": {"audio": {
             "data": b64.encode(chunk), "mimeType": "audio/pcm;rate=16000"}}});
-        ws.send(frame(m)).await.map_err(|_| dropped())?;
+        send_within(&mut ws, limits.send, frame(m)).await?;
     }
-    ws.send(frame(
-        serde_json::json!({"realtimeInput": {"audioStreamEnd": true}}),
-    ))
-    .await
-    .map_err(|_| dropped())?;
+    send_within(
+        &mut ws,
+        limits.send,
+        frame(serde_json::json!({"realtimeInput": {"audioStreamEnd": true}})),
+    )
+    .await?;
 
     let mut text = String::new();
-    let hard_deadline = tokio::time::Instant::now() + FINAL_TIMEOUT;
+    // Whether the service said anything usable after the audio: an empty transcript is only
+    // "silence" when it did (e.g. `turnComplete`), not when the wait simply ran out.
+    let mut heard_back = false;
+    let hard_deadline = tokio::time::Instant::now() + limits.final_wait;
     let mut deadline = hard_deadline;
     loop {
         let Ok(next) = tokio::time::timeout_at(deadline, ws.next()).await else {
@@ -168,6 +207,7 @@ pub(crate) async fn transcribe_pcm(
         let Some(sc) = v.get("serverContent") else {
             continue;
         };
+        heard_back = true;
         if let Some(t) = sc
             .pointer("/inputTranscription/text")
             .and_then(serde_json::Value::as_str)
@@ -182,7 +222,13 @@ pub(crate) async fn transcribe_pcm(
         }
     }
     let _ = ws.close(None).await;
-    Ok(text.trim().to_owned())
+    let text = text.trim().to_owned();
+    if text.is_empty() && !heard_back {
+        return Err(upstream(
+            "Gemini Live sent no transcript before the timeout",
+        ));
+    }
+    Ok(text)
 }
 
 #[cfg(test)]
@@ -272,6 +318,62 @@ mod tests {
         assert!(setup["setup"]["inputAudioTranscription"].is_object());
         assert_eq!(bytes, pcm.len());
         assert!(ended);
+    }
+
+    /// A server that accepts the session but then reads nothing or says nothing.
+    async fn stalled(read_audio: bool) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("ws://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let mut ws = accept_hdr_async(sock, |_: &Request, resp: Response| Ok(resp))
+                .await
+                .unwrap();
+            while let Some(Ok(m)) = ws.next().await {
+                if parse(m).is_some_and(|v| v.get("setup").is_some()) {
+                    ws.send(Message::text(r#"{"setupComplete":{}}"#))
+                        .await
+                        .unwrap();
+                    break;
+                }
+            }
+            if read_audio {
+                while ws.next().await.is_some() {}
+            } else {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            }
+        });
+        base
+    }
+
+    #[tokio::test]
+    async fn no_transcript_before_the_timeout_is_an_upstream_failure_not_silence() {
+        let base = stalled(true).await;
+        let limits = Limits {
+            send: Duration::from_secs(5),
+            final_wait: Duration::from_millis(300),
+        };
+        let err = transcribe_with(&base, "K", "m", &[0u8; 640], limits)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, VoiceControlError::Upstream(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn a_socket_that_stops_reading_cannot_hold_the_request_open() {
+        let base = stalled(false).await;
+        let limits = Limits {
+            send: Duration::from_millis(300),
+            final_wait: Duration::from_secs(30),
+        };
+        // Far more than the kernel socket buffers hold.
+        let pcm = vec![7u8; 48 * 1024 * 1024];
+        let started = std::time::Instant::now();
+        let err = transcribe_with(&base, "K", "m", &pcm, limits)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, VoiceControlError::Upstream(_)), "{err:?}");
+        assert!(started.elapsed() < Duration::from_secs(20));
     }
 
     #[test]
