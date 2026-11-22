@@ -79,7 +79,9 @@ pub fn provider_tool_name(name: &str) -> String {
     if (1..=64).contains(&name.len())
         && !name.starts_with(PREFIX)
         && (name.as_bytes()[0].is_ascii_alphabetic() || name.starts_with('_'))
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
     {
         return name.to_owned();
     }

@@ -27,6 +27,8 @@ expect:
   state: succeeded
   tool_runs: { "mcp:helpdesk/close_case": 0 }
   permissions:
+    - { tool: tool_search, decision: allowed }
+    - { tool: tool_describe, decision: allowed }
     - { tool: "mcp:helpdesk/close_case", decision: denied_user }
   approval_cards:
     - tool: "mcp:helpdesk/close_case"

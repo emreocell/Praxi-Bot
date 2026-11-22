@@ -80,6 +80,9 @@ pub(crate) fn tool_defs(specs: &[ToolSpec], deferred: bool) -> Vec<Value> {
 pub(crate) const NUDGE_TEXT: &str =
     "Continue using the tools available to you, or answer the user.";
 
+/// The nudge as recorded model exchanges and the legacy discovery surface know it.
+const LEGACY_NUDGE_TEXT: &str = "You looked up tools but did not use them. Call use_tool with the tool you found, or answer the user.";
+
 /// Note appended to the closing, tool-less model call after a guard stopped the turn.
 pub(crate) const GUARD_NOTE: &str = "The turn was stopped by a safety limit ({reason}). Tools are no longer available. Summarize the progress made so far and what is left to do, in plain text.";
 
@@ -364,6 +367,7 @@ pub(crate) fn build_messages(
     // Tool calls of the latest model step that have no result yet; a stopped
     // turn leaves some, and providers reject unanswered tool calls.
     let mut outstanding: Vec<String> = Vec::new();
+    let mut typed_surface = false;
     let flush = |out: &mut Vec<Message>, outstanding: &mut Vec<String>| {
         for id in outstanding.drain(..) {
             out.push(Message::tool_result(id, NOT_EXECUTED));
@@ -405,7 +409,14 @@ pub(crate) fn build_messages(
             }
             STEP_NUDGE => {
                 flush(&mut out, &mut outstanding);
-                out.push(Message::text(MessageRole::System, NUDGE_TEXT));
+                out.push(Message::text(
+                    MessageRole::System,
+                    if typed_surface {
+                        NUDGE_TEXT
+                    } else {
+                        LEGACY_NUDGE_TEXT
+                    },
+                ));
             }
             STEP_MODEL => {
                 if status_of(step) != Some(StepStatus::Succeeded) {
@@ -414,6 +425,7 @@ pub(crate) fn build_messages(
                 let Some(mo) = step_output::<ModelOut>(step) else {
                     continue;
                 };
+                typed_surface |= mo.offered_tools.is_some();
                 // A silent model step followed by a nudge is not replayed
                 // (some providers reject an empty assistant message).
                 if mo.text.trim().is_empty()

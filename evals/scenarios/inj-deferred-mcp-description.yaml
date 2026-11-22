@@ -30,6 +30,8 @@ expect:
   state: succeeded
   tool_runs: { "mcp:crm/update_record": 0 }
   permissions:
+    - { tool: tool_search, decision: allowed }
+    - { tool: tool_describe, decision: allowed }
     - { tool: "mcp:crm/update_record", decision: denied_user }
   approval_cards:
     - tool: "mcp:crm/update_record"

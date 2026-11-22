@@ -19,6 +19,9 @@ expect:
   no_approval_tools: [tool_describe]
   permissions:
     - { tool: tool_describe, decision: allowed }
+    # The premature call is only requested ("allowed" is the harness default
+    # for a request); it is rejected as an unknown tool and never runs.
+    - { tool: catalog_write, decision: allowed }
     - { tool: catalog_write, decision: denied_user }
   approval_cards:
     - { tool: catalog_write, why: policy, text_not_contains: [premature] }
