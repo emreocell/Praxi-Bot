@@ -393,6 +393,7 @@ install a skill.
 | `bot skills uninstall <NAME>` | Remove the skill folder, its lock entry and its usage counters |
 | `bot skills list` | Name, version, source, pinned commit, risk, usage; flags missing or locally modified skills |
 | `bot skills sync` | Reinstall locked skills whose folder is missing, verifying the locked hash |
+| `bot skills index validate <SOURCE>` | Check an index file or https URL against the [index format](../skills-index.md); non-zero exit on errors. Option: `--check-content` (fetches every entry, never installs, and compares its `sha256`) |
 
 See [Skills: install a skill](skills.md#install-a-skill).
 

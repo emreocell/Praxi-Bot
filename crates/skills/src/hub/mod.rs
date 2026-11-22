@@ -33,6 +33,7 @@
 //! CLI: `praxi skill install|update|uninstall|list|sync`; UI: a skills
 //! settings page listing [`SkillHub::list`] with source tag, risk, usage.
 
+pub mod index_check;
 pub mod lock;
 pub mod scan;
 pub mod source;
@@ -44,6 +45,7 @@ use std::path::{Path, PathBuf};
 use parking_lot::Mutex;
 use tempfile::TempDir;
 
+pub use index_check::{IndexReport, validate_index};
 pub use lock::{GitPin, LockEntry, LockFile, SourceSpec, UsageStats};
 pub use scan::{Finding, FindingKind, RiskLevel, RiskReport, Severity, scan_dir};
 pub use source::{
@@ -235,6 +237,18 @@ impl SkillHub {
     #[must_use]
     pub fn paths(&self) -> &HubPaths {
         &self.paths
+    }
+
+    /// Download an index document (https only, size capped). Nothing is parsed
+    /// or installed; use [`validate_index`] on the bytes.
+    ///
+    /// # Errors
+    /// Non-https URLs and transport failures.
+    pub fn fetch_index_document(&self, url: &str) -> Result<Vec<u8>, HubError> {
+        if !url.to_ascii_lowercase().starts_with("https://") {
+            return Err(HubError::Source("index URL must use https://".into()));
+        }
+        self.fetcher.get(url)
     }
 
     /// Fetch/copy `source` into a staging directory, validate it and scan it.

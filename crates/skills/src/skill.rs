@@ -75,6 +75,10 @@ pub struct Skill {
     pub version: String,
     /// Triggers.
     pub when: When,
+    /// Who wrote the skill (optional credit line, shown nowhere to the model).
+    pub author: Option<String>,
+    /// Licence of the skill text, for example `MIT` (optional).
+    pub license: Option<String>,
     /// Markdown body (without frontmatter).
     pub body: String,
     /// Source layer.
@@ -119,6 +123,18 @@ fn scalar(key: &str, v: &Value) -> Result<String, String> {
     }
 }
 
+/// A credit line (`author`, `license`): one short line, no control characters.
+fn credit(key: &str, v: &Value) -> Result<String, String> {
+    let s = scalar(key, v)?;
+    let s = s.trim();
+    if s.is_empty() || s.chars().count() > MAX_DESCRIPTION_LEN || s.chars().any(char::is_control) {
+        return Err(format!(
+            "`{key}` must be one line of at most {MAX_DESCRIPTION_LEN} characters"
+        ));
+    }
+    Ok(s.to_string())
+}
+
 fn list(key: &str, v: &Value) -> Result<Vec<String>, String> {
     match v {
         Value::List(l) => Ok(l.clone()),
@@ -140,11 +156,15 @@ pub fn parse_skill(content: &str, source: Source, dir: Option<PathBuf>) -> Resul
     let mut name = None;
     let mut description = None;
     let mut version = None;
+    let mut author = None;
+    let mut license = None;
     for (k, v) in &front.top {
         match k.as_str() {
             "name" => name = Some(scalar(k, v)?),
             "description" => description = Some(scalar(k, v)?),
             "version" => version = Some(scalar(k, v)?),
+            "author" => author = Some(credit(k, v)?),
+            "license" => license = Some(credit(k, v)?),
             "when" => return Err("`when` must be a block with indented keys".into()),
             other => return Err(format!("unknown frontmatter key `{other}`")),
         }
@@ -185,6 +205,8 @@ pub fn parse_skill(content: &str, source: Source, dir: Option<PathBuf>) -> Resul
         description: description.trim().to_string(),
         version,
         when,
+        author,
+        license,
         body,
         source,
         dir,
