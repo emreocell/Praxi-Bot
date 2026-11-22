@@ -1355,14 +1355,15 @@ impl Page {
             }
             WaitCondition::Selector(sel) => {
                 let js = format!("!!document.querySelector({})", json!(sel));
-                self.poll_true(&js, timeout, "selector").await
+                self.poll_true(&js, timeout, &format!("selector {sel}"))
+                    .await
             }
             WaitCondition::Text(t) => {
                 let js = format!(
                     "(document.body && document.body.innerText || '').includes({})",
                     json!(t)
                 );
-                self.poll_true(&js, timeout, "text").await
+                self.poll_true(&js, timeout, &format!("text \"{t}\"")).await
             }
         };
         // The wanted condition already holds (or timed out): snapshot only, no settle.
@@ -1378,7 +1379,10 @@ impl Page {
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                return Err(Error::Timeout(format!("waiting for {what}")));
+                return Err(Error::Timeout(format!(
+                    "waiting for {what}: it did not appear within {}s. Call browser_snapshot to see what the page shows now (it may still be loading, worded differently, or need a click first), then wait for something that is really there",
+                    timeout.as_secs().max(1)
+                )));
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
