@@ -20,6 +20,7 @@ pub mod fake;
 pub mod harness;
 pub mod live;
 pub mod metrics;
+pub mod nightly;
 pub mod report;
 pub mod scenario;
 pub mod task;

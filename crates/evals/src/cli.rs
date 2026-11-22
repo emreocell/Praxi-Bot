@@ -19,6 +19,8 @@ use crate::{scenario, task, tier1, tier2};
 /// `eval` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum EvalCommand {
+    /// Opt-in real-model comparison using isolated scenario fixture tools only.
+    Nightly(crate::nightly::NightlyArgs),
     /// Run scenarios (tier 1) and/or live tasks (tier 2) and write a JSONL result file.
     Run(RunArgs),
     /// Record a real model turn with isolated fixture tools (owner machine only).
@@ -169,6 +171,7 @@ fn print_record(r: &RunRecord) {
 /// Load / harness / IO failures.
 pub async fn execute(cmd: EvalCommand) -> Result<bool> {
     match cmd {
+        EvalCommand::Nightly(a) => crate::nightly::execute(a).await,
         EvalCommand::Run(a) => run(a).await,
         EvalCommand::Record(a) => record(a).await,
         EvalCommand::Replay(a) => {
