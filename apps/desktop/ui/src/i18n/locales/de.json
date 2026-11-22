@@ -2173,6 +2173,19 @@
     "sectionTitle": "Entwickler",
     "simulateBotRun": "Bot-Lauf simulieren"
   },
+  "digest": {
+    "cost": "{{calls}} Modellaufrufe, {{cost}}.",
+    "done": "Erledigt: {{count}}",
+    "empty": "Deine Bots haben heute noch nichts getan.",
+    "failed": "Fehlgeschlagen: {{count}}",
+    "noCalls": "Noch keine Modellaufrufe.",
+    "ofLimit": "Das sind {{percent}} des Tageslimits.",
+    "running": "Laufen: {{count}}",
+    "stopped": "Gestoppt: {{count}}",
+    "subtitle": "Was deine Bots seit Mitternacht getan haben und was es gekostet hat.",
+    "title": "Heute",
+    "waiting": "Warten auf dich: {{count}}"
+  },
   "engineConsent": {
     "allow": "{{cli}} erlauben",
     "blocked": {

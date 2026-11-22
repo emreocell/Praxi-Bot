@@ -2173,6 +2173,19 @@
     "sectionTitle": "Geliştirici",
     "simulateBotRun": "Bot çalışmasını simüle et"
   },
+  "digest": {
+    "cost": "{{calls}} model çağrısı, {{cost}}.",
+    "done": "Tamamlanan: {{count}}",
+    "empty": "Botların bugün henüz bir şey yapmadı.",
+    "failed": "Başarısız: {{count}}",
+    "noCalls": "Henüz model çağrısı yok.",
+    "ofLimit": "Bu, günlük limitin {{percent}} kadarı.",
+    "running": "Çalışan: {{count}}",
+    "stopped": "Durdurulan: {{count}}",
+    "subtitle": "Botların gece yarısından beri neler yaptığı ve maliyeti.",
+    "title": "Bugün",
+    "waiting": "Seni bekleyen: {{count}}"
+  },
   "engineConsent": {
     "allow": "{{cli}} için izin ver",
     "blocked": {

@@ -2173,6 +2173,19 @@
     "sectionTitle": "Developer",
     "simulateBotRun": "Simulate bot run"
   },
+  "digest": {
+    "cost": "{{calls}} model calls, {{cost}}.",
+    "done": "Done: {{count}}",
+    "empty": "Your bots have not done anything today.",
+    "failed": "Failed: {{count}}",
+    "noCalls": "No model calls yet.",
+    "ofLimit": "That is {{percent}} of the daily limit.",
+    "running": "Running: {{count}}",
+    "stopped": "Stopped: {{count}}",
+    "subtitle": "What your bots did since midnight and what it cost.",
+    "title": "Today",
+    "waiting": "Waiting for you: {{count}}"
+  },
   "engineConsent": {
     "allow": "Allow {{cli}}",
     "blocked": {
