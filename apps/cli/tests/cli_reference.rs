@@ -1,14 +1,20 @@
-//! Keep the CLI command tree and `docs/guide/cli-reference.md` in step.
+//! Keep the CLI command tree, `docs/guide/cli-reference.md`, and the generated
+//! clap reference snapshot (`docs/cli/reference.md`) in step.
 //!
 //! The test runs the real `bot` binary with `--help`, walks the visible
-//! subcommands, and compares commands, long flags and environment variables
-//! with the headings and command tables of the reference. Every mismatch is
-//! reported in one failure so a contributor can fix the whole drift at once.
+//! subcommands, and compares commands, global and subcommand long flags, and
+//! environment variables with the headings and command tables of the reference,
+//! plus verifies that `docs/cli/reference.md` matches the live command tree.
+//! Every mismatch is reported in one failure so a contributor can fix the whole
+//! drift at once.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
+use std::path::Path;
 use std::process::Command;
 
 const CLI_REFERENCE: &str = include_str!("../../../docs/guide/cli-reference.md");
+const GENERATED_CLI_REFERENCE_PATH: &str = "docs/cli/reference.md";
 
 /// Visible commands that are deliberately undocumented. Every entry needs a
 /// reason; keep the list empty when you can.
@@ -21,8 +27,9 @@ const ALLOWED_MISSING_FLAGS: &[(&str, &str, &str)] = &[];
 const ALLOWED_MISSING_ENV: &[(&str, &str)] = &[];
 
 /// Parsed pieces of one `bot ... --help` output.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct Help {
+    about: String,
     children: Vec<String>,
     flags: BTreeSet<String>,
     env: BTreeSet<String>,
@@ -50,8 +57,14 @@ fn run_help(path: &[String]) -> String {
 fn parse_help(text: &str) -> Help {
     let mut help = Help::default();
     let mut section = "";
+    let mut before_usage = true;
     for line in text.lines() {
         let heading = line.trim_end();
+        if heading.starts_with("Usage:") {
+            before_usage = false;
+        } else if before_usage && help.about.is_empty() && !heading.trim().is_empty() {
+            heading.trim().clone_into(&mut help.about);
+        }
         if !line.starts_with(' ') && heading.ends_with(':') {
             section = heading.trim_end_matches(':');
         }
@@ -127,28 +140,40 @@ fn collect(path: &mut Vec<String>, out: &mut BTreeMap<String, Help>) {
 }
 
 /// The command headings, command-table rows and section bodies of the guide.
-struct Reference {
+struct Reference<'a> {
     /// Documented command path -> 1-based line number of its first mention.
     commands: BTreeMap<String, usize>,
     /// Documented command path -> the body of its heading, until the next one.
     sections: BTreeMap<String, String>,
-    text: &'static str,
+    /// Body of the `## Global options` section.
+    global_options: String,
+    text: &'a str,
 }
 
-impl Reference {
+impl<'a> Reference<'a> {
     fn parse() -> Self {
+        Self::parse_str(CLI_REFERENCE)
+    }
+
+    fn parse_str(source: &'a str) -> Self {
         let mut commands = BTreeMap::new();
         let mut sections = BTreeMap::new();
         let mut headings: Vec<String> = Vec::new();
         let mut body = String::new();
+        let mut global_options = String::new();
+        let mut in_global_options = false;
         let mut in_fence = false;
 
-        for (index, line) in CLI_REFERENCE.lines().enumerate() {
+        for (index, line) in source.lines().enumerate() {
             if line.starts_with("```") {
                 in_fence = !in_fence;
                 if !headings.is_empty() {
                     body.push_str(line);
                     body.push('\n');
+                }
+                if in_global_options {
+                    global_options.push_str(line);
+                    global_options.push('\n');
                 }
                 continue;
             }
@@ -157,20 +182,30 @@ impl Reference {
                     body.push_str(line);
                     body.push('\n');
                 }
+                if in_global_options {
+                    global_options.push_str(line);
+                    global_options.push('\n');
+                }
                 continue;
             }
             if let Some(title) = line.strip_prefix("### ") {
                 flush(&mut sections, &headings, &mut body);
+                in_global_options = false;
                 headings = heading_paths(title);
                 for path in &headings {
                     commands.entry(path.clone()).or_insert(index + 1);
                 }
                 continue;
             }
-            if line.starts_with("## ") {
+            if let Some(h2) = line.strip_prefix("## ") {
                 flush(&mut sections, &headings, &mut body);
                 headings.clear();
+                in_global_options = h2.trim().eq_ignore_ascii_case("Global options");
                 continue;
+            }
+            if in_global_options {
+                global_options.push_str(line);
+                global_options.push('\n');
             }
             if let Some(section) = headings.first()
                 && let Some(path) = table_row_path(line, section)
@@ -187,7 +222,8 @@ impl Reference {
         Self {
             commands,
             sections,
-            text: CLI_REFERENCE,
+            global_options,
+            text: source,
         }
     }
 
@@ -387,19 +423,38 @@ fn help_and_reference_parsers_handle_clap_layouts() {
     assert_eq!(table_row_path("| `--json` | JSON output |", "bot"), None);
 }
 
-#[test]
-fn documented_flags_and_environment_match_the_cli() {
-    let reference = Reference::parse();
-    let mut cli = BTreeMap::new();
-    collect(&mut Vec::new(), &mut cli);
-
+fn check_flags_and_env(
+    reference: &Reference<'_>,
+    cli: &BTreeMap<String, Help>,
+    allowed_flags: &[(&str, &str, &str)],
+    allowed_env: &[(&str, &str)],
+) -> Vec<String> {
     let Some(root) = cli.get("bot") else {
         panic!("`bot --help` produced no root command");
     };
-    let global: BTreeSet<&str> = root.flags.iter().map(String::as_str).collect();
+    let inherited_global: BTreeSet<&str> = root
+        .flags
+        .iter()
+        .map(String::as_str)
+        .filter(|&f| f != "--help" && f != "--version")
+        .collect();
     let mut problems = Vec::new();
 
-    for (path, help) in &cli {
+    for flag in &root.flags {
+        if flag == "--help" || flag == "--version" {
+            continue;
+        }
+        let allowed = allowed_flags
+            .iter()
+            .any(|(path, f, _)| *path == "bot" && *f == flag.as_str());
+        if !allowed && !mentions_flag(&reference.global_options, flag) {
+            problems.push(format!(
+                "`bot` has global flag `{flag}`, but `## Global options` in docs/guide/cli-reference.md does not mention it"
+            ));
+        }
+    }
+
+    for (path, help) in cli {
         if path == "bot" {
             continue;
         }
@@ -407,15 +462,12 @@ fn documented_flags_and_environment_match_the_cli() {
             continue;
         };
         for flag in &help.flags {
-            if global.contains(flag.as_str()) || flag == "--help" || flag == "--version" {
+            if inherited_global.contains(flag.as_str()) || flag == "--help" {
                 continue;
             }
-            if ALLOWED_MISSING_FLAGS
-                .iter()
-                .any(|(allowed_path, allowed_flag, _)| {
-                    *allowed_path == path.as_str() && *allowed_flag == flag.as_str()
-                })
-            {
+            if allowed_flags.iter().any(|(allowed_path, allowed_flag, _)| {
+                *allowed_path == path.as_str() && *allowed_flag == flag.as_str()
+            }) {
                 continue;
             }
             if !mentions_flag(body, flag) {
@@ -431,7 +483,7 @@ fn documented_flags_and_environment_match_the_cli() {
         envs.extend(help.env.iter().map(String::as_str));
     }
     for &name in &envs {
-        let allowed = ALLOWED_MISSING_ENV
+        let allowed = allowed_env
             .iter()
             .any(|(allowed_name, _)| *allowed_name == name);
         if !allowed && !reference.text.contains(name) {
@@ -441,10 +493,110 @@ fn documented_flags_and_environment_match_the_cli() {
         }
     }
 
+    problems
+}
+
+/// Render a deterministic Markdown snapshot of the `bot` clap command tree.
+fn render_generated_reference(cli: &BTreeMap<String, Help>) -> String {
+    let Some(root) = cli.get("bot") else {
+        panic!("`bot --help` produced no root command");
+    };
+    let inherited_global: BTreeSet<&str> = root
+        .flags
+        .iter()
+        .map(String::as_str)
+        .filter(|&f| f != "--help" && f != "--version")
+        .collect();
+    let mut envs = BTreeSet::new();
+    for help in cli.values() {
+        envs.extend(help.env.iter().map(String::as_str));
+    }
+
+    let mut out = String::new();
+    out.push_str("# Generated CLI Reference (`bot`)\n\n");
+    out.push_str(
+        "Generated from the `clap` command definitions in `apps/cli/src/main.rs`.\n\
+         Do not edit by hand; regenerate with:\n\n\
+         ```sh\n\
+         UPDATE_CLI_REFERENCE=1 cargo test -p cli --test cli_reference\n\
+         ```\n\n\
+         For usage prose and examples, see [`docs/guide/cli-reference.md`](../guide/cli-reference.md).\n\n",
+    );
+
+    out.push_str("## Global Options\n\n");
+    for flag in &root.flags {
+        let _ = writeln!(out, "- `{flag}`");
+    }
+
+    out.push_str("\n## Environment Variables\n\n");
+    for env in &envs {
+        let _ = writeln!(out, "- `{env}`");
+    }
+
+    out.push_str("\n## Command Tree\n\n");
+    out.push_str("| Command | Summary | Subcommands | Options |\n");
+    out.push_str("| --- | --- | --- | --- |\n");
+    for (path, help) in cli {
+        let subcommands: Vec<String> = help
+            .children
+            .iter()
+            .filter(|c| c.as_str() != "help")
+            .map(|c| format!("`{c}`"))
+            .collect();
+        let sub_cell = if subcommands.is_empty() {
+            "—".to_owned()
+        } else {
+            subcommands.join(", ")
+        };
+        let local_flags: Vec<String> = help
+            .flags
+            .iter()
+            .filter(|f| {
+                let s = f.as_str();
+                s != "--help"
+                    && !(path == "bot" && s == "--version")
+                    && s != "--fake-provider"
+                    && (path == "bot" || !inherited_global.contains(s))
+            })
+            .map(|f| format!("`{f}`"))
+            .collect();
+        let opt_cell = if local_flags.is_empty() {
+            "—".to_owned()
+        } else {
+            local_flags.join(", ")
+        };
+        let about = help.about.replace('|', "\\|");
+        let _ = writeln!(out, "| `{path}` | {about} | {sub_cell} | {opt_cell} |");
+    }
+    out
+}
+
+#[test]
+fn documented_flags_and_environment_match_the_cli() {
+    let reference = Reference::parse();
+    let mut cli = BTreeMap::new();
+    collect(&mut Vec::new(), &mut cli);
+
+    let Some(root) = cli.get("bot") else {
+        panic!("`bot --help` produced no root command");
+    };
+    let mut envs = BTreeSet::new();
+    for help in cli.values() {
+        envs.extend(help.env.iter().map(String::as_str));
+    }
+
+    let problems =
+        check_flags_and_env(&reference, &cli, ALLOWED_MISSING_FLAGS, ALLOWED_MISSING_ENV);
+
     for (path, flag, reason) in ALLOWED_MISSING_FLAGS {
-        assert!(
+        let exists = if *path == "bot" {
+            root.flags.contains(*flag)
+        } else {
             cli.get(*path)
-                .is_some_and(|help| help.flags.contains(*flag)),
+                .is_some_and(|help| help.flags.contains(*flag))
+        };
+        assert!(
+            exists,
             "allow-list entry `{path} {flag}` is not a real command flag"
         );
         assert!(
@@ -468,4 +620,66 @@ fn documented_flags_and_environment_match_the_cli() {
         "CLI reference drift:\n{}",
         problems.join("\n")
     );
+}
+
+#[test]
+fn generated_cli_reference_matches_command_tree() {
+    let mut cli = BTreeMap::new();
+    collect(&mut Vec::new(), &mut cli);
+    let expected = render_generated_reference(&cli);
+    let snapshot = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(GENERATED_CLI_REFERENCE_PATH);
+    if std::env::var_os("UPDATE_CLI_REFERENCE").is_some() {
+        if let Some(parent) = snapshot.parent() {
+            std::fs::create_dir_all(parent).expect("create docs/cli directory");
+        }
+        std::fs::write(&snapshot, &expected).expect("write generated CLI reference");
+    }
+    let actual = std::fs::read_to_string(&snapshot)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", snapshot.display()))
+        .replace("\r\n", "\n");
+    assert_eq!(
+        actual, expected,
+        "{GENERATED_CLI_REFERENCE_PATH} is out of date with the `bot` clap command tree; \
+         run `UPDATE_CLI_REFERENCE=1 cargo test -p cli --test cli_reference` and commit the result"
+    );
+}
+
+#[test]
+fn drift_detector_reports_missing_global_flags_subcommand_flags_and_env() {
+    let doc = "\
+# CLI reference
+## Global options
+| `--data-dir <PATH>` | `BOT_DATA_DIR` |
+## Commands
+### `bot status`
+Show daemon status.
+";
+    let reference = Reference::parse_str(doc);
+    let mut cli = BTreeMap::new();
+    cli.insert(
+        "bot".to_owned(),
+        Help {
+            about: "Root".to_owned(),
+            children: vec!["status".to_owned()],
+            flags: BTreeSet::from(["--data-dir".to_owned(), "--new-global".to_owned()]),
+            env: BTreeSet::from(["BOT_DATA_DIR".to_owned(), "BOT_NEW_ENV".to_owned()]),
+        },
+    );
+    cli.insert(
+        "bot status".to_owned(),
+        Help {
+            about: "Status".to_owned(),
+            children: Vec::new(),
+            flags: BTreeSet::from(["--data-dir".to_owned(), "--new-local".to_owned()]),
+            env: BTreeSet::new(),
+        },
+    );
+
+    let problems = check_flags_and_env(&reference, &cli, &[], &[]);
+    assert_eq!(problems.len(), 3, "{problems:?}");
+    assert!(problems.iter().any(|p| p.contains("--new-global")));
+    assert!(problems.iter().any(|p| p.contains("--new-local")));
+    assert!(problems.iter().any(|p| p.contains("BOT_NEW_ENV")));
 }

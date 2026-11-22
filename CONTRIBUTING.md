@@ -143,9 +143,12 @@ Testing) and the UI checks below. It also checks that `docs/api/openapi.json` an
 documentation skip the long Rust jobs. A PR is merged only when CI is green.
 
 The CLI reference is checked too: `apps/cli/tests/cli_reference.rs` fails when a visible
-command, long flag or environment variable is missing from `docs/guide/cli-reference.md`, or
-when a heading names a command that no longer exists. Update the guide, or add a reasoned entry
-to the test's allow-list, in the same pull request.
+command, global or subcommand long flag, or environment variable is missing from
+`docs/guide/cli-reference.md`, when a heading names a command that no longer exists, or when
+the generated command-tree snapshot (`docs/cli/reference.md`) drifts from the `clap` definitions
+(regenerate it with `UPDATE_CLI_REFERENCE=1 cargo test -p cli --test cli_reference`). Update the
+guide, regenerate the snapshot, or add a reasoned entry to the test's allow-list in the same pull
+request.
 
 **Accessibility check.** `pnpm --dir apps/desktop/ui check:a11y` builds the mock bundle, opens about
 40 screens and states (home, chat, right panel, approval card, schedules, apps, dialogs, first-run
