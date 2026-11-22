@@ -218,3 +218,26 @@ test("selectionColors stay visible on every bot colour and theme bubble, and kee
     }
   }
 });
+
+test("system mode follows the chosen light and dark palettes", async () => {
+  const { parseSystemPair, DEFAULT_SYSTEM_PAIR } = await import("ui/theme-model");
+  assert.equal(themeFor("system", DEFAULT_CUSTOM_THEME, false).id, "clay");
+  assert.equal(themeFor("system", DEFAULT_CUSTOM_THEME, true).id, "obsidian");
+  const light = PALETTES.find((p) => deriveTheme(p).light && p.id !== "clay");
+  const darkOne = PALETTES.find((p) => !deriveTheme(p).light && p.id !== "obsidian");
+  assert.ok(light && darkOne);
+  const pair = { light: light.id, dark: darkOne.id };
+  assert.equal(themeFor("system", DEFAULT_CUSTOM_THEME, false, pair).id, light.id);
+  assert.equal(themeFor("system", DEFAULT_CUSTOM_THEME, true, pair).id, darkOne.id);
+  assert.deepEqual(parseSystemPair(undefined, 42), DEFAULT_SYSTEM_PAIR);
+});
+
+test("parseSystemPair rejects a palette of the wrong brightness", async () => {
+  const { parseSystemPair, DEFAULT_SYSTEM_PAIR } = await import("ui/theme-model");
+  const dark = PALETTES.find((p) => !deriveTheme(p).light);
+  const light = PALETTES.find((p) => deriveTheme(p).light);
+  assert.ok(dark && light);
+  assert.deepEqual(parseSystemPair(dark.id, light.id), DEFAULT_SYSTEM_PAIR);
+  assert.deepEqual(parseSystemPair("nope", "nope"), DEFAULT_SYSTEM_PAIR);
+  assert.deepEqual(parseSystemPair(light.id, dark.id), { light: light.id, dark: dark.id });
+});

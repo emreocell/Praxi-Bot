@@ -1,0 +1,10 @@
+name: nightly-read
+description: Complete a simple task using a synthetic read fixture.
+policy: full
+user: 'Call fixture_read with empty arguments exactly once, then reply exactly: done'
+tools:
+  - {name: fixture_read, effect: read, category: fs, output: 'Synthetic public fixture: ready.'}
+expect:
+  state: succeeded
+  tool_runs: {fixture_read: 1}
+  final_text: {equals: done}

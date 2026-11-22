@@ -1,4 +1,5 @@
 import type { ComposioApp, ComposioToolkit, McpCatalogEntry, McpServer } from "../api/types";
+import { matchesQuery } from "./searchText.ts";
 
 /** Chip groups of the Apps grid, in display order (also the daemon's group ids). */
 export const GROUPS = ["communication", "social", "productivity", "dev", "finance", "business"] as const;
@@ -90,11 +91,8 @@ export function filterDirect(
   query: string,
   group: string
 ): McpCatalogEntry[] {
-  const q = query.trim().toLowerCase();
   return entries.filter(
-    (e) =>
-      (group === "all" || directGroup(e.id) === group) &&
-      (q === "" || e.name.toLowerCase().includes(q) || e.description.toLowerCase().includes(q))
+    (e) => (group === "all" || directGroup(e.id) === group) && matchesQuery(query, e.name, e.description)
   );
 }
 

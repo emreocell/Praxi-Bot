@@ -1,4 +1,5 @@
 import { Bot as BotIcon, Check, Info } from "lucide-react";
+import { systemPairOf } from "../../lib/appearance";
 import { useRef, type CSSProperties } from "react";
 import type { TFunction } from "i18next";
 import {
@@ -261,7 +262,7 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
     </SettingRow>
   );
 
-  const theme = resolveTheme(settings.themeMode, settings.customTheme);
+  const theme = resolveTheme(settings.themeMode, settings.customTheme, systemPairOf(settings));
   const accent = accentFor(settings.accentColor, theme, b.botColor);
   const fixed = settings.accentColor.startsWith("#") ? settings.accentColor : "";
   const swatch = (key: string, color: string, label: string, pressed: boolean, onClick: () => void, icon?: React.ReactNode) => (
@@ -298,6 +299,8 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
           mode={settings.themeMode}
           custom={settings.customTheme}
           accent={settings.accentColor}
+          systemLight={settings.systemLightTheme}
+          systemDark={settings.systemDarkTheme}
           onChange={update}
         />
       ),

@@ -5,6 +5,10 @@ Tier-1 evaluation scenarios live as YAML data files under [`evals/scenarios/`](.
 To capture a real model turn and replay its sanitized transcript through the same
 loop, see [Record and replay](eval-record-replay.md).
 
+For opt-in, budgeted comparisons of real models using fixture tools only, see
+[Nightly model comparisons](eval-nightly.md). These are separate from the
+hermetic CI suite and from live browser/desktop tasks.
+
 For the full scenario schema, tool content classes, and baseline commands, see:
 
 - [`evals/README.md`](../../evals/README.md) — scenario schema, `attack` metadata, `approval_cards` assertions, and `bot-eval` commands

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ComposioApp, ComposioToolkit, McpCatalogEntry } from "../api/types.ts";
-import { composioTileState, tileAction, visibleToolkits } from "./appTiles.ts";
+import { composioTileState, filterDirect, tileAction, visibleToolkits } from "./appTiles.ts";
 
 const app = (slug: string, state: ComposioApp["state"]): ComposioApp => ({
   slug,
@@ -49,4 +49,20 @@ test("a product connected directly or already in Connected has one tile only", (
     shown.map((t) => t.slug),
     ["slack"]
   );
+});
+
+test("direct tiles are found without regard to case, accents or the Turkish i (#638)", () => {
+  const entries = [
+    { id: "notion-remote", name: "Notion", description: "Notlarını ve görevlerini yönet" },
+    { id: "linear-remote", name: "Linear", description: "Issue tracking" },
+    { id: "ikas-remote", name: "İkas", description: "Online store" }
+  ] as McpCatalogEntry[];
+  const ids = (query: string): string[] => filterDirect(entries, query, "all").map((e) => e.id);
+  assert.deepEqual(ids(""), ["notion-remote", "linear-remote", "ikas-remote"]);
+  assert.deepEqual(ids("  "), ["notion-remote", "linear-remote", "ikas-remote"]);
+  assert.deepEqual(ids("ikas"), ["ikas-remote"]);
+  assert.deepEqual(ids("İKAS"), ["ikas-remote"]);
+  assert.deepEqual(ids("notlarini gorevlerini"), ["notion-remote"]);
+  assert.deepEqual(ids(" LINEAR "), ["linear-remote"]);
+  assert.deepEqual(ids("notion tracking"), []);
 });

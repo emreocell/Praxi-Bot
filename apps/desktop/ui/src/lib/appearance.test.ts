@@ -100,7 +100,9 @@ test("valid new values round-trip", () => {
     transparentChat: true,
     chatPanel: false,
     transparencyOverride: true,
-    photorealAvatars: false
+    photorealAvatars: false,
+    systemLightTheme: "clay",
+    systemDarkTheme: "obsidian"
   };
   assert.deepEqual(normalizeAppearance(stored), {
     ...stored,
@@ -174,4 +176,13 @@ test("URL overrides (mock review screenshots) are validated and optional", () =>
   assert.equal(b.wallpaper, "night");
   assert.equal(b.wallpaperMotion, "live");
   assert.equal(appearanceFromQuery(q("accent=bot"), { ...DEFAULT_APPEARANCE, accentColor: "theme" }).accentColor, "bot");
+});
+
+test("the system theme pair is validated and defaults to clay / obsidian", () => {
+  assert.equal(DEFAULT_APPEARANCE.systemLightTheme, "clay");
+  assert.equal(DEFAULT_APPEARANCE.systemDarkTheme, "obsidian");
+  // a dark palette in the light slot (and an unknown id in the dark slot) fall back
+  const n = normalizeAppearance({ systemLightTheme: "obsidian", systemDarkTheme: "nope" });
+  assert.equal(n.systemLightTheme, "clay");
+  assert.equal(n.systemDarkTheme, "obsidian");
 });

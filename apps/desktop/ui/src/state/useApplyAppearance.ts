@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { systemPairOf } from "../lib/appearance";
 import {
   accentFor,
   applyTheme,
@@ -30,7 +31,7 @@ export interface AppliedAppearance {
 }
 
 type AppearanceInput = Pick<AppSettings, "themeMode" | "customTheme" | "accentColor"> &
-  Partial<Pick<AppSettings, "photorealAvatars">>;
+  Partial<Pick<AppSettings, "photorealAvatars" | "systemLightTheme" | "systemDarkTheme">>;
 
 /** The window's own backdrop / style axes only apply to the main window. */
 type FullAppearanceInput = AppearanceInput &
@@ -92,7 +93,7 @@ export function paintSavedAppearanceEarly(overlay: boolean): void {
   document.documentElement.dataset.booting = "1";
   const saved = loadSettingsSync();
   if (!saved) return;
-  const theme = resolveTheme(saved.themeMode, saved.customTheme);
+  const theme = resolveTheme(saved.themeMode, saved.customTheme, systemPairOf(saved));
   paintAppearance(saved, theme, accentFor(saved.accentColor, theme, undefined), !overlay);
 }
 
@@ -152,7 +153,7 @@ export function useApplyAppearance(
   // Re-paint when the OS "reduce transparency" preference flips.
   useEffect(() => subscribeSurfaceSupport(() => setSystemTick((n) => n + 1)), []);
 
-  const theme = resolveTheme(settings.themeMode, settings.customTheme);
+  const theme = resolveTheme(settings.themeMode, settings.customTheme, systemPairOf(settings));
   const accent = accentFor(settings.accentColor, theme, botColor);
   const full = overlay ? null : (settings as FullAppearanceInput);
   // Before the shell computes its geometry (isFloatShell) in this same render.

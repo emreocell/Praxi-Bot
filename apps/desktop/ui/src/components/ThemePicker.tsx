@@ -15,7 +15,9 @@ import {
   type ThemeDef,
   type ThemeMode
 } from "ui";
+import { DEFAULT_SYSTEM_PAIR, parseSystemPair } from "ui/theme-model";
 import { Modal } from "./Modal";
+import form from "./Form.module.css";
 import styles from "./AppearancePicker.module.css";
 import tileStyles from "./ThemePicker.module.css";
 
@@ -113,15 +115,26 @@ export function ThemePicker({
   mode,
   custom,
   accent,
+  systemLight = DEFAULT_SYSTEM_PAIR.light,
+  systemDark = DEFAULT_SYSTEM_PAIR.dark,
   onChange
 }: {
   mode: ThemeMode;
   custom: CustomTheme;
+  /** The light / dark palette "Follow system" uses (saved ids). */
+  systemLight?: string;
+  systemDark?: string;
   /** The saved accent preference (`""`, `"theme"` or a colour). */
   accent: string;
   /** The caller persists the patch. */
   onChange: (
-    patch: { themeMode?: string; customTheme?: CustomTheme; accentColor?: string },
+    patch: {
+      themeMode?: string;
+      customTheme?: CustomTheme;
+      accentColor?: string;
+      systemLightTheme?: string;
+      systemDarkTheme?: string;
+    },
     opts?: { deferSave?: boolean }
   ) => void;
 }) {
@@ -191,6 +204,36 @@ export function ThemePicker({
         <span>{t("appearance.theme.system")}</span>
         {isSystem ? <Check /> : null}
       </button>
+
+      {isSystem ? (
+        <div className={tileStyles.pair}>
+          {([
+            ["systemLight", light, systemLight, "systemLightTheme"],
+            ["systemDark", dark, systemDark, "systemDarkTheme"]
+          ] as const).map(([key, list, value, field]) => (
+            <label key={key} className={tileStyles.pairField}>
+              {t(`appearance.theme.${key}`)}
+              <select
+                className={form.select}
+                value={value}
+                onChange={(e) => {
+                  const next = parseSystemPair(
+                    field === "systemLightTheme" ? e.target.value : systemLight,
+                    field === "systemDarkTheme" ? e.target.value : systemDark
+                  );
+                  onChange({ systemLightTheme: next.light, systemDarkTheme: next.dark });
+                }}
+              >
+                {list.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {nameOf(p.id)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      ) : null}
 
       <Modal open={open} onClose={() => setOpen(false)} label={t("appearance.themes.modalTitle")} size="md">
         <div className={styles.gallery}>

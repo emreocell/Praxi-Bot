@@ -454,6 +454,8 @@
       "all": "Alle Designs",
       "description": "Farben für die gesamte App. Flächen, Linien und gedämpfter Text werden aus zwei Farben abgeleitet.",
       "system": "System folgen",
+      "systemDark": "Dunkles Design, solange das System dunkel ist",
+      "systemLight": "Helles Design, solange das System hell ist",
       "title": "Design"
     },
     "themes": {
@@ -780,6 +782,7 @@
     "delete": "Bot löschen",
     "deleteBlocked": "Dieser Bot hat noch Chats ({{count}}) und kann daher nicht gelöscht werden. Nur ein Bot ohne Chats oder Läufe kann entfernt werden.",
     "deleteBlockedRuns": "Dieser Bot hat noch gespeicherte Läufe ({{count}}) und kann daher nicht gelöscht werden. Nur ein Bot ohne Chats oder Läufe kann entfernt werden.",
+    "deleteBlockedRuns_one": "Dieser Bot hat noch einen gespeicherten Lauf ({{count}}) und kann daher nicht gelöscht werden. Nur ein Bot ohne Chats oder Läufe kann entfernt werden.",
     "deleteConfirmBody": "Der Bot, sein Zugriff auf Apps und seine E-Mail-Konten werden entfernt. Dies kann nicht rückgängig gemacht werden. Ein Bot, der noch Chats oder Läufe hat, kann nicht gelöscht werden: In diesem Fall wird nichts entfernt, und du siehst den Grund.",
     "deleteConfirmTitle": "{{name}} löschen?",
     "deleteHint": "Entfernt den Bot, seinen Zugriff auf Apps und seine E-Mail-Konten. Nur möglich, solange er keine Chats oder Läufe hat. Dies kann nicht rückgängig gemacht werden.",
@@ -1021,7 +1024,7 @@
       "soft_usd": "Warnen bei (USD)"
     },
     "hint": "Eine Warnung benachrichtigt dich nur bei 80 % und 100 %. Ein Stopp beendet den Lauf, bevor das Modell aufgerufen wird. Bei Modellen mit unbekanntem Preis zählt nur die Nutzung. Zeitpläne und Kanalnachrichten folgen denselben Limits.",
-    "invalid": "Gib einen positiven Betrag ein (Geld ab 0,01, Nutzung als ganze Zahl) oder lass das Feld leer.",
+    "invalid": "Gib einen positiven Betrag ein (Geld ab 0,01, Nutzung als ganze Zahl), nur Ziffern und ohne Tausendertrennzeichen (10000 statt 10.000), oder lass das Feld leer.",
     "order": "Die Warnschwelle darf nicht über der Stoppschwelle liegen.",
     "period": {
       "daily": "Pro Tag",
@@ -1034,6 +1037,7 @@
     "saving": "Wird gespeichert…",
     "unlimited": "Kein Limit",
     "unreported": "{{count}} Aufrufe meldeten keine Nutzung und werden mit einer vorsichtigen Schätzung gezählt.",
+    "unreported_one": "{{count}} Aufruf meldete keine Nutzung und wird mit einer vorsichtigen Schätzung gezählt.",
     "used": "{{usd}} und {{amount}} Textbausteine verbraucht. Zurückgesetzt am {{when}}."
   },
   "botPanel": {
@@ -1186,6 +1190,7 @@
       "summaryAll": "Nutzt alle geteilten Skills ({{count}})",
       "summaryLearned": "(+{{count}} gelernt)",
       "summaryMissing": "Auf dem Datenträger fehlende Skills: {{count}}",
+      "summaryMissing_one": "Auf dem Datenträger fehlender Skill: {{count}}",
       "summarySelected": "{{count}} von {{total}} geteilten Skills",
       "tooMany": "Es können nur {{max}} Skills zugewiesen werden. Wähle weniger Skills oder verwende „Alle geteilten Skills“."
     },
@@ -3227,8 +3232,10 @@
     "emailUnavailable": "Die E-Mail-Erkennung ist nicht verfügbar: {{error}}",
     "embed": "Semantischen Index aufbauen oder fortsetzen",
     "embeddingRemaining": "{{count}} Chunks übrig",
+    "embeddingRemaining_one": "{{count}} Chunk übrig",
     "embeddingRetry": "Erneut versuchen nach {{time}}",
     "embeddingSkipped": "{{count}} Chunks übersprungen",
+    "embeddingSkipped_one": "{{count}} Chunk übersprungen",
     "embeddingStatus": {
       "awaiting_consent": "Quellenberechtigung erforderlich",
       "cancelled": "Embedding pausiert",
@@ -3244,6 +3251,7 @@
     "html": "Der gespeicherte Inhalt ist HTML",
     "importHint": "Importierte Quellen starten deaktiviert. Wähle den Embedding-Anbieter erneut aus und speichere ihn, und autorisiere dann Quellen und Abrufanfragen getrennt.",
     "indexed": "{{count}} Dokumente verarbeitet.",
+    "indexed_one": "{{count}} Dokument verarbeitet.",
     "kind": "Quellentyp",
     "kinds": {
       "conversation": "Frühere Unterhaltung",
@@ -3293,6 +3301,7 @@
     "select": "Wählen …",
     "settings": "Abrufeinstellungen",
     "skippedFiles": "{{count}} Dateien übersprungen",
+    "skippedFiles_one": "{{count}} Datei übersprungen",
     "title": "Wissen und gemeinsames Gehirn",
     "url": "URL der gespeicherten Seite"
   },
@@ -3478,6 +3487,7 @@
     "copied": "Kopiert",
     "copy": "Befehl kopieren",
     "cores": "{{count}} Prozessor-Threads",
+    "cores_one": "{{count}} Prozessor-Thread",
     "disk": "{{size}} freier Speicherplatz",
     "fitFast": "läuft gut",
     "fitSlow": "läuft, aber langsam",
@@ -3544,6 +3554,7 @@
     "previewRun": "Abruf testen",
     "previewTitle": "Was der Bot sieht (Abrufvorschau)",
     "previewTokens": "{{count}} Erinnerungen abgerufen · ~{{used}} / {{budget}} Tokens",
+    "previewTokens_one": "{{count}} Erinnerung abgerufen · ~{{used}} / {{budget}} Tokens",
     "saveEdit": "Erinnerung speichern",
     "scope": "Bereich",
     "scopeShared": "Für alle Bots gemeinsam",
@@ -4186,9 +4197,13 @@
       "cron": "Cron: {{cron}}",
       "every": {
         "days": "Alle {{count}} Tage",
+        "days_one": "Jeden Tag",
         "hours": "Alle {{count}} Stunden",
+        "hours_one": "Jede Stunde",
         "minutes": "Alle {{count}} Minuten",
-        "seconds": "Alle {{count}} Sekunden"
+        "minutes_one": "Jede Minute",
+        "seconds": "Alle {{count}} Sekunden",
+        "seconds_one": "Jede Sekunde"
       },
       "unknown": "Benutzerdefinierter Zeitplan"
     },
@@ -4622,7 +4637,8 @@
       "notOnPlatform": "Auf dieser Plattform nicht verfügbar.",
       "offline": "Der lokale Dienst läuft nicht. Starte ihn neu, um die Diagnose auszuführen.",
       "privacy": "Die Diagnose liest nur deine Einstellungen. Eine Reparatur läuft nur, wenn du auf ihre Schaltfläche klickst.",
-      "problems": "{{count}} Punkt braucht Aufmerksamkeit",
+      "problems": "{{count}} Punkte brauchen Aufmerksamkeit",
+      "problems_one": "{{count}} Punkt braucht Aufmerksamkeit",
       "problems_other": "{{count}} Punkte brauchen Aufmerksamkeit",
       "repair": {
         "create_data_dir": "Ordner erstellen",
@@ -4996,6 +5012,7 @@
       "test": "Testen",
       "testFailed": "Such-Test fehlgeschlagen ({{ms}} ms): {{error}}",
       "testOk": "{{backend}} hat geantwortet ({{count}} Ergebnisse in {{ms}} ms)",
+      "testOk_one": "{{backend}} hat geantwortet ({{count}} Ergebnis in {{ms}} ms)",
       "testQueryLabel": "Test-Suchanfrage",
       "testTitle": "Verbindungstest",
       "testing": "Wird getestet …",
@@ -5021,6 +5038,7 @@
     "newBot": "Neuer Bot",
     "notifications": "Benachrichtigungen",
     "notificationsCount": "{{count}} ungelesene Benachrichtigungen",
+    "notificationsCount_one": "{{count}} ungelesene Benachrichtigung",
     "reorderBot": "{{name}} neu anordnen (Pfeiltasten verschieben nach oben oder unten)",
     "reorderHint": "Zeile ziehen oder diesen Griff fokussieren und die Pfeiltaste nach oben/unten drücken",
     "reorderMoved": "{{name}} wurde auf Position {{pos}} verschoben",
@@ -5165,7 +5183,8 @@
       "save": "Limit setzen",
       "spent": "Diesen Monat ausgegeben",
       "title": "Monatliches Ausgabenlimit",
-      "unpriced": "{{count}} Aufrufe diesen Monat hatten keinen bekannten Preis und wurden nicht mitgezählt."
+      "unpriced": "{{count}} Aufrufe diesen Monat hatten keinen bekannten Preis und wurden nicht mitgezählt.",
+      "unpriced_one": "{{count}} Aufruf diesen Monat hatte keinen bekannten Preis und wurde nicht mitgezählt."
     },
     "loading": "Nutzung wird geladen…",
     "model": "Modell",
@@ -5203,8 +5222,10 @@
       "title": "Tagesverlauf"
     },
     "unknown": "Unbekannt",
-    "unknownCostNotice": "{{count}} Aufruf(e) hatten keinen bekannten Preis und sind nicht in den Gesamtkosten enthalten.",
-    "unknownUsageNotice": "{{count}} Aufruf(e) haben keine Token-Daten gemeldet und werden getrennt gezählt."
+    "unknownCostNotice": "{{count}} Aufrufe hatten keinen bekannten Preis und sind nicht in den Gesamtkosten enthalten.",
+    "unknownCostNotice_one": "{{count}} Aufruf hatte keinen bekannten Preis und ist nicht in den Gesamtkosten enthalten.",
+    "unknownUsageNotice": "{{count}} Aufrufe haben keine Token-Daten gemeldet und werden getrennt gezählt.",
+    "unknownUsageNotice_one": "{{count}} Aufruf hat keine Token-Daten gemeldet und wird getrennt gezählt."
   },
   "voice": {
     "auto": "Automatisch (passend zur App-Sprache)",
@@ -5303,7 +5324,8 @@
     "idleStep": "Kein aktiver Bot-Lauf.",
     "pause": "Pause",
     "pausedStep": "Lauf pausiert – wartet auf Fortsetzung.",
-    "refusedBadge": "{{count}} Bot-Aktion abgelehnt",
+    "refusedBadge": "{{count}} Bot-Aktionen abgelehnt",
+    "refusedBadge_one": "{{count}} Bot-Aktion abgelehnt",
     "refusedBadge_other": "{{count}} Bot-Aktionen abgelehnt",
     "resume": "Fortsetzen",
     "status": {
