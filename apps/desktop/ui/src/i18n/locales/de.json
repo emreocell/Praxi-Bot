@@ -2175,11 +2175,14 @@
     "empty": "Deine Bots haben heute noch nichts getan.",
     "failed": "Fehlgeschlagen: {{count}}",
     "noCalls": "Noch keine Modellaufrufe.",
+    "notifyPrivate": "Deine Tageszusammenfassung ist fertig. Öffne die App, um sie zu lesen.",
+    "notifyTitle": "Deine Bots heute",
     "ofLimit": "Das sind {{percent}} des Tageslimits.",
     "running": "Laufen: {{count}}",
     "stopped": "Gestoppt: {{count}}",
     "subtitle": "Was deine Bots seit Mitternacht getan haben und was es gekostet hat.",
     "title": "Heute",
+    "totalCost": "Kosten: {{cost}}",
     "waiting": "Warten auf dich: {{count}}"
   },
   "engineConsent": {
@@ -3679,6 +3682,7 @@
     "held": "Zurückgehalten (Ruhezeit)",
     "heldMuted": "Zurückgehalten (Bot stummgeschaltet)",
     "kind": {
+      "digest": "Tageszusammenfassung",
       "failed": "Lauf fehlgeschlagen",
       "longRun": "Langer Lauf beendet",
       "needsYou": "Braucht dich"
@@ -4251,6 +4255,12 @@
       },
       "noFile": "Kein Hintergrundbild ausgewählt",
       "title": "Hintergrundbild"
+    },
+    "digest": {
+      "enabled": "Tägliche Zusammenfassung senden",
+      "enabledHint": "Eine kurze Benachrichtigung pro Tag: was deine Bots getan haben und was es gekostet hat. Ruhezeiten gelten: währenddessen landet sie nur im Benachrichtigungsverlauf.",
+      "time": "Senden um",
+      "title": "Tageszusammenfassung"
     },
     "hotkey": {
       "currentLabel": "Aktives Kürzel",

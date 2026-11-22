@@ -6,7 +6,7 @@ import { describeTool, isSendTool, resolveToolCall } from "./toolLabels.ts";
 /** A run that took longer than this notifies when it finishes (unfocused). */
 export const LONG_RUN_MS = 30_000;
 
-export type NotifyKind = "needsYou" | "longRun" | "failed";
+export type NotifyKind = "needsYou" | "longRun" | "failed" | "digest";
 
 export interface NotifyPrefs {
   notifyNeedsYou: boolean;
