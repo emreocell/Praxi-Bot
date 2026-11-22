@@ -23,6 +23,9 @@ allow = [
     "Unlicense",
     # webpki-roots / webpki-root-certs (Mozilla CA bundle data, via iroh and the optional fastembed feature)
     "CDLA-Permissive-2.0",
+    # libbz2-rs-sys (bzip2 0.6, a build dependency of sherpa-onnx-sys behind the optional
+    # `local-voice` feature): the BSD-style bzip2/libbzip2 licence.
+    "bzip2-1.0.6",
 ]
 
 [bans]
@@ -50,3 +53,10 @@ ignore = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# libbz2-rs-sys (pure-Rust port of libbzip2, pulled in by zip -> bzip2 for the optional local-voice
+# model archive extraction): "bzip2-1.0.6" is the permissive BSD-style libbzip2 licence.
+# Narrow exception for this crate only.
+[[licenses.exceptions]]
+allow = ["bzip2-1.0.6"]
+crate = "libbz2-rs-sys"
