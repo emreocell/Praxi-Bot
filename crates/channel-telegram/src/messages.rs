@@ -66,6 +66,7 @@ pub(crate) enum Message<'a> {
     ApprovalDetailsUnavailable { tool: &'a str },
     ApprovalTooLarge { tool: &'a str },
     ApprovalIncomplete,
+    ApprovalDesktopOnly { tool: &'a str },
     LanguageSet,
     LanguageUsage { current: Language },
 }
@@ -138,6 +139,12 @@ impl<'a> Message<'a> {
             ).into(),
             (Self::ApprovalTooLarge { tool }, true) => format!(
                 "⚠️ {tool} için onay gerekiyor. İstek Telegram’da incelenemeyecek kadar uzun. Masaüstü uygulamasında incele."
+            ).into(),
+            (Self::ApprovalDesktopOnly { tool }, false) => format!(
+                "🔒 {tool} needs your approval, and this kind of action can only be approved in the desktop app (not from Telegram). Open the desktop app to allow or deny it."
+            ).into(),
+            (Self::ApprovalDesktopOnly { tool }, true) => format!(
+                "🔒 {tool} için onayın gerekiyor ve bu tür bir işlem yalnızca masaüstü uygulamasında onaylanabilir (Telegram’dan değil). İzin vermek veya reddetmek için masaüstü uygulamasını aç."
             ).into(),
             (Self::ApprovalIncomplete, false) => "Approval could not be shown completely here. Approve or deny it in the desktop app.".into(),
             (Self::ApprovalIncomplete, true) => "Onay isteğinin tamamı burada gösterilemedi. Masaüstü uygulamasında onayla veya reddet.".into(),

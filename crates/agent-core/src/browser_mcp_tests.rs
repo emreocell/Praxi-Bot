@@ -110,6 +110,8 @@ async fn page_actions_after_a_web_page_do_not_ask_on_full_but_a_private_read_bri
     assert_eq!(details["host"], "example.com");
     assert_eq!(details["browser_action"], true);
     assert_eq!(details["run_grant"], true);
+    // The owner's browser after a private read: desktop-only, never a phone button.
+    assert_eq!(details["risk"], "high");
     // A standing tool grant is not offered (nor accepted) next to private data.
     assert_eq!(details["always_offered"], false);
     assert!(matches!(

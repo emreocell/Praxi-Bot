@@ -1626,6 +1626,16 @@ impl Shared {
             obj.insert("once_only".into(), json!(once_only));
             obj.insert("run_grant".into(), json!(run_tool));
             obj.insert("always_offered".into(), json!(always_offered));
+            // Channels that cannot show the whole card (Telegram) offer buttons for "low" only;
+            // a missing value counts as "high". Low: an ordinary policy ask, never destructive,
+            // never on the owner's PC or browser, never for an external caller.
+            let low_risk = why == "policy"
+                && effect != Effect::Destructive
+                && ctx.initiator == InitiatorKind::Human
+                && !class.in_owner_browser
+                && !name.starts_with(builtin_tools::pc::PC_PREFIX)
+                && !obj.contains_key("computer_target");
+            obj.insert("risk".into(), json!(if low_risk { "low" } else { "high" }));
             if class.in_owner_browser {
                 obj.insert("browser_action".into(), json!(true));
             }
