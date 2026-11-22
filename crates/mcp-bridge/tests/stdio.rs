@@ -922,7 +922,21 @@ async fn tool_list_changed_refreshes_the_registry_without_a_reconnect() {
         call(&reg, "mcp:dyn/grow", json!({})).await.unwrap(),
         "grown"
     );
-    wait_until("the announced tool", || reg.get("mcp:dyn/extra").is_some()).await;
+    // A tool the owner never approved is held back on a server that already
+    // has approved tools, until it is approved with the hash that was shown.
+    wait_until("the announced tool is pending", || {
+        mgr.snapshot("dyn").is_some_and(|s| {
+            s.changed_tools
+                .iter()
+                .any(|c| c.tool == "extra" && c.new_tool)
+        })
+    })
+    .await;
+    assert!(reg.get("mcp:dyn/extra").is_none());
+    let hash = mgr.snapshot("dyn").unwrap().changed_tools[0].hash.clone();
+    mgr.approve_tool_changes("dyn", "extra", &hash)
+        .await
+        .unwrap();
     assert_eq!(
         call(&reg, "mcp:dyn/extra", json!({})).await.unwrap(),
         "extra"

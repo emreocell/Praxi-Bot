@@ -543,6 +543,7 @@
       "approve": "Yeni sürüme güven",
       "before": "Onayladığınız metin",
       "intro": "{{name}}, “{{tool}}” aracını anlatış biçimini değiştirdi. Siz karar verene kadar araç kapalıdır ve Praxi onu kullanamaz.",
+      "newIntro": "{{name}}, senin hiç onaylamadığın “{{tool}}” adlı bir araç sunuyor. Sen karar verene kadar kapalı kalır ve Praxi onu kullanamaz.",
       "other": "Metinde görünmeyen bir şey de değişti (örneğin gizli karakterler).",
       "schema": "Bu aracın kabul ettiği girdiler de değişti.",
       "title": "Bir araç, onayladığınızdan sonra değişti",
@@ -2450,6 +2451,10 @@
       "mcp_rate_limit": {
         "hint": "Biraz bekleyip yeniden dene.",
         "title": "Bu uygulamaya çok sık istek gidiyor"
+      },
+      "mcp_tool_changed_again": {
+        "hint": "Kartı yenile ve karar vermeden önce yeni metni oku. Hiçbir şey onaylanmadı.",
+        "title": "Uygulama bu aracı yeniden değiştirdi"
       },
       "message_not_editable": {
         "hint": "Yalnızca kendi son mesajınız düzenlenebilir veya yeniden oluşturulabilir, o da bot işini bitirdikten sonra.",

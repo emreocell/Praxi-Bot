@@ -1208,11 +1208,11 @@ export class ApiClient {
       `/mcp/servers/${encodeURIComponent(name)}/reconnect`
     );
   }
-  approveMcpToolChanges(name: string, tool?: string): Promise<McpServer> {
+  approveMcpToolChanges(name: string, tool: string, hash: string): Promise<McpServer> {
     return this.request(
       "POST",
       `/mcp/servers/${encodeURIComponent(name)}/approve-tool-changes`,
-      { body: tool ? { tool } : {} }
+      { body: { tool, hash } }
     );
   }
   listMcpTools(name: string): Promise<McpTool[]> {

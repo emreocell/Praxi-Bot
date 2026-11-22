@@ -65,6 +65,7 @@ export const DAEMON_ERROR_CODES = [
   "login_untrusted_location",
   "mcp_approval_timeout",
   "mcp_rate_limit",
+  "mcp_tool_changed_again",
   "message_not_editable",
   "message_not_last",
   "modified_since",

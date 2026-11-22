@@ -151,6 +151,7 @@ pub struct McpServerDto {
 }
 
 /// One tool whose description or schema changed after approval.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct McpToolChangeDto {
     /// Tool name on the server.
@@ -166,14 +167,23 @@ pub struct McpToolChangeDto {
     /// Something not visible in the text differs (hidden characters, title,
     /// annotations).
     pub other_changed: bool,
+    /// The tool is new on a server that already had approved tools (or the
+    /// approvals could not be read); `before` is empty.
+    #[serde(default)]
+    pub new_tool: bool,
+    /// Hash of the definition shown here; the approval must quote it.
+    pub hash: String,
 }
 
 /// Body of `POST /v1/mcp/servers/{name}/approve-tool-changes`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct McpApproveChangesInput {
-    /// Approve only this tool; omitted = every changed tool of the server.
-    #[serde(default)]
-    pub tool: Option<String>,
+    /// The tool to approve.
+    pub tool: String,
+    /// `hash` of the changed definition the owner was shown. If the server
+    /// offers something else now the request fails with `409
+    /// mcp_tool_changed_again`.
+    pub hash: String,
 }
 
 /// Detailed transport of an MCP server body (the `McpServerConfig` shape).
@@ -498,6 +508,9 @@ pub enum McpControlError {
     Invalid(String),
     /// The config could not be saved, or another internal failure (`500`).
     Internal(String),
+    /// The tool definition changed again since the owner was shown it (`409`,
+    /// `mcp_tool_changed_again`).
+    ToolChangedAgain(String),
 }
 
 /// OAuth configuration contains no credential values.
@@ -614,15 +627,16 @@ pub trait McpControl: Send + Sync {
     /// # Errors
     /// [`McpControlError`].
     async fn reconnect(&self, name: &str) -> Result<McpServerDto, McpControlError>;
-    /// Approve the new definition of the tools the server changed after the
-    /// owner approved them (`tool: None` = all) and switch them back on.
+    /// Approve the definition of `tool` with `hash` (the one shown to the
+    /// owner) and switch the tool on.
     ///
     /// # Errors
     /// [`McpControlError`].
     async fn approve_tool_changes(
         &self,
         _name: &str,
-        _tool: Option<String>,
+        _tool: &str,
+        _hash: &str,
     ) -> Result<McpServerDto, McpControlError> {
         Err(McpControlError::Internal(
             "tool approval is not supported by this host".into(),

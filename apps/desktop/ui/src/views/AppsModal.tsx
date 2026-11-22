@@ -8,6 +8,7 @@ import { BrandIcon } from "../components/BrandIcon";
 import { brandIcon } from "../lib/brandIcons";
 import { botView } from "../lib/botProfile";
 import { McpToolList } from "./McpToolList.tsx";
+import { ApiError } from "../api/client";
 import type { McpAuthState, McpCatalogEntry, McpServer } from "../api/types";
 import formStyles from "../components/Form.module.css";
 import { BotAccessPicker } from "../components/BotAccessPicker";
@@ -90,7 +91,7 @@ function McpChangedTools({
   server: McpServer;
   title: string;
   busy: boolean;
-  onApprove: (tool: string) => void;
+  onApprove: (tool: string, hash: string) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -106,7 +107,9 @@ function McpChangedTools({
             data-testid={`mcp-changed-${server.name}-${c.tool}`}
           >
             <b>{t("apps.changed.title")}</b>
-            <p className={styles.errorHint}>{t("apps.changed.intro", { name: title, tool: c.tool })}</p>
+            <p className={styles.errorHint}>
+              {t(c.new_tool ? "apps.changed.newIntro" : "apps.changed.intro", { name: title, tool: c.tool })}
+            </p>
             <span className={styles.panelLabel}>{t("apps.changed.before")}</span>
             <DiffText parts={diff.before} />
             <span className={styles.panelLabel}>{t("apps.changed.after")}</span>
@@ -119,7 +122,7 @@ function McpChangedTools({
               variant="secondary"
               disabled={busy}
               data-testid={`mcp-approve-${server.name}-${c.tool}`}
-              onClick={() => onApprove(c.tool)}
+              onClick={() => onApprove(c.tool, c.hash)}
             >
               {t("apps.changed.approve")}
             </Button>
@@ -232,7 +235,7 @@ function ConnectedCell({
   onChooseFolder: (folder: string) => void;
   signingIn: boolean;
   onReconnect: () => void;
-  onApproveChange: (tool: string) => void;
+  onApproveChange: (tool: string, hash: string) => void;
   onSignIn: () => void;
   onCancelSignIn: () => void;
   onPasteRedirect: (url: string) => void;
@@ -1003,9 +1006,18 @@ export function AppsModal({
           await reload();
         })
       }
-      onApproveChange={(tool) =>
+      onApproveChange={(tool, hash) =>
         void run(s.name, async () => {
-          await client?.approveMcpToolChanges(s.name, tool);
+          try {
+            await client?.approveMcpToolChanges(s.name, tool, hash);
+          } catch (error) {
+            // The server changed the definition again after the card was painted:
+            // nothing was approved. Reload so the owner reviews the new text.
+            if (error instanceof ApiError && error.code === "mcp_tool_changed_again") {
+              await reload();
+            }
+            throw error;
+          }
           toast.show(t("apps.changed.toast", { name: s.name, tool }), "success");
           await reload();
         })

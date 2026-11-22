@@ -6195,8 +6195,14 @@ export interface components {
         };
         /** @description Body of `POST /v1/mcp/servers/{name}/approve-tool-changes`. */
         McpApproveChangesInput: {
-            /** @description Approve only this tool; omitted = every changed tool of the server. */
-            tool?: string | null;
+            /**
+             * @description `hash` of the changed definition the owner was shown. If the server
+             *     offers something else now the request fails with `409
+             *     mcp_tool_changed_again`.
+             */
+            hash: string;
+            /** @description The tool to approve. */
+            tool: string;
         };
         /** @description Body of `POST /v1/mcp/servers/{name}/auth/callback`. */
         McpAuthCallback: {
@@ -6554,6 +6560,13 @@ export interface components {
             before: string;
             /** @description The visible description text differs. */
             description_changed: boolean;
+            /** @description Hash of the definition shown here; the approval must quote it. */
+            hash: string;
+            /**
+             * @description The tool is new on a server that already had approved tools (or the
+             *     approvals could not be read); `before` is empty.
+             */
+            new_tool?: boolean;
             /**
              * @description Something not visible in the text differs (hidden characters, title,
              *     annotations).
@@ -13820,6 +13833,15 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The tool changed again since it was shown (`mcp_tool_changed_again`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

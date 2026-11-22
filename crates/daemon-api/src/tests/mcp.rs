@@ -207,8 +207,14 @@ impl McpControl for FakeMcp {
     async fn approve_tool_changes(
         &self,
         name: &str,
-        _tool: Option<String>,
+        _tool: &str,
+        hash: &str,
     ) -> Result<McpServerDto, McpControlError> {
+        if hash == "stale" {
+            return Err(McpControlError::ToolChangedAgain(
+                "tool changed again".into(),
+            ));
+        }
         self.servers
             .lock()
             .iter()
@@ -892,7 +898,7 @@ async fn every_mcp_mutation_is_audited_without_values() {
         (
             Method::POST,
             "/v1/mcp/servers/files/approve-tool-changes".to_owned(),
-            None,
+            Some(json!({"tool": "echo", "hash": "abc"})),
             "mcp.tool_changes_approved",
         ),
         (
@@ -1065,10 +1071,22 @@ async fn approving_changed_tools_reaches_the_host() {
     )
     .await;
     assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
-    let body = Some(json!({"tool": "echo"}));
+    let body = Some(json!({"tool": "echo", "hash": "abc"}));
     let path = "/v1/mcp/servers/files/approve-tool-changes";
     let r = call(&t, Method::POST, path, body.clone()).await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    // The hash is required, and a stale one is a typed conflict.
+    let r = call(&t, Method::POST, path, Some(json!({"tool": "echo"}))).await;
+    assert!(r.status.is_client_error());
+    let r = call(
+        &t,
+        Method::POST,
+        path,
+        Some(json!({"tool": "echo", "hash": "stale"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    assert_eq!(r.json()["error"]["code"], "mcp_tool_changed_again");
     let r = call(
         &t,
         Method::POST,

@@ -543,6 +543,7 @@
       "approve": "Neuer Version vertrauen",
       "before": "Das haben Sie freigegeben",
       "intro": "{{name}} beschreibt „{{tool}}“ jetzt anders. Das Werkzeug ist ausgeschaltet und Praxi kann es nicht nutzen, bis Sie entscheiden.",
+      "newIntro": "{{name}} bietet ein Werkzeug „{{tool}}“ an, das du nie freigegeben hast. Es bleibt ausgeschaltet, und Praxi kann es nicht nutzen, bis du entscheidest.",
       "other": "Auch etwas, das im Text nicht sichtbar ist, hat sich geändert (zum Beispiel versteckte Zeichen).",
       "schema": "Auch die Eingaben, die dieses Werkzeug annimmt, haben sich geändert.",
       "title": "Ein Werkzeug hat sich nach Ihrer Freigabe geändert",
@@ -2450,6 +2451,10 @@
       "mcp_rate_limit": {
         "hint": "Warte einen Moment und versuche es erneut.",
         "title": "Diese App wird zu oft angefragt"
+      },
+      "mcp_tool_changed_again": {
+        "hint": "Lade die Karte neu und lies den neuen Text, bevor du entscheidest. Es wurde nichts freigegeben.",
+        "title": "Die App hat dieses Werkzeug erneut geändert"
       },
       "message_not_editable": {
         "hint": "Nur deine eigene letzte Nachricht lässt sich bearbeiten oder neu erzeugen, und zwar erst, wenn der Bot fertig ist.",

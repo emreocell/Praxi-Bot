@@ -226,6 +226,7 @@ impl McpHost {
                 h.connect_registered(&id, generation, handle, false).await;
             });
         }
+        Self::forward_change_events(&host);
         let weak = Arc::downgrade(&host);
         *host.poller.lock() = Some(tokio::spawn(poll(weak)));
         host
@@ -274,6 +275,33 @@ impl McpHost {
             // No subscriber is not an error.
             let _ = self.events.send(McpServerChanged::new(name, status));
         }
+    }
+
+    /// A server that swaps a held-back definition while a card is on screen
+    /// must make the UI reload it, although its status stays `connected`.
+    fn forward_change_events(host: &Arc<Self>) {
+        let mut changes = host.manager.subscribe_changes();
+        let weak = Arc::downgrade(host);
+        tokio::spawn(async move {
+            loop {
+                match changes.recv().await {
+                    Ok(id) => {
+                        let Some(host) = weak.upgrade() else {
+                            return;
+                        };
+                        host.notify_changed(&id);
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        });
+    }
+
+    /// Tell clients to reload `name` even though its status did not move.
+    fn notify_changed(&self, name: &str) {
+        let status = self.status_of(name);
+        let _ = self.events.send(McpServerChanged::new(name, status));
     }
 
     fn forget(&self, name: &str) {
@@ -364,6 +392,8 @@ impl McpHost {
                             description_changed: c.description_changed,
                             schema_changed: c.schema_changed,
                             other_changed: c.other_changed,
+                            new_tool: c.new_tool,
+                            hash: c.hash.clone(),
                         })
                         .collect()
                 })
@@ -587,6 +617,7 @@ fn map_err(e: McpError) -> McpControlError {
     match e {
         McpError::Config(m) => McpControlError::Invalid(m),
         McpError::UnknownServer(n) => McpControlError::NotFound(format!("mcp server {n}")),
+        e @ McpError::ToolChangedAgain { .. } => McpControlError::ToolChangedAgain(e.to_string()),
         other => McpControlError::Internal(other.to_string()),
     }
 }
@@ -1268,7 +1299,8 @@ impl McpControl for McpHost {
     async fn approve_tool_changes(
         &self,
         name: &str,
-        tool: Option<String>,
+        tool: &str,
+        hash: &str,
     ) -> Result<McpServerDto, McpControlError> {
         let cfg = {
             let _op = self.ops.lock().await;
@@ -1277,12 +1309,13 @@ impl McpControl for McpHost {
         };
         if cfg.enabled {
             // A failed reconnect is not an error here: it shows in the status.
-            match self
-                .manager
-                .approve_tool_changes(name, tool.as_deref())
-                .await
-            {
+            match self.manager.approve_tool_changes(name, tool, hash).await {
                 Ok(_) | Err(McpError::UnknownServer(_)) => {}
+                Err(error @ McpError::ToolChangedAgain { .. }) => {
+                    // The card on screen is stale: make every client reload it.
+                    self.notify_changed(name);
+                    return Err(map_err(error));
+                }
                 Err(error) => eprintln!("warning: re-approving MCP tools failed: {error}"),
             }
             self.announce(name);

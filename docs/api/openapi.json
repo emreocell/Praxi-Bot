@@ -8049,6 +8049,16 @@
               }
             }
           },
+          "409": {
+            "description": "The tool changed again since it was shown (`mcp_tool_changed_again`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "503": {
             "description": "MCP management is not available",
             "content": {
@@ -19707,13 +19717,18 @@
       "McpApproveChangesInput": {
         "type": "object",
         "description": "Body of `POST /v1/mcp/servers/{name}/approve-tool-changes`.",
+        "required": [
+          "tool",
+          "hash"
+        ],
         "properties": {
+          "hash": {
+            "type": "string",
+            "description": "`hash` of the changed definition the owner was shown. If the server\noffers something else now the request fails with `409\nmcp_tool_changed_again`."
+          },
           "tool": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Approve only this tool; omitted = every changed tool of the server."
+            "type": "string",
+            "description": "The tool to approve."
           }
         }
       },
@@ -20654,7 +20669,8 @@
           "after",
           "description_changed",
           "schema_changed",
-          "other_changed"
+          "other_changed",
+          "hash"
         ],
         "properties": {
           "after": {
@@ -20668,6 +20684,14 @@
           "description_changed": {
             "type": "boolean",
             "description": "The visible description text differs."
+          },
+          "hash": {
+            "type": "string",
+            "description": "Hash of the definition shown here; the approval must quote it."
+          },
+          "new_tool": {
+            "type": "boolean",
+            "description": "The tool is new on a server that already had approved tools (or the\napprovals could not be read); `before` is empty."
           },
           "other_changed": {
             "type": "boolean",

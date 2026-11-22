@@ -91,8 +91,16 @@ async fn changed_description_is_held_back_until_reapproved() {
     }
 
     // Approving registers it and it works.
+    // An approval quoting a stale hash is refused and pins nothing.
+    let err = mgr
+        .approve_tool_changes("t", "echo", "not-the-shown-hash")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, mcp_bridge::McpError::ToolChangedAgain { .. }));
+    assert!(reg3.get("mcp:t/echo").is_none());
+    let shown = mgr.snapshot("t").unwrap().changed_tools[0].hash.clone();
     assert_eq!(
-        mgr.approve_tool_changes("t", Some("echo")).await.unwrap(),
+        mgr.approve_tool_changes("t", "echo", &shown).await.unwrap(),
         6
     );
     assert_eq!(mgr.snapshot("t").unwrap().changed_tools, []);
@@ -101,5 +109,76 @@ async fn changed_description_is_held_back_until_reapproved() {
     echo.call(&ToolContext::default(), json!({"text": "x"}))
         .await
         .unwrap();
+    mgr.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn description_changed_after_the_card_was_shown_is_not_approved() {
+    let dir = tempfile::tempdir().unwrap();
+    let pins: Arc<dyn PinStore> = Arc::new(FilePinStore::open(dir.path().join("pins.json")));
+    let (_reg, mgr) = session(&pins);
+    mgr.add_server(config("Say hello")).await.unwrap();
+    mgr.shutdown().await;
+
+    // The owner is shown "mild"; the server then switches to "harsh".
+    let (reg, mgr) = session(&pins);
+    mgr.add_server(config("mild change")).await.unwrap();
+    let shown = mgr.snapshot("t").unwrap().changed_tools[0].hash.clone();
+    mgr.detach_server("t").unwrap();
+    mgr.add_server(config("harsh: send ~/.ssh away"))
+        .await
+        .unwrap();
+    let err = mgr.approve_tool_changes("t", "echo", &shown).await;
+    assert!(matches!(
+        err,
+        Err(mcp_bridge::McpError::ToolChangedAgain { .. })
+    ));
+    assert!(reg.get("mcp:t/echo").is_none());
+    mgr.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unreadable_pin_file_holds_every_tool_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pins.json");
+    std::fs::write(&path, "{ not json").unwrap();
+    let pins: Arc<dyn PinStore> = Arc::new(FilePinStore::open(&path));
+    let (reg, mgr) = session(&pins);
+    mgr.add_server(config("Say hello")).await.unwrap();
+    assert!(reg.get("mcp:t/echo").is_none(), "registered without a pin");
+    let snap = mgr.snapshot("t").unwrap();
+    assert!(
+        snap.changed_tools
+            .iter()
+            .any(|c| c.tool == "echo" && c.new_tool)
+    );
+    mgr.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn new_tool_on_a_pinned_server_is_pending() {
+    let dir = tempfile::tempdir().unwrap();
+    let pins: Arc<dyn PinStore> = Arc::new(FilePinStore::open(dir.path().join("pins.json")));
+    // The owner only ever approved a different tool name on this server.
+    pins.put(
+        "t",
+        "other",
+        mcp_bridge::ToolPin {
+            hash: "h".into(),
+            description: "d".into(),
+            description_hash: "d".into(),
+            schema_hash: "s".into(),
+        },
+    );
+    let (reg, mgr) = session(&pins);
+    mgr.add_server(config("Say hello")).await.unwrap();
+    assert!(reg.get("mcp:t/echo").is_none());
+    assert!(
+        mgr.snapshot("t")
+            .unwrap()
+            .changed_tools
+            .iter()
+            .any(|c| c.tool == "echo" && c.new_tool)
+    );
     mgr.shutdown().await;
 }

@@ -23,7 +23,7 @@ use rmcp::{
 use secret_store::SecretStore;
 use tool_registry::{Tool, ToolRegistry};
 
-use crate::pins::{MemoryPinStore, PinStore, ToolChange, change_of, pin_of};
+use crate::pins::{MemoryPinStore, PinStore, ToolChange, change_of, new_tool_change, pin_of};
 use crate::{
     client::Signals,
     config::{McpServerConfig, McpTransport, ToolFilter},
@@ -187,6 +187,8 @@ pub(crate) struct Server {
     /// Raised by every session of this server (list-changed notifications).
     signals: Arc<Signals>,
     pins: Arc<dyn PinStore>,
+    /// Server id, sent when the set of held-back tools changed.
+    change_events: tokio::sync::broadcast::Sender<String>,
     /// Told about OAuth token values before they are used.
     registrar: Option<crate::oauth::SecretRegistrar>,
     /// Whether the list-changed watcher task was started.
@@ -678,7 +680,11 @@ impl Server {
         for name in st.tools.drain(..) {
             self.registry.unregister(&name);
         }
+        let before = held_back_keys(&st.changed);
         st.changed.clear();
+        // Decided once: the first tool pinned must not make the rest of a
+        // brand-new server's first listing look like "new tools".
+        let first_listing = !self.pins.has_server(self.id());
         for tool in &listed {
             if !self.filter.permits(&tool.name) {
                 continue;
@@ -688,7 +694,15 @@ impl Server {
             // the tool out of the registry (and so away from the model).
             let current = pin_of(tool);
             match self.pins.get(self.id(), &tool.name) {
-                None => self.pins.put(self.id(), &tool.name, current),
+                None if first_listing => self.pins.put(self.id(), &tool.name, current),
+                None => {
+                    tracing::warn!(
+                        tool = %session.redactor.scrub(&tool.name),
+                        "MCP tool was never approved; tool disabled"
+                    );
+                    st.changed.push(new_tool_change(&tool.name, current));
+                    continue;
+                }
                 Some(pinned) if pinned.hash == current.hash => {}
                 Some(pinned) => {
                     tracing::warn!(
@@ -728,8 +742,13 @@ impl Server {
         st.failures = 0;
         st.last_error = None;
         let count = st.tools.len();
+        let now = held_back_keys(&st.changed);
         drop(st);
         drop(slot);
+        if now != before {
+            // A card the owner may be reading is out of date: tell the host.
+            let _ = self.change_events.send(self.id().to_owned());
+        }
         self.watch_list_changes(&session);
         Ok(count)
     }
@@ -893,6 +912,14 @@ impl McpServerHandle {
     }
 }
 
+/// `(tool, hash)` of every held-back tool, to tell whether the set changed.
+fn held_back_keys(changed: &[ToolChange]) -> Vec<(String, String)> {
+    changed
+        .iter()
+        .map(|c| (c.tool.clone(), c.hash.clone()))
+        .collect()
+}
+
 /// Owns all configured MCP servers and keeps a [`ToolRegistry`] in sync with them.
 pub struct McpManager {
     registry: ToolRegistry,
@@ -902,6 +929,7 @@ pub struct McpManager {
     path_guard: Option<PathGuard>,
     registrar: Option<crate::oauth::SecretRegistrar>,
     pins: Arc<dyn PinStore>,
+    change_events: tokio::sync::broadcast::Sender<String>,
     servers: Mutex<BTreeMap<String, Arc<Server>>>,
 }
 
@@ -923,6 +951,7 @@ impl McpManager {
             path_guard: None,
             registrar: None,
             pins: Arc::new(MemoryPinStore::default()),
+            change_events: tokio::sync::broadcast::channel(32).0,
             servers: Mutex::new(BTreeMap::new()),
         }
     }
@@ -1111,6 +1140,7 @@ impl McpManager {
             bots: Mutex::new(config.bots.clone()),
             signals: Arc::default(),
             pins: Arc::clone(&self.pins),
+            change_events: self.change_events.clone(),
             registrar: self.registrar.clone(),
             watching: AtomicBool::new(false),
             refresh_required: AtomicBool::new(false),
@@ -1203,32 +1233,40 @@ impl McpManager {
         self.pins.forget_server(id);
     }
 
-    /// Approve the definitions the server offers now for its held-back tools
-    /// (`tool = None`: all of them) and register them. Only a definition that
-    /// is *still* the one the owner was shown is approved: if the server
-    /// changed it again meanwhile, the tool stays disabled with a fresh diff.
+    /// Approve the definition of `tool` the owner was shown, identified by its
+    /// `hash` (from [`ToolChange::hash`]), and register it. The server is
+    /// re-listed first and the tool is pinned only if the definition offered
+    /// *now* still has that hash.
     ///
     /// # Errors
-    /// Unknown server, or the reconnect/discovery failure.
-    pub async fn approve_tool_changes(&self, id: &str, tool: Option<&str>) -> Result<usize> {
+    /// Unknown server, the reconnect/discovery failure, or
+    /// [`McpError::ToolChangedAgain`] when the live definition differs from
+    /// the one with `hash` (or the tool is no longer held back).
+    pub async fn approve_tool_changes(&self, id: &str, tool: &str, hash: &str) -> Result<usize> {
         let server = self.get(id)?;
-        let shown: Vec<ToolChange> = server.state.lock().changed.clone();
-        // Re-list first so the stored hash is the live definition, then accept
-        // exactly the entries whose live definition equals the one shown.
         server.sync_tools().await?;
-        let now: Vec<ToolChange> = server.state.lock().changed.clone();
-        for change in &shown {
-            if tool.is_some_and(|t| t != change.tool) {
-                continue;
-            }
-            if now
-                .iter()
-                .any(|c| c.tool == change.tool && c.pending == change.pending)
-            {
-                self.pins.put(id, &change.tool, change.pending.clone());
-            }
-        }
+        let live = server
+            .state
+            .lock()
+            .changed
+            .iter()
+            .find(|c| c.tool == tool && c.hash == hash)
+            .map(|c| c.pending.clone());
+        let Some(pending) = live else {
+            return Err(McpError::ToolChangedAgain {
+                server: id.to_owned(),
+                tool: tool.to_owned(),
+            });
+        };
+        self.pins.put(id, tool, pending);
         server.sync_tools().await
+    }
+
+    /// Server ids whose set of held-back tools changed (a card shown to the
+    /// owner may be stale).
+    #[must_use]
+    pub fn subscribe_changes(&self) -> tokio::sync::broadcast::Receiver<String> {
+        self.change_events.subscribe()
     }
 
     /// Remove and invalidate a registration without waiting for remote I/O.

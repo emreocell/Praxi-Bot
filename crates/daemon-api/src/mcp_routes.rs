@@ -26,6 +26,9 @@ impl From<McpControlError> for ApiError {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "bad_mcp_config", m)
             }
             McpControlError::Internal(m) => Self::internal(m),
+            McpControlError::ToolChangedAgain(m) => {
+                Self::new(StatusCode::CONFLICT, "mcp_tool_changed_again", m)
+            }
         }
     }
 }
@@ -249,17 +252,20 @@ pub(crate) async fn reconnect_mcp_server(
     params(("name" = String, Path, description = "Server name")),
     request_body = McpApproveChangesInput,
     responses((status = 200, body = McpServerDto), (status = 404, body = ErrorBody),
+              (status = 409, body = ErrorBody, description = "The tool changed again since it was shown (`mcp_tool_changed_again`)"),
               (status = 503, body = ErrorBody, description = "MCP management is not available")))]
 pub(crate) async fn approve_mcp_tool_changes(
     State(s): State<AppState>,
     actor: MaybeActor,
     Path(name): Path<String>,
-    body: Option<Json<McpApproveChangesInput>>,
+    ApiJson(body): ApiJson<McpApproveChangesInput>,
 ) -> Result<Json<McpServerDto>, ApiError> {
     let host = mcp(&s)?;
-    let tool = body.and_then(|Json(b)| b.tool);
     audited(&s, &actor, "mcp.tool_changes_approved", &name, async {
-        Ok(Json(host.approve_tool_changes(&name, tool).await?))
+        Ok(Json(
+            host.approve_tool_changes(&name, &body.tool, &body.hash)
+                .await?,
+        ))
     })
     .await
 }

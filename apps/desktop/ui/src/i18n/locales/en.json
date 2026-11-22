@@ -543,6 +543,7 @@
       "approve": "Trust the new version",
       "before": "What you approved",
       "intro": "{{name}} changed how it describes “{{tool}}”. The tool is switched off, and Praxi cannot use it, until you decide.",
+      "newIntro": "{{name}} offers a tool, “{{tool}}”, that you never approved. It is switched off, and Praxi cannot use it, until you decide.",
       "other": "Something you cannot see in the text changed too (for example hidden characters).",
       "schema": "The inputs this tool accepts changed too.",
       "title": "A tool changed after you approved it",
@@ -2450,6 +2451,10 @@
       "mcp_rate_limit": {
         "hint": "Wait a moment and try again.",
         "title": "That app is being asked too often"
+      },
+      "mcp_tool_changed_again": {
+        "hint": "Reload the card and read the new wording before you decide. Nothing was approved.",
+        "title": "The app changed this tool again"
       },
       "message_not_editable": {
         "hint": "Only your own latest message can be edited or regenerated, and only once the bot has finished.",

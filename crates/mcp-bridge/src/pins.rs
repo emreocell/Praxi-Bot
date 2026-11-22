@@ -34,6 +34,7 @@ pub struct ToolPin {
 
 /// A tool whose definition no longer matches what was approved.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ToolChange {
     /// Server-side tool name.
     pub tool: String,
@@ -48,6 +49,12 @@ pub struct ToolChange {
     /// Something else differs (hidden characters, title, annotations, output
     /// schema) while the visible text may look the same.
     pub other_changed: bool,
+    /// The tool was not part of the approved set of a server that already has
+    /// approved tools (a new or renamed tool): `before` is empty.
+    pub new_tool: bool,
+    /// Hash of the definition offered now. An approval must quote it, so only
+    /// the exact definition the owner was shown can be approved.
+    pub hash: String,
     /// The definition offered now; stored by an approval, never shown.
     pub(crate) pending: ToolPin,
 }
@@ -121,8 +128,26 @@ pub(crate) fn change_of(tool: &str, pinned: &ToolPin, current: ToolPin) -> ToolC
         schema_changed,
         other_changed: !description_changed
             && (!schema_changed || pinned.description_hash != current.description_hash),
+        new_tool: false,
+        hash: current.hash.clone(),
         pending: current,
     }
+}
+
+/// A tool the owner never approved, offered by a server that already has
+/// approved tools (or whose pin file could not be read).
+pub(crate) fn new_tool_change(tool: &str, current: ToolPin) -> ToolChange {
+    let none = ToolPin {
+        hash: String::new(),
+        description: String::new(),
+        description_hash: String::new(),
+        schema_hash: String::new(),
+    };
+    let mut change = change_of(tool, &none, current);
+    change.new_tool = true;
+    change.description_changed = true;
+    change.other_changed = false;
+    change
 }
 
 /// Where approved fingerprints live. Implementations must be cheap: they are
@@ -130,6 +155,11 @@ pub(crate) fn change_of(tool: &str, pinned: &ToolPin, current: ToolPin) -> ToolC
 pub trait PinStore: Send + Sync {
     /// The approved pin of `server`'s `tool`.
     fn get(&self, server: &str, tool: &str) -> Option<ToolPin>;
+    /// Whether `server` already has approved tools. A tool without a pin on
+    /// such a server is new and needs approval; only a server that was never
+    /// seen gets its first listing approved automatically. A store that could
+    /// not read its data answers `true` for every server (fail closed).
+    fn has_server(&self, server: &str) -> bool;
     /// Record an approval.
     fn put(&self, server: &str, tool: &str, pin: ToolPin);
     /// Forget everything about a removed server.
@@ -146,6 +176,9 @@ impl PinStore for MemoryPinStore {
     fn get(&self, server: &str, tool: &str) -> Option<ToolPin> {
         self.0.lock().get(server)?.get(tool).cloned()
     }
+    fn has_server(&self, server: &str) -> bool {
+        self.0.lock().contains_key(server)
+    }
     fn put(&self, server: &str, tool: &str, pin: ToolPin) {
         self.0
             .lock()
@@ -158,12 +191,14 @@ impl PinStore for MemoryPinStore {
     }
 }
 
-/// Pins persisted as a JSON file (write-then-rename). A file that cannot be
-/// read starts empty in memory; the next approval rewrites it.
+/// Pins persisted as a JSON file (write-then-rename). A missing file means no
+/// pins yet; a file that exists but cannot be read or parsed fails closed:
+/// every listed tool is treated as not approved until the owner approves it.
 #[derive(Debug)]
 pub struct FilePinStore {
     path: PathBuf,
     pins: Mutex<Pins>,
+    unreadable: bool,
 }
 
 impl FilePinStore {
@@ -171,13 +206,21 @@ impl FilePinStore {
     #[must_use]
     pub fn open(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
-        let pins = fs::read_to_string(&path)
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default();
+        let (pins, unreadable) = match fs::read_to_string(&path) {
+            Ok(text) => match serde_json::from_str(&text) {
+                Ok(pins) => (pins, false),
+                Err(_) => (Pins::default(), true),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Pins::default(), false),
+            Err(_) => (Pins::default(), true),
+        };
+        if unreadable {
+            tracing::warn!("MCP tool pin file is unreadable; tools need approval again");
+        }
         Self {
             path,
             pins: Mutex::new(pins),
+            unreadable,
         }
     }
 
@@ -199,6 +242,9 @@ impl FilePinStore {
 impl PinStore for FilePinStore {
     fn get(&self, server: &str, tool: &str) -> Option<ToolPin> {
         self.pins.lock().get(server)?.get(tool).cloned()
+    }
+    fn has_server(&self, server: &str) -> bool {
+        self.unreadable || self.pins.lock().contains_key(server)
     }
     fn put(&self, server: &str, tool: &str, pin: ToolPin) {
         let mut pins = self.pins.lock();
