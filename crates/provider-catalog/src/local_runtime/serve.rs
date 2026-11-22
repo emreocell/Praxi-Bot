@@ -72,6 +72,8 @@ pub enum ServeError {
     Exited,
     #[error("the model did not finish loading in time")]
     NotReady,
+    #[error("the installed program was changed or is incomplete; install it again")]
+    Untrusted,
 }
 
 /// Starts `binary` with `model` and waits until it answers on loopback.
@@ -89,6 +91,12 @@ pub async fn start_server(
         .is_err()
     {
         return Err(ServeError::PortBusy(port));
+    }
+    // Fail closed: re-hash the whole install folder right before the spawn.
+    let b = binary.to_path_buf();
+    let trusted = tokio::task::spawn_blocking(move || super::trusted::verify_install(&b)).await;
+    if !matches!(trusted, Ok(Ok(()))) {
+        return Err(ServeError::Untrusted);
     }
     let mut cmd = std::process::Command::new(binary);
     cmd.args(server_args(model, port, threads))
@@ -141,6 +149,17 @@ mod tests {
         assert!(!args.iter().any(|a| a == "0.0.0.0" || a == "--api-key"));
         assert!(args.contains(&"--no-webui".to_owned()));
         assert!(server_args(Path::new("m"), 1, Some(0)).len() < args.len());
+    }
+
+    #[tokio::test]
+    async fn an_unverified_program_is_never_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("llama-server");
+        std::fs::write(&fake, b"not a program").unwrap();
+        let err = start_server(&fake, Path::new("m"), 0, None)
+            .await
+            .unwrap_err();
+        assert_eq!(err, ServeError::Untrusted);
     }
 
     #[tokio::test]

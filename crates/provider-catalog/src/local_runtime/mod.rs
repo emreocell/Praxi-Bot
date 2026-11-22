@@ -10,6 +10,7 @@ pub mod download;
 pub mod extract;
 pub mod manifest;
 pub mod serve;
+pub mod trusted;
 
 pub use download::{DownloadError, DownloadSpec, download, download_verified};
 pub use extract::{ExtractError, extract_archive, find_binary};
@@ -18,3 +19,4 @@ pub use manifest::{
     runtime_asset,
 };
 pub use serve::{LLAMA_PORT, ServeError, ServerHandle, server_args, start_server};
+pub use trusted::{TrustError, install_verified, verified_binary, verify_install};

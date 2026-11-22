@@ -20,7 +20,7 @@ use provider_catalog::{
     local_advice::{self, Fit},
     local_runtime::{
         self, DownloadError, DownloadSpec, LLAMA_PORT, ManagedModel, ServeError, ServerHandle,
-        download, extract_archive, find_binary, managed_model, managed_models, runtime_asset,
+        download, install_verified, managed_model, managed_models, runtime_asset, verified_binary,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -241,7 +241,8 @@ async fn run_install(
     job().state.bytes_total = total;
 
     // 1. the runtime program
-    let mut binary = find_binary(&runtime_dir, asset.binary);
+    // Only a binary that passes its install manifest counts; a bare file is never trusted.
+    let mut binary = verified_binary(&runtime_dir, asset.binary);
     if binary.is_none() {
         set_phase(InstallPhaseDto::DownloadingRuntime);
         let archive = root.join("downloads").join(asset.file_name);
@@ -256,14 +257,23 @@ async fn run_install(
             return record_download_error(&e);
         }
         set_phase(InstallPhaseDto::Unpacking);
-        let (kind, a, d) = (asset.kind, archive.clone(), runtime_dir.clone());
-        let unpacked = tokio::task::spawn_blocking(move || extract_archive(kind, &a, &d)).await;
+        let (kind, a, d, sha, bin) = (
+            asset.kind,
+            archive.clone(),
+            runtime_dir.clone(),
+            asset.sha256,
+            asset.binary,
+        );
+        let unpacked =
+            tokio::task::spawn_blocking(move || install_verified(kind, &a, sha, &d, bin)).await;
         let _ = tokio::fs::remove_file(&archive).await;
-        if !matches!(unpacked, Ok(Ok(()))) {
-            let _ = tokio::fs::remove_dir_all(&runtime_dir).await;
-            return fail(InstallErrorKindDto::Other);
-        }
-        binary = find_binary(&runtime_dir, asset.binary);
+        binary = match unpacked {
+            Ok(Ok(path)) => Some(path),
+            Ok(Err(local_runtime::TrustError::ArchiveMismatch)) => {
+                return fail(InstallErrorKindDto::Checksum);
+            }
+            _ => return fail(InstallErrorKindDto::Other),
+        };
     }
     let Some(binary) = binary else {
         return fail(InstallErrorKindDto::Other);
@@ -305,6 +315,7 @@ async fn run_install(
             });
         }
         Err(ServeError::PortBusy(_)) => fail(InstallErrorKindDto::PortBusy),
+        Err(ServeError::Untrusted) => fail(InstallErrorKindDto::Checksum),
         Err(_) => fail(InstallErrorKindDto::StartFailed),
     }
 }

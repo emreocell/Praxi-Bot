@@ -56,7 +56,11 @@ fn write_capped(
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut out = fs::File::create(target)?;
+    // create_new: never write through an existing file or symlink.
+    let mut out = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(target)?;
     let budget = MAX_TOTAL_BYTES.saturating_sub(*total);
     let copied = io::copy(&mut reader.take(budget + 1), &mut out)?;
     *total += copied;
@@ -79,16 +83,24 @@ fn write_capped(
 /// # Errors
 /// See [`ExtractError`].
 pub fn extract_archive(kind: ArchiveKind, archive: &Path, dest: &Path) -> Result<(), ExtractError> {
+    extract_file(kind, fs::File::open(archive)?, dest)
+}
+
+/// Like [`extract_archive`] but from an already opened (and, by the caller, already hashed) file.
+pub(crate) fn extract_file(
+    kind: ArchiveKind,
+    file: fs::File,
+    dest: &Path,
+) -> Result<(), ExtractError> {
     fs::create_dir_all(dest)?;
     match kind {
-        ArchiveKind::Zip => extract_zip(archive, dest),
-        ArchiveKind::TarGz => extract_tar_gz(archive, dest),
+        ArchiveKind::Zip => extract_zip(file, dest),
+        ArchiveKind::TarGz => extract_tar_gz(file, dest),
     }
 }
 
-fn extract_zip(archive: &Path, dest: &Path) -> Result<(), ExtractError> {
-    let mut zip = zip::ZipArchive::new(fs::File::open(archive)?)
-        .map_err(|e| ExtractError::Corrupt(e.to_string()))?;
+fn extract_zip(file: fs::File, dest: &Path) -> Result<(), ExtractError> {
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| ExtractError::Corrupt(e.to_string()))?;
     if zip.len() > MAX_ENTRIES {
         return Err(ExtractError::TooBig);
     }
@@ -113,8 +125,8 @@ fn extract_zip(archive: &Path, dest: &Path) -> Result<(), ExtractError> {
     Ok(())
 }
 
-fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<(), ExtractError> {
-    let gz = flate2::read::GzDecoder::new(fs::File::open(archive)?);
+fn extract_tar_gz(file: fs::File, dest: &Path) -> Result<(), ExtractError> {
+    let gz = flate2::read::GzDecoder::new(file);
     let mut tar = tar::Archive::new(gz);
     let mut total = 0u64;
     let mut count = 0usize;
