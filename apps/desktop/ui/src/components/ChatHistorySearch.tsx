@@ -42,7 +42,7 @@ export function ChatHistorySearch({ onOpenChat }: { onOpenChat: (chatId: string,
         aria-label={t("chatHistory.search")} onChange={(e) => {
           active.current?.abort(); setBusy(false); setQuery(e.target.value); setPage(null); setError(null);
         }} />
-      <button type="submit" disabled={busy || !query.trim()} aria-label={t("chatHistory.submit")}><Search aria-hidden="true" /></button>
+      <button type="submit" disabled={busy || !query.trim()} aria-label={t("chatHistory.submit")} title={t("chatHistory.submit")}><Search aria-hidden="true" /></button>
     </form>
     {busy ? <p role="status">{t("chatHistory.searching")}</p> : null}
     {error ? <p role="alert">{error}</p> : null}

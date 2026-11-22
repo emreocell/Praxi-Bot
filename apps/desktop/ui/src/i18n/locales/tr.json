@@ -686,7 +686,7 @@
     "goFirst": "{{name}} botuna git",
     "goneHint": "Silinmiş ya da başka bir bilgisayarda olabilir. İlk botuna git ya da yeni bir tane oluştur.",
     "goneTitle": "Bu bot artık yok",
-    "suggestionsTitle": "Şunlardan birini dene",
+    "suggestionsTitle": "Önce şunu dene",
     "title": "{{name}} ile sohbete başla"
   },
   "botEngine": {
@@ -1765,7 +1765,8 @@
     "deleteBody": "“{{title}}” ve tüm mesajları kalıcı olarak silinecek. Bu işlem geri alınamaz.",
     "deleteConfirm": "Sohbeti sil",
     "deleteTitle": "Bu sohbet silinsin mi?",
-    "empty": "Henüz sohbet yok.",
+    "empty": "“Yeni sohbet”e bas ve neye ihtiyacın olduğunu yaz. Sohbetlerin burada saklanır.",
+    "emptyTitle": "Henüz sohbet yok",
     "loading": "Sohbetler yükleniyor…",
     "menuLabel": "{{title}} için sohbet seçenekleri",
     "menuTooltip": "Sohbet seçenekleri",
@@ -2588,12 +2589,16 @@
       "noService": "Praxi'nin arka plan servisi henüz çalışmıyor. Birkaç saniye bekleyip yeniden dene.",
       "recap": "Beyin: {{model}} · Özgürlük: {{level}}",
       "subtitle": "Ona bir ad ve bir görünüm ver. İkisini de sonra değiştirebilirsin.",
-      "title": "Botunla tanış"
+      "title": "Botunla tanış",
+      "tryTitle": "Önce şunu dene",
+      "whereBody": "Botun, Praxi-Bot açıkken bu bilgisayarda çalışır. Yalnızca onunla paylaştığın klasörlere dokunur.",
+      "whereLater": "Bilgisayarın kapalıyken de çalışmasını mı istiyorsun? Sonra Ayarlar'dan bir sunucu ekleyebilirsin. Şimdi gerekmez.",
+      "whereTitle": "Botun nerede çalışır"
     },
     "brain": {
       "another": "Başka bir beyin seç",
-      "apiTitle": "Bir API bağla",
-      "apiTitleAfter": "ya da bir API bağla",
+      "apiTitle": "Kendi yapay zekâ hesabını kullan",
+      "apiTitleAfter": "Ya da kendi yapay zekâ hesabını kullan",
       "change": "Değiştir",
       "checking": "Denetleniyor…",
       "cliReady": "{{name}} hazır",
@@ -2603,13 +2608,27 @@
       "connected": "Bağlandı",
       "connectedModel": "Bağlandı · {{count}} model",
       "connectedModels": "Bağlandı · {{count}} model",
+      "easyTitle": "En kolay yol",
       "foundTitle": "Bu bilgisayarda hazır",
-      "getFreeKey": "Ücretsiz anahtar al",
+      "freeSteps": {
+        "one": "“Anahtarımı al”a bas. Tarayıcında bir Google sayfası açılır.",
+        "three": "Buraya dön ve aşağıya yapıştır. Praxi-Bot anahtarı hemen kontrol eder.",
+        "two": "Google ile giriş yap ve “API anahtarı oluştur”a bas. Sonra anahtarı kopyala."
+      },
+      "freeSub": "Google Gemini'nin ücretsiz bir planı var. Yaklaşık iki dakika sürer ve yalnızca bir Google hesabı gerekir.",
+      "freeTitle": "Ücretsiz bir model kullan",
+      "getFreeKey": "Anahtarımı al",
       "getKey": "Anahtar al",
       "hide": "Anahtarı gizle",
       "keyHint": "Sistem anahtarlığına kaydedilir. Bir daha gösterilmez.",
       "keyLabel": "{{name}} API anahtarı",
       "keyPlaceholder": "Anahtarını buraya yapıştır",
+      "keyProblem": {
+        "address": "Bu bir anahtar değil, web adresi gibi görünüyor. Anahtar sayfasına dön ve anahtarın kendisini kopyala.",
+        "prefix": "Bu, bu servisin bir anahtarına benzemiyor. Yine de deneyebilirsin ama doğrusunu kopyaladığından emin ol.",
+        "short": "Bu bir anahtar için çok kısa. Anahtarın tamamını kopyala; harf ve rakamlardan oluşan uzun bir satırdır."
+      },
+      "laterNote": "Hazır değil misin? Üstteki “Bunu sonra eklerim”e bas. Etrafa göz atabilirsin; Ayarlar → Yapay zekâ'dan bir model ekler eklemez botun cevap vermeye başlar.",
       "local": {
         "llamacpp": "llama.cpp sunucusu",
         "lmstudio": "LM Studio"
@@ -2694,10 +2713,12 @@
       "subtitle": "Botunun sormadan ne kadarını yapabileceğine karar ver. Sonradan her bota ayrı seviye verebilirsin.",
       "title": "Ne kadar serbest olsun?"
     },
+    "help": "Yardım lazım mı?",
     "language": "Dil",
     "next": "Devam et",
     "progress": "Adım {{current}} / {{total}}",
     "prompts": {
+      "draft": "Bir komşuma kısa ve samimi bir mesaj yazmama yardım et",
       "folder": "Bu klasörü özetle",
       "news": "Bugünün en önemli yapay zekâ haberlerini bul",
       "screen": "Şu an ekranımda ne var?"
@@ -2707,7 +2728,8 @@
       "retry": "Yeniden dene",
       "title": "Praxi'nin arka plan servisi henüz çalışmıyor"
     },
-    "skip": "Şimdilik atla",
+    "skip": "Bunu sonra eklerim",
+    "skipTip": "Önce etrafa göz at. Kurulumu sonra “Kurulumu bitir” düğmesinden tamamlayabilirsin.",
     "start": "Başla",
     "steps": {
       "bot": "Botun",
@@ -3227,7 +3249,8 @@
     "description": "Her botun geçmiş sohbetlerden ne hatırladığını gör, herhangi bir kaydı düzenle veya unut, değişiklikleri geri al ve bir sonraki tura ne gireceğini önizle.",
     "edit": "Düzenle",
     "editLabel": "Hafıza metni",
-    "empty": "Bu filtreye uyan hafıza kaydı yok.",
+    "empty": "Botun burada adın gibi işe yarar bilgileri hatırlar. Bir sohbette ona bir şey söyle ya da aşağıdan kendin ekle.",
+    "emptyTitle": "Henüz kayıt yok",
     "forget": "Unut",
     "forgottenBadge": "Unutuldu",
     "forgottenNotice": "Hafıza kaydı unutuldu.",
@@ -3341,7 +3364,8 @@
     "title": "Model"
   },
   "needs": {
-    "empty": "Senden bekleyen bir şey yok. Bir bot onay istediğinde ya da soru sorduğunda burada görünür.",
+    "empty": "Bir bot onayına ihtiyaç duyduğunda ya da bir sorusu olduğunda burada görünür.",
+    "emptyTitle": "Her şey yolunda",
     "kind": {
       "approval": "Onay",
       "question": "Soru"
@@ -3425,7 +3449,9 @@
   },
   "notifyHistory": {
     "clear": "Geçmişi temizle",
-    "empty": "Henüz bildirim yok.",
+    "empty": "Bir bot işini bitirdiğinde ya da onayına ihtiyaç duyduğunda burada görürsün.",
+    "emptyAction": "Seni bekleyenlere bak",
+    "emptyTitle": "Yeni bir şey yok",
     "held": "Tutuldu (sessiz saatler)",
     "heldMuted": "Tutuldu (bot sessizde)",
     "kind": {
@@ -4578,7 +4604,8 @@
     "costNote": "Maliyet yalnızca fiyatı bilinen modeller için gösterilir; bilinmeyen fiyat asla sıfır olarak gösterilmez.",
     "day": "Gün",
     "deletedBot": "Silinmiş bot",
-    "empty": "Henüz kullanım yok. Bir bota mesaj gönderdiğinde token kullanımı burada görünür.",
+    "empty": "Bir bota mesaj gönder; kullanımı ve tahmini maliyeti burada görünür.",
+    "emptyTitle": "Henüz kullanım yok",
     "exportCsv": "CSV indir",
     "exportDone": "Kullanım CSV dosyası indirildi.",
     "exportFailed": "Kullanım CSV dosyası indirilemedi",

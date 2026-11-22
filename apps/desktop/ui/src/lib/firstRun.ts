@@ -214,4 +214,31 @@ export function refLabel(ref: string): string {
 }
 
 /** Prompts that exercise real abilities; the chat offers them as one-click starters. */
-export const FIRST_PROMPT_KEYS = ["screen", "folder", "news"] as const;
+export const FIRST_PROMPT_KEYS = ["draft", "screen", "folder", "news"] as const;
+
+/** What is visibly wrong with a key while it is being typed, so the person hears it before pressing Connect. */
+export type KeyShapeProblem = "address" | "short" | "prefix";
+
+/**
+ * Cheap, offline checks in plain words: a web address pasted instead of the key, a key cut off,
+ * or a key of another service. They only advise; the provider has the final say.
+ */
+export function keyShapeProblem(group: ApiGroup | null, key: string): KeyShapeProblem | null {
+  const k = key.trim();
+  if (k === "" || group === "ollama") {
+    return null;
+  }
+  if (/^https?:\/\//i.test(k) || /\s/.test(k)) {
+    return "address";
+  }
+  if (k.length < 20) {
+    return "short";
+  }
+  if (group === "gemini" && !k.startsWith("AIza")) {
+    return "prefix";
+  }
+  if (group === "anthropic" && !k.startsWith("sk-ant-")) {
+    return "prefix";
+  }
+  return null;
+}

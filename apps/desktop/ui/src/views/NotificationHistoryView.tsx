@@ -1,4 +1,5 @@
 import { ArrowUpRight, BellOff, CheckCheck, Trash2 } from "lucide-react";
+import { EmptyState } from "../components/EmptyState";
 import { useTranslation } from "react-i18next";
 import { Button, Card } from "ui";
 import formStyles from "../components/Form.module.css";
@@ -58,10 +59,15 @@ export function NotificationHistoryView({
           {list.length > 0 ? t("notifyHistory.unreadCount", { count: unread }) : ""}
         </span>
         {list.length === 0 ? (
-          <p className={formStyles.hint}>
-            <BellOff className={formStyles.emptyIcon} />
+          <EmptyState
+            icon={BellOff}
+            title={t("notifyHistory.emptyTitle")}
+            actionLabel={t("notifyHistory.emptyAction")}
+            onAction={onOpenNeeds}
+            testId="notify-history-empty"
+          >
             {t("notifyHistory.empty")}
-          </p>
+          </EmptyState>
         ) : (
           <ul className={needsStyles.list}>
             {list.map((n) => (

@@ -55,7 +55,7 @@ export function WorkflowReview({ client, runId, canRemember }: { client: ApiClie
       <Button size="sm" variant="ghost" onClick={() => dispatch({ type: "open" })} data-testid="save-workflow"><Workflow />{t("workflow.button")}</Button>}
     <Modal open={state.open} onClose={() => dispatch({ type: "close" })} label={t("workflow.title")} size="lg">
       <div className={styles.root}>
-        <div className={styles.head}><h2>{t("workflow.title")}</h2><Button size="sm" variant="ghost" disabled={busy} aria-label={t("workflow.cancel")} onClick={() => dispatch({ type: "close" })}><X /></Button></div>
+        <div className={styles.head}><h2>{t("workflow.title")}</h2><Button size="sm" variant="ghost" disabled={busy} aria-label={t("workflow.cancel")} title={t("workflow.cancel")} onClick={() => dispatch({ type: "close" })}><X /></Button></div>
         <p>{t("workflow.reviewHint")}</p>
         {proposal.step_provenance.some(step => step.needs_confirmation) && <p role="alert">{t("workflow.untrustedWarning")}</p>}
         <label>{t("workflow.name")}<input value={draft.name} disabled={busy} maxLength={64} pattern="[a-z0-9_-]+" onChange={e => dispatch({ type: "edit", draft: { ...draft, name: e.target.value } })} /></label>

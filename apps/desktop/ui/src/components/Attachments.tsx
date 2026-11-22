@@ -31,7 +31,7 @@ export function ComposerFiles({ files, onRemove }: { files: PendingFile[]; onRem
           <button
             type="button"
             className={styles.remove}
-            aria-label={t("chat.attach.remove", { name: f.name })}
+            aria-label={t("chat.attach.remove", { name: f.name })} title={t("chat.attach.remove", { name: f.name })}
             onClick={() => onRemove(f.key)}
           >
             <X aria-hidden="true" />

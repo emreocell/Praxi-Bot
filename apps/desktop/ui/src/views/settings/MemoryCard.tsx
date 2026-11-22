@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Brain } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button, Card } from "ui";
 import type { MemoryItem, MemoryKind, MemoryPreview } from "../../api/types";
 import form from "../../components/Form.module.css";
+import { EmptyState } from "../../components/EmptyState";
 import { humanLine } from "../../lib/humanError";
 import { useDaemon } from "../../state/DaemonContext";
 import styles from "./KnowledgeCard.module.css";
@@ -262,7 +264,7 @@ export function MemoryCard() {
               </li>
             ))}
           </ul>
-          {items.length === 0 ? <p className={form.hint}>{t("memory.empty")}</p> : null}
+          {items.length === 0 ? <EmptyState icon={Brain} title={t("memory.emptyTitle")}>{t("memory.empty")}</EmptyState> : null}
           {editing ? (
             <section className={styles.review} aria-label={t("memory.edit")}>
               <label className={form.field}>

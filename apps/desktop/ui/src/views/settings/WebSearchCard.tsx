@@ -292,7 +292,7 @@ export function WebSearchCard() {
                         size="sm"
                         variant="ghost"
                         disabled={saving || index === 0}
-                        aria-label={t("settingsModal.webSearch.moveUp", { name: label })}
+                        aria-label={t("settingsModal.webSearch.moveUp", { name: label })} title={t("settingsModal.webSearch.moveUp", { name: label })}
                         onClick={() => moveBackend(index, -1)}
                       >
                         <ArrowUp />
@@ -301,7 +301,7 @@ export function WebSearchCard() {
                         size="sm"
                         variant="ghost"
                         disabled={saving || index === config.order.length - 1}
-                        aria-label={t("settingsModal.webSearch.moveDown", { name: label })}
+                        aria-label={t("settingsModal.webSearch.moveDown", { name: label })} title={t("settingsModal.webSearch.moveDown", { name: label })}
                         onClick={() => moveBackend(index, 1)}
                       >
                         <ArrowDown />

@@ -686,7 +686,7 @@
     "goFirst": "Go to {{name}}",
     "goneHint": "It may have been deleted, or it lives on another computer. Go to your first bot or create a new one.",
     "goneTitle": "This bot is gone",
-    "suggestionsTitle": "Try one of these",
+    "suggestionsTitle": "Try this first",
     "title": "Start a chat with {{name}}"
   },
   "botEngine": {
@@ -1765,7 +1765,8 @@
     "deleteBody": "\"{{title}}\" and its messages will be permanently deleted. This cannot be undone.",
     "deleteConfirm": "Delete chat",
     "deleteTitle": "Delete this chat?",
-    "empty": "No chats yet.",
+    "empty": "Press “New chat” and write what you need. Your chats are saved here.",
+    "emptyTitle": "No chats yet",
     "loading": "Loading chats…",
     "menuLabel": "Chat options for {{title}}",
     "menuTooltip": "Chat options",
@@ -2588,12 +2589,16 @@
       "noService": "Praxi's background service is not running yet. Wait a few seconds and try again.",
       "recap": "Brain: {{model}} · Freedom: {{level}}",
       "subtitle": "Give it a name and a look. You can change both later.",
-      "title": "Meet your bot"
+      "title": "Meet your bot",
+      "tryTitle": "Try this first",
+      "whereBody": "Your bot runs on this computer while Praxi-Bot is open. It only touches the folders you share with it.",
+      "whereLater": "Want it to keep working when your computer is off? You can add a server later in Settings. You do not need one now.",
+      "whereTitle": "Where your bot runs"
     },
     "brain": {
       "another": "Pick a different brain",
-      "apiTitle": "Connect an API",
-      "apiTitleAfter": "or connect an API",
+      "apiTitle": "Use your own AI account",
+      "apiTitleAfter": "Or use your own AI account",
       "change": "Change",
       "checking": "Checking…",
       "cliReady": "{{name}} is ready",
@@ -2603,13 +2608,27 @@
       "connected": "Connected",
       "connectedModel": "Connected · {{count}} model",
       "connectedModels": "Connected · {{count}} models",
+      "easyTitle": "The easiest way",
       "foundTitle": "Already on this computer",
-      "getFreeKey": "Get a free key",
+      "freeSteps": {
+        "one": "Press “Get my key”. A Google page opens in your browser.",
+        "three": "Come back here and paste it below. Praxi-Bot checks it right away.",
+        "two": "Sign in with Google and press “Create API key”. Then copy the key."
+      },
+      "freeSub": "Google Gemini has a free plan. It takes about two minutes and you only need a Google account.",
+      "freeTitle": "Use a free model",
+      "getFreeKey": "Get my key",
       "getKey": "Get a key",
       "hide": "Hide key",
       "keyHint": "Saved in your system keychain. It is never shown again.",
       "keyLabel": "{{name}} API key",
       "keyPlaceholder": "Paste your key here",
+      "keyProblem": {
+        "address": "That looks like a web address, not a key. Go back to the key page and copy the key itself.",
+        "prefix": "This does not look like a key from this service. You can still try it, but check you copied the right one.",
+        "short": "That is too short for a key. Copy the whole key, it is a long line of letters and numbers."
+      },
+      "laterNote": "Not ready? Press “I will add this later” at the top. You can look around, and your bot starts answering as soon as you add a model in Settings → AI.",
       "local": {
         "llamacpp": "llama.cpp server",
         "lmstudio": "LM Studio"
@@ -2694,10 +2713,12 @@
       "subtitle": "Decide how much your bot may do without asking. Every bot can have its own level later.",
       "title": "How much freedom?"
     },
+    "help": "Need help?",
     "language": "Language",
     "next": "Continue",
     "progress": "Step {{current}} of {{total}}",
     "prompts": {
+      "draft": "Help me write a short, friendly message to a neighbour",
       "folder": "Summarise this folder",
       "news": "Find today's top AI news",
       "screen": "What is on my screen right now?"
@@ -2707,7 +2728,8 @@
       "retry": "Try again",
       "title": "Praxi's background service is not running yet"
     },
-    "skip": "Skip for now",
+    "skip": "I will add this later",
+    "skipTip": "Look around first. You can finish the setup later from the Finish setup button.",
     "start": "Start",
     "steps": {
       "bot": "Your bot",
@@ -3227,7 +3249,8 @@
     "description": "See what each bot remembers from past conversations, edit or forget any item, undo changes, and preview what enters the next turn.",
     "edit": "Edit",
     "editLabel": "Memory text",
-    "empty": "No memories match this filter.",
+    "empty": "Your bot remembers useful facts here, like your name. Tell it something in a chat, or add one yourself below.",
+    "emptyTitle": "No memories yet",
     "forget": "Forget",
     "forgottenBadge": "Forgotten",
     "forgottenNotice": "Memory forgotten.",
@@ -3341,7 +3364,8 @@
     "title": "Model"
   },
   "needs": {
-    "empty": "Nothing is waiting for you. When a bot needs an approval or has a question, it appears here.",
+    "empty": "When a bot needs your OK or has a question, it shows up here.",
+    "emptyTitle": "All clear",
     "kind": {
       "approval": "Approval",
       "question": "Question"
@@ -3425,7 +3449,9 @@
   },
   "notifyHistory": {
     "clear": "Clear history",
-    "empty": "No notifications yet.",
+    "empty": "When a bot finishes a job or needs your OK, you will see it here.",
+    "emptyAction": "See what needs you",
+    "emptyTitle": "Nothing new",
     "held": "Held (quiet hours)",
     "heldMuted": "Held (bot muted)",
     "kind": {
@@ -4578,7 +4604,8 @@
     "costNote": "Cost is shown only for models with a known price; unknown pricing is never shown as zero.",
     "day": "Day",
     "deletedBot": "Deleted bot",
-    "empty": "No usage yet. Send a message to a bot and its token use shows up here.",
+    "empty": "Send a message to a bot and its usage appears here, with an estimate of the cost.",
+    "emptyTitle": "Nothing used yet",
     "exportCsv": "Download CSV",
     "exportDone": "Usage CSV downloaded.",
     "exportFailed": "Could not download usage CSV",

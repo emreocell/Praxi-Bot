@@ -686,7 +686,7 @@
     "goFirst": "Zu {{name}}",
     "goneHint": "Er wurde möglicherweise gelöscht oder lebt auf einem anderen Computer. Gehe zu deinem ersten Bot oder erstelle einen neuen.",
     "goneTitle": "Dieser Bot ist weg",
-    "suggestionsTitle": "Probiere eines davon",
+    "suggestionsTitle": "Probiere zuerst das",
     "title": "Chat mit {{name}} starten"
   },
   "botEngine": {
@@ -1765,7 +1765,8 @@
     "deleteBody": "„{{title}}“ und alle zugehörigen Nachrichten werden dauerhaft gelöscht. Das lässt sich nicht rückgängig machen.",
     "deleteConfirm": "Chat löschen",
     "deleteTitle": "Diesen Chat löschen?",
-    "empty": "Noch keine Chats.",
+    "empty": "Drücke „Neuer Chat“ und schreibe, was du brauchst. Deine Chats werden hier gespeichert.",
+    "emptyTitle": "Noch keine Chats",
     "loading": "Chats werden geladen …",
     "menuLabel": "Chat-Optionen für {{title}}",
     "menuTooltip": "Chat-Optionen",
@@ -2588,12 +2589,16 @@
       "noService": "Der Hintergrunddienst von Praxi läuft noch nicht. Warte ein paar Sekunden und versuche es erneut.",
       "recap": "Gehirn: {{model}} · Freiheit: {{level}}",
       "subtitle": "Gib ihm einen Namen und ein Aussehen. Beides kannst du später ändern.",
-      "title": "Lerne deinen Bot kennen"
+      "title": "Lerne deinen Bot kennen",
+      "tryTitle": "Probiere zuerst das",
+      "whereBody": "Dein Bot läuft auf diesem Computer, solange Praxi-Bot geöffnet ist. Er fasst nur die Ordner an, die du mit ihm teilst.",
+      "whereLater": "Soll er auch weiterarbeiten, wenn dein Computer aus ist? Du kannst später in den Einstellungen einen Server hinzufügen. Jetzt brauchst du keinen.",
+      "whereTitle": "Wo dein Bot läuft"
     },
     "brain": {
       "another": "Ein anderes Gehirn wählen",
-      "apiTitle": "Eine API verbinden",
-      "apiTitleAfter": "oder eine API verbinden",
+      "apiTitle": "Dein eigenes KI-Konto nutzen",
+      "apiTitleAfter": "Oder dein eigenes KI-Konto nutzen",
       "change": "Ändern",
       "checking": "Wird geprüft …",
       "cliReady": "{{name}} ist bereit",
@@ -2603,13 +2608,27 @@
       "connected": "Verbunden",
       "connectedModel": "Verbunden · {{count}} Modell",
       "connectedModels": "Verbunden · {{count}} Modelle",
+      "easyTitle": "Der einfachste Weg",
       "foundTitle": "Bereits auf diesem Computer",
-      "getFreeKey": "Gratis-Schlüssel holen",
+      "freeSteps": {
+        "one": "Drücke „Meinen Schlüssel holen“. Im Browser öffnet sich eine Google-Seite.",
+        "three": "Komm hierher zurück und füge ihn unten ein. Praxi-Bot prüft ihn sofort.",
+        "two": "Melde dich bei Google an und drücke „API-Schlüssel erstellen“. Kopiere dann den Schlüssel."
+      },
+      "freeSub": "Google Gemini hat einen kostenlosen Tarif. Es dauert etwa zwei Minuten, du brauchst nur ein Google-Konto.",
+      "freeTitle": "Ein kostenloses Modell nutzen",
+      "getFreeKey": "Meinen Schlüssel holen",
       "getKey": "Schlüssel holen",
       "hide": "Schlüssel verbergen",
       "keyHint": "Im Schlüsselbund deines Systems gespeichert. Er wird nie wieder angezeigt.",
       "keyLabel": "{{name}}-API-Schlüssel",
       "keyPlaceholder": "Füge deinen Schlüssel hier ein",
+      "keyProblem": {
+        "address": "Das sieht nach einer Webadresse aus, nicht nach einem Schlüssel. Geh zur Schlüssel-Seite zurück und kopiere den Schlüssel selbst.",
+        "prefix": "Das sieht nicht wie ein Schlüssel dieses Dienstes aus. Du kannst es trotzdem versuchen, prüfe aber, ob du den richtigen kopiert hast.",
+        "short": "Das ist zu kurz für einen Schlüssel. Kopiere den ganzen Schlüssel, er ist eine lange Zeile aus Buchstaben und Zahlen."
+      },
+      "laterNote": "Noch nicht bereit? Drücke oben „Das füge ich später hinzu“. Du kannst dich in Ruhe umsehen, und dein Bot antwortet, sobald du unter Einstellungen → KI ein Modell hinzufügst.",
       "local": {
         "llamacpp": "llama.cpp-Server",
         "lmstudio": "LM Studio"
@@ -2694,10 +2713,12 @@
       "subtitle": "Lege fest, wie viel dein Bot ohne Nachfrage tun darf. Später kann jeder Bot seine eigene Stufe haben.",
       "title": "Wie viel Freiheit?"
     },
+    "help": "Hilfe nötig?",
     "language": "Sprache",
     "next": "Weiter",
     "progress": "Schritt {{current}} von {{total}}",
     "prompts": {
+      "draft": "Hilf mir, eine kurze, freundliche Nachricht an einen Nachbarn zu schreiben",
       "folder": "Fasse diesen Ordner zusammen",
       "news": "Finde die wichtigsten KI-Nachrichten von heute",
       "screen": "Was ist gerade auf meinem Bildschirm?"
@@ -2707,7 +2728,8 @@
       "retry": "Erneut versuchen",
       "title": "Der Hintergrunddienst von Praxi läuft noch nicht"
     },
-    "skip": "Vorerst überspringen",
+    "skip": "Das füge ich später hinzu",
+    "skipTip": "Sieh dich erst um. Die Einrichtung kannst du später über „Einrichtung abschließen“ beenden.",
     "start": "Starten",
     "steps": {
       "bot": "Dein Bot",
@@ -3227,7 +3249,8 @@
     "description": "Sieh dir an, woran sich jeder Bot aus früheren Unterhaltungen erinnert, bearbeite oder vergiss Einträge, mache Änderungen rückgängig und prüfe in der Vorschau, was in den nächsten Durchgang einfließt.",
     "edit": "Bearbeiten",
     "editLabel": "Erinnerungstext",
-    "empty": "Keine Erinnerungen entsprechen diesem Filter.",
+    "empty": "Dein Bot merkt sich hier nützliche Dinge, etwa deinen Namen. Erzähle ihm im Chat etwas oder füge unten selbst eine Erinnerung hinzu.",
+    "emptyTitle": "Noch keine Erinnerungen",
     "forget": "Vergessen",
     "forgottenBadge": "Vergessen",
     "forgottenNotice": "Erinnerung vergessen.",
@@ -3341,7 +3364,8 @@
     "title": "Modell"
   },
   "needs": {
-    "empty": "Nichts wartet auf dich. Wenn ein Bot eine Genehmigung braucht oder eine Frage hat, erscheint sie hier.",
+    "empty": "Wenn ein Bot dein OK braucht oder eine Frage hat, erscheint das hier.",
+    "emptyTitle": "Alles erledigt",
     "kind": {
       "approval": "Genehmigung",
       "question": "Frage"
@@ -3425,7 +3449,9 @@
   },
   "notifyHistory": {
     "clear": "Verlauf löschen",
-    "empty": "Noch keine Benachrichtigungen.",
+    "empty": "Wenn ein Bot eine Aufgabe beendet oder dein OK braucht, siehst du es hier.",
+    "emptyAction": "Ansehen, was dich braucht",
+    "emptyTitle": "Nichts Neues",
     "held": "Zurückgehalten (Ruhezeit)",
     "heldMuted": "Zurückgehalten (Bot stummgeschaltet)",
     "kind": {
@@ -4578,7 +4604,8 @@
     "costNote": "Kosten werden nur für Modelle mit bekanntem Preis angezeigt; unbekannte Preise werden nie als Null dargestellt.",
     "day": "Tag",
     "deletedBot": "Gelöschter Bot",
-    "empty": "Noch keine Nutzung. Sobald du einem Bot schreibst, erscheint der Token-Verbrauch hier.",
+    "empty": "Schicke einem Bot eine Nachricht, dann erscheint hier seine Nutzung samt Kostenschätzung.",
+    "emptyTitle": "Noch nichts genutzt",
     "exportCsv": "CSV herunterladen",
     "exportDone": "Nutzungs-CSV heruntergeladen.",
     "exportFailed": "Nutzungs-CSV konnte nicht heruntergeladen werden",

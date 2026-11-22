@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Check, LoaderCircle, ServerOff } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CircleHelp, LoaderCircle, ServerOff } from "lucide-react";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
@@ -39,6 +39,8 @@ export interface OnboardingViewProps {
   settings: AppSettings;
   onLanguageChange: (lang: SupportedLanguage) => void;
   onSkip: () => void;
+  /** Opens the Help window with its short answers; omitted where there is no shell around the wizard. */
+  onHelp?: () => void;
   onComplete: (result: { botId?: string }) => void;
   /** Design review and tests: open on this screen with a brain already chosen. */
   initialStep?: FirstRunStep;
@@ -57,7 +59,7 @@ function reviewStep(): FirstRunStep | undefined {
  * First run: three screens, one decision each (brain, freedom, bot), "Skip for now" on every one.
  * It only ever talks to the daemon this app started on this computer.
  */
-export function OnboardingView({ settings, onLanguageChange, onSkip, onComplete, initialStep }: OnboardingViewProps) {
+export function OnboardingView({ settings, onLanguageChange, onSkip, onHelp, onComplete, initialStep }: OnboardingViewProps) {
   const { t, i18n } = useTranslation();
   const { phase, client, bots, refreshBots, retry } = useDaemon();
   const { askEngine, applyEngine } = useEngineConsent();
@@ -168,9 +170,17 @@ export function OnboardingView({ settings, onLanguageChange, onSkip, onComplete,
               </button>
             ))}
           </div>
-          <Button size="sm" variant="ghost" onClick={onSkip} data-testid="onboarding-skip">
-            {t("firstRun.skip")}
-          </Button>
+          <div className={styles.topActions}>
+            {onHelp ? (
+              <Button size="sm" variant="ghost" onClick={onHelp} data-testid="onboarding-help" title={t("firstRun.help")}>
+                <CircleHelp aria-hidden="true" />
+                {t("firstRun.help")}
+              </Button>
+            ) : null}
+            <Button size="sm" variant="ghost" onClick={onSkip} data-testid="onboarding-skip" title={t("firstRun.skipTip")}>
+              {t("firstRun.skip")}
+            </Button>
+          </div>
         </header>
 
         <div className={styles.surface}>

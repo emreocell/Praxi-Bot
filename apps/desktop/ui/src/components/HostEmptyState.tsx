@@ -37,7 +37,7 @@ function HostModelDialog({ open, onClose }: { open: boolean; onClose: () => void
           <button
             type="button"
             className={styles.copy}
-            aria-label={t("hostMode.model.copy")}
+            aria-label={t("hostMode.model.copy")} title={t("hostMode.model.copy")}
             onClick={() => {
               void navigator.clipboard?.writeText(HOST_MODEL_SETUP_COMMAND).then(
                 () => setCopied(true),

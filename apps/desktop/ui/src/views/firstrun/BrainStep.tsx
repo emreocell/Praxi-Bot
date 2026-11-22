@@ -19,6 +19,7 @@ import {
   type ConnectError,
   type FirstRunAction,
   type FirstRunState,
+  keyShapeProblem,
   modelCount,
   providerIdFor,
   readyEngines,
@@ -296,6 +297,7 @@ export function BrainStep({
   const ollamaFound = local?.some((s) => s.id === "ollama") === true;
   const otherLocal = (local ?? []).filter((s) => s.id !== "ollama");
   const keyOpen = group !== null && group !== "ollama" && !connected;
+  const keyProblem = keyOpen ? keyShapeProblem(group, key) : null;
 
   return (
     <div className={styles.stack}>
@@ -339,12 +341,42 @@ export function BrainStep({
       ) : null}
 
       {engines !== null && !connected ? (
+        <section className={styles.block} aria-labelledby="fr-easy">
+          <h2 id="fr-easy" className={styles.eyebrow}>{t("firstRun.brain.easyTitle")}</h2>
+          <button
+            type="button"
+            className={`${styles.card} ${styles.easy} ${group === "gemini" ? styles.cardOn : ""}`}
+            aria-pressed={group === "gemini"}
+            disabled={busy}
+            data-testid="fr-api-gemini"
+            onClick={() => pickApi("gemini")}
+          >
+            <BrandIcon name="gemini" bare size={26} />
+            <span className={styles.cardText}>
+              <span className={styles.cardTitle}>
+                {t("firstRun.brain.freeTitle")}
+                <span className={styles.badge}>{t("firstRun.brain.providers.gemini.badge")}</span>
+              </span>
+              <span className={styles.cardSub}>{t("firstRun.brain.freeSub")}</span>
+            </span>
+          </button>
+          {group === "gemini" && keyOpen ? (
+            <ol className={styles.steps} data-testid="fr-gemini-steps">
+              {(["one", "two", "three"] as const).map((n) => (
+                <li key={n}>{t(`firstRun.brain.freeSteps.${n}`)}</li>
+              ))}
+            </ol>
+          ) : null}
+        </section>
+      ) : null}
+
+      {engines !== null && !connected ? (
         <section className={styles.block} aria-labelledby="fr-api">
           <h2 id="fr-api" className={styles.eyebrow}>
             {ready.length > 0 ? t("firstRun.brain.apiTitleAfter") : t("firstRun.brain.apiTitle")}
           </h2>
           <div className={styles.tiles} role="group" aria-label={t("firstRun.brain.apiTitle")}>
-            {API_GROUPS.map((g) => {
+            {API_GROUPS.filter((g) => g !== "gemini").map((g) => {
               const on = group === g;
               const badge = g === "ollama" && ollamaFound
                 ? t("firstRun.brain.providers.ollama.found")
@@ -468,7 +500,7 @@ export function BrainStep({
             <button
               type="button"
               className={styles.iconBtn}
-              aria-label={shown ? t("firstRun.brain.hide") : t("firstRun.brain.show")}
+              aria-label={shown ? t("firstRun.brain.hide") : t("firstRun.brain.show")} title={shown ? t("firstRun.brain.hide") : t("firstRun.brain.show")}
               aria-pressed={shown}
               onClick={() => setShown((v) => !v)}
             >
@@ -495,7 +527,7 @@ export function BrainStep({
                 {t("firstRun.brain.checking")}
               </>
             ) : (
-              error ?? t("firstRun.brain.keyHint")
+              error ?? (keyProblem ? t(`firstRun.brain.keyProblem.${keyProblem}`) : t("firstRun.brain.keyHint"))
             )}
           </p>
         </section>
@@ -535,6 +567,12 @@ export function BrainStep({
             </button>
           </div>
         </section>
+      ) : null}
+
+      {!connected && !busy ? (
+        <p className={styles.later} data-testid="fr-later-note">
+          {t("firstRun.brain.laterNote")}
+        </p>
       ) : null}
 
       {!keyOpen && error ? (

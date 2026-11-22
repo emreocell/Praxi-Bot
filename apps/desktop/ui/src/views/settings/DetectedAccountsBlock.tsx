@@ -216,7 +216,7 @@ export function DetectedAccountsBlock({ local = false }: { local?: boolean } = {
               type="button"
               className={styles.detailsBtn}
               aria-expanded={open}
-              aria-label={`${t("settingsModal.ai.detected.detailsToggle")}: ${row.display_name}`}
+              aria-label={`${t("settingsModal.ai.detected.detailsToggle")}: ${row.display_name}`} title={`${t("settingsModal.ai.detected.detailsToggle")}: ${row.display_name}`}
               onClick={() => setOpenId(open ? null : row.id)}
             >
               <ChevronDown size={14} aria-hidden="true" className={open ? styles.chevOpen : undefined} />

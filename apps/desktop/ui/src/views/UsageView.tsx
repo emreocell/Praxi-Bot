@@ -1,4 +1,5 @@
-import { Download, Info, LoaderCircle, RefreshCw } from "lucide-react";
+import { Download, Gauge, Info, LoaderCircle, RefreshCw } from "lucide-react";
+import { EmptyState } from "../components/EmptyState";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button, Card } from "ui";
@@ -246,7 +247,7 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
 
             {isEmpty ? (
               <Card padding="md" className={styles.stateCard} data-testid="usage-empty">
-                <p className={formStyles.hint}>{t("usage.empty")}</p>
+                <EmptyState icon={Gauge} title={t("usage.emptyTitle")}>{t("usage.empty")}</EmptyState>
               </Card>
             ) : (
               <>

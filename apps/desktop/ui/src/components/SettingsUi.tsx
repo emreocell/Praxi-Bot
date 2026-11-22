@@ -109,7 +109,7 @@ export function Switch({
       type="button"
       role="switch"
       aria-checked={checked}
-      aria-label={label}
+      aria-label={label} title={label}
       disabled={disabled}
       className={[styles.switch, checked ? styles.switchOn : ""]
         .filter(Boolean)

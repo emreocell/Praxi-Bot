@@ -22,6 +22,7 @@ import { saveChatExport, type ExportFormat } from "../lib/chatHistory";
 import { humanLine } from "../lib/humanError";
 import { useDaemon } from "../state/DaemonContext";
 import { useToast } from "./Toast";
+import { EmptyState } from "./EmptyState";
 import { chatTitleLabel } from "../lib/chatTitle";
 import { Callout, ConfirmDialog } from "./DialogParts";
 import { Popover } from "./Popover";
@@ -274,7 +275,7 @@ export function ChatList({
   return (
     <div className={styles.wrap}>
       {chats.length === 0 ? (
-        !searchActive ? <p className={styles.empty} data-testid="chat-list-empty">{t("chatManage.empty")}</p> : null
+        !searchActive ? <EmptyState icon={MessageSquare} title={t("chatManage.emptyTitle")} testId="chat-list-empty">{t("chatManage.empty")}</EmptyState> : null
       ) : active.length === 0 && !searchActive ? (
         <p className={styles.empty} data-testid="chat-list-all-archived">{t("chatManage.allArchived")}</p>
       ) : active.length > 0 ? (

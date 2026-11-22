@@ -135,7 +135,7 @@ export function ServerTerminal({
           <i aria-hidden="true" />
           {t(`terminal.state.${phase}`)}
         </span>
-        <button type="button" className={styles.close} aria-label={t("terminal.close")} onClick={onClose} data-testid="terminal-close">
+        <button type="button" className={styles.close} aria-label={t("terminal.close")} title={t("terminal.close")} onClick={onClose} data-testid="terminal-close">
           <X aria-hidden="true" />
         </button>
       </header>

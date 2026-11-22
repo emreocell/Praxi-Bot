@@ -1012,6 +1012,7 @@ function AppShell() {
           <OnboardingView
             settings={settings}
             onLanguageChange={handleLanguageChange}
+            onHelp={() => setHelpOpen(true)}
             onSkip={() => {
               updateSettings({ onboardingSkipped: true });
               go({ kind: "home" });

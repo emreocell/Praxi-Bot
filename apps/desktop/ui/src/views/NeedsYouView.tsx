@@ -1,4 +1,5 @@
 import { ArrowUpRight, CheckCheck } from "lucide-react";
+import { EmptyState } from "../components/EmptyState";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button, Card } from "ui";
 import formStyles from "../components/Form.module.css";
@@ -22,7 +23,7 @@ export function NeedsYouView({
           <p className={formStyles.hint}>{t("needs.subtitle")}</p>
         </header>
         {needs.length === 0 ? (
-          <p className={formStyles.hint}><CheckCheck className={formStyles.emptyIcon} />{t("needs.empty")}</p>
+          <EmptyState icon={CheckCheck} title={t("needs.emptyTitle")} testId="needs-empty">{t("needs.empty")}</EmptyState>
         ) : (
           <ul className={styles.list}>
             {needs.map((n) => {
