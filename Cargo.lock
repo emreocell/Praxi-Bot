@@ -10371,6 +10371,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-sandbox-spike"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "windows-strings"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

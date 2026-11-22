@@ -1,0 +1,27 @@
+name: Windows sandbox spike
+
+on:
+  pull_request:
+    paths:
+      - 'crates/windows-sandbox-spike/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/windows-sandbox-spike.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  confinement:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy -p windows-sandbox-spike --all-targets --features windows-sandbox -- -D warnings
+      - run: cargo test -p windows-sandbox-spike --features windows-sandbox
