@@ -29,6 +29,7 @@ url = "2"
 uuid.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 wiremock.workspace = true

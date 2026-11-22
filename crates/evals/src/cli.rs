@@ -1,4 +1,4 @@
-//! Command-line surface: `bot-eval run | report | list`.
+//! Command-line surface: `bot-eval run | record | replay | report | list`.
 //!
 //! [`EvalCommand`] is a plain `clap` subcommand so `apps/cli` can later mount
 //! it as `bot eval ...` without changes here.
@@ -21,12 +21,42 @@ use crate::{scenario, task, tier1, tier2};
 pub enum EvalCommand {
     /// Run scenarios (tier 1) and/or live tasks (tier 2) and write a JSONL result file.
     Run(RunArgs),
+    /// Record a real model turn with isolated fixture tools (owner machine only).
+    Record(RecordArgs),
+    /// Replay a recorded scenario without credentials or network.
+    Replay(ReplayArgs),
     /// Markdown before/after comparison of two result files.
     Report(ReportArgs),
     /// List the scenarios and tasks.
     List(ListArgs),
     /// Compare one result file against a stored baseline: prints GO or NO-GO.
     Compare(CompareArgs),
+}
+
+/// Arguments of `eval record`.
+#[derive(Debug, Args)]
+pub struct RecordArgs {
+    /// Scenario template: user turn, fixture tools, policy and owner reactions.
+    pub scenario: PathBuf,
+    /// New scenario file to write; existing files are never overwritten.
+    #[arg(long)]
+    pub out: PathBuf,
+    /// Configured provider/model.
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Owner's application data directory (provider configuration and vault).
+    #[arg(long, env = "BOT_DATA_DIR")]
+    pub data_dir: Option<PathBuf>,
+    /// Provider catalog directory.
+    #[arg(long, env = "BOT_CATALOG_DIR")]
+    pub catalog_dir: Option<PathBuf>,
+}
+
+/// Arguments of `eval replay`.
+#[derive(Debug, Args)]
+pub struct ReplayArgs {
+    /// Recorded scenario YAML.
+    pub scenario: PathBuf,
 }
 
 /// Arguments of `eval compare`.
@@ -140,6 +170,16 @@ fn print_record(r: &RunRecord) {
 pub async fn execute(cmd: EvalCommand) -> Result<bool> {
     match cmd {
         EvalCommand::Run(a) => run(a).await,
+        EvalCommand::Record(a) => record(a).await,
+        EvalCommand::Replay(a) => {
+            let s = scenario::Scenario::from_yaml(&std::fs::read_to_string(a.scenario)?)?;
+            if s.transcript.is_none() {
+                return Err("replay requires a recorded transcript".into());
+            }
+            let r = tier1::run_scenario(&s).await?.record;
+            print_record(&r);
+            Ok(r.as_expected())
+        }
         EvalCommand::Report(a) => {
             let before = read_jsonl(&a.before)?;
             let after = read_jsonl(&a.after)?;
@@ -297,4 +337,52 @@ async fn run(a: RunArgs) -> Result<bool> {
     }
     append_jsonl(&out, &all)?;
     Ok(summarize(&all, &out))
+}
+
+async fn record(a: RecordArgs) -> Result<bool> {
+    crate::transcript::recording_allowed(|k| std::env::var_os(k))?;
+    let s = scenario::Scenario::from_yaml(&std::fs::read_to_string(a.scenario)?)?;
+    if s.fs.is_some() || s.subagents || !s.workflows.is_empty() || s.transcript.is_some() {
+        return Err(
+            "record template must use fixture tools without fs, workflows, subagents or transcript"
+                .into(),
+        );
+    }
+    let data_dir = a
+        .data_dir
+        .or_else(storage::data_dir)
+        .ok_or("no owner data directory")?;
+    let (store, _) =
+        secret_store::open_store(secret_store::BackendChoice::Auto, &data_dir, &|_| None)?;
+    let redactor = secret_store::Redactor::from_store(&*store)?;
+    let mut privacy = crate::transcript::Privacy::new(redactor);
+    for name in store.list_names()? {
+        if let Some(value) = store.get(&name)? {
+            privacy.register(value.expose());
+        }
+    }
+    for (name, value) in std::env::vars() {
+        let name = name.to_ascii_uppercase();
+        if ["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"]
+            .iter()
+            .any(|s| name.contains(s))
+        {
+            privacy.register(&value);
+        }
+    }
+    for secret in &s.secrets {
+        privacy.register(secret);
+    }
+    let live = crate::live::build_recording_provider(
+        a.model.as_deref(),
+        &data_dir,
+        a.catalog_dir.as_deref(),
+    )?;
+    let (_, captured) = tier1::capture_scenario(&s, live.provider, &live.model, false).await?;
+    privacy.write(&captured, &a.out)?;
+    // Redaction may change what the gate sees. Never silently bless such a change.
+    let safe = scenario::Scenario::from_yaml(&std::fs::read_to_string(&a.out)?)?;
+    let r = tier1::run_scenario(&safe).await?.record;
+    print_record(&r);
+    Ok(r.as_expected())
 }

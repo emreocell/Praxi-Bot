@@ -82,6 +82,9 @@ Last reviewed on 2026-11-15:
 | `lmstudio` | — | 2026-11-15 | None (depends on installed local models) | <https://lmstudio.ai/docs/developer/openai-compat/models> |
 | `cli:claude` | — | 2026-11-15 | Claude Code default (`default`), Claude Sonnet (`sonnet`), Claude Opus (`opus`), Claude Haiku (`haiku`) | <https://code.claude.com/docs/en/model-config> |
 | `cli:codex` | — | 2026-11-15 | Codex default (`default`) | <https://developers.openai.com/codex/models> |
+| `groq` | — | 2026-11-15 | Llama 3.3 70B Versatile (`llama-3.3-70b-versatile`), GPT-OSS 120B (`openai/gpt-oss-120b`), Llama 3.1 8B Instant (`llama-3.1-8b-instant`) | <https://console.groq.com/docs/models>, <https://console.groq.com/docs/rate-limits> |
+| `mistral` | — | 2026-11-15 | Mistral Large (`mistral-large-latest`), Mistral Small (`mistral-small-latest`), Codestral (`codestral-latest`) | <https://docs.mistral.ai/models> |
+| `together` | — | 2026-11-15 | DeepSeek V4.1 Flash (`deepseek-ai/DeepSeek-V4.1-Flash`), Llama 3.3 70B Instruct Turbo (`meta-llama/Llama-3.3-70B-Instruct-Turbo`), GPT-OSS 120B (`openai/gpt-oss-120b`) | <https://docs.together.ai/docs/serverless/models>, <https://docs.together.ai/docs/serverless/rate-limits> |
 <!-- END:model-catalog-table -->
 
 ### Freshness tooling and staleness reminders

@@ -52,6 +52,14 @@ passphrase-encrypted file you can restore with `bot backup restore` (see
 encrypted file in the data directory) and are included only with
 `--include-secrets`.
 
+### How do I back up inside Docker?
+
+The container has no passphrase set. Export `BACKUP_PASSPHRASE` in your shell and pass
+it through by name: `docker exec -e BACKUP_PASSPHRASE praxi-host bot backup create
+/tmp/praxi.bak --passphrase-env BACKUP_PASSPHRASE`, then `docker cp` the file out. Restore
+needs the daemon stopped (a one-off container on the same volume); see
+[Docker host](docker-host.md).
+
 ### How do I make a bot faster and cheaper?
 Use a small `classifier` model, save [workflows](workflows.md) for repeated jobs,
 press **Remember this** after a run that went well, and write

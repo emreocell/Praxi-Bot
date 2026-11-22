@@ -23,11 +23,31 @@ Then open your bot in Telegram and send `/pair 123456` (your code).
 | `/use <bot name or id>` | Chooses the bot this chat talks to |
 | `/stop` | Stops the current run |
 | `/status` | Shows status |
+| `/lang tr` or `/lang en` | Sets this chat's language to Turkish or English (`/lang` alone shows the current one) |
 | anything else | Sent to the selected bot as a message |
 
 When a bot needs approval or asks a question, you get a message with buttons. The
 run waits until you tap one (or, for scheduled runs, until the 30-minute timeout
 pauses it).
+
+## Language
+
+Commands, approval cards, buttons and notices from the channel itself are in
+English or Turkish. Each chat has its own language and keeps it across restarts;
+`/lang` changes it at any time. What your bots write, tool output and
+daemon messages are not translated.
+
+- A chat that was paired **before** chat languages existed, or a user listed in
+  the configuration, stays in English until someone in that chat sends `/lang`.
+  An upgrade never changes the language of an approval card on its own.
+- A chat paired with `/pair` from now on starts in Turkish or English depending
+  on the Telegram app's language; any other app language falls back to
+  English. (The channel can also fall back to the desktop app's language, but
+  the desktop app does not pass it to the daemon yet.)
+- Only the button labels change with the language. What a button does, the
+  information on the card and what is masked stay the same.
+- Some fixed texts (pairing replies, run finished notices) are still English
+  only.
 
 ## Good to know
 

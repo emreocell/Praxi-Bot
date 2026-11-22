@@ -486,5 +486,99 @@
       "url": "https://mcp.atlassian.com/v1/mcp",
       "required_secrets": []
     }
+  },
+  {
+    "id": "vercel",
+    "name": "Vercel",
+    "description": "Projects, deployments and build logs on Vercel. Sign in with your Vercel account.",
+    "category": "accounts",
+    "homepage": "https://vercel.com/docs/agent-resources/vercel-mcp",
+    "icon": "vercel",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.vercel.com",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "figma",
+    "name": "Figma",
+    "description": "Read Figma design files, frames and design tokens. Sign in with your Figma account.",
+    "category": "accounts",
+    "homepage": "https://developers.figma.com/docs/figma-mcp-server/",
+    "icon": "figma",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.figma.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "posthog",
+    "name": "PostHog",
+    "description": "Query PostHog analytics, feature flags, experiments and errors. Sign in with your PostHog account.",
+    "category": "accounts",
+    "homepage": "https://posthog.com/docs/model-context-protocol",
+    "icon": "posthog",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.posthog.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "intercom",
+    "name": "Intercom",
+    "description": "Search and read Intercom conversations, contacts and help articles. Sign in with your Intercom account.",
+    "category": "messaging",
+    "homepage": "https://developers.intercom.com/docs/guides/mcp",
+    "icon": "intercom",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.intercom.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "paypal",
+    "name": "PayPal",
+    "description": "Inspect orders, invoices, subscriptions and disputes in PayPal. Sign in with your PayPal account.",
+    "category": "money",
+    "homepage": "https://developer.paypal.com/ai-tools/mcp-server",
+    "icon": "paypal",
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.paypal.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "mongodb",
+    "name": "MongoDB",
+    "description": "Inspect collections, schemas and run read-only queries on a MongoDB database.",
+    "category": "accounts",
+    "homepage": "https://github.com/mongodb-js/mongodb-mcp-server",
+    "icon": "mongodb",
+    "install": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mongodb-mcp-server@3.3.0",
+        "--readOnly"
+      ],
+      "env": {
+        "DO_NOT_TRACK": "1"
+      },
+      "secret_env": {
+        "MDB_MCP_CONNECTION_STRING": "mcp/mongodb-uri"
+      },
+      "required_secrets": [
+        {
+          "name": "mcp/mongodb-uri",
+          "label": "MongoDB connection URI (mongodb://... or mongodb+srv://...)"
+        }
+      ]
+    }
   }
 ]

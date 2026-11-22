@@ -1,0 +1,32 @@
+# Together AI — OpenAI-compatible serverless inference for open models.
+# Sources:
+#   https://docs.together.ai/docs/inference/openai-compatibility
+#   https://docs.together.ai/docs/serverless/models
+#   https://docs.together.ai/docs/serverless/rate-limits
+# Auth: HTTP Bearer token from TOGETHER_API_KEY (`Authorization: Bearer <key>`).
+# Rate limits: serverless endpoints enforce per-tier RPM and TPM limits scaled
+# by billing tier and return HTTP 429 when exceeded; see the Together
+# serverless rate-limits documentation for current tier quotas.
+id = "together"
+kind = "open_ai_compatible"
+base_url = "https://api.together.ai/v1"
+auth = { ApiKeyEnv = "TOGETHER_API_KEY" }
+models_endpoint = "https://api.together.ai/v1/models"
+
+[capabilities]
+tools = true
+vision = true
+streaming = true
+json_mode = true
+
+[compat_flags]
+strip_system_role = false
+
+[[models]]
+id = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+
+[[models]]
+id = "deepseek-ai/DeepSeek-V4.1-Flash"
+
+[[models]]
+id = "openai/gpt-oss-120b"

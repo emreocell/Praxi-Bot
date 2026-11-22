@@ -138,6 +138,8 @@ const TABLE: Record<string, Entry> = {
   session_search: { id: "session_search", icon: "memory", chips: queryChip },
   memory_save: { id: "memory_save", icon: "memory" },
   memory_forget: { id: "memory_forget", icon: "memory", chips: queryChip },
+  notes_read: { id: "notes_read", icon: "memory", chips: queryChip },
+  notes_write: { id: "notes_write", icon: "memory" },
   knowledge_search: { id: "knowledge_search", icon: "search", chips: queryChip },
   workflow_run: { id: "workflow", icon: "workflow" },
   todo_write: { id: "todo", icon: "list" },

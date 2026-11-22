@@ -425,13 +425,29 @@ pub(crate) fn exclusive_probe_with(
     Ok(back)
 }
 
-/// `data dir`: exists and is writable.  Offers [`Repair::CreateDataDir`] when
-/// it is missing.
+/// `data dir`: exists, is a directory, is writable, and has enough free disk
+/// space.  Offers [`Repair::CreateDataDir`] when it is missing.
 #[must_use]
 pub fn check_data_dir(dir: &Path) -> Check {
     const ID: &str = "data_dir";
     const N: &str = "data dir";
     if !dir.exists() {
+        if dir
+            .ancestors()
+            .skip(1)
+            .find(|p| !p.as_os_str().is_empty() && p.exists())
+            .is_some_and(|p| !p.is_dir())
+        {
+            return Check::fail(
+                ID,
+                N,
+                format!(
+                    "{} cannot be created because a parent path is not a directory",
+                    dir.display()
+                ),
+                "remove the blocking file or pass another --data-dir",
+            );
+        }
         return Check::warn(
             ID,
             N,
@@ -440,13 +456,53 @@ pub fn check_data_dir(dir: &Path) -> Check {
         )
         .repair(Repair::CreateDataDir);
     }
-    match exclusive_probe(dir, &probe_name(".doctor-probe-", ""), b"ok") {
-        Ok(_) => Check::ok(ID, N, format!("{} (writable)", dir.display())),
-        Err(e) => Check::fail(
+    if !dir.is_dir() {
+        return Check::fail(
+            ID,
+            N,
+            format!("{} is not a directory", dir.display()),
+            "remove the file or pass another --data-dir",
+        );
+    }
+    if let Err(e) = exclusive_probe(dir, &probe_name(".doctor-probe-", ""), b"ok") {
+        return Check::fail(
             ID,
             N,
             format!("{} is not writable: {e}", dir.display()),
             "fix the folder permissions or pass another --data-dir",
+        );
+    }
+    data_dir_with_free_space(dir, fs4::available_space(dir).map_err(|e| e.to_string()))
+}
+
+/// Finish [`check_data_dir`] once `dir` is confirmed to exist and be writable,
+/// evaluating the measured free space against [`DISK_WARN_BYTES`] and
+/// [`DISK_FAIL_BYTES`].
+#[must_use]
+pub fn data_dir_with_free_space(dir: &Path, free: Result<u64, String>) -> Check {
+    const ID: &str = "data_dir";
+    const N: &str = "data dir";
+    match free {
+        Ok(free) => {
+            let detail = format!("{} (writable, {} MiB free)", dir.display(), free >> 20);
+            if free < DISK_FAIL_BYTES {
+                Check::fail(
+                    ID,
+                    N,
+                    detail,
+                    "free some disk space; runs and logs cannot be saved",
+                )
+            } else if free < DISK_WARN_BYTES {
+                Check::warn(ID, N, detail, "less than 1 GiB left; free some space")
+            } else {
+                Check::ok(ID, N, detail)
+            }
+        }
+        Err(e) => Check::warn(
+            ID,
+            N,
+            format!("{} (writable; cannot read free space: {e})", dir.display()),
+            "ignore if unsure",
         ),
     }
 }

@@ -344,6 +344,8 @@ impl McpHost {
             trust_hints: cfg.trust_hints,
             public_content: cfg.public_content,
             local_only: cfg.local_only,
+            browser: cfg.browser,
+            is_browser: cfg.is_browser(),
             bots: cfg.bots.clone(),
         }
     }
@@ -762,14 +764,15 @@ fn merge_update(
     if let Some(v) = obj.get("tool_exclude") {
         cfg.tool_exclude = json_strings(v, "tool_exclude")?;
     }
-    if let Some(v) = obj.get("trust_hints") {
-        cfg.trust_hints = json_bool(v, "trust_hints")?;
-    }
-    if let Some(v) = obj.get("public_content") {
-        cfg.public_content = json_bool(v, "public_content")?;
-    }
-    if let Some(v) = obj.get("local_only") {
-        cfg.local_only = json_bool(v, "local_only")?;
+    for (key, slot) in [
+        ("trust_hints", &mut cfg.trust_hints),
+        ("public_content", &mut cfg.public_content),
+        ("local_only", &mut cfg.local_only),
+        ("browser", &mut cfg.browser),
+    ] {
+        if let Some(v) = obj.get(key) {
+            *slot = json_bool(v, key)?;
+        }
     }
     if let Some(v) = obj.get("category") {
         cfg.category = if v.is_null() {
@@ -873,6 +876,7 @@ fn to_config(name: &str, input: McpServerInput) -> Result<McpServerConfig, McpCo
         trust_hints: input.trust_hints,
         public_content: input.public_content,
         local_only: input.local_only,
+        browser: input.browser,
         category,
         secret_headers: input.secret_headers,
         secret_env: input.secret_env,

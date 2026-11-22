@@ -885,7 +885,7 @@ impl ScheduleStore {
         let attempt = match probe(occ.attempt) {
             AttemptRun::None => occ.attempt,
             AttemptRun::Failed => occ.attempt.saturating_add(1),
-            AttemptRun::Active => {
+            AttemptRun::Active | AttemptRun::Succeeded => {
                 return Err(SchedulerError::Conflict(format!(
                     "occurrence {id}:{due_ms} already has a run that is not finished or not failed"
                 )));
@@ -927,7 +927,7 @@ impl ScheduleStore {
         let affected: Vec<String> = {
             let mut st = tx.prepare(
                 "SELECT DISTINCT schedule_id FROM occurrences \
-                 WHERE state IN ('pending', 'dispatched')",
+                 WHERE state IN ('pending', 'dispatched', 'started')",
             )?;
             st.query_map([], |row| row.get(0))?
                 .collect::<rusqlite::Result<_>>()?
@@ -958,7 +958,7 @@ impl ScheduleStore {
             [],
         )?;
         changed += tx.execute(
-            "UPDATE occurrences SET state = 'interrupted' WHERE state = 'dispatched'",
+            "UPDATE occurrences SET state = 'interrupted' WHERE state IN ('dispatched', 'started')",
             [],
         )?;
         for raw in &affected {
@@ -972,6 +972,46 @@ impl ScheduleStore {
             self.notify();
         }
         Ok(u64::try_from(changed).unwrap_or(u64::MAX))
+    }
+
+    /// `(schedule, due, attempt)` of every `interrupted` occurrence, for the
+    /// startup reconciliation against the executor's durable run keys.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn interrupted_attempts(&self) -> Result<Vec<(TaskId, i64, u32)>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(
+            "SELECT schedule_id, due_ms, attempt FROM occurrences WHERE state = 'interrupted'",
+        )?;
+        let rows = st.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, u32>(2)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (raw, due, attempt) = row?;
+            if let Ok(uuid) = Uuid::parse_str(&raw) {
+                out.push((TaskId(uuid), due, attempt));
+            }
+        }
+        Ok(out)
+    }
+
+    /// An `interrupted` occurrence whose run key says it finished successfully
+    /// becomes `succeeded` (a crash after the side effect). Returns whether a row changed.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors.
+    pub fn resolve_interrupted_as_succeeded(&self, id: TaskId, due_ms: i64) -> Result<bool> {
+        let changed = self.conn().execute(
+            "UPDATE occurrences SET state = 'succeeded' WHERE schedule_id = ?1              AND due_ms = ?2 AND state = 'interrupted'",
+            params![id.to_string(), due_ms],
+        )?;
+        Ok(changed > 0)
     }
 
     #[cfg(test)]

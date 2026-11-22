@@ -1076,3 +1076,143 @@ mod quote_tests {
         assert_eq!(quote_arg(r#"a\"b"#), r#""a\\\"b""#);
     }
 }
+
+#[cfg(test)]
+mod key_properties {
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::select;
+    use proptest::test_runner::RngSeed;
+
+    use super::{Key, parse_key};
+
+    const NAMED_KEYS: &[&str] = &[
+        "enter",
+        "return",
+        "tab",
+        "esc",
+        "escape",
+        "space",
+        "backspace",
+        "delete",
+        "del",
+        "insert",
+        "ins",
+        "home",
+        "end",
+        "pageup",
+        "pgup",
+        "pagedown",
+        "pgdn",
+        "left",
+        "up",
+        "right",
+        "down",
+    ];
+    // Modifier spellings accepted by both desktop-windows and desktop-linux.
+    // Note: desktop-linux additionally accepts X11-specific non-modifier aliases
+    // (`spacebar`, `page_up`/`page-up`, `page_down`/`page-down`,
+    // `arrow_left`/`arrow-left` etc., `caps`/`capslock`/`caps_lock`, and
+    // `print`/`printscreen`/`print_screen`/`prtsc`), while every modifier name
+    // accepted on Windows is also accepted on Linux.
+    const WINDOWS_MODIFIERS: &[&str] = &[
+        "ctrl", "control", "lctrl", "rctrl", "shift", "lshift", "rshift", "alt", "menu", "option",
+        "lalt", "ralt", "altgr", "win", "windows", "cmd", "meta", "super", "lwin", "rwin",
+        "rsuper",
+    ];
+    const WHITESPACE: &[&str] = &["", " ", "\t", "\r\n", "\u{a0}", "\t\u{2003} "];
+
+    fn unicode_text() -> impl Strategy<Value = String> {
+        const EDGE_CHARS: &[char] = &['\0', '\t', '\n', '\u{1b}', '\u{2003}', 'İ', '\u{307}', '🦀'];
+        let character = prop_oneof![4 => any::<char>(), 1 => select(EDGE_CHARS)];
+        vec(character, 0..=512).prop_map(|chars| chars.into_iter().collect())
+    }
+
+    fn vary_ascii_case(name: &str, uppercase: &[bool; 16]) -> String {
+        name.chars()
+            .zip(uppercase.iter().cycle())
+            .map(|(c, &upper)| if upper { c.to_ascii_uppercase() } else { c })
+            .collect()
+    }
+
+    fn config() -> ProptestConfig {
+        let mut config = ProptestConfig::default();
+        if config.rng_seed == RngSeed::Random {
+            config.rng_seed = RngSeed::Fixed(461);
+        }
+        config
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+
+        /// Arbitrary valid UTF-8, including controls and unusual Unicode, never panics.
+        #[test]
+        fn arbitrary_utf8_does_not_panic(input in unicode_text()) {
+            let _ = parse_key(&input);
+        }
+
+        /// Recognized ASCII key names and modifiers keep the same virtual-key code across case and surrounding whitespace.
+        #[test]
+        fn named_keys_ignore_ascii_case_and_whitespace(
+            uppercase in any::<[bool; 16]>(),
+            before in select(WHITESPACE),
+            after in select(WHITESPACE),
+        ) {
+            for &name in NAMED_KEYS.iter().chain(WINDOWS_MODIFIERS) {
+                let expected = parse_key(name);
+                let varied = vary_ascii_case(name, &uppercase);
+                let input = format!("{before}{varied}{after}");
+                prop_assert!(matches!(expected, Some(Key::Vk(_))), "{name:?}");
+                prop_assert_eq!(parse_key(&input), expected, "input: {:?}", input);
+            }
+        }
+
+        /// F1 through F24 map to Win32 VK_F1..=VK_F24 (0x70..=0x87), and out-of-range numbers are rejected.
+        #[test]
+        fn function_key_range(
+            prefix in select(&['f', 'F'][..]),
+            leading_zeroes in 0..=3_usize,
+            invalid in prop_oneof![Just(0_u64), 25..=64_u64, 65..=u64::MAX],
+        ) {
+            let zeroes = "0".repeat(leading_zeroes);
+            for (number, vk) in (1_u16..=24).zip(0x70_u16..=0x87) {
+                let input = format!("{prefix}{zeroes}{number}");
+                prop_assert_eq!(parse_key(&input), Some(Key::Vk(vk)), "input: {:?}", input);
+            }
+            let input = format!("{prefix}{zeroes}{invalid}");
+            prop_assert_eq!(parse_key(&input), None, "input: {:?}", input);
+        }
+
+        /// ASCII letters map to VK_A..=VK_Z (0x41..=0x5A) and digits map to VK_0..=VK_9 (0x30..=0x39).
+        #[test]
+        fn ascii_letters_and_digits(letter in b'a'..=b'z', digit in b'0'..=b'9') {
+            let vk_letter = 0x41 + u16::from(letter - b'a');
+            for byte in [letter, letter.to_ascii_uppercase()] {
+                let input = char::from(byte).to_string();
+                prop_assert_eq!(parse_key(&input), Some(Key::Vk(vk_letter)), "input: {:?}", input);
+            }
+            let vk_digit = 0x30 + u16::from(digit - b'0');
+            let input = char::from(digit).to_string();
+            prop_assert_eq!(parse_key(&input), Some(Key::Vk(vk_digit)), "input: {:?}", input);
+        }
+
+        /// A single non-ASCII non-whitespace literal retains its original Unicode scalar.
+        #[test]
+        fn unicode_literals_keep_the_original_character(
+            c in any::<char>().prop_filter("non-ASCII literal", |c| !c.is_ascii() && !c.is_whitespace()),
+            before in select(WHITESPACE),
+            after in select(WHITESPACE),
+        ) {
+            let input = format!("{before}{c}{after}");
+            prop_assert_eq!(parse_key(&input), Some(Key::Char(c)), "input: {:?}", input);
+        }
+
+        /// Unknown tokens with at least two characters after trimming are rejected.
+        #[test]
+        fn unknown_multi_character_tokens_are_rejected(text in unicode_text()) {
+            let input = format!(" \t?{text}!\u{2003}");
+            prop_assert_eq!(parse_key(&input), None, "input: {:?}", input);
+        }
+    }
+}

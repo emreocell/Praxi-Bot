@@ -48,6 +48,10 @@ All paths are under `apps/desktop/ui/src/`.
   `apps/cli/src/presets.rs`); a new CLI language is a separate, larger change.
 - The natural-language schedule parser understands English and Turkish phrases
   (`crates/scheduler/src/nl.rs`).
+- The Telegram channel's own texts are an English/Turkish catalog in
+  `crates/channel-telegram/src/messages.rs`, and `/lang` accepts only `en` and `tr`. A new Telegram
+  language needs a new `Language` value, a text for every message, and tests; keep each message's
+  arguments and the security meaning of approval texts exactly as in English.
 - The user guide in `docs/guide/` is English only.
 
 Tell us in the pull request which of these you did or did not do.

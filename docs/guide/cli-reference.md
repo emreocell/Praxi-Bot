@@ -91,8 +91,9 @@ before a provider is configured, reporting `setup_required` until you run
 
 ### `bot doctor`
 
-Check installation health (data dir, config, providers, daemon, browser, and more).
-Never prompts. Exits 1 when any check fails.
+Check installation health (data dir writability and free disk space, config,
+providers, daemon, browser, and more). Never prompts. Exits 1 when any check
+fails.
 
 | Option | Meaning |
 | --- | --- |
@@ -166,6 +167,16 @@ Send a message and stream the answer.
 | --- | --- |
 | `--chat <CHAT_ID>` | Continue an existing chat instead of starting one |
 | `--mode <steer\|queue>` | What to do if the chat has a running turn (default `queue`) |
+
+### `bot chats`
+
+List and export saved chats. Export is owner-only and uses the same Markdown
+and JSON files as the desktop app.
+
+| Subcommand | Meaning |
+| --- | --- |
+| `bot chats list [--bot <BOT_ID>]` | List chats; `--json` prints the API array |
+| `bot chats export <CHAT_ID>` | Write one chat to stdout. Options: `--format md\|json` (default `md`; global `--json` forces JSON), `-o, --output <FILE>` writes a private file (mode `0600` on Unix; an existing path or a symlink is refused) and `--force` replaces an existing regular file |
 
 ### `bot bots`
 

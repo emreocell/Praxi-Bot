@@ -30,3 +30,5 @@ pub mod tier2;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 /// Result alias.
 pub type Result<T> = std::result::Result<T, Error>;
+
+pub mod transcript;

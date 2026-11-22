@@ -1047,6 +1047,13 @@ impl AgentLoop {
         note: Option<&str>,
         kind: &str,
     ) -> Result<RunId> {
+        // A tool or workflow directive is dropped under safe mode; say so instead of
+        // starting a turn that silently does nothing.
+        if self.sh.cfg.safe_mode && !matches!(work, ScheduleWork::Prompt(_)) {
+            return Err(LoopError::Profile(
+                "scheduled tools and workflows are disabled in safe mode".into(),
+            ));
+        }
         if !self.sh.storage.list_messages(chat_id)?.is_empty() {
             return Err(LoopError::Profile(
                 "external schedule requires an empty chat".into(),
@@ -1472,13 +1479,20 @@ impl AgentLoop {
         // The run-scoped control scope is the one non-Once scope a once-only
         // card may carry, and only when the daemon built it with an eligible
         // control target. It is refused everywhere else, for every client.
-        let refused = self.sh.pending.lock().get(&call_id).is_some_and(|p| {
-            if scope == ApprovalScope::RunControl {
-                !p.grantable
-            } else {
-                scope != ApprovalScope::Once && p.once_only
-            }
-        });
+        // "Allow for this task" is accepted only where the daemon offered it (one MCP tool,
+        // not always-ask, not a floor, not a program start after untrusted content). A
+        // tool-wide standing grant is refused for an MCP tool once the run read private data.
+        let refused = self
+            .sh
+            .pending
+            .lock()
+            .get(&call_id)
+            .is_some_and(|p| match scope {
+                ApprovalScope::RunControl => !p.grantable,
+                ApprovalScope::RunTool => !p.run_tool,
+                ApprovalScope::Always | ApprovalScope::AlwaysCategory if p.always_refused => true,
+                _ => scope != ApprovalScope::Once && p.once_only,
+            });
         if refused {
             return Err(LoopError::OnceOnly(call_id));
         }

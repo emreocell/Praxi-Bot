@@ -192,8 +192,14 @@ You can also export portable state (bots, chats, memory, skills, workflows,
 schedules, provider settings — excluding API keys, tokens, paired devices, and
 browser profiles) as described in [Encrypted backup and restore](backup.md). Keep the passphrase in a file or Docker secret, never on the command line:
 
+The image does not define `BACKUP_PASSPHRASE`; you set it for the command
+(`docker exec -e BACKUP_PASSPHRASE ...` passes the value from your shell without
+writing it on the command line, or use `--passphrase-file` with a mounted Docker
+secret). `--passphrase-env` takes the **name** of the variable, never the passphrase.
+
 ```sh
-docker exec praxi-host bot backup create /tmp/praxi-backup.bak --passphrase-env BACKUP_PASSPHRASE
+export BACKUP_PASSPHRASE='...'   # your shell only; not stored in the image
+docker exec -e BACKUP_PASSPHRASE praxi-host bot backup create /tmp/praxi-backup.bak --passphrase-env BACKUP_PASSPHRASE
 docker cp praxi-host:/tmp/praxi-backup.bak ./praxi-backup.bak
 docker exec praxi-host rm -f /tmp/praxi-backup.bak
 ```

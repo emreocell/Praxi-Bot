@@ -1252,6 +1252,23 @@ id = "m1"
                 get(&checks, n).detail
             );
         }
+        let dd = get(&checks, "data dir");
+        assert!(
+            dd.detail.contains("writable") && dd.detail.contains("MiB free"),
+            "{}",
+            dd.detail
+        );
+
+        let file_path = d.path().join("not-a-directory");
+        std::fs::write(&file_path, b"file").unwrap();
+        let file_checks = run_checks(&env(&file_path, &cat, &store, free_port()));
+        let bad_dd = get(&file_checks, "data dir");
+        assert_eq!(bad_dd.status, Status::Fail, "{}", bad_dd.detail);
+        assert!(
+            bad_dd.detail.contains("is not a directory"),
+            "{}",
+            bad_dd.detail
+        );
     }
 
     #[test]

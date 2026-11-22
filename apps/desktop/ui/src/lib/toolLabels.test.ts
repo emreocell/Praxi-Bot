@@ -89,6 +89,7 @@ test("writing, scripting and typing tools are not worded as reads or generic use
   assert.notEqual(describeTool("skill_write", {}).key, describeTool("skill_read", {}).key);
   assert.notEqual(describeTool("memory_save", {}).key, describeTool("memory_search", {}).key);
   assert.notEqual(describeTool("memory_forget", {}).key, describeTool("memory_search", {}).key);
+  assert.notEqual(describeTool("notes_write", {}).key, describeTool("notes_read", {}).key);
   assert.equal(describeTool("session_search", { query: "deploy" }).key, "chat.step.session_search");
   assert.equal(describeTool("knowledge_search", { query: "backup" }).key, "chat.step.knowledge_search");
   assert.notEqual(describeTool("desktop_type", {}).key, describeTool("desktop_get_state", {}).key);

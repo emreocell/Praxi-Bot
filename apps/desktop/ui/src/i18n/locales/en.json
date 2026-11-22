@@ -806,7 +806,7 @@
         "name": "Custom"
       },
       "full": {
-        "hint": "Runs without asking (including deletes and sends), except Money, schedule activation and catastrophic never-list commands. After reading untrusted content it still asks before sending data out or running a program.",
+        "hint": "Runs without asking (including deletes and sends), except Money, schedule activation and catastrophic never-list commands. After reading untrusted content it still asks before sending data out or running a program. Exception: actions inside a browser you connected as a browser (Playwright: open, look, click, type, run a page script) do not ask after a web page alone; they ask once the task also read something private (files, mail, memory, your screen). Running code outside the page and moving files always ask.",
         "name": "Full"
       },
       "read-and-draft": {
@@ -904,6 +904,8 @@
       "toolsOnHint": "Reading is allowed. Sending always follows the permission mode of this bot, and asks first by default."
     },
     "makeMain": "Make main bot",
+    "muteNotify": "Mute run notifications",
+    "muteNotifyHint": "Finished and failed runs of this bot stay silent and go to the notification history. Approvals and questions still notify.",
     "myComputer": "My computer",
     "needsDesktop": "{{name}} has no desktop session, so there is no screen to show. To add one, run this on this computer:",
     "noChatMatches": "No chats match",
@@ -1025,6 +1027,7 @@
     "addCommand": "Add a command or bot",
     "approval": {
       "always": "Always",
+      "alwaysTool": "Always allow for this bot (this tool)",
       "app": {
         "arguments": "Show all arguments ({{count}} characters)",
         "footer": "Via Composio. Approve only this action with all arguments shown above."
@@ -1112,6 +1115,10 @@
       "plain": {
         "action": {
           "browser": "Open this page in the browser on {{where}}: {{url}}",
+          "browserMcpAction": "Praxi wants to use {{tool}} in your browser.",
+          "browserMcpCode": "Praxi wants to run code in your browser automation, outside the web page.",
+          "browserMcpFile": "Praxi wants to move a file between this computer and a page in your browser.",
+          "browserMcpOpen": "Praxi wants to open {{url}} in your browser.",
           "generic": "Do something on {{where}}",
           "launch": "Open the program {{name}} on {{where}}",
           "pcBrowser": "Use the browser on YOUR computer",
@@ -1149,6 +1156,7 @@
         },
         "reason": {
           "egress": "The bot read {{list}} and now wants to send data to {{host}}.",
+          "egressBrowser": "Browser actions run without asking after a web page alone. This task also read {{list}}, which is private, so Praxi asks: a web address or a page script could carry it out.",
           "egressExecutes": "The bot read {{list}} and now wants to send data to {{host}} and start a program. Calls that start a program always ask.",
           "unknownSources": "untrusted or private content"
         },
@@ -1172,6 +1180,7 @@
         }
       },
       "reasonPlaceholder": "Reason for denying (optional)",
+      "runTool": "Allow for this task",
       "schedule": {
         "allowed": "Allowed without asking: {{list}}.",
         "level": {
@@ -1210,7 +1219,8 @@
       "thisChat": "This chat",
       "title": "Approval needed",
       "why": {
-        "always_ask": "This action always asks, whatever the permission level (apps, secrets).",
+        "always_ask": "This action always asks, whatever the permission level (apps, secrets, code outside a browser page, browser file transfers).",
+        "browser_address": "This address is a file, your own computer or your network, not a public web page, so opening it asks first.",
         "egress": "Untrusted content (a web page, mail, download) is in this chat, so sending data out asks first.",
         "executes": "Untrusted content (a web page, mail, download) is in this chat, so typing, shell commands and launching programs ask first.",
         "floor": "Payments and risky commands always ask, whatever the permission level.",
@@ -1647,6 +1657,16 @@
         "failed": "Couldn't search memory",
         "running": "Searching memory"
       },
+      "notes_read": {
+        "done": "Read notes",
+        "failed": "Couldn't read notes",
+        "running": "Reading notes"
+      },
+      "notes_write": {
+        "done": "Saved a note",
+        "failed": "Didn't save a note",
+        "running": "Saving a note"
+      },
       "schedule_create": {
         "done": "Created a recurring task",
         "failed": "Didn't create a recurring task",
@@ -1760,6 +1780,7 @@
     "exportJson": "Export as JSON",
     "exportMarkdown": "Export as Markdown",
     "more": "More results",
+    "noneYet": "No visible matches on this page yet",
     "results": "Message search results",
     "search": "Search all chat messages…",
     "searching": "Searching messages…",
@@ -2479,6 +2500,10 @@
     "restarting": "Restarting…",
     "retry": "Try again",
     "retrying": "Trying again in {{seconds}} s",
+    "safeModeBlocked": {
+      "hint": "Tools, workflows and schedules are switched off while safe mode is on. Restart Praxi normally to use them.",
+      "title": "Safe mode is on"
+    },
     "screenInputDenied": {
       "hint": "Allow screen control for this computer in Praxi on the host, then try again.",
       "title": "Screen control is not allowed for this computer"
@@ -3354,7 +3379,7 @@
     "autonomyCustom": "Using the {{preset}} permission preset.",
     "autonomyHints": {
       "ask": "Reads files, checks the screen, and searches the web without asking; asks before any change, send, page fetch, click, or command.",
-      "auto": "Runs without asking, even for deletes, commands and sends. Still asks for Money, schedule activation and catastrophic commands, and after reading untrusted content, before sending data out or running a program.",
+      "auto": "Runs without asking, even for deletes, commands and sends. Still asks for Money, schedule activation and catastrophic commands, and after reading untrusted content, before sending data out or running a program. Actions inside a connected browser (Playwright) only ask once the task also read something private; code outside the page and file transfers always ask.",
       "balanced": "Reads, browses, edits workspace files and works on the bot's own computer without asking; asks before deleting files, sending, spending money, or touching your PC."
     },
     "autonomyLevels": {
@@ -3425,6 +3450,7 @@
     "clear": "Clear history",
     "empty": "No notifications yet.",
     "held": "Held (quiet hours)",
+    "heldMuted": "Held (bot muted)",
     "kind": {
       "failed": "Run failed",
       "longRun": "Long run finished",

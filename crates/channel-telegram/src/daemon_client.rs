@@ -550,3 +550,85 @@ pub fn parse_question_callback(data: &str) -> Option<(ToolCallId, String)> {
 pub fn format_question_callback(call_id: ToolCallId, option_index: usize) -> String {
     format!("question:{}:{option_index}", call_id.0)
 }
+
+#[cfg(test)]
+mod property_tests {
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::select;
+    use proptest::test_runner::RngSeed;
+    use uuid::Uuid;
+
+    use super::{
+        ApprovalDecision, ApprovalScope, ToolCallId, format_approval_callback,
+        format_question_callback, parse_approval_callback, parse_question_callback,
+    };
+
+    fn config() -> ProptestConfig {
+        let mut config = ProptestConfig::default();
+        if config.rng_seed == RngSeed::Random {
+            config.rng_seed = RngSeed::Fixed(461);
+        }
+        config
+    }
+
+    fn unicode_text() -> impl Strategy<Value = String> {
+        const SYNTAX: &[char] = &[':', '\0', '\n', '\t', '-', 'İ', '🦀'];
+        let ch = prop_oneof![4 => any::<char>(), 1 => select(SYNTAX)];
+        vec(ch, 0..=256).prop_map(|chars| chars.into_iter().collect())
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+
+        /// Both Telegram callback parsers tolerate arbitrary UTF-8 strings without panicking.
+        #[test]
+        fn callback_parsers_never_panic_on_arbitrary_utf8(input in unicode_text()) {
+            let _ = parse_approval_callback(&input);
+            let _ = parse_question_callback(&input);
+        }
+
+        /// Approval callbacks round-trip for known actions across both `approve:` and `ap:` prefixes and reject unknown actions.
+        #[test]
+        fn approval_callbacks_round_trip_and_reject_unknown_actions(
+            bytes in any::<[u8; 16]>(),
+            prefix in select(&["approve:", "ap:"][..]),
+            unknown in "[a-z0-9_-]{1,16}".prop_filter("not a valid action", |s| {
+                !matches!(s.as_str(), "once" | "always" | "run" | "deny")
+            }),
+        ) {
+            let call_id = ToolCallId(Uuid::from_bytes(bytes));
+            for (action, decision, scope) in [
+                ("once", ApprovalDecision::Approve, ApprovalScope::Once),
+                ("always", ApprovalDecision::Approve, ApprovalScope::Always),
+                ("run", ApprovalDecision::Approve, ApprovalScope::RunControl),
+                ("deny", ApprovalDecision::Deny, ApprovalScope::Once),
+            ] {
+                let formatted = format_approval_callback(call_id, action);
+                prop_assert_eq!(parse_approval_callback(&formatted), Some((call_id, decision, scope)));
+                let raw = format!("{prefix}{action}:{}", call_id.0);
+                prop_assert_eq!(parse_approval_callback(&raw), Some((call_id, decision, scope)));
+            }
+            let invalid = format!("{prefix}{unknown}:{}", call_id.0);
+            prop_assert_eq!(parse_approval_callback(&invalid), None);
+        }
+
+        /// Question callbacks preserve arbitrary UTF-8 payloads (including colons) after the UUID separator.
+        #[test]
+        fn question_callbacks_preserve_arbitrary_payloads_including_colons(
+            bytes in any::<[u8; 16]>(),
+            index in any::<usize>(),
+            payload in unicode_text(),
+            prefix in select(&["question:", "q:"][..]),
+        ) {
+            let call_id = ToolCallId(Uuid::from_bytes(bytes));
+            let formatted = format_question_callback(call_id, index);
+            prop_assert_eq!(
+                parse_question_callback(&formatted),
+                Some((call_id, index.to_string()))
+            );
+            let raw = format!("{prefix}{}:{payload}", call_id.0);
+            prop_assert_eq!(parse_question_callback(&raw), Some((call_id, payload)));
+        }
+    }
+}

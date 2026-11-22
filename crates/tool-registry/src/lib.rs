@@ -3,6 +3,7 @@
 //! Maintains the runtime registry of built-in tools, MCP servers, and skills,
 //! and exposes a find-tool interface that narrows the visible set for each agent turn.
 
+pub mod browser_mcp;
 pub mod error;
 pub mod registry;
 pub mod spec;

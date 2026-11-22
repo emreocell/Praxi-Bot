@@ -433,6 +433,23 @@ fn update_with_a_changed_spec_rearms_and_upsert_keeps_cursors_for_other_edits() 
 }
 
 #[test]
+fn a_run_left_started_by_a_hard_kill_is_reconciled_as_interrupted() {
+    let store = ScheduleStore::open_in_memory().unwrap();
+    let sched = recurring();
+    store.insert(&sched).unwrap();
+    raw_occurrence(&store, sched.id, 1_000, "started");
+    assert_eq!(store.recover_unresolved_occurrences().unwrap(), 1);
+    assert_eq!(
+        store
+            .get_occurrence(sched.id, 1_000)
+            .unwrap()
+            .unwrap()
+            .state,
+        crate::OccurrenceState::Interrupted
+    );
+}
+
+#[test]
 fn startup_recovery_makes_unresolved_occurrences_visible_and_parks_one_shots() {
     let store = ScheduleStore::open_in_memory().unwrap();
     let mut once = at_schedule(5_000);

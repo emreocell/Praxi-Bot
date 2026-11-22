@@ -70,6 +70,16 @@ pub struct ContentClass {
     /// Missing on the wire means it does not.
     #[serde(default, skip_serializing_if = "is_false")]
     pub executes: bool,
+    /// The call acts only inside a browser the OWNER connected as a browser
+    /// (an MCP server whose configured kind is `browser`, or the built-in
+    /// Playwright preset): navigate, snapshot, click, type, evaluate inside the
+    /// page. Its egress is that browser's own page traffic. The egress gate
+    /// lets it through while the run has read only untrusted content and asks
+    /// once anything private was read. Set only by the MCP bridge from owner
+    /// configuration, never from a server's or a model's text. Missing on the
+    /// wire means it does not.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub in_owner_browser: bool,
     /// `false` only for [`ContentClass::unspecified`] and for a spec that was
     /// deserialized without an explicit declaration.
     #[serde(default)]
@@ -97,9 +107,18 @@ impl ContentClass {
             reads_private,
             egress,
             executes: false,
+            in_owner_browser: false,
             declared: true,
             external_metadata: false,
         }
+    }
+
+    /// This call acts only inside the browser the owner connected (see
+    /// [`ContentClass::in_owner_browser`]).
+    #[must_use]
+    pub const fn in_owner_browser(mut self) -> Self {
+        self.in_owner_browser = true;
+        self
     }
 
     /// This call starts an arbitrary program.
@@ -169,6 +188,7 @@ impl ContentClass {
             reads_private: true,
             egress: true,
             executes: false,
+            in_owner_browser: false,
             declared: false,
             external_metadata: false,
         }

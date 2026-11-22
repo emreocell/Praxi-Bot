@@ -1,0 +1,113 @@
+name: live-recorded-read
+description: Recorded from a real provider against an isolated read fixture.
+policy: full
+profile_toml: ''
+guards:
+  max_steps: 4
+  repeat_warn: null
+  repeat_stop: null
+  max_tokens_per_turn: null
+  spill_threshold_bytes: null
+  spill_preview_bytes: null
+  tool_timeout_ms: null
+  model_timeout_ms: 30000
+tools:
+- name: fixture_read
+  effect: read
+  category: fs
+  output: 'Synthetic public fixture: ready.'
+  output_bytes: null
+  delay_ms: 0
+  error: null
+  content: none
+  executes: false
+subagents: false
+workflows: []
+user: 'Call fixture_read with empty arguments exactly once. After reading its result, reply with exactly: fixture complete'
+script: []
+transcript:
+  version: 1
+  synthetic: false
+  source_model: gemini/gemini-3.1-flash-lite
+  calls:
+  - request:
+      fingerprint: e538b3a5f54c9943
+      roles:
+      - user
+      tool_results: []
+      tools:
+      - fixture_read
+      - todo_write
+    chunks:
+    - !tool_delta
+      call_id: gm9f2dd65ca452b8eaxEqEBCp4BAWkUfRN2JCZTkhifLgQLmEFOix3L_eM_MS6NFjQUykZRIDbrFx60YCJJqWl0dNn0w0cRJW_sl7hzbmTaTlRqH5ZhSJpQCaP8lt8AJmMs4e4tHwzaMFcj3t19Idi0LRDlywOnQqTFxPfUMJNsT7aAhS7ZCYsNhaiLWi7MHwd7zLDMZWZcJ09_ujb2Ed_O8DWg5Rn6R5AJg3--qTeSc-Q
+      name: fixture_read
+      input_delta: '{}'
+    - !tool
+      id: gm9f2dd65ca452b8eaxEqEBCp4BAWkUfRN2JCZTkhifLgQLmEFOix3L_eM_MS6NFjQUykZRIDbrFx60YCJJqWl0dNn0w0cRJW_sl7hzbmTaTlRqH5ZhSJpQCaP8lt8AJmMs4e4tHwzaMFcj3t19Idi0LRDlywOnQqTFxPfUMJNsT7aAhS7ZCYsNhaiLWi7MHwd7zLDMZWZcJ09_ujb2Ed_O8DWg5Rn6R5AJg3--qTeSc-Q
+      name: fixture_read
+      arguments: '{}'
+    - !usage
+      prompt_tokens: 348
+      completion_tokens: 10
+      cached_tokens: null
+      cache_write_tokens: null
+    - !done ToolCalls
+  - request:
+      fingerprint: 00d4101887de81d7
+      roles:
+      - user
+      - assistant
+      - tool
+      tool_results:
+      - 'Synthetic public fixture: ready.'
+      tools:
+      - fixture_read
+      - todo_write
+    chunks:
+    - !text |2-
+
+
+      fixture complete
+    - !usage
+      prompt_tokens: 478
+      completion_tokens: 3
+      cached_tokens: null
+      cache_write_tokens: null
+    - !done Stop
+reactions: []
+expect:
+  state: succeeded
+  model_calls: 2
+  tool_calls:
+  - fixture_read
+  tool_runs:
+    fixture_read: 1
+  tool_finished: {}
+  permissions:
+  - tool: fixture_read
+    decision: allowed
+  final_text:
+    contains: []
+    not_contains: []
+    regex: null
+    equals: |2-
+
+
+      fixture complete
+  error: null
+  requests: []
+  files_absent: []
+  files_unchanged: {}
+  approval_cards: []
+  no_approval_tools:
+  - fixture_read
+timeout_ms: 60000
+unsafe_tools: []
+secrets: []
+expected_fail: null
+initiator: human
+fs: null
+settle_ms: 0
+redact_secrets: false
+attack: null

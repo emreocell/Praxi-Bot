@@ -26,6 +26,7 @@ use crate::detect::{
 };
 
 mod native;
+pub(crate) use native::run_adapted_turn;
 pub use native::{NativeTurn, run_native_turn};
 
 /// Supported session dialect.

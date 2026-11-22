@@ -46,6 +46,19 @@ pub async fn run_native_turn(
     host: Arc<dyn TurnHost>,
     cancel: CancellationToken,
 ) -> Result<TurnUsage, CliError> {
+    use crate::adapter::EngineAdapter;
+    nt.driver
+        .run_turn(command, env, nt.turn, nt.workspace, nt.level, host, cancel)
+        .await
+}
+
+pub(crate) async fn run_adapted_turn(
+    command: &str,
+    env: &PathEnv,
+    nt: NativeTurn,
+    host: Arc<dyn TurnHost>,
+    cancel: CancellationToken,
+) -> Result<TurnUsage, CliError> {
     let stop = cancel.child_token();
     let _guard = CancelOnDrop(stop.clone());
     let command = command.to_owned();

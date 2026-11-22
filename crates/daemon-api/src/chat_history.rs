@@ -17,6 +17,8 @@ use crate::{
 };
 
 const MAX_EXPORT_BYTES: usize = 4 * 1024 * 1024;
+/// Ranked pages scanned for one request when redaction omits every hit.
+const MAX_SCAN_PAGES: usize = 20;
 
 #[derive(Deserialize, IntoParams)]
 pub(crate) struct SearchQuery {
@@ -81,36 +83,53 @@ fn search_page(s: &AppState, q: &SearchQuery) -> Result<SearchPage, ApiError> {
     if let Some(chat) = q.chat_id {
         s.chat_of_user(ChatId(chat))?;
     }
-    let rows = s.storage().search_messages(
-        s.user_id(),
-        q.bot_id.map(BotId),
-        q.chat_id.map(ChatId),
-        text,
-        offset,
-        limit,
-    )?;
-    let full = rows.len() == limit as usize;
+    // A page whose hits were all omitted by redaction must not come back empty
+    // with a "more" cursor: keep reading forward (bounded) until something is
+    // shown or the ranked list ends.
+    let mut next = offset;
     let mut results = Vec::new();
-    for (m, snippet) in rows {
-        // Redact the WHOLE message before considering snippets. Otherwise a snippet
-        // boundary could split a credential and evade known-value masking. Omit a
-        // changed message entirely, so a query cannot match only its secret portion.
-        if safe_text(s, &m.content) != m.content || m.content.contains("[REDACTED]") {
-            continue;
+    let mut next_offset = None;
+    for _ in 0..MAX_SCAN_PAGES {
+        let rows = s.storage().search_messages(
+            s.user_id(),
+            q.bot_id.map(BotId),
+            q.chat_id.map(ChatId),
+            text,
+            next,
+            limit,
+        )?;
+        let full = rows.len() == limit as usize;
+        for (m, snippet) in rows {
+            // Redact the WHOLE message before considering snippets. Otherwise a snippet
+            // boundary could split a credential and evade known-value masking. Omit a
+            // changed message entirely, so a query cannot match only its secret portion.
+            if safe_text(s, &m.content) != m.content || m.content.contains("[REDACTED]") {
+                continue;
+            }
+            // The snippet gets the same pass as the checked text: the folded-match
+            // fallback can pick a window that differs from what was checked.
+            if safe_text(s, &snippet) != snippet || snippet.contains("[REDACTED]") {
+                continue;
+            }
+            let chat = s.chat_of_user(m.chat_id)?;
+            results.push(SearchHit {
+                chat_id: chat.id.0,
+                bot_id: chat.bot_id.0,
+                chat_title: safe_text(s, &chat.title),
+                message_id: m.id,
+                created_at_ms: m.created_at_ms,
+                snippet: snippet.chars().take(320).collect(),
+            });
         }
-        let chat = s.chat_of_user(m.chat_id)?;
-        results.push(SearchHit {
-            chat_id: chat.id.0,
-            bot_id: chat.bot_id.0,
-            chat_title: safe_text(s, &chat.title),
-            message_id: m.id,
-            created_at_ms: m.created_at_ms,
-            snippet: snippet.chars().take(320).collect(),
-        });
+        next += limit;
+        next_offset = (full && next <= 10_000).then_some(next);
+        if !results.is_empty() || next_offset.is_none() {
+            break;
+        }
     }
     Ok(SearchPage {
         results,
-        next_offset: (full && offset + limit <= 10_000).then_some(offset + limit),
+        next_offset,
     })
 }
 

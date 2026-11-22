@@ -129,6 +129,16 @@ pub struct McpServerConfig {
     /// tool is egress. Set `true` only for a server that cannot send data out.
     #[serde(default, skip_serializing_if = "is_false")]
     pub local_only: bool,
+    /// The owner connected this server as a browser (Playwright and similar).
+    /// Its in-page tools (navigate, snapshot, click, type, evaluate, ...) are
+    /// then judged as actions inside that browser: no ask after untrusted
+    /// content alone, an ask once something private was read. Tools that run
+    /// code outside the page or move files always ask. Comes only from the
+    /// owner's configuration (`mcp.toml`, the owner-only API), never from the
+    /// server or a model. The built-in Playwright preset counts as a browser
+    /// without it (see [`Self::is_browser`]).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub browser: bool,
     /// Bots that may use this server's tools; `None` = all bots.
     /// [`crate::tool::McpToolAdapter`] refuses a call whose bot id is missing
     /// or not in the list.
@@ -146,6 +156,40 @@ impl McpServerConfig {
     #[must_use]
     pub fn effective_category(&self) -> PermissionCategory {
         self.category.unwrap_or(PermissionCategory::Accounts)
+    }
+
+    /// The owner connected this server as a browser: the explicit
+    /// [`Self::browser`] flag, or the built-in Playwright preset exactly as
+    /// the catalog installs it (`npx -y @playwright/mcp@<version>`, an
+    /// isolated browser profile). Any extra argument (`--extension`,
+    /// `--cdp-endpoint`, a user data dir that may be signed in) needs the
+    /// explicit flag. Fails closed.
+    #[must_use]
+    pub fn is_browser(&self) -> bool {
+        self.browser || self.is_playwright_preset()
+    }
+
+    fn is_playwright_preset(&self) -> bool {
+        let McpTransport::Stdio { command, args, .. } = &self.transport else {
+            return false;
+        };
+        let stem = Path::new(command)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !matches!(stem.as_str(), "npx" | "npx.cmd" | "npx.exe") {
+            return false;
+        }
+        let pinned = |arg: &str| {
+            arg.strip_prefix("@playwright/mcp@").is_some_and(|v| {
+                !v.is_empty()
+                    && v.split('.').count() == 3
+                    && v.split('.')
+                        .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+            })
+        };
+        matches!(args.as_slice(), [y, pkg] if y == "-y" && pinned(pkg))
     }
 
     /// A stdio server with defaults (enabled, no filters, empty env).
@@ -173,6 +217,7 @@ impl McpServerConfig {
             secret_env: BTreeMap::new(),
             public_content: false,
             local_only: false,
+            browser: false,
             bots: None,
         }
     }
@@ -196,6 +241,7 @@ impl McpServerConfig {
             secret_env: BTreeMap::new(),
             public_content: false,
             local_only: false,
+            browser: false,
             bots: None,
         }
     }
@@ -656,6 +702,7 @@ mod tests {
         h.trust_hints = true;
         h.public_content = true;
         h.local_only = true;
+        h.browser = true;
         h.category = Some(PermissionCategory::Fs);
         h.secret_headers
             .insert("Authorization".into(), "mcp/web-token".into());
@@ -663,6 +710,26 @@ mod tests {
         s.secret_env.insert("API_KEY".into(), "mcp/loc-key".into());
         store.save(&[h.clone(), s.clone()]).unwrap();
         assert_eq!(store.load().unwrap(), vec![h, s]);
+    }
+
+    #[test]
+    fn only_the_owner_flag_or_the_exact_playwright_preset_is_a_browser() {
+        let preset = |args: &[&str]| McpServerConfig::stdio("pw", "npx", args.iter().copied());
+        assert!(preset(&["-y", "@playwright/mcp@0.0.86"]).is_browser());
+        assert!(
+            McpServerConfig::stdio("pw", "C:/nodejs/npx.cmd", ["-y", "@playwright/mcp@0.0.86"])
+                .is_browser()
+        );
+        // Not the preset: unpinned, extra arguments that reach a signed-in browser, other packages.
+        assert!(!preset(&["-y", "@playwright/mcp@latest"]).is_browser());
+        assert!(!preset(&["-y", "@playwright/mcp@0.0.86", "--extension"]).is_browser());
+        assert!(!preset(&["-y", "@evil/playwright-mcp@0.0.86"]).is_browser());
+        assert!(!McpServerConfig::stdio("pw", "node", ["@playwright/mcp@0.0.86"]).is_browser());
+        assert!(!McpServerConfig::http("pw", "https://x/mcp").is_browser());
+        // The owner's explicit flag.
+        let mut flagged = McpServerConfig::http("pw", "https://x/mcp");
+        flagged.browser = true;
+        assert!(flagged.is_browser());
     }
 
     #[test]

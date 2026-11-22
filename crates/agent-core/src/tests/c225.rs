@@ -323,3 +323,24 @@ async fn safe_mode_refuses_cli_executor_and_every_gate_call() {
     assert!(host.call_tool("read", json!({})).await.is_err());
     assert_eq!(read.count.load(Ordering::SeqCst), 0);
 }
+
+#[tokio::test]
+async fn safe_mode_external_schedule_reports_the_refusal() {
+    let env = setup();
+    let fake = Fake::new(vec![]);
+    let mut config = cfg(Policy::full());
+    config.safe_mode = true;
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let err = lp
+        .run_scheduled_external(
+            env.chat,
+            TaskId::new(),
+            ScheduleWork::Tool {
+                name: "read".into(),
+                input: json!({}),
+            },
+            None,
+        )
+        .expect_err("a tool schedule must be refused in safe mode");
+    assert!(err.to_string().contains("disabled in safe mode"), "{err}");
+}

@@ -27,6 +27,7 @@ tokio-util.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+proptest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
 wiremock.workspace = true

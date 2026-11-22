@@ -308,6 +308,7 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
             format!("file skill {}", str_field("name").unwrap_or("a skill"))
         }
         "memory_search" | "memory_save" | "memory_forget" => "memory".to_owned(),
+        "notes_read" | "notes_write" => "notes".to_owned(),
         "session_search" => "past conversation".to_owned(),
         "workflow_run" | "workflow_list" => "workflow replay".to_owned(),
         other if other.starts_with("desktop_") => format!(
@@ -383,6 +384,7 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
             ("this bot's scheduler".to_owned(), "body")
         }
         "memory_save" | "memory_forget" => ("this bot's memory".to_owned(), "body"),
+        "notes_write" => ("this bot's notes".to_owned(), "body"),
         "bot_create" | "bot_update" | "bot_delete" => ("the user's bots".to_owned(), "body"),
         other if other.starts_with("desktop_") => ("the desktop".to_owned(), "body"),
         _ => {
@@ -858,6 +860,69 @@ pub(crate) fn note_executes_on_egress(value: &mut Value) {
     obj.insert("executes".to_owned(), json!(true));
 }
 
+/// One plain sentence of what an action in the owner's connected browser will
+/// do, written by the daemon (the model's text only fills the address).
+pub(crate) fn owner_browser_action(name: &str, input: &Value) -> String {
+    let tool = name.rsplit('/').next().unwrap_or(name);
+    match input.get("url").and_then(Value::as_str) {
+        Some(url)
+            if matches!(
+                tool,
+                "browser_navigate" | "browser_tabs" | "browser_tab_new"
+            ) =>
+        {
+            format!("open {url} in your browser")
+        }
+        _ => format!("use {tool} in your browser"),
+    }
+}
+
+/// An action in the browser the owner connected asks only because the run also
+/// read something private. The card says that in one sentence, names the site
+/// a navigation goes to, and keeps the full payload below it.
+pub(crate) fn note_owner_browser(value: &mut Value, name: &str, input: &Value) {
+    let action = owner_browser_action(name, input);
+    let server = name
+        .strip_prefix("mcp:")
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or("the browser")
+        .to_owned();
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    let sources: String = obj
+        .get("read")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    if let Some(url) = input.get("url").and_then(Value::as_str) {
+        obj.insert("host".to_owned(), json!(host_of_url(url)));
+    }
+    obj.insert("action".to_owned(), json!(action));
+    obj.insert("browser".to_owned(), json!(server));
+    let reason = if crate::browser_url::opens_non_public(name, input) {
+        format!(
+            "this is not a public web address (a file, this computer or your network), so it asks before it will {action} ({server})"
+        )
+    } else if sources.is_empty() {
+        format!(
+            "this run read private data and now wants to {action} ({server}): a web address or a page script could carry it out"
+        )
+    } else {
+        format!(
+            "this run read {sources}, which includes private data, and now wants to {action} ({server}): a web address or a page script could carry what it read"
+        )
+    };
+    obj.insert("reason".to_owned(), json!(reason));
+    obj.insert("reason_code".to_owned(), json!("egress_browser"));
+}
+
 /// Replace `payload` with the text the user can see, and record its real size.
 pub(crate) fn finalize_egress_record(value: &mut Value) {
     let raw = value
@@ -1000,6 +1065,34 @@ mod card_tests {
         super::note_executes_on_egress(&mut card);
         assert_eq!(card["reason_code"], "egress_executes");
         assert_eq!(card["executes"], true);
+    }
+
+    #[test]
+    fn an_owner_browser_card_says_what_happens_once_and_names_the_site() {
+        let mut t = ContentTaint::default();
+        t.note(tool_registry::ContentClass::untrusted(), "mcp playwright");
+        t.note(
+            tool_registry::ContentClass::private_read(),
+            "file notes.txt",
+        );
+        let input = json!({"url": "https://example.com/start"});
+        let name = "mcp:playwright/browser_navigate";
+        let mut card = super::egress_record(&t, name, &input).unwrap();
+        super::note_owner_browser(&mut card, name, &input);
+        assert_eq!(card["reason_code"], "egress_browser");
+        assert_eq!(card["host"], "example.com");
+        assert_eq!(
+            card["action"],
+            "open https://example.com/start in your browser"
+        );
+        let reason = card["reason"].as_str().unwrap();
+        assert!(reason.contains("file notes.txt") && reason.contains("private"));
+        // The tool name is said once, in the sentence of what happens, not repeated.
+        assert_eq!(reason.matches("browser_navigate").count(), 0, "{reason}");
+        assert_eq!(
+            super::owner_browser_action("mcp:playwright/browser_click", &json!({"ref": "e3"})),
+            "use browser_click in your browser"
+        );
     }
 
     #[test]

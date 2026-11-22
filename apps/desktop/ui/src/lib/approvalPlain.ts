@@ -45,10 +45,12 @@ export function hostText(host: string, t: T): string {
 
 /** Why it asks, in one sentence, from the daemon's reason code. `null` for an older daemon (use its text). */
 export function reasonLine(egress: EgressApprovalDetails, t: T): string | null {
-  if (egress.reasonCode !== "egress" && egress.reasonCode !== "egress_executes") return null;
   const list = egress.read.length
     ? egress.read.map((s) => sourceText(s, t)).join(", ")
     : t("chat.approval.plain.reason.unknownSources");
+  // An action in the browser the owner connected asks only because the run also read private data.
+  if (egress.reasonCode === "egress_browser") return t("chat.approval.plain.reason.egressBrowser", { list });
+  if (egress.reasonCode !== "egress" && egress.reasonCode !== "egress_executes") return null;
   const key = egress.reasonCode === "egress_executes" || egress.executes ? "egressExecutes" : "egress";
   return t(`chat.approval.plain.reason.${key}`, { list, host: hostText(egress.host, t) });
 }
@@ -174,6 +176,30 @@ export function actionText(tool: string, input: unknown, w: WhereInput, t: T): s
   }
   if (tool.startsWith("desktop_")) return t("chat.approval.plain.action.screen", { where });
   return null;
+}
+
+/**
+ * One plain sentence for a call to the browser the owner connected (a browser-kind MCP server),
+ * or `null`. Only when the daemon marked the call (`browser_action`, or an always-asking
+ * `mcp_call` card): a tool name alone never makes a call a browser action.
+ */
+export function browserMcpText(tool: string, input: unknown, details: unknown, t: T): string | null {
+  // `mcp:<server>/<tool>`, or `<server>.<tool>` as a wrapped call is shown.
+  const m = /^mcp:[^/]+\/(.+)$/s.exec(tool) ?? /^[^/:]+\.([^./:]+)$/s.exec(tool);
+  if (!m || !details || typeof details !== "object") return null;
+  const d = details as { browser_action?: unknown; kind?: unknown; reason_code?: unknown };
+  const remote = m[1];
+  if (d.kind === "mcp_call") {
+    if (d.reason_code === "browser_code") return t("chat.approval.plain.action.browserMcpCode");
+    if (d.reason_code === "browser_file") return t("chat.approval.plain.action.browserMcpFile");
+    return null;
+  }
+  if (d.browser_action !== true) return null;
+  const rec = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  if ((remote === "browser_navigate" || remote === "browser_tabs" || remote === "browser_tab_new") && typeof rec.url === "string") {
+    return t("chat.approval.plain.action.browserMcpOpen", { url: escapeInvisible(clip(rec.url, 160)) });
+  }
+  return t("chat.approval.plain.action.browserMcpAction", { tool: remote });
 }
 
 /** Characters of a shell command shown before the card says it was cut. */

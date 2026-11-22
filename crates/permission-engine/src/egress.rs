@@ -55,6 +55,21 @@ impl ContentExposure {
     }
 }
 
+/// Where an egress call can send data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EgressReach {
+    /// The call can be aimed at an arbitrary host.
+    Arbitrary,
+    /// A `web_search` that can only reach the configured search provider.
+    ConfiguredSearch,
+    /// An action inside the browser the OWNER connected as a browser (an MCP
+    /// server of kind `browser` or the built-in Playwright preset): navigate,
+    /// snapshot, click, type, evaluate inside the page. It is the browser's own
+    /// page traffic, not a program start and not a file upload (those tools
+    /// are classified apart and always ask).
+    OwnerBrowser,
+}
+
 /// Whether an egress call must ask because of [`ContentExposure`].
 ///
 /// * Clean runs are unchanged.
@@ -62,11 +77,12 @@ impl ContentExposure {
 ///   asks here: with no untrusted text in the context there is nothing that can
 ///   instruct the model to send it anywhere. The tools that always ask (sends,
 ///   money, never-list) are decided before this rule.
-/// * Untrusted content only: `configured_search` (a `web_search` that can only
-///   reach the configured search provider, never an arbitrary URL) stays
-///   prompt-free. Every other egress asks.
-/// * Untrusted AND private content: every egress asks, search included (a query
-///   could carry the private data).
+/// * Untrusted content only: a configured search and an action inside the
+///   owner's connected browser stay prompt-free (there is no private data in
+///   the context they could carry). Every other egress asks.
+/// * Untrusted AND private content: every egress asks, search and browser
+///   actions included (a query, a URL or a page script could carry the
+///   private data out).
 /// * `explicit_waiver` is the per-bot "allow egress after reads" setting. It
 ///   is never implied by a tool or category grant.
 ///
@@ -75,7 +91,7 @@ impl ContentExposure {
 pub const fn egress_must_ask(
     exposure: ContentExposure,
     egress: bool,
-    configured_search: bool,
+    reach: EgressReach,
     explicit_waiver: bool,
 ) -> bool {
     if explicit_waiver || !egress || !exposure.untrusted {
@@ -85,7 +101,7 @@ pub const fn egress_must_ask(
         return true;
     }
     // Untrusted only.
-    !configured_search
+    matches!(reach, EgressReach::Arbitrary)
 }
 
 /// Whether a call that starts an arbitrary program must ask because the run
@@ -104,13 +120,14 @@ pub const fn executes_must_ask(exposure: ContentExposure, executes: bool) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use EgressReach::{Arbitrary, ConfiguredSearch, OwnerBrowser};
 
     #[test]
     fn clean_runs_do_not_ask() {
         let clean = ContentExposure::clean();
-        assert!(!egress_must_ask(clean, true, false, false));
-        assert!(!egress_must_ask(clean, true, true, false));
-        assert!(!egress_must_ask(clean, false, false, false));
+        assert!(!egress_must_ask(clean, true, Arbitrary, false));
+        assert!(!egress_must_ask(clean, true, ConfiguredSearch, false));
+        assert!(!egress_must_ask(clean, false, Arbitrary, false));
     }
 
     #[test]
@@ -118,9 +135,9 @@ mod tests {
         let mut exposure = ContentExposure::clean();
         exposure.observe(true, false);
         assert!(exposure.untrusted_only());
-        assert!(!egress_must_ask(exposure, true, true, false));
-        assert!(egress_must_ask(exposure, true, false, false));
-        assert!(!egress_must_ask(exposure, false, false, false));
+        assert!(!egress_must_ask(exposure, true, ConfiguredSearch, false));
+        assert!(egress_must_ask(exposure, true, Arbitrary, false));
+        assert!(!egress_must_ask(exposure, false, Arbitrary, false));
     }
 
     #[test]
@@ -128,19 +145,29 @@ mod tests {
         let mut exposure = ContentExposure::clean();
         exposure.observe(false, true);
         assert!(exposure.has_private());
-        assert!(!egress_must_ask(exposure, true, true, false));
-        assert!(!egress_must_ask(exposure, true, false, false));
+        assert!(!egress_must_ask(exposure, true, ConfiguredSearch, false));
+        assert!(!egress_must_ask(exposure, true, Arbitrary, false));
         exposure.observe(true, false);
         assert!(exposure.has_private());
-        assert!(egress_must_ask(exposure, true, true, false));
+        assert!(egress_must_ask(exposure, true, ConfiguredSearch, false));
+    }
+
+    #[test]
+    fn an_owner_browser_action_passes_untrusted_only_and_asks_once_private_is_read() {
+        let mut exposure = ContentExposure::clean();
+        exposure.observe(true, false);
+        assert!(!egress_must_ask(exposure, true, OwnerBrowser, false));
+        assert!(egress_must_ask(exposure, true, Arbitrary, false));
+        exposure.observe(false, true);
+        assert!(egress_must_ask(exposure, true, OwnerBrowser, false));
     }
 
     #[test]
     fn explicit_waiver_is_the_only_thing_that_skips_the_gate() {
         let mut exposure = ContentExposure::clean();
         exposure.observe(true, true);
-        assert!(!egress_must_ask(exposure, true, false, true));
-        assert!(egress_must_ask(exposure, true, false, false));
+        assert!(!egress_must_ask(exposure, true, Arbitrary, true));
+        assert!(egress_must_ask(exposure, true, Arbitrary, false));
     }
 
     #[test]

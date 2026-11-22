@@ -1,5 +1,21 @@
 export type ExportFormat = "markdown" | "json";
 
+/**
+ * Fetch one page of hits. A page whose hits were all omitted by the daemon comes back empty
+ * with a cursor; keep going (bounded) so the list never shows "0 matches" next to "More".
+ */
+export async function fetchHistoryPage<P extends { results: unknown[]; next_offset?: number | null }>(
+  fetchPage: (offset: number) => Promise<P>,
+  offset: number,
+  maxEmptyPages = 5
+): Promise<P> {
+  let page = await fetchPage(offset);
+  for (let i = 0; i < maxEmptyPages && page.results.length === 0 && page.next_offset != null; i++) {
+    page = await fetchPage(page.next_offset);
+  }
+  return page;
+}
+
 /** Group ranked hits without discarding their order within a chat. */
 export function groupHistoryHits<T extends { chat_id: string }>(hits: readonly T[]): T[][] {
   const groups = new Map<string, T[]>();

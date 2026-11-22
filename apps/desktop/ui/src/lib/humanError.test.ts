@@ -166,6 +166,7 @@ test("takeover and pause failures name their real reason, never the generic sent
       [{ status: 403, code: "forbidden", host: "Praxi host", message: "only the local user may do this" }, "host_refusal"],
       [{ status: 403, code: "forbidden", host: "Praxi host", message: "some brand new refusal" }, "host_refusal"],
       [{ status: 409, code: "conflict", message: "this screen target has no input backend, so it cannot be taken over" }, "noInputBackend"],
+      [{ status: 409, code: "conflict", message: "workflows are disabled in safe mode" }, "safeModeBlocked"],
       [{ status: 503, code: "unavailable", message: "the executor is busy; try again" }, "hostBusy"],
       [{ status: 503, code: "unavailable", message: "the display target did not confirm the key reset; the latch is kept, try again" }, "screenNoConfirm"],
       [{ status: 504, code: "timeout", host: "Praxi host", message: "gateway timeout" }, "host_silent"],

@@ -3,6 +3,7 @@
 //! Reports installed, signed-in coding CLIs (`claude`, `codex`, `cursor`, `opencode`,
 //! `gemini`, `agy`).
 
+pub mod adapter;
 pub mod detect;
 pub mod install;
 pub mod levels;

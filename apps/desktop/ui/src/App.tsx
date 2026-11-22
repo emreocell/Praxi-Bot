@@ -61,6 +61,7 @@ import { chatTitleLabel } from "./lib/chatTitle";
 import { APP_COMMAND_EVENT, type AppCommandTarget } from "./lib/slash";
 import { editorSection } from "./lib/botEditor";
 import { BOT_COLORS, botView, draftFromBot } from "./lib/botProfile";
+import { isBotMuted, setBotMuted } from "./lib/botMute";
 import { makeBotMain } from "./lib/botOrder";
 import {
   backFromChatOpensPanel,
@@ -885,6 +886,16 @@ function AppShell() {
               isMain={bots[0]?.id === selectedBot.id}
               mainBotName={bots[0] ? botView(bots[0]).name : undefined}
               onMakeMain={botIds.length > 1 ? () => saveBotOrder(makeBotMain(botIds, selectedBot.id)) : undefined}
+              notifyMuted={isBotMuted(settings.mutedBotIds, selectedBot.id)}
+              onToggleNotifyMute={() =>
+                updateSettings({
+                  mutedBotIds: setBotMuted(
+                    settings.mutedBotIds,
+                    selectedBot.id,
+                    !isBotMuted(settings.mutedBotIds, selectedBot.id)
+                  )
+                })
+              }
             />
           ) : null}
         </SidePanel>

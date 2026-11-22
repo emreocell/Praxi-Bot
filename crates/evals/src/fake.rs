@@ -167,6 +167,7 @@ impl ChatProvider for ScriptedProvider {
 /// A fake tool with a fixed output that counts its executions.
 pub struct FakeTool {
     spec: ToolSpec,
+    always_ask: bool,
     runs: Arc<AtomicU64>,
     finished: Arc<AtomicU64>,
     output: String,
@@ -190,16 +191,22 @@ impl FakeTool {
         let output = s
             .output_bytes
             .map_or_else(|| s.output.clone(), |n| "x".repeat(n));
+        let declared_effect = match s.effect {
+            EffectSpec::Read => Effect::Read,
+            EffectSpec::Write => Effect::Write,
+            EffectSpec::Destructive => Effect::Destructive,
+        };
+        let (content, effect, always_ask) = if s.browser_mcp {
+            browser_rules(&s.name)
+        } else {
+            (content_class(s), declared_effect, false)
+        };
         let tool = Arc::new(Self {
             spec: ToolSpec {
                 name: s.name.clone(),
                 description: format!("fake tool {}", s.name),
                 input_schema: json!({"type": "object"}),
-                effect: match s.effect {
-                    EffectSpec::Read => Effect::Read,
-                    EffectSpec::Write => Effect::Write,
-                    EffectSpec::Destructive => Effect::Destructive,
-                },
+                effect,
                 category: match s.category {
                     CategorySpec::Fs => PermissionCategory::Fs,
                     CategorySpec::Shell => PermissionCategory::Shell,
@@ -215,8 +222,9 @@ impl FakeTool {
                 },
                 platforms: vec![Platform::All],
 
-                content: content_class(s),
+                content,
             },
+            always_ask,
             runs: Arc::clone(&runs),
             finished: Arc::clone(&finished),
             output,
@@ -227,10 +235,36 @@ impl FakeTool {
     }
 }
 
+/// The class an owner-connected browser server's tool gets from the MCP
+/// bridge (same rules), or the generic MCP class for a name they do not know.
+fn browser_rules(name: &str) -> (tool_registry::ContentClass, Effect, bool) {
+    use tool_registry::browser_mcp;
+    let remote = name.rsplit('/').next().unwrap_or(name);
+    browser_mcp::rules(browser_mcp::classify(remote), false, false).unwrap_or((
+        tool_registry::ContentClass::declared(true, true, true),
+        Effect::Destructive,
+        false,
+    ))
+}
+
 #[async_trait]
 impl Tool for FakeTool {
     fn spec(&self) -> &ToolSpec {
         &self.spec
+    }
+
+    fn always_ask(&self) -> bool {
+        self.always_ask
+    }
+
+    async fn approval_details(
+        &self,
+        _: &ToolContext,
+        input: &Value,
+    ) -> Result<Option<Value>, ToolError> {
+        Ok(self
+            .always_ask
+            .then(|| json!({"kind": "mcp_call", "tool": self.spec.name, "arguments": input})))
     }
 
     async fn call(&self, _: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {

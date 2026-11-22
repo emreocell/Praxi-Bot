@@ -495,11 +495,13 @@ fn restore_encrypted(
     json_out: bool,
     out: &mut dyn Write,
 ) -> crate::Result<()> {
-    let _lock = ensure_daemon_stopped(data_dir, port)?;
+    // Refuse early without creating anything, then decrypt and check the whole
+    // file before the data dir is touched: a wrong passphrase or damaged file
+    // must not overwrite state nor create the destination directory.
+    refuse_if_daemon_running(data_dir, port)?;
     let passphrase = read_passphrase(&cmd.passphrase, false)?;
-    // First pass: decrypt and check the entire file before the data dir is
-    // touched, so a wrong passphrase or damaged file can never overwrite state.
     let found = inspect(&cmd.file, &passphrase)?;
+    let _lock = ensure_daemon_stopped(data_dir, port)?;
     let m = &found.manifest;
     // Progress notes go to stderr so stdout stays empty when the restore fails.
     if !json_out {
@@ -637,25 +639,55 @@ fn explain_import_error(e: Box<dyn std::error::Error>) -> Box<dyn std::error::Er
 }
 
 /// Hold the daemon lock file in `data_dir` for the life of the returned file.
-/// `bot serve` calls this at start; a second holder is told about it.
-pub fn hold_daemon_lock(data_dir: &Path) -> Option<std::fs::File> {
-    std::fs::create_dir_all(data_dir).ok()?;
-    let file = std::fs::OpenOptions::new()
+/// `bot serve` calls this at start. `Ok(None)` means the lock could not be
+/// created at all (read-only directory); `Err` means another process (a running
+/// daemon or a restore in progress) holds it, and the caller must not start.
+pub fn hold_daemon_lock(data_dir: &Path) -> crate::Result<Option<std::fs::File>> {
+    if std::fs::create_dir_all(data_dir).is_err() {
+        return Ok(None);
+    }
+    let Ok(file) = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
         .open(data_dir.join(DAEMON_LOCK))
-        .ok()?;
+    else {
+        return Ok(None);
+    };
     if file.try_lock().is_ok() {
-        Some(file)
+        Ok(Some(file))
     } else {
-        eprintln!(
-            "warning: another Praxi process appears to be using {}",
+        Err(format!(
+            "another Praxi process (a running daemon or a backup restore) is using {}; stop it first",
             data_dir.display()
-        );
-        None
+        )
+        .into())
     }
+}
+
+/// Read-only check used before anything is created: refuse while a daemon
+/// answers on `port` or holds the lock file of an existing `data_dir`.
+fn refuse_if_daemon_running(data_dir: &Path, port: u16) -> crate::Result<()> {
+    if daemon_listening(port) {
+        return Err(format!(
+            "cannot restore while a daemon is running on port {port}; stop `bot serve` (or close the desktop app) and retry"
+        )
+        .into());
+    }
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(data_dir.join(DAEMON_LOCK))
+        && file.try_lock().is_err()
+    {
+        return Err(format!(
+            "cannot restore while a daemon is using {}; stop `bot serve` (or close the desktop app) and retry",
+            data_dir.display()
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// Refuse while a daemon uses the data directory: it holds the lock file or
@@ -985,7 +1017,7 @@ mod tests {
         let file = work.path().join("praxi.bak");
         make_backup(src.path(), &file, &pass, false);
         let dst = tempfile::tempdir().unwrap();
-        let fake_daemon = hold_daemon_lock(dst.path()).expect("lock");
+        let fake_daemon = hold_daemon_lock(dst.path()).unwrap().expect("lock");
         let err = do_restore(dst.path(), &MemoryStore::new(), &restore_cmd(&file, &pass))
             .unwrap_err()
             .to_string();
@@ -994,6 +1026,36 @@ mod tests {
         drop(fake_daemon);
         do_restore(dst.path(), &MemoryStore::new(), &restore_cmd(&file, &pass)).unwrap();
         assert_eq!(bot_names(dst.path()), ["Atlas"]);
+    }
+
+    #[test]
+    fn serve_refuses_to_start_while_the_lock_is_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = hold_daemon_lock(dir.path()).unwrap().expect("lock");
+        let err = hold_daemon_lock(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("another Praxi process"), "{err}");
+        drop(first);
+        assert!(hold_daemon_lock(dir.path()).unwrap().is_some());
+    }
+
+    #[test]
+    fn wrong_passphrase_does_not_create_the_destination_directory() {
+        let src = tempfile::tempdir().unwrap();
+        data_with_bot(src.path());
+        let work = tempfile::tempdir().unwrap();
+        let pass = pass_file(work.path(), PASS);
+        let file = work.path().join("praxi.bak");
+        make_backup(src.path(), &file, &pass, false);
+        let other = pass_file(work.path(), "a different passphrase");
+        let dst = work.path().join("not-yet-there");
+        let err = do_restore(&dst, &MemoryStore::new(), &restore_cmd(&file, &other))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("wrong passphrase"), "{err}");
+        assert!(
+            !dst.exists(),
+            "a failed restore must not create the data dir"
+        );
     }
 
     #[test]

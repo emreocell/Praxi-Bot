@@ -27,13 +27,13 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::Result;
 
 /// A tier-1 scenario.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
     /// Unique name (also the metrics key).
@@ -62,7 +62,11 @@ pub struct Scenario {
     /// The user message that starts the turn.
     pub user: String,
     /// Scripted model responses, consumed one per model call.
+    #[serde(default)]
     pub script: Vec<ScriptStep>,
+    /// Recorded provider exchange (mutually exclusive with `script`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<crate::transcript::Transcript>,
     /// Reactions of the simulated user.
     #[serde(default)]
     pub reactions: Vec<Reaction>,
@@ -110,7 +114,7 @@ pub struct Scenario {
 }
 
 /// Classification metadata for a prompt-injection or red-team scenario.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttackMeta {
     /// Corpus format version (for example, `1`).
@@ -127,7 +131,7 @@ pub struct AttackMeta {
 }
 
 /// Who starts the run.
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InitiatorSpec {
     /// The owner, in a chat.
@@ -140,7 +144,7 @@ pub enum InitiatorSpec {
 }
 
 /// Files of the throw-away workspace behind the real file tools.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FsFixture {
     /// Relative path to text content.
@@ -153,7 +157,7 @@ pub struct FsFixture {
 }
 
 /// One directory link of an [`FsFixture`].
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinkSpec {
     /// Where the link is created.
@@ -163,7 +167,7 @@ pub struct LinkSpec {
 }
 
 /// Global policy preset.
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicyPreset {
     /// Everything allowed.
@@ -178,7 +182,7 @@ pub enum PolicyPreset {
 }
 
 /// Optional overrides of the loop guards.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuardOverrides {
     /// Maximum model calls per turn.
@@ -200,7 +204,7 @@ pub struct GuardOverrides {
 }
 
 /// Effect of a fake tool.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectSpec {
     /// Read-only.
@@ -214,7 +218,7 @@ pub enum EffectSpec {
 /// What a fake tool puts into the run's context or can do with it (the engine's
 /// [`tool_registry::ContentClass`]). The default, `none`, keeps the taint rules out of
 /// scenarios that do not test them.
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContentSpec {
     /// No untrusted ingestion, no private read, no egress.
@@ -235,7 +239,7 @@ pub enum ContentSpec {
 }
 
 /// Permission category of a fake tool.
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CategorySpec {
     /// Files.
@@ -264,7 +268,7 @@ pub enum CategorySpec {
 }
 
 /// A fake tool backend.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FakeToolSpec {
     /// Tool name (a `.` is exposed to the model as `__`).
@@ -292,10 +296,18 @@ pub struct FakeToolSpec {
     /// The call starts an arbitrary program (a run tainted by untrusted content asks).
     #[serde(default)]
     pub executes: bool,
+    /// A tool of an MCP server the owner connected as a browser (name
+    /// `mcp:<server>/<tool>`). Content class, effect and always-ask come from
+    /// `tool_registry::browser_mcp`, exactly as the MCP bridge registers them;
+    /// `content`, `effect` and `executes` are ignored. A tool name the browser
+    /// rules do not know keeps the generic MCP class (untrusted, private,
+    /// egress, destructive).
+    #[serde(default)]
+    pub browser_mcp: bool,
 }
 
 /// Token usage reported with a scripted reply.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct UsageSpec {
     /// Prompt tokens.
@@ -308,7 +320,7 @@ pub struct UsageSpec {
 }
 
 /// One tool call inside a scripted reply.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptCall {
     /// Provider call id.
@@ -357,7 +369,7 @@ impl ScriptCall {
 }
 
 /// One scripted model response.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptStep {
     /// Assistant text.
@@ -378,7 +390,7 @@ pub struct ScriptStep {
 }
 
 /// What a reaction waits for.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Trigger {
     /// The run started.
@@ -392,13 +404,15 @@ pub enum Trigger {
 }
 
 /// What the simulated user does.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Act {
     /// Approve once.
     Approve,
     /// Approve for the rest of the chat.
     ApproveChat,
+    /// Approve for the rest of the task (one tool, this run).
+    ApproveTask,
     /// Approve always.
     ApproveAlways,
     /// Deny.
@@ -410,7 +424,7 @@ pub enum Act {
 }
 
 /// A reaction of the simulated user.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Reaction {
     /// Trigger event.
@@ -436,7 +450,7 @@ pub struct Reaction {
 }
 
 /// An integer expectation: exact or a range.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum IntMatch {
     /// Exactly this.
@@ -462,7 +476,7 @@ impl IntMatch {
 }
 
 /// Text assertions.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TextMatch {
     /// Must contain each of these (case-sensitive).
@@ -480,7 +494,7 @@ pub struct TextMatch {
 }
 
 /// An expected permission decision for one call (in call order).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExpectedPermission {
     /// Tool name.
@@ -490,7 +504,7 @@ pub struct ExpectedPermission {
 }
 
 /// Assertions about the n-th request sent to the model.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RequestExpect {
     /// Zero-based request index.
@@ -519,7 +533,7 @@ pub struct RequestExpect {
 }
 
 /// Assertion about an `ApprovalNeeded` card emitted for a tool call.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApprovalCardExpect {
     /// Tool name that must have emitted an `ApprovalNeeded` card.
@@ -527,7 +541,7 @@ pub struct ApprovalCardExpect {
     /// Expected `details.kind` (for example, `"egress"`).
     #[serde(default)]
     pub kind: Option<String>,
-    /// Expected `details.why` (`"egress"`, `"executes"`, `"floor"`, `"always_ask"`, `"policy"`).
+    /// Expected `details.why` (`"egress"`, `"executes"`, `"floor"`, `"always_ask"`, `"policy"`, `"browser_address"`).
     #[serde(default)]
     pub why: Option<String>,
     /// Substring expected in `details.host`.
@@ -545,7 +559,7 @@ pub struct ApprovalCardExpect {
 }
 
 /// All assertions of a scenario; absent fields are not checked.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Expect {
     /// Final run state (`succeeded`, `failed`, `cancelled`).
@@ -646,6 +660,12 @@ impl Scenario {
     /// Malformed YAML or unknown fields.
     pub fn from_yaml(s: &str) -> Result<Self> {
         let mut sc: Self = serde_yaml::from_str(s)?;
+        if sc.transcript.is_some() && !sc.script.is_empty() {
+            return Err("scenario must use either script or transcript".into());
+        }
+        if let Some(t) = &sc.transcript {
+            t.validate()?;
+        }
         for step in &mut sc.script {
             step.tool_calls = step
                 .tool_calls

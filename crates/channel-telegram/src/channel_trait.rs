@@ -114,6 +114,10 @@ pub struct IncomingMessage {
     pub user_id: i64,
     /// Optional username or display name of the sender.
     pub username: Option<String>,
+    /// Language tag of the sender's Telegram client, if sent. Used only to pick
+    /// the language of a chat that is paired for the first time.
+    #[serde(default)]
+    pub language_code: Option<String>,
     /// Message id (for text messages).
     pub message_id: Option<i64>,
     /// Message content or callback payload.

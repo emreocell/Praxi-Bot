@@ -45,7 +45,15 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // outside (Downloads, attachments, mail) is marked untrusted per call by the loop
         // (`taint::arrived_from_outside`). Full screen content (`desktop_get_state`) stays
         // untrusted: the code cannot tell a browser or mail window from another program.
-        "fs_read" | "fs_list" | "fs_search" | "fs_edit" => ContentClass::private_read(),
+        // The bot's own notes (`notes_read`) are private too: a later
+        // egress asks. A note written in an untrusted run reports untrusted
+        // exposure per call (see `notes`).
+        "fs_read" | "fs_list" | "fs_search" | "fs_edit" | "notes_read" => {
+            ContentClass::private_read()
+        }
+        // Persisting or deleting a note from a tainted run changes what later
+        // runs read, so it asks like `memory_save` / `memory_forget`.
+        "notes_write" => ContentClass::declared(false, true, true),
         // A shell, a script, browser navigation and input, a drag, or a
         // desktop mutation that types, replaces a value, presses a key, or
         // launches a program can read and can send data off the machine. Tab

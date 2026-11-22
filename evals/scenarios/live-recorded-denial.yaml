@@ -1,0 +1,126 @@
+name: live-recorded-denial
+description: Recorded from a real provider with an explicit owner denial of a fixture write.
+policy: approve_destructive
+profile_toml: ''
+guards:
+  max_steps: 4
+  repeat_warn: null
+  repeat_stop: null
+  max_tokens_per_turn: null
+  spill_threshold_bytes: null
+  spill_preview_bytes: null
+  tool_timeout_ms: null
+  model_timeout_ms: 30000
+tools:
+- name: fixture_write
+  effect: write
+  category: fs
+  output: 'Synthetic write fixture: completed.'
+  output_bytes: null
+  delay_ms: 0
+  error: null
+  content: none
+  executes: false
+subagents: false
+workflows: []
+user: Call fixture_write with empty arguments exactly once. If it is denied, do not retry it; report that it was denied.
+script: []
+transcript:
+  version: 1
+  synthetic: false
+  source_model: gemini/gemini-3.1-flash-lite
+  calls:
+  - request:
+      fingerprint: f1813102c469fede
+      roles:
+      - user
+      tool_results: []
+      tools:
+      - fixture_write
+      - todo_write
+    chunks:
+    - !tool_delta
+      call_id: gm0ae19dc50615ae09xEqEBCp4BAWkUfRMRR9Pj8kEKQE4-0ID2o632CI21MyrBXAecVBB8LtFEkDyGWJXwuQrhl7QVNmxnSiK3Z0Pj7IaASER04x8A1jSUix0enAmT-al4KMptrXBEesrmn2S-C2_uFq5ZLbx_glTMPrRnN0HhY_ePda0inocAyBFSTMdqf84HWSNbJIPYwlBVeuL99oqZ7HQ6CNBN63g4DyDpkQkJzXE
+      name: fixture_write
+      input_delta: '{}'
+    - !tool
+      id: gm0ae19dc50615ae09xEqEBCp4BAWkUfRMRR9Pj8kEKQE4-0ID2o632CI21MyrBXAecVBB8LtFEkDyGWJXwuQrhl7QVNmxnSiK3Z0Pj7IaASER04x8A1jSUix0enAmT-al4KMptrXBEesrmn2S-C2_uFq5ZLbx_glTMPrRnN0HhY_ePda0inocAyBFSTMdqf84HWSNbJIPYwlBVeuL99oqZ7HQ6CNBN63g4DyDpkQkJzXE
+      name: fixture_write
+      arguments: '{}'
+    - !usage
+      prompt_tokens: 353
+      completion_tokens: 10
+      cached_tokens: null
+      cache_write_tokens: null
+    - !done ToolCalls
+  - request:
+      fingerprint: d3c9b1bd485217b9
+      roles:
+      - user
+      - assistant
+      - tool
+      tool_results:
+      - 'Tool call was not authorized: The owner declined this fixture write.. Do not retry this call.'
+      tools:
+      - fixture_write
+      - todo_write
+    chunks:
+    - !text |2+
+
+
+    - !text The request to `fixture_write` was denied.
+    - !usage
+      prompt_tokens: 565
+      completion_tokens: 12
+      cached_tokens: null
+      cache_write_tokens: null
+    - !done Stop
+reactions:
+- on: approval_needed
+  tool: fixture_write
+  do: deny
+  text: The owner declined this fixture write.
+  once: false
+  nth: null
+  delay_ms: 0
+expect:
+  state: succeeded
+  model_calls: 2
+  tool_calls:
+  - fixture_write
+  tool_runs:
+    fixture_write: 0
+  tool_finished: {}
+  permissions:
+  - tool: fixture_write
+    decision: denied_user
+  final_text:
+    contains: []
+    not_contains: []
+    regex: null
+    equals: |2-
+
+
+      The request to `fixture_write` was denied.
+  error: null
+  requests: []
+  files_absent: []
+  files_unchanged: {}
+  approval_cards:
+  - tool: fixture_write
+    kind: null
+    why: null
+    host_contains: null
+    payload_contains: []
+    payload_not_contains: []
+    reason_contains: []
+  no_approval_tools: []
+timeout_ms: 60000
+unsafe_tools: []
+secrets: []
+expected_fail: null
+initiator: human
+fs: null
+settle_ms: 0
+redact_secrets: false
+attack: null

@@ -645,9 +645,13 @@ async fn navigate_does_not_wait_for_long_lived_request() {
         .unwrap();
     let took = t.elapsed();
     assert!(r.ok, "{:?}", r.error);
+    // The real guard: if the held request still blocked the settle, it would run into the
+    // 2 s cap and report "network still busy". The request is only ignored once it has
+    // been open for `LONG_LIVED_AGE` (1 s), so the floor is about 1 s; the time bound
+    // leaves room for slow CI runners and only catches a much larger stall.
     assert!(r.settle_note.is_none(), "{:?}", r.settle_note);
     assert!(
-        took < Duration::from_millis(1700),
+        took < Duration::from_secs(4),
         "navigate waited {took:?} for a long-lived request"
     );
     let _ = b.close().await;

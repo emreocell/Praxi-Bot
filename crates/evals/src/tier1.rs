@@ -43,6 +43,41 @@ fn policy(p: PolicyPreset) -> Policy {
 /// # Errors
 /// Harness failures (not assertion failures: those land in the record).
 pub async fn run_scenario(s: &Scenario) -> Result<ScenarioResult> {
+    let replay = s
+        .transcript
+        .clone()
+        .map(crate::transcript::ReplayProvider::new)
+        .transpose()?;
+    let provider = replay
+        .as_ref()
+        .map(|p| Arc::clone(p) as Arc<dyn ChatProvider>);
+    let (mut result, _) = run_with_source(s, provider, FAKE_MODEL, true).await?;
+    if let Some(p) = replay {
+        result.record.failures.extend(p.failures());
+        result.record.success = result.record.failures.is_empty();
+    }
+    Ok(result)
+}
+
+/// Run the same tier-1 loop with a supplied provider and generate editable assertions.
+///
+/// # Errors
+/// Harness setup failures.
+pub async fn capture_scenario(
+    s: &Scenario,
+    source: Arc<dyn ChatProvider>,
+    model: &str,
+    synthetic: bool,
+) -> Result<(ScenarioResult, Scenario)> {
+    run_with_source(s, Some(source), model, synthetic).await
+}
+
+async fn run_with_source(
+    s: &Scenario,
+    source: Option<Arc<dyn ChatProvider>>,
+    model: &str,
+    synthetic: bool,
+) -> Result<(ScenarioResult, Scenario)> {
     // The workspace outlives the turn so its files can be inspected by the real tools.
     let workspace = tempfile::tempdir()?;
     let data_dir = tempfile::tempdir()?;
@@ -54,11 +89,14 @@ pub async fn run_scenario(s: &Scenario) -> Result<ScenarioResult> {
         .path()
         .to_string_lossy()
         .replace(std::path::MAIN_SEPARATOR, "/");
+    let template = s;
     let s = &s.with_workspace(&ws).with_data_dir(&dd);
     if let Some(fx) = &s.fs {
         build_fixture(workspace.path(), fx)?;
     }
-    let provider = ScriptedProvider::new(s.script.clone());
+    // Scripted replies must see the same expanded paths as the turn and fixtures.
+    let source = source.unwrap_or_else(|| ScriptedProvider::new(s.script.clone()));
+    let provider = crate::transcript::RecordingProvider::new(source);
     let registry = ToolRegistry::new();
     let mut counters: BTreeMap<String, Arc<AtomicU64>> = BTreeMap::new();
     let mut finished_counters: BTreeMap<String, Arc<AtomicU64>> = BTreeMap::new();
@@ -75,17 +113,7 @@ pub async fn run_scenario(s: &Scenario) -> Result<ScenarioResult> {
             registry.register(tool);
         }
     }
-    let redactor = (s.redact_secrets).then(|| {
-        let mut r = secret_store::Redactor::new();
-        for v in &s.secrets {
-            r.add_secret(v);
-        }
-        let shared = agent_core::SharedRedactor::new(r);
-        for v in &s.secrets {
-            shared.register(v);
-        }
-        shared
-    });
+    let redactor = scenario_redactor(s);
     let extras = TurnExtras {
         redactor,
         fs_home: s.fs.as_ref().map(|_| workspace.path().join("project")),
@@ -98,7 +126,7 @@ pub async fn run_scenario(s: &Scenario) -> Result<ScenarioResult> {
     };
     let trace = run_turn_ext(
         TurnConfig {
-            model: FAKE_MODEL.into(),
+            model: model.into(),
             persona: "You are T.".into(),
             profile_extra: s.profile_toml.clone(),
             policy: policy(s.policy),
@@ -143,7 +171,58 @@ pub async fn run_scenario(s: &Scenario) -> Result<ScenarioResult> {
     let mut record = RunRecord::from_trace(1, &s.name, FAKE_MODEL, &trace, failures);
     record.unsafe_actions = unsafe_actions;
     record.expected_fail = s.expected_fail.is_some();
-    Ok(ScenarioResult { record })
+    let mut captured = template.clone();
+    captured.script.clear();
+    captured.transcript = Some(provider.transcript(synthetic));
+    captured.expect = generated_expect(s, &trace, &runs)?;
+    Ok((ScenarioResult { record }, captured))
+}
+
+fn scenario_redactor(s: &Scenario) -> Option<agent_core::SharedRedactor> {
+    (s.redact_secrets).then(|| {
+        let mut r = secret_store::Redactor::new();
+        for v in &s.secrets {
+            r.add_secret(v);
+        }
+        let shared = agent_core::SharedRedactor::new(r);
+        for v in &s.secrets {
+            shared.register(v);
+        }
+        shared
+    })
+}
+
+fn generated_expect(
+    s: &Scenario,
+    trace: &TurnTrace,
+    runs: &BTreeMap<String, u64>,
+) -> Result<Expect> {
+    let cards: Vec<_> = trace
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            protocol::Event::ApprovalNeeded(a) => Some(serde_json::json!({"tool": a.tool_name})),
+            _ => None,
+        })
+        .collect();
+    let permissions: Vec<_> = trace
+        .calls
+        .iter()
+        .map(|c| serde_json::json!({"tool": c.tool, "decision": c.decision}))
+        .collect();
+    let calls: Vec<_> = trace.calls.iter().map(|c| &c.tool).collect();
+    let no_approval: Vec<_> = s
+        .tools
+        .iter()
+        .filter(|t| !cards.iter().any(|c| c["tool"] == t.name))
+        .map(|t| &t.name)
+        .collect();
+    Ok(serde_json::from_value(serde_json::json!({
+        "state": trace.state.as_str(), "model_calls": trace.llm_calls,
+        "tool_calls": calls, "permissions": permissions, "tool_runs": runs,
+        "approval_cards": cards, "no_approval_tools": no_approval,
+        "final_text": {"equals": trace.final_text},
+    }))?)
 }
 
 /// Check the on-disk expectations of an `fs` scenario.

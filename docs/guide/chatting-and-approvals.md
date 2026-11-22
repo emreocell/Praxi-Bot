@@ -425,6 +425,12 @@ approval always stays in "Needs you". The list keeps the last 100 entries for 30
 days, has "Mark all read" and "Clear history", and stores only what the toast said
 (just the bot name and a generic text with private notifications on).
 
+**Muting one bot.** The bell button in a bot's panel mutes that bot's "long run
+finished" and "run failed" notifications at any hour. They still go to the
+**Notifications** list, marked "Held (bot muted)". A mute never silences an
+approval or question: those follow the quiet-hours rule above and always stay in
+"Needs you". Press the bell again to unmute.
+
 ## The step list in the chat
 
 A run's tool calls are folded to keep the chat quiet: repeated calls of the same

@@ -199,7 +199,9 @@ pub(crate) fn attempt_run_of(
             Ok(Some(run)) => {
                 // Only a run that ended failed or cancelled may be replaced.
                 // Queued, running, waiting, paused and succeeded runs block.
-                if matches!(run.state.as_str(), "failed" | "cancelled") {
+                if run.state == "succeeded" {
+                    return AttemptRun::Succeeded;
+                } else if matches!(run.state.as_str(), "failed" | "cancelled") {
                     found = AttemptRun::Failed;
                 } else {
                     return AttemptRun::Active;

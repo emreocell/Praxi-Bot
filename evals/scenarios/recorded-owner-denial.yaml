@@ -1,0 +1,116 @@
+name: recorded-owner-denial
+description: 'Synthetic provider recording: A denied approval never runs the tool; the model is told why and not to retry.'
+policy: approve_destructive
+profile_toml: ''
+guards:
+  max_steps: null
+  repeat_warn: null
+  repeat_stop: null
+  max_tokens_per_turn: null
+  spill_threshold_bytes: null
+  spill_preview_bytes: null
+  tool_timeout_ms: null
+  model_timeout_ms: null
+tools:
+- name: t_write
+  effect: write
+  category: fs
+  output: written
+  output_bytes: null
+  delay_ms: 0
+  error: null
+  content: none
+  executes: false
+subagents: false
+workflows: []
+user: go
+script: []
+transcript:
+  version: 1
+  synthetic: true
+  source_model: fake/m
+  calls:
+  - request:
+      fingerprint: 59830c2294e13b9b
+      roles:
+      - user
+      tool_results: []
+      tools:
+      - t_write
+      - todo_write
+    chunks:
+    - !tool
+      id: c1
+      name: t_write
+      arguments: '{}'
+    - !usage
+      prompt_tokens: 10
+      completion_tokens: 5
+      cached_tokens: null
+      cache_write_tokens: null
+    - !done ToolCalls
+  - request:
+      fingerprint: bee635eec593ab2c
+      roles:
+      - user
+      - assistant
+      - tool
+      tool_results:
+      - 'Tool call was not authorized: too risky. Do not retry this call.'
+      tools:
+      - t_write
+      - todo_write
+    chunks:
+    - !text ok, not doing it
+    - !usage
+      prompt_tokens: 10
+      completion_tokens: 5
+      cached_tokens: null
+      cache_write_tokens: null
+    - !done Stop
+reactions:
+- on: approval_needed
+  tool: t_write
+  do: deny
+  text: too risky
+  once: false
+  nth: null
+  delay_ms: 0
+expect:
+  state: succeeded
+  model_calls: 2
+  tool_calls:
+  - t_write
+  tool_runs:
+    t_write: 0
+  tool_finished: {}
+  permissions:
+  - tool: t_write
+    decision: denied_user
+  final_text:
+    contains: []
+    not_contains: []
+    regex: null
+    equals: ok, not doing it
+  error: null
+  requests: []
+  files_absent: []
+  files_unchanged: {}
+  approval_cards:
+  - tool: t_write
+    kind: null
+    why: null
+    host_contains: null
+    payload_contains: []
+    payload_not_contains: []
+    reason_contains: []
+  no_approval_tools: []
+timeout_ms: null
+unsafe_tools: []
+secrets: []
+expected_fail: null
+initiator: human
+fs: null
+settle_ms: 0
+redact_secrets: false
+attack: null

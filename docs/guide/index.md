@@ -64,8 +64,9 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Replay a recorded sequence of steps without a model | [Workflows](workflows.md) |
 | Teach a bot how to handle a tricky web page or app | [Skills](skills.md) |
 | Create, import, update or delete shared skills through the local API | [Managing shared skills](skill-management-api.md) |
-| Add external tool servers | [MCP servers](mcp-servers.md) |
-| Let another MCP agent use a selected Praxi bot | [Praxi as an MCP server](mcp-server.md) |
+| Connect external apps (OAuth, Composio, and MCP servers in the desktop app) | [Connecting apps](apps.md) |
+| Configure external MCP servers by hand (`mcp.toml` and API) | [MCP servers](mcp-servers.md) |
+| Let another MCP agent use a selected Praxi bot; client recipes and troubleshooting | [Praxi as an MCP server](mcp-server.md) |
 | Pick a provider, use the Gemini free tier | [Providers and models](providers-and-models.md) |
 | Understand how the model picker names and ranks models | [Model picker metadata](model-catalog.md) |
 | Let a lighter model answer simple first turns | [Optional model tiering](model-tiering.md) |
@@ -78,6 +79,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Read and add calendar events | [Calendar (CalDAV)](calendar.md) |
 | Let a bot read Home Assistant entities and call services | [Home Assistant](home-assistant.md) |
 | Let a bot search the web and read pages without a browser | [Web tools](web.md) |
+| Give a bot a scratchpad between runs | [Notes](agent-tools.md) |
 | Set up knowledge embeddings (optional; knowledge search works without them) | [Set up knowledge embeddings](knowledge-embeddings.md) |
 | Look up a command or flag | [CLI reference](cli-reference.md) |
 | Back up and restore your data (encrypted) | [Encrypted backup and restore](backup.md) |

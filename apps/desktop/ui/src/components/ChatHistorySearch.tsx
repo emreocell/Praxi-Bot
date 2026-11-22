@@ -2,7 +2,7 @@ import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { SearchPage } from "../api/types";
-import { groupHistoryHits, historySnippetParts } from "../lib/chatHistory";
+import { fetchHistoryPage, groupHistoryHits, historySnippetParts } from "../lib/chatHistory";
 import { humanLine } from "../lib/humanError";
 import { useDaemon } from "../state/DaemonContext";
 import styles from "./ChatHistorySearch.module.css";
@@ -28,7 +28,7 @@ export function ChatHistorySearch({ onOpenChat }: { onOpenChat: (chatId: string,
     setError(null);
     if (!offset) { setPage(null); setSearched(phrase); }
     try {
-      const next = await client.searchChatHistory(phrase, offset, controller.signal);
+      const next = await fetchHistoryPage((o) => client.searchChatHistory(phrase, o, controller.signal), offset);
       if (!controller.signal.aborted) setPage((prev) => ({ ...next, results: offset ? [...(prev?.results ?? []), ...next.results] : next.results }));
     } catch (e) {
       if (!controller.signal.aborted) setError(humanLine(e));
@@ -47,7 +47,7 @@ export function ChatHistorySearch({ onOpenChat }: { onOpenChat: (chatId: string,
     {busy ? <p role="status">{t("chatHistory.searching")}</p> : null}
     {error ? <p role="alert">{error}</p> : null}
     {page ? <div aria-label={t("chatHistory.results")}>
-      <p role="status">{t("chatHistory.count", { count: page.results.length })}</p>
+      <p role="status">{page.results.length === 0 && page.next_offset != null ? t("chatHistory.noneYet") : t("chatHistory.count", { count: page.results.length })}</p>
       {groupHistoryHits(page.results).map((group) => <section key={group[0].chat_id}>
         <h4>{group[0].chat_title || t("botPanel.untitled")}</h4>
         {group.map((hit) => <button type="button" className={styles.hit} key={hit.message_id} onClick={() => onOpenChat(hit.chat_id, hit.message_id)}>

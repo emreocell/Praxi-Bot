@@ -113,6 +113,7 @@ impl BotPreset {
             "use_tool",
             "skill_*",
             "workflow_*",
+            "notes_*",
         ];
         match self {
             // `mcp:*` only makes MCP tools reachable: every MCP tool is

@@ -7,6 +7,10 @@ dist/
 apps/desktop/gen/
 apps/desktop/binaries/
 
+# Python bytecode (from running scripts/*.py)
+__pycache__/
+*.pyc
+
 # Environment files
 .env
 .env.*

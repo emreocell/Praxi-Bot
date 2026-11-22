@@ -2,6 +2,9 @@
 
 This directory holds the data-driven evaluation suites run by [`crates/evals`](../crates/evals):
 
+Use [`cargo xtask record` / `cargo xtask replay`](../docs/contributing/eval-record-replay.md)
+to capture sanitized real-model exchanges and replay them offline.
+
 - **`scenarios/`** — Tier-1 hermetic YAML scenarios (scripted fake model, fake or sandboxed local tools, zero network, zero API keys). Run in CI via `cargo test -p evals`.
 - **`tasks/`** — Tier-2 live YAML tasks (browser/desktop/files, opt-in via `BOT_EVAL_LIVE=1`).
 - **`baselines/`** — Checked-in JSONL baselines for regression comparison (`injection-pack.jsonl`, `safety-pack.jsonl`). See [baselines/README.md](baselines/README.md).

@@ -290,11 +290,10 @@ impl VoiceControl for VoiceHost {
         } else if input.clear_gemini_key == Some(true)
             && let Some(store) = store.clone()
         {
-            tokio::task::spawn_blocking(move || {
-                let _ = store.delete(GEMINI_KEY_NAME);
-            })
-            .await
-            .map_err(|e| VoiceControlError::Internal(format!("secret task failed: {e}")))?;
+            tokio::task::spawn_blocking(move || store.delete(GEMINI_KEY_NAME))
+                .await
+                .map_err(|e| VoiceControlError::Internal(format!("secret task failed: {e}")))?
+                .map_err(|e| VoiceControlError::Internal(format!("cannot delete secret: {e}")))?;
         }
         if let Some(key) = input.stt_key {
             let Some(store) = store else {
@@ -434,6 +433,43 @@ mod tests {
         assert!(s.contains("name=\"language\"\r\n\r\ntr\r\n"));
         assert!(s.contains("filename=\"audio.webm\""));
         assert!(s.contains("AUDIO\r\n--B--"));
+    }
+
+    /// A store whose backend refuses every delete.
+    struct StuckStore;
+
+    impl SecretStore for StuckStore {
+        fn get(
+            &self,
+            _: &str,
+        ) -> Result<Option<secret_store::SecretValue>, secret_store::SecretError> {
+            Ok(None)
+        }
+        fn set(&self, _: &str, _: &str) -> Result<(), secret_store::SecretError> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> Result<bool, secret_store::SecretError> {
+            Err(secret_store::SecretError::NotFound("locked".into()))
+        }
+        fn list_names(&self) -> Result<Vec<String>, secret_store::SecretError> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn clearing_the_gemini_key_surfaces_a_store_failure() {
+        let dir = std::env::temp_dir().join(format!("praxi-voice-clear-{}", rand_u64()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = VoiceHost::new(&dir, 7000, Some(Arc::new(StuckStore)));
+        let err = host
+            .update(VoiceConfigInput {
+                clear_gemini_key: Some(true),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, VoiceControlError::Internal(_)), "{err:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
