@@ -4588,6 +4588,40 @@
         }
       }
     },
+    "data": {
+      "category": {
+        "backups": "Yedekler",
+        "caches": "Geçici dosyalar",
+        "chats": "Sohbetler ve dosyalar",
+        "knowledge": "Bilgi",
+        "memory": "Hafıza",
+        "other": "Diğer her şey"
+      },
+      "categoryHint": {
+        "backups": "Uygulama verisini güncellemeden önce alınan güvenlik kopyaları.",
+        "caches": "Uygulamanın yeniden oluşturabileceği dosyalar.",
+        "chats": "Konuşmaların, eklerin ve ekran görüntüleri.",
+        "knowledge": "Botlarının okuduğu kaynaklar ve tarayıcı profilleri.",
+        "memory": "Botlarının hatırladıkları.",
+        "other": "Ayarlar, kayıtlar ve gerisi."
+      },
+      "clear": {
+        "button": "{{size}} temizle",
+        "confirm": "Temizle",
+        "confirmKeeps": "Sohbetlerine, hafızana, bilgi kaynaklarına, yedeklerine, ayarlarına ve kayıtlı anahtarlarına dokunulmaz.",
+        "confirmRemoves": "Kayıtlı model listesi ve eski araç çıktı dosyaları silinir. Uygulama gerektiğinde bunları yeniden oluşturur.",
+        "confirmTitle": "Geçici dosyalar temizlensin mi?",
+        "description": "Sohbetlerine, hafızana ve anahtarlarına dokunmadan yer açar.",
+        "done": "{{size}} yer açıldı.",
+        "nothing": "Temizlenecek bir şey yok",
+        "title": "Geçici dosyaları temizle"
+      },
+      "description": "Disk alanının nereye gittiğini gör ve geçici dosyaları sil.",
+      "loading": "Ölçülüyor...",
+      "title": "Veri ve disk alanı",
+      "total": "Toplam",
+      "totalHint": "Uygulamanın bu bilgisayarda tuttuğu her şey."
+    },
     "diagnostics": {
       "allGood": "Her şey yolunda görünüyor",
       "checkedAt": "Son kontrol: {{time}}",

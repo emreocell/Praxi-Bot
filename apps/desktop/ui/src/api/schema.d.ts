@@ -1249,6 +1249,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/data-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How much space each kind of data uses (owner only). Reads folder metadata, never contents. */
+        get: operations["get_data_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/data-usage/clear-cache": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove regenerable caches only (owner only). Never touches chats, memory, knowledge,
+         *     backups, secrets or settings.
+         */
+        post: operations["post_clear_cache"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/doctor": {
         parameters: {
             query?: never;
@@ -4208,6 +4245,11 @@ export interface components {
         };
         /** @enum {string} */
         CheckpointLocationDto: "daemon_local";
+        /** @description Result of "Clear cache". */
+        ClearCacheDto: {
+            /** Format: int64 */
+            freed_bytes: number;
+        };
         /**
          * @description Authentication status reported by a CLI provider (`GET /v1/providers/detected`).
          * @enum {string}
@@ -4760,6 +4802,27 @@ export interface components {
             calls_without_usage?: number;
             /** @description Calendar day in `time_zone` (`YYYY-MM-DD`). */
             day: string;
+        };
+        /** @description One slice of the data folder. */
+        DataCategoryDto: {
+            /**
+             * Format: int64
+             * @description Bytes used on disk by this category.
+             */
+            bytes: number;
+            /** @description `chats`, `memory`, `knowledge`, `backups`, `caches` or `other`. */
+            id: string;
+        };
+        /** @description Data folder sizes. */
+        DataUsageDto: {
+            categories: components["schemas"]["DataCategoryDto"][];
+            /**
+             * Format: int64
+             * @description Bytes "Clear cache" would free right now.
+             */
+            clearable_bytes: number;
+            /** Format: int64 */
+            total_bytes: number;
         };
         /** @description `POST /v1/approvals/{call_id}`. */
         DecideApproval: {
@@ -11563,6 +11626,60 @@ export interface operations {
             };
             /** @description unknown, answered or timed-out request */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_data_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataUsageDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_clear_cache: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClearCacheDto"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -131,6 +131,8 @@ import type {
   TerminalInfo,
   TerminalOutput,
   SpendLimit,
+  DataUsage,
+  ClearCacheResult,
   BotSpendLimits,
   UsageSummary,
   ViewHeartbeat,
@@ -928,6 +930,15 @@ export class ApiClient {
   /** Explicitly retry a failed, missed, or interrupted occurrence (owner only, idempotent). */
   retryScheduleOccurrence(id: string, dueMs: number): Promise<AcceptedResponse> {
     return this.request("POST", `/schedules/${id}/occurrences/${dueMs}/retry`);
+  }
+
+  /** Data folder size per category (owner only; folder metadata, never contents). */
+  getDataUsage(): Promise<DataUsage> {
+    return this.request("GET", "/data-usage");
+  }
+  /** Remove regenerable caches only (owner only). */
+  clearCache(): Promise<ClearCacheResult> {
+    return this.request("POST", "/data-usage/clear-cache");
   }
 
   /** Monthly spending limit and month-to-date spend. */

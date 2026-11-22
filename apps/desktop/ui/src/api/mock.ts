@@ -789,6 +789,7 @@ export class MockApiClient extends ApiClient {
   readonly secrets = new Map<string, number>();
   readonly doctorChecks: DoctorCheck[] = structuredClone(DOCTOR_CHECKS);
   spendLimit: number | null = null;
+  mockCacheBytes = 18 * 1024 * 1024;
   readonly botLimits = new Map<string, BotSpendLimits["limits"]>();
   /** Repairs run so far (tests). */
   readonly repairs: string[] = [];
@@ -1505,6 +1506,23 @@ export class MockApiClient extends ApiClient {
         const days = Number.isFinite(rawDays) && rawDays > 0 ? Math.min(rawDays, 90) : 30;
         const tz = typeof opts.query?.tz === "string" && opts.query.tz ? opts.query.tz : "UTC";
         return ok({ ...USAGE, daily: mockDailySeries(days), time_zone: tz });
+      }
+      case "GET /data-usage":
+      case "POST /data-usage/clear-cache": {
+        if (method === "POST") {
+          const freed = this.mockCacheBytes;
+          this.mockCacheBytes = 0;
+          return ok({ freed_bytes: freed });
+        }
+        const MB = 1024 * 1024;
+        const categories = [
+          { id: "chats", bytes: 48 * MB }, { id: "memory", bytes: 2 * MB }, { id: "knowledge", bytes: 130 * MB },
+          { id: "backups", bytes: 12 * MB }, { id: "caches", bytes: 20 * MB + this.mockCacheBytes },
+          { id: "other", bytes: MB }
+        ];
+        return ok({
+          total_bytes: categories.reduce((n, c) => n + c.bytes, 0), categories, clearable_bytes: this.mockCacheBytes
+        });
       }
       case "GET /spend-limit":
       case "PUT /spend-limit": {

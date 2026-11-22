@@ -4647,6 +4647,32 @@ fn toml_to_json_profile(bot: &Resp) -> String {
 }
 
 #[tokio::test]
+async fn data_usage_and_clear_cache_are_owner_only_and_spare_user_data() {
+    let t = setup();
+    let cache = t._dir.path().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("cli-models.json"), "{}").unwrap();
+    std::fs::write(t._dir.path().join("memory.db"), "keep me").unwrap();
+
+    for (m, p) in [
+        (Method::GET, "/v1/data-usage"),
+        (Method::POST, "/v1/data-usage/clear-cache"),
+    ] {
+        let r = call_token_only(&t, m, p, None).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{p}");
+    }
+    assert!(cache.join("cli-models.json").exists());
+
+    let g = call(&t, Method::GET, "/v1/data-usage", None).await.json();
+    assert_eq!(g["clearable_bytes"], 2, "{g}");
+    let r = call(&t, Method::POST, "/v1/data-usage/clear-cache", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["freed_bytes"], 2);
+    assert!(!cache.join("cli-models.json").exists());
+    assert!(t._dir.path().join("memory.db").exists());
+}
+
+#[tokio::test]
 async fn spend_limit_is_owner_only_validated_live_and_persisted() {
     let t = setup();
     let g = call(&t, Method::GET, "/v1/spend-limit", None).await.json();

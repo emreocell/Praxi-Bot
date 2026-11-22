@@ -4881,6 +4881,78 @@
         ]
       }
     },
+    "/v1/data-usage": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "How much space each kind of data uses (owner only). Reads folder metadata, never contents.",
+        "operationId": "get_data_usage",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataUsageDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/data-usage/clear-cache": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Remove regenerable caches only (owner only). Never touches chats, memory, knowledge,\nbackups, secrets or settings.",
+        "operationId": "post_clear_cache",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearCacheDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/doctor": {
       "get": {
         "tags": [
@@ -14245,6 +14317,20 @@
           "daemon_local"
         ]
       },
+      "ClearCacheDto": {
+        "type": "object",
+        "description": "Result of \"Clear cache\".",
+        "required": [
+          "freed_bytes"
+        ],
+        "properties": {
+          "freed_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "CliAuthState": {
         "type": "string",
         "description": "Authentication status reported by a CLI provider (`GET /v1/providers/detected`).",
@@ -15613,6 +15699,54 @@
           }
         ],
         "description": "Usage bucketed to one local calendar day (`YYYY-MM-DD`)."
+      },
+      "DataCategoryDto": {
+        "type": "object",
+        "description": "One slice of the data folder.",
+        "required": [
+          "id",
+          "bytes"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes used on disk by this category.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "`chats`, `memory`, `knowledge`, `backups`, `caches` or `other`."
+          }
+        }
+      },
+      "DataUsageDto": {
+        "type": "object",
+        "description": "Data folder sizes.",
+        "required": [
+          "total_bytes",
+          "categories",
+          "clearable_bytes"
+        ],
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DataCategoryDto"
+            }
+          },
+          "clearable_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes \"Clear cache\" would free right now.",
+            "minimum": 0
+          },
+          "total_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       },
       "DecideApproval": {
         "type": "object",

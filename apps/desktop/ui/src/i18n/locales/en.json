@@ -4588,6 +4588,40 @@
         }
       }
     },
+    "data": {
+      "category": {
+        "backups": "Backups",
+        "caches": "Temporary files",
+        "chats": "Chats and files",
+        "knowledge": "Knowledge",
+        "memory": "Memory",
+        "other": "Everything else"
+      },
+      "categoryHint": {
+        "backups": "Safety copies made before the app updates its data.",
+        "caches": "Files the app can rebuild.",
+        "chats": "Your conversations, attachments and screenshots.",
+        "knowledge": "Sources your bots read and their browser profiles.",
+        "memory": "What your bots remember.",
+        "other": "Settings, logs and the rest."
+      },
+      "clear": {
+        "button": "Clear {{size}}",
+        "confirm": "Clear",
+        "confirmKeeps": "Your chats, memory, knowledge, backups, settings and saved keys are not touched.",
+        "confirmRemoves": "This removes the saved list of available models and old tool output files. The app rebuilds them when needed.",
+        "confirmTitle": "Clear temporary files?",
+        "description": "Frees space without touching your chats, memory or keys.",
+        "done": "Freed {{size}}.",
+        "nothing": "Nothing to clear",
+        "title": "Clear temporary files"
+      },
+      "description": "See where disk space goes and remove temporary files.",
+      "loading": "Measuring...",
+      "title": "Data and disk space",
+      "total": "Total",
+      "totalHint": "Everything the app keeps on this computer."
+    },
     "diagnostics": {
       "allGood": "Everything looks fine",
       "checkedAt": "Last checked at {{time}}",

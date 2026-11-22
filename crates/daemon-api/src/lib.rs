@@ -62,6 +62,7 @@ mod secret_request_routes;
 pub mod trusted_folders;
 pub use peer::{PeerIdentity, PeerRole, peer_router};
 mod bot_limits_routes;
+mod data_routes;
 mod routes;
 mod schedule;
 mod schedule_tools;
@@ -1387,6 +1388,11 @@ fn api_routes() -> Router<AppState> {
             post(cli_engines::decide),
         )
         .route("/v1/providers/reload", post(r::reload_providers))
+        .route("/v1/data-usage", get(data_routes::get_data_usage))
+        .route(
+            "/v1/data-usage/clear-cache",
+            post(data_routes::post_clear_cache),
+        )
         .route("/v1/doctor", get(doctor_routes::get_doctor))
         .route("/v1/doctor/report", get(doctor_routes::report))
         .route("/v1/doctor/repair/{id}", post(doctor_routes::repair))

@@ -14,6 +14,7 @@ use crate::cli_login;
 use crate::components;
 use crate::composio;
 use crate::composio_routes;
+use crate::data_routes;
 use crate::doctor;
 use crate::doctor_routes;
 use crate::dto;
@@ -322,6 +323,8 @@ impl Modify for Security {
         voice_routes::update_voice,
         bot_limits_routes::get_bot_spend_limits,
         bot_limits_routes::put_bot_spend_limits,
+        data_routes::get_data_usage,
+        data_routes::post_clear_cache,
         spend_routes::get_spend_limit,
         spend_routes::put_spend_limit,
         web_routes::get_web_search,
@@ -636,6 +639,9 @@ impl Modify for Security {
         bot_limits_routes::PeriodLimitDto,
         bot_limits_routes::PeriodUsageDto,
         bot_limits_routes::PutBotSpendLimitsInput,
+        data_routes::DataCategoryDto,
+        data_routes::DataUsageDto,
+        data_routes::ClearCacheDto,
         spend_routes::SpendLimitDto,
         spend_routes::SpendLimitInput,
         web::WebSearchConfigDto,

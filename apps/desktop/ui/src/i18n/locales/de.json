@@ -4588,6 +4588,40 @@
         }
       }
     },
+    "data": {
+      "category": {
+        "backups": "Sicherungen",
+        "caches": "Temporäre Dateien",
+        "chats": "Chats und Dateien",
+        "knowledge": "Wissen",
+        "memory": "Gedächtnis",
+        "other": "Alles andere"
+      },
+      "categoryHint": {
+        "backups": "Sicherheitskopien, die vor Updates der App-Daten angelegt werden.",
+        "caches": "Dateien, die die App neu erzeugen kann.",
+        "chats": "Deine Unterhaltungen, Anhänge und Screenshots.",
+        "knowledge": "Quellen, die deine Bots lesen, und ihre Browserprofile.",
+        "memory": "Woran sich deine Bots erinnern.",
+        "other": "Einstellungen, Protokolle und der Rest."
+      },
+      "clear": {
+        "button": "{{size}} löschen",
+        "confirm": "Loeschen",
+        "confirmKeeps": "Deine Chats, dein Gedächtnis, dein Wissen, deine Sicherungen, Einstellungen und gespeicherten Schlüssel bleiben unberührt.",
+        "confirmRemoves": "Das entfernt die gespeicherte Liste verfügbarer Modelle und alte Ausgabedateien von Werkzeugen. Die App erzeugt sie bei Bedarf neu.",
+        "confirmTitle": "Temporäre Dateien löschen?",
+        "description": "Schafft Platz, ohne deine Chats, dein Gedächtnis oder deine Schlüssel anzufassen.",
+        "done": "{{size}} freigegeben.",
+        "nothing": "Nichts zu löschen",
+        "title": "Temporäre Dateien löschen"
+      },
+      "description": "Sieh, wohin der Speicherplatz geht, und entferne temporäre Dateien.",
+      "loading": "Wird gemessen...",
+      "title": "Daten und Speicherplatz",
+      "total": "Gesamt",
+      "totalHint": "Alles, was die App auf diesem Computer speichert."
+    },
     "diagnostics": {
       "allGood": "Alles sieht gut aus",
       "checkedAt": "Zuletzt geprüft um {{time}}",

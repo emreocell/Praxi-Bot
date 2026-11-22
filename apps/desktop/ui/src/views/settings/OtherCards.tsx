@@ -7,6 +7,7 @@ import { PRODUCT_CONFIG } from "../../config/product";
 import { isTauriRuntime } from "../../overlay/events";
 import { useDaemon } from "../../state/DaemonContext";
 import { UsageView } from "../UsageView";
+import { DataCard } from "./DataCard";
 import { DiagnosticsCard } from "./DiagnosticsCard";
 import { SafeModeCard } from "./SafeModeCard";
 import type { CardDef } from "./types";
@@ -71,6 +72,15 @@ export function otherCards(t: TFunction): CardDef[] {
       description: t("settingsModal.diagnostics.description"),
       keywords: "doctor diagnostics health repair support report tanilama saglik onar destek rapor",
       node: <DiagnosticsCard />
+    },
+    {
+      id: "data",
+      section: "diagnostics",
+      kind: "block",
+      title: t("settingsModal.data.title"),
+      description: t("settingsModal.data.description"),
+      keywords: "data disk space storage cache clear size daten speicher platz zwischenspeicher veri depolama onbellek temizle",
+      node: <DataCard />
     },
     {
       id: "safe-mode",
