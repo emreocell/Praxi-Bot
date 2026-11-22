@@ -52,6 +52,24 @@ tokio-tungstenite, accessibility-tree snapshots with `@e` refs, and line-based s
 Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
 Adapted files carry the header `// Adapted from vercel-labs/agent-browser (Apache-2.0)`.
 
+## moltis importers (MIT)
+
+`apps/cli/src/import_cmd.rs` (`bot import`) adapts the detection paths and the
+"what maps to what" tables of the `import-core`, `claude-import`, `openclaw-import` and
+`hermes-import` crates of [moltis](https://github.com/moltis-org/moltis), rewritten against
+Praxi-Bot's `McpServerConfig`, secret store and skill hub (no moltis code is linked or copied
+verbatim). Copyright (c) 2025 Fabien Penso. Licensed under the MIT License:
+
+```text
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+and associated documentation files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions: the above copyright
+notice and this permission notice shall be included in all copies or substantial portions of
+the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+```
+
 ## browser-harness (MIT)
 
 The "click at the box-model center" interaction approach in `crates/browser-cdp/src/actions.rs`

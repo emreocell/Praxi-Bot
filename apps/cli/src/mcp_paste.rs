@@ -626,6 +626,18 @@ fn str_map(value: Option<&Value>, what: &str) -> Result<Vec<(String, String)>, S
         .collect()
 }
 
+/// One server entry of another app's config (`name` + its JSON object), as
+/// [`parse`] would read it: values become secret references, the result is
+/// validated, and the error text never quotes the entry.
+///
+/// # Errors
+/// An unsupported transport, a refused or unpinned stdio command, a bad name.
+pub fn parse_entry(name: &str, value: &Value) -> Result<Parsed, String> {
+    let parsed = server_from_json(&clean_name(name), value)?;
+    check(&parsed.config)?;
+    Ok(parsed)
+}
+
 fn server_from_json(name: &str, value: &Value) -> Result<Parsed, String> {
     let object = value
         .as_object()
