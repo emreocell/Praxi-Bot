@@ -1,15 +1,47 @@
-//! Telegram-owned messages. The bridge uses English until per-chat language
-//! selection is added. Keep model and daemon text outside this catalog.
+//! Telegram-owned messages in English and Turkish. Each paired chat renders
+//! them in its own language (see [`crate::pairing::PairingStore::chat_language`]).
+//! Keep model and daemon text outside this catalog.
 
 use std::borrow::Cow;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Language(bool);
+/// Language of a paired Telegram chat. English is the default and the fallback.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Language(bool);
 
 impl Language {
-    const EN: Self = Self(false);
-    #[cfg(test)]
-    const TR: Self = Self(true);
+    pub(crate) const EN: Self = Self(false);
+    pub(crate) const TR: Self = Self(true);
+
+    /// Stored and `/lang` code.
+    pub(crate) const fn code(self) -> &'static str {
+        if self.0 { "tr" } else { "en" }
+    }
+
+    /// Parse an exact `en` / `tr` code (stored values and `/lang` arguments).
+    pub(crate) fn from_code(code: &str) -> Option<Self> {
+        match code.trim().to_ascii_lowercase().as_str() {
+            "en" => Some(Self::EN),
+            "tr" => Some(Self::TR),
+            _ => None,
+        }
+    }
+
+    /// Parse a language tag such as Telegram's `language_code` (`tr`, `tr-TR`,
+    /// `en_US`) by its primary subtag. Unsupported languages return `None`.
+    pub(crate) fn from_tag(tag: &str) -> Option<Self> {
+        let primary = tag.trim().split(['-', '_']).next().unwrap_or_default();
+        Self::from_code(primary)
+    }
+
+    /// Language for a chat that is paired for the first time: the Telegram
+    /// language code, then the desktop preference, then English. An explicit
+    /// `/lang` choice always replaces it later.
+    pub(crate) fn for_new_pairing(telegram_code: Option<&str>, desktop: Option<Self>) -> Self {
+        telegram_code
+            .and_then(Self::from_tag)
+            .or(desktop)
+            .unwrap_or(Self::EN)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -34,14 +66,17 @@ pub(crate) enum Message<'a> {
     ApprovalDetailsUnavailable { tool: &'a str },
     ApprovalTooLarge { tool: &'a str },
     ApprovalIncomplete,
+    LanguageSet,
+    LanguageUsage { current: Language },
 }
 
 impl<'a> Message<'a> {
+    #[cfg(test)]
     pub(crate) fn english(self) -> Cow<'a, str> {
         self.render(Language::EN)
     }
 
-    fn render(self, language: Language) -> Cow<'a, str> {
+    pub(crate) fn render(self, language: Language) -> Cow<'a, str> {
         match (self, language.0) {
             (Self::NoBots, false) => "No bots configured.".into(),
             (Self::NoBots, true) => "Henüz bir bot ayarlanmamış.".into(),
@@ -106,6 +141,16 @@ impl<'a> Message<'a> {
             ).into(),
             (Self::ApprovalIncomplete, false) => "Approval could not be shown completely here. Approve or deny it in the desktop app.".into(),
             (Self::ApprovalIncomplete, true) => "Onay isteğinin tamamı burada gösterilemedi. Masaüstü uygulamasında onayla veya reddet.".into(),
+            (Self::LanguageSet, false) => "This chat now uses English.".into(),
+            (Self::LanguageSet, true) => "Bu sohbet artık Türkçe.".into(),
+            (Self::LanguageUsage { current }, false) => {
+                let name = if current.0 { "Turkish" } else { "English" };
+                format!("This chat uses {name}. To change it, send /lang en or /lang tr.").into()
+            }
+            (Self::LanguageUsage { current }, true) => {
+                let name = if current.0 { "Türkçe" } else { "İngilizce" };
+                format!("Bu sohbetin dili: {name}. Değiştirmek için /lang en veya /lang tr gönder.").into()
+            }
         }
     }
 }
@@ -113,6 +158,57 @@ impl<'a> Message<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Language, Message};
+
+    #[test]
+    fn language_codes_and_new_pairing_priority() {
+        assert_eq!(Language::default(), Language::EN);
+        for (tag, expected) in [
+            ("tr", Some(Language::TR)),
+            ("TR-tr", Some(Language::TR)),
+            ("tr_TR", Some(Language::TR)),
+            ("en-GB", Some(Language::EN)),
+            ("de", None),
+            ("", None),
+            ("turkish", None),
+        ] {
+            assert_eq!(Language::from_tag(tag), expected, "{tag}");
+        }
+        assert_eq!(Language::from_code("tr-TR"), None);
+        assert_eq!(Language::from_code(Language::TR.code()), Some(Language::TR));
+        assert_eq!(
+            Language::for_new_pairing(Some("tr-TR"), Some(Language::EN)),
+            Language::TR
+        );
+        assert_eq!(
+            Language::for_new_pairing(Some("en"), Some(Language::TR)),
+            Language::EN
+        );
+        assert_eq!(
+            Language::for_new_pairing(Some("de"), Some(Language::TR)),
+            Language::TR
+        );
+        assert_eq!(
+            Language::for_new_pairing(None, Some(Language::TR)),
+            Language::TR
+        );
+        assert_eq!(Language::for_new_pairing(Some("de"), None), Language::EN);
+        assert_eq!(Language::for_new_pairing(None, None), Language::EN);
+    }
+
+    #[test]
+    fn language_replies_name_both_commands() {
+        for language in [Language::EN, Language::TR] {
+            for current in [Language::EN, Language::TR] {
+                let usage = Message::LanguageUsage { current }.render(language);
+                assert_eq!(usage.matches("/lang en").count(), 1);
+                assert_eq!(usage.matches("/lang tr").count(), 1);
+            }
+        }
+        assert_eq!(
+            Message::LanguageSet.render(Language::TR),
+            "Bu sohbet artık Türkçe."
+        );
+    }
     #[test]
     fn preserves_the_existing_english_labels() {
         assert_eq!(Message::ApproveOnce.render(Language::EN), "Approve once");

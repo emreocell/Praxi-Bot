@@ -88,6 +88,7 @@ impl Update {
                 chat: ChatRef(msg.chat.id),
                 user_id: from.id,
                 username,
+                language_code: from.language_code,
                 message_id: Some(msg.message_id),
                 kind,
             });
@@ -107,6 +108,7 @@ impl Update {
                 chat: ChatRef(chat_id),
                 user_id: cb.from.id,
                 username,
+                language_code: cb.from.language_code,
                 message_id,
                 kind: IncomingKind::Callback {
                     query_id: cb.id,
@@ -192,6 +194,9 @@ pub struct TgUser {
     /// User's or bot's `@username`.
     #[serde(default)]
     pub username: Option<String>,
+    /// IETF language tag of the user's Telegram client (e.g. `tr`, `en`), if sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language_code: Option<String>,
 }
 
 /// A Telegram chat.

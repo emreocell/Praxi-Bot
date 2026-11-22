@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{Result, TelegramError};
+use crate::messages::Language;
 
 /// Default [`SecretStore`] key name under which the Telegram bot token is stored.
 pub const TELEGRAM_BOT_TOKEN_SECRET: &str = "telegram.bot_token";
@@ -122,6 +123,12 @@ struct PersistedFile {
     chat_bots: BTreeMap<i64, BotId>,
     #[serde(default)]
     chat_threads: BTreeMap<String, ChatId>,
+    /// Language per Telegram chat (`"en"` or `"tr"`). Absent means English:
+    /// chats paired before this field existed, and users paired through
+    /// configuration, keep English until they send `/lang`. Only a chat paired
+    /// with `/pair` after this field existed gets an automatic entry.
+    #[serde(default)]
+    chat_languages: BTreeMap<i64, String>,
     /// Next `getUpdates` offset, so a restart never replays confirmed updates.
     #[serde(default)]
     next_offset: Option<i64>,
@@ -316,6 +323,27 @@ impl PairingStore {
     /// # Errors
     /// Returns [`TelegramError::Storage`] if persisting the newly paired user fails.
     pub fn redeem_code(&self, user_id: i64, code: &str) -> Result<PairAttempt> {
+        self.redeem(user_id, code, None)
+    }
+
+    /// [`Self::redeem_code`] from `telegram_chat_id`. A newly paired user's chat
+    /// gets `language` in the same save; an already paired user keeps theirs.
+    pub(crate) fn redeem_code_in_chat(
+        &self,
+        user_id: i64,
+        code: &str,
+        telegram_chat_id: i64,
+        language: Language,
+    ) -> Result<PairAttempt> {
+        self.redeem(user_id, code, Some((telegram_chat_id, language)))
+    }
+
+    fn redeem(
+        &self,
+        user_id: i64,
+        code: &str,
+        chat_language: Option<(i64, Language)>,
+    ) -> Result<PairAttempt> {
         let candidate = code.trim();
         let now = Instant::now();
         let mut guard = self.inner.lock();
@@ -342,6 +370,12 @@ impl PairingStore {
             }
             let mut candidate = guard.persisted.clone();
             let newly_inserted = candidate.paired_users.insert(user_id);
+            if newly_inserted && let Some((chat, language)) = chat_language {
+                candidate
+                    .chat_languages
+                    .entry(chat)
+                    .or_insert_with(|| language.code().to_owned());
+            }
             self.save_locked(&candidate)?;
             guard.persisted = candidate;
             guard.pending_codes.remove(idx);
@@ -501,6 +535,33 @@ impl PairingStore {
         let mut guard = self.inner.lock();
         let mut candidate = guard.persisted.clone();
         candidate.chat_bots.insert(telegram_chat_id, bot_id);
+        self.save_locked(&candidate)?;
+        guard.persisted = candidate;
+        Ok(())
+    }
+
+    /// Language of `telegram_chat_id`; English when none (or an unknown one) is stored.
+    pub(crate) fn chat_language(&self, telegram_chat_id: i64) -> Language {
+        self.inner
+            .lock()
+            .persisted
+            .chat_languages
+            .get(&telegram_chat_id)
+            .and_then(|code| Language::from_code(code))
+            .unwrap_or_default()
+    }
+
+    /// Persist an explicit `/lang` choice. On a save error nothing changes.
+    pub(crate) fn set_chat_language(
+        &self,
+        telegram_chat_id: i64,
+        language: Language,
+    ) -> Result<()> {
+        let mut guard = self.inner.lock();
+        let mut candidate = guard.persisted.clone();
+        candidate
+            .chat_languages
+            .insert(telegram_chat_id, language.code().to_owned());
         self.save_locked(&candidate)?;
         guard.persisted = candidate;
         Ok(())

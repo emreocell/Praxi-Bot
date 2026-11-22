@@ -31,7 +31,7 @@ use crate::daemon_client::{
 };
 use crate::error::{Result, TelegramError};
 use crate::inbox::{DeliveryReceipt, Inbox, MAX_ATTEMPTS};
-use crate::messages::Message;
+use crate::messages::{Language, Message};
 use crate::pairing::{
     PairAttempt, PairingStore, TELEGRAM_BOT_TOKEN_SECRET, UNPAIRED_REFUSAL_TEXT, load_bot_token,
 };
@@ -143,6 +143,9 @@ pub struct TelegramConfig {
     pub paired_users: Vec<i64>,
     /// Additional literal secret strings to register with the [`Redactor`].
     pub extra_redactor_secrets: Vec<String>,
+    /// Desktop app language (`en`, `tr`, ...), used for a newly paired chat when
+    /// Telegram sends no supported language code. `None` falls back to English.
+    pub desktop_language: Option<String>,
 }
 
 impl fmt::Debug for TelegramConfig {
@@ -155,6 +158,7 @@ impl fmt::Debug for TelegramConfig {
             .field("state_path", &self.state_path)
             .field("default_bot_id", &self.default_bot_id)
             .field("paired_users", &self.paired_users)
+            .field("desktop_language", &self.desktop_language)
             .finish_non_exhaustive()
     }
 }
@@ -182,6 +186,7 @@ impl TelegramConfig {
             default_bot_id: None,
             paired_users: Vec::new(),
             extra_redactor_secrets: Vec::new(),
+            desktop_language: None,
         }
     }
 
@@ -251,6 +256,14 @@ impl TelegramConfig {
     #[must_use]
     pub fn with_paired_users(mut self, users: impl IntoIterator<Item = i64>) -> Self {
         self.paired_users = users.into_iter().collect();
+        self
+    }
+
+    /// Desktop app language for newly paired chats without a supported Telegram
+    /// language code. Unsupported values fall back to English.
+    #[must_use]
+    pub fn with_desktop_language(mut self, language: impl Into<String>) -> Self {
+        self.desktop_language = Some(language.into());
         self
     }
 
@@ -460,12 +473,14 @@ fn validate_base_url(url: &str) -> Result<()> {
     }
 }
 
+/// Button labels follow the chat language; callback data never changes with it.
 fn approval_markup(
     a: &protocol::event::ApprovalNeeded,
     offer_run_control: bool,
+    language: Language,
 ) -> Option<InlineKeyboardMarkup> {
     let mut row = vec![InlineButton::new(
-        Message::ApproveOnce.english(),
+        Message::ApproveOnce.render(language),
         format_approval_callback(a.call_id, "once"),
     )];
     // Only when the whole card fits one message: the daemon-written lines that
@@ -477,19 +492,19 @@ fn approval_markup(
             .and_then(protocol::approval_text::control_grant_program)
     {
         row.push(InlineButton::new(
-            Message::ApproveForTask { program: &program }.english(),
+            Message::ApproveForTask { program: &program }.render(language),
             format_approval_callback(a.call_id, "run"),
         ));
     }
     // No standing grant for tools that bring details.
     if a.details.is_none() {
         row.push(InlineButton::new(
-            Message::Always.english(),
+            Message::Always.render(language),
             format_approval_callback(a.call_id, "always"),
         ));
     }
     row.push(InlineButton::new(
-        Message::Deny.english(),
+        Message::Deny.render(language),
         format_approval_callback(a.call_id, "deny"),
     ));
     InlineKeyboardMarkup::from_rows(vec![row])
@@ -692,6 +707,11 @@ impl TelegramChannel {
     #[cfg(test)]
     pub(crate) fn fail_inbox_writes(&self, enabled: bool) {
         self.inner.inbox.fail_writes(enabled);
+    }
+
+    /// Current language of a paired chat (English unless set; see `PairingStore`).
+    fn language(&self, telegram_chat_id: i64) -> Language {
+        self.inner.pairing.chat_language(telegram_chat_id)
     }
 
     fn report_error(&self, error: &TelegramError) {
@@ -1024,11 +1044,13 @@ impl TelegramChannel {
         a: protocol::event::ApprovalNeeded,
     ) -> Result<()> {
         let tool = &a.tool_name;
+        // Read at send time, so a card always follows the chat's current choice.
+        let language = self.language(chat_id);
         let heading = Message::ApprovalHeading {
             tool,
             subagent: is_child,
         }
-        .english();
+        .render(language);
         // A tool that attaches details (a schedule) must be shown in
         // full before anyone can approve it here; if that is not
         // possible, approval is left to the desktop app.
@@ -1043,14 +1065,16 @@ impl TelegramChannel {
                         (shown, true)
                     } else {
                         (
-                            Message::ApprovalMasked { tool }.english().into_owned(),
+                            Message::ApprovalMasked { tool }
+                                .render(language)
+                                .into_owned(),
                             false,
                         )
                     }
                 }
                 None => (
                     Message::ApprovalDetailsUnavailable { tool }
-                        .english()
+                        .render(language)
                         .into_owned(),
                     false,
                 ),
@@ -1062,7 +1086,11 @@ impl TelegramChannel {
         let chunks = protocol::approval_text::chunk_text(&redacted, 3500);
         if chunks.len() > 40 {
             let _ = self
-                .send_redacted(chat_id, &Message::ApprovalTooLarge { tool }.english(), None)
+                .send_redacted(
+                    chat_id,
+                    &Message::ApprovalTooLarge { tool }.render(language),
+                    None,
+                )
                 .await;
             return Ok(());
         }
@@ -1092,7 +1120,7 @@ impl TelegramChannel {
                 }
                 run.insert(a.call_id);
             }
-            approval_markup(&a, offer_run_control)
+            approval_markup(&a, offer_run_control, language)
         } else {
             None
         };
@@ -1117,7 +1145,7 @@ impl TelegramChannel {
                     chunks.len()
                 );
                 let _ = self
-                    .send_redacted(chat_id, &Message::ApprovalIncomplete.english(), None)
+                    .send_redacted(chat_id, &Message::ApprovalIncomplete.render(language), None)
                     .await;
                 return Ok(());
             }
@@ -1140,7 +1168,7 @@ impl TelegramChannel {
         Ok(msg.message_id)
     }
 
-    async fn handle_incoming(&self, msg: IncomingMessage) -> Result<()> {
+    pub(crate) async fn handle_incoming(&self, msg: IncomingMessage) -> Result<()> {
         let chat_id = msg.chat.0;
         let user_id = msg.user_id;
 
@@ -1148,7 +1176,9 @@ impl TelegramChannel {
             let trimmed = text.trim();
             if trimmed == "/pair" || trimmed.starts_with("/pair ") || trimmed.starts_with("/pair@")
             {
-                return self.handle_pair_command(chat_id, user_id, trimmed).await;
+                return self
+                    .handle_pair_command(chat_id, user_id, trimmed, msg.language_code.as_deref())
+                    .await;
             }
         }
 
@@ -1194,7 +1224,13 @@ impl TelegramChannel {
         }
     }
 
-    async fn handle_pair_command(&self, chat_id: i64, user_id: i64, raw: &str) -> Result<()> {
+    async fn handle_pair_command(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+        raw: &str,
+        telegram_language: Option<&str>,
+    ) -> Result<()> {
         let code = raw
             .split_once(char::is_whitespace)
             .map_or("", |(_, rest)| rest.trim());
@@ -1204,7 +1240,19 @@ impl TelegramChannel {
             return Ok(());
         }
 
-        match self.inner.pairing.redeem_code(user_id, code)? {
+        // Used only if this pairs a new user; existing chats keep their language.
+        let desktop = self
+            .inner
+            .config
+            .desktop_language
+            .as_deref()
+            .and_then(Language::from_tag);
+        let language = Language::for_new_pairing(telegram_language, desktop);
+        match self
+            .inner
+            .pairing
+            .redeem_code_in_chat(user_id, code, chat_id, language)?
+        {
             PairAttempt::Paired => {
                 self.send_redacted(
                     chat_id,
@@ -1241,8 +1289,12 @@ impl TelegramChannel {
             return Ok(());
         }
         if trimmed.chars().count() > MAX_INCOMING_CHARS {
-            self.send_redacted(chat_id, &Message::InputTooLong.english(), None)
-                .await?;
+            self.send_redacted(
+                chat_id,
+                &Message::InputTooLong.render(self.language(chat_id)),
+                None,
+            )
+            .await?;
             return Ok(());
         }
 
@@ -1260,6 +1312,12 @@ impl TelegramChannel {
         }
         if trimmed == "/status" || trimmed.starts_with("/status@") {
             return self.handle_status_command(chat_id).await;
+        }
+        if trimmed == "/lang" || trimmed.starts_with("/lang ") || trimmed.starts_with("/lang@") {
+            let arg = trimmed
+                .split_once(char::is_whitespace)
+                .map_or("", |(_, rest)| rest.trim());
+            return self.handle_lang_command(chat_id, arg).await;
         }
 
         // A retry after daemon acknowledgement resumes the original delivery. A
@@ -1296,11 +1354,30 @@ impl TelegramChannel {
         self.forward_user_message(chat_id, trimmed, update_id).await
     }
 
+    /// `/lang tr` or `/lang en` stores this chat's language; anything else shows
+    /// the current one. The reply uses the new language only after it is saved.
+    async fn handle_lang_command(&self, chat_id: i64, arg: &str) -> Result<()> {
+        let Some(language) = Language::from_code(arg) else {
+            let current = self.language(chat_id);
+            let usage = Message::LanguageUsage { current }.render(current);
+            self.send_redacted(chat_id, &usage, None).await?;
+            return Ok(());
+        };
+        self.inner.pairing.set_chat_language(chat_id, language)?;
+        self.send_redacted(chat_id, &Message::LanguageSet.render(language), None)
+            .await?;
+        Ok(())
+    }
+
     async fn handle_bots_command(&self, chat_id: i64) -> Result<()> {
         let bots = self.inner.api_client.list_bots().await?;
         if bots.is_empty() {
-            self.send_redacted(chat_id, &Message::NoBots.english(), None)
-                .await?;
+            self.send_redacted(
+                chat_id,
+                &Message::NoBots.render(self.language(chat_id)),
+                None,
+            )
+            .await?;
             return Ok(());
         }
         let active = self
@@ -1311,7 +1388,11 @@ impl TelegramChannel {
             .or_else(|| bots.first().map(|b| b.id));
 
         let mut lines = Vec::with_capacity(bots.len() + 1);
-        lines.push(Message::AvailableBots.english().into_owned());
+        lines.push(
+            Message::AvailableBots
+                .render(self.language(chat_id))
+                .into_owned(),
+        );
         for b in &bots {
             let mark = if Some(b.id) == active { "*" } else { "•" };
             lines.push(format!("{mark} {} ({})", b.name, b.id));
@@ -1338,8 +1419,12 @@ impl TelegramChannel {
             });
 
         let Some(bot) = found else {
-            self.send_redacted(chat_id, &Message::BotNotFound { query }.english(), None)
-                .await?;
+            self.send_redacted(
+                chat_id,
+                &Message::BotNotFound { query }.render(self.language(chat_id)),
+                None,
+            )
+            .await?;
             return Ok(());
         };
 
@@ -1393,8 +1478,12 @@ impl TelegramChannel {
                 .await?;
         } else {
             self.inner.inbox.delivered(update_id, None)?;
-            self.send_redacted(chat_id, &Message::NoActiveRun.english(), None)
-                .await?;
+            self.send_redacted(
+                chat_id,
+                &Message::NoActiveRun.render(self.language(chat_id)),
+                None,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -1555,8 +1644,12 @@ impl TelegramChannel {
                     }
                     rt.queued.remove(&telegram_chat_id);
                 }
-                self.send_redacted(telegram_chat_id, &Message::RunStopped.english(), None)
-                    .await?;
+                self.send_redacted(
+                    telegram_chat_id,
+                    &Message::RunStopped.render(self.language(telegram_chat_id)),
+                    None,
+                )
+                .await?;
             }
             DeliveryKind::Queued if outcome.run_id.is_none() => {
                 // The daemon starts this turn later as a brand-new run nobody subscribed to;
@@ -1751,6 +1844,7 @@ impl TelegramChannel {
         data: &str,
         update_id: i64,
     ) -> Result<()> {
+        let language = self.language(chat_id);
         if let Some((call_id, decision, scope)) = parse_approval_callback(data) {
             // Only approvals this bridge issued to *this* chat may be decided from it.
             let allowed = { self.inner.pending_approvals.lock().get(&call_id) == Some(&chat_id) };
@@ -1759,7 +1853,7 @@ impl TelegramChannel {
                     .bot_api
                     .answer_callback_query(
                         query_id,
-                        Some(&Message::UnknownOrExpiredRequest.english()),
+                        Some(&Message::UnknownOrExpiredRequest.render(language)),
                     )
                     .await?;
                 return Ok(());
@@ -1775,7 +1869,7 @@ impl TelegramChannel {
             {
                 self.inner
                     .bot_api
-                    .answer_callback_query(query_id, Some(&Message::OnceOnly.english()))
+                    .answer_callback_query(query_id, Some(&Message::OnceOnly.render(language)))
                     .await?;
                 return Ok(());
             }
@@ -1799,7 +1893,7 @@ impl TelegramChannel {
             };
             self.inner
                 .bot_api
-                .answer_callback_query(query_id, Some(&ack.english()))
+                .answer_callback_query(query_id, Some(&ack.render(language)))
                 .await?;
             return Ok(());
         }
@@ -1826,7 +1920,7 @@ impl TelegramChannel {
                     .bot_api
                     .answer_callback_query(
                         query_id,
-                        Some(&Message::UnknownOrExpiredRequest.english()),
+                        Some(&Message::UnknownOrExpiredRequest.render(language)),
                     )
                     .await?;
                 return Ok(());
@@ -1845,7 +1939,7 @@ impl TelegramChannel {
             }
             self.inner
                 .bot_api
-                .answer_callback_query(query_id, Some(&Message::Answered.english()))
+                .answer_callback_query(query_id, Some(&Message::Answered.render(language)))
                 .await?;
             return Ok(());
         }

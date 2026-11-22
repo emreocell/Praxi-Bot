@@ -39,15 +39,18 @@ inline buttons. Only Telegram accounts you pair can use it.
 | `bot channels telegram status` | Show configured / enabled / running and the number of paired users |
 | `bot channels telegram disable` | Turn the channel off (the token stays stored); takes effect at the next `bot serve` |
 
-In the chat with your bot: `/bots`, `/use <bot>`, `/stop`, `/status`. Any other
-text is sent to the selected bot. Voice messages, photos and files are not
+In the chat with your bot: `/bots`, `/use <bot>`, `/stop`, `/status`, and
+`/lang tr` or `/lang en` to pick the chat's language (see
+[Language](guide/telegram.md#language)). Any other text is sent to the selected
+bot. Voice messages, photos and files are not
 read yet: the bot answers that it only understands text.
 
 ## Notes
 
 - The pairing code is created by the running daemon, so `bot channels telegram
   pair` needs `bot serve` to be up and the channel running.
-- Paired users and the chat mapping are kept in `<data dir>/telegram_state.json`;
+- Paired users, the chat mapping and each chat's language (`chat_languages`;
+  a chat without an entry is English) are kept in `<data dir>/telegram_state.json`;
   the on/off switch is `<data dir>/channels.toml`.
 - Everything the bot sends to Telegram is passed through the secret redactor.
 - The daemon API exposes `GET /v1/channels` and
