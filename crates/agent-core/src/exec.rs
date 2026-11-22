@@ -1071,8 +1071,19 @@ impl TurnExecutor {
         }
         let model = req.model.clone();
         let provider = self.sh.providers.read().pick(&model)?;
-        let mut call = crate::usage::CallGuard::start(&self.sh, ctx, &model.0, purpose)
-            .map_err(ProviderError::InvalidRequest)?;
+        // Bytes / 3 of the serialized request: more tokens than real text, so a
+        // large prompt is not waved through on the default first-call guess.
+        let prompt_hint = serde_json::to_vec(&req)
+            .ok()
+            .map(|b| (b.len() as u64).div_ceil(3));
+        let mut call = crate::usage::CallGuard::start_with_prompt(
+            &self.sh,
+            ctx,
+            &model.0,
+            purpose,
+            prompt_hint,
+        )
+        .map_err(ProviderError::InvalidRequest)?;
         call.tier(tier);
         let mut stream = provider.stream(req).await?;
         let mut out = ModelOut {
@@ -1090,6 +1101,8 @@ impl TurnExecutor {
                         }),
                     );
                     out.text.push_str(&t);
+                    call.stream_progress(out.text.len())
+                        .map_err(ProviderError::InvalidRequest)?;
                 }
                 ChatChunk::ToolCall(mut tc) => {
                     if let Some(real) = specs.iter().find(|s| expose(&s.name) == tc.name) {
