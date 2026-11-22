@@ -1717,6 +1717,7 @@
     "exportJson": "JSON olarak dışa aktar",
     "exportMarkdown": "Markdown olarak dışa aktar",
     "more": "Daha fazla sonuç",
+    "noneYet": "Bu sayfada henüz görünen eşleşme yok",
     "results": "Mesaj arama sonuçları",
     "search": "Tüm sohbet mesajlarında ara…",
     "searching": "Mesajlar aranıyor…",
@@ -2424,6 +2425,10 @@
     "restarting": "Yeniden başlatılıyor…",
     "retry": "Yeniden dene",
     "retrying": "{{seconds}} sn sonra yeniden denenecek",
+    "safeModeBlocked": {
+      "hint": "Güvenli mod açıkken araçlar, iş akışları ve zamanlamalar kapalıdır. Kullanmak için Praxi'yi normal şekilde yeniden başlat.",
+      "title": "Güvenli mod açık"
+    },
     "screenInputDenied": {
       "hint": "Sunucudaki Praxi'de bu bilgisayara ekran denetimi izni ver, sonra yeniden dene.",
       "title": "Bu bilgisayara ekran denetimi izni verilmemiş"

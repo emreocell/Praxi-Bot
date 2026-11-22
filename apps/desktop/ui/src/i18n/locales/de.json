@@ -1717,6 +1717,7 @@
     "exportJson": "Als JSON exportieren",
     "exportMarkdown": "Als Markdown exportieren",
     "more": "Weitere Ergebnisse",
+    "noneYet": "Auf dieser Seite noch keine sichtbaren Treffer",
     "results": "Ergebnisse der Nachrichtensuche",
     "search": "Alle Chatnachrichten durchsuchen …",
     "searching": "Nachrichten werden durchsucht …",
@@ -2424,6 +2425,10 @@
     "restarting": "Wird neu gestartet …",
     "retry": "Erneut versuchen",
     "retrying": "Neuer Versuch in {{seconds}} s",
+    "safeModeBlocked": {
+      "hint": "Im abgesicherten Modus sind Werkzeuge, Workflows und Zeitpläne abgeschaltet. Starte Praxi normal neu, um sie zu nutzen.",
+      "title": "Der abgesicherte Modus ist aktiv"
+    },
     "screenInputDenied": {
       "hint": "Erlaube die Bildschirmsteuerung für diesen Computer in Praxi auf dem Host und versuche es erneut.",
       "title": "Bildschirmsteuerung ist für diesen Computer nicht erlaubt"

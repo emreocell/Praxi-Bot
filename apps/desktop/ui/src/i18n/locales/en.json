@@ -1717,6 +1717,7 @@
     "exportJson": "Export as JSON",
     "exportMarkdown": "Export as Markdown",
     "more": "More results",
+    "noneYet": "No visible matches on this page yet",
     "results": "Message search results",
     "search": "Search all chat messages…",
     "searching": "Searching messages…",
@@ -2424,6 +2425,10 @@
     "restarting": "Restarting…",
     "retry": "Try again",
     "retrying": "Trying again in {{seconds}} s",
+    "safeModeBlocked": {
+      "hint": "Tools, workflows and schedules are switched off while safe mode is on. Restart Praxi normally to use them.",
+      "title": "Safe mode is on"
+    },
     "screenInputDenied": {
       "hint": "Allow screen control for this computer in Praxi on the host, then try again.",
       "title": "Screen control is not allowed for this computer"

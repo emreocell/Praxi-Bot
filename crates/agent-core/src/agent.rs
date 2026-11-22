@@ -1047,6 +1047,13 @@ impl AgentLoop {
         note: Option<&str>,
         kind: &str,
     ) -> Result<RunId> {
+        // A tool or workflow directive is dropped under safe mode; say so instead of
+        // starting a turn that silently does nothing.
+        if self.sh.cfg.safe_mode && !matches!(work, ScheduleWork::Prompt(_)) {
+            return Err(LoopError::Profile(
+                "scheduled tools and workflows are disabled in safe mode".into(),
+            ));
+        }
         if !self.sh.storage.list_messages(chat_id)?.is_empty() {
             return Err(LoopError::Profile(
                 "external schedule requires an empty chat".into(),
