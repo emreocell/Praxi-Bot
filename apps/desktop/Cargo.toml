@@ -29,7 +29,7 @@ storage.workspace = true
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-notification = "2"
 tauri-plugin-store = "2"
-tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "zip"] }
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
 thiserror.workspace = true
 tokio.workspace = true
 

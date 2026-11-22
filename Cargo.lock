@@ -235,15 +235,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
-name = "arbitrary"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
-dependencies = [
- "derive_arbitrary",
-]
-
-[[package]]
 name = "arc-swap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -997,7 +988,7 @@ dependencies = [
  "log",
  "quick-xml",
  "serde",
- "zip 9.4.1",
+ "zip",
 ]
 
 [[package]]
@@ -2187,17 +2178,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_arbitrary"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b034bd7d5f032402a2479444dcc6f74e36a03f31854d41680fb240ef682a1ac"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.9",
-]
-
-[[package]]
 name = "derive_builder"
 version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2487,7 +2467,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tool-registry",
- "zip 9.4.1",
+ "zip",
 ]
 
 [[package]]
@@ -4813,7 +4793,7 @@ dependencies = [
  "tracing",
  "url",
  "windows 0.62.2",
- "zip 9.4.1",
+ "zip",
 ]
 
 [[package]]
@@ -6640,7 +6620,7 @@ dependencies = [
  "toml 0.8.2",
  "toml_edit 0.20.2",
  "wiremock",
- "zip 9.4.1",
+ "zip",
 ]
 
 [[package]]
@@ -7340,7 +7320,7 @@ version = "0.102.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ca3d0e879a578c1313c2800ab0c6c029d38eed18098675e50341a30d32372ed"
 dependencies = [
- "zip 9.4.1",
+ "zip",
 ]
 
 [[package]]
@@ -8195,7 +8175,7 @@ dependencies = [
  "tokio",
  "tool-registry",
  "unicode-normalization",
- "zip 9.4.1",
+ "zip",
 ]
 
 [[package]]
@@ -8914,7 +8894,6 @@ dependencies = [
  "tokio",
  "url",
  "windows-sys 0.60.2",
- "zip 4.6.1",
 ]
 
 [[package]]
@@ -10259,7 +10238,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -11374,18 +11353,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
-]
-
-[[package]]
-name = "zip"
-version = "4.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
-dependencies = [
- "arbitrary",
- "crc32fast",
- "indexmap 2.14.2",
- "memchr",
 ]
 
 [[package]]
