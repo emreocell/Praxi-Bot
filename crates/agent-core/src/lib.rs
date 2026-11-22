@@ -44,6 +44,7 @@ pub mod usage;
 mod approval_expiry_tests;
 #[cfg(test)]
 mod bot_limit_tests;
+#[cfg(test)]
 mod browser_mcp_tests;
 #[cfg(test)]
 mod control_grant_tests;
