@@ -79,7 +79,8 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Let a bot search the web and read pages without a browser | [Web tools](web.md) |
 | Set up knowledge embeddings (optional; knowledge search works without them) | [Set up knowledge embeddings](knowledge-embeddings.md) |
 | Look up a command or flag | [CLI reference](cli-reference.md) |
-| Back up and restore your data | [Backup and restore](backup-and-restore.md) |
+| Back up and restore your data (encrypted) | [Encrypted backup and restore](backup.md) |
+| Restore an older plaintext backup | [Restoring older plaintext backups](backup-and-restore.md) |
 | Understand what protects you | [Security model](security.md) |
 | Look up a term | [Glossary](glossary.md) |
 | See keyboard shortcuts | [Keyboard shortcuts](keyboard-shortcuts.md) |

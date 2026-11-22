@@ -100,26 +100,29 @@ Never prompts. Exits 1 when any check fails.
 
 `--json` prints the checks as JSON.
 
-### `bot backup <FILE>` and `bot restore <FILE>`
+### `bot backup create | verify | restore`
 
-`backup` writes one file with your bots, chats, memory, skills, workflows,
-schedules and provider settings. It never overwrites an existing file and
-never contains API keys or tokens: enter those again after a restore. It is
-safe while the app runs, but a backup taken with the app closed is consistent
-across all files.
+`bot backup create <FILE>` writes one passphrase-encrypted file with your bots, chats,
+memory, skills, workflows, schedules and provider settings. It never overwrites an existing
+file. `verify` decrypts and checks the file without touching the data directory. `restore`
+unpacks it into this installation; stop the daemon first (it refuses while `bot serve` holds
+the data directory or a daemon answers on `--port`). See
+[Encrypted backup and restore](backup.md).
 
-`restore` unpacks such a file into this installation. Stop the daemon first (it
-refuses while a daemon answers on `--port`). An installation that already has
-bots or chats is refused unless you pass `--replace`; the state it replaces is
-kept in a `backup-*` folder inside the data directory.
+The passphrase comes from a hidden prompt, `--passphrase-file <FILE>` or
+`--passphrase-env <VAR>` (the variable name); it is never a command-line value.
 
-With `--json`, each command writes one JSON object to stdout on success. See
-[JSON output for scripts](backup-and-restore.md#json-output-for-scripts) for the fields.
+| Option | Commands | Meaning |
+| --- | --- | --- |
+| `--passphrase-file <FILE>` | all | Read the passphrase from the first line of a file |
+| `--passphrase-env <VAR>` | all | Read the passphrase from this environment variable |
+| `--include-secrets` | `create` | Also store API keys and tokens (encrypted) in the backup |
+| `--include-secrets` | `restore` | Write the backup's API keys into the secret store (default: skip) |
+| `--replace` | `restore` | Swap existing bots and chats for the backup (the old state goes to a `backup-*` folder) |
+| `--allow-policy-relaxation` | `restore` | Accept a backup whose permission policy is more permissive |
 
-| Option (`restore`) | Meaning |
-| --- | --- |
-| `--replace` | Swap the existing bots and chats for the backup |
-| `--allow-policy-relaxation` | Accept a backup whose permission policy is more permissive than the current one |
+`bot restore <FILE>` restores plaintext archives made by older versions; see
+[Restoring older plaintext backups](backup-and-restore.md).
 
 ### `bot status`
 

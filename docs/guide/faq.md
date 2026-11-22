@@ -46,9 +46,11 @@ Yes. Each has its own profile, chats and grants; see
 ### Where is my data, and how do I back it up?
 In the data directory (`--data-dir` / `BOT_DATA_DIR`, otherwise the OS per-user
 app-data folder for `praxi-bot`): a SQLite database plus event logs,
-`providers.toml`, skills, workflows and the API token. Stop the daemon and copy
-the folder. API keys are in your OS keychain (or an encrypted file in the data
-directory) and are not part of a plain copy when the keychain is used.
+`providers.toml`, skills, workflows and the API token. Run `bot backup create <file>`: it writes one
+passphrase-encrypted file you can restore with `bot backup restore` (see
+[Encrypted backup and restore](backup.md)). API keys are in your OS keychain (or an
+encrypted file in the data directory) and are included only with
+`--include-secrets`.
 
 ### How do I make a bot faster and cheaper?
 Use a small `classifier` model, save [workflows](workflows.md) for repeated jobs,

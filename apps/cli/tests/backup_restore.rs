@@ -1,9 +1,9 @@
-use std::fs::File;
 use std::path::Path;
 use std::process::{Command, Output};
 
 use serde_json::{Value, json};
-use state_bundle::Manifest;
+
+const PASSPHRASE: &str = "backup-restore-test-only";
 
 fn bot(root: &Path, data_dir: &str, json_out: bool, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_bot"))
@@ -11,6 +11,7 @@ fn bot(root: &Path, data_dir: &str, json_out: bool, args: &[&str]) -> Output {
         .args(["--data-dir", data_dir])
         .args(["--port", "0", "--secrets-backend", "file"])
         .env("BOT_SECRETS_PASSPHRASE", "backup-restore-test-only")
+        .env("PRAXI_TEST_BACKUP_PASS", PASSPHRASE)
         .env_remove("BOT_CATALOG_DIR")
         .args(json_out.then_some("--json"))
         .args(args)
@@ -39,17 +40,6 @@ fn data_with_bot(dir: &Path) {
         .unwrap();
 }
 
-fn manifest(file: &Path) -> Manifest {
-    let mut archive = tar::Archive::new(File::open(file).unwrap());
-    let entry = archive
-        .entries()
-        .unwrap()
-        .map(Result::unwrap)
-        .find(|entry| entry.path().unwrap() == Path::new("manifest.json"))
-        .expect("backup manifest");
-    serde_json::from_reader(entry).unwrap()
-}
-
 fn stdout(output: Output) -> String {
     assert!(output.status.success(), "{output:?}");
     String::from_utf8(output.stdout).unwrap()
@@ -65,92 +55,111 @@ fn assert_failure(output: &Output, message: &str) {
     );
 }
 
+const PASS: [&str; 2] = ["--passphrase-env", "PRAXI_TEST_BACKUP_PASS"];
+
 #[test]
-fn backup_and_restore_report_results_in_both_output_modes() {
-    for json_out in [false, true] {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path();
-        data_with_bot(&root.join("source"));
-        let file = "praxi yedek ı.tar";
-        let backup = stdout(bot(root, "source", json_out, &["backup", file]));
-        let existing = bot(root, "source", json_out, &["backup", file]);
-        assert_failure(&existing, "already exists");
-        let manifest = manifest(&root.join(file));
-        let files = manifest.files.len();
-        let bytes: u64 = manifest.files.iter().map(|entry| entry.size).sum();
-        if json_out {
-            assert_eq!(
-                serde_json::from_str::<Value>(&backup).unwrap(),
-                json!({"file": file, "files": files, "bytes": bytes})
-            );
-        } else {
-            assert_eq!(
-                backup,
-                format!(
-                    "Backup written to {file} ({files} files, {bytes} bytes).\nIt does not contain API keys or tokens; enter them again after a restore.\n"
-                )
-            );
-        }
+fn encrypted_backup_create_verify_restore_report_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    data_with_bot(&root.join("source"));
+    let file = "praxi yedek ı.bak";
+    let create = stdout(bot(
+        root,
+        "source",
+        true,
+        &[&["backup", "create", file][..], &PASS].concat(),
+    ));
+    let created: Value = serde_json::from_str(&create).unwrap();
+    assert_eq!(created["encrypted"], json!(true));
+    assert_eq!(created["secrets_included"], json!(false));
+    let again = bot(
+        root,
+        "source",
+        false,
+        &[&["backup", "create", file][..], &PASS].concat(),
+    );
+    assert_failure(&again, "already exists");
 
-        let app_version = manifest.app_version;
-        let summary =
-            format!("Restored {files} files from {file} (created with Praxi {app_version}).\n");
-        let keys = "API keys are not part of a backup: enter them again (`bot secrets set`, or the app's settings).\n";
-        let restore = stdout(bot(root, "target", json_out, &["restore", file]));
-        let mut expected = json!({
-            "file": file, "files": files, "app_version": app_version, "previous_state": null,
-        });
-        if json_out {
-            assert_eq!(serde_json::from_str::<Value>(&restore).unwrap(), expected);
-        } else {
-            assert_eq!(restore, format!("{summary}{keys}"));
-        }
+    let verified: Value = serde_json::from_str(&stdout(bot(
+        root,
+        "source",
+        true,
+        &[&["backup", "verify", file][..], &PASS].concat(),
+    )))
+    .unwrap();
+    assert_eq!(verified["files"], created["files"]);
 
-        let refused = bot(root, "target", json_out, &["restore", file]);
-        assert_failure(&refused, "re-run with `--replace`");
-        let replacement = stdout(bot(
-            root,
-            "target",
-            json_out,
-            &["restore", file, "--replace"],
-        ));
-        let previous = root
-            .join("target")
-            .read_dir()
-            .unwrap()
-            .map(Result::unwrap)
-            .find(|entry| entry.file_name().to_string_lossy().starts_with("backup-"))
-            .expect("previous state directory");
-        assert!(previous.path().join("bot.db").is_file());
-        let previous = Path::new("target").join(previous.file_name());
-        if json_out {
-            expected["previous_state"] = json!(previous.to_str().unwrap());
-            assert_eq!(
-                serde_json::from_str::<Value>(&replacement).unwrap(),
-                expected
-            );
-        } else {
-            assert_eq!(
-                replacement,
-                format!(
-                    "{summary}The previous state was kept in {}.\n{keys}",
-                    previous.display()
-                )
-            );
-        }
-    }
+    let restored: Value = serde_json::from_str(&stdout(bot(
+        root,
+        "target",
+        true,
+        &[&["backup", "restore", file][..], &PASS].concat(),
+    )))
+    .unwrap();
+    assert_eq!(restored["files"], created["files"]);
+    assert_eq!(restored["secrets_skipped"], json!(0));
+    assert!(root.join("target/bot.db").is_file());
+
+    let refused = bot(
+        root,
+        "target",
+        false,
+        &[&["backup", "restore", file][..], &PASS].concat(),
+    );
+    assert_failure(&refused, "re-run with `--replace`");
 }
 
 #[test]
-fn backup_and_restore_fail_with_text_on_stderr_in_both_output_modes() {
+fn passphrase_is_never_a_command_line_value_and_a_wrong_one_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    data_with_bot(&root.join("source"));
+    let file = "b.bak";
+    stdout(bot(
+        root,
+        "source",
+        false,
+        &[&["backup", "create", file][..], &PASS].concat(),
+    ));
+    let rejected = bot(
+        root,
+        "source",
+        false,
+        &["backup", "verify", file, "--passphrase", "hunter2hunter2"],
+    );
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("--passphrase"));
+
+    std::fs::write(root.join("wrong.txt"), "not the passphrase\n").unwrap();
+    let wrong = bot(
+        root,
+        "source",
+        false,
+        &["backup", "verify", file, "--passphrase-file", "wrong.txt"],
+    );
+    assert_failure(&wrong, "wrong passphrase");
+}
+
+#[test]
+fn backup_fails_with_text_on_stderr_in_both_output_modes() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     for json_out in [false, true] {
-        let backup = bot(root, "empty", json_out, &["backup", "missing.tar"]);
+        let backup = bot(
+            root,
+            "empty",
+            json_out,
+            &[&["backup", "create", "missing.bak"][..], &PASS].concat(),
+        );
         assert_failure(&backup, "nothing to back up");
-        assert!(!root.join("missing.tar").exists());
+        assert!(!root.join("missing.bak").exists());
 
-        let restore = bot(root, "target", json_out, &["restore", "missing.tar"]);
-        assert_failure(&restore, "backup file missing.tar not found");
+        let verify = bot(
+            root,
+            "target",
+            json_out,
+            &[&["backup", "verify", "missing.bak"][..], &PASS].concat(),
+        );
+        assert_failure(&verify, "backup file missing.bak not found");
     }
 }

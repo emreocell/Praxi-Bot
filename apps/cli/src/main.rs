@@ -1,6 +1,7 @@
 //! Command-line interface entry point for the Praxi-Bot agent (`bot`).
 
 mod backup_cmd;
+mod backup_crypto;
 mod calendar_host;
 mod catalog_cmd;
 mod channels;
@@ -147,13 +148,19 @@ enum Command {
         #[command(subcommand)]
         action: host::HostCmd,
     },
-    /// Back up bots, chats, memory, skills, and settings to one file (no API keys).
+    /// Encrypted backup of bots, chats, memory, skills, and settings: `create`, `verify`, `restore`.
     ///
-    /// Existing files are never overwritten. API keys and tokens are excluded
-    /// from backups and must be re-entered after a restore. Stopping the daemon
-    /// first gives a snapshot that is consistent across all files.
-    Backup(backup_cmd::BackupCmd),
-    /// Restore a backup file created by `bot backup` (stop the daemon first).
+    /// Backups are protected with a passphrase (hidden prompt, `--passphrase-file`
+    /// or `--passphrase-env`; never a command-line value). Existing files are never
+    /// overwritten. API keys are excluded unless `--include-secrets` is given.
+    /// Stopping the daemon first gives a snapshot that is consistent across all files.
+    Backup {
+        #[command(subcommand)]
+        action: backup_cmd::BackupAction,
+    },
+    /// Restore a plaintext backup made by an older version (stop the daemon first).
+    ///
+    /// Encrypted backups are restored with `bot backup restore`.
     Restore(backup_cmd::RestoreCmd),
     /// Set up a provider, default model, and first bot (interactive, or scripted with `--provider`).
     Setup(SetupCmd),
@@ -752,8 +759,15 @@ fn run() -> Result<()> {
         }
         Command::Serve { .. } => return run_serve(&cli, command, &data_dir),
         Command::Doctor(c) => return run_doctor(&cli, c, &data_dir),
-        Command::Backup(c) => {
-            return backup_cmd::backup(&data_dir, c, cli.json, &mut std::io::stdout());
+        Command::Backup { action } if !action.needs_secret_store() => {
+            return backup_cmd::run(
+                action,
+                &data_dir,
+                cli.port,
+                &secret_store::MemoryStore::new(),
+                cli.json,
+                &mut std::io::stdout(),
+            );
         }
         Command::SelfUpdate(args) => return update::run(args),
         Command::Host { .. }
@@ -808,6 +822,14 @@ fn run() -> Result<()> {
 
     match command {
         Command::Setup(c) => run_setup(c, &env),
+        Command::Backup { action } => backup_cmd::run(
+            action,
+            &data_dir,
+            cli.port,
+            store,
+            cli.json,
+            &mut std::io::stdout(),
+        ),
         Command::Restore(c) => backup_cmd::restore(
             &data_dir,
             cli.port,
@@ -853,7 +875,7 @@ fn run() -> Result<()> {
         | Command::Host { .. }
         | Command::SelfUpdate(_)
         | Command::Doctor(_)
-        | Command::Backup(_)
+        | Command::Backup { .. }
         | Command::Serve { .. }
         | Command::Status
         | Command::Proxy
@@ -979,6 +1001,8 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
     // First thing: restrict the daemon process before secrets are read or
     // children are spawned. Never fatal; the result is recorded in `serve`
     // and shown by `doctor`.
+    // Held for the whole run so `bot backup restore` can tell a daemon is using the data dir.
+    let _daemon_lock = backup_cmd::hold_daemon_lock(data_dir);
     let guard = process_guard::protect();
     if guard.outcome == process_guard::Outcome::Failed {
         eprintln!("warning: DEGRADED process guard: {}", guard.detail);

@@ -1322,10 +1322,12 @@ version = "0.1.0"
 dependencies = [
  "agent-core",
  "agent-router",
+ "argon2",
  "async-trait",
  "base64 0.22.1",
  "browser-cdp",
  "builtin-tools",
+ "chacha20poly1305",
  "channel-telegram",
  "clap",
  "clap_complete",

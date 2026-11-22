@@ -33,7 +33,7 @@
 
 <p align="center"><sub>Ask, watch the steps, approve or deny. Demo data shown.</sub></p>
 
-> **Project status: alpha.** The latest pre-release is `v0.1.0-alpha.2` (the first was `v0.1.0-alpha.1`). There is no stable API and things change quickly. Expect breaking changes, and back up your data directory before updating. Only the latest pre-release is supported (see [SECURITY.md](SECURITY.md)).
+> **Project status: alpha.** The latest pre-release is `v0.1.0-alpha.2` (the first was `v0.1.0-alpha.1`). There is no stable API and things change quickly. Expect breaking changes, and run `bot backup create <file>` (encrypted, see [docs/guide/backup.md](docs/guide/backup.md)) before updating. Only the latest pre-release is supported (see [SECURITY.md](SECURITY.md)).
 
 ## What it does
 
@@ -173,7 +173,7 @@ To package the Windows installer yourself, see [Building the Windows installer y
 
 ## Project status
 
-- **Alpha.** No stable API; back up your data directory before updating.
+- **Alpha.** No stable API; run `bot backup create <file>` (encrypted, see [docs/guide/backup.md](docs/guide/backup.md)) before updating.
 - **Platforms.** The CLI and daemon build on Windows, Linux and macOS. Desktop control works on Windows and on Linux under X11 or Xvfb; the macOS backend is a stub and Wayland sessions are refused. The desktop app and installer are Windows only.
 - **Experimental:** node-agents (`bot-node`) and controlling a paired PC.
 - **Planned, not shipped:** recording a workflow by demonstration, a long-term memory the daemon enables, a plugin API, more messaging channels, and voice, image or video generation.

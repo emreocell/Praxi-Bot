@@ -194,14 +194,14 @@ Skip the Xvfb and desktop lines when those units are not installed. The aside
 directory is your undo. Ownership is whatever the archive recorded (the
 helper's `tar` runs as root).
 
-**Portable state file.** `sudo praxi backup <file>` and
-`sudo praxi restore <file>` copy bots, chats, memory, skills, workflows,
-schedules and provider settings. The file excludes API keys, the API token,
-paired-device state and browser profiles. `restore` refuses to run while a
-daemon answers on the service port, so stop the units first. The `praxi`
-user must be able to read the file. Flags are in the
-[CLI reference](cli-reference.md#bot-backup-file-and-bot-restore-file).
-Enter keys again after this restore (`sudo praxi setup` or
+**Portable state file.** `sudo praxi backup create <file> --passphrase-file <pass>` and
+`sudo praxi backup restore <file> --passphrase-file <pass>` copy bots, chats, memory,
+skills, workflows, schedules and provider settings into one encrypted file. API keys are
+included only with `--include-secrets`; the API token, paired-device state and browser
+profiles are never included. `restore` refuses to run while a daemon holds the data
+directory or answers on the service port, so stop the units first. The `praxi` user must
+be able to read the file. Details: [Encrypted backup and restore](backup.md). Enter keys
+again after a restore without `--include-secrets` (`sudo praxi setup` or
 `sudo praxi secrets set`).
 
 ## Pairing the desktop app

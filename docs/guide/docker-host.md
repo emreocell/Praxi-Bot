@@ -190,15 +190,15 @@ docker compose -f packaging/docker/docker-compose.yml up -d
 
 You can also export portable state (bots, chats, memory, skills, workflows,
 schedules, provider settings — excluding API keys, tokens, paired devices, and
-browser profiles) as described in [Backup and restore](backup-and-restore.md):
+browser profiles) as described in [Encrypted backup and restore](backup.md). Keep the passphrase in a file or Docker secret, never on the command line:
 
 ```sh
-docker exec praxi-host bot backup /tmp/praxi-backup.tar
-docker cp praxi-host:/tmp/praxi-backup.tar ./praxi-backup.tar
-docker exec praxi-host rm -f /tmp/praxi-backup.tar
+docker exec praxi-host bot backup create /tmp/praxi-backup.bak --passphrase-env BACKUP_PASSPHRASE
+docker cp praxi-host:/tmp/praxi-backup.bak ./praxi-backup.bak
+docker exec praxi-host rm -f /tmp/praxi-backup.bak
 ```
 
-Because `bot restore` refuses to run while `bot serve` is listening, restore
+Because `bot backup restore` refuses to run while `bot serve` is listening, restore
 with the daemon stopped using a one-off container on the same volume, then
 start the service and re-enter secrets.
 
