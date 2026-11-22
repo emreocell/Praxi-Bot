@@ -1250,3 +1250,92 @@ h"#
         assert!(split_words("'open").is_err());
     }
 }
+
+#[cfg(test)]
+mod property_tests {
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::select;
+    use proptest::test_runner::RngSeed;
+
+    use super::{create_body, parse, parse_argv};
+
+    fn config() -> ProptestConfig {
+        let mut config = ProptestConfig::default();
+        if config.rng_seed == RngSeed::Random {
+            config.rng_seed = RngSeed::Fixed(461);
+        }
+        config
+    }
+
+    fn untrusted_paste() -> impl Strategy<Value = String> {
+        const FRAGMENTS: &[&str] = &[
+            "claude mcp add ",
+            "--transport http ",
+            "--transport sse ",
+            "-e KEY=val ",
+            "-H \"X-Key: val\" ",
+            "-- npx -y @scope/pkg@1.2.3 ",
+            "uvx pkg==1.0.0 ",
+            "https://mcp.example.com/mcp",
+            "{\"mcpServers\":{}}",
+            "\"",
+            "'",
+            "\\",
+            "\n",
+            "\0",
+            "=",
+            ":",
+            "İıŞş🦀",
+        ];
+        let part = prop_oneof![
+            3 => select(FRAGMENTS).prop_map(str::to_owned),
+            2 => ".{0,24}",
+        ];
+        vec(part, 0..=16).prop_map(|parts| parts.concat())
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+
+        /// `mcp_paste::parse` and `parse_argv` never panic on arbitrary UTF-8 strings or argument lists.
+        #[test]
+        fn paste_parsers_never_panic_on_arbitrary_text_or_argv(
+            input in untrusted_paste(),
+            override_name in proptest::option::of(".{0,32}"),
+            argv in vec(".{0,32}", 0..=12),
+        ) {
+            let _ = parse(&input, override_name.as_deref());
+            let _ = parse_argv(&argv, override_name.as_deref());
+        }
+
+        /// Pasted environment and header secret values are isolated into `Parsed::secrets` and never appear in the config or Debug output.
+        #[test]
+        fn pasted_secrets_never_leak_into_config_or_debug(
+            env_key in "[A-Z][A-Z0-9_]{2,16}",
+            header_key in "X-[A-Za-z0-9]{2,16}",
+            secret in "sec_[A-Za-z0-9/_+=.-]{12,32}",
+        ) {
+            let stdio = format!("{env_key}={secret} npx -y @scope/server-demo@1.2.3");
+            let parsed_stdio = parse(&stdio, None).unwrap();
+            prop_assert_eq!(parsed_stdio.len(), 1);
+            let p = &parsed_stdio[0];
+            prop_assert_eq!(&p.secrets[0].1, &secret);
+            let dump = format!("{} {:?}", create_body(&p.config), p);
+            prop_assert!(!dump.contains(&secret), "secret leaked into stdio config/debug: {dump}");
+
+            let http = format!(
+                "claude mcp add --transport http demo https://mcp.example.com/mcp -H \"{header_key}: {secret}\""
+            );
+            let parsed_http = parse(&http, None).unwrap();
+            prop_assert_eq!(parsed_http.len(), 1);
+            let p_http = &parsed_http[0];
+            prop_assert_eq!(&p_http.secrets[0].1, &secret);
+            let dump_http = format!("{} {:?}", create_body(&p_http.config), p_http);
+            prop_assert!(
+                !dump_http.contains(&secret),
+                "secret leaked into http config/debug: {dump_http}"
+            );
+        }
+    }
+}

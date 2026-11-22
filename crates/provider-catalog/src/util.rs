@@ -558,3 +558,105 @@ mod thought_tests {
         assert_eq!(run(&["é<thought>é</thought>é"]), "éé");
     }
 }
+
+#[cfg(test)]
+mod property_tests {
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::select;
+    use proptest::test_runner::RngSeed;
+    use serde_json::json;
+
+    use super::{ThoughtFilter, error_message, parse_args, parse_data_url};
+
+    fn config() -> ProptestConfig {
+        let mut config = ProptestConfig::default();
+        if config.rng_seed == RngSeed::Random {
+            config.rng_seed = RngSeed::Fixed(461);
+        }
+        config
+    }
+
+    fn model_stream() -> impl Strategy<Value = String> {
+        const PIECES: &[&str] = &[
+            "<thought>",
+            "</thought>",
+            "<tho",
+            "ught>",
+            "</th",
+            "ought>",
+            "<",
+            ">",
+            "\0",
+            "\n",
+            "İıŞş🦀",
+        ];
+        let seg = prop_oneof![
+            3 => select(PIECES).prop_map(str::to_owned),
+            2 => ".{0,24}",
+        ];
+        vec(seg, 0..=24).prop_map(|parts| parts.concat())
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+
+        /// `ThoughtFilter` produces identical visible text regardless of how a stream is split across UTF-8 character boundaries.
+        #[test]
+        fn thought_filter_is_chunk_boundary_invariant(
+            stream in model_stream(),
+            step in 1..=7_usize,
+        ) {
+            let mut single = ThoughtFilter::default();
+            let mut one_shot = single.push(&stream);
+            one_shot.push_str(&single.finish());
+
+            let chars: Vec<char> = stream.chars().collect();
+            let mut chunked = ThoughtFilter::default();
+            let mut incremental = String::new();
+            for slice in chars.chunks(step) {
+                let piece: String = slice.iter().collect();
+                incremental.push_str(&chunked.push(&piece));
+            }
+            incremental.push_str(&chunked.finish());
+
+            prop_assert_eq!(incremental, one_shot);
+        }
+
+        /// `parse_args` never panics on arbitrary text, always yields a JSON object, and preserves valid JSON objects.
+        #[test]
+        fn parse_args_never_panics_and_always_returns_an_object(
+            raw in ".{0,256}",
+            key in "[a-z_]{1,16}",
+            val in ".{0,64}",
+        ) {
+            let parsed = parse_args(&raw);
+            prop_assert!(parsed.is_object(), "{parsed:?}");
+
+            let obj = json!({ key: val });
+            prop_assert_eq!(parse_args(&obj.to_string()), obj);
+        }
+
+        /// `parse_data_url` never panics on arbitrary text and round-trips `data:<mime>;base64,<payload>`.
+        #[test]
+        fn parse_data_url_round_trips_and_never_panics(
+            raw in ".{0,256}",
+            mime in "[a-z]{2,12}/[a-z0-9.+-]{2,16}",
+            payload in "[A-Za-z0-9+/=]{0,128}",
+        ) {
+            let _ = parse_data_url(&raw);
+            let url = format!("data:{mime};base64,{payload}");
+            prop_assert_eq!(parse_data_url(&url), Some((mime, payload)));
+        }
+
+        /// `error_message` never panics on arbitrary text and truncates its result to at most 500 characters.
+        #[test]
+        fn error_message_never_panics_and_caps_at_500_chars(raw in ".{0,1024}") {
+            let msg = error_message(&raw);
+            prop_assert!(msg.chars().count() <= 500);
+            let wrapped = json!({"error": {"message": raw}}).to_string();
+            let wrapped_msg = error_message(&wrapped);
+            prop_assert!(wrapped_msg.chars().count() <= 500);
+        }
+    }
+}
