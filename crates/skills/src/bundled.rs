@@ -31,6 +31,39 @@ pub(crate) const BUNDLED: &[(&str, &str)] = &[
         include_str!("../../../skills/windows-settings-navigation/SKILL.md"),
     ),
     (
+        "document-to-action-items",
+        include_str!("../../../skills/document-to-action-items/SKILL.md"),
+    ),
+    (
+        "meeting-action-items",
+        include_str!("../../../skills/meeting-action-items/SKILL.md"),
+    ),
+    (
+        "weekly-review-planning",
+        include_str!("../../../skills/weekly-review-planning/SKILL.md"),
+    ),
+    (
+        "email-inbox-triage",
+        include_str!("../../../skills/email-inbox-triage/SKILL.md"),
+    ),
+    (
+        "product-price-monitor",
+        include_str!("../../../skills/product-price-monitor/SKILL.md"),
+    ),
+    (
+        "competitor-news-monitor",
+        include_str!("../../../skills/competitor-news-monitor/SKILL.md"),
+    ),
+    (
+        "grounded-citations",
+        include_str!("../../../skills/grounded-citations/SKILL.md"),
+    ),
+    (
+        "blocked-page-recovery",
+        include_str!("../../../skills/blocked-page-recovery/SKILL.md"),
+    ),
+    ("maps", include_str!("../../../skills/maps/SKILL.md")),
+    (
         "sign-in-forms",
         include_str!("../../../skills/sign-in-forms/SKILL.md"),
     ),
