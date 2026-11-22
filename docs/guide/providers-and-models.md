@@ -14,6 +14,9 @@ written `provider/model`, for example `gemini/gemini-2.5-flash-lite`.
 | `anthropic` | Anthropic Claude, native Messages API | `ANTHROPIC_API_KEY` |
 | `openrouter` | One key, many upstream models (OpenAI-compatible) | `OPENROUTER_API_KEY` |
 | `deepseek` | DeepSeek (OpenAI-compatible) | `DEEPSEEK_API_KEY` |
+| `groq` | Groq (OpenAI-compatible, low-latency open models) | `GROQ_API_KEY` |
+| `mistral` | Mistral AI (OpenAI-compatible) | `MISTRAL_API_KEY` |
+| `together` | Together AI (OpenAI-compatible serverless open models) | `TOGETHER_API_KEY` |
 | `ollama` | Local models via Ollama at `http://localhost:11434/v1` | none |
 | `lmstudio` | Local models via LM Studio at `http://localhost:1234/v1` | none |
 

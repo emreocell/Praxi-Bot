@@ -181,6 +181,9 @@ mod tests {
             "gemini",
             "deepseek",
             "gemini-openai-compat",
+            "groq",
+            "mistral",
+            "together",
         ] {
             assert!(cat.get(id).is_some(), "{id} missing");
         }
@@ -193,6 +196,51 @@ mod tests {
                     m.id
                 );
             }
+        }
+    }
+
+    #[test]
+    fn openai_compat_presets_declare_endpoints_auth_and_models() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../providers/catalog");
+        let cat = Catalog::load_dir(&dir).expect("every catalog toml parses");
+        for (id, base_url, models_endpoint, env_var, expected_model) in [
+            (
+                "groq",
+                "https://api.groq.com/openai/v1",
+                "https://api.groq.com/openai/v1/models",
+                "GROQ_API_KEY",
+                "llama-3.3-70b-versatile",
+            ),
+            (
+                "mistral",
+                "https://api.mistral.ai/v1",
+                "https://api.mistral.ai/v1/models",
+                "MISTRAL_API_KEY",
+                "mistral-large-latest",
+            ),
+            (
+                "together",
+                "https://api.together.ai/v1",
+                "https://api.together.ai/v1/models",
+                "TOGETHER_API_KEY",
+                "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            ),
+        ] {
+            let entry = cat.get(id).unwrap_or_else(|| panic!("{id} missing"));
+            assert_eq!(entry.kind, ProviderKind::OpenAiCompatible, "{id}");
+            assert_eq!(entry.base_url, base_url, "{id}");
+            assert_eq!(
+                entry.models_endpoint.as_deref(),
+                Some(models_endpoint),
+                "{id}"
+            );
+            assert_eq!(entry.auth, Auth::ApiKeyEnv(env_var.into()), "{id}");
+            assert!(entry.capabilities.tools, "{id}");
+            assert!(entry.capabilities.streaming, "{id}");
+            assert!(
+                entry.model(expected_model).is_some(),
+                "{id} missing model {expected_model}"
+            );
         }
     }
 }

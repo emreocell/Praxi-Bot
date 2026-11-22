@@ -368,6 +368,98 @@
           "recommended_rank": 1
         }
       ]
+    },
+    {
+      "id": "groq",
+      "aliases": [],
+      "sources": [
+        "https://console.groq.com/docs/models",
+        "https://console.groq.com/docs/rate-limits"
+      ],
+      "models": [
+        {
+          "id": "llama-3.3-70b-versatile",
+          "display_name": "Llama 3.3 70B Versatile",
+          "kind": "chat",
+          "recommended": true,
+          "recommended_rank": 1
+        },
+        {
+          "id": "openai/gpt-oss-120b",
+          "display_name": "GPT-OSS 120B",
+          "kind": "chat",
+          "recommended": true,
+          "recommended_rank": 2
+        },
+        {
+          "id": "llama-3.1-8b-instant",
+          "display_name": "Llama 3.1 8B Instant",
+          "kind": "chat",
+          "recommended": true,
+          "recommended_rank": 3
+        }
+      ]
+    },
+    {
+      "id": "mistral",
+      "aliases": [],
+      "sources": [
+        "https://docs.mistral.ai/models"
+      ],
+      "models": [
+        {
+          "id": "mistral-large-latest",
+          "display_name": "Mistral Large",
+          "kind": "chat",
+          "recommended": true,
+          "recommended_rank": 1
+        },
+        {
+          "id": "mistral-small-latest",
+          "display_name": "Mistral Small",
+          "kind": "chat",
+          "recommended": true,
+          "recommended_rank": 2
+        },
+        {
+          "id": "codestral-latest",
+          "display_name": "Codestral",
+          "kind": "chat",
+          "recommended": true,
+          "recommended_rank": 3
+        }
+      ]
+    },
+    {
+      "id": "together",
+      "aliases": [],
+      "sources": [
+        "https://docs.together.ai/docs/serverless/models",
+        "https://docs.together.ai/docs/serverless/rate-limits"
+      ],
+      "models": [
+        {
+          "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+          "display_name": "DeepSeek V4.1 Flash",
+          "kind": "chat",
+          "recommended": true,
+          "recommended_rank": 1
+        },
+        {
+          "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+          "display_name": "Llama 3.3 70B Instruct Turbo",
+          "kind": "chat",
+          "recommended": true,
+          "recommended_rank": 2
+        },
+        {
+          "id": "openai/gpt-oss-120b",
+          "display_name": "GPT-OSS 120B",
+          "kind": "chat",
+          "recommended": true,
+          "recommended_rank": 3
+        }
+      ]
     }
   ]
 }
