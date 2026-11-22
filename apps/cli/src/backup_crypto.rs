@@ -3,7 +3,7 @@
 //! Layout (all integers little-endian):
 //!
 //! ```text
-//! header  : magic "PRAXIBAK" | version u16 | m_cost u32 | t_cost u32 | p_cost u32
+//! header  : magic "PRAXIBAK" | version u16 | memory_kib u32 | passes u32 | lanes u32
 //!           | salt [16] | chunk_size u32                      (42 bytes)
 //! chunk*  : ciphertext_len u32 | ChaCha20-Poly1305 ciphertext (plaintext + 16-byte tag)
 //! ```
@@ -40,27 +40,28 @@ const SALT_LEN: usize = 16;
 const TAG_LEN: usize = 16;
 /// Plaintext bytes per chunk.
 pub const CHUNK_SIZE: usize = 64 * 1024;
+const CHUNK_SIZE_U32: u32 = 64 * 1024;
 const MAX_CHUNK_SIZE: u32 = 1024 * 1024;
 // Upper bounds for KDF parameters read from an untrusted header.
-const MAX_M_COST_KIB: u32 = 1024 * 1024;
-const MAX_T_COST: u32 = 16;
-const MAX_P_COST: u32 = 16;
+const MAX_MEMORY_KIB: u32 = 1024 * 1024;
+const MAX_PASSES: u32 = 16;
+const MAX_LANES: u32 = 16;
 
 /// Argon2id cost parameters stored in the header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Kdf {
-    pub m_cost: u32,
-    pub t_cost: u32,
-    pub p_cost: u32,
+    pub memory_kib: u32,
+    pub passes: u32,
+    pub lanes: u32,
 }
 
 impl Default for Kdf {
     /// 64 MiB, 3 passes, 1 lane (above the OWASP minimum; a backup is created rarely).
     fn default() -> Self {
         Self {
-            m_cost: 64 * 1024,
-            t_cost: 3,
-            p_cost: 1,
+            memory_kib: 64 * 1024,
+            passes: 3,
+            lanes: 1,
         }
     }
 }
@@ -105,7 +106,7 @@ fn nonce(counter: u64, last: bool) -> Nonce {
 }
 
 fn derive(passphrase: &str, salt: &[u8], kdf: Kdf) -> Result<ChaCha20Poly1305, SealError> {
-    let params = Params::new(kdf.m_cost, kdf.t_cost, kdf.p_cost, Some(32))
+    let params = Params::new(kdf.memory_kib, kdf.passes, kdf.lanes, Some(32))
         .map_err(|_| SealError::BadHeader)?;
     let mut key = Zeroizing::new([0u8; 32]);
     Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
@@ -135,11 +136,11 @@ impl<W: Write> SealWriter<W> {
         let mut header = [0u8; HEADER_LEN];
         header[..8].copy_from_slice(MAGIC);
         header[8..10].copy_from_slice(&VERSION.to_le_bytes());
-        header[10..14].copy_from_slice(&kdf.m_cost.to_le_bytes());
-        header[14..18].copy_from_slice(&kdf.t_cost.to_le_bytes());
-        header[18..22].copy_from_slice(&kdf.p_cost.to_le_bytes());
+        header[10..14].copy_from_slice(&kdf.memory_kib.to_le_bytes());
+        header[14..18].copy_from_slice(&kdf.passes.to_le_bytes());
+        header[18..22].copy_from_slice(&kdf.lanes.to_le_bytes());
         header[22..38].copy_from_slice(&salt);
-        header[38..42].copy_from_slice(&(CHUNK_SIZE as u32).to_le_bytes());
+        header[38..42].copy_from_slice(&CHUNK_SIZE_U32.to_le_bytes());
         let cipher = derive(passphrase, &salt, kdf).map_err(seal_err)?;
         out.write_all(&header)?;
         Ok(Self {
@@ -231,17 +232,17 @@ impl<R: Read> SealReader<R> {
         }
         let word = |at: usize| u32::from_le_bytes(header[at..at + 4].try_into().unwrap_or([0; 4]));
         let kdf = Kdf {
-            m_cost: word(10),
-            t_cost: word(14),
-            p_cost: word(18),
+            memory_kib: word(10),
+            passes: word(14),
+            lanes: word(18),
         };
         let chunk_size = word(38);
-        if kdf.m_cost == 0
-            || kdf.m_cost > MAX_M_COST_KIB
-            || kdf.t_cost == 0
-            || kdf.t_cost > MAX_T_COST
-            || kdf.p_cost == 0
-            || kdf.p_cost > MAX_P_COST
+        if kdf.memory_kib == 0
+            || kdf.memory_kib > MAX_MEMORY_KIB
+            || kdf.passes == 0
+            || kdf.passes > MAX_PASSES
+            || kdf.lanes == 0
+            || kdf.lanes > MAX_LANES
             || chunk_size == 0
             || chunk_size > MAX_CHUNK_SIZE
         {
@@ -326,9 +327,9 @@ mod tests {
     use super::*;
 
     const FAST: Kdf = Kdf {
-        m_cost: 8,
-        t_cost: 1,
-        p_cost: 1,
+        memory_kib: 8,
+        passes: 1,
+        lanes: 1,
     };
 
     fn seal(data: &[u8]) -> Vec<u8> {
@@ -345,7 +346,9 @@ mod tests {
     }
 
     fn sample() -> Vec<u8> {
-        (0..CHUNK_SIZE * 3 + 123).map(|i| (i % 251) as u8).collect()
+        (0..CHUNK_SIZE * 3 + 123)
+            .map(|i| u8::try_from(i % 251).unwrap())
+            .collect()
     }
 
     #[test]

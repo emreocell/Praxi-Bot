@@ -875,7 +875,6 @@ fn run() -> Result<()> {
         | Command::Host { .. }
         | Command::SelfUpdate(_)
         | Command::Doctor(_)
-        | Command::Backup { .. }
         | Command::Serve { .. }
         | Command::Status
         | Command::Proxy

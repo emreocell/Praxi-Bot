@@ -753,9 +753,9 @@ mod tests {
     use super::*;
 
     const FAST: Kdf = Kdf {
-        m_cost: 8,
-        t_cost: 1,
-        p_cost: 1,
+        memory_kib: 8,
+        passes: 1,
+        lanes: 1,
     };
     const PASS: &str = "correct horse battery";
 
@@ -964,7 +964,7 @@ mod tests {
         std::fs::create_dir_all(&notes).unwrap();
         // 6 MiB of non-repeating data: ~96 chunks.
         let big: Vec<u8> = (0..6 * 1024 * 1024u32)
-            .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 13).to_le_bytes()[0])
             .collect();
         std::fs::write(notes.join("big.md"), &big).unwrap();
         let work = tempfile::tempdir().unwrap();
@@ -1007,12 +1007,9 @@ mod tests {
         make_backup(src.path(), &plain, &pass, false);
         let secret = work.path().join("secret.bak");
         make_backup(src.path(), &secret, &pass, true);
-        assert!(
-            inspect(&plain, PASS)
-                .unwrap()
-                .manifest
-                .secret_names
-                .is_empty()
+        assert_eq!(
+            inspect(&plain, PASS).unwrap().manifest.secret_names,
+            Vec::<String>::new()
         );
         assert_eq!(
             inspect(&secret, PASS).unwrap().manifest.secret_names,
