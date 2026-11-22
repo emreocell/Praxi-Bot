@@ -2984,6 +2984,8 @@
   "help": {
     "center": {
       "allDocs": "Ganze Anleitung öffnen",
+      "guideNote": "Die Handbuchseiten sind vorerst auf Englisch.",
+      "guideTitle": "Im vollständigen Handbuch",
       "intro": "Kurze Antworten auf die Fragen, die am häufigsten zuerst kommen. Tippe ein Wort, um zu suchen.",
       "noMatch": "Keine Antwort gefunden. Versuche ein einfaches Wort oder öffne unten die ganze Anleitung.",
       "readMore": "Mehr in der Anleitung lesen",

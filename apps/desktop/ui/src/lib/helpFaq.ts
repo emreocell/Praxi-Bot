@@ -1,6 +1,8 @@
 import de from "../help/faq.de.json";
 import en from "../help/faq.en.json";
+import guide from "../help/guideIndex.json";
 import tr from "../help/faq.tr.json";
+import { searchGuide, type GuideEntry } from "./guideIndex.ts";
 
 /** One short answer in the Help window. `doc` is a page of docs/guide for "Read more". */
 export interface FaqItem {
@@ -42,4 +44,13 @@ export function searchFaq(items: readonly FaqItem[], query: string): FaqItem[] {
 
 export function docUrl(item: FaqItem): string {
   return `${DOCS_BASE_URL}${item.doc}`;
+}
+
+/** The guide pages as the Help window searches them (English: the guide is not translated yet). */
+export const GUIDE_INDEX: readonly GuideEntry[] = guide;
+
+export { searchGuide };
+
+export function guideUrl(entry: GuideEntry): string {
+  return `${DOCS_BASE_URL}${entry.doc}`;
 }

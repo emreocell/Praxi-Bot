@@ -2984,6 +2984,8 @@
   "help": {
     "center": {
       "allDocs": "Tam kılavuzu aç",
+      "guideNote": "Kılavuz sayfaları şimdilik İngilizce.",
+      "guideTitle": "Tam kılavuzda",
       "intro": "İnsanların ilk sorduğu soruların kısa cevapları. Aramak için bir kelime yaz.",
       "noMatch": "Cevap bulunamadı. Tek bir basit kelime dene ya da aşağıdan tam kılavuzu aç.",
       "readMore": "Kılavuzda devamını oku",

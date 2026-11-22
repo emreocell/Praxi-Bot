@@ -2984,6 +2984,8 @@
   "help": {
     "center": {
       "allDocs": "Open the full guide",
+      "guideNote": "Guide pages are in English for now.",
+      "guideTitle": "In the full guide",
       "intro": "Short answers to the questions people ask first. Type a word to search.",
       "noMatch": "No answer found. Try one simple word, or open the full guide below.",
       "readMore": "Read more in the guide",

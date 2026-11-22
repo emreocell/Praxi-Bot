@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { DEFAULT_STOP_HOTKEY } from "../config/product";
-import { DOCS_INDEX_URL, docUrl, faqFor, searchFaq } from "../lib/helpFaq";
+import { DOCS_INDEX_URL, GUIDE_INDEX, docUrl, faqFor, guideUrl, searchFaq, searchGuide } from "../lib/helpFaq";
 import { openExternal } from "../lib/externalLink";
 import { resolveKeys, SHORTCUT_GROUPS, SHORTCUTS, slashShortcuts } from "../lib/shortcuts";
 import { Modal } from "./Modal";
@@ -31,6 +31,7 @@ export function HelpModal({
   const [query, setQuery] = useState("");
   const ctx = { stopHotkey: stopHotkey || DEFAULT_STOP_HOTKEY, sendWith };
   const items = useMemo(() => searchFaq(faqFor(i18n.language), query), [i18n.language, query]);
+  const guidePages = useMemo(() => searchGuide(GUIDE_INDEX, query), [query]);
   return (
     <Modal open={open} onClose={onClose} label={t("help.center.title")} size="md">
       <div className={styles.root} data-testid="help-center">
@@ -67,6 +68,25 @@ export function HelpModal({
             ))}
           </div>
         )}
+        {guidePages.length > 0 ? (
+          <section className={styles.guide} aria-label={t("help.center.guideTitle")} data-testid="help-guide-results">
+            <h3 className={styles.groupTitle}>{t("help.center.guideTitle")}</h3>
+            <ul className={styles.list}>
+              {guidePages.map((page) => (
+                <li key={page.doc}>
+                  <button type="button" className={styles.guideLink} onClick={() => openExternal(guideUrl(page))}>
+                    <span className={styles.guideName}>{page.title}</span>
+                    {page.summary ? <span className={styles.guideSummary}>{page.summary}</span> : null}
+                    <ExternalLink aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {i18n.language.slice(0, 2).toLowerCase() !== "en" ? (
+              <p className={styles.guideNote}>{t("help.center.guideNote")}</p>
+            ) : null}
+          </section>
+        ) : null}
         <details className={styles.answer}>
           <summary className={styles.question}>{t("help.title")}</summary>
           <p className={styles.text}>{t("help.intro")}</p>
