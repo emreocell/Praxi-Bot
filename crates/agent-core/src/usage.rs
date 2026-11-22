@@ -670,7 +670,7 @@ impl CallGuard {
         use crate::bot_limits::{
             BotReserved, Period, PeriodLimit, find_breach, load_limits, period_usage,
         };
-        let Some(own) = self.bot_reservation else {
+        let Some(mut own) = self.bot_reservation else {
             return Ok(());
         };
         if streamed_bytes < self.next_check_bytes {
@@ -713,7 +713,21 @@ impl CallGuard {
             usage.push((p, u));
         }
         let breach = find_breach(&limits, &usage, others, actual_usd, actual_tokens);
-        if actual_tokens > own.tokens {
+        // The call outgrew its admission reservation: hold the growth in the
+        // shared in-flight total at once, so other chats, subagents and
+        // scheduled runs of this bot are admitted against the real size.
+        let grow_tokens = actual_tokens.saturating_sub(own.tokens);
+        let grow_usd = actual_usd.map_or(0.0, |u| (u - own.usd).max(0.0));
+        if grow_tokens > 0 || grow_usd > 0.0 {
+            if let Some(e) = sh.spend.bot.reserved.lock().get_mut(&self.bot) {
+                e.tokens = e.tokens.saturating_add(grow_tokens);
+                e.usd += grow_usd;
+            }
+            own.tokens = own.tokens.saturating_add(grow_tokens);
+            own.usd += grow_usd;
+            self.bot_reservation = Some(own);
+        }
+        if actual_tokens > self.detail["limit_estimate_tokens"].as_u64().unwrap_or(0) {
             self.detail["limit_estimate_tokens"] = json!(actual_tokens);
             if let Some(usd) = actual_usd {
                 self.detail["limit_estimate_usd"] = json!(usd);

@@ -342,3 +342,78 @@ async fn soft_alerts_are_not_repeated_after_a_restart() {
         "{w:?}"
     );
 }
+
+fn started_run(lp: &AgentLoop, env: &Env) -> (storage::Run, std::sync::Arc<crate::shared::RunCtx>) {
+    let id = lp
+        .rt
+        .create_run(env.user, env.bot, Some(env.chat), "turn")
+        .unwrap();
+    let row = env.storage.get_run(id).unwrap().unwrap();
+    let ctx = lp.sh.ctx(&row).unwrap();
+    (row, ctx)
+}
+
+#[tokio::test]
+async fn a_huge_tool_call_stream_is_cut_by_the_hard_limit() {
+    // Tool-call arguments are output too: about 12 KB of them cross a 5000 token cap.
+    let env = setup();
+    set_limits(&env, &daily(|d| d.hard_tokens = Some(5_000)));
+    let chunks = (0..12)
+        .map(|_| ChatChunk::ToolCallDelta {
+            call_id: "c1".into(),
+            name: None,
+            input_delta: "z".repeat(1_000),
+        })
+        .collect();
+    let fake = Fake::new(vec![Reply::Chunks(chunks)]);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), unpriced(10));
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    let (state, evs) = finish(&lp, &mut rx, run).await;
+    assert_eq!(state, RunState::Failed);
+    let msg = run_error(&evs).expect("typed error");
+    assert!(msg.contains(BOT_LIMIT_REACHED), "{msg}");
+}
+
+#[tokio::test]
+async fn a_cli_prompt_larger_than_the_cap_is_refused_before_the_session() {
+    let env = setup();
+    set_limits(&env, &daily(|d| d.hard_tokens = Some(10_000)));
+    let fake = Fake::new(vec![]);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), unpriced(10));
+    let (row, ctx) = started_run(&lp, &env);
+    let executor = crate::exec::TurnExecutor { sh: lp.sh.clone() };
+    let mut req = provider_catalog::ChatRequest::new(
+        provider_catalog::ModelRef("cli:claude".into()),
+        vec![provider_catalog::Message::text(
+            provider_catalog::MessageRole::User,
+            "x".repeat(60_000),
+        )],
+    );
+    req.max_tokens = Some(10);
+    let err = executor
+        .stream_once(&ctx, &row, req, &[], crate::CallPurpose::Executor, None)
+        .await
+        .expect_err("must be refused");
+    assert!(err.to_string().contains(BOT_LIMIT_REACHED), "{err}");
+}
+
+#[tokio::test]
+async fn a_call_that_outgrows_its_reservation_blocks_the_next_admission() {
+    // Cap 20_000. Call A is admitted at about 4_010 and streams to about 18_000
+    // (still under the cap, so no cut). Call B (about 4_010 more) must now be refused.
+    let env = setup();
+    set_limits(&env, &daily(|d| d.hard_tokens = Some(20_000)));
+    let fake = Fake::new(vec![]);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), unpriced(10));
+    let (_, ctx_a) = started_run(&lp, &env);
+    let (_, ctx_b) = started_run(&lp, &env);
+    let mut a =
+        crate::usage::CallGuard::start(&lp.sh, &ctx_a, "fake/m", crate::CallPurpose::Executor)
+            .expect("A admitted");
+    a.stream_progress(42_000).expect("A is still under the cap");
+    let b = crate::usage::CallGuard::start(&lp.sh, &ctx_b, "fake/m", crate::CallPurpose::Executor);
+    let err = b.err().expect("B must be refused while A is in flight");
+    assert!(err.contains(BOT_LIMIT_REACHED), "{err}");
+    drop(a);
+}
