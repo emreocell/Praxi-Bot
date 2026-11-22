@@ -46,6 +46,17 @@ you configured. Free-tier keys are subject to Google's own limits and terms.
    indicator (**Microphone on** or **Microphone muted**), and a live status
    line.
 
+The phone button stays available. If setup is incomplete, the panel explains
+which key/provider to configure, how to restore owner authorization or daemon
+connectivity, or how to allow microphone access in Windows Settings → Privacy &
+security → Microphone (including access for desktop apps). Retry in the panel or
+click the phone again after fixing the problem. A pending microphone prompt
+times out instead of leaving the call connecting indefinitely.
+
+If this chat already has a running bot, finish or stop that run and retry the
+call. The microphone stays off while this explanation is shown. During a call,
+clicking the phone focuses the existing panel; **End call** releases the microphone.
+
 The call cycles through these steps automatically:
 
 1. **Listening**: The app watches microphone loudness using energy-based voice

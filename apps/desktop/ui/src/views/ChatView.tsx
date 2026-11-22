@@ -1171,6 +1171,7 @@ export function ChatView({
     botId: chat?.bot_id,
     runs: chatRuns,
     awaitingApproval,
+    runActive: active,
     sendText: async (spoken) => {
       // Nobody is looking at a screen to confirm a warning during a call: a credential is not sent.
       if (detectSecrets(spoken).length > 0) {
@@ -1966,20 +1967,24 @@ export function ChatView({
                 inputRef.current?.focus();
               }}
             />
-            {voiceCall.supported ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className={styles.plus}
-                title={t("voice.call.start")}
-                aria-label={t("voice.call.start")}
-                disabled={!client || voiceCall.state.phase !== "idle"}
-                data-testid="voice-call-start"
-                onClick={voiceCall.start}
-              >
-                <Phone aria-hidden="true" />
-              </Button>
-            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={styles.plus}
+              title={t(voiceCall.blockedReason ?? "voice.call.start")}
+              aria-label={t("voice.call.start")}
+              aria-disabled={(voiceCall.state.phase === "idle" || voiceCall.state.phase === "failed") && voiceCall.blockedReason ? true : undefined}
+              aria-description={voiceCall.state.notice ? t(voiceCall.state.notice) : voiceCall.blockedReason ? t(voiceCall.blockedReason) : undefined}
+              aria-expanded={voiceCall.state.phase !== "idle"}
+              aria-controls={voiceCall.state.phase !== "idle" ? "voice-call-panel" : undefined}
+              data-testid="voice-call-start"
+              onClick={() => {
+                if (voiceCall.state.phase === "idle" || voiceCall.state.phase === "failed") voiceCall.start();
+                else document.querySelector<HTMLElement>('[data-testid="voice-call"]')?.focus();
+              }}
+            >
+              <Phone aria-hidden="true" />
+            </Button>
             {bot ? (
               <div className={styles.modelSlot}>
                 <ModelPicker

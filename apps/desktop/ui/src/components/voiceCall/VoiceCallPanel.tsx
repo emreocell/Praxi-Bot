@@ -32,7 +32,7 @@ export function VoiceCallPanel({ call, bot }: { call: VoiceCall; bot: Identity }
 
   // Focus moves into the call when it opens so the keyboard works at once.
   useEffect(() => {
-    if (state.phase === "starting") {
+    if (state.phase === "starting" || state.phase === "failed") {
       panel.current?.focus();
     }
   }, [state.phase]);
@@ -61,6 +61,7 @@ export function VoiceCallPanel({ call, bot }: { call: VoiceCall; bot: Identity }
       aria-label={t("voice.call.title")}
       tabIndex={-1}
       data-testid="voice-call"
+      id="voice-call-panel"
       data-phase={state.phase}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
@@ -69,7 +70,7 @@ export function VoiceCallPanel({ call, bot }: { call: VoiceCall; bot: Identity }
         }
       }}
     >
-      {live ? (
+      {live && state.phase !== "starting" ? (
         <span className={styles.live} data-testid="voice-call-indicator">
           <span className={`${styles.dot} ${state.muted ? styles.dotMuted : ""}`} aria-hidden="true" />
           {t(state.muted ? "voice.call.micMuted" : "voice.call.micOn")}

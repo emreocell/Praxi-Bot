@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ApiError } from "../../api/client";
 import { isMockMode } from "../../api/mockMode";
 import { effectiveVoice } from "../../lib/botVoice";
 import { dictationSupported, pickRecordingMime } from "../../lib/dictation";
@@ -11,6 +10,8 @@ import { transcribePayload } from "../../lib/voiceAudio";
 import { callReducer, initialCallState, type CallState } from "../../lib/voiceCall/callMachine";
 import { cancelQueuedSpeech, queueSpeech, setDrainedHandler } from "../../lib/voiceCall/callSpeaker";
 import { takeSpeakable } from "../../lib/voiceCall/sentences";
+import { callMicrophone, voiceConfigNotice, voiceFailureNotice } from "../../lib/voiceCall/readiness";
+import { ownerKey } from "../../lib/ownerKey";
 import { BARGE_IN_VAD, createVad, LISTEN_VAD, rmsOf } from "../../lib/voiceCall/vad";
 import { DEFAULT_SETTINGS, loadSettingsSync } from "../../store/settingsStore";
 import type { RunState } from "../../state/timeline";
@@ -35,6 +36,7 @@ export interface VoiceCall {
   /** Mock mode only: pretend the owner said something (no microphone needed). */
   simulateSpeech: () => void;
   supported: boolean;
+  blockedReason: "voice.call.unsupported" | "voice.call.daemonUnavailable" | "voice.call.runActive" | null;
 }
 
 export interface VoiceCallOptions {
@@ -42,6 +44,7 @@ export interface VoiceCallOptions {
   runs: readonly RunState[];
   /** The run waits for a click on the approval card. */
   awaitingApproval: boolean;
+  runActive: boolean;
   /** Sends the transcribed text as an ordinary user message (same permission engine as typing). */
   sendText: (text: string) => Promise<void>;
 }
@@ -58,7 +61,7 @@ function spokenText(run: RunState, labels: { code: string; table: string }): str
  * aloud sentence by sentence. The microphone is opened by `start` and released by `end` (or when
  * the component unmounts); audio lives in memory only until it is transcribed.
  */
-export function useVoiceCall({ botId, runs, awaitingApproval, sendText }: VoiceCallOptions): VoiceCall {
+export function useVoiceCall({ botId, runs, awaitingApproval, runActive, sendText }: VoiceCallOptions): VoiceCall {
   const { t, i18n } = useTranslation();
   const { client } = useDaemon();
   const mock = isMockMode();
@@ -82,6 +85,9 @@ export function useVoiceCall({ botId, runs, awaitingApproval, sendText }: VoiceC
   const turn = useRef<{ known: Set<string>; runId: string | null; spokenLen: number } | null>(null);
   const runsRef = useRef(runs);
   runsRef.current = runs;
+  const busyRef = useRef(runActive);
+  busyRef.current = runActive;
+  const blockedReason = !supported ? "voice.call.unsupported" : !client ? "voice.call.daemonUnavailable" : runActive ? "voice.call.runActive" : null;
   const labels = { code: t("voice.codeOmitted"), table: t("voice.tableOmitted") };
   const labelsRef = useRef(labels);
   labelsRef.current = labels;
@@ -167,10 +173,7 @@ export function useVoiceCall({ botId, runs, awaitingApproval, sendText }: VoiceC
       }
       let text: string;
       try {
-        const provider = await client
-          .getVoice()
-          .then((c) => c.stt_provider)
-          .catch(() => undefined);
+        const provider = (await client.getVoice()).stt_provider;
         const out = await client.transcribe({
           ...(await transcribePayload(blob, provider, { mock })),
           language: i18n.language.split("-")[0]
@@ -178,7 +181,7 @@ export function useVoiceCall({ botId, runs, awaitingApproval, sendText }: VoiceC
         text = out.text.trim();
       } catch (e) {
         if (gen === callGen.current) {
-          dispatch({ type: "TRANSCRIBE_FAILED", notConfigured: e instanceof ApiError && e.status === 409 });
+          dispatch({ type: "FAILED", notice: voiceFailureNotice(e) });
         }
         return;
       }
@@ -189,15 +192,19 @@ export function useVoiceCall({ botId, runs, awaitingApproval, sendText }: VoiceC
         dispatch({ type: "TRANSCRIBED", empty: true });
         return;
       }
+      if (busyRef.current) {
+        dispatch({ type: "FAILED", notice: "voice.call.runActive" });
+        return;
+      }
       setCaptions({ you: text, bot: "" });
       turn.current = { known: new Set(runsRef.current.map((r) => r.id)), runId: null, spokenLen: 0 };
       dispatch({ type: "TRANSCRIBED", empty: false });
       try {
         await sendText(text);
-      } catch {
+      } catch (e) {
         if (gen === callGen.current) {
           turn.current = null;
-          dispatch({ type: "REPLY_FAILED" });
+          dispatch({ type: "FAILED", notice: voiceFailureNotice(e) });
         }
       }
     },
@@ -244,39 +251,76 @@ export function useVoiceCall({ botId, runs, awaitingApproval, sendText }: VoiceC
   }, [finishUtterance, interrupt, startRecorder, stopRecorder]);
 
   const start = useCallback(() => {
-    if (!supported || (stateRef.current.phase !== "idle" && stateRef.current.phase !== "failed")) {
+    if (stateRef.current.phase !== "idle" && stateRef.current.phase !== "failed") {
       return;
     }
     const gen = ++callGen.current;
     dispatch({ type: "START" });
-    if (mock) {
-      dispatch({ type: "MIC_READY" });
+    if (blockedReason) {
+      dispatch({ type: "FAILED", notice: blockedReason });
       return;
     }
     void (async () => {
       try {
+        if (!client) return;
+        const config = await client.getVoice();
+        if (gen !== callGen.current) return;
+        const notice = voiceConfigNotice(config);
+        if (notice) {
+          dispatch({ type: "FAILED", notice });
+          return;
+        }
+        const key = await ownerKey(client.baseUrl);
+        if (gen !== callGen.current) return;
+        if (!key) {
+          dispatch({ type: "FAILED", notice: "voice.call.ownerRequired" });
+          return;
+        }
+        if (busyRef.current) {
+          dispatch({ type: "FAILED", notice: "voice.call.runActive" });
+          return;
+        }
+      } catch (e) {
+        if (gen === callGen.current) dispatch({ type: "FAILED", notice: voiceFailureNotice(e) });
+        return;
+      }
+      if (mock) {
+        dispatch({ type: "MIC_READY" });
+        return;
+      }
+      try {
         // Same permission prompt as dictation; asked only because the owner opened a call.
-        const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+        const s = await callMicrophone(() => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }));
         if (gen !== callGen.current) {
           s.getTracks().forEach((tr) => tr.stop());
           return;
         }
         stream.current = s;
         const ctx = new AudioContext();
+        audioCtx.current = ctx;
+        const resumeTimer = window.setTimeout(() => {
+          if (gen !== callGen.current) return;
+          callGen.current += 1;
+          releaseMic();
+          dispatch({ type: "FAILED", notice: "voice.call.micTimeout" });
+        }, 10_000);
+        try { await ctx.resume(); }
+        finally { window.clearTimeout(resumeTimer); }
+        if (gen !== callGen.current) return;
         const src = ctx.createMediaStreamSource(s);
         const an = ctx.createAnalyser();
         an.fftSize = 1024;
         src.connect(an);
-        audioCtx.current = ctx;
         analyser.current = an;
         timer.current = window.setInterval(tick, FRAME_MS);
         dispatch({ type: "MIC_READY" });
       } catch (e) {
+        if (gen !== callGen.current) return;
         releaseMic();
-        dispatch({ type: "MIC_FAILED", notice: micErrorKey(e) });
+        dispatch({ type: "FAILED", notice: e instanceof Error && e.message === "voice.call.micTimeout" ? "voice.call.micTimeout" : micErrorKey(e) });
       }
     })();
-  }, [mock, releaseMic, supported, tick]);
+  }, [blockedReason, client, mock, releaseMic, tick]);
 
   // `tick` is re-created when its callbacks change; the interval must call the newest one.
   const tickRef = useRef(tick);
@@ -405,6 +449,7 @@ export function useVoiceCall({ botId, runs, awaitingApproval, sendText }: VoiceC
     },
     pushToTalkUp: () => finishUtterance(),
     simulateSpeech,
-    supported
+    supported,
+    blockedReason
   };
 }

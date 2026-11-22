@@ -20,6 +20,13 @@ export type CallNoticeKey =
   | "voice.call.transcribeFailed"
   | "voice.call.replyFailed"
   | "voice.call.notConfigured"
+  | "voice.call.geminiKeyMissing"
+  | "voice.call.wrongProvider"
+  | "voice.call.runActive"
+  | "voice.call.ownerRequired"
+  | "voice.call.daemonUnavailable"
+  | "voice.call.serviceRefused"
+  | "voice.call.micTimeout"
   | "voice.micDenied"
   | "voice.micMissing"
   | "voice.micBusy"
@@ -43,6 +50,7 @@ export interface CallState {
 
 export type CallEvent =
   | { type: "START" }
+  | { type: "FAILED"; notice: CallNoticeKey }
   | { type: "MIC_READY" }
   | { type: "MIC_FAILED"; notice: "voice.micDenied" | "voice.micMissing" | "voice.micBusy" | "voice.call.unsupported" }
   | { type: "SPEECH_START" }
@@ -91,6 +99,8 @@ export function callReducer(s: CallState, e: CallEvent): CallState {
       return s.phase === "idle" || s.phase === "failed" ? s : { ...s, pushToTalk: !s.pushToTalk, heard: false };
     case "END":
       return { ...s, phase: "idle", heard: false, replyDone: false, notice: null, silentTurns: 0, muted: false };
+    case "FAILED":
+      return s.phase === "idle" ? s : { ...s, phase: "failed", heard: false, notice: e.notice };
     case "START":
       return s.phase === "idle" || s.phase === "failed"
         ? { ...initialCallState(s.captions), pushToTalk: s.pushToTalk, phase: "starting" }

@@ -5,6 +5,7 @@ pub mod command_names;
 pub mod control;
 pub mod daemon;
 pub mod listener;
+mod microphone;
 pub mod shell;
 pub mod widget_visibility;
 pub mod window_gate;
@@ -1098,6 +1099,8 @@ pub fn run() {
         .manage(daemon_handle)
         .setup(move |app| {
             let app_handle = app.handle().clone();
+            #[cfg(windows)]
+            microphone::install(&app_handle)?;
             control_for_setup.set_sink(Arc::new(TauriOverlaySink {
                 app: app_handle.clone(),
             }));

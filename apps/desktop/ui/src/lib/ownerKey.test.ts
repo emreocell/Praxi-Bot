@@ -79,4 +79,7 @@ test("a failed read gives no key instead of an error", async () => {
   native.fail = true;
   assert.equal(await ownerKey("http://127.0.0.1:47821"), undefined);
   assert.equal(native.calls.length, 1);
+  native.fail = false;
+  assert.equal(await ownerKey("http://127.0.0.1:47821"), "owner-secret");
+  assert.equal(native.calls.length, 2);
 });
