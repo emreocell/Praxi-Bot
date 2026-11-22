@@ -58,7 +58,7 @@ The container has no passphrase set. Export `BACKUP_PASSPHRASE` in your shell an
 it through by name: `docker exec -e BACKUP_PASSPHRASE praxi-host bot backup create
 /tmp/praxi.bak --passphrase-env BACKUP_PASSPHRASE`, then `docker cp` the file out. Restore
 needs the daemon stopped (a one-off container on the same volume); see
-[Docker host](docker-host.md#portable-state-backup-bot-backup-bot-restore).
+[Docker host](docker-host.md).
 
 ### How do I make a bot faster and cheaper?
 Use a small `classifier` model, save [workflows](workflows.md) for repeated jobs,
