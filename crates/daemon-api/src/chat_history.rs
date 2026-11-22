@@ -302,7 +302,7 @@ fn import_doc(s: &AppState, bot_id: Uuid, doc: ChatImport) -> Result<ChatImportR
     let message_count = doc.messages.len();
     let mut rows = Vec::with_capacity(message_count + 1);
     for (index, message) in doc.messages.into_iter().enumerate() {
-        let id = Uuid::now_v7();
+        let (id, source) = (Uuid::now_v7(), import_source(&message.role));
         rows.push((
             storage::Message {
                 id,
@@ -317,7 +317,7 @@ fn import_doc(s: &AppState, bot_id: Uuid, doc: ChatImport) -> Result<ChatImportR
                 exposure_private: false,
                 exposure_sources: vec!["imported chat".to_owned()],
             },
-            "imported",
+            source,
         ));
     }
     if !doc.steps.is_empty() || !doc.approvals.is_empty() {
@@ -353,6 +353,15 @@ fn import_doc(s: &AppState, bot_id: Uuid, doc: ChatImport) -> Result<ChatImportR
         steps_ignored,
         approvals_ignored,
     })
+}
+
+/// Imported replies are quoted as a foreign author's untrusted data, never as our own.
+fn import_source(role: &str) -> &'static str {
+    if role == "assistant" {
+        "imported_foreign:imported chat"
+    } else {
+        "imported"
+    }
 }
 
 fn safe_text(s: &AppState, text: &str) -> String {

@@ -238,9 +238,16 @@ async fn import_creates_untrusted_history_and_never_runs_tool_rows() {
     assert_eq!(messages[2].role, agent_core::control_note::IMPORTED_ROLE);
     for message in &messages {
         assert!(message.exposure_untrusted);
+        // An imported assistant line is never the bot's own: it is stored as a foreign author's
+        // reply so the history builder quotes it as untrusted data.
+        let expected = if message.role == "assistant" {
+            "imported_foreign:imported chat"
+        } else {
+            "imported"
+        };
         assert_eq!(
             t.state.storage().message_source(message.id).unwrap(),
-            "imported"
+            expected
         );
     }
     assert_eq!(

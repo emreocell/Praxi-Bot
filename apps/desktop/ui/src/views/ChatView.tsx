@@ -1510,7 +1510,7 @@ export function ChatView({
                 return (
                   <div key={e.key} id={e.key} tabIndex={-1} className={styles.assistantRow} data-message-row="assistant">
                     <div className={styles.assistantBubble}>
-                      {e.source === "imported" ? (
+                      {e.source?.startsWith("imported") ? (
                         <span className={styles.importedBadge}>{t("chat.imported")}</span>
                       ) : null}
                       {lead ? guestName(guestBot(e.botId)) : null}
