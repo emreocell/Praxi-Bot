@@ -43,7 +43,6 @@ browser-cdp = { path = "../../crates/browser-cdp", version = "0.1.0" }
 mcp-bridge = { path = "../../crates/mcp-bridge", version = "0.1.0" }
 composio = { path = "../../crates/composio", version = "0.1.0" }
 fs4 = "1"
-libc = "0.2"
 clap = { workspace = true, features = ["env"] }
 clap_complete = "4.6.12"
 clap_mangen = "0.3.4"
@@ -93,6 +92,9 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 desktop-linux = { path = "../../crates/desktop-linux", version = "0.1.0" }
