@@ -16,7 +16,6 @@ windows-sandbox = ["dep:windows", "dep:uuid"]
 
 [dependencies]
 serde.workspace = true
-serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 uuid = { workspace = true, optional = true }
@@ -34,6 +33,7 @@ windows = { workspace = true, optional = true, features = [
 
 [dev-dependencies]
 tempfile.workspace = true
+serde_json.workspace = true
 
 [[example]]
 name = "run-command"

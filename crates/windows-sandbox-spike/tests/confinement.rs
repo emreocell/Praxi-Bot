@@ -12,6 +12,7 @@ fn enabled() -> SandboxConfig {
 }
 
 #[test]
+#[ignore = "requires a working Windows desktop/profile; hosted CI exits with STATUS_DLL_INIT_FAILED before the command; run locally with --include-ignored"]
 fn command_runs_in_workspace_but_cannot_read_or_write_outside_canary() {
     let parent = tempfile::tempdir().unwrap();
     let canary = parent.path().join("private canary.txt");
@@ -59,6 +60,7 @@ fn command_runs_in_workspace_but_cannot_read_or_write_outside_canary() {
 }
 
 #[test]
+#[ignore = "requires a working Windows desktop/profile; hosted CI exits with STATUS_DLL_INIT_FAILED before the command; run locally with --include-ignored"]
 fn timeout_stops_the_shell() {
     let parent = tempfile::tempdir().unwrap();
     let config = SandboxConfig {

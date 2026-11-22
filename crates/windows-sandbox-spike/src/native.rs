@@ -431,7 +431,14 @@ pub(super) fn run(config: &SandboxConfig, workspace: &Path, command: &str) -> io
     let result = if wait == WAIT_OBJECT_0 {
         let mut exit = 0;
         unsafe { GetExitCodeProcess(child.process.0, &raw mut exit) }.map_err(io::Error::other)?;
-        Ok(exit)
+        if exit == 0xc000_0142 {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Windows could not initialize the sandboxed shell (STATUS_DLL_INIT_FAILED). This desktop or profile is not supported. No unrestricted retry was attempted.",
+            ))
+        } else {
+            Ok(exit)
+        }
     } else if wait == WAIT_TIMEOUT {
         Err(io::Error::new(
             io::ErrorKind::TimedOut,

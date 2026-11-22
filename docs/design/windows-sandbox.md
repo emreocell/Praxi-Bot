@@ -126,7 +126,7 @@ No UI is wired in this spike. Proposed wording, with actual translations:
 Run the focused Windows tests with:
 
 ```powershell
-cargo test -p windows-sandbox-spike --features windows-sandbox
+cargo test -p windows-sandbox-spike --features windows-sandbox -- --include-ignored
 ```
 
 The canary test first proves an ordinary shell can read the private outside file,
@@ -134,8 +134,18 @@ then checks denied reads and writes alongside successful workspace read/write.
 It also rejects reusing an existing workspace. The timeout test runs a bounded
 infinite shell loop. The dedicated Windows CI workflow enables the feature;
 ordinary workspace builds
-leave it off. These tests need Windows AppContainer support, not elevation, real
-credentials or public Internet access. They are not ignored to hide failures.
+leave it off. Native tests need Windows AppContainer support and a working
+desktop/profile, not elevation, real credentials or public Internet access. They
+passed locally, but the first hosted Windows CI run exited with
+`STATUS_DLL_INIT_FAILED` (0xc0000142) before either command ran. As allowed by the
+spike scope, those two native tests are explicitly `#[ignore]` with that reason;
+use `--include-ignored` locally. Hosted CI compiles them and runs the config
+tests, and is **not** evidence of native confinement. See the failed
+[hosted run](https://github.com/emreocell/Praxi-Bot/actions/runs/45066073994).
+The runner reports this startup status as an unsupported desktop/profile rather
+than exposing an unexplained numeric exit code. Private-desktop/window-station
+setup needs a separate design; no access to an existing desktop was broadened.
+Desktop, keyboard and GUI isolation are not certified by this spike.
 
 Observed during development: stripping `LOCALAPPDATA` caused process creation to
 fail with Windows error 203. Keeping that one path variable fixed profile lookup.

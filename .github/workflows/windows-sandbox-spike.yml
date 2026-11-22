@@ -24,4 +24,7 @@ jobs:
         with:
           components: clippy
       - run: cargo clippy -p windows-sandbox-spike --all-targets --features windows-sandbox -- -D warnings
+      # Native tests are explicitly ignored: the hosted runner's desktop/profile
+      # failed before command execution (STATUS_DLL_INIT_FAILED). Compile them;
+      # local Windows verification uses --include-ignored and is recorded in the PR.
       - run: cargo test -p windows-sandbox-spike --features windows-sandbox
