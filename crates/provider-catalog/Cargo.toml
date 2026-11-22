@@ -24,6 +24,10 @@ sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 httpdate = "1"
 reqwest.workspace = true
 tokio = { workspace = true }
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 proptest.workspace = true

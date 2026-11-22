@@ -44,6 +44,7 @@ mod knowledge;
 pub mod knowledge_runtime;
 mod knowledge_settings;
 pub mod live_view;
+mod local_install;
 mod local_models;
 pub mod mcp;
 mod mcp_routes;
@@ -1367,6 +1368,12 @@ fn api_routes() -> Router<AppState> {
         .route("/v1/providers", get(r::list_providers))
         .route("/v1/providers/detected", get(r::detect_providers))
         .route("/v1/local-models", get(local_models::get_local_models))
+        .route(
+            "/v1/local-install",
+            get(local_install::get_local_install)
+                .post(local_install::start_local_install)
+                .delete(local_install::stop_local_install),
+        )
         .route("/v1/providers/cli/enable", post(r::enable_cli_provider))
         .route("/v1/providers/cli/disable", post(r::disable_cli_provider))
         .route("/v1/providers/cli", get(cli_engines::list))

@@ -46,6 +46,8 @@ import type {
   UpdateChatInput,
   ConfiguredProviderDto,
   CliEngineDto,
+  InstallStateDto,
+  LocalInstallDto,
   LocalModelsDto,
   CliInstallApproval,
   ControlModeName,
@@ -462,6 +464,21 @@ export class ApiClient {
   /** Hardware summary and local-model advice (`GET /v1/local-models`, owner only; best effort). */
   localModels(): Promise<LocalModelsDto> {
     return this.request("GET", "/local-models");
+  }
+
+  /** One-click local model: curated list ranked for this computer plus install progress (owner only). */
+  localInstall(): Promise<LocalInstallDto> {
+    return this.request("GET", "/local-install");
+  }
+
+  /** Download, verify and start one curated local model (owner only). Returns at once; poll `localInstall`. */
+  startLocalInstall(modelId: string): Promise<InstallStateDto> {
+    return this.request("POST", "/local-install", { body: { model_id: modelId } });
+  }
+
+  /** Stop a running download, or stop the local model program (owner only). */
+  stopLocalInstall(): Promise<InstallStateDto> {
+    return this.request("DELETE", "/local-install");
   }
 
   cliEngines(refresh = false): Promise<CliEngineDto[]> {

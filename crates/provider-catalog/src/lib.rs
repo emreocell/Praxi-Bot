@@ -16,6 +16,7 @@ pub mod hardware;
 mod limits;
 pub mod local_advice;
 pub mod local_detect;
+pub mod local_runtime;
 pub mod model_metadata;
 pub mod openai_compat;
 pub mod provider;

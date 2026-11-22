@@ -157,6 +157,10 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/providers/reload"),
     // hardware summary (RAM, GPU, free disk) is a machine fingerprint: owner only
     ("GET", "/v1/local-models"),
+    // one-click local model: downloads and runs software on this computer
+    ("GET", "/v1/local-install"),
+    ("POST", "/v1/local-install"),
+    ("DELETE", "/v1/local-install"),
     ("POST", "/v1/components/{}/install"),
     ("POST", "/v1/mcp/servers"),
     ("PUT", "/v1/mcp/servers/{}"),

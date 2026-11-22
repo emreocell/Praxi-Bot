@@ -13,6 +13,7 @@ import { useProviders } from "../../state/useProviders";
 import pageStyles from "./AiPage.module.css";
 import { ProvidersSection } from "../SettingsSections";
 import { ApiKeyPaste } from "./ApiKeyPaste";
+import { LocalInstallCard } from "../../components/LocalInstallCard";
 import { LocalModelsAdvice } from "../../components/LocalModelsAdvice";
 import { EnginesCard } from "./HomeCards";
 import { KnowledgeCard } from "./KnowledgeCard";
@@ -113,7 +114,12 @@ export function aiCards(t: TFunction): CardDef[] {
       title: t("localModels.cardTitle"),
       description: t("localModels.cardDescription"),
       keywords: "ollama lmstudio local model hardware gpu ram yerel donanim lokal modell hardware",
-      node: <LocalModelsAdvice />
+      node: (
+        <>
+          <LocalInstallCard />
+          <LocalModelsAdvice />
+        </>
+      )
     },
     {
       id: "keys",

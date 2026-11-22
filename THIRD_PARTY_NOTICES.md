@@ -169,3 +169,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## llama.cpp (MIT) and Qwen3 GGUF models (Apache-2.0)
+
+The one-click local model feature (`crates/provider-catalog/src/local_runtime`) downloads, at
+the owner's request and never bundled in the installer, a pinned `llama-server` build from
+[ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) release `b12633` (MIT licence,
+Copyright (c) 2023-2026 The ggml authors) and a Qwen3 GGUF model from
+[unsloth](https://huggingface.co/unsloth) quantisations of Alibaba's Qwen3 (Apache-2.0).
+Each file is verified against a SHA-256 pinned in `manifest.rs`. No upstream source code is
+copied into this repository; the licence of each model is shown in the picker.
