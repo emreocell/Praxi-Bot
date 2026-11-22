@@ -1283,6 +1283,14 @@ export class MockApiClient extends ApiClient {
               { id: "mock-message-m2", chat_id: CHAT_ID, content: tr ? "İyiyim, teşekkürler! Size yardımcı olmak için hazırım." : "Doing well, thanks! Ready to help.", role: "assistant", bot_id: NOVA, created_at_ms: NOW + 6000 } as Message
             );
           }
+          if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "imported") {
+            // Review screen: an imported conversation and its inert tool note.
+            seeded.push(
+              { id: "mock-message-i1", chat_id: CHAT_ID, content: tr ? "Dünkü notları buraya taşıyalım." : "Let's move yesterday's notes here.", role: "user", created_at_ms: NOW + 5000 } as Message,
+              { id: "mock-message-i2", chat_id: CHAT_ID, content: tr ? "Notlar içe aktarıldı; araç adımları çalıştırılmadı." : "Notes imported; tool steps were not run.", role: "assistant", source: "imported", created_at_ms: NOW + 6000 } as Message,
+              { id: "mock-message-i3", chat_id: CHAT_ID, content: tr ? "İçe aktarılan not: 2 araç adımı ve 1 onay dosyada listelenmişti; içe aktarılmadı ve çalıştırılmadı." : "Imported chat note: 2 tool step(s) and 1 approval(s) were listed in the file but were not imported or executed.", role: "imported_note", created_at_ms: NOW + 7000 } as Message
+            );
+          }
           this.messages.set(seg[1], seeded);
           return ok(seeded);
         }

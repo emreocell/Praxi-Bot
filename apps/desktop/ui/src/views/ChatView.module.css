@@ -129,6 +129,30 @@
   overflow-wrap: anywhere;
 }
 
+.importedBadge {
+  display: inline-block;
+  margin-block-end: var(--space-1);
+  padding: 0 var(--space-2);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.importedNote {
+  max-width: 100%;
+  margin: var(--space-1) 0;
+  padding-inline-start: var(--space-3);
+  border-inline-start: var(--size-border) solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  overflow-wrap: anywhere;
+}
+
 .itemRow {
   display: flex;
   flex-direction: column;
