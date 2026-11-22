@@ -44,7 +44,7 @@ import { StepIcon } from "./StepIcon";
 import formStyles from "./Form.module.css";
 import styles from "./ChatCards.module.css";
 import { humanLine, humanToolError } from "../lib/humanError";
-import { COMMAND_LIMIT, INPUT_LIMIT, actionArguments, browserStepLines, actionCommand, actionText, hostText, reasonLine, sourceText, type T } from "../lib/approvalPlain";
+import { COMMAND_LIMIT, INPUT_LIMIT, actionArguments, browserMcpText, browserStepLines, actionCommand, actionText, hostText, reasonLine, sourceText, type T } from "../lib/approvalPlain";
 import { ErrorNotice } from "./ErrorNotice";
 
 const brandName = (name: string): string | null => {
@@ -471,8 +471,13 @@ export function ApprovalCard({
   const [trustedFolders, setTrustedFolders] = useState<string[]>([]);
   const folderFacts = (tool.details as { trust_folders?: unknown } | null)?.trust_folders;
   const folders = Array.isArray(folderFacts) ? folderFacts.filter((f): f is string => typeof f === "string") : [];
-  const facts = tool.details as { why?: unknown; once_only?: unknown } | null | undefined;
+  const facts = tool.details as
+    | { why?: unknown; once_only?: unknown; run_grant?: unknown; always_offered?: unknown }
+    | null
+    | undefined;
   const why = typeof facts?.why === "string" ? facts.why : null;
+  // "Allow for this task": the same MCP tool for the rest of this run, only when the daemon offers it.
+  const runGrant = facts?.run_grant === true;
   // What "this chat" / "always" would remember: one site, folder or command, never the whole tool.
   const memory = memoryOffer(tool.details);
   const memoryTarget = memory
@@ -480,6 +485,12 @@ export function ApprovalCard({
     : null;
   // The daemon says whether a standing choice may be offered; older events: any details mean once only.
   const onceOnly = typeof facts?.once_only === "boolean" ? facts.once_only : tool.details != null;
+  // A standing grant only where the daemon allows it (never next to private data, never on a
+  // taint-gate or always-ask card); older daemons: hidden on a taint-gate card.
+  const alwaysOffered =
+    typeof facts?.always_offered === "boolean"
+      ? facts.always_offered
+      : why !== "egress" && why !== "executes";
 
   const decide = async (
     decision: "approve" | "deny",
@@ -501,7 +512,9 @@ export function ApprovalCard({
   const tt = t as unknown as T;
   // `use_tool` wraps the real call: the card words (and the glyph shows) the call that would run.
   const call = resolveToolCall(tool.name, tool.input);
-  const plainAction = actionText(call.name, call.input, { computer, serverName }, tt);
+  const plainAction =
+    browserMcpText(call.name, call.input, tool.details, tt) ??
+    actionText(call.name, call.input, { computer, serverName }, tt);
   const command = actionCommand(call.name, call.input);
   // Without a command box the owner still sees the real tool and EVERY argument (path, recipient, body).
   const args = command ? null : actionArguments(call.input);
@@ -611,10 +624,7 @@ export function ApprovalCard({
             ) : null}
             {args ? (
               <>
-                <p className={styles.bodyLabel}>
-                  <span className={styles.approvalTool}>{call.name}</span>{" "}
-                  {t("chat.approval.input.label", { name: call.name })}
-                </p>
+                <p className={styles.bodyLabel}>{t("chat.approval.input.label", { name: call.name })}</p>
                 <pre className={styles.code} tabIndex={0} data-testid="approval-input">{args.text}</pre>
                 {args.shortened ? (
                   <p className={styles.bodyLabel} data-testid="approval-input-shortened">
@@ -675,32 +685,50 @@ export function ApprovalCard({
               {t("chat.approval.control.button", { program: control.program })}
             </Button>
           ) : null}
+          {/* This MCP tool until the task ends: only when the daemon offered it. */}
+          {runGrant ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={disabled || reviewPending}
+              data-testid="approval-run-tool"
+              onClick={() => void decide("approve", "run_tool")}
+            >
+              {t("chat.approval.runTool")}
+            </Button>
+          ) : null}
           {/* The daemon refuses a standing grant for a once-only card. */}
           {onceOnly ? null : (
             <>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={disabled}
-                onClick={() => void decide("approve", "this_chat")}
-              >
-                {memoryTarget
-                  ? t("chat.approval.memory.thisChat", { target: memoryTarget })
-                  : t("chat.approval.thisChat")}
-              </Button>
-              {/* A taint-gate card keeps its choice to this chat (tool class and site). */}
-              {why === "egress" || why === "executes" ? null : (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={disabled}
-                onClick={() => void decide("approve", "always")}
-              >
-                {memoryTarget
-                  ? t("chat.approval.memory.always", { target: memoryTarget })
-                  : t("chat.approval.always")}
-              </Button>
+              {/* "For this task" replaces "this chat" on a card that offers it. */}
+              {runGrant ? null : (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={disabled}
+                  onClick={() => void decide("approve", "this_chat")}
+                >
+                  {memoryTarget
+                    ? t("chat.approval.memory.thisChat", { target: memoryTarget })
+                    : t("chat.approval.thisChat")}
+                </Button>
               )}
+              {/* A taint-gate card keeps its choice to this chat (tool class and site). */}
+              {alwaysOffered ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={disabled}
+                  data-testid="approval-always"
+                  onClick={() => void decide("approve", "always")}
+                >
+                  {memoryTarget
+                    ? t("chat.approval.memory.always", { target: memoryTarget })
+                    : runGrant
+                      ? t("chat.approval.alwaysTool")
+                      : t("chat.approval.always")}
+                </Button>
+              ) : null}
             </>
           )}
           <Button

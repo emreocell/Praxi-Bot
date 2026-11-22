@@ -800,7 +800,7 @@
         "name": "Benutzerdefiniert"
       },
       "full": {
-        "hint": "Läuft ohne Nachfrage (auch Löschen und Senden), außer bei Geld, Aktivierung von Zeitplänen und katastrophalen Befehlen auf der Verbotsliste. Nach dem Lesen nicht vertrauenswürdiger Inhalte fragt der Bot weiterhin vor dem Senden von Daten oder dem Start eines Programms.",
+        "hint": "Läuft ohne Nachfrage (auch Löschen und Senden), außer bei Geld, Aktivierung von Zeitplänen und katastrophalen Befehlen auf der Verbotsliste. Nach dem Lesen nicht vertrauenswürdiger Inhalte fragt der Bot weiterhin vor dem Senden von Daten oder dem Start eines Programms. Ausnahme: Aktionen in einem Browser, den du als Browser verbunden hast (Playwright: öffnen, ansehen, klicken, tippen, Seitenskript ausführen), fragen nach einer Webseite allein nicht; sie fragen, sobald die Aufgabe auch etwas Privates gelesen hat (Dateien, E-Mail, Gedächtnis, deinen Bildschirm). Code außerhalb der Seite und Dateiübertragungen fragen immer.",
         "name": "Voll"
       },
       "read-and-draft": {
@@ -978,6 +978,7 @@
     "addCommand": "Befehl oder Bot hinzufügen",
     "approval": {
       "always": "Immer",
+      "alwaysTool": "Für diesen Bot immer erlauben (dieses Werkzeug)",
       "app": {
         "arguments": "Alle Argumente anzeigen ({{count}} Zeichen)",
         "footer": "Über Composio. Genehmige nur diese Aktion mit allen oben angezeigten Argumenten."
@@ -1065,6 +1066,10 @@
       "plain": {
         "action": {
           "browser": "Diese Seite im Browser auf {{where}} öffnen: {{url}}",
+          "browserMcpAction": "Praxi möchte {{tool}} in deinem Browser verwenden.",
+          "browserMcpCode": "Praxi möchte in deiner Browser-Automatisierung Code außerhalb der Webseite ausführen.",
+          "browserMcpFile": "Praxi möchte eine Datei zwischen diesem Computer und einer Seite in deinem Browser übertragen.",
+          "browserMcpOpen": "Praxi möchte {{url}} in deinem Browser öffnen.",
           "generic": "Etwas auf {{where}} tun",
           "launch": "Das Programm {{name}} auf {{where}} öffnen",
           "pcBrowser": "Den Browser auf DEINEM Computer verwenden",
@@ -1102,6 +1107,7 @@
         },
         "reason": {
           "egress": "Der Bot hat {{list}} gelesen und möchte nun Daten senden (Ziel: {{host}}).",
+          "egressBrowser": "Nach dem Lesen einer Webseite allein laufen Browser-Aktionen ohne Rückfrage. Diese Aufgabe hat außerdem private Inhalte gelesen ({{list}}), daher fragt Praxi: Eine Webadresse oder ein Seitenskript könnte sie nach außen tragen.",
           "egressExecutes": "Der Bot hat {{list}} gelesen und möchte nun Daten senden (Ziel: {{host}}) und ein Programm starten. Aufrufe, die ein Programm starten, fragen immer nach.",
           "unknownSources": "nicht vertrauenswürdige oder private Inhalte"
         },
@@ -1125,6 +1131,7 @@
         }
       },
       "reasonPlaceholder": "Grund für die Ablehnung (optional)",
+      "runTool": "Für diese Aufgabe erlauben",
       "schedule": {
         "allowed": "Ohne Nachfrage erlaubt: {{list}}.",
         "level": {
@@ -1163,7 +1170,7 @@
       "thisChat": "Dieser Chat",
       "title": "Genehmigung erforderlich",
       "why": {
-        "always_ask": "Diese Aktion fragt immer nach, unabhängig von der Berechtigungsstufe (Apps, Zugangsdaten).",
+        "always_ask": "Diese Aktion fragt immer nach, unabhängig von der Berechtigungsstufe (Apps, Zugangsdaten, Code außerhalb einer Browserseite, Dateiübertragungen im Browser).",
         "egress": "In diesem Chat befinden sich nicht vertrauenswürdige Inhalte (eine Webseite, E-Mail, ein Download), daher wird vor dem Senden von Daten nachgefragt.",
         "executes": "In diesem Chat befinden sich nicht vertrauenswürdige Inhalte (eine Webseite, E-Mail, ein Download), daher wird vor Tippen, Shell-Befehlen und dem Starten von Programmen nachgefragt.",
         "floor": "Zahlungen und riskante Befehle fragen immer nach, unabhängig von der Berechtigungsstufe.",
@@ -3268,7 +3275,7 @@
     "autonomyCustom": "Verwendet die Berechtigungsvorlage {{preset}}.",
     "autonomyHints": {
       "ask": "Liest Dateien, prüft den Bildschirm und durchsucht das Web ohne Nachfrage; fragt vor jeder Änderung, jedem Senden, Seitenabruf, Klick oder Befehl.",
-      "auto": "Läuft ohne Nachfrage, auch bei Löschen, Befehlen und Senden. Fragt weiterhin bei Geld, Aktivierung von Zeitplänen und katastrophalen Befehlen sowie nach dem Lesen nicht vertrauenswürdiger Inhalte vor dem Senden von Daten oder dem Start eines Programms.",
+      "auto": "Läuft ohne Nachfrage, auch bei Löschen, Befehlen und Senden. Fragt weiterhin bei Geld, Aktivierung von Zeitplänen und katastrophalen Befehlen sowie nach dem Lesen nicht vertrauenswürdiger Inhalte vor dem Senden von Daten oder dem Start eines Programms. Aktionen in einem verbundenen Browser (Playwright) fragen erst, wenn die Aufgabe auch etwas Privates gelesen hat; Code außerhalb der Seite und Dateiübertragungen fragen immer.",
       "balanced": "Liest, surft, bearbeitet Dateien im Arbeitsbereich und arbeitet auf dem eigenen Computer des Bots ohne Nachfrage; fragt vor dem Löschen von Dateien, dem Senden, Geldausgaben oder Eingriffen in deinen PC."
     },
     "autonomyLevels": {

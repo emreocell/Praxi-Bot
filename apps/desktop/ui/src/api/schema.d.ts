@@ -5916,6 +5916,13 @@ export interface components {
             args?: string[] | null;
             /** @description Bots that may use the server; `null` = all bots. */
             bots?: string[] | null;
+            /**
+             * @description The owner connected this server as a browser (Playwright and similar). Its in-page tools
+             *     do not ask after a web page alone; they ask once the run read private data. Code outside
+             *     the page and file moves always ask. The built-in Playwright preset counts as a browser
+             *     without it (`is_browser`).
+             */
+            browser?: boolean;
             /** @description Permission category of every tool of the server. */
             category: string;
             /** @description Executable (stdio). */
@@ -5935,6 +5942,11 @@ export interface components {
             headers?: {
                 [key: string]: string;
             };
+            /**
+             * @description Whether the daemon treats this server as a browser: `browser`, or the exact built-in
+             *     Playwright preset.
+             */
+            is_browser?: boolean;
             /** @description Tools cannot send data off the machine. Default `false`: every tool is egress. */
             local_only?: boolean;
             /** @description Server name (the `<server>` of `mcp:<server>/<tool>`). */
@@ -5983,6 +5995,8 @@ export interface components {
             args?: string[] | null;
             /** @description Bots that may use the server; absent / `null` = all bots. */
             bots?: string[] | null;
+            /** @description The owner connects this server as a browser (see `McpServerDto::browser`). Default `false`. */
+            browser?: boolean;
             /** @description Permission category of the tools; default `accounts`; `meta` is rejected. */
             category?: string | null;
             /** @description Executable (stdio, with `transport: "stdio"`). */
@@ -6049,6 +6063,8 @@ export interface components {
              *     `[]` (no bot), it never becomes `null`.  Applied after `bots_add`.
              */
             bots_remove?: string[] | null;
+            /** @description The owner connects this server as a browser. Omit to keep the stored value. */
+            browser?: boolean | null;
             /** @description Permission category of the tools; `null` clears it; `meta` is rejected. */
             category?: string | null;
             /** @description Executable (stdio). */
@@ -6962,7 +6978,7 @@ export interface components {
          * @description How far an approval reaches.
          * @enum {string}
          */
-        Scope: "once" | "this_chat" | "always" | "always_category" | "run_control";
+        Scope: "once" | "this_chat" | "always" | "always_category" | "run_control" | "run_tool";
         /** @description Body of `PUT /v1/view/privileges/{peer_key}` (local user only). */
         ScreenPrivilegesInput: {
             /** @description May take over and drive input (`screen:input`); requires `view`. */

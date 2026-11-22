@@ -800,7 +800,7 @@
         "name": "Özel"
       },
       "full": {
-        "hint": "Sormadan çalışır (silme ve gönderim dahil); yalnızca Para, zamanlanmış görev etkinleştirme ve yasaklı listedeki yıkıcı komutlarda sorar. Güvenilmeyen içerik okuduktan sonra veri göndermeden veya program çalıştırmadan önce yine sorar.",
+        "hint": "Sormadan çalışır (silme ve gönderim dahil); yalnızca Para, zamanlanmış görev etkinleştirme ve yasaklı listedeki yıkıcı komutlarda sorar. Güvenilmeyen içerik okuduktan sonra veri göndermeden veya program çalıştırmadan önce yine sorar. İstisna: tarayıcı olarak bağladığın bir tarayıcının içindeki işlemler (Playwright: açma, bakma, tıklama, yazma, sayfa betiği çalıştırma) yalnızca bir web sayfası okunduysa sormaz; görev ayrıca özel bir şey okuduysa (dosya, posta, hafıza, ekranın) sorar. Sayfanın dışında kod çalıştırmak ve dosya taşımak her zaman sorar.",
         "name": "Tam"
       },
       "read-and-draft": {
@@ -978,6 +978,7 @@
     "addCommand": "Komut veya bot ekle",
     "approval": {
       "always": "Her zaman",
+      "alwaysTool": "Bu bot için her zaman izin ver (bu araç)",
       "app": {
         "arguments": "Tüm bağımsız değişkenleri göster ({{count}} karakter)",
         "footer": "Composio üzerinden. Yalnızca bu eylemi yukarıdaki tüm parametrelerle onayla."
@@ -1065,6 +1066,10 @@
       "plain": {
         "action": {
           "browser": "{{where}} üzerindeki tarayıcıda şu sayfayı aç: {{url}}",
+          "browserMcpAction": "Praxi tarayıcında {{tool}} kullanmak istiyor.",
+          "browserMcpCode": "Praxi tarayıcı otomasyonunda, web sayfasının dışında kod çalıştırmak istiyor.",
+          "browserMcpFile": "Praxi bu bilgisayarla tarayıcındaki bir sayfa arasında dosya taşımak istiyor.",
+          "browserMcpOpen": "Praxi tarayıcında {{url}} adresini açmak istiyor.",
           "generic": "{{where}} üzerinde bir işlem yap",
           "launch": "{{where}} üzerinde {{name}} programını aç",
           "pcBrowser": "SENİN bilgisayarındaki tarayıcıyı kullan",
@@ -1102,6 +1107,7 @@
         },
         "reason": {
           "egress": "Bot şunu okudu: {{list}}. Şimdi veri göndermek istiyor (hedef: {{host}}).",
+          "egressBrowser": "Yalnızca bir web sayfası okunduysa tarayıcı işlemleri sormadan çalışır. Bu görev ayrıca özel bir içerik okudu ({{list}}); bir web adresi veya sayfa betiği bunu dışarı taşıyabileceği için Praxi soruyor.",
           "egressExecutes": "Bot şunu okudu: {{list}}. Şimdi veri göndermek ve bir program başlatmak istiyor (hedef: {{host}}); program başlatan çağrılar her seferinde sorar.",
           "unknownSources": "güvenilmeyen ya da özel içerik"
         },
@@ -1125,6 +1131,7 @@
         }
       },
       "reasonPlaceholder": "Reddetme gerekçesi (isteğe bağlı)",
+      "runTool": "Bu görev için izin ver",
       "schedule": {
         "allowed": "Sormadan izin verilenler: {{list}}.",
         "level": {
@@ -1163,7 +1170,7 @@
       "thisChat": "Bu sohbet",
       "title": "Onay gerekiyor",
       "why": {
-        "always_ask": "Bu işlem izin düzeyi ne olursa olsun her zaman sorar (uygulamalar, gizli bilgiler).",
+        "always_ask": "Bu işlem izin düzeyi ne olursa olsun her zaman sorar (uygulamalar, gizli bilgiler, tarayıcı sayfası dışında kod, tarayıcı dosya aktarımları).",
         "egress": "Bu sohbette güvenilmeyen içerik (web sayfası, e-posta, indirilen dosya) var; bu yüzden veri göndermeden önce sorar.",
         "executes": "Bu sohbette güvenilmeyen içerik (web sayfası, e-posta, indirilen dosya) var; bu yüzden yazma, komut ve program başlatmadan önce sorar.",
         "floor": "Ödemeler ve riskli komutlar izin düzeyi ne olursa olsun her zaman sorar.",
@@ -3268,7 +3275,7 @@
     "autonomyCustom": "{{preset}} izin profili kullanılıyor.",
     "autonomyHints": {
       "ask": "Dosya okuma, ekran görüntüsü ve web aramasını sormadan yapar; her değişiklik, gönderim, sayfa açma, tıklama ve komuttan önce sorar.",
-      "auto": "Silme, komut ve gönderim dahil sormadan çalışır. Para, zamanlanmış görev etkinleştirme ve yıkıcı komutlarda, ayrıca güvenilmeyen içerik okuduktan sonra veri göndermeden veya program çalıştırmadan önce yine sorar.",
+      "auto": "Silme, komut ve gönderim dahil sormadan çalışır. Para, zamanlanmış görev etkinleştirme ve yıkıcı komutlarda, ayrıca güvenilmeyen içerik okuduktan sonra veri göndermeden veya program çalıştırmadan önce yine sorar. Bağlı bir tarayıcının (Playwright) içindeki işlemler yalnızca görev özel bir şey de okuduysa sorar; sayfa dışında kod ve dosya aktarımı her zaman sorar.",
       "balanced": "Okur, gezinir, çalışma alanındaki dosyaları düzenler ve botun kendi bilgisayarında sormadan çalışır; dosya silmeden, göndermeden, para harcamadan ve senin bilgisayarına dokunmadan önce sorar."
     },
     "autonomyLevels": {
