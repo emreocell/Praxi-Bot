@@ -242,11 +242,7 @@ impl Tool for WorkflowRun {
                 "workflow belongs to another bot".into(),
             ));
         }
-        if wf
-            .params
-            .iter()
-            .any(|p| p.name.starts_with("recorded_secret_"))
-        {
+        if wf.params.iter().any(crate::format::Param::is_secret) {
             return Err(ToolError::PermissionDenied(
                 "runtime parameters require the human replay endpoint".into(),
             ));

@@ -54,6 +54,8 @@ pub enum ParamType {
     Number,
     /// `true` / `false`.
     Bool,
+    /// Secret value; must never carry a stored default and is redacted in logs/handovers.
+    Secret,
 }
 
 /// One workflow parameter.
@@ -70,6 +72,14 @@ pub struct Param {
     /// Human description.
     #[serde(default)]
     pub description: String,
+}
+
+impl Param {
+    /// Whether this parameter represents a secret / runtime-only value.
+    #[must_use]
+    pub fn is_secret(&self) -> bool {
+        self.ty == ParamType::Secret || self.name.starts_with("recorded_secret_")
+    }
 }
 
 /// Extra hint for finding an unnamed or renamed desktop element.
@@ -589,6 +599,12 @@ impl Workflow {
             if !declared.insert(p.name.as_str()) {
                 return bad(format!("duplicate parameter {:?}", p.name));
             }
+            if p.ty == ParamType::Secret && p.default.is_some() {
+                return bad(format!(
+                    "secret parameter {:?} must not have a default",
+                    p.name
+                ));
+            }
             if let Some(d) = &p.default {
                 check_type(&p.name, p.ty, d)?;
             }
@@ -669,7 +685,7 @@ impl Workflow {
 
 fn check_type(name: &str, ty: ParamType, v: &str) -> Result<(), WorkflowError> {
     let ok = match ty {
-        ParamType::String => true,
+        ParamType::String | ParamType::Secret => true,
         ParamType::Number => v.parse::<f64>().is_ok_and(f64::is_finite),
         ParamType::Bool => v == "true" || v == "false",
     };

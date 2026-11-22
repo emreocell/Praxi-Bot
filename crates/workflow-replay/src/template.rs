@@ -99,6 +99,51 @@ pub fn render(t: &str, vars: &Vars) -> Result<String, WorkflowError> {
     render_with(t, vars, |v| Ok(v.to_owned()))
 }
 
+/// Substitute parameters into a URL template, percent-encoding any parameter
+/// positioned in the query string (`?` .. `#`) while leaving whole-URL or
+/// non-query placeholders unencoded.
+///
+/// # Errors
+/// Malformed template or an unbound parameter.
+pub fn render_url(t: &str, vars: &Vars) -> Result<String, WorkflowError> {
+    let mut out = String::new();
+    let mut in_query = false;
+    let mut in_fragment = false;
+    for p in parse(t)? {
+        match p {
+            Piece::Lit(l) => {
+                if !in_fragment {
+                    for c in l.chars() {
+                        match c {
+                            '?' => in_query = true,
+                            '#' => {
+                                in_query = false;
+                                in_fragment = true;
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                out.push_str(&l);
+            }
+            Piece::Var(v) => {
+                let raw = vars
+                    .get(v)
+                    .ok_or_else(|| WorkflowError::Template(format!("unbound parameter `{v}`")))?;
+                if in_query {
+                    for chunk in url::form_urlencoded::byte_serialize(raw.as_bytes()) {
+                        out.push_str(chunk);
+                    }
+                } else {
+                    out.push_str(raw);
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn render_with(
     t: &str,
     vars: &Vars,
@@ -397,6 +442,22 @@ mod tests {
     fn substitutes_and_unescapes() {
         let v = vars(&[("name", "Ada")]);
         assert_eq!(render("Hi {name}! {{ok}}", &v).unwrap(), "Hi Ada! {ok}");
+    }
+
+    #[test]
+    fn render_url_percent_encodes_query_params_only() {
+        let v = vars(&[
+            ("q", "red & blue=100% 🚀"),
+            ("url", "https://example.test/path?x=1&y=2"),
+        ]);
+        assert_eq!(
+            render_url("https://shop.test/search?q={q}&lang=en#top", &v).unwrap(),
+            "https://shop.test/search?q=red+%26+blue%3D100%25+%F0%9F%9A%80&lang=en#top"
+        );
+        assert_eq!(
+            render_url("{url}", &v).unwrap(),
+            "https://example.test/path?x=1&y=2"
+        );
     }
 
     #[test]

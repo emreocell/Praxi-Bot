@@ -550,6 +550,14 @@ impl Replayer {
             step_index: u32::try_from(step_index).unwrap_or(u32::MAX),
             reason: format!("{}: {}", reason.as_str(), truncate(reason.detail(), 300)),
         }));
+        let mut safe_params = vars.clone();
+        for p in &wf.params {
+            if p.is_secret()
+                && let Some(val) = safe_params.get_mut(&p.name)
+            {
+                secret_store::REDACTED.clone_into(val);
+            }
+        }
         ReplayReport {
             workflow: wf.name.clone(),
             steps_replayed: reports.len(),
@@ -561,7 +569,7 @@ impl Replayer {
                 reason,
                 partial_state: PartialState {
                     completed: reports.len(),
-                    params: vars.clone(),
+                    params: safe_params,
                     last_output,
                     remaining: wf.steps[step_index.min(wf.steps.len())..]
                         .iter()
@@ -686,7 +694,7 @@ impl Replayer {
             }
             Step::Navigate(n) => {
                 let driver = self.browser()?;
-                let url = template::render(&n.url, vars).map_err(|e| tpl(&e))?;
+                let url = template::render_url(&n.url, vars).map_err(|e| tpl(&e))?;
                 self.authorize(
                     gate,
                     "browser_open",
