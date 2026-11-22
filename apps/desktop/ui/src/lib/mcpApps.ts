@@ -20,6 +20,7 @@ export type McpApi = Pick<
   | "updateMcpServer"
   | "deleteMcpServer"
   | "reconnectMcpServer"
+  | "approveMcpToolChanges"
   | "listMcpTools"
   | "mcpCatalog"
   | "setSecret"

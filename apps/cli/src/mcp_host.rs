@@ -16,8 +16,8 @@ use async_trait::async_trait;
 use daemon_api::mcp::{
     McpAuthStart, McpAuthState, McpCatalogEntryDto, McpCatalogInstallDto,
     McpErrorKind as ErrorKindDto, McpFolderDto, McpOAuthConfig, McpRequiredSecretDto,
-    McpServerChanged, McpServerDto, McpServerInput, McpStatus, McpToolDto, McpTransportInput,
-    McpTransportKind, McpTransportObject,
+    McpServerChanged, McpServerDto, McpServerInput, McpStatus, McpToolChangeDto, McpToolDto,
+    McpTransportInput, McpTransportKind, McpTransportObject,
 };
 use daemon_api::{McpControl, McpControlError};
 use mcp_bridge::{
@@ -161,8 +161,13 @@ impl McpHost {
             // Do not start configurations whose canonical form could not be saved.
             loaded.clear();
         }
-        let mut manager =
-            McpManager::with_policy(registry.clone(), policy).with_path_guard(guard.clone());
+        // Approved tool fingerprints live next to `mcp.toml`; a tool whose
+        // definition changes later stays off until the owner approves it.
+        let mut manager = McpManager::with_policy(registry.clone(), policy)
+            .with_path_guard(guard.clone())
+            .with_pin_store(Arc::new(mcp_bridge::FilePinStore::open(
+                data_dir.join("mcp-tool-pins.json"),
+            )));
         if let Some(s) = secrets {
             manager = manager.with_secret_store(s);
         }
@@ -347,6 +352,22 @@ impl McpHost {
             browser: cfg.browser,
             is_browser: cfg.is_browser(),
             bots: cfg.bots.clone(),
+            changed_tools: snap
+                .as_ref()
+                .map(|s| {
+                    s.changed_tools
+                        .iter()
+                        .map(|c| McpToolChangeDto {
+                            tool: c.tool.clone(),
+                            before: c.before.clone(),
+                            after: c.after.clone(),
+                            description_changed: c.description_changed,
+                            schema_changed: c.schema_changed,
+                            other_changed: c.other_changed,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 
@@ -1117,6 +1138,10 @@ impl McpControl for McpHost {
                 }
                 return Ok(self.dto(&cfg));
             }
+            if prev.transport != cfg.transport {
+                // A different program or address is a different server.
+                self.manager.forget_tool_pins(name);
+            }
             let old = match self.manager.detach_server(name) {
                 Ok(handle) => Some(handle),
                 Err(McpError::UnknownServer(_)) => None,
@@ -1201,6 +1226,7 @@ impl McpControl for McpHost {
             self.persist(|m| {
                 m.remove(name);
             })?;
+            self.manager.forget_tool_pins(name);
             let old = match self.manager.detach_server(name) {
                 Ok(handle) => Some(handle),
                 Err(McpError::UnknownServer(_)) => None,
@@ -1237,6 +1263,31 @@ impl McpControl for McpHost {
         self.connect_registered(name, generation, handle, reenable)
             .await;
         Ok(self.dto(&self.config_of(name).unwrap_or(fallback)))
+    }
+
+    async fn approve_tool_changes(
+        &self,
+        name: &str,
+        tool: Option<String>,
+    ) -> Result<McpServerDto, McpControlError> {
+        let cfg = {
+            let _op = self.ops.lock().await;
+            self.check_writable()?;
+            self.config_of(name)?
+        };
+        if cfg.enabled {
+            // A failed reconnect is not an error here: it shows in the status.
+            match self
+                .manager
+                .approve_tool_changes(name, tool.as_deref())
+                .await
+            {
+                Ok(_) | Err(McpError::UnknownServer(_)) => {}
+                Err(error) => eprintln!("warning: re-approving MCP tools failed: {error}"),
+            }
+            self.announce(name);
+        }
+        Ok(self.dto(&self.config_of(name).unwrap_or(cfg)))
     }
 
     fn tools(&self, name: &str) -> Result<Vec<McpToolDto>, McpControlError> {

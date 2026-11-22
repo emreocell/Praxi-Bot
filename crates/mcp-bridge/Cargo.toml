@@ -40,6 +40,7 @@ rmcp = { version = "3.9", default-features = false, features = [
 secret-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 thiserror.workspace = true
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
 toml.workspace = true
@@ -54,7 +55,6 @@ rmcp = { version = "3.9", default-features = false, features = [
     "server",
     "transport-io",
 ] }
-sha2 = "0.10"
 tempfile = "3"
 tokio = { version = "1", features = ["io-std", "macros", "rt-multi-thread", "time", "test-util"] }
 

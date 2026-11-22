@@ -1430,6 +1430,10 @@ fn api_routes() -> Router<AppState> {
             "/v1/mcp/servers/{name}/reconnect",
             post(m::reconnect_mcp_server),
         )
+        .route(
+            "/v1/mcp/servers/{name}/approve-tool-changes",
+            post(m::approve_mcp_tool_changes),
+        )
         .route("/v1/mcp/servers/{name}/tools", get(m::list_mcp_tools))
         .route("/v1/mcp/servers/{name}/auth/start", post(m::start_mcp_auth))
         .route(

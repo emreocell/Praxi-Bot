@@ -537,6 +537,17 @@
       "search": "Arama"
     },
     "categoriesLabel": "Kategoriler",
+    "changed": {
+      "advice": "Yalnızca bu uygulamaya güveniyorsanız ve yeni metin doğru görünüyorsa tekrar açın.",
+      "after": "Şimdiki metin",
+      "approve": "Yeni sürüme güven",
+      "before": "Onayladığınız metin",
+      "intro": "{{name}}, “{{tool}}” aracını anlatış biçimini değiştirdi. Siz karar verene kadar araç kapalıdır ve Praxi onu kullanamaz.",
+      "other": "Metinde görünmeyen bir şey de değişti (örneğin gizli karakterler).",
+      "schema": "Bu aracın kabul ettiği girdiler de değişti.",
+      "title": "Bir araç, onayladığınızdan sonra değişti",
+      "toast": "{{name}}: “{{tool}}” aracının yeni sürümü onaylandı"
+    },
     "close": "Kapat",
     "component": {
       "confirm": "Praxi {{name}} kurmak için şu komutu çalıştıracak:",

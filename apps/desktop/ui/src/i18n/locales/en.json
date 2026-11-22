@@ -537,6 +537,17 @@
       "search": "Search"
     },
     "categoriesLabel": "Categories",
+    "changed": {
+      "advice": "Only turn it back on if you trust this app and the new wording looks right.",
+      "after": "What it says now",
+      "approve": "Trust the new version",
+      "before": "What you approved",
+      "intro": "{{name}} changed how it describes “{{tool}}”. The tool is switched off, and Praxi cannot use it, until you decide.",
+      "other": "Something you cannot see in the text changed too (for example hidden characters).",
+      "schema": "The inputs this tool accepts changed too.",
+      "title": "A tool changed after you approved it",
+      "toast": "{{name}}: new version of “{{tool}}” approved"
+    },
     "close": "Close",
     "component": {
       "confirm": "Praxi will run this command to install {{name}}:",

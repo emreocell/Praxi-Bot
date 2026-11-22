@@ -65,6 +65,7 @@ impl FakeMcp {
             browser: input.browser,
             is_browser: input.browser,
             bots: input.bots.clone(),
+            changed_tools: Vec::new(),
         }
     }
 
@@ -202,6 +203,18 @@ impl McpControl for FakeMcp {
         drop(all);
         self.emit(name, McpStatus::Connecting);
         Ok(dto)
+    }
+    async fn approve_tool_changes(
+        &self,
+        name: &str,
+        _tool: Option<String>,
+    ) -> Result<McpServerDto, McpControlError> {
+        self.servers
+            .lock()
+            .iter()
+            .find(|s| s.name == name)
+            .cloned()
+            .ok_or_else(|| McpControlError::NotFound(format!("mcp server {name}")))
     }
     fn tools(&self, name: &str) -> Result<Vec<McpToolDto>, McpControlError> {
         if !self.servers.lock().iter().any(|s| s.name == name) {
@@ -772,6 +785,7 @@ async fn mcp_management_is_host_local_for_every_peer_role() {
             (Method::PUT, "/v1/mcp/servers/s"),
             (Method::DELETE, "/v1/mcp/servers/s"),
             (Method::POST, "/v1/mcp/servers/s/reconnect"),
+            (Method::POST, "/v1/mcp/servers/s/approve-tool-changes"),
         ] {
             let variants = [
                 path.to_owned(),
@@ -874,6 +888,12 @@ async fn every_mcp_mutation_is_audited_without_values() {
             "/v1/mcp/servers/files/reconnect".to_owned(),
             None,
             "mcp.server_reconnect",
+        ),
+        (
+            Method::POST,
+            "/v1/mcp/servers/files/approve-tool-changes".to_owned(),
+            None,
+            "mcp.tool_changes_approved",
         ),
         (
             Method::POST,
@@ -1032,4 +1052,29 @@ async fn peer_router_refuses_every_mcp_mutation_to_every_role() {
         assert_eq!(resp.status(), StatusCode::FORBIDDEN, "%2F for {role:?}");
     }
     assert!(fake.list().is_empty(), "a peer must not add a server");
+}
+
+#[tokio::test]
+async fn approving_changed_tools_reaches_the_host() {
+    let (t, _) = with_mcp();
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/mcp/servers",
+        Some(stdio_body("files")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let body = Some(json!({"tool": "echo"}));
+    let path = "/v1/mcp/servers/files/approve-tool-changes";
+    let r = call(&t, Method::POST, path, body.clone()).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/mcp/servers/nope/approve-tool-changes",
+        body,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
 }

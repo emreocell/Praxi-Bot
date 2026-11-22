@@ -537,6 +537,17 @@
       "search": "Suche"
     },
     "categoriesLabel": "Kategorien",
+    "changed": {
+      "advice": "Schalten Sie es nur wieder ein, wenn Sie dieser App vertrauen und der neue Text in Ordnung aussieht.",
+      "after": "Das steht jetzt dort",
+      "approve": "Neuer Version vertrauen",
+      "before": "Das haben Sie freigegeben",
+      "intro": "{{name}} beschreibt „{{tool}}“ jetzt anders. Das Werkzeug ist ausgeschaltet und Praxi kann es nicht nutzen, bis Sie entscheiden.",
+      "other": "Auch etwas, das im Text nicht sichtbar ist, hat sich geändert (zum Beispiel versteckte Zeichen).",
+      "schema": "Auch die Eingaben, die dieses Werkzeug annimmt, haben sich geändert.",
+      "title": "Ein Werkzeug hat sich nach Ihrer Freigabe geändert",
+      "toast": "{{name}}: neue Version von „{{tool}}“ freigegeben"
+    },
     "close": "Schließen",
     "component": {
       "confirm": "Praxi führt diesen Befehl aus, um {{name}} zu installieren:",

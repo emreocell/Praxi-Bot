@@ -23,6 +23,7 @@ use rmcp::{
 use secret_store::SecretStore;
 use tool_registry::{Tool, ToolRegistry};
 
+use crate::pins::{MemoryPinStore, PinStore, ToolChange, change_of, pin_of};
 use crate::{
     client::Signals,
     config::{McpServerConfig, McpTransport, ToolFilter},
@@ -138,6 +139,9 @@ pub struct ServerSnapshot {
     pub consecutive_failures: u32,
     /// Names (`mcp:<id>/<tool>`) of the tools currently registered.
     pub tools: Vec<String>,
+    /// Tools disabled because the server changed their definition after the
+    /// owner approved it; each carries the before/after of the description.
+    pub changed_tools: Vec<ToolChange>,
     /// Most recent error message.
     pub last_error: Option<String>,
     /// Class of [`Self::last_error`] (`None` when there is no error).
@@ -154,6 +158,8 @@ struct State {
     status: ServerStatus,
     failures: u32,
     tools: Vec<String>,
+    /// Tools held back because their definition changed after approval.
+    changed: Vec<ToolChange>,
     last_error: Option<String>,
     /// Meaningful only while `last_error` is set.
     last_error_kind: McpErrorKind,
@@ -180,6 +186,7 @@ pub(crate) struct Server {
     bots: Mutex<Option<Vec<String>>>,
     /// Raised by every session of this server (list-changed notifications).
     signals: Arc<Signals>,
+    pins: Arc<dyn PinStore>,
     /// Told about OAuth token values before they are used.
     registrar: Option<crate::oauth::SecretRegistrar>,
     /// Whether the list-changed watcher task was started.
@@ -671,9 +678,26 @@ impl Server {
         for name in st.tools.drain(..) {
             self.registry.unregister(&name);
         }
+        st.changed.clear();
         for tool in &listed {
             if !self.filter.permits(&tool.name) {
                 continue;
+            }
+            // Trust on first use: the owner connected this server, so the
+            // first definition is the approved one. A later difference keeps
+            // the tool out of the registry (and so away from the model).
+            let current = pin_of(tool);
+            match self.pins.get(self.id(), &tool.name) {
+                None => self.pins.put(self.id(), &tool.name, current),
+                Some(pinned) if pinned.hash == current.hash => {}
+                Some(pinned) => {
+                    tracing::warn!(
+                        tool = %session.redactor.scrub(&tool.name),
+                        "MCP tool definition changed after approval; tool disabled"
+                    );
+                    st.changed.push(change_of(&tool.name, &pinned, current));
+                    continue;
+                }
             }
             let adapter: Arc<dyn Tool> = Arc::new(McpToolAdapter::new(Arc::clone(self), tool));
             let name = qualified_name(&self.config.id, &tool.name);
@@ -804,6 +828,7 @@ impl Server {
             },
             consecutive_failures: st.failures,
             tools: st.tools.clone(),
+            changed_tools: st.changed.clone(),
             last_error: st.last_error.clone(),
             last_error_kind: st.last_error.as_ref().map(|_| st.last_error_kind),
             auth_required: st.auth_required,
@@ -876,6 +901,7 @@ pub struct McpManager {
     redactor: Option<ExternalRedactor>,
     path_guard: Option<PathGuard>,
     registrar: Option<crate::oauth::SecretRegistrar>,
+    pins: Arc<dyn PinStore>,
     servers: Mutex<BTreeMap<String, Arc<Server>>>,
 }
 
@@ -896,8 +922,19 @@ impl McpManager {
             redactor: None,
             path_guard: None,
             registrar: None,
+            pins: Arc::new(MemoryPinStore::default()),
             servers: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Where approved tool fingerprints are kept (default: in memory, so a
+    /// restart re-approves). A tool whose name, description or schema no longer
+    /// matches its fingerprint is not registered until
+    /// [`Self::approve_tool_changes`].
+    #[must_use]
+    pub fn with_pin_store(mut self, store: Arc<dyn PinStore>) -> Self {
+        self.pins = store;
+        self
     }
 
     /// Secret store used to resolve `secret_headers` / `secret_env` at connect
@@ -1064,6 +1101,7 @@ impl McpManager {
                 },
                 failures: 0,
                 tools: Vec::new(),
+                changed: Vec::new(),
                 last_error: None,
                 last_error_kind: McpErrorKind::Other,
                 auth_required: false,
@@ -1072,6 +1110,7 @@ impl McpManager {
             retired: tokio::sync::watch::channel(false).0,
             bots: Mutex::new(config.bots.clone()),
             signals: Arc::default(),
+            pins: Arc::clone(&self.pins),
             registrar: self.registrar.clone(),
             watching: AtomicBool::new(false),
             refresh_required: AtomicBool::new(false),
@@ -1152,7 +1191,44 @@ impl McpManager {
     /// [`McpError::UnknownServer`].
     pub async fn remove_server(&self, id: &str) -> Result<()> {
         self.detach_server(id)?.close().await;
+        self.pins.forget_server(id);
         Ok(())
+    }
+
+    /// Forget the approved tool fingerprints of `id`, so its next listing is
+    /// approved afresh. Hosts call it when the owner removes a server or
+    /// changes what it runs; [`Self::detach_server`] alone keeps them, so a
+    /// settings edit cannot silently approve a changed tool.
+    pub fn forget_tool_pins(&self, id: &str) {
+        self.pins.forget_server(id);
+    }
+
+    /// Approve the definitions the server offers now for its held-back tools
+    /// (`tool = None`: all of them) and register them. Only a definition that
+    /// is *still* the one the owner was shown is approved: if the server
+    /// changed it again meanwhile, the tool stays disabled with a fresh diff.
+    ///
+    /// # Errors
+    /// Unknown server, or the reconnect/discovery failure.
+    pub async fn approve_tool_changes(&self, id: &str, tool: Option<&str>) -> Result<usize> {
+        let server = self.get(id)?;
+        let shown: Vec<ToolChange> = server.state.lock().changed.clone();
+        // Re-list first so the stored hash is the live definition, then accept
+        // exactly the entries whose live definition equals the one shown.
+        server.sync_tools().await?;
+        let now: Vec<ToolChange> = server.state.lock().changed.clone();
+        for change in &shown {
+            if tool.is_some_and(|t| t != change.tool) {
+                continue;
+            }
+            if now
+                .iter()
+                .any(|c| c.tool == change.tool && c.pending == change.pending)
+            {
+                self.pins.put(id, &change.tool, change.pending.clone());
+            }
+        }
+        server.sync_tools().await
     }
 
     /// Remove and invalidate a registration without waiting for remote I/O.

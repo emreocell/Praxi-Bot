@@ -8000,6 +8000,73 @@
         ]
       }
     },
+    "/v1/mcp/servers/{name}/approve-tool-changes": {
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Approve the tools a server changed after the owner approved them, so they\nare switched on again. Owner only.",
+        "operationId": "approve_mcp_tool_changes",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Server name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpApproveChangesInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "MCP management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/mcp/servers/{name}/auth/callback": {
       "post": {
         "tags": [
@@ -19637,6 +19704,19 @@
           }
         }
       },
+      "McpApproveChangesInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/mcp/servers/{name}/approve-tool-changes`.",
+        "properties": {
+          "tool": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Approve only this tool; omitted = every changed tool of the server."
+          }
+        }
+      },
       "McpAuthCallback": {
         "type": "object",
         "description": "Body of `POST /v1/mcp/servers/{name}/auth/callback`.",
@@ -19993,6 +20073,13 @@
           "category": {
             "type": "string",
             "description": "Permission category of every tool of the server."
+          },
+          "changed_tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpToolChangeDto"
+            },
+            "description": "Tools the server changed after the owner approved them. They are\nswitched off (the model never sees them) until re-approved with\n`POST /v1/mcp/servers/{name}/approve-tool-changes`."
           },
           "command": {
             "type": [
@@ -20557,6 +20644,44 @@
           }
         },
         "additionalProperties": false
+      },
+      "McpToolChangeDto": {
+        "type": "object",
+        "description": "One tool whose description or schema changed after approval.",
+        "required": [
+          "tool",
+          "before",
+          "after",
+          "description_changed",
+          "schema_changed",
+          "other_changed"
+        ],
+        "properties": {
+          "after": {
+            "type": "string",
+            "description": "The description the server offers now (untrusted text: show it as text)."
+          },
+          "before": {
+            "type": "string",
+            "description": "The approved description."
+          },
+          "description_changed": {
+            "type": "boolean",
+            "description": "The visible description text differs."
+          },
+          "other_changed": {
+            "type": "boolean",
+            "description": "Something not visible in the text differs (hidden characters, title,\nannotations)."
+          },
+          "schema_changed": {
+            "type": "boolean",
+            "description": "The input schema differs."
+          },
+          "tool": {
+            "type": "string",
+            "description": "Tool name on the server."
+          }
+        }
       },
       "McpToolDto": {
         "type": "object",

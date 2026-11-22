@@ -143,6 +143,37 @@ pub struct McpServerDto {
     pub is_browser: bool,
     /// Bots that may use the server; `null` = all bots.
     pub bots: Option<Vec<String>>,
+    /// Tools the server changed after the owner approved them. They are
+    /// switched off (the model never sees them) until re-approved with
+    /// `POST /v1/mcp/servers/{name}/approve-tool-changes`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_tools: Vec<McpToolChangeDto>,
+}
+
+/// One tool whose description or schema changed after approval.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpToolChangeDto {
+    /// Tool name on the server.
+    pub tool: String,
+    /// The approved description.
+    pub before: String,
+    /// The description the server offers now (untrusted text: show it as text).
+    pub after: String,
+    /// The visible description text differs.
+    pub description_changed: bool,
+    /// The input schema differs.
+    pub schema_changed: bool,
+    /// Something not visible in the text differs (hidden characters, title,
+    /// annotations).
+    pub other_changed: bool,
+}
+
+/// Body of `POST /v1/mcp/servers/{name}/approve-tool-changes`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpApproveChangesInput {
+    /// Approve only this tool; omitted = every changed tool of the server.
+    #[serde(default)]
+    pub tool: Option<String>,
 }
 
 /// Detailed transport of an MCP server body (the `McpServerConfig` shape).
@@ -583,6 +614,20 @@ pub trait McpControl: Send + Sync {
     /// # Errors
     /// [`McpControlError`].
     async fn reconnect(&self, name: &str) -> Result<McpServerDto, McpControlError>;
+    /// Approve the new definition of the tools the server changed after the
+    /// owner approved them (`tool: None` = all) and switch them back on.
+    ///
+    /// # Errors
+    /// [`McpControlError`].
+    async fn approve_tool_changes(
+        &self,
+        _name: &str,
+        _tool: Option<String>,
+    ) -> Result<McpServerDto, McpControlError> {
+        Err(McpControlError::Internal(
+            "tool approval is not supported by this host".into(),
+        ))
+    }
     /// Remove a deleted bot's id from every server's `bots` list (an atomic
     /// remove-id, never a list written back from a snapshot).  A list that
     /// becomes empty stays an explicit empty list ("no bot"); it never turns

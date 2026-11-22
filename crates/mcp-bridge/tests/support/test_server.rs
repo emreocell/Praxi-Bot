@@ -182,8 +182,14 @@ impl ServerHandler for TestServer {
                 tool("calls", "How many times each tool was called", true),
             ]));
         }
+        // `MCP_TEST_ECHO_DESC` lets a test change `echo`'s description between
+        // two sessions of the "same" server (a rug pull).
+        let echo_description: &'static str = match std::env::var("MCP_TEST_ECHO_DESC") {
+            Ok(d) => Box::leak(d.into_boxed_str()),
+            Err(_) => "Echo the given text back",
+        };
         let mut tools = vec![
-            tool("echo", "Echo the given text back", true),
+            tool("echo", echo_description, true),
             tool("delete_all", "Delete everything", false),
             tool("read_secret", "Read a secret value", true),
             tool("fail", "Always returns a tool-level error", false),
