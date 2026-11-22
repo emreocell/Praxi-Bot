@@ -798,7 +798,10 @@ async fn skill_hint_lists_the_skill_first() {
             bot: None,
         }));
     let mut rx = lp.subscribe();
-    let (_, state) = turn(&lp, env.chat, "frobnicate the gizmo").await;
+    // The text must overlap the skill (here: "github"): with an unrelated text
+    // the classifier only sees the corpus when it is tiny, and the bundled
+    // skill set grows over time.
+    let (_, state) = turn(&lp, env.chat, "frobnicate the gizmo on github").await;
     assert_eq!(state, RunState::Succeeded);
     let d = decided(&drain(&mut rx));
     assert_eq!(d[0].route["kind"], "skill_hint", "{d:?}");
@@ -819,7 +822,7 @@ async fn skill_hint_lists_the_skill_first() {
         .find(|m| m.role == provider_catalog::MessageRole::User)
         .unwrap();
     let user = user.content.as_str().unwrap();
-    assert!(user.starts_with("frobnicate the gizmo"), "{user}");
+    assert!(user.starts_with("frobnicate the gizmo on github"), "{user}");
     assert!(user.contains("[loop hint, not written by the user: Suggested skills"));
     assert!(user.contains("github-basics"));
 }

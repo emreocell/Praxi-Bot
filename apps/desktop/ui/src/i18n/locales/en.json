@@ -997,7 +997,7 @@
   "botLimits": {
     "card": {
       "body": {
-        "tokens": "This bot used up its token limit. The run was stopped before the model was called, so nothing went over.",
+        "tokens": "This bot used up its usage limit (the amount of text the model may read and write). The run was stopped before the model was called, so nothing went over.",
         "usd": "This bot used up its spending limit. The run was stopped before the model was called, so nothing went over."
       },
       "raise": "Raise limit",
@@ -1012,15 +1012,15 @@
       "waiting": "Okay. The bot can work again after the limit resets on {{when}}.",
       "waitingUnknown": "Okay. The bot can work again after the limit resets."
     },
-    "defaultNote": "This bot has no saved limits yet, so a safe cap of {{usd}} or {{tokens}} tokens per day applies. Raise it here if the bot needs more.",
+    "defaultNote": "This bot has no saved limits yet, so a safe daily cap of {{usd}} or {{amount}} pieces of text applies. Raise it here if the bot needs more.",
     "field": {
-      "hard_tokens": "Stop at (tokens)",
+      "hard_tokens": "Stop at (usage)",
       "hard_usd": "Stop at (USD)",
-      "soft_tokens": "Warn at (tokens)",
+      "soft_tokens": "Warn at (usage)",
       "soft_usd": "Warn at (USD)"
     },
-    "hint": "A warning only notifies you at 80% and 100%. A stop ends the run before the model is called. Models with an unknown price count tokens only. Schedules and channel messages follow the same limits.",
-    "invalid": "Enter a positive amount (money from 0.01, tokens as whole numbers) or leave the field empty.",
+    "hint": "A warning only notifies you at 80% and 100%. A stop ends the run before the model is called. Models with an unknown price count usage only. Schedules and channel messages follow the same limits.",
+    "invalid": "Enter a positive amount (money from 0.01, usage as whole numbers) or leave the field empty.",
     "order": "The warning level must not be above the stop level.",
     "period": {
       "daily": "Per day",
@@ -1033,7 +1033,7 @@
     "saving": "Saving…",
     "unlimited": "No limit",
     "unreported": "{{count}} calls reported no usage and are counted by a cautious estimate.",
-    "used": "Used {{usd}} and {{tokens}} tokens. Resets {{when}}."
+    "used": "Used {{usd}} and {{amount}} of text usage. Resets {{when}}."
   },
   "botPanel": {
     "botsComputer": "{{bot}}'s computer · {{name}}",
@@ -5026,7 +5026,7 @@
     "total": "Total",
     "trend": {
       "ariaLabel": "Daily {{metric}} trend over {{days}} days",
-      "dayReadout": "{{day}} · {{calls}} calls · {{tokens}} tokens · {{cost}}",
+      "dayReadout": "{{day}} · {{calls}} calls · {{amount}} tokens · {{cost}}",
       "hoverHint": "Hover or focus a day to see its totals.",
       "metric": "Chart metric",
       "metrics": {
@@ -5054,7 +5054,7 @@
       "approvalHint": "Approve or deny on the card in the chat. Approvals cannot be given by voice.",
       "captions": "Captions",
       "close": "Close",
-      "daemonUnavailable": "The voice service is unavailable. Reconnect the daemon on this computer and try again; update it if voice is not supported.",
+      "daemonUnavailable": "The voice service is unavailable. Reconnect the background service on this computer and try again; update it if voice is not supported.",
       "end": "End call",
       "geminiKeyMissing": "Add a Gemini API key in Settings → General → Dictation service, then try again.",
       "holdToTalk": "Hold to talk",
@@ -5065,7 +5065,7 @@
       "mute": "Mute microphone",
       "noSpeech": "No speech detected. Still listening.",
       "notConfigured": "Add a Gemini key and select Gemini Live in Settings → General → Dictation service, or configure a Whisper-compatible service.",
-      "ownerRequired": "Owner authorization is missing. Open Praxi-Bot on this computer and reconnect the local daemon, then try again.",
+      "ownerRequired": "Owner authorization is missing. Open Praxi-Bot on this computer and reconnect the local background service, then try again.",
       "phase": {
         "approval": "Waiting for your approval",
         "failed": "The call ended",

@@ -6,7 +6,7 @@ use skills::hub::{
 };
 use std::{
     collections::BTreeSet,
-    io::{BufRead, IsTerminal, Write},
+    io::{BufRead, IsTerminal, Read as _, Write},
     path::{Path, PathBuf},
 };
 
@@ -69,6 +69,102 @@ pub enum SkillsCmd {
     List,
     /// Reinstall locked skills whose folder is missing; verifies the locked hashes.
     Sync,
+    /// Work with skill index documents (see docs/skills-index.md).
+    Index {
+        #[command(subcommand)]
+        action: IndexCmd,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum IndexCmd {
+    /// Check an index file or https URL against the index format; exits non-zero on errors.
+    Validate {
+        /// Path of a local index file, or an https:// URL.
+        source: String,
+        /// Also fetch every entry (never installs) and compare its `sha256`.
+        #[arg(long)]
+        check_content: bool,
+    },
+}
+
+/// Read an index from a file (capped) or an https URL.
+fn read_index(hub: &SkillHub, source: &str) -> crate::Result<Vec<u8>> {
+    if source.to_ascii_lowercase().starts_with("https://") {
+        return hub
+            .fetch_index_document(source)
+            .map_err(|e| hub_err("fetch index", &e).into());
+    }
+    if source.contains("://") {
+        return Err("an index URL must use https://".into());
+    }
+    let mut buf = Vec::new();
+    std::fs::File::open(source)
+        .map_err(|e| format!("cannot read `{source}`: {e}"))?
+        .take(skills::hub::MAX_INDEX_BYTES as u64 + 1)
+        .read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
+fn validate_index_cmd(
+    hub: &SkillHub,
+    source: &str,
+    check_content: bool,
+    out: &mut dyn Write,
+) -> crate::Result<()> {
+    let bytes = read_index(hub, source)?;
+    let report = skills::hub::validate_index(&bytes);
+    for w in &report.warnings {
+        writeln!(out, "warning: {w}")?;
+    }
+    for e in &report.errors {
+        writeln!(out, "error: {e}")?;
+    }
+    let mut failures = report.errors.len();
+    if check_content && report.is_ok() {
+        let doc: serde_json::Value = serde_json::from_slice(&bytes)?;
+        for e in doc["skills"].as_array().into_iter().flatten() {
+            let text = |k: &str| e[k].as_str().map(str::to_string);
+            let name = text("name").unwrap_or_default();
+            let src = InstallSource::Git {
+                url: text("git").unwrap_or_default(),
+                rev: text("commit"),
+                subdir: text("subdir"),
+            };
+            match hub.preview(&src) {
+                Ok(p) => match text("sha256") {
+                    Some(want) if !want.eq_ignore_ascii_case(&p.report.fingerprint) => {
+                        failures += 1;
+                        writeln!(
+                            out,
+                            "error: `{name}`: sha256 {want} does not match the content ({})",
+                            p.report.fingerprint
+                        )?;
+                    }
+                    Some(_) => writeln!(out, "ok: `{name}` content matches its sha256")?,
+                    None => writeln!(
+                        out,
+                        "warning: `{name}` has no sha256; its content is only pinned by commit. Fingerprint: {}",
+                        p.report.fingerprint
+                    )?,
+                },
+                Err(err) => {
+                    failures += 1;
+                    writeln!(out, "error: `{name}`: cannot fetch or validate: {err}")?;
+                }
+            }
+        }
+    }
+    if failures > 0 {
+        return Err(format!("index is invalid ({failures} problem(s))").into());
+    }
+    writeln!(
+        out,
+        "Index is valid: {} skill(s), {} warning(s).",
+        report.entries,
+        report.warnings.len()
+    )?;
+    Ok(())
 }
 
 fn install_source(
@@ -360,6 +456,13 @@ fn run_hub(
                 return Err(format!("{failed} skill(s) could not be restored").into());
             }
         }
+        SkillsCmd::Index {
+            action:
+                IndexCmd::Validate {
+                    source,
+                    check_content,
+                },
+        } => validate_index_cmd(hub, source, *check_content, out)?,
         SkillsCmd::Review { .. } | SkillsCmd::Trust { .. } => unreachable!("handled by run"),
     }
     Ok(())
@@ -601,6 +704,53 @@ mod tests {
             install_source("https://i/x.json", None, None, Some("n")),
             Ok(InstallSource::Index { .. })
         ));
+    }
+
+    #[test]
+    fn index_validate_reports_problems_and_checks_content_hash() {
+        let tmp = tempfile::tempdir().unwrap();
+        let body = Arc::new(Mutex::new("body".to_string()));
+        let hub = hub_in(tmp.path(), &body);
+        let file = tmp.path().join("index.json");
+        let doc = |sha: &str| {
+            format!(
+                r#"{{"version":1,"skills":[{{"name":"gs","description":"d","git":"https://example.com/r.git","commit":"{HASH}"{sha}}}]}}"#
+            )
+        };
+        let run_validate = |check: bool| {
+            let mut out = Vec::new();
+            let r = validate_index_cmd(&hub, file.to_str().unwrap(), check, &mut out);
+            (r, String::from_utf8(out).unwrap())
+        };
+        // Broken index: short commit, listed with exit error.
+        std::fs::write(&file, doc("").replace(HASH, "abc")).unwrap();
+        let (r, out) = run_validate(false);
+        assert!(
+            r.is_err() && out.contains("error:") && out.contains("commit"),
+            "{out}"
+        );
+        // Valid, no content check.
+        std::fs::write(&file, doc("")).unwrap();
+        let (r, out) = run_validate(false);
+        r.unwrap();
+        assert!(out.contains("Index is valid"));
+        // Content check prints the fingerprint when the entry has no sha256 ...
+        let (r, out) = run_validate(true);
+        r.unwrap();
+        let fp = fingerprint_in_text(&out);
+        // ... accepts the right one and rejects a wrong one.
+        std::fs::write(&file, doc(&format!(r#","sha256":"{fp}""#))).unwrap();
+        assert!(run_validate(true).1.contains("matches its sha256"));
+        std::fs::write(&file, doc(&format!(r#","sha256":"{}""#, "0".repeat(64)))).unwrap();
+        let (r, out) = run_validate(true);
+        assert!(r.is_err() && out.contains("does not match"), "{out}");
+        // http index URLs are refused before any fetch.
+        assert!(read_index(&hub, "http://x/i.json").is_err());
+    }
+
+    fn fingerprint_in_text(out: &str) -> String {
+        let at = out.find("Fingerprint: ").unwrap() + "Fingerprint: ".len();
+        out[at..].chars().take(64).collect()
     }
 
     #[test]
