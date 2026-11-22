@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use daemon_api::voice::{
-    TranscribeOutput, VoiceConfigDto, VoiceConfigInput, VoiceControl, VoiceControlError,
-    VoiceProvider,
+    LocalVoiceStatusDto, TranscribeOutput, VoiceConfigDto, VoiceConfigInput, VoiceControl,
+    VoiceControlError, VoiceProvider,
 };
 use secret_store::SecretStore;
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,12 @@ struct VoiceFile {
     stt_provider: VoiceProvider,
     #[serde(default = "default_gemini_model")]
     gemini_model: String,
+    #[serde(default = "default_local_model")]
+    local_model: String,
+}
+
+fn default_local_model() -> String {
+    crate::voice_local::DEFAULT_MODEL.to_owned()
 }
 
 fn default_gemini_model() -> String {
@@ -59,6 +65,7 @@ impl Default for VoiceFile {
             stt_model: default_model(),
             stt_provider: VoiceProvider::default(),
             gemini_model: default_gemini_model(),
+            local_model: default_local_model(),
         }
     }
 }
@@ -71,6 +78,9 @@ pub struct VoiceHost {
     http: reqwest::Client,
     update_lock: tokio::sync::Mutex<()>,
     gemini_ws_base: String,
+    local: crate::voice_local::LocalVoice,
+    #[cfg(feature = "local-voice")]
+    engine: Arc<crate::voice_local_engine::Engine>,
 }
 
 impl VoiceHost {
@@ -88,6 +98,9 @@ impl VoiceHost {
                 .unwrap_or_default(),
             update_lock: tokio::sync::Mutex::new(()),
             gemini_ws_base: crate::voice_gemini::DEFAULT_WS_BASE.to_owned(),
+            local: crate::voice_local::LocalVoice::new(data_dir),
+            #[cfg(feature = "local-voice")]
+            engine: Arc::default(),
         }
     }
 
@@ -135,6 +148,7 @@ impl VoiceHost {
             stt_key_set: self.key().is_some(),
             stt_provider: file.stt_provider,
             gemini_model: file.gemini_model.clone(),
+            local_model: file.local_model.clone(),
             gemini_key_set: self.secret(GEMINI_KEY_NAME).is_some(),
         }
     }
@@ -218,6 +232,7 @@ fn multipart_body(
 }
 
 #[async_trait]
+#[allow(clippy::too_many_lines)]
 impl VoiceControl for VoiceHost {
     fn get(&self) -> VoiceConfigDto {
         self.dto(&self.load())
@@ -276,6 +291,15 @@ impl VoiceControl for VoiceHost {
                 m.to_owned()
             };
         }
+        if let Some(m) = &input.local_model {
+            let m = m.trim();
+            if crate::voice_local::find_model(m).is_none() {
+                return Err(VoiceControlError::Invalid(
+                    "`local_model` is not one of the offered speech models".into(),
+                ));
+            }
+            m.clone_into(&mut file.local_model);
+        }
         let store = self.secrets.as_ref().map(Arc::clone);
         if let Some(key) = input.gemini_key {
             let Some(store) = store.clone() else {
@@ -325,6 +349,11 @@ impl VoiceControl for VoiceHost {
         language: Option<String>,
     ) -> Result<TranscribeOutput, VoiceControlError> {
         let file = self.load();
+        if file.stt_provider == VoiceProvider::LocalVoice {
+            return self
+                .transcribe_local(audio, &mime, language, &file.local_model)
+                .await;
+        }
         if file.stt_provider == VoiceProvider::GeminiLive {
             let key = self
                 .secret(GEMINI_KEY_NAME)
@@ -393,6 +422,64 @@ impl VoiceControl for VoiceHost {
         Ok(TranscribeOutput {
             text: text.trim().to_owned(),
         })
+    }
+
+    fn local_status(&self) -> LocalVoiceStatusDto {
+        self.local.status()
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn local_install(&self, model: String) -> Result<LocalVoiceStatusDto, VoiceControlError> {
+        self.local
+            .start_install(model.trim())
+            .map_err(VoiceControlError::Invalid)?;
+        Ok(self.local.status())
+    }
+}
+
+impl VoiceHost {
+    /// On-device transcription: audio is decoded, cut by Silero VAD and read by Whisper in this
+    /// process. Nothing is sent anywhere.
+    #[cfg(feature = "local-voice")]
+    async fn transcribe_local(
+        &self,
+        audio: Vec<u8>,
+        mime: &str,
+        language: Option<String>,
+        model: &str,
+    ) -> Result<TranscribeOutput, VoiceControlError> {
+        if !self.local.ready(model) {
+            return Err(VoiceControlError::Invalid(
+                "the speech model is not downloaded yet: install it in Settings > Dictation".into(),
+            ));
+        }
+        let language = language
+            .filter(|l| (2..=3).contains(&l.len()) && l.bytes().all(|b| b.is_ascii_lowercase()));
+        let (mime, model) = (mime.to_owned(), model.to_owned());
+        let engine = Arc::clone(&self.engine);
+        let dir = self.data_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            let samples = crate::voice_local::decode_audio(&audio, &mime)?;
+            engine.transcribe(&dir, &model, language.as_deref(), &samples)
+        })
+        .await
+        .map_err(|e| VoiceControlError::Internal(format!("speech task failed: {e}")))?
+        .map(|text| TranscribeOutput { text })
+        .map_err(VoiceControlError::Invalid)
+    }
+
+    #[cfg(not(feature = "local-voice"))]
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
+    async fn transcribe_local(
+        &self,
+        _audio: Vec<u8>,
+        _mime: &str,
+        _language: Option<String>,
+        _model: &str,
+    ) -> Result<TranscribeOutput, VoiceControlError> {
+        Err(VoiceControlError::Invalid(
+            "this build of Praxi-Bot does not include on-device voice".into(),
+        ))
     }
 }
 
@@ -469,6 +556,45 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, VoiceControlError::Internal(_)), "{err:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn local_voice_validates_model_and_never_uses_the_network() {
+        let dir = std::env::temp_dir().join(format!("praxi-voice-local-{}", rand_u64()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = VoiceHost::new(&dir, 7000, None);
+        let bad = host
+            .update(VoiceConfigInput {
+                local_model: Some("../../etc/passwd".into()),
+                ..Default::default()
+            })
+            .await;
+        assert!(matches!(bad, Err(VoiceControlError::Invalid(_))));
+        let dto = host
+            .update(VoiceConfigInput {
+                stt_provider: Some(VoiceProvider::LocalVoice),
+                local_model: Some("whisper-base".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(dto.local_model, "whisper-base");
+        // Nothing is installed: an honest, actionable error instead of a silent fallback to a
+        // cloud service (the audio must never leave the machine in this mode).
+        let err = host
+            .transcribe(vec![0; 64], "audio/pcm".into(), None)
+            .await
+            .unwrap_err();
+        let VoiceControlError::Invalid(m) = err else {
+            panic!("{err:?}");
+        };
+        assert!(
+            m.contains("not download") || m.contains("does not include"),
+            "{m}"
+        );
+        let st = host.local_status();
+        assert!(st.models.iter().all(|m| !m.installed));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

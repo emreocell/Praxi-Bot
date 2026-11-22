@@ -40,6 +40,9 @@ mod update;
 mod view_targets;
 mod voice_gemini;
 mod voice_host;
+mod voice_local;
+#[cfg(feature = "local-voice")]
+mod voice_local_engine;
 mod web_host;
 mod wizard;
 mod workflow;
