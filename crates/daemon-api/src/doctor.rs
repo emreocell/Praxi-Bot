@@ -1195,6 +1195,52 @@ pub fn check_clock(now: SystemTime, newest_data: Option<SystemTime>) -> Check {
     )
 }
 
+/// Clock difference from a network time source above which `clock_skew` warns.
+pub const NETWORK_SKEW_TOLERANCE: Duration = Duration::from_secs(2 * 60);
+
+/// Parse an HTTP `Date` header value (`Sun, 06 Nov 1994 08:49:37 GMT`).
+#[must_use]
+pub fn parse_http_date(value: &str) -> Option<SystemTime> {
+    let t = chrono::DateTime::parse_from_rfc2822(value.trim()).ok()?;
+    u64::try_from(t.timestamp())
+        .ok()
+        .map(|s| SystemTime::UNIX_EPOCH + Duration::from_secs(s))
+}
+
+/// `clock_skew`: this computer's time against the `Date` header of an HTTPS
+/// endpoint the user chose (`remote` = that time, or why it could not be read).
+/// An unreachable endpoint never fails the doctor: the check is skipped.
+#[must_use]
+pub fn check_clock_skew(local: SystemTime, remote: Result<SystemTime, String>) -> Check {
+    const ID: &str = "clock_skew";
+    const N: &str = "clock skew";
+    let server = match remote {
+        Ok(t) => t,
+        Err(e) => return Check::ok(ID, N, format!("skipped: could not read network time ({e})")),
+    };
+    let (diff, ahead) = match local.duration_since(server) {
+        Ok(d) => (d, true),
+        Err(e) => (e.duration(), false),
+    };
+    if diff <= NETWORK_SKEW_TOLERANCE {
+        return Check::ok(
+            ID,
+            N,
+            format!("within {} s of network time", diff.as_secs()),
+        );
+    }
+    Check::warn(
+        ID,
+        N,
+        format!(
+            "this computer's clock is about {} min {} network time; scheduled jobs and sign-ins can break",
+            diff.as_secs() / 60,
+            if ahead { "ahead of" } else { "behind" }
+        ),
+        "turn on automatic time sync and check the time zone in the operating system settings",
+    )
+}
+
 /// One capability the daemon may lack, with the reason.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CapabilityStatus {

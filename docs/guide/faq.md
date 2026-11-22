@@ -96,7 +96,7 @@ documents (**Planned**).
 No. These are on the design roadmap only (**Planned**).
 
 ### Can I use Turkish?
-Yes. The wizard offers English and Turkish, the desktop app has both, and the
+Yes. The command-line wizard offers English and Turkish, the desktop app also has German, and the
 schedule parser understands Turkish phrases such as `her gün 09:00`. The model
 answers in whatever language you write to it, and a profile's `language` can set
 a preference.

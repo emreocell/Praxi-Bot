@@ -2178,11 +2178,14 @@
     "empty": "Deine Bots haben heute noch nichts getan.",
     "failed": "Fehlgeschlagen: {{count}}",
     "noCalls": "Noch keine Modellaufrufe.",
+    "notifyPrivate": "Deine Tageszusammenfassung ist fertig. Öffne die App, um sie zu lesen.",
+    "notifyTitle": "Deine Bots heute",
     "ofLimit": "Das sind {{percent}} des Tageslimits.",
     "running": "Laufen: {{count}}",
     "stopped": "Gestoppt: {{count}}",
     "subtitle": "Was deine Bots seit Mitternacht getan haben und was es gekostet hat.",
     "title": "Heute",
+    "totalCost": "Kosten: {{cost}}",
     "waiting": "Warten auf dich: {{count}}"
   },
   "engineConsent": {
@@ -2996,6 +2999,20 @@
   "help": {
     "center": {
       "allDocs": "Ganze Anleitung öffnen",
+      "diag": {
+        "copied": "Diagnoseinfos kopiert.",
+        "copy": "Kopieren",
+        "copyFailed": "Kopieren nicht möglich. Markieren Sie den Text oben und kopieren Sie ihn von Hand.",
+        "failed": "Die Informationen konnten nicht gesammelt werden",
+        "intro": "Gibt es ein Problem? Lassen Sie sich anzeigen, was kopiert würde, lesen Sie es und fügen Sie es dann in eine Fehlermeldung ein. Schlüssel, Passwörter, E-Mail-Adressen und Ihr Benutzerordner sind unkenntlich gemacht, Nachrichten sind nicht enthalten. Es wird nichts gesendet.",
+        "loading": "Informationen werden gesammelt …",
+        "offline": "Noch nicht mit dem Hintergrunddienst verbunden.",
+        "previewLabel": "Vorschau der Diagnoseinfos",
+        "previewNote": "Genau dieser Text landet mit „Kopieren“ in Ihrer Zwischenablage:",
+        "refresh": "Aktualisieren",
+        "show": "Anzeigen, was kopiert wird",
+        "title": "Diagnoseinfos kopieren"
+      },
       "guideNote": "Die Handbuchseiten sind vorerst auf Englisch.",
       "guideTitle": "Im vollständigen Handbuch",
       "intro": "Kurze Antworten auf die Fragen, die am häufigsten zuerst kommen. Tippe ein Wort, um zu suchen.",
@@ -3712,6 +3729,7 @@
     "held": "Zurückgehalten (Ruhezeit)",
     "heldMuted": "Zurückgehalten (Bot stummgeschaltet)",
     "kind": {
+      "digest": "Tageszusammenfassung",
       "failed": "Lauf fehlgeschlagen",
       "longRun": "Langer Lauf beendet",
       "needsYou": "Braucht dich",
@@ -3945,6 +3963,36 @@
     "thisComputer": "Dieser Computer",
     "thisComputerHint": "Deine Bots laufen hier. Kein Server nötig.",
     "title": "Wo laufen meine Bots?"
+  },
+  "runReport": {
+    "answered": "Du hast geantwortet",
+    "approved": "Du hast es erlaubt",
+    "asked": "Hat dir eine Frage gestellt",
+    "askedCredential": "Hat nach einem Passwort oder Schlüssel gefragt",
+    "button": "Zeitverlauf",
+    "credentialCancelled": "Du hast abgebrochen",
+    "credentialSaved": "Du hast es gespeichert",
+    "declined": "Nicht erlaubt",
+    "exportHtml": "Als Webseite speichern",
+    "exportMarkdown": "Als Text speichern",
+    "exported": "Bericht gespeichert",
+    "footer": "Mit Praxi erstellt. Private Details sind nicht enthalten.",
+    "hint": "Sieh Schritt für Schritt, was der Bot in diesem Lauf getan hat",
+    "noSteps": "Der Bot hat in diesem Lauf keine Werkzeuge benutzt.",
+    "outcome": "Ergebnis",
+    "outcomes": {
+      "done": "Fertig",
+      "failed": "Fehlgeschlagen",
+      "stopped": "Von dir gestoppt",
+      "unfinished": "Nicht abgeschlossen"
+    },
+    "privacy": "Private Details bleiben draußen: Was eingegeben, gelesen oder beantwortet wurde, wird nicht gezeigt, und alles, was wie ein Passwort oder Schlüssel aussieht, wird verborgen.",
+    "started": "Gestartet",
+    "title": "Was der Bot getan hat",
+    "took": "Dauer",
+    "tookTime": "Dauerte {{time}}",
+    "unanswered": "Keine Antwort",
+    "waitingForYou": "Wartet auf dich"
   },
   "runStatus": {
     "showCard": "Anzeigen",
@@ -4294,6 +4342,12 @@
       "noFile": "Kein Hintergrundbild ausgewählt",
       "title": "Hintergrundbild"
     },
+    "digest": {
+      "enabled": "Tägliche Zusammenfassung senden",
+      "enabledHint": "Eine kurze Benachrichtigung pro Tag: was deine Bots getan haben und was es gekostet hat. Ruhezeiten gelten: währenddessen landet sie nur im Benachrichtigungsverlauf.",
+      "time": "Senden um",
+      "title": "Tageszusammenfassung"
+    },
     "hotkey": {
       "currentLabel": "Aktives Kürzel",
       "description": "Bricht aktive Bot-Läufe ab. In der Windows-Desktop-App funktioniert es auch, wenn eine andere App den Fokus hat. Auf anderen Plattformen musst du zuerst Praxi-Bot fokussieren.",
@@ -4577,7 +4631,7 @@
       },
       "repairDone": "Reparatur abgeschlossen",
       "repairFailed": "Die Reparatur war nicht erfolgreich",
-      "reportCopied": "Support-Bericht kopiert. Schlüssel, Tokens, E-Mail-Adressen und dein Benutzerordner sind maskiert.",
+      "reportCopied": "Support-Bericht kopiert. Schlüssel, Passwörter, E-Mail-Adressen und dein Benutzerordner sind maskiert.",
       "reportFailed": "Der Support-Bericht konnte nicht erstellt werden",
       "rerun": "Erneut ausführen",
       "running": "Diagnose läuft …",

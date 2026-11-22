@@ -17,7 +17,7 @@ Running `bot` with no command prints a hint to run `bot setup`.
 | `--data-dir <PATH>` | `BOT_DATA_DIR` | OS app-data dir | Data directory |
 | `--catalog-dir <PATH>` | `BOT_CATALOG_DIR` | built-in set | Directory of provider catalog `*.toml` files |
 | `--secrets-backend <auto\|keyring\|file>` | `BOT_SECRETS_BACKEND` | `auto` | `auto` = an existing encrypted file, else the OS keychain (the file backend is chosen automatically only if `BOT_SECRETS_PASSPHRASE` is set; otherwise pass `--secrets-backend file`). The file passphrase comes from `BOT_SECRETS_PASSPHRASE` or a prompt |
-| `--json` | | off | Machine-readable output (JSON, or NDJSON for `chat`) for `status`, `chat`, `bots`, `answer`, `approve`, `grants`, `schedules`, `email`, `mcp add`, `doctor`, `serve`, `backup`, `restore`, and `channels telegram pair` / `status`. `host status`, `devices`, `revoke`, `standby`, `activate`, and `workflow` already print JSON; `--json` makes `host invite` print JSON instead of a QR. Errors always go to stderr as text |
+| `--json` | | off | Machine-readable output (JSON, or NDJSON for `chat`) for `status`, `chat`, `bots`, `answer`, `approve`, `grants`, `schedules`, `email`, `mcp add`, `doctor`, `serve`, `backup`, `restore`, `providers list`, `secrets list`, `skills list`, and `channels telegram pair` / `status`. `host status`, `devices`, `revoke`, `standby`, `activate`, and `workflow` already print JSON; `--json` makes `host invite` print JSON instead of a QR. Errors always go to stderr as text |
 | `--port <PORT>` | `BOT_PORT` | `47821` | Port `serve` binds on `127.0.0.1`; clients connect to it |
 | `--url <URL>` | `BOT_URL` | | Full daemon URL for client commands (overrides `--port`) |
 | `--remote <ENDPOINT>` | | | Peer endpoint ID of a paired daemon (iroh). Conflicts with `--url` |
@@ -99,6 +99,7 @@ fails.
 | --- | --- |
 | `--online` | Also test provider connections and peer relay reachability over the network |
 | `--report <FILE>` | Write a redacted diagnostic bundle (JSON, no secrets) to this file |
+| `--time-url <HTTPS_URL>` | Compare this computer's clock with the `Date` header of this https address and warn about a large difference (more than 2 minutes). Off by default: without it no request is made. If the address cannot be reached the check is skipped and never fails the doctor |
 
 `--json` prints the checks as JSON.
 
@@ -256,7 +257,7 @@ Manage the e-mail accounts of the running daemon (see [email](email.md)). Change
 
 | Subcommand | Meaning |
 | --- | --- |
-| `bot providers list` | List configured providers (`*` = global default) |
+| `bot providers list` | List configured providers (`*` = global default). `--json`: array of `{id, default, enabled, kind: "api"\|"cli", model, key}` (`key` is the secret's name, never its value) |
 | `bot providers detect-local` | Look for a local model server (Ollama, LM Studio, llama.cpp) on loopback and print what it found as JSON. Contacts only `127.0.0.1` |
 | `bot providers add <ID>` | Add or update a provider. Built-in catalog IDs: `anthropic`, `deepseek`, `gemini`, `gemini-openai-compat`, `lmstudio`, `ollama`, `openrouter`. Options: `--base-url <URL>` (custom OpenAI-compatible provider), `--key-env <VAR>`, `--model <MODEL>`, `--no-test` |
 | `bot providers test [ID]` | Test a provider's connection (the default provider when omitted) |
@@ -278,7 +279,7 @@ default; `--live` is the only network call and is opt-in.
 
 | Subcommand | Meaning |
 | --- | --- |
-| `bot secrets list` | List secret names (never values) |
+| `bot secrets list` | List secret names (never values). `--json`: array of names |
 | `bot secrets set <NAME>` | Store a secret; value from `--value-env <VAR>` or a hidden prompt, never from the command line |
 | `bot secrets delete <NAME>` | Delete a secret |
 
@@ -403,7 +404,7 @@ install a skill.
 | `bot skills install <SOURCE>` | Install from an `https://`/`ssh://` git URL, an https index (`--name <SKILL>`) or a local folder. Prints the risk report first. Options: `--rev`, `--subdir`, `--name`, `--accept <FINGERPRINT>` |
 | `bot skills update [NAME]` | Re-fetch hub-installed skills, show what changed (new findings, risk, commit) and ask before replacing. `--accept <FINGERPRINT>` with a NAME |
 | `bot skills uninstall <NAME>` | Remove the skill folder, its lock entry and its usage counters |
-| `bot skills list` | Name, version, source, pinned commit, risk, usage; flags missing or locally modified skills |
+| `bot skills list` | Name, version, source, pinned commit, risk, usage; flags missing or locally modified skills. `--json`: array of `{name, version, source, commit, risk, used, state: "ok"\|"missing"\|"modified"}` |
 | `bot skills sync` | Reinstall locked skills whose folder is missing, verifying the locked hash |
 | `bot skills index validate <SOURCE>` | Check an index file or https URL against the [index format](../skills-index.md); non-zero exit on errors. Option: `--check-content` (fetches every entry, never installs, and compares its `sha256`) |
 

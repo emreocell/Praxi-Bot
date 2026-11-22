@@ -52,6 +52,7 @@ All paths are under `apps/desktop/ui/src/`.
   `crates/channel-telegram/src/messages.rs`, and `/lang` accepts only `en` and `tr`. A new Telegram
   language needs a new `Language` value, a text for every message, and tests; keep each message's
   arguments and the security meaning of approval texts exactly as in English.
-- The user guide in `docs/guide/` is English only.
+- The user guide in `docs/guide/` is English, with Turkish and German pages in `docs/guide/tr/` and `docs/guide/de/`; see
+  [Translating the user guide](translating-the-guide.md).
 
 Tell us in the pull request which of these you did or did not do.

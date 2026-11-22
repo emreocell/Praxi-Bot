@@ -45,6 +45,9 @@ pub struct DoctorEnv<'a> {
     pub detected: Option<Vec<cli_provider::DetectedCli>>,
     /// Capabilities of the desktop automation backend, if one loads.
     pub desktop: Option<desktop_api::Capabilities>,
+    /// Opt-in HTTPS endpoint whose `Date` header is compared with the local
+    /// clock (`bot doctor --time-url`). `None` = no network request is made.
+    pub time_url: Option<&'a str>,
 }
 
 /// Run every check.  The order of the original `bot doctor` lines is kept;
@@ -53,7 +56,7 @@ pub struct DoctorEnv<'a> {
 pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
     let online: core::OnlineProbe<'_> = &online_test;
     let detected = env.detected.as_deref();
-    vec![
+    let mut checks = vec![
         core::check_host(env.data_dir),
         check_peer_relay(env),
         check_host_display(env),
@@ -95,7 +98,40 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         core::check_peer_link(env.data_dir, &core::LinkRuntime::Unknown),
         core::check_desktop_automation(std::env::consts::OS, env.desktop.as_ref()),
         core::check_clock(std::time::SystemTime::now(), core::newest_mtime(env.data_dir)),
-    ]
+    ];
+    if let Some(url) = env.time_url {
+        checks.push(core::check_clock_skew(
+            std::time::SystemTime::now(),
+            fetch_network_time(url),
+        ));
+    }
+    checks
+}
+
+/// `Date` header of one HTTPS HEAD request (5 s limit). Plain http is refused
+/// so the opt-in request is never sent unencrypted.
+fn fetch_network_time(url: &str) -> std::result::Result<std::time::SystemTime, String> {
+    if !url.starts_with("https://") {
+        return Err("the time URL must start with https://".into());
+    }
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    rt.block_on(async {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| e.to_string())?;
+        let resp = client.head(url).send().await.map_err(|e| e.to_string())?;
+        let date = resp
+            .headers()
+            .get(reqwest::header::DATE)
+            .and_then(|v| v.to_str().ok())
+            .ok_or("no Date header in the answer")?;
+        core::parse_http_date(date).ok_or_else(|| "unreadable Date header".to_string())
+    })
 }
 
 fn check_decider(env: &DoctorEnv<'_>) -> Check {
@@ -1191,6 +1227,7 @@ id = "m1"
             browser_error: None,
             detected: None,
             desktop: None,
+            time_url: None,
         }
     }
 
@@ -1349,6 +1386,7 @@ id = "m1"
             browser_error: None,
             detected: None,
             desktop: None,
+            time_url: None,
         };
         let checks = run_checks(&e);
         assert_eq!(get(&checks, "secret backend").status, Status::Fail);
@@ -1391,6 +1429,7 @@ id = "m1"
             browser_error: None,
             detected: None,
             desktop: None,
+            time_url: None,
         };
         let checks = run_checks(&e);
         let err = write_report(&e, &checks, &path).unwrap_err().to_string();

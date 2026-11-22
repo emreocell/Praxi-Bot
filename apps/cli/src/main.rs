@@ -494,6 +494,10 @@ struct DoctorCmd {
     /// Write a redacted diagnostic bundle (JSON, no secrets) to this file.
     #[arg(long, value_name = "FILE")]
     report: Option<PathBuf>,
+    /// Compare this computer's clock with the `Date` header of this HTTPS URL
+    /// (off by default; sends one HEAD request only when given).
+    #[arg(long, value_name = "HTTPS_URL")]
+    time_url: Option<String>,
 }
 
 #[derive(Args)]
@@ -776,7 +780,7 @@ fn run() -> Result<()> {
     // Daemon commands (no secret store needed, except `serve` with real providers).
     match command {
         Command::Skills { action } => {
-            return skills_cmd::run(&data_dir, action, &mut std::io::stdout());
+            return skills_cmd::run(&data_dir, action, cli.json, &mut std::io::stdout());
         }
         Command::Import {
             action: import_cmd::ImportCmd::Detect,
@@ -839,6 +843,15 @@ fn run() -> Result<()> {
     match command {
         Command::Providers {
             action: ProvidersCmd::List,
+        } if cli.json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&commands::providers_list_json(&data_dir)?)?
+            );
+            return Ok(());
+        }
+        Command::Providers {
+            action: ProvidersCmd::List,
         } => return commands::providers_list(&data_dir, &mut say),
         Command::Providers {
             action: ProvidersCmd::Default { id, model },
@@ -879,6 +892,13 @@ fn run() -> Result<()> {
             action: ChannelsCmd::Telegram { action },
         } => run_telegram(&cli, &data_dir, store, action, &mut say),
         Command::Secrets { action } => match action {
+            SecretsCmd::List if cli.json => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&commands::secrets_list_json(store)?)?
+                );
+                Ok(())
+            }
             SecretsCmd::List => commands::secrets_list(store, &mut say),
             SecretsCmd::Set { name, value_env } => {
                 let v = read_value(value_env.as_deref(), &format!("Value for {name}"))?;
@@ -1007,6 +1027,7 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
         }),
         detected: detect_cli_accounts(),
         desktop: serve::local_desktop(&mut |_| {}).map(|d| d.capabilities()),
+        time_url: c.time_url.as_deref(),
     };
     let checks = doctor::run_checks(&env);
     if cli.json {
@@ -2136,6 +2157,7 @@ mod tests {
             browser_error: None,
             detected: None,
             desktop: None,
+            time_url: None,
         });
         let prov = checks.iter().find(|c| c.title == "providers").unwrap();
         assert!(prov.detail.contains("no LLM provider"), "{}", prov.detail);

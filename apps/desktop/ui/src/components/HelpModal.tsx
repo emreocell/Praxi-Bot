@@ -3,9 +3,10 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { DEFAULT_STOP_HOTKEY } from "../config/product";
-import { DOCS_INDEX_URL, GUIDE_INDEX, docUrl, faqFor, guideUrl, searchFaq, searchGuide } from "../lib/helpFaq";
+import { DOCS_INDEX_URL, docUrl, faqFor, guideFor, guideUrl, searchFaq, searchGuide } from "../lib/helpFaq";
 import { openExternal } from "../lib/externalLink";
 import { resolveKeys, SHORTCUT_GROUPS, SHORTCUTS, slashShortcuts } from "../lib/shortcuts";
+import { DiagnosticInfo } from "./DiagnosticInfo";
 import { Modal } from "./Modal";
 import styles from "./HelpModal.module.css";
 
@@ -31,7 +32,7 @@ export function HelpModal({
   const [query, setQuery] = useState("");
   const ctx = { stopHotkey: stopHotkey || DEFAULT_STOP_HOTKEY, sendWith };
   const items = useMemo(() => searchFaq(faqFor(i18n.language), query), [i18n.language, query]);
-  const guidePages = useMemo(() => searchGuide(GUIDE_INDEX, query), [query]);
+  const guidePages = useMemo(() => searchGuide(guideFor(i18n.language), query), [i18n.language, query]);
   return (
     <Modal open={open} onClose={onClose} label={t("help.center.title")} size="md">
       <div className={styles.root} data-testid="help-center">
@@ -104,6 +105,7 @@ export function HelpModal({
             </section>
           ))}
         </details>
+        <DiagnosticInfo />
         <div className={styles.actions}>
           <Button variant="ghost" size="sm" onClick={() => openExternal(DOCS_INDEX_URL)}>
             {t("help.center.allDocs")}

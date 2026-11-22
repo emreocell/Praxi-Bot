@@ -24,7 +24,7 @@ export function NotificationSettings({
   settings,
   onChange
 }: {
-  settings: Pick<AppSettings, Toggle | "quietHours">;
+  settings: Pick<AppSettings, Toggle | "quietHours" | "digestTime">;
   onChange: (patch: Partial<AppSettings>) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -162,6 +162,35 @@ export function NotificationSettings({
               </span>
             </label>
           </>
+        ) : null}
+      </div>
+      <div className={styles.group} data-testid="digest-settings">
+        <h3 className={styles.subHeading}>{t("settings.digest.title")}</h3>
+        <label className={styles.row}>
+          <input
+            type="checkbox"
+            className={styles.check}
+            checked={settings.digestTime !== ""}
+            onChange={(e) => onChange({ digestTime: e.target.checked ? "18:00" : "" })}
+            data-testid="settings-digest-enabled"
+          />
+          <span className={styles.text}>
+            <span className={styles.label}>{t("settings.digest.enabled")}</span>
+            <span className={formStyles.hint}>{t("settings.digest.enabledHint")}</span>
+          </span>
+        </label>
+        {settings.digestTime !== "" ? (
+          <label className={styles.field} htmlFor={`${idBase}-digest`}>
+            <span className={styles.label}>{t("settings.digest.time")}</span>
+            <input
+              id={`${idBase}-digest`}
+              type="time"
+              className={styles.input}
+              value={settings.digestTime}
+              onChange={(e) => e.target.value && onChange({ digestTime: e.target.value })}
+              data-testid="settings-digest-time"
+            />
+          </label>
         ) : null}
       </div>
       <div className={styles.group}>

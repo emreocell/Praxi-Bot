@@ -2178,11 +2178,14 @@
     "empty": "Botların bugün henüz bir şey yapmadı.",
     "failed": "Başarısız: {{count}}",
     "noCalls": "Henüz model çağrısı yok.",
+    "notifyPrivate": "Günlük özetin hazır. Okumak için uygulamayı aç.",
+    "notifyTitle": "Botların bugün",
     "ofLimit": "Bu, günlük limitin {{percent}} kadarı.",
     "running": "Çalışan: {{count}}",
     "stopped": "Durdurulan: {{count}}",
     "subtitle": "Botların gece yarısından beri neler yaptığı ve maliyeti.",
     "title": "Bugün",
+    "totalCost": "Maliyet: {{cost}}",
     "waiting": "Seni bekleyen: {{count}}"
   },
   "engineConsent": {
@@ -2996,6 +2999,20 @@
   "help": {
     "center": {
       "allDocs": "Tam kılavuzu aç",
+      "diag": {
+        "copied": "Tanılama bilgisi kopyalandı.",
+        "copy": "Kopyala",
+        "copyFailed": "Kopyalanamadı. Yukarıdaki metni seçip elle kopyalayın.",
+        "failed": "Bilgiler toplanamadı",
+        "intro": "Bir sorun mu yaşıyorsunuz? Kopyalanacak metni gösterin, okuyun, sonra hata bildirimine yapıştırın. Anahtarlar, parolalar, e-posta adresleri ve kullanıcı klasörünüz gizlenir, mesajlar eklenmez. Hiçbir yere gönderilmez.",
+        "loading": "Bilgiler toplanıyor…",
+        "offline": "Arka plan hizmetine henüz bağlanılmadı.",
+        "previewLabel": "Tanılama bilgisi önizlemesi",
+        "previewNote": "Kopyala düğmesi panonuza tam olarak şu metni koyar:",
+        "refresh": "Yenile",
+        "show": "Kopyalanacakları göster",
+        "title": "Tanılama bilgisini kopyala"
+      },
       "guideNote": "Kılavuz sayfaları şimdilik İngilizce.",
       "guideTitle": "Tam kılavuzda",
       "intro": "İnsanların ilk sorduğu soruların kısa cevapları. Aramak için bir kelime yaz.",
@@ -3712,6 +3729,7 @@
     "held": "Tutuldu (sessiz saatler)",
     "heldMuted": "Tutuldu (bot sessizde)",
     "kind": {
+      "digest": "Günlük özet",
       "failed": "Çalışma başarısız",
       "longRun": "Uzun çalışma bitti",
       "needsYou": "Sizi bekliyor",
@@ -3945,6 +3963,36 @@
     "thisComputer": "Bu bilgisayar",
     "thisComputerHint": "Botların burada çalışır. Sunucu gerekmez.",
     "title": "Botlarım nerede çalışsın?"
+  },
+  "runReport": {
+    "answered": "Cevapladın",
+    "approved": "İzin verdin",
+    "asked": "Sana bir soru sordu",
+    "askedCredential": "Parola veya anahtar istedi",
+    "button": "Zaman çizelgesi",
+    "credentialCancelled": "Vazgeçtin",
+    "credentialSaved": "Sen kaydettin",
+    "declined": "İzin verilmedi",
+    "exportHtml": "Web sayfası olarak kaydet",
+    "exportMarkdown": "Metin olarak kaydet",
+    "exported": "Rapor kaydedildi",
+    "footer": "Praxi ile hazırlandı. Özel ayrıntılar dışarıda bırakıldı.",
+    "hint": "Botun bu çalışmada neler yaptığını adım adım gör",
+    "noSteps": "Bot bu çalışmada hiçbir araç kullanmadı.",
+    "outcome": "Sonuç",
+    "outcomes": {
+      "done": "Bitti",
+      "failed": "Başarısız",
+      "stopped": "Senin tarafından durduruldu",
+      "unfinished": "Bitmedi"
+    },
+    "privacy": "Özel ayrıntılar dışarıda bırakılır: yazılanlar, okunanlar ve verdiğin cevaplar gösterilmez; parola ya da anahtara benzeyen her şey gizlenir.",
+    "started": "Başlangıç",
+    "title": "Botun yaptıkları",
+    "took": "Süre",
+    "tookTime": "{{time}} sürdü",
+    "unanswered": "Cevap yok",
+    "waitingForYou": "Seni bekliyor"
   },
   "runStatus": {
     "showCard": "Göster",
@@ -4293,6 +4341,12 @@
       },
       "noFile": "Arka plan görseli seçilmedi",
       "title": "Arka plan görseli"
+    },
+    "digest": {
+      "enabled": "Günlük özet gönder",
+      "enabledHint": "Günde bir kısa bildirim: botların neler yaptı ve maliyeti ne oldu. Sessiz saatler geçerlidir: o saatlerde yalnızca bildirim geçmişine düşer.",
+      "time": "Şu saatte gönder",
+      "title": "Günlük özet"
     },
     "hotkey": {
       "currentLabel": "Aktif kısayol",

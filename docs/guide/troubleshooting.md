@@ -5,6 +5,11 @@ accepted, and shows how many approvals are waiting.
 
 ## Diagnostics (Settings → Diagnostics, `bot doctor`)
 
+**Reporting a bug:** open Help and use *Copy diagnostic info*. It first shows exactly
+the text it would copy (versions, platform, check results; keys, passwords, e-mail
+addresses and your user folder are masked, no messages are included) and copies it
+only when you press *Copy*. Nothing is sent anywhere.
+
 The desktop app has a **Diagnostics** page in Settings. It lists the same
 checks as `bot doctor`: provider keys and coding-CLI sign-in, loaded
 providers, data folder (including a file name with Turkish letters),

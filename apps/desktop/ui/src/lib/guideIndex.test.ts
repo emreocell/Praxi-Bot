@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildGuideIndex, indexPage, plainMarkdown } from "./guideIndex.ts";
+import { buildGuideIndex, guideForLanguage, indexPage, plainMarkdown } from "./guideIndex.ts";
 import type { GuideEntry } from "./guideIndex.ts";
 import { searchGuide } from "./guideIndex.ts";
 
@@ -84,4 +84,37 @@ test("searchGuide needs every word, ranks title over heading over summary, and c
 test("the real index finds the guide pages a beginner would look for", () => {
   assert.ok(searchGuide(GUIDE_INDEX, "backup").some((e) => e.doc.startsWith("backup")));
   assert.ok(searchGuide(GUIDE_INDEX, "telegram").some((e) => e.doc === "telegram.md"));
+});
+
+for (const lang of ["tr", "de"]) {
+  test(`the committed ${lang} guide index matches docs/guide/${lang}`, () => {
+    const dir = fileURLToPath(new URL(`../../../../../docs/guide/${lang}/`, import.meta.url));
+    const files = readdirSync(dir)
+      .filter((n) => n.endsWith(".md"))
+      .map((name) => ({ name: `${lang}/${name}`, text: readFileSync(dir + name, "utf8") }));
+    const committed: GuideEntry[] = JSON.parse(
+      readFileSync(new URL(`../help/guideIndex.${lang}.json`, import.meta.url), "utf8")
+    );
+    assert.deepEqual(committed, buildGuideIndex(files));
+    // Every translated page has an English original, so the in-app link never dangles.
+    const english = new Set(GUIDE_INDEX.map((e) => e.doc));
+    for (const e of committed) {
+      assert.ok(english.has(e.doc.slice(lang.length + 1)), `${e.doc} has an English original`);
+    }
+  });
+}
+
+test("guideForLanguage lists translated pages and falls back to English for the rest", () => {
+  const en = [
+    { doc: "a.md", title: "Backup", headings: [], summary: "" },
+    { doc: "b.md", title: "Skills", headings: [], summary: "" }
+  ];
+  const tr = [{ doc: "tr/a.md", title: "Yedekleme", headings: [], summary: "" }];
+  const merged = guideForLanguage(en, tr);
+  assert.deepEqual(
+    merged.map((e) => e.doc),
+    ["tr/a.md", "b.md"]
+  );
+  assert.deepEqual(searchGuide(merged, "yedekleme").map((e) => e.doc), ["tr/a.md"]);
+  assert.deepEqual(searchGuide(merged, "skills").map((e) => e.doc), ["b.md"]);
 });

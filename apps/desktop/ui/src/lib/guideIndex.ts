@@ -6,7 +6,7 @@
  */
 
 export interface GuideEntry {
-  /** File name under `docs/guide`, for example `settings.md`. */
+  /** Path under `docs/guide`: `settings.md`, or `tr/settings.md` for a translated page. */
   doc: string;
   title: string;
   headings: string[];
@@ -68,6 +68,18 @@ export function buildGuideIndex(files: readonly { name: string; text: string }[]
     .filter((f) => f.name.endsWith(".md"))
     .map((f) => indexPage(f.name, f.text))
     .sort((a, b) => (a.doc < b.doc ? -1 : a.doc > b.doc ? 1 : 0));
+}
+
+/**
+ * The pages to search in one language: its translated pages first, then every English page that has
+ * no translation yet (so nothing in the guide becomes unsearchable in a language that is half done).
+ */
+export function guideForLanguage(
+  english: readonly GuideEntry[],
+  translated: readonly GuideEntry[]
+): GuideEntry[] {
+  const done = new Set(translated.map((e) => e.doc.slice(e.doc.lastIndexOf("/") + 1)));
+  return [...translated, ...english.filter((e) => !done.has(e.doc))];
 }
 
 const foldText = (s: string): string =>

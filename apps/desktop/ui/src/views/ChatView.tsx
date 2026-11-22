@@ -12,6 +12,7 @@ import {
   CircleHelp,
   Download,
   LayoutGrid,
+  ListOrdered,
   Settings2,
   Brain,
   Search,
@@ -74,6 +75,7 @@ import { SpeakButton } from "../components/SpeakButton";
 import { QueuedMessages } from "../components/QueuedMessages";
 import { RunStatusLine } from "../components/RunStatusLine";
 import { RunChangesGate } from "../components/RunChangesGate";
+import { RunTimelineModal } from "../components/RunTimelineModal";
 import { ThinkingChain } from "../components/ThinkingChain";
 import { WorkflowReview } from "../components/WorkflowReview";
 import { useToast } from "../components/Toast";
@@ -182,6 +184,7 @@ type Entry =
   | { kind: "route"; key: string; ts: number; run: RunState }
   | { kind: "changes"; key: string; ts: number; run: RunState }
   | { kind: "remember"; key: string; ts: number; run: RunState }
+  | { kind: "timeline"; key: string; ts: number; run: RunState }
   | { kind: "workflow"; key: string; ts: number; run: RunState };
 
 /** `idle` = offer the button; `saved` = done; `hidden` = the daemon said no (409). */
@@ -355,6 +358,7 @@ export function ChatView({
   }, []);
   const stickToBottom = useRef(true);
   const [remember, setRemember] = useState<Record<string, RememberState>>({});
+  const [timelineRunId, setTimelineRunId] = useState<string | null>(null);
   useLayoutEffect(() => {
     if (liveChatSlots?.composer) inputRef.current?.focus({ preventScroll: true });
   }, [liveChatSlots?.composer]);
@@ -560,6 +564,14 @@ export function ChatView({
           kind: "changes",
           key: `${run.id}-changes`,
           ts: run.finishedMs ?? run.startedMs,
+          run
+        });
+      }
+      if (run === lastFinished && run.finishedMs !== undefined) {
+        out.push({
+          kind: "timeline",
+          key: `${run.id}-timeline`,
+          ts: run.finishedMs,
           run
         });
       }
@@ -1583,6 +1595,20 @@ export function ChatView({
                   </div>
                 );
               }
+              case "timeline":
+                return (
+                  <div key={e.key} className={styles.rememberRow}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title={t("runReport.hint")}
+                      onClick={() => setTimelineRunId(e.run.id)}
+                      data-testid="run-timeline"
+                    >
+                      <ListOrdered />{t("runReport.button")}
+                    </Button>
+                  </div>
+                );
               case "remember": {
                 const st = remember[e.run.id] ?? "idle";
                 return (
@@ -2026,6 +2052,11 @@ export function ChatView({
       </footer>
       )}
       <VoiceCallPanel call={voiceCall} bot={view ?? { id: chat?.bot_id ?? "unknown", name: "Bot" }} />
+      <RunTimelineModal
+        run={chatRuns.find((r) => r.id === timelineRunId) ?? null}
+        botName={bot?.name ?? ""}
+        onClose={() => setTimelineRunId(null)}
+      />
     </div>
   );
 }

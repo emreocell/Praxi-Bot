@@ -307,6 +307,33 @@ fn clock_check_flags_impossible_and_backwards_clocks() {
 }
 
 #[test]
+fn clock_skew_warns_above_threshold_and_skips_when_unreadable() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+    let ok = check_clock_skew(now, Ok(now - Duration::from_secs(30)));
+    assert_eq!((ok.id.as_str(), ok.status), ("clock_skew", Status::Ok));
+    let ahead = check_clock_skew(now, Ok(now - Duration::from_secs(600)));
+    assert_eq!(ahead.status, Status::Warn);
+    assert!(ahead.detail.contains("10 min ahead of"), "{}", ahead.detail);
+    let behind = check_clock_skew(now, Ok(now + Duration::from_secs(3600)));
+    assert_eq!(behind.status, Status::Warn);
+    assert!(behind.detail.contains("60 min behind"), "{}", behind.detail);
+    // Offline: never a warning or failure.
+    let off = check_clock_skew(now, Err("offline".into()));
+    assert_eq!(off.status, Status::Ok);
+    assert!(off.detail.starts_with("skipped"), "{}", off.detail);
+}
+
+#[test]
+fn http_date_header_parses() {
+    let t = parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT").unwrap();
+    assert_eq!(
+        t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
+        784_111_777
+    );
+    assert!(parse_http_date("yesterday").is_none());
+}
+
+#[test]
 fn catalog_freshness_warns_when_older_than_90_days() {
     let mut table = provider_catalog::embedded_metadata().clone();
     table.last_reviewed = "2026-01-01".into();

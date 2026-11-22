@@ -172,7 +172,7 @@ const RESET_KEYS: Partial<Record<SettingsPageId, readonly (keyof AppSettings)[]>
     "transparencyOverride",
     "photorealAvatars"
   ],
-  notifications: ["notifyNeedsYou", "notifyLongRun", "notifyFailed", "notifyPrivate", "quietHours", "mutedBotIds"],
+  notifications: ["notifyNeedsYou", "notifyLongRun", "notifyFailed", "notifyPrivate", "quietHours", "mutedBotIds", "digestTime", "digestLastDay"],
   voice: ["voiceName", "voiceRate", "speakReplies"]
 };
 
