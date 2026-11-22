@@ -100,6 +100,27 @@ async fn search_is_owner_only_scoped_bounded_and_never_matches_secrets() {
 }
 
 #[tokio::test]
+async fn a_page_of_omitted_hits_does_not_hide_later_matches() {
+    let redactor = agent_core::SharedRedactor::default();
+    redactor.register("history-secret-canary-value");
+    let t = setup_with_config(
+        |_| {},
+        LoopConfig {
+            redactor: Some(redactor),
+            ..LoopConfig::default()
+        },
+    );
+    let (_bot, chat) = make_chat(&t).await;
+    for _ in 0..3 {
+        message(&t, &chat, "ancient history-secret-canary-value", false, "user");
+    }
+    let hit = message(&t, &chat, "ancient and visible text", false, "assistant");
+    let r = call(&t, Method::GET, "/v1/chats/search?q=ancient&limit=1", None).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json());
+    assert_eq!(r.json()["results"][0]["message_id"], hit.to_string());
+}
+
+#[tokio::test]
 async fn export_redacts_credentials_and_private_content_and_only_summarizes_tools() {
     const CANARY: &str = "history-secret-canary-value";
     let redactor = agent_core::SharedRedactor::default();

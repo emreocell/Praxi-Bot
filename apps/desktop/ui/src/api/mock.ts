@@ -914,7 +914,10 @@ export class MockApiClient extends ApiClient {
   override async exportChat(chatId: string, format: ExportFormat): Promise<Blob> {
     const chat = this.chats.find((c) => c.id === chatId);
     if (!chat) throw new ApiError(404, "not_found", "mock chat not found");
-    const messages = (await this.listMessages(chatId)).filter((m) => !m.superseded && ["user", "assistant"].includes(m.role));
+    // The mock cannot tell which sample messages are private, so it never writes their text.
+    const messages = (await this.listMessages(chatId))
+      .filter((m) => !m.superseded && ["user", "assistant"].includes(m.role))
+      .map((m) => ({ ...m, content: "[REDACTED]" }));
     const doc = { format_version: 1, chat_id: chatId, title: chat.title, created_at_ms: chat.created_at_ms,
       messages: messages.map((m) => ({ id: m.id, run_id: m.run_id ?? null, role: m.role, created_at_ms: m.created_at_ms, content: m.content, attachments: [] })), steps: [], approvals: [] };
     return new Blob([format === "json" ? JSON.stringify(doc, null, 2) : transcriptMarkdown(messages, { title: chat.title, user: "User", bot: "Bot" })],
