@@ -318,7 +318,11 @@ export async function flows(ctx) {
     // A fresh chat: exposure of earlier turns rides on the chat's messages, and
     // the previous flow's shell output would make the first search ask instead.
     const fresh = page.getByTestId('bot-panel-new-chat');
-    if (await fresh.isVisible().catch(() => false)) await fresh.click();
+    if (await fresh.isVisible().catch(() => false)) {
+      await fresh.click();
+      // The old chat's composer stays visible until the switch: wait for its last reply to go.
+      await page.getByText(/tool said: .*smoke-one/).first().waitFor({ state: 'hidden', timeout: 15000 });
+    }
     await composer(page).waitFor(T);
     await sendLines(page, ['call:web_search {"query":"smoke untrusted"}', `call:shell_run ${JSON.stringify({ command: 'echo smoke-two' })}`]);
     const card = cards(page).first();
