@@ -33,6 +33,13 @@ out keeps its previous value. `bots: null` means every bot.
   send data off the machine unless `local_only = true`. Those two flags are
   how the egress gate decides whether a later send must ask. Both default to
   false.
+- **A browser server.** `browser = true` tells Praxi you connected this
+  server as a browser (Playwright and similar). The built-in Playwright preset
+  counts as one without it. Its in-page tools (navigate, snapshot, click,
+  type, evaluate, ...) then do not ask after a web page alone and ask once the
+  task also read something private; code outside the page and file transfers
+  always ask. Only you can set it (config or the owner-only API). See
+  [Security model, item 12a](security.md).
 - **Who may use it:** `bots` is a list of bot ids (the bot's storage UUID, not
   its profile id), or omitted / `null` for every bot. An empty list `[]` means
   no bot at all, never every bot. A bot that is not listed does not see the
@@ -68,6 +75,7 @@ category = "fs"          # accounts (default) | fs | shell | browser | ...
 trust_hints = false      # true: believe this server's readOnlyHint
 public_content = false   # true: results are not treated as private reads
 local_only = false       # true: tools cannot send data off this machine
+browser = false          # true: you connected this server as a browser (security.md 12a)
 # bots = ["bot-a"]       # omit or null: every bot
 tool_allow = ["read_*"]
 

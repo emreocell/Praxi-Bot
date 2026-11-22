@@ -88,6 +88,49 @@ profile, the search backend, and a default mail account. Email attachments
 are covered by `email_read`; there is no separate attachment tool. When a
 call does carry an attachment list, the card shows each name and size.
 
+**12a. A browser you connected as a browser.** An MCP server you connected
+as a browser (the built-in Playwright preset, or any MCP server whose
+configuration has `browser = true`, set in `mcp.toml` or through the
+owner-only API; a server, a page or a model can never set it) acts inside
+that browser. Its tools are judged by the name the server registered, from a
+fixed list, never from the model's arguments:
+
+| Tool of such a server | Clean run | After a web page only | After private data (files, mail, memory, your screen) too |
+|---|---|---|---|
+| In-page action: `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_evaluate` (a script inside the page), `browser_wait_for`, `browser_tabs`, `browser_take_screenshot`, ... | level decides | **no card** on Full; on "ask on destructive" too (they are not destructive) | asks |
+| Code outside the page (`browser_run_code`, `browser_run_code_unsafe`, anything named like code, script, exec, install) | **always asks** | always asks | always asks |
+| File upload or download (`browser_file_upload`, `browser_pdf_save`, ...) | **always asks** | always asks | always asks |
+| Any other tool of the server | as any MCP tool | asks | asks |
+
+Before this rule every call of such a server counted as "sending data off
+the machine" and its result as private, so a five-minute task in a page could
+need a hundred cards. A page you opened in that browser is web content, not
+your private data: an in-page result counts as untrusted, not private. The
+consequence to know: if you sign the automation browser into private
+accounts, a page that injected instructions can make the bot open and read
+those accounts and navigate elsewhere without a card, as long as the task has
+not read anything private through other tools. The Playwright preset uses its
+own isolated profile; the preset is recognised only in its exact catalog form
+(`npx -y @playwright/mcp@<version>`), so `--extension`, `--cdp-endpoint` or a
+user data directory need the explicit `browser` flag, which is your decision.
+Shell, scripts, desktop typing, launching programs, sending mail and money
+keep their floors; MCP servers that are not browsers, external agents and the
+MCP server mode keep their stricter rules.
+
+**12b. Approval scopes.** When a card for an MCP tool cannot be avoided it can
+offer: **Allow once**; **Allow for this task**, the same server and tool for
+the rest of this run only (never persisted, never another tool, not given to
+sub-agents, and it stops covering as soon as the run reads something it had
+not read when you gave it, for example private data after a web page; the
+next call asks again); **Always allow for this bot (this tool)**, a standing
+grant that is offered only on a card the policy alone asked for, never next
+to private data and never for an always-ask tool, a payment or a never-list
+command (a standing grant never waives item 12); and **Deny**. Every approval
+is recorded in the audit log with its scope (`RunTool` for the task scope).
+"Allow for this task" is not offered for a program start after untrusted
+content, a floor, an always-ask tool or an external caller, and the daemon
+refuses it on a card that did not offer it.
+
 ## What it does not protect you from
 
 Be realistic about the limits:
@@ -537,7 +580,10 @@ follows untrusted instructions, the repository includes an offline tier-1
 prompt-injection evaluation pack under `evals/scenarios/inj-*.yaml` (scripted
 model, fake tools, no network). Each attack covers a different untrusted source
 (web pages, e-mail, files, MCP output, chat messages, memory) and has an
-`-holdout` twin with different wording and fixtures.
+`-holdout` twin with different wording and fixtures. The `inj-browser-mcp-*`
+scenarios cover item 12a: page actions after a web page alone run without a
+card, a navigation after private data asks, `browser_run_code` asks, and a
+shell or script after a page read through the browser asks.
 
 Run the pack and compare it against the checked-in baseline:
 
