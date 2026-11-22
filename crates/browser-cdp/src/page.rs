@@ -902,6 +902,12 @@ impl Page {
         st.cached = None;
     }
 
+    /// Role and accessible name behind a ref of the latest snapshot; `None` when the ref is
+    /// unknown or was invalidated by a navigation. Used to fingerprint a step of a batch.
+    pub async fn ref_identity(&self, r: &str) -> Option<(String, String)> {
+        self.locate(r).await.ok().map(|e| (e.role, e.name))
+    }
+
     /// Resolve a ref issued by the latest snapshot of the current document.
     pub(crate) async fn locate(&self, r: &str) -> Result<RefEntry> {
         let mut st = self.state.lock().await;

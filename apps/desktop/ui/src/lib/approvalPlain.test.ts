@@ -132,3 +132,26 @@ test("known internal target ids read as words in every language, a site stays as
   }
   await i18n.changeLanguage("en");
 });
+
+test("a browser batch card lists every step as a numbered readable line with invisible characters escaped", async () => {
+  const details = {
+    kind: "browser_steps",
+    steps: [
+      { n: 1, action: "click", ref: "e1", target: 'button "No thanks"' },
+      { n: 2, action: "fill", ref: "e2", target: 'textbox "Email"', text: "a\u202Eb@x.io", text_chars: 7 },
+      { n: 3, action: "press", key: "Enter" }
+    ]
+  };
+  for (const [lng, first, third] of [["en", /Click button "No thanks"/, /Press the Enter key/], ["tr", /öğesine tıkla/, /tuşuna bas/], ["de", /anklicken/, /drücken/]] as const) {
+    await i18n.changeLanguage(lng);
+    const t = ((k: string, v?: Record<string, unknown>) => i18n.t(k, v)) as import("./approvalPlain.ts").T;
+    const lines = plain.browserStepLines(details, t)!;
+    assert.equal(lines.length, 3);
+    assert.match(lines[0], first);
+    assert.match(lines[2], third);
+    assert.ok(lines[1].includes("a<U+202E>b@x.io"), lines[1]);
+    assert.ok(!lines[1].includes("\u202E"));
+  }
+  await i18n.changeLanguage("en");
+  assert.equal(plain.browserStepLines({ kind: "other" }, ((k: string) => k) as import("./approvalPlain.ts").T), null);
+});

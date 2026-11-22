@@ -68,6 +68,9 @@ export type HomeInfo = S["HomeDto"];
 export type StopRunsInput = S["StopRunsInput"];
 export type StopRunsResponse = S["StopRunsResponse"];
 export type UsageSummary = S["UsageSummary"];
+export type ModelUsage = S["ModelUsage"];
+export type ProviderUsage = S["ProviderUsage"];
+export type DailyUsage = S["DailyUsage"];
 export type SpendLimit = S["SpendLimitDto"];
 export type UsageTotals = S["UsageTotals"];
 export type EffectivePolicy = S["EffectivePolicyDto"];
@@ -362,6 +365,10 @@ export interface Envelope {
 export interface GlobalEnvelope extends Envelope {
   gseq: number;
 }
+
+// ---- Credential requests and the vault (`/v1/secret-requests/*`, `/v1/fill-secrets`) -----
+export type SecretRequestAnswer = S["SecretRequestAnswer"];
+export type FillSecretInfo = S["FillSecretDto"];
 
 // ---- MCP management API (`/v1/mcp/*`, `/v1/secrets/*`) ---------------------
 

@@ -44,6 +44,9 @@ import {
 } from "../components/ChatCards";
 import { ApprovalBatchCard } from "../components/ApprovalBatchCard";
 import { PendingDecisions, useDecisionActions } from "../components/PendingDecisions";
+import { SecretRequestCard } from "../components/SecretRequestCard";
+import { PastedSecretWarning } from "../components/PastedSecretWarning";
+import { detectSecrets, kindsToWarn, planStore, removeSecrets } from "../lib/secretDetect";
 import { chatTitleLabel } from "../lib/chatTitle";
 import { pendingForChat } from "../lib/pendingDecisions";
 import { ChatFindBar } from "../components/ChatFindBar";
@@ -295,6 +298,11 @@ export function ChatView({
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
+  // The newest draft, for async work that must not act on a stale closure (kept in memory only).
+  const draftRef = useRef("");
+  draftRef.current = text;
+  // A pasted credential found in the draft before send (kinds only; the value stays in `text`).
+  const [secretKinds, setSecretKinds] = useState<string[] | null>(null);
   const [queue, updateQueue] = useChatQueue(chatId);
   // Up / Down recall this chat's earlier messages; the draft is kept (lib/composerHistory).
   const [nav, setNav] = useState<HistoryNav>(FRESH);
@@ -823,7 +831,9 @@ export function ChatView({
     );
   };
 
-  const send = async () => {
+  // `allowSecrets` is the owner's "Send anyway" for THIS call only: it is an argument, never state,
+  // so a call that returns early (busy, offline) cannot leave a standing permission behind.
+  const send = async (allowSecrets = false) => {
     const body = text.trim();
     const attachmentIds = readyFiles.flatMap((f) => (f.id ? [f.id] : []));
     if (!client || (!body && attachmentIds.length === 0) || sending || uploadingFiles) {
@@ -840,6 +850,15 @@ export function ChatView({
       setText("");
       window.dispatchEvent(new CustomEvent(APP_COMMAND_EVENT, { detail: appCommand.target }));
       return;
+    }
+    // A draft that looks like it holds a credential is not sent (or queued) until the owner says so.
+    // Slash commands that reach the bot are stored in the history too, so they are checked as well.
+    if (!allowSecrets) {
+      const found = kindsToWarn(text, allowSecrets);
+      if (found.length > 0) {
+        setSecretKinds(found);
+        return;
+      }
     }
     // A message typed while the bot works joins the queue as a "Sirada." bubble (slash commands such
     // as /stop still go straight to the daemon). It is delivered when the run ends or by "Simdi gonder".
@@ -1171,6 +1190,11 @@ export function ChatView({
     runs: chatRuns,
     awaitingApproval,
     sendText: async (spoken) => {
+      // Nobody is looking at a screen to confirm a warning during a call: a credential is not sent.
+      if (detectSecrets(spoken).length > 0) {
+        toast.show(t("pastedSecret.voiceBlocked"), "danger");
+        return;
+      }
       if (client) {
         await client.sendMessage(chatId, spoken, undefined, await ownerKey(client.baseUrl));
       }
@@ -1324,6 +1348,18 @@ export function ChatView({
             onAnswer={decisions.answer(runId, item.callId)}
           />
         );
+      case "secret":
+        if (nested && item.outcome === undefined && !item.closed) {
+          return <p className={ccStyles.nestedText}>{t("chat.pendingPinned")}</p>;
+        }
+        return (
+          <SecretRequestCard
+            item={item}
+            botName={bots.find((b) => b.id === run?.botId)?.name ?? bot?.name ?? ""}
+            onSubmit={decisions.submitSecret(runId, item.callId)}
+            onCancel={decisions.cancelSecret(runId, item.callId)}
+          />
+        );
       case "todo":
         return <TodoCard todo={item} />;
       case "notice":
@@ -1389,6 +1425,7 @@ export function ChatView({
             .filter(Boolean)
             .join(" ")}
         >
+          {entries.length > 0 && view?.name ? <h1 className={styles.srOnly}>{view.name}</h1> : null}
           {entries.length === 0 ? (
             <div className={styles.emptyConversation}>
               <BotAvatar
@@ -1675,6 +1712,49 @@ export function ChatView({
             onAction={(a) => (a === "restartService" ? void restartDaemon() : void send())}
           />
         ) : null}
+        {secretKinds ? (
+          <PastedSecretWarning
+            kinds={secretKinds}
+            onDismiss={() => setSecretKinds(null)}
+            onSendAnyway={() => {
+              setSecretKinds(null);
+              void send(true);
+            }}
+            onRemove={() => {
+              setText((cur) => removeSecrets(cur, detectSecrets(cur)));
+              setSecretKinds(null);
+              inputRef.current?.focus();
+            }}
+            onStore={async (name) => {
+              if (!client) throw new Error(t("pastedSecret.notConnected"));
+              const analysed = text;
+              const plan = planStore(analysed, detectSecrets(analysed), name);
+              const stored: string[] = [];
+              try {
+                for (const entry of plan.entries) {
+                  await client.createFillSecret({ name: entry.name, value: entry.value });
+                  stored.push(entry.name);
+                }
+              } catch (e) {
+                // The draft stays exactly as typed; say which entries already are in the vault.
+                if (stored.length > 0) {
+                  toast.show(t("pastedSecret.partialStored", { names: stored.join(", ") }), "danger");
+                }
+                throw e;
+              } finally {
+                plan.entries.length = 0;
+              }
+              // The plan fits only the text it was made from; an edit made meanwhile is never overwritten.
+              if (draftRef.current === analysed) {
+                setText(plan.text);
+              } else {
+                toast.show(t("pastedSecret.editedMeanwhile", { names: stored.join(", ") }), "info");
+              }
+              setSecretKinds(null);
+              inputRef.current?.focus();
+            }}
+          />
+        ) : null}
         <PendingDecisions
           entries={pending.pinned}
           caption={(entry) =>
@@ -1821,6 +1901,7 @@ export function ChatView({
             onChange={(e) => {
               setNav((n) => afterEdit(n, e.target.value));
               setText(e.target.value);
+              setSecretKinds(null);
               setCaret(e.target.selectionStart);
               setMenuIdx(0);
             }}

@@ -29,6 +29,8 @@ use utoipa::ToSchema;
 pub const DISK_WARN_BYTES: u64 = 1 << 30;
 /// Free space below which the disk check fails.
 pub const DISK_FAIL_BYTES: u64 = 100 << 20;
+/// Age in days after which the curated model catalog triggers a warning.
+pub const CATALOG_STALE_DAYS: u32 = provider_catalog::DEFAULT_STALE_AFTER_DAYS;
 /// A data file written further than this in the future means the clock went back.
 pub const CLOCK_SKEW_TOLERANCE: Duration = Duration::from_secs(5 * 60);
 /// File name of the Unicode path probe (Turkish letters on purpose: the most
@@ -837,6 +839,55 @@ pub fn check_catalog(data_dir: &Path, catalog: &Result<&Catalog, String>) -> Che
         }
     }
     Check::ok(ID, N, detail)
+}
+
+/// `catalog freshness`: warns when the checked-in curated model table has not
+/// been reviewed for more than [`CATALOG_STALE_DAYS`] (90) days. Always a
+/// warning, never a failure (Praxi works offline by design).
+#[must_use]
+pub fn check_catalog_freshness(now: SystemTime) -> Check {
+    check_catalog_freshness_for(
+        provider_catalog::embedded_metadata(),
+        now,
+        CATALOG_STALE_DAYS,
+    )
+}
+
+/// Pure freshness check against an explicit metadata table and threshold
+/// (used by tests with fixture tables and timestamps).
+#[must_use]
+pub fn check_catalog_freshness_for(
+    table: &provider_catalog::CuratedModels,
+    now: SystemTime,
+    max_age_days: u32,
+) -> Check {
+    const ID: &str = "catalog_freshness";
+    const N: &str = "catalog freshness";
+    const HINT: &str =
+        "run `bot catalog check` and review model_metadata.json against current provider docs";
+    match provider_catalog::check_staleness(table, now, max_age_days) {
+        Ok(report) if report.stale => Check::warn(
+            ID,
+            N,
+            format!(
+                "last reviewed {} ({} day(s) ago; older than {max_age_days} days)",
+                report.oldest_reviewed, report.age_days
+            ),
+            HINT,
+        ),
+        Ok(report) if report.age_days < 0 => {
+            Check::ok(ID, N, format!("last reviewed {}", report.oldest_reviewed))
+        }
+        Ok(report) => Check::ok(
+            ID,
+            N,
+            format!(
+                "last reviewed {} ({} day(s) ago)",
+                report.oldest_reviewed, report.age_days
+            ),
+        ),
+        Err(err) => Check::warn(ID, N, err, HINT),
+    }
 }
 
 /// `provider reload`: providers enabled in `providers.toml` that the running

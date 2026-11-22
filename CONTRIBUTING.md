@@ -142,6 +142,17 @@ Testing) and the UI checks below. It also checks that `docs/api/openapi.json` an
 `pnpm --dir apps/desktop/ui gen:api`, and commit both files. Pull requests that only change
 documentation skip the long Rust jobs. A PR is merged only when CI is green.
 
+**Accessibility check.** `pnpm --dir apps/desktop/ui check:a11y` builds the mock bundle, opens about
+40 screens and states (home, chat, right panel, approval card, schedules, apps, dialogs, first-run
+wizard, every settings section; two themes, plus tr/de samples) in headless Chrome (`CHROME_BIN`) and
+runs [axe-core](https://github.com/dequelabs/axe-core) on each. It takes about 40 seconds, runs in the
+UI CI job and fails on any violation that is not in `apps/desktop/ui/scripts/a11y-allowlist.mjs`, and
+also on an allow-list entry that no longer matches (delete it once you fix the problem). Prefer fixing
+a violation (a name, a role, a heading level). If you cannot fix it now, add one entry
+`{ rule, selector, screens, reason }` with a comment saying why; the list is visible debt, not a
+parking lot. axe-core is MPL-2.0 and used unmodified as a dev dependency only; it is not shipped.
+Use `--only=<substring>` (for example `--only=settings-ai`) to run a few cases while iterating.
+
 **The real-app smoke run** drives the real UI (vite dev server, not mock mode) against a real local
 daemon (a debug `bot serve`) that talks to a tiny scripted OpenAI-compatible stub, using headless
 Chrome (set `CHROME_BIN` if it is not found):

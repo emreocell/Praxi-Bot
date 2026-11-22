@@ -25,6 +25,7 @@ const LOCAL_ONLY: Record<string, string> = {
   "components/ModelPicker.tsx": "arrow keys inside the model picker list",
   "components/ResendTurn.tsx": "Escape and Ctrl/Cmd+Enter inside the inline message editor",
   "components/ResizeGrip.tsx": "arrow keys on a resize handle",
+  "components/SecretRequestCard.tsx": "Escape cancels the credential form it is typed in",
   "components/ServerSignInModal.tsx": "Enter inside a single field",
   "components/useBotReorder.ts": "keyboard reordering of the bot list",
   "lib/liveViewInput.ts": "forwards keys to the remote screen, not app shortcuts",

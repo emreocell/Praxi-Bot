@@ -146,3 +146,138 @@ pub(crate) fn parse(text: &str) -> Result<Front, String> {
     }
     Ok(front)
 }
+
+#[cfg(test)]
+mod property_tests {
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::select;
+
+    use super::{Value, parse, split};
+
+    fn unicode_text() -> impl Strategy<Value = String> {
+        const SYNTAX_CHARS: &[char] = &[
+            '\n', '\r', '\t', '\0', '\u{feff}', '#', '-', ':', '[', ']', ',', '\'', '"', '\\',
+        ];
+        let character = prop_oneof![4 => any::<char>(), 1 => select(SYNTAX_CHARS)];
+        vec(character, 0..256).prop_map(|chars| chars.into_iter().collect())
+    }
+
+    // Proptest defaults to 256 cases and honors PROPTEST_CASES and PROPTEST_RNG_SEED.
+    proptest! {
+        /// Both entry points tolerate arbitrary valid UTF-8, including text inside fences and lists.
+        #[test]
+        fn arbitrary_utf8_does_not_panic(input in unicode_text()) {
+            let _ = split(&input);
+            let _ = parse(&input);
+            let (header, _) = split(&format!("---\n{input}\n---\n")).unwrap();
+            let _ = parse(&header);
+            let _ = parse(&format!("when:\n  apps: [{input}]"));
+        }
+
+        /// Valid fences preserve header lines and trim the body after normalizing line endings, with or without a BOM.
+        #[test]
+        fn split_normalizes_fenced_documents(
+            header_line in "[^\r\n]{0,96}",
+            body_line in "[^\r\n]{0,96}",
+            bom in select(&["", "\u{feff}"] as &[_]),
+            eol in select(&["\n", "\r\n"] as &[_]),
+        ) {
+            let header = format!("\nname: example\n  # {header_line}\t\n");
+            let body = format!("# Body\n  {body_line} \n---");
+            // Split joins lines with LF and trims outer body whitespace, so rejoining
+            // its output can lose information from the original document.
+            let document = format!("{bom}--- \t\n{header}\n---\t\n \t\u{2003}\n{body}\n\u{2003}\t ");
+            let document = document.replace('\n', eol);
+            prop_assert_eq!(split(&document).unwrap(), (header, body));
+        }
+
+        /// A malformed opening or closing fence leaves the corresponding delimiter missing.
+        #[test]
+        fn split_rejects_malformed_delimiters(
+            malformed in select(&["", "--", "----", " ---", "--- trailing"] as &[_]),
+            text in "[^\r\n]{0,96}",
+        ) {
+            // Split requires an opening fence on the first line, even when a later line is a fence.
+            let missing_opener = format!("{malformed}\n---\n# {text}");
+            let missing_closer = format!("---\n# {text}\n{malformed}\n");
+            prop_assert!(split(&missing_opener).unwrap_err().starts_with("missing frontmatter:"));
+            prop_assert!(split(&missing_closer).unwrap_err().starts_with("unterminated frontmatter:"));
+        }
+
+        /// JSON-quoted scalars decode to their original text, including whitespace and escape characters.
+        #[test]
+        fn parse_decodes_quoted_scalars(text in unicode_text()) {
+            let quoted = serde_json::to_string(&text).unwrap();
+            let front = parse(&format!("title:  {quoted}\t")).unwrap();
+            prop_assert_eq!(front.top, [("title".to_owned(), Value::Scalar(text))]);
+            prop_assert_eq!(front.when, []);
+        }
+
+        /// Inline lists retain order and quoted commas, skip empty items, and respect the `when` scope.
+        #[test]
+        fn parse_keeps_list_order_and_when_scope(
+            items in vec("[a-z0-9_.-]{1,16}", 0..8),
+            first in "[a-z]{1,12}",
+            second in "[a-z]{1,12}",
+            indent in select(&["  ", "\t"] as &[_]),
+        ) {
+            let single_quoted = format!("{first},{second}");
+            let double_quoted = format!("{second},{first}");
+            let plain = items.join(", ");
+            let input = format!(
+                "apps: []\nwhen:\n{indent}apps: [{plain}, '{single_quoted}', \"{double_quoted}\", '', ]\ntitle: '{first}'"
+            );
+            let front = parse(&input).unwrap();
+            let mut expected = items;
+            expected.extend([single_quoted, double_quoted]);
+            prop_assert_eq!(front.top, [
+                ("apps".to_owned(), Value::List(Vec::new())),
+                ("title".to_owned(), Value::Scalar(first)),
+            ]);
+            prop_assert_eq!(front.when, [("apps".to_owned(), Value::List(expected))]);
+            let after_when = format!("{input}\n{indent}keywords: [extra]");
+            prop_assert!(parse(&after_when).unwrap_err().contains("unexpected indentation"));
+        }
+
+        /// Duplicate keys are rejected within either scope even when key spacing differs.
+        #[test]
+        fn parse_rejects_duplicate_keys(key in "key_[\\p{L}0-9]{1,12}") {
+            let top = format!("{key}: one\n{key} \t: two");
+            let nested = format!("when:\n  {key}: one\n\t{key} : two");
+            let duplicate = format!("duplicate key `{key}`");
+            let duplicate_in_when = format!("{duplicate} in `when`");
+            prop_assert!(parse(&top).unwrap_err().contains(&duplicate));
+            prop_assert!(parse(&nested).unwrap_err().contains(&duplicate_in_when));
+        }
+
+        /// Inline lists reject a missing closing bracket or an unmatched quote.
+        #[test]
+        fn parse_rejects_unterminated_lists(item in "[a-z0-9_.-]{1,16}") {
+            let missing_bracket = format!("apps: [{item}");
+            let missing_quote = format!("apps: ['{item}]");
+            prop_assert!(parse(&missing_bracket).unwrap_err().contains("unterminated list"));
+            prop_assert!(parse(&missing_quote).unwrap_err().contains("unterminated quote in list"));
+        }
+    }
+
+    /// Empty input yields no entries, and long fenced Unicode input preserves its scalar and body.
+    #[test]
+    fn empty_and_long_inputs() {
+        assert!(split("").is_err());
+        assert_eq!(split("---\n---").unwrap(), (String::new(), String::new()));
+        let empty = parse("").unwrap();
+        assert_eq!(empty.top, []);
+        assert_eq!(empty.when, []);
+
+        let value = "İ東京💥".repeat(16_384);
+        let header = format!("title: {value}");
+        let body = format!("# Body\n{value}");
+        let (actual_header, actual_body) = split(&format!("---\n{header}\n---\n{body}\n")).unwrap();
+        assert_eq!(actual_header, header);
+        assert_eq!(actual_body, body);
+        let front = parse(&actual_header).unwrap();
+        assert_eq!(front.top, [("title".to_owned(), Value::Scalar(value))]);
+        assert_eq!(front.when, []);
+    }
+}

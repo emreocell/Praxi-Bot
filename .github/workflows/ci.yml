@@ -272,6 +272,10 @@ jobs:
       - name: UI shell layout
         run: pnpm --dir apps/desktop/ui check:layout
 
+      # axe-core over the mock-mode screens in headless Chrome (preinstalled on ubuntu-latest).
+      - name: UI accessibility (axe-core)
+        run: CHROME_BIN="$(command -v google-chrome || command -v chromium)" pnpm --dir apps/desktop/ui check:a11y
+
       # docs/api/openapi.json is checked by the `openapi_snapshot` test inside
       # `cargo test --workspace` (Build & Test). This checks the file generated from it.
       - name: Generated API types are up to date

@@ -44,7 +44,7 @@ import { StepIcon } from "./StepIcon";
 import formStyles from "./Form.module.css";
 import styles from "./ChatCards.module.css";
 import { humanLine, humanToolError } from "../lib/humanError";
-import { COMMAND_LIMIT, INPUT_LIMIT, actionArguments, actionCommand, actionText, hostText, reasonLine, sourceText, type T } from "../lib/approvalPlain";
+import { COMMAND_LIMIT, INPUT_LIMIT, actionArguments, browserStepLines, actionCommand, actionText, hostText, reasonLine, sourceText, type T } from "../lib/approvalPlain";
 import { ErrorNotice } from "./ErrorNotice";
 
 const brandName = (name: string): string | null => {
@@ -506,6 +506,7 @@ export function ApprovalCard({
   // Without a command box the owner still sees the real tool and EVERY argument (path, recipient, body).
   const args = command ? null : actionArguments(call.input);
   const stepLabel = describeTool(call.name, call.input, brandName);
+  const steps = browserStepLines(tool.details, tt);
   const headline = plainAction ?? t(`${stepLabel.key}.running`, stepLabel.values);
   const plainReason = egress ? reasonLine(egress, tt) : null;
   const detailBody = (
@@ -588,6 +589,16 @@ export function ApprovalCard({
             <p className={styles.approvalSummary}>
               {headline}
             </p>
+            {steps ? (
+              <>
+                <p className={styles.bodyLabel}>{t("chat.approval.steps.label")}</p>
+                <ol data-testid="approval-browser-steps">
+                  {steps.map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+                </ol>
+              </>
+            ) : null}
             {command ? (
               <>
                 <pre className={styles.code} tabIndex={0} data-testid="approval-command">{command.text}</pre>
@@ -872,7 +883,9 @@ export function SubagentCard({ run, renderItem, onCancel }: SubagentCardProps) {
   const waiting = status === "waiting_approval";
   // an approval or a question inside the card must never stay hidden
   const asking = run.items.some(
-    (i) => i.kind === "question" && i.answer === undefined && !i.closed
+    (i) =>
+      (i.kind === "question" && i.answer === undefined && !i.closed) ||
+      (i.kind === "secret" && i.outcome === undefined && !i.closed)
   );
   const expanded = open || waiting || asking;
   const cancellable = status === "running" || waiting;

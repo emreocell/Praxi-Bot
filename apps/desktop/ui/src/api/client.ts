@@ -99,6 +99,8 @@ import type {
   RepairResult,
   Run,
   Schedule,
+  SecretRequestAnswer,
+  FillSecretInfo,
   ScheduleInput,
   Scope,
   ScreenPrivilegesInput,
@@ -322,6 +324,22 @@ export class ApiClient {
     return { Authorization: `Bearer ${this.token}` };
   }
 
+  /**
+   * Headers for the event stream: the owner key marks this app as the local manager, so the
+   * daemon sends it approval/question/control events (a bearer alone only gets progress events).
+   * Never sent through the proxy to a paired host.
+   */
+  async eventStreamHeaders(): Promise<Record<string, string>> {
+    const headers = this.authHeaders();
+    if (ApiClient.ownerKeyProvider && isLocalBaseUrl(this.baseUrl)) {
+      const key = await ApiClient.ownerKeyProvider();
+      if (key) {
+        headers["x-praxi-owner-key"] = key;
+      }
+    }
+    return headers;
+  }
+
   protected async request<T>(
     method: string,
     path: string,
@@ -340,9 +358,13 @@ export class ApiClient {
     return res.blob();
   }
 
-  /** Like `request`, for routes that answer with text (Markdown). */
-  protected async requestText(method: string, path: string): Promise<string> {
-    const res = await this.send(method, path);
+  /** Like `request`, for routes that answer with text (Markdown, CSV). */
+  protected async requestText(
+    method: string,
+    path: string,
+    opts: { query?: Query; signal?: AbortSignal } = {}
+  ): Promise<string> {
+    const res = await this.send(method, path, opts);
     return res.text();
   }
 
@@ -786,6 +808,27 @@ export class ApiClient {
     return this.request("POST", `/questions/${callId}`, { body: { answer } });
   }
 
+  /**
+   * Answer a bot's credential request: the value goes into the vault, the run only learns
+   * `stored`. Owner-only (the owner key is added for this computer's daemon). The body is built
+   * by the caller and never logged here.
+   */
+  submitSecretRequest(
+    callId: string,
+    body: { value?: string; username?: string; password?: string; origins: string[]; programs: string[] }
+  ): Promise<SecretRequestAnswer> {
+    return this.request("POST", `/secret-requests/${encodeURIComponent(callId)}`, { body });
+  }
+
+  cancelSecretRequest(callId: string): Promise<SecretRequestAnswer> {
+    return this.request("POST", `/secret-requests/${encodeURIComponent(callId)}/cancel`);
+  }
+
+  /** Store a value the owner typed or pasted in the vault (`POST /v1/fill-secrets`, write-only). */
+  createFillSecret(input: { name: string; value: string; origins?: string[]; programs?: string[] }): Promise<FillSecretInfo> {
+    return this.request("POST", "/fill-secrets", { body: input });
+  }
+
   listSchedules(): Promise<Schedule[]> {
     return this.request("GET", "/schedules");
   }
@@ -829,8 +872,19 @@ export class ApiClient {
     return this.request("PUT", "/spend-limit", { body: { limit_usd: limitUsd } });
   }
 
-  usage(sinceMs?: number): Promise<UsageSummary> {
-    return this.request("GET", "/usage", { query: { since_ms: sinceMs } });
+  usage(
+    opts?: number | { since_ms?: number; until_ms?: number; days?: number; tz?: string }
+  ): Promise<UsageSummary> {
+    const query: Query =
+      typeof opts === "number" ? { since_ms: opts } : (opts ?? {});
+    return this.request("GET", "/usage", { query });
+  }
+
+  /** Formula-safe CSV export of usage over the same range (owner only). */
+  usageExport(
+    opts?: { since_ms?: number; until_ms?: number; days?: number; tz?: string }
+  ): Promise<string> {
+    return this.requestText("GET", "/usage/export", { query: opts });
   }
 
   /** Daemon's current controller registration & owned takeover status. */

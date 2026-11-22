@@ -107,7 +107,13 @@ struct State {
     targets: BTreeMap<u32, (String, Option<ControlRect>)>,
     /// Indexes of password fields in the last observation (`secure` state).
     secure: BTreeSet<u32>,
+    /// Screen origin of the window the last snapshot described.
+    window_origin: (f64, f64),
 }
+
+/// Longest edge of a screenshot saved for the model. Larger captures are
+/// downscaled; the tool text tells the model how to map those pixels back.
+const MODEL_SHOT_MAX_EDGE: u32 = 1280;
 
 /// A small capped map of per-run states (LRU eviction: touch on every use).
 #[derive(Default)]
@@ -249,6 +255,60 @@ fn rect_of(r: desktop_api::snapshot::Rect) -> ControlRect {
         y: r.y,
         width: r.width,
         height: r.height,
+    }
+}
+
+/// How an image pixel maps onto the screen. `region_*` is the capture size
+/// before any downscale (X11 pixels). `img_*` is the file the model opens.
+fn screenshot_coordinate_line(
+    origin_x: f64,
+    origin_y: f64,
+    region_w: f64,
+    region_h: f64,
+    img_w: u32,
+    img_h: u32,
+) -> String {
+    let sx = if img_w == 0 {
+        1.0
+    } else {
+        region_w / f64::from(img_w)
+    };
+    let sy = if img_h == 0 {
+        1.0
+    } else {
+        region_h / f64::from(img_h)
+    };
+    if (sx - 1.0).abs() < 0.02 && (sy - 1.0).abs() < 0.02 {
+        format!(
+            "coordinates: image (0,0) is screen ({origin_x:.0},{origin_y:.0}); 1 image pixel = 1 screen pixel ({img_w}x{img_h}). Element bounds are screen pixels."
+        )
+    } else {
+        format!(
+            "coordinates: image (0,0) is screen ({origin_x:.0},{origin_y:.0}); multiply image x by {sx:.3} and image y by {sy:.3} to get screen pixels (capture {region_w:.0}x{region_h:.0}, image {img_w}x{img_h}). Element bounds are screen pixels."
+        )
+    }
+}
+
+/// Shrink a capture whose long edge exceeds [`MODEL_SHOT_MAX_EDGE`].
+/// The returned width and height are the file the model will open.
+fn shrink_screenshot_for_model(img: desktop_api::Image) -> desktop_api::Image {
+    if img.width.max(img.height) <= MODEL_SHOT_MAX_EDGE || img.data.is_empty() {
+        return img;
+    }
+    let Ok(decoded) = image::load_from_memory(&img.data) else {
+        return img;
+    };
+    let rgb = decoded.to_rgb8();
+    let down = vision::downscale_max_dimension(&rgb, MODEL_SHOT_MAX_EDGE);
+    let Ok(encoded) = vision::encode_jpeg(&down.image, 70) else {
+        return img;
+    };
+    let (width, height) = down.image.dimensions();
+    desktop_api::Image {
+        data: encoded.bytes,
+        width,
+        height,
+        mime_type: encoded.mime_type.to_string(),
     }
 }
 
@@ -590,6 +650,7 @@ impl Shared {
                 let mut states = self.state.lock();
                 let st = states.entry(run_id);
                 st.window_id = Some(snap.window.id);
+                st.window_origin = (snap.window.bounds.x, snap.window.bounds.y);
                 st.generation = Some(snap.generation);
                 st.observation_epoch = observation_epoch;
                 st.marks.clear();
@@ -1373,6 +1434,14 @@ impl DesktopTool {
                         .screenshot(region, Quality::Medium)
                         .await
                         .map_err(|e| derr(&e))?;
+                    let origin = {
+                        let mut states = sh.state.lock();
+                        states.get(run_id).map_or((0.0, 0.0), |st| st.window_origin)
+                    };
+                    let (ox, oy) = if scope.is_some() { origin } else { (0.0, 0.0) };
+                    let capture_w = f64::from(img.width);
+                    let capture_h = f64::from(img.height);
+                    let img = shrink_screenshot_for_model(img);
                     let ext = if img.mime_type == "image/png" {
                         "png"
                     } else {
@@ -1380,6 +1449,10 @@ impl DesktopTool {
                     };
                     let path = save_file(&sh.data_dir.join("screenshots"), ext, &img.data)?;
                     let _ = writeln!(text, "screenshot: {path} ({}x{})", img.width, img.height);
+                    let note = screenshot_coordinate_line(
+                        ox, oy, capture_w, capture_h, img.width, img.height,
+                    );
+                    let _ = writeln!(text, "{note}");
                 }
                 Ok(text)
             }
@@ -2841,6 +2914,21 @@ mod tests {
             .next()
             .unwrap();
         assert!(Path::new(path).exists(), "{s}");
+        assert!(
+            s.contains("1 image pixel = 1 screen pixel"),
+            "the model must see that this capture is not a scaled 1920x1080: {s}"
+        );
+    }
+
+    #[test]
+    fn screenshot_coordinate_line_scales_a_downscaled_capture() {
+        let same = screenshot_coordinate_line(0.0, 0.0, 1280.0, 800.0, 1280, 800);
+        assert!(same.contains("1 image pixel = 1 screen pixel"), "{same}");
+        assert!(same.contains("1280x800"), "{same}");
+        let scaled = screenshot_coordinate_line(100.0, 40.0, 1920.0, 1080.0, 1280, 720);
+        assert!(scaled.contains("100"), "{scaled}");
+        assert!(scaled.contains("1.500"), "{scaled}");
+        assert!(scaled.contains("screen pixels"), "{scaled}");
     }
 
     struct Recorder {

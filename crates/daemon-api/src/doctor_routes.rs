@@ -345,6 +345,11 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
         );
     }
     add(
+        "catalog_freshness",
+        "catalog freshness",
+        Box::new(|| doctor::check_catalog_freshness(SystemTime::now())),
+    );
+    add(
         "browser",
         "browser",
         Box::new(move || {

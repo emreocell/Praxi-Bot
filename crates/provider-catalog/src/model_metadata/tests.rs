@@ -6,7 +6,7 @@ fn ids(values: &[&str]) -> Vec<String> {
 
 #[test]
 fn curated_table_is_valid_and_covers_every_shipped_provider() {
-    let table = embedded();
+    let table = embedded_metadata();
     assert_eq!(table.validate(), Ok(()));
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../providers/catalog");
     for provider in crate::Catalog::load_dir(&dir).unwrap().all() {

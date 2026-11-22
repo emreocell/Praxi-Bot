@@ -49,6 +49,7 @@ import {
   EMPTY_EVENTS,
   type EventsState,
   markAnswered,
+  recordSecretOutcome,
   type NeedsYouEntry,
   needsYou,
   type PendingApprovalFact,
@@ -80,6 +81,12 @@ type Action =
   | { type: "event"; env: GlobalEnvelope }
   | { type: "answered"; runId: string; callId: string; answer: string }
   | {
+      type: "secretAnswered";
+      runId: string;
+      callId: string;
+      outcome: "stored" | "cancelled";
+    }
+  | {
       type: "reconcile";
       approvals: ReadonlySet<string>;
       live: ReadonlySet<string>;
@@ -95,6 +102,13 @@ function reducer(state: EventsState, action: Action): EventsState {
       return applyEvent(state, action.env);
     case "answered":
       return markAnswered(state, action.runId, action.callId, action.answer);
+    case "secretAnswered":
+      return recordSecretOutcome(
+        state,
+        action.runId,
+        action.callId,
+        action.outcome
+      );
     case "reconcile":
       return restorePending(
         reconcile(state, action.approvals, action.live, action.asOfMs),
@@ -127,6 +141,12 @@ export interface DaemonContextValue {
   /** Optimistically delete a chat, rolling back if the daemon rejects it. */
   deleteChat: (chatId: string) => Promise<void>;
   recordAnswer: (runId: string, callId: string, answer: string) => void;
+  /** A credential request was stored or cancelled from its card (no value is passed). */
+  recordSecretOutcome: (
+    runId: string,
+    callId: string,
+    outcome: "stored" | "cancelled"
+  ) => void;
   retry: () => void;
   restartDaemon: () => Promise<void>;
   /**
@@ -213,6 +233,7 @@ type DaemonData = Pick<
   | "updateChat"
   | "deleteChat"
   | "recordAnswer"
+  | "recordSecretOutcome"
   | "onDaemonEvent"
 >;
 
@@ -453,7 +474,29 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
       dispatch({ type: "answered", runId, callId, answer }),
     []
   );
-  const needs = useMemo(() => needsYou(events, runs), [events, runs]);
+  const recordSecretOutcomeCb = useCallback(
+    (runId: string, callId: string, outcome: "stored" | "cancelled") =>
+      dispatch({ type: "secretAnswered", runId, callId, outcome }),
+    []
+  );
+  // A credential request stops being pinned the moment its card locks: wake up at the next expiry.
+  const [expiryTick, setExpiryTick] = useState(0);
+  useEffect(() => {
+    const now = Date.now();
+    let next = Infinity;
+    for (const run of Object.values(events.runs)) {
+      for (const i of run.items) {
+        if (i.kind === "secret" && i.outcome === undefined && !i.closed && i.expiresMs > now) {
+          next = Math.min(next, i.expiresMs);
+        }
+      }
+    }
+    if (next === Infinity) return;
+    const id = window.setTimeout(() => setExpiryTick((n) => n + 1), Math.min(next - now + 50, 2_000_000_000));
+    return () => window.clearTimeout(id);
+  }, [events, expiryTick]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const needs = useMemo(() => needsYou(events, runs), [events, runs, expiryTick]);
 
   return {
     client,
@@ -471,6 +514,7 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
     updateChat,
     deleteChat,
     recordAnswer,
+    recordSecretOutcome: recordSecretOutcomeCb,
     onDaemonEvent
   };
 }

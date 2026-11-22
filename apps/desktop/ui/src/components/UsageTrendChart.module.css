@@ -1,0 +1,154 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.titleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.title {
+  margin: var(--space-0);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.metricGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.readout {
+  margin: var(--space-0);
+  min-height: var(--space-5);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+
+.chartWrap {
+  width: 100%;
+  overflow: hidden;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.gridLine {
+  stroke: var(--color-border);
+  stroke-width: var(--size-border);
+  stroke-dasharray: var(--space-1) var(--space-1);
+}
+
+.axisLine {
+  stroke: var(--color-border);
+  stroke-width: var(--size-border);
+}
+
+.hitArea {
+  fill: transparent;
+}
+
+.barGroup {
+  cursor: pointer;
+  outline: none;
+}
+
+.barGroup:focus-visible .bar,
+.barGroup:focus-visible .barActive,
+.barGroup:focus-visible .barUnknown {
+  stroke: var(--color-focus);
+  stroke-width: var(--size-border-thick);
+}
+
+.bar {
+  fill: var(--color-accent);
+  opacity: 0.85;
+  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.barActive {
+  fill: var(--color-accent-hover);
+  opacity: 1;
+}
+
+.barUnknown {
+  fill: var(--color-border-strong);
+  opacity: 0.65;
+}
+
+.axisLabel {
+  fill: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+}
+
+.details {
+  border-top: var(--size-border) solid var(--color-border);
+  padding-top: var(--space-2);
+}
+
+.summary {
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.summary:hover {
+  color: var(--color-text);
+}
+
+.tableWrap {
+  margin-top: var(--space-2);
+  max-height: calc(var(--size-preview-height) * 2);
+  overflow-y: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+}
+
+.table th,
+.table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: var(--size-border) solid var(--color-border);
+  text-align: left;
+}
+
+.table thead th {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.num,
+.table th.num,
+.table td.num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}

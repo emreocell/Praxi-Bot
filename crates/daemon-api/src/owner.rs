@@ -104,6 +104,8 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/v1/policy"),
     // monthly spending limit: a token holder must not lift its own cap
     ("PUT", "/v1/spend-limit"),
+    // bulk usage CSV export: bot names, models and spend history belong to the owner
+    ("GET", "/v1/usage/export"),
     ("POST", "/v1/trusted-folders"),
     ("DELETE", "/v1/trusted-folders"),
     ("PUT", "/v1/bots/{}/files"),

@@ -57,6 +57,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         core::check_host(env.data_dir),
         check_peer_relay(env),
         check_host_display(env),
+        check_desktop_backend(env),
         check_free_ram(),
         core::check_data_dir(env.data_dir),
         core::check_config(env.data_dir),
@@ -70,6 +71,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
             online: env.online.then_some(online),
         })),
         core::check_catalog(env.data_dir, &env.catalog),
+        core::check_catalog_freshness(std::time::SystemTime::now()),
         check_daemon(env.data_dir, env.port),
         env.browser_error.as_ref().map_or_else(
             || check_browser(env.browser.as_deref()),
@@ -233,6 +235,183 @@ fn diagnose_host_display(
             p.display()
         )),
     }
+}
+
+fn check_desktop_backend(env: &DoctorEnv<'_>) -> Check {
+    if !daemon_api::host::HostConfig::load(env.data_dir)
+        .is_ok_and(|c| c.mode == daemon_api::host::HostMode::Host)
+    {
+        return Check::ok("desktop_backend", "desktop backend", "not in host mode");
+    }
+    linux_desktop_backend_check()
+}
+
+/// Linux host: name the first broken piece of the X11 desktop backend.
+#[cfg(target_os = "linux")]
+fn linux_desktop_backend_check() -> Check {
+    let display = std::env::var("DISPLAY").ok();
+    let session = std::env::var("XDG_SESSION_TYPE").ok();
+    let wayland = std::env::var("WAYLAND_DISPLAY").ok();
+    let xauthority = std::env::var("XAUTHORITY").ok();
+    let xauthority_readable = xauthority
+        .as_deref()
+        .is_some_and(|p| std::fs::File::open(p).is_ok());
+    let xdpyinfo = command_on_path("xdpyinfo", std::env::var_os("PATH").as_deref(), &|p| {
+        p.is_file()
+    });
+    let probe_x = session_problem(session.as_deref(), wayland.as_deref()).is_none()
+        && display.as_deref().is_some_and(|d| !d.trim().is_empty())
+        && xauthority.is_some()
+        && xauthority_readable;
+    let x_error = if probe_x {
+        desktop_linux::probe_x_server(Duration::from_secs(2)).err()
+    } else {
+        None
+    };
+    finish_desktop_check(&DesktopFacts {
+        session_type: session.as_deref(),
+        wayland_display: wayland.as_deref(),
+        display: display.as_deref(),
+        xauthority: xauthority.as_deref(),
+        xauthority_readable,
+        x_error: x_error.as_deref(),
+        x_probed: probe_x,
+        xdpyinfo_present: xdpyinfo,
+    })
+}
+
+/// The X11 probe is compiled only for the Linux host build.
+#[cfg(not(target_os = "linux"))]
+fn linux_desktop_backend_check() -> Check {
+    Check::skipped(
+        "desktop_backend",
+        "desktop backend",
+        "Linux X11 probe runs on the Linux host",
+    )
+}
+
+/// Facts for [`diagnose_desktop_backend`]. The caller keeps the strings.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Clone, Copy)]
+struct DesktopFacts<'a> {
+    session_type: Option<&'a str>,
+    wayland_display: Option<&'a str>,
+    display: Option<&'a str>,
+    xauthority: Option<&'a str>,
+    xauthority_readable: bool,
+    /// Set when a bounded X handshake was attempted and failed.
+    x_error: Option<&'a str>,
+    /// `true` when a handshake was attempted (`x_error` empty means it succeeded).
+    x_probed: bool,
+    xdpyinfo_present: bool,
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn finish_desktop_check(facts: &DesktopFacts<'_>) -> Check {
+    match diagnose_desktop_backend(facts) {
+        Ok(detail) => Check::ok("desktop_backend", "desktop backend", detail),
+        Err((detail, hint)) => Check::warn("desktop_backend", "desktop backend", detail, hint),
+    }
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn session_problem(session: Option<&str>, wayland: Option<&str>) -> Option<String> {
+    let session = session.map(str::trim).filter(|s| !s.is_empty());
+    let wayland = wayland.map(str::trim).filter(|s| !s.is_empty());
+    if session.is_some_and(|s| s.eq_ignore_ascii_case("wayland")) {
+        return Some("Wayland session (XDG_SESSION_TYPE=wayland)".into());
+    }
+    if let Some(name) = wayland
+        && !session.is_some_and(|s| s.eq_ignore_ascii_case("x11"))
+    {
+        return Some(format!("Wayland display '{name}'"));
+    }
+    None
+}
+
+/// `Ok(detail)` when the Linux desktop backend can drive the screen.
+/// The `Err` names the first real cause and how to fix it.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn diagnose_desktop_backend(f: &DesktopFacts<'_>) -> std::result::Result<String, (String, String)> {
+    if let Some(problem) = session_problem(f.session_type, f.wayland_display) {
+        return Err((
+            format!("{problem}: desktop control needs an X11 session such as Xvfb on :99"),
+            "start praxi-xvfb and set XDG_SESSION_TYPE=x11 and DISPLAY=:99 in /etc/praxi/praxi.env"
+                .into(),
+        ));
+    }
+    let display = f.display.map(str::trim).filter(|s| !s.is_empty());
+    let Some(display) = display else {
+        return Err((
+            "DISPLAY is not set: the desktop backend cannot open an X11 screen".into(),
+            "the service needs DISPLAY=:99 (praxi-xvfb.service, /etc/praxi/praxi.env)".into(),
+        ));
+    };
+    match f.xauthority {
+        None => {
+            return Err((
+                format!(
+                    "XAUTHORITY is not set for display {display}: the daemon cannot prove which X cookie to use"
+                ),
+                "set XAUTHORITY=/var/lib/praxi/.Xauthority (mode 0600, owned by the daemon user) in /etc/praxi/praxi.env"
+                    .into(),
+            ));
+        }
+        Some(path) if !f.xauthority_readable => {
+            return Err((
+                format!("XAUTHORITY file is missing or unreadable: {path}"),
+                "check that the daemon user can read the cookie file, then restart praxi-xvfb"
+                    .into(),
+            ));
+        }
+        Some(_) => {}
+    }
+    if let Some(err) = f.x_error {
+        return Err((
+            err.to_string(),
+            "check `systemctl status praxi-xvfb` and run `sudo praxi doctor` so the probe shares the Xvfb namespace"
+                .into(),
+        ));
+    }
+    if f.x_probed && !f.xdpyinfo_present {
+        return Err((
+            "helper `xdpyinfo` is missing".into(),
+            "install x11-utils (apt) or xorg-x11-utils (dnf). Clicks and screenshots use in-process X11; xdotool, xclip, scrot and ImageMagick are unused"
+                .into(),
+        ));
+    }
+    let x_state = if f.x_probed {
+        "X server reachable"
+    } else {
+        "X server not probed"
+    };
+    let helper = if f.xdpyinfo_present {
+        "helper xdpyinfo present"
+    } else {
+        "helper xdpyinfo not checked"
+    };
+    Ok(format!(
+        "session=x11; DISPLAY={display}; XAUTHORITY set; {x_state}; {helper}"
+    ))
+}
+
+/// `true` when `name` is a file in a `PATH` entry. `exists` is injected so tests
+/// do not touch the real filesystem layout beyond a temp dir.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn command_on_path(
+    name: &str,
+    path_env: Option<&std::ffi::OsStr>,
+    exists: &dyn Fn(&Path) -> bool,
+) -> bool {
+    let Some(path_env) = path_env else {
+        return false;
+    };
+    for dir in std::env::split_paths(path_env) {
+        if exists(&dir.join(name)) {
+            return true;
+        }
+    }
+    false
 }
 
 fn check_free_ram() -> Check {
@@ -838,6 +1017,73 @@ mod tests {
         })
         .unwrap_err();
         assert!(d.contains("no browser"), "{d}");
+    }
+
+    #[test]
+    fn desktop_backend_names_display_auth_session_and_helper() {
+        let ok = DesktopFacts {
+            session_type: Some("x11"),
+            wayland_display: None,
+            display: Some(":99"),
+            xauthority: Some("/var/lib/praxi/.Xauthority"),
+            xauthority_readable: true,
+            x_error: None,
+            x_probed: true,
+            xdpyinfo_present: true,
+        };
+        let ready = diagnose_desktop_backend(&ok).unwrap();
+        assert!(ready.contains("DISPLAY=:99"), "{ready}");
+        assert!(ready.contains("X server reachable"), "{ready}");
+
+        let (d, _) = diagnose_desktop_backend(&DesktopFacts {
+            session_type: Some("wayland"),
+            ..ok
+        })
+        .unwrap_err();
+        assert!(d.contains("Wayland"), "{d}");
+
+        let (d, _) = diagnose_desktop_backend(&DesktopFacts {
+            display: None,
+            ..ok
+        })
+        .unwrap_err();
+        assert!(d.contains("DISPLAY is not set"), "{d}");
+
+        let (d, _) = diagnose_desktop_backend(&DesktopFacts {
+            xauthority: None,
+            ..ok
+        })
+        .unwrap_err();
+        assert!(d.contains("XAUTHORITY is not set"), "{d}");
+
+        let (d, _) = diagnose_desktop_backend(&DesktopFacts {
+            xauthority_readable: false,
+            ..ok
+        })
+        .unwrap_err();
+        assert!(d.contains("missing or unreadable"), "{d}");
+
+        let (d, _) = diagnose_desktop_backend(&DesktopFacts {
+            x_error: Some("X server not reachable at :99: connection refused"),
+            ..ok
+        })
+        .unwrap_err();
+        assert!(d.contains("X server not reachable at :99"), "{d}");
+
+        let (d, hint) = diagnose_desktop_backend(&DesktopFacts {
+            xdpyinfo_present: false,
+            ..ok
+        })
+        .unwrap_err();
+        assert!(d.contains("helper `xdpyinfo` is missing"), "{d}");
+        assert!(hint.contains("xdotool"), "{hint}");
+
+        assert!(command_on_path(
+            "xdpyinfo",
+            Some(std::ffi::OsStr::new("/usr/bin")),
+            &|p| p == Path::new("/usr/bin/xdpyinfo")
+        ));
+        assert!(!command_on_path("xdpyinfo", None, &|_| true));
     }
 
     use secret_store::{SecretRef, SecretValue};

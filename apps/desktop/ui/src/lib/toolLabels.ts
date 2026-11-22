@@ -109,6 +109,7 @@ const TABLE: Record<string, Entry> = {
   "shell.run": { id: "shell", icon: "terminal" },
   script_run: { id: "shell", icon: "terminal" },
   browser_open: { id: "browser_open", icon: "globe", chips: urlChip },
+  browser_act: { id: "browser_act", icon: "globe" },
   browser_click: { id: "browser_click", icon: "globe" },
   browser_fill: { id: "browser_fill", icon: "globe" },
   browser_eval: { id: "browser_eval", icon: "terminal" },

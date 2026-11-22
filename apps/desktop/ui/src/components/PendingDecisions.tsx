@@ -5,6 +5,8 @@ import { ownerKey } from "../lib/ownerKey";
 import { useTranslation } from "react-i18next";
 import type { NeedsYouEntry } from "../state/timeline";
 import { ApprovalCard, QuestionCard, type ApprovalCardProps } from "./ChatCards";
+import { SecretRequestCard } from "./SecretRequestCard";
+import { NoClientError, type SubmitBody } from "../lib/secretRequestForm";
 import styles from "./PendingDecisions.module.css";
 
 type Decide = ApprovalCardProps["onDecide"];
@@ -14,7 +16,7 @@ type Decide = ApprovalCardProps["onDecide"];
  * inline cards, the pinned cards above the composer and the live view banner decide the same way.
  */
 export function useDecisionActions() {
-  const { client, recordAnswer, home } = useDaemon();
+  const { client, recordAnswer, recordSecretOutcome, home } = useDaemon();
   const { t } = useTranslation();
   const decide = useCallback(
     (callId: string): Decide =>
@@ -55,9 +57,28 @@ export function useDecisionActions() {
     },
     [client, recordAnswer]
   );
+  // The value goes from the card to the daemon and nowhere else: only the outcome is recorded.
+  const submitSecret = useCallback(
+    (runId: string, callId: string) => async (body: SubmitBody) => {
+      if (!client) throw new NoClientError();
+      await client.submitSecretRequest(callId, body);
+      recordSecretOutcome(runId, callId, "stored");
+    },
+    [client, recordSecretOutcome]
+  );
+  const cancelSecret = useCallback(
+    (runId: string, callId: string) => async () => {
+      if (!client) throw new NoClientError();
+      await client.cancelSecretRequest(callId);
+      recordSecretOutcome(runId, callId, "cancelled");
+    },
+    [client, recordSecretOutcome]
+  );
   return {
     decide,
     answer,
+    submitSecret,
+    cancelSecret,
     trustFolder,
     serverName: home.kind === "host" ? home.name : null
   };
@@ -66,6 +87,7 @@ export function useDecisionActions() {
 /** One pending entry as its card (an approval or a question). */
 export function PendingCard({ entry }: { entry: NeedsYouEntry }): ReactNode {
   const actions = useDecisionActions();
+  const { bots } = useDaemon();
   if (entry.tool) {
     return (
       <ApprovalCard
@@ -81,6 +103,16 @@ export function PendingCard({ entry }: { entry: NeedsYouEntry }): ReactNode {
       <QuestionCard
         q={entry.question}
         onAnswer={actions.answer(entry.runId, entry.callId)}
+      />
+    );
+  }
+  if (entry.secret) {
+    return (
+      <SecretRequestCard
+        item={entry.secret}
+        botName={bots.find((b) => b.id === entry.botId)?.name ?? ""}
+        onSubmit={actions.submitSecret(entry.runId, entry.callId)}
+        onCancel={actions.cancelSecret(entry.runId, entry.callId)}
       />
     );
   }

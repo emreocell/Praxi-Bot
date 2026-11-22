@@ -1,0 +1,122 @@
+name: Docker Image
+
+# Builds and smoke-tests the container images without pushing or using secrets.
+on:
+  pull_request:
+    paths:
+      - "packaging/docker/**"
+      - ".dockerignore"
+      - ".github/workflows/docker.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packaging/docker/**"
+      - ".dockerignore"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-docker-images:
+    name: Build & smoke-test Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Lint Docker scripts and Compose config
+        run: |
+          set -euo pipefail
+          shellcheck -x packaging/docker/*.sh
+          bash -n packaging/docker/*.sh
+          cp packaging/docker/.env.example packaging/docker/.env
+          trap 'rm -f packaging/docker/.env' EXIT
+          docker compose -f packaging/docker/docker-compose.yml config --quiet
+
+      - name: Build base host image
+        run: |
+          set -euo pipefail
+          docker build -f packaging/docker/Dockerfile -t praxi-host:ci .
+
+      - name: Smoke-test base host image
+        run: |
+          set -euo pipefail
+          docker run --rm praxi-host:ci --version
+          uid="$(docker run --rm --entrypoint id praxi-host:ci -u)"
+          test "${uid}" != "0"
+
+          cid="$(docker run -d \
+            -e BOT_SECRETS_PASSPHRASE=ci-smoke-test-passphrase-only \
+            praxi-host:ci)"
+          trap 'docker rm -f "${cid}" >/dev/null 2>&1 || true' EXIT
+
+          ready=0
+          for _ in $(seq 1 30); do
+            if health="$(docker exec "${cid}" curl -fsS --noproxy '*' http://127.0.0.1:47821/v1/health 2>/dev/null)" \
+              && [[ "${health}" =~ \"status\"[[:space:]]*:[[:space:]]*\"(ok|setup_required)\" ]]; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "${ready}" -eq 1
+          docker exec "${cid}" bot doctor >/dev/null || true
+
+      - name: Build desktop host image
+        run: |
+          set -euo pipefail
+          docker build --build-arg WITH_DESKTOP=1 -f packaging/docker/Dockerfile -t praxi-host:ci-desktop .
+
+      - name: Smoke-test desktop host image
+        run: |
+          set -euo pipefail
+          docker run --rm praxi-host:ci-desktop --version
+          docker run --rm --entrypoint /opt/praxi-browser/chrome praxi-host:ci-desktop --version
+
+          # Ubuntu 24.04 runners restrict unprivileged user namespaces at the kernel
+          # level even for apparmor=unconfined containers (same sysctl as ci.yml).
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+          # Disable seccomp/apparmor userns restrictions on the CI runner so
+          # Chrome runs as non-root `praxi` with its sandbox enabled.
+          cid="$(docker run -d \
+            --security-opt seccomp=unconfined \
+            --security-opt apparmor=unconfined \
+            -e BOT_SECRETS_PASSPHRASE=ci-smoke-test-passphrase-only \
+            praxi-host:ci-desktop)"
+          trap 'docker rm -f "${cid}" >/dev/null 2>&1 || true' EXIT
+
+          ready=0
+          for _ in $(seq 1 30); do
+            if health="$(docker exec "${cid}" curl -fsS --noproxy '*' http://127.0.0.1:47821/v1/health 2>/dev/null)" \
+              && [[ "${health}" =~ \"status\"[[:space:]]*:[[:space:]]*\"(ok|setup_required)\" ]]; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "${ready}" -eq 1
+          docker exec "${cid}" xdpyinfo -display :99 >/dev/null
+          docker exec "${cid}" bot --json doctor > doctor.json || true
+          python3 - <<'PY'
+          import json, pathlib
+          data = json.loads(pathlib.Path("doctor.json").read_text())
+          checks = {c["name"]: c for c in data["checks"]}
+          for req in ("host display", "daemon", "secret backend", "browser", "desktop automation"):
+              assert checks[req]["status"] == "ok", f"{req}: {checks[req]}"
+          print("Verified desktop doctor checks:", ", ".join(req for req in ("host display", "daemon", "secret backend", "browser", "desktop automation")))
+          PY

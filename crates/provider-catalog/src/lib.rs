@@ -5,6 +5,7 @@
 
 pub mod anthropic;
 pub mod catalog;
+pub mod catalog_freshness;
 pub mod config;
 pub mod embedding;
 pub mod entry;
@@ -22,6 +23,13 @@ mod util;
 
 pub use anthropic::AnthropicProvider;
 pub use catalog::Catalog;
+pub use catalog_freshness::{
+    AddedModel, CatalogDiff, ChangedModel, DEFAULT_STALE_AFTER_DAYS, DOCS_TABLE_BEGIN,
+    DOCS_TABLE_END, FieldChange, IsoDate, LikelyRename, ProviderFreshness, RemovedModel,
+    SnapshotModel, StalenessReport, ValidationReport, check_staleness, check_staleness_embedded,
+    diff_provider, format_check_report, format_diff_report, load_catalog_entries_from_dir,
+    parse_snapshot, render_docs_table, validate_catalog, verify_docs_table,
+};
 pub use config::{
     ConfigError, ConnectionReport, ProviderConfig, ProviderSettings, api_key_secret_name,
     config_path, test_connection,
@@ -38,7 +46,9 @@ pub use error::ProviderError;
 pub use factory::{build_chat_provider, build_embedding_provider};
 pub use gemini::GeminiProvider;
 pub use local_detect::{LocalServer, detect_local_servers};
-pub use model_metadata::{ModelKind, ModelMetadata, model_metadata};
+pub use model_metadata::{
+    CuratedModels, ModelKind, ModelMetadata, ProviderMetadata, embedded_metadata, model_metadata,
+};
 pub use openai_compat::{OpenAiCompatConfig, OpenAiCompatProvider};
 pub use provider::{
     ChatChunk, ChatProvider, ChatRequest, FinishReason, Message, MessageRole, ModelRef, ToolCall,

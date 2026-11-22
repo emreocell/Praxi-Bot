@@ -54,6 +54,15 @@
   outline-offset: calc(var(--size-border-thick) * -1);
 }
 
+.srOnly {
+  position: absolute;
+  width: var(--size-border);
+  height: var(--size-border);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .timeline {
   display: flex;
   flex-direction: column;
