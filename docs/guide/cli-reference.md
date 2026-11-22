@@ -168,6 +168,16 @@ Send a message and stream the answer.
 | `--chat <CHAT_ID>` | Continue an existing chat instead of starting one |
 | `--mode <steer\|queue>` | What to do if the chat has a running turn (default `queue`) |
 
+### `bot chats`
+
+List and export saved chats. Export is owner-only and uses the same Markdown
+and JSON files as the desktop app.
+
+| Subcommand | Meaning |
+| --- | --- |
+| `bot chats list [--bot <BOT_ID>]` | List chats; `--json` prints the API array |
+| `bot chats export <CHAT_ID>` | Write one chat to stdout. Options: `--format md\|json` (default `md`; global `--json` selects JSON), `-o, --output <FILE>` writes a file instead |
+
 ### `bot bots`
 
 | Subcommand | Meaning |

@@ -237,6 +237,30 @@ impl Client {
         self.request_with(method, path, body, None).await
     }
 
+    /// Send a request and return the raw body. Chat export answers with
+    /// Markdown or JSON, so its response cannot go through [`Self::request`].
+    pub async fn request_bytes(&self, method: Method, path: &str) -> Result<Vec<u8>> {
+        let owner_key = self
+            .owner_key
+            .as_deref()
+            .filter(|_| daemon_api::owner::is_owner_route(method.as_str(), path));
+        let mut rb = self
+            .http
+            .request(method, format!("{}{path}", self.base))
+            .bearer_auth(&self.token)
+            .timeout(Duration::from_secs(30));
+        if let Some(key) = owner_key {
+            rb = rb.header(daemon_api::owner::OWNER_HEADER, key);
+        }
+        let resp = rb.send().await.map_err(|e| self.unreachable(&e))?;
+        let resp = self.check(resp).await?;
+        Ok(resp
+            .bytes()
+            .await
+            .map_err(|e| self.unreachable(&e))?
+            .to_vec())
+    }
+
     /// An owner-only request: also carries the owner key (host: the data dir's
     /// `owner-key` file) in `x-praxi-owner-key`.
     pub async fn request_owner(
