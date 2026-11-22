@@ -157,6 +157,9 @@ test("validateDraft", () => {
   d.botId = "";
   assert.equal(validateDraft(d), "bot");
   d.botId = "b1";
+  // the easy builder starts with a complete choice (every day at 09:00)
+  assert.equal(validateDraft(d), "prompt");
+  d.kind = "natural";
   assert.equal(validateDraft(d), "text");
   d.text = "every day at 9";
   assert.equal(validateDraft(d), "prompt");
@@ -170,7 +173,13 @@ test("validateDraft", () => {
 });
 
 test("buildInput for natural, cron and keep", () => {
-  const d = { ...emptyDraft("b1"), name: " N ", text: "daily", prompt: " go " };
+  const d = {
+    ...emptyDraft("b1"),
+    kind: "natural" as const,
+    name: " N ",
+    text: "daily",
+    prompt: " go "
+  };
   const parsed = { cron: "0 9 * * *" };
   const a = buildInput(d, parsed);
   assert.equal(a.name, "N");
@@ -358,4 +367,12 @@ test("month calendar grid, placement, and keyboard navigation", () => {
   assert.equal(moveCalendarFocusIndex(10, "Home", cells.length), 7);
   assert.equal(moveCalendarFocusIndex(10, "End", cells.length), 13);
   assert.equal(moveCalendarFocusIndex(10, "Enter", cells.length), null);
+});
+
+test("a draft from the easy builder saves the spec the builder made", () => {
+  const d = { ...emptyDraft("b1"), name: "Daily", prompt: "go" };
+  assert.equal(d.kind, "simple");
+  const spec = { cron: "0 9 * * * Europe/Berlin" };
+  assert.deepEqual(buildInput(d, spec).spec, spec);
+  assert.throws(() => buildInput(d, null));
 });

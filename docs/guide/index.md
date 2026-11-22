@@ -62,7 +62,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Create a bot and understand its profile file | [Bots and profiles](bots-and-profiles.md) |
 | Talk to a bot, approve or deny actions | [Chatting and approvals](chatting-and-approvals.md) |
 | Talk to a bot hands-free by voice (desktop app) | [Voice call mode](voice-call.md) |
-| Run something every morning | [Scheduled tasks](scheduled-tasks.md) |
+| Run something every morning | [Scheduled jobs in plain words](schedules.md), [Scheduled tasks](scheduled-tasks.md) (reference) |
 | Replay a recorded sequence of steps without a model | [Workflows](workflows.md) |
 | Teach a bot how to handle a tricky web page or app | [Skills](skills.md) |
 | Create, import, update or delete shared skills through the local API | [Managing shared skills](skill-management-api.md) |
@@ -82,6 +82,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Let a bot read Home Assistant entities and call services | [Home Assistant](home-assistant.md) |
 | Let a bot search the web and read pages without a browser | [Web tools](web.md) |
 | Give a bot a scratchpad between runs | [Notes](agent-tools.md) |
+| Let a bot work in apps on your own PC | [Computer use](computer-use.md) |
 | Set up knowledge embeddings (optional; knowledge search works without them) | [Set up knowledge embeddings](knowledge-embeddings.md) |
 | Look up a command or flag | [CLI reference](cli-reference.md) |
 | Back up and restore your data (encrypted) | [Encrypted backup and restore](backup.md) |

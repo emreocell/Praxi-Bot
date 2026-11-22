@@ -7327,6 +7327,140 @@
         ]
       }
     },
+    "/v1/local-install": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "The curated models ranked for this computer, and the install progress.",
+        "operationId": "get_local_install",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalInstallDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Starts downloading and starting the chosen model. Returns at once; poll `GET`.",
+        "operationId": "start_local_install",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartInstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallStateDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "unknown model or unsupported computer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "an install is already running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Stops a running download, or stops the local model program.",
+        "operationId": "stop_local_install",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallStateDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not the local owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/local-models": {
       "get": {
         "tags": [
@@ -18582,6 +18716,73 @@
           }
         }
       },
+      "InstallErrorKindDto": {
+        "type": "string",
+        "description": "Why it failed, as a stable kind the UI turns into a sentence.",
+        "enum": [
+          "unsupported",
+          "disk",
+          "network",
+          "checksum",
+          "port_busy",
+          "start_failed",
+          "other"
+        ]
+      },
+      "InstallPhaseDto": {
+        "type": "string",
+        "description": "Where the install is.",
+        "enum": [
+          "idle",
+          "downloading_runtime",
+          "unpacking",
+          "downloading_model",
+          "starting",
+          "ready",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "InstallStateDto": {
+        "type": "object",
+        "description": "Progress of the current or last install.",
+        "required": [
+          "phase",
+          "bytes_done",
+          "bytes_total"
+        ],
+        "properties": {
+          "bytes_done": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bytes_total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InstallErrorKindDto"
+              }
+            ]
+          },
+          "model_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phase": {
+            "$ref": "#/components/schemas/InstallPhaseDto"
+          }
+        }
+      },
       "InviteRole": {
         "type": "string",
         "enum": [
@@ -19219,6 +19420,37 @@
           }
         }
       },
+      "LocalInstallDto": {
+        "type": "object",
+        "description": "Response of `GET /v1/local-install`.",
+        "required": [
+          "supported",
+          "runtime_size_bytes",
+          "models",
+          "state"
+        ],
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedModelDto"
+            }
+          },
+          "runtime_size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Download size of the runtime program.",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/InstallStateDto"
+          },
+          "supported": {
+            "type": "boolean",
+            "description": "False when no pinned runtime exists for this operating system / processor."
+          }
+        }
+      },
       "LocalModelDto": {
         "type": "object",
         "description": "One curated local model with its verdict.",
@@ -19317,6 +19549,66 @@
           "running": {
             "type": "boolean",
             "description": "The server answered on its loopback port."
+          }
+        }
+      },
+      "ManagedFitDto": {
+        "type": "string",
+        "description": "How a model is expected to run here.",
+        "enum": [
+          "comfortable",
+          "slow",
+          "too_large",
+          "unknown"
+        ]
+      },
+      "ManagedModelDto": {
+        "type": "object",
+        "description": "One model the owner can install.",
+        "required": [
+          "id",
+          "display_name",
+          "size_bytes",
+          "licence",
+          "min_ram_gib",
+          "fit",
+          "recommended"
+        ],
+        "properties": {
+          "disk_ok": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "False when free disk space is smaller than runtime plus model plus a safety margin."
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "fit": {
+            "$ref": "#/components/schemas/ManagedFitDto"
+          },
+          "id": {
+            "type": "string"
+          },
+          "licence": {
+            "type": "string",
+            "description": "SPDX licence id of the model weights."
+          },
+          "min_ram_gib": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "recommended": {
+            "type": "boolean",
+            "description": "The one suggested for this computer."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Download size of the model file.",
+            "minimum": 0
           }
         }
       },
@@ -23571,6 +23863,19 @@
               "null"
             ],
             "description": "SSH user (default `ubuntu`)."
+          }
+        }
+      },
+      "StartInstallRequest": {
+        "type": "object",
+        "description": "Body of `POST /v1/local-install`.",
+        "required": [
+          "model_id"
+        ],
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "description": "One of the ids from `GET /v1/local-install`."
           }
         }
       },

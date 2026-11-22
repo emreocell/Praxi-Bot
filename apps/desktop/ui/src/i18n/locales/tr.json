@@ -930,6 +930,7 @@
     },
     "color": "Renk",
     "colorCustom": "Özel renk",
+    "colorSwatch": "Renk {{hex}}",
     "computer": "Bilgisayar",
     "editTitle": "Botu düzenle",
     "engine": {
@@ -997,7 +998,7 @@
   "botLimits": {
     "card": {
       "body": {
-        "tokens": "Bu bot token limitini doldurdu. Koşu model çağrılmadan durduruldu, yani limit aşılmadı.",
+        "tokens": "Bu bot kullanım sınırını (modelin okuyup yazabileceği metin miktarı) doldurdu. Koşu model çağrılmadan durduruldu, yani limit aşılmadı.",
         "usd": "Bu bot harcama limitini doldurdu. Koşu model çağrılmadan durduruldu, yani limit aşılmadı."
       },
       "raise": "Limiti yükselt",
@@ -1012,15 +1013,15 @@
       "waiting": "Tamam. Limit {{when}} tarihinde sıfırlanınca bot yeniden çalışabilir.",
       "waitingUnknown": "Tamam. Limit sıfırlanınca bot yeniden çalışabilir."
     },
-    "defaultNote": "Bu botun henüz kayıtlı limiti yok, bu yüzden günde {{usd}} veya {{tokens}} token güvenli üst sınırı geçerli. Bot daha fazlasına ihtiyaç duyuyorsa buradan yükselt.",
+    "defaultNote": "Bu botun henüz kayıtlı limiti yok, bu yüzden günde {{usd}} veya {{amount}} metin parçası güvenli üst sınırı geçerli. Bot daha fazlasına ihtiyaç duyuyorsa buradan yükselt.",
     "field": {
-      "hard_tokens": "Durdurma eşiği (token)",
+      "hard_tokens": "Durdurma eşiği (kullanım)",
       "hard_usd": "Durdurma eşiği (USD)",
-      "soft_tokens": "Uyarı eşiği (token)",
+      "soft_tokens": "Uyarı eşiği (kullanım)",
       "soft_usd": "Uyarı eşiği (USD)"
     },
-    "hint": "Uyarı yalnızca %80 ve %100'de bildirim verir. Durdurma, model çağrılmadan koşuyu bitirir. Fiyatı bilinmeyen modellerde yalnızca token sayılır. Zamanlamalar ve kanal mesajları aynı limitlere uyar.",
-    "invalid": "Pozitif bir miktar gir (para 0,01'den başlar, token tam sayı olmalı) ya da alanı boş bırak.",
+    "hint": "Uyarı yalnızca %80 ve %100'de bildirim verir. Durdurma, model çağrılmadan koşuyu bitirir. Fiyatı bilinmeyen modellerde yalnızca kullanım sayılır. Zamanlamalar ve kanal mesajları aynı limitlere uyar.",
+    "invalid": "Pozitif bir miktar gir (para 0,01'den başlar, kullanım tam sayı olmalı) ya da alanı boş bırak.",
     "order": "Uyarı eşiği durdurma eşiğinden yüksek olamaz.",
     "period": {
       "daily": "Günlük",
@@ -1033,7 +1034,7 @@
     "saving": "Kaydediliyor…",
     "unlimited": "Limit yok",
     "unreported": "{{count}} çağrı kullanım bildirmedi ve temkinli bir tahminle sayıldı.",
-    "used": "{{usd}} ve {{tokens}} token kullanıldı. Sıfırlanma: {{when}}."
+    "used": "{{usd}} ve {{amount}} metin parçası kullanıldı. Sıfırlanma: {{when}}."
   },
   "botPanel": {
     "botsComputer": "{{bot}} botunun bilgisayarı · {{name}}",
@@ -2002,6 +2003,9 @@
     "deny": "Reddet",
     "description": "Eşleştirdiğin sunucular, yalnızca sen izin verirsen bu bilgisayarın ekranına bakıp işlem yapmak isteyebilir.",
     "details": "Tam olarak",
+    "enableAction": "Ekran ve girişe izin ver",
+    "enableHint": "{{name}} bu bilgisayarın ekranını görebilsin ve kullanabilsin. Tıklama ve yazma işlemleri için yine onayın istenir.",
+    "enableTitle": "Bilgisayar kullanımını aç",
     "explain": "Varsayılan olarak kapalı. Açıkken sunucudaki botlar bu bilgisayarın ekranına bakabilir. Tıklayan, yazan veya bir şey açan her işlem yine önce sana sorar; Durdur her zaman önceliklidir.",
     "family": {
       "browser": "{{name}} üzerindeki botlar bu bilgisayarın tarayıcısını kullanabilsin",
@@ -2088,12 +2092,7 @@
     },
     "localHint": "Burada, bu PC'de çalışır",
     "makeHome": "Bu sunucuyu botlarımın evi yap…",
-    "menu": "Bilgisayar",
-    "stopFailed": "Çalışmaları durdurmak için sunucuya ulaşılamadı.",
-    "stopHost": "Sunucudaki tüm çalışmaları durdur",
-    "stopHostHint": "Şu an orada çalışanları durdurur",
-    "stopNone": "Sunucuda çalışan bir şey yok.",
-    "stopped": "Sunucuda {{count}} çalışma durduruldu."
+    "menu": "Bilgisayar"
   },
   "control": {
     "starting": "Çalışıyor…"
@@ -2172,6 +2171,22 @@
     "runningLabel": "Bot çalışması etkin",
     "sectionTitle": "Geliştirici",
     "simulateBotRun": "Bot çalışmasını simüle et"
+  },
+  "digest": {
+    "cost": "{{calls}} model çağrısı, {{cost}}.",
+    "done": "Tamamlanan: {{count}}",
+    "empty": "Botların bugün henüz bir şey yapmadı.",
+    "failed": "Başarısız: {{count}}",
+    "noCalls": "Henüz model çağrısı yok.",
+    "notifyPrivate": "Günlük özetin hazır. Okumak için uygulamayı aç.",
+    "notifyTitle": "Botların bugün",
+    "ofLimit": "Bu, günlük limitin {{percent}} kadarı.",
+    "running": "Çalışan: {{count}}",
+    "stopped": "Durdurulan: {{count}}",
+    "subtitle": "Botların gece yarısından beri neler yaptığı ve maliyeti.",
+    "title": "Bugün",
+    "totalCost": "Maliyet: {{cost}}",
+    "waiting": "Seni bekleyen: {{count}}"
   },
   "engineConsent": {
     "allow": "{{cli}} için izin ver",
@@ -2984,6 +2999,8 @@
   "help": {
     "center": {
       "allDocs": "Tam kılavuzu aç",
+      "guideNote": "Kılavuz sayfaları şimdilik İngilizce.",
+      "guideTitle": "Tam kılavuzda",
       "intro": "İnsanların ilk sorduğu soruların kısa cevapları. Aramak için bir kelime yaz.",
       "noMatch": "Cevap bulunamadı. Tek bir basit kelime dene ya da aşağıdan tam kılavuzu aç.",
       "readMore": "Kılavuzda devamını oku",
@@ -3037,19 +3054,19 @@
       "title": "{{name}} artık botlarının evi"
     },
     "banner": {
-      "back": "{{name}} bilgisayarına dön",
+      "back": "{{name}} konumuna geç",
       "offline": "Botlarının bilgisayarı çevrimdışı. Yeniden bağlanılıyor… Liste en son görülen.",
-      "temporary": "Şimdilik bu bilgisayarda çalışıyorsun. Botların {{name}} üzerinde yaşıyor.",
-      "workHere": "Şimdilik bu bilgisayarda çalış"
+      "temporary": "Botların bu bilgisayarda çalışıyor. {{name}} kurulu kalır, istediğin zaman ona geçebilirsin.",
+      "workHere": "Bu bilgisayarı kullan"
     },
     "chip": {
       "connecting": "{{name}} · bağlanıyor",
       "degraded": "{{name}} · kısıtlı",
       "local": "Bu bilgisayar",
       "offline": "{{name}} · çevrimdışı",
-      "online": "{{name}} · çevrimiçi",
+      "online": "{{name}}",
       "starting": "{{name}} · başlıyor",
-      "temporary": "Bu bilgisayar · şimdilik"
+      "temporary": "Bu bilgisayar"
     },
     "copy": "Kopyala",
     "engines": {
@@ -3074,19 +3091,12 @@
     "hint": "{{name}} üzerinde",
     "menu": {
       "add": "Sunucu ekle",
-      "backHome": "{{name}} bilgisayarına dön",
-      "backHomeHint": "Şimdilik bu bilgisayarda çalışıyorsun.",
       "makeHome": "{{name}} botlarımın evi olsun",
       "pcOff": "Kapalı · botların bu bilgisayarı kullanamaz",
       "pcOn": "Açık · her işlem burada sana sorar",
-      "stop": "{{name}} üzerindeki her şeyi durdur",
-      "stopHint": "Orada şu an süren her çalışmayı durdurur.",
       "sync": "Kurulumumu {{name}} ile eşitle",
       "terminal": "Sunucuda terminal",
-      "title": "Botlarının bilgisayarı",
-      "viewScreen": "Ekranını gör",
-      "workHere": "Şimdilik bu bilgisayarda çalış",
-      "workHereHint": "Geri dönene kadar bu bilgisayarın kendi botlarını gösterir."
+      "viewScreen": "Ekranını gör"
     },
     "saved": "Kaydedildi.",
     "target": {
@@ -3098,13 +3108,6 @@
   },
   "homeMenu": {
     "lastSync": "Son eşitleme: {{when}}",
-    "lives": {
-      "connecting": "Botların burada yaşıyor · bağlanıyor",
-      "local": "Botların burada yaşıyor",
-      "offline": "Botların burada yaşıyor · çevrimdışı",
-      "online": "Botların burada yaşıyor · çevrimiçi",
-      "temporary": "Şimdilik botların bu bilgisayarda çalışıyor"
-    },
     "pcOff": "Botların bu bilgisayarı kullanamaz",
     "pcOn": "Her işlem burada sana sorulur",
     "sync": "Kurulumumu eşitle",
@@ -3426,6 +3429,34 @@
     "viewOnly": "Salt izleme",
     "watchAction": "Devral"
   },
+  "localInstall": {
+    "cancel": "İndirmeyi durdur",
+    "disclosure": "Program github.com/ggml-org/llama.cpp adresinden, model huggingface.co adresinden gelir. Praxi her dosyayı sabit bir sağlama toplamıyla karşılaştırır ve uyuşmayan dosyayı reddeder. İstediğiniz an durdurabilirsiniz; durdurulan indirme sonra kaldığı yerden devam eder.",
+    "download": "İndirme boyutu: {{size}} (modeli çalıştıran program için ayrıca {{runtime}}).",
+    "errorChecksum": "İndirilen dosya beklenenle uyuşmadı ve silindi. Daha sonra yeniden deneyin.",
+    "errorDisk": "Yeterli boş disk alanı yok. Biraz yer açıp yeniden deneyin.",
+    "errorNetwork": "İndirme yarıda kesildi. İnternet bağlantınızı kontrol edip yeniden deneyin.",
+    "errorOther": "Kurulum sırasında bir sorun çıktı. Yeniden deneyin.",
+    "errorPortBusy": "8080 numaralı bağlantı noktasını başka bir program kullanıyor. Onu kapatıp yeniden deneyin.",
+    "errorStartFailed": "Model başlatılamadı. Daha küçük bir model deneyin.",
+    "errorUnsupported": "Tek tıkla yerel model henüz bu bilgisayar için kullanılamıyor.",
+    "fitFast": "rahat çalışır",
+    "fitSlow": "çalışır, ama yavaş",
+    "install": "Kur ve başlat",
+    "intro": "Küçük bir yapay zekâ modelini indirip bu bilgisayarda çalıştırın. Kullandığınız sürece yazdığınız hiçbir şey bu bilgisayardan çıkmaz.",
+    "licence": "Lisans: {{licence}}",
+    "noDisk": "yeterli disk alanı yok",
+    "phaseCancelled": "Durduruldu. Yeniden başlatabilirsiniz; indirme kaldığı yerden devam eder.",
+    "phaseDownloadingModel": "Model indiriliyor… %{{percent}}",
+    "phaseDownloadingRuntime": "Program indiriliyor… %{{percent}}",
+    "phaseReady": "Bu bilgisayarda çalışıyor. Sağlayıcı olarak “llama.cpp” seçin; Praxi onu otomatik bulur.",
+    "phaseStarting": "Model başlatılıyor (bir dakika sürebilir)…",
+    "phaseUnpacking": "Program açılıyor…",
+    "recommended": "Önerilen",
+    "stop": "Yerel modeli durdur",
+    "title": "Tek tıkla yerel model",
+    "tooLarge": "bu bilgisayar için çok büyük"
+  },
   "localModels": {
     "bestEffort": "Bunlar tahmindir, garanti değildir. Praxi komutları sizin yerinize çalıştırmaz ve bu donanım bilgisi bu bilgisayarda kalır.",
     "cardDescription": "Ollama veya LM Studio için bu bilgisayara uyanlar. En iyi tahmin.",
@@ -3666,12 +3697,14 @@
     "detail": {
       "failed": "Başarısız: {{detail}}",
       "longRun": "{{detail}}",
-      "needsYou": "{{detail}}"
+      "needsYou": "{{detail}}",
+      "scheduleDone": "{{detail}}"
     },
     "generic": {
       "failed": "Bir çalışma başarısız oldu.",
       "longRun": "Uzun bir görev bitti.",
-      "needsYou": "Dikkatin gerekiyor."
+      "needsYou": "Dikkatin gerekiyor.",
+      "scheduleDone": "Zamanlanmış bir iş bitti."
     }
   },
   "notifyHistory": {
@@ -3682,9 +3715,11 @@
     "held": "Tutuldu (sessiz saatler)",
     "heldMuted": "Tutuldu (bot sessizde)",
     "kind": {
+      "digest": "Günlük özet",
       "failed": "Çalışma başarısız",
       "longRun": "Uzun çalışma bitti",
-      "needsYou": "Sizi bekliyor"
+      "needsYou": "Sizi bekliyor",
+      "scheduleDone": "Zamanlanmış iş bitti"
     },
     "markAllRead": "Tümünü okundu say",
     "openNeeds": "Sizi bekleyenleri aç",
@@ -3730,7 +3765,9 @@
       "bot": "Bot",
       "chat": "Sohbet",
       "navigate": "Gezinti",
-      "schedule": "Zamanlama"
+      "recentChat": "Son sohbet",
+      "schedule": "Zamanlama",
+      "settings": "Ayarlar"
     },
     "help": "Yardım ve cevaplar",
     "helpKeywords": "yardım sorular sss nasıl nedir kılavuz",
@@ -3739,6 +3776,7 @@
     "placeholder": "Bir komut yaz…",
     "runSchedule": "Şimdi çalıştır: {{name}}",
     "scheduleStarted": "Zamanlama başlatıldı",
+    "settingsPage": "Ayarlar: {{name}}",
     "shortcuts": "Klavye kısayolları",
     "switchBot": "{{name}} botuna geç",
     "title": "Komut paleti"
@@ -3871,6 +3909,77 @@
     "resets": "Yenilenme: {{when}}",
     "title": "Kalan kota"
   },
+  "runLocation": {
+    "addHint": "İsteğe bağlı. Bu bilgisayar kapalıyken de botların çalışmaya devam eder.",
+    "on": "{{name}} üzerinde",
+    "serverHint": "Bu bilgisayar kapalıyken de açık kalır",
+    "serverState": {
+      "connecting": "bağlanıyor",
+      "degraded": "kısıtlı",
+      "offline": "çevrimdışı",
+      "online": "çevrimiçi",
+      "starting": "başlıyor"
+    },
+    "status": {
+      "connecting": "{{name}} ile bağlantı kuruluyor…",
+      "degraded": "Botların {{name}} üzerinde çalışıyor · kısıtlı",
+      "local": "Botların bu bilgisayarda çalışıyor",
+      "offline": "{{name}} çevrimdışı",
+      "online": "Botların {{name}} üzerinde çalışıyor · çevrimiçi",
+      "starting": "Botların {{name}} üzerinde çalışıyor · başlıyor",
+      "temporary": "Botların bu bilgisayarda çalışıyor"
+    },
+    "stopAll": "{{name}} üzerinde çalışan her şeyi durdur",
+    "stopBody": "{{name}} üzerinde şu an süren {{count}} çalışma durdurulur. Şimdiye kadar yapılan iş korunur.",
+    "stopBody_one": "{{name}} üzerinde şu an süren {{count}} çalışma durdurulur. Şimdiye kadar yapılan iş korunur.",
+    "stopConfirm": "{{count}} çalışmayı durdur",
+    "stopConfirm_one": "{{count}} çalışmayı durdur",
+    "stopFailed": "Çalışmaları durdurmak için {{name}} ile bağlantı kurulamadı.",
+    "stopHint": "Şu an {{count}} çalışma sürüyor",
+    "stopHint_one": "Şu an {{count}} çalışma sürüyor",
+    "stopIdle": "Şu an çalışan bir şey yok",
+    "stopNone": "{{name}} üzerinde çalışan bir şey yoktu.",
+    "stopTitle": "{{name}} üzerindeki her şey durdurulsun mu?",
+    "stopped": "{{name}} üzerinde {{count}} çalışma durduruldu.",
+    "stopped_one": "{{name}} üzerinde {{count}} çalışma durduruldu.",
+    "switchBody": "{{from}} üzerinde {{count}} çalışma hâlâ sürüyor. Hiçbir şey durdurulmaz: orada çalışmaya devam eder, istediğin zaman geri dönebilirsin.",
+    "switchBody_one": "{{from}} üzerinde {{count}} çalışma hâlâ sürüyor. Hiçbir şey durdurulmaz: orada çalışmaya devam eder, istediğin zaman geri dönebilirsin.",
+    "switchConfirm": "{{to}} konumuna geç",
+    "switchTitle": "{{to}} konumuna geçilsin mi?",
+    "thisComputer": "Bu bilgisayar",
+    "thisComputerHint": "Botların burada çalışır. Sunucu gerekmez.",
+    "title": "Botlarım nerede çalışsın?"
+  },
+  "runReport": {
+    "answered": "Cevapladın",
+    "approved": "İzin verdin",
+    "asked": "Sana bir soru sordu",
+    "askedCredential": "Parola veya anahtar istedi",
+    "button": "Zaman çizelgesi",
+    "credentialCancelled": "Vazgeçtin",
+    "credentialSaved": "Sen kaydettin",
+    "declined": "İzin verilmedi",
+    "exportHtml": "Web sayfası olarak kaydet",
+    "exportMarkdown": "Metin olarak kaydet",
+    "exported": "Rapor kaydedildi",
+    "footer": "Praxi ile hazırlandı. Özel ayrıntılar dışarıda bırakıldı.",
+    "hint": "Botun bu çalışmada neler yaptığını adım adım gör",
+    "noSteps": "Bot bu çalışmada hiçbir araç kullanmadı.",
+    "outcome": "Sonuç",
+    "outcomes": {
+      "done": "Bitti",
+      "failed": "Başarısız",
+      "stopped": "Senin tarafından durduruldu",
+      "unfinished": "Bitmedi"
+    },
+    "privacy": "Özel ayrıntılar dışarıda bırakılır: yazılanlar, okunanlar ve verdiğin cevaplar gösterilmez; parola ya da anahtara benzeyen her şey gizlenir.",
+    "started": "Başlangıç",
+    "title": "Botun yaptıkları",
+    "took": "Süre",
+    "tookTime": "{{time}} sürdü",
+    "unanswered": "Cevap yok",
+    "waitingForYou": "Seni bekliyor"
+  },
   "runStatus": {
     "showCard": "Göster",
     "stopping": "Durduruluyor…",
@@ -3931,14 +4040,28 @@
     "filterAll": "Tümü",
     "filterIssues": "Başarısız ve kaçırılan",
     "form": {
+      "advanced": "Gelişmiş",
+      "advancedHint": "Cron bilenler için. Çoğu kişi burayı atlayabilir.",
       "botFixed": "Bir zamanlamanın botu değiştirilemez.",
-      "cannotParse": "Bu cümle anlaşılamadı. “her gün 09:00” dene ya da cron kullan.",
+      "cannotParse": "Bunu anlayamadım. \"her gün 09:00\", \"hafta içi her sabah 8\" ya da \"every day at 9\" deneyin veya Kolay sekmesini kullanın.",
       "cannotPreview": "Bu zamanlama önizlenemedi. Söz dizimini ve saat dilimini kontrol et.",
+      "confirmParsed": "Bunu kastettiğinizi kontrol edin, sonra Oluştur'a basın.",
       "create": "Oluştur",
       "cron": "Cron ifadesi",
       "cronHint": "Beş alan; istersen sonuna bir saat dilimi ekle.",
+      "customHint": "Kendi cümlenle anlat, örneğin \"her pazartesi 08:00\".",
+      "date": "Hangi gün?",
       "editTitle": "Zamanlanmış görevi düzenle",
       "firstRun": "ilk çalışma {{when}}",
+      "freq": {
+        "custom": "Diğer",
+        "daily": "Her gün",
+        "label": "Ne sıklıkla?",
+        "monthly": "Her ay",
+        "once": "Bir kez",
+        "weekdays": "Hafta içi",
+        "weekly": "Her hafta"
+      },
       "invalid": {
         "bot": "Bir bot seç.",
         "cron": "Bir cron ifadesi gir.",
@@ -3950,28 +4073,52 @@
       "kind": {
         "cron": "Cron",
         "keep": "Mevcut kalsın",
-        "natural": "Cümleyle"
+        "natural": "Yazarak anlat",
+        "simple": "Kolay"
       },
-      "misfire": "Uygulama o saatte kapalıysa",
+      "misfire": "Planlanan zamanda bilgisayar kapalıysa",
+      "misfireHint": "Çalışma zamanı geldiğinde bilgisayar kapalı ya da uykudaysa ne olacağını belirler.",
       "misfirePolicy": {
-        "run_all": "Kaçan her seferi çalıştır",
-        "run_once": "Dönünce bir kez çalıştır",
-        "skip": "Atla"
+        "run_all": "Yetiş: kaçan her zamanı çalıştır (en çok 10)",
+        "run_once": "Bilgisayar açılınca bir kez çalıştır",
+        "skip": "Atla ve bir sonraki zamanı bekle"
       },
+      "monthDay": "Ayın kaçıncı günü?",
+      "monthDayHint": "1 ile 28 arası, böylece her ay çalışır.",
       "name": "Ad",
       "newTitle": "Yeni zamanlanmış görev",
       "nextRunsTitle": "Sonraki 5 çalışma ({{tz}})",
       "noFirstRun": "yaklaşan çalışma yok",
+      "notify": {
+        "always": "Her seferinde",
+        "hint": "Bu bilgisayarda saklanır. Bot onayınıza ihtiyaç duyarsa size her zaman haber verilir.",
+        "label": "Çalışınca bana haber ver",
+        "never": "Hiçbir zaman",
+        "problems": "Sadece bir sorun olursa"
+      },
+      "parsedAs": "Şöyle anlaşıldı: {{what}}",
       "payloadKept": "Bu zamanlama bir iş akışı ya da araç çalıştırır; o kısım değişmez.",
       "preview": "Önizle",
       "prompt": "İstem",
       "promptHint": "Bottan her seferinde yapması istenen şey.",
       "save": "Kaydet",
+      "simpleProblem": {
+        "date": "Çalışacağı günü seçin.",
+        "past": "Bu zaman geçti. Daha ileri bir zaman seçin.",
+        "time": "09:00 gibi bir saat seçin."
+      },
+      "templates": {
+        "hint": "Formu doldurmak için birini seçin. Sonra her şeyi değiştirebilirsiniz.",
+        "title": "Bir örnekle başla"
+      },
       "text": "Zamanlama cümlesi",
       "textHint": "Türkçe ya da İngilizce. Saatler {{tz}} diliminde.",
       "textPlaceholder": "her gün 09:00, every weekday at 9",
+      "time": "Saat kaçta?",
       "tz": "Saat dilimi",
       "tzCronHint": "Cron ifadesinde saat dilimi belirtilmemiş 5 alan varsa kullanılır.",
+      "tzShown": "Saatler {{tz}} dilimine göre.",
+      "weekday": "Haftanın hangi günü?",
       "when": "Ne zaman"
     },
     "history": "Çalışma geçmişi",
@@ -4180,6 +4327,12 @@
       },
       "noFile": "Arka plan görseli seçilmedi",
       "title": "Arka plan görseli"
+    },
+    "digest": {
+      "enabled": "Günlük özet gönder",
+      "enabledHint": "Günde bir kısa bildirim: botların neler yaptı ve maliyeti ne oldu. Sessiz saatler geçerlidir: o saatlerde yalnızca bildirim geçmişine düşer.",
+      "time": "Şu saatte gönder",
+      "title": "Günlük özet"
     },
     "hotkey": {
       "currentLabel": "Aktif kısayol",
@@ -5023,7 +5176,7 @@
     "total": "Toplam",
     "trend": {
       "ariaLabel": "{{days}} günlük {{metric}} eğilimi",
-      "dayReadout": "{{day}} · {{calls}} çağrı · {{tokens}} token · {{cost}}",
+      "dayReadout": "{{day}} · {{calls}} çağrı · {{amount}} token · {{cost}}",
       "hoverHint": "Toplamlarını görmek için bir günün üzerine gelin veya odaklanın.",
       "metric": "Grafik ölçütü",
       "metrics": {

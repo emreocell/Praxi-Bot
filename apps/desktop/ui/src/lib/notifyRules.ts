@@ -6,7 +6,7 @@ import { describeTool, isSendTool, resolveToolCall } from "./toolLabels.ts";
 /** A run that took longer than this notifies when it finishes (unfocused). */
 export const LONG_RUN_MS = 30_000;
 
-export type NotifyKind = "needsYou" | "longRun" | "failed";
+export type NotifyKind = "needsYou" | "longRun" | "failed" | "scheduleDone" | "digest";
 
 export interface NotifyPrefs {
   notifyNeedsYou: boolean;
@@ -104,6 +104,11 @@ export interface NotifyContext {
   /** The main window has focus. */
   focused: boolean;
   prefs: NotifyPrefs;
+  /**
+   * The person's choice for the scheduled job this run belongs to (`undefined` for a
+   * normal chat run).  An approval always notifies; this only shapes how the run ends.
+   */
+  scheduleNotify?: "always" | "problems" | "never";
 }
 
 /** A user-initiated stop is not a failure. */
@@ -159,10 +164,20 @@ export function decideNotification(
       if (env.parent_run_id || run?.parentRunId) {
         return null;
       }
+      const choice = ctx.scheduleNotify;
+      if (choice === "never") {
+        return null;
+      }
       if (e.error) {
         return ctx.prefs.notifyFailed && !isCancellation(e.error)
           ? { kind: "failed", runId: e.run_id, ...base, detail: e.error }
           : null;
+      }
+      if (choice === "always") {
+        return { kind: "scheduleDone", runId: e.run_id, ...base, detail: "" };
+      }
+      if (choice === "problems") {
+        return null;
       }
       const started = run?.startedMs ?? env.ts_ms;
       return ctx.prefs.notifyLongRun && env.ts_ms - started > LONG_RUN_MS

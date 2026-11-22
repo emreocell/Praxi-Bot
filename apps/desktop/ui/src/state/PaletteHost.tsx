@@ -7,6 +7,9 @@ import {
 } from "../components/CommandPalette";
 import { useToast } from "../components/Toast";
 import { botView } from "../lib/botProfile";
+import { chatTitleLabel } from "../lib/chatTitle";
+import { recentChats, settingsPageIds } from "../lib/paletteEntries";
+import type { SettingsPageId } from "../lib/settingsPages";
 import { useDaemon } from "./DaemonContext";
 import { humanLine } from "../lib/humanError";
 
@@ -31,17 +34,19 @@ export function PaletteHost({
   onScreen,
   onBot,
   onChat,
+  onSettingsPage,
   onHelp
 }: {
   currentBotId: string | undefined;
   onScreen: (screen: PaletteScreen) => void;
   onBot: (botId: string) => void;
   onChat: (chatId: string, botId: string) => void;
+  onSettingsPage: (page: SettingsPageId) => void;
   onHelp: () => void;
 }) {
   const { t } = useTranslation();
   const toast = useToast();
-  const { client, bots, refreshChats } = useDaemon();
+  const { client, bots, chats, refreshChats } = useDaemon();
   const [open, setOpen] = useState(false);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
 
@@ -139,6 +144,27 @@ export function PaletteHost({
         run: () => onBot(b.id)
       });
     }
+    for (const c of recentChats(chats)) {
+      const bot = bots.find((b) => b.id === c.bot_id);
+      const botName = bot ? botView(bot).name : "";
+      const title = chatTitleLabel(c.title, t("botPanel.untitled"));
+      out.push({
+        id: `chat-${c.id}`,
+        title,
+        group: t("palette.group.recentChat"),
+        keywords: botName ? [botName] : [],
+        run: () => onChat(c.id, c.bot_id)
+      });
+    }
+    for (const page of settingsPageIds()) {
+      out.push({
+        id: `settings-${page}`,
+        title: t("palette.settingsPage", { name: t(`settings.pages.${page}.name`) }),
+        group: t("palette.group.settings"),
+        keywords: [t(`settings.pages.${page}.description`)],
+        run: () => onSettingsPage(page)
+      });
+    }
     for (const s of schedules) {
       out.push({
         id: `sched-${s.id}`,
@@ -156,7 +182,7 @@ export function PaletteHost({
       });
     }
     return out;
-  }, [t, bots, schedules, currentBotId, onScreen, onBot, onHelp, newChat, client, toast]);
+  }, [t, bots, chats, schedules, currentBotId, onScreen, onBot, onChat, onSettingsPage, onHelp, newChat, client, toast]);
 
   return open ? (
     <CommandPalette commands={commands} onClose={() => setOpen(false)} />

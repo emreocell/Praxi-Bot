@@ -2066,6 +2066,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/local-install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The curated models ranked for this computer, and the install progress. */
+        get: operations["get_local_install"];
+        put?: never;
+        /** Starts downloading and starting the chosen model. Returns at once; poll `GET`. */
+        post: operations["start_local_install"];
+        /** Stops a running download, or stops the local model program. */
+        delete: operations["stop_local_install"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/local-models": {
         parameters: {
             query?: never;
@@ -5862,6 +5881,26 @@ export interface components {
             applied_through: number;
             state: components["schemas"]["ViewState"];
         };
+        /**
+         * @description Why it failed, as a stable kind the UI turns into a sentence.
+         * @enum {string}
+         */
+        InstallErrorKindDto: "unsupported" | "disk" | "network" | "checksum" | "port_busy" | "start_failed" | "other";
+        /**
+         * @description Where the install is.
+         * @enum {string}
+         */
+        InstallPhaseDto: "idle" | "downloading_runtime" | "unpacking" | "downloading_model" | "starting" | "ready" | "failed" | "cancelled";
+        /** @description Progress of the current or last install. */
+        InstallStateDto: {
+            /** Format: int64 */
+            bytes_done: number;
+            /** Format: int64 */
+            bytes_total: number;
+            error?: null | components["schemas"]["InstallErrorKindDto"];
+            model_id?: string | null;
+            phase: components["schemas"]["InstallPhaseDto"];
+        };
         /** @enum {string} */
         InviteRole: "desktop" | "phone" | "node" | "host";
         /** @enum {string} */
@@ -6052,6 +6091,18 @@ export interface components {
             models: components["schemas"]["LocalModelDto"][];
             recommended?: string | null;
         };
+        /** @description Response of `GET /v1/local-install`. */
+        LocalInstallDto: {
+            models: components["schemas"]["ManagedModelDto"][];
+            /**
+             * Format: int64
+             * @description Download size of the runtime program.
+             */
+            runtime_size_bytes: number;
+            state: components["schemas"]["InstallStateDto"];
+            /** @description False when no pinned runtime exists for this operating system / processor. */
+            supported: boolean;
+        };
         /** @description One curated local model with its verdict. */
         LocalModelDto: {
             /** @description False when free disk space is smaller than the estimated download. */
@@ -6089,6 +6140,30 @@ export interface components {
             installed_models: string[];
             /** @description The server answered on its loopback port. */
             running: boolean;
+        };
+        /**
+         * @description How a model is expected to run here.
+         * @enum {string}
+         */
+        ManagedFitDto: "comfortable" | "slow" | "too_large" | "unknown";
+        /** @description One model the owner can install. */
+        ManagedModelDto: {
+            /** @description False when free disk space is smaller than runtime plus model plus a safety margin. */
+            disk_ok?: boolean | null;
+            display_name: string;
+            fit: components["schemas"]["ManagedFitDto"];
+            id: string;
+            /** @description SPDX licence id of the model weights. */
+            licence: string;
+            /** Format: int32 */
+            min_ram_gib: number;
+            /** @description The one suggested for this computer. */
+            recommended: boolean;
+            /**
+             * Format: int64
+             * @description Download size of the model file.
+             */
+            size_bytes: number;
         };
         /** @description Metadata only; the response never includes instruction bodies or files. */
         ManagedSkillDto: {
@@ -7821,6 +7896,11 @@ export interface components {
             port?: number | null;
             /** @description SSH user (default `ubuntu`). */
             user?: string | null;
+        };
+        /** @description Body of `POST /v1/local-install`. */
+        StartInstallRequest: {
+            /** @description One of the ids from `GET /v1/local-install`. */
+            model_id: string;
         };
         /**
          * @description How far background startup of the automatic components has got.
@@ -13175,6 +13255,112 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_local_install: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalInstallDto"];
+                };
+            };
+            /** @description caller is not the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    start_local_install: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartInstallRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallStateDto"];
+                };
+            };
+            /** @description unknown model or unsupported computer */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description caller is not the local owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description an install is already running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    stop_local_install: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallStateDto"];
+                };
+            };
+            /** @description caller is not the local owner */
             403: {
                 headers: {
                     [name: string]: unknown;

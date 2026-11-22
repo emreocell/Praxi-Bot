@@ -5,6 +5,7 @@ import {
   beginAction,
   type ControlSnapshot,
   finishBotRun,
+  getControlState,
   isTauriRuntime,
   overlayClick,
   startBotRun,
@@ -20,6 +21,7 @@ import {
   resolveTargetScope
 } from "./controlBridge";
 import { useLiveView } from "./LiveViewContext";
+import { startLocalComputerPresence } from "./localComputerPresence";
 
 /**
  * Connects the daemon to the on-screen overlay (task 017b) and live-view panel
@@ -29,7 +31,7 @@ import { useLiveView } from "./LiveViewContext";
  */
 export function ControlBridgeHost() {
   const { t } = useTranslation();
-  const { client, bots, onDaemonEvent, eventsConnected } = useDaemon();
+  const { client, localApi, bots, onDaemonEvent, eventsConnected } = useDaemon();
   const {
     targets,
     selectedTarget,
@@ -68,6 +70,19 @@ export function ControlBridgeHost() {
     void runtime.readNative();
     return off;
   }, [runtime]);
+
+  // A server-homed chat reports to the server. The PC that actually serves the
+  // desktop RPC still needs its own local presence and takeover heartbeat.
+  useEffect(() => {
+    if (!isTauriRuntime()) return undefined;
+    return startLocalComputerPresence({
+      active: client,
+      local: localApi,
+      read: getControlState,
+      subscribe: (onControlStateChanged) => subscribeOverlayEvents({ onControlStateChanged }),
+      intervalMs: HEARTBEAT_MS
+    });
+  }, [client, localApi]);
 
   // The event stream reconnected: wait for (and fetch) a fresh run list.
   useEffect(() => {

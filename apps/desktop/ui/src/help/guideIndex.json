@@ -1,0 +1,654 @@
+[
+  {
+    "doc": "accessibility.md",
+    "title": "Accessibility",
+    "headings": [
+      "Keyboard navigation",
+      "Skip link and landmarks",
+      "First-run setup wizard",
+      "Chat, step list, and approval cards",
+      "Right panel (BotPanel) and resizable rails",
+      "Settings (SettingsModal)",
+      "Screen-reader announcements and live regions",
+      "Focus indication, themes, and contrast",
+      "Reduced motion and reduced transparency"
+    ],
+    "summary": "Praxi is designed to be usable with a keyboard alone, with assistive technologies such as screen readers, across light, dark, and high-contrast themes, and with reduced motion or reduced transparency…"
+  },
+  {
+    "doc": "agent-tools.md",
+    "title": "Notes",
+    "headings": [],
+    "summary": "Every bot has a small built-in scratchpad between runs: a plan for a long task, a checklist, facts it will need tomorrow. Tools: notes_read (list notes, read one, or search) and notes_write (replace,…"
+  },
+  {
+    "doc": "apps.md",
+    "title": "Connecting apps (the Apps dialog)",
+    "headings": [
+      "Three ways apps connect",
+      "1. Direct OAuth apps",
+      "2. Composio apps",
+      "3. Advanced: MCP servers and token-based services",
+      "What \"Connected\" means",
+      "Managing connections and signing out",
+      "Direct OAuth and MCP servers",
+      "Composio apps",
+      "Per-bot access",
+      "Troubleshooting a stuck or failed connection",
+      "OAuth sign-in is stuck on \"Waiting for the browser sign-in…\"",
+      "Composio sign-in is stuck or the catalog will not refresh",
+      "A local MCP server shows \"Error\" or \"Quarantined\""
+    ],
+    "summary": "The Apps dialog in the desktop app connects Praxi to external services"
+  },
+  {
+    "doc": "backup-and-restore.md",
+    "title": "Restoring older plaintext backups",
+    "headings": [],
+    "summary": "Current versions create encrypted backups; see Encrypted backup and restore."
+  },
+  {
+    "doc": "backup.md",
+    "title": "Encrypted backup and restore",
+    "headings": [
+      "The passphrase",
+      "What is inside",
+      "API keys (--include-secrets)",
+      "Create",
+      "Verify",
+      "Restore",
+      "Damaged files and wrong passphrases",
+      "Format (for the curious)",
+      "Older plaintext backups",
+      "See also"
+    ],
+    "summary": "bot backup writes your bots, chats, memory, skills, workflows, schedules and provider"
+  },
+  {
+    "doc": "bot-spending-limits.md",
+    "title": "Bot spending limits",
+    "headings": [
+      "What you can set",
+      "The default for new bots",
+      "What happens at the limit",
+      "How usage is counted",
+      "Who can change limits"
+    ],
+    "summary": "Every bot can have a daily, weekly and monthly limit on what its model calls"
+  },
+  {
+    "doc": "bots-and-profiles.md",
+    "title": "Bots and profiles",
+    "headings": [
+      "Create a bot",
+      "A complete profile",
+      "Model references",
+      "Permissions in a profile",
+      "Tool filters",
+      "Managing bots",
+      "Main bot and bot order (desktop app)",
+      "Bot avatars (desktop app)",
+      "Subagents",
+      "Planned",
+      "Sharing a bot: profile files and the template gallery",
+      "Computer target"
+    ],
+    "summary": "A bot is a named assistant with its own persona, model choice, tool set and"
+  },
+  {
+    "doc": "calendar.md",
+    "title": "Calendar (CalDAV)",
+    "headings": [
+      "Set it up",
+      "Tools",
+      "Safety"
+    ],
+    "summary": "Bots can read and add events in a CalDAV calendar (Nextcloud, Radicale,"
+  },
+  {
+    "doc": "chatting-and-approvals.md",
+    "title": "Chatting and approvals",
+    "headings": [
+      "Talking to a bot",
+      "Sending a message while the bot is busy",
+      "Attaching files and images",
+      "Voice call (desktop app)",
+      "Slash commands",
+      "Managing chats (desktop app)",
+      "Copying messages and Markdown export",
+      "Unread markers",
+      "Keyboard shortcuts and \"What's new\"",
+      "Sending while the host is offline",
+      "Questions",
+      "Approvals",
+      "How far an approval reaches",
+      "Permission levels",
+      "The four presets",
+      "Absolute floors",
+      "Egress after a read",
+      "Host-status commands on an always-on host",
+      "Runs started by a schedule",
+      "Controlling the desktop",
+      "Undoing file changes",
+      "Limits per turn",
+      "Notifications and approvals",
+      "The step list in the chat"
+    ],
+    "summary": "Every conversation is a chat with one bot. Chats are kept, so you can come"
+  },
+  {
+    "doc": "cli-engines.md",
+    "title": "Coding CLI engines",
+    "headings": [
+      "Security boundary",
+      "Local evidence and attribution",
+      "Running a CLI with its own tools (engine mode)"
+    ],
+    "summary": "Settings → Providers lists CLI engines on the daemon's computer. Refresh"
+  },
+  {
+    "doc": "cli-reference.md",
+    "title": "CLI reference",
+    "headings": [
+      "Global options",
+      "Exit codes",
+      "Commands",
+      "bot setup",
+      "bot serve",
+      "bot doctor",
+      "bot backup create | verify | restore",
+      "bot restore",
+      "bot status",
+      "bot proxy",
+      "bot chat",
+      "bot chats",
+      "bot bots",
+      "bot profile",
+      "bot import",
+      "bot approve",
+      "bot answer",
+      "bot grants",
+      "bot schedules",
+      "bot email",
+      "bot providers",
+      "bot catalog",
+      "bot secrets",
+      "bot channels telegram",
+      "bot completions",
+      "bot man-pages",
+      "bot skills",
+      "bot token",
+      "bot mcp",
+      "bot host",
+      "bot workflow",
+      "bot self-update",
+      "Other binaries",
+      "The HTTP API"
+    ],
+    "summary": "The command is bot. This page follows the command definitions in"
+  },
+  {
+    "doc": "computer-use.md",
+    "title": "Computer use on your own PC",
+    "headings": [
+      "What a bot can do",
+      "Safety",
+      "Not verified"
+    ],
+    "summary": "Bots can work in apps on your Windows PC when the chat uses This computer and"
+  },
+  {
+    "doc": "decision-pool.md",
+    "title": "Optional decision pool",
+    "headings": [
+      "Configure the pool",
+      "Input, answers, and accounting"
+    ],
+    "summary": "The decision pool is an opt-in facility for asking small, structured questions"
+  },
+  {
+    "doc": "docker-host.md",
+    "title": "Running Praxi in Docker (always-on host)",
+    "headings": [
+      "Image variants",
+      "First run",
+      "Pairing the desktop app with the container host",
+      "Upgrades",
+      "Backups of the volume",
+      "Full volume snapshot (recommended before upgrades)",
+      "Portable state backup (bot backup / bot restore)",
+      "Security notes",
+      "Never expose the daemon port publicly",
+      "Who can reach the owner key and passphrase",
+      "Chrome sandbox and --security-opt for WITH_DESKTOP=1"
+    ],
+    "summary": "This guide runs the Praxi always-on host (bot serve --host) inside a Linux"
+  },
+  {
+    "doc": "email.md",
+    "title": "Email integration",
+    "headings": [
+      "How to enable email",
+      "1. Store your password",
+      "2. Configure accounts",
+      "3. Start the daemon",
+      "Managing accounts without editing files",
+      "One mailbox per bot",
+      "Available tools",
+      "Approvals and security",
+      "Give a bot its own address (AgentMail)"
+    ],
+    "summary": "Praxi includes IMAP and SMTP tools that allow your bots to read, search, draft, and send e-mails."
+  },
+  {
+    "doc": "faq.md",
+    "title": "FAQ",
+    "headings": [
+      "Is Praxi ready to use?",
+      "Does anything leave my machine?",
+      "Does it cost money?",
+      "Which operating systems work?",
+      "Can I use it without a terminal?",
+      "Can the bot do anything without asking me?",
+      "How do I stop a bot right now?",
+      "Can I run several bots?",
+      "Where is my data, and how do I back it up?",
+      "How do I back up inside Docker?",
+      "How do I make a bot faster and cheaper?",
+      "Can I record a workflow by demonstrating it?",
+      "Does it have long-term memory?",
+      "Can I add MCP servers or plugins?",
+      "Can one bot control another computer?",
+      "Which other messaging apps are supported?",
+      "Is there voice, image or video generation?",
+      "Can I use Turkish?",
+      "How do I update?",
+      "How do I uninstall?",
+      "Where do I report bugs or contribute?"
+    ],
+    "summary": "It is in early development. The README says there is no stable API and no"
+  },
+  {
+    "doc": "glossary.md",
+    "title": "Glossary",
+    "headings": [],
+    "summary": "Alphabetical reference of core terms used across Praxi, the user guide, and the codebase."
+  },
+  {
+    "doc": "home-assistant.md",
+    "title": "Home Assistant",
+    "headings": [
+      "Set it up",
+      "Tools",
+      "Safety"
+    ],
+    "summary": "Bots can read your Home Assistant entities and call services (turn a light on,"
+  },
+  {
+    "doc": "host-leadership.md",
+    "title": "Host leadership limits",
+    "headings": [],
+    "summary": "Demotion closes automatic admission and stops the scheduler and channels. Runs already admitted (scheduled, webhook, Telegram or chat) continue and can still execute approved tools. This change does…"
+  },
+  {
+    "doc": "host-operations.md",
+    "title": "Operating a Praxi host",
+    "headings": [
+      "Logs",
+      "Start, stop, and restart",
+      "Upgrade and repair",
+      "Roll back",
+      "Backup and restore",
+      "Pairing the desktop app",
+      "Firewall and ports",
+      "Troubleshooting"
+    ],
+    "summary": "Day-to-day operation of the always-on Linux host (systemd, unprivileged user"
+  },
+  {
+    "doc": "index.md",
+    "title": "Praxi user guide",
+    "headings": [
+      "What changed recently",
+      "What is where",
+      "The pieces",
+      "Conventions in this guide"
+    ],
+    "summary": "Praxi (the repository is called Praxi-Bot, the command is bot) is a"
+  },
+  {
+    "doc": "install-windows.md",
+    "title": "Installing on Windows",
+    "headings": [
+      "Before you start",
+      "What gets installed",
+      "Window controls and appearance",
+      "Upgrading",
+      "Uninstalling",
+      "When something goes wrong"
+    ],
+    "summary": "This page covers the Windows installer in detail: what it installs, where your"
+  },
+  {
+    "doc": "install.md",
+    "title": "Install and first run",
+    "headings": [
+      "Option A: Windows desktop app",
+      "Option B: build the CLI from source",
+      "Building the Windows installer yourself",
+      "First run from the terminal",
+      "What bot serve does",
+      "Where your files live",
+      "Environment variables"
+    ],
+    "summary": "There are two ways to get Praxi: the Windows installer (no terminal needed) or"
+  },
+  {
+    "doc": "keyboard-shortcuts.md",
+    "title": "Keyboard shortcuts",
+    "headings": [
+      "Global shortcuts",
+      "Chat composer",
+      "Configurable composer and stop shortcuts",
+      "Slash commands",
+      "Dialogs",
+      "Related documentation"
+    ],
+    "summary": "The Praxi desktop app provides keyboard shortcuts to help you navigate chats, control bot runs, open dialogs, and compose messages quickly without reaching for the mouse."
+  },
+  {
+    "doc": "knowledge-embeddings.md",
+    "title": "Knowledge embedding setup",
+    "headings": [
+      "Remote providers and owner approval",
+      "Local native profile registry",
+      "Corpus limits and validation"
+    ],
+    "summary": "Knowledge search works locally without an embedding provider. Remote embeddings"
+  },
+  {
+    "doc": "llm-call-ledger.md",
+    "title": "LLM call ledger",
+    "headings": [
+      "Audit records",
+      "API",
+      "Evals"
+    ],
+    "summary": "Each model invocation now records a purpose. This includes executor requests,"
+  },
+  {
+    "doc": "mcp-server.md",
+    "title": "Use Praxi as an MCP server",
+    "headings": [
+      "Create a credential and connect",
+      "Connect your MCP client",
+      "Claude Code",
+      "Claude Desktop",
+      "Cursor",
+      "VS Code (GitHub Copilot, agent mode)",
+      "Zed",
+      "Generic stdio client",
+      "Verification status",
+      "Task tools",
+      "Computer tools",
+      "Approvals and authority",
+      "Limits, revocation and storage",
+      "Troubleshooting",
+      "Common failures in a client"
+    ],
+    "summary": "bot mcp serve exposes one selected Praxi bot to an external MCP client over"
+  },
+  {
+    "doc": "mcp-servers.md",
+    "title": "MCP servers",
+    "headings": [
+      "What a server becomes",
+      "mcp.toml"
+    ],
+    "summary": "The daemon (bot serve) loads /mcp.toml at startup and runs every"
+  },
+  {
+    "doc": "model-catalog.md",
+    "title": "Model picker metadata",
+    "headings": [
+      "API",
+      "Curated data and maintenance",
+      "Freshness tooling and staleness reminders",
+      "Local models: hardware and recommendations",
+      "Limits of a model listing",
+      "Owner verification"
+    ],
+    "summary": "The daemon annotates the model ids returned by each configured provider. The"
+  },
+  {
+    "doc": "model-tiering.md",
+    "title": "Optional model tiering",
+    "headings": [
+      "How the first model is chosen",
+      "When the executor takes over",
+      "Conservative context limits",
+      "Validation and cost interpretation"
+    ],
+    "summary": "Model tiering lets a bot use a configured light model for a small class of"
+  },
+  {
+    "doc": "providers-and-models.md",
+    "title": "Providers and models",
+    "headings": [
+      "Built-in providers",
+      "Add and manage providers",
+      "Which model runs what",
+      "Gemini free tier",
+      "Local models",
+      "Custom OpenAI-compatible providers"
+    ],
+    "summary": "A provider is a service (or local program) that runs a language model for"
+  },
+  {
+    "doc": "release-linux.md",
+    "title": "Releasing the Linux server packages",
+    "headings": [
+      "Pre-release tags (v0.1.0-alpha.1, -beta.N, -rc.N: any suffix)",
+      "Final tags (v1.0.0, no suffix)",
+      "Release notes and assets",
+      "Which tag the server installs"
+    ],
+    "summary": "Pushing a v tag runs Linux Server Packages: native x86_64 and aarch64 builds, build provenance"
+  },
+  {
+    "doc": "remote-host.md",
+    "title": "Running Praxi on a remote host (VPS / VM)",
+    "headings": [
+      "What you need",
+      "1. Get and verify the release package",
+      "2. Install, including offline hosts",
+      "Offline trust preparation",
+      "Release administrator setup and dry run",
+      "3. Configure and pair",
+      "Using the host from the desktop app",
+      "Letting another core control this machine (experimental)",
+      "4. Firewall notes (Oracle Cloud)",
+      "5. Security",
+      "Browser source and service diagnostics",
+      "Desktop session, application menu, and browser lifecycle",
+      "Small-host resource check",
+      "Troubleshooting desktop, Xauthority, D-Bus, and namespaces",
+      "Update, logs, rollback, and uninstall",
+      "Changing the screen size of an existing host",
+      "Operating a host"
+    ],
+    "summary": "This guide sets up Praxi as an always-on host on a cheap Linux server, for"
+  },
+  {
+    "doc": "scheduled-tasks.md",
+    "title": "Scheduled tasks",
+    "headings": [
+      "Create one",
+      "When phrases",
+      "What a schedule can run",
+      "Webhooks",
+      "Missed runs",
+      "Approvals in unattended runs",
+      "Letting a bot manage its own schedules"
+    ],
+    "summary": "A schedule makes a bot do something on its own: every weekday morning, every"
+  },
+  {
+    "doc": "schedules.md",
+    "title": "Scheduled jobs, in plain words",
+    "headings": [
+      "Make your first job",
+      "Typing it in words",
+      "Advanced (collapsed)",
+      "If the computer was off",
+      "Run now, pause, edit, delete",
+      "History and problems",
+      "Telling you about it",
+      "Safety"
+    ],
+    "summary": "A scheduled job lets a bot do something on its own, at the times you choose:"
+  },
+  {
+    "doc": "security.md",
+    "title": "Security model",
+    "headings": [
+      "What protects you",
+      "What it does not protect you from",
+      "Daemon process guard (defence in depth)",
+      "Good practice",
+      "Reporting a vulnerability",
+      "Live screen privacy and human control",
+      "Secrets the assistant may type (fill secrets)",
+      "Letting the assistant ask for a credential (experimental, off by default)",
+      "A password pasted into the message box",
+      "Prompt-injection evaluation pack"
+    ],
+    "summary": "An agent that can use your computer is a powerful thing and a tempting target:"
+  },
+  {
+    "doc": "servers.md",
+    "title": "Adding a server",
+    "headings": [
+      "Step 1: choose what fits you",
+      "Oracle Cloud free tier, in short",
+      "Step 2: what Praxi needs",
+      "Step 3: checks, install, done",
+      "Your servers",
+      "Fixing common problems",
+      "Limits today"
+    ],
+    "summary": "A server is another computer that stays on day and night, usually rented online. Your bots can live there, so they keep working when your own computer is off."
+  },
+  {
+    "doc": "settings.md",
+    "title": "Settings",
+    "headings": [
+      "The pages",
+      "Search",
+      "Simple and Advanced",
+      "Safety levels",
+      "Reset to recommended",
+      "Small screens"
+    ],
+    "summary": "Open Settings from the account menu. Everything is on ten pages with plain names."
+  },
+  {
+    "doc": "skill-management-api.md",
+    "title": "Managing shared skills from the local app",
+    "headings": [
+      "Routes",
+      "Import limits and behavior",
+      "Install from a git repository (preview, then install)"
+    ],
+    "summary": "The local owner can create, import, update and delete shared skills through the"
+  },
+  {
+    "doc": "skills.md",
+    "title": "Skills",
+    "headings": [
+      "Where skills live",
+      "Write one",
+      "Install a skill",
+      "Managing shared skills through the API",
+      "Choosing which skills a bot gets"
+    ],
+    "summary": "A skill is a short Markdown playbook that teaches a bot how to do something"
+  },
+  {
+    "doc": "telegram.md",
+    "title": "Telegram",
+    "headings": [
+      "In the chat",
+      "Language",
+      "Good to know"
+    ],
+    "summary": "Talk to your bots from your phone. The daemon runs a Telegram channel: you"
+  },
+  {
+    "doc": "troubleshooting.md",
+    "title": "Troubleshooting",
+    "headings": [
+      "Diagnostics (Settings → Diagnostics, bot doctor)",
+      "The always-on host",
+      "daemon not reachable at http://127.0.0.1:47821 (exit code 3)",
+      "Authentication rejected (exit code 4)",
+      "no usable provider; run bot setup or bot providers add",
+      "connection test failed",
+      "A bot answers \"has no usable profile\"",
+      "bot bots add is rejected (exit code 6)",
+      "The bot stops and waits",
+      "A tool call is refused",
+      "\"Always allow\" does not stick, or never asks",
+      "Rate limit errors from Gemini (HTTP 429)",
+      "Safe mode: start with everything off",
+      "Schedules do not fire",
+      "Telegram",
+      "The secret store asks for a passphrase",
+      "Browser does not open or times out",
+      "Windows SmartScreen blocks the installer",
+      "Collecting information for a bug report"
+    ],
+    "summary": "Start with bot status. It checks that the daemon is up and that your token is"
+  },
+  {
+    "doc": "voice-call.md",
+    "title": "Voice call mode (hands-free chat)",
+    "headings": [
+      "Before you start",
+      "Choosing the speech-to-text provider",
+      "Starting and using a call",
+      "Interrupting (barge-in) and call controls",
+      "What it can and cannot do",
+      "Privacy and safety"
+    ],
+    "summary": "Voice call mode in the desktop app lets you talk to a bot without typing. You"
+  },
+  {
+    "doc": "web.md",
+    "title": "Web tools: search and read pages",
+    "headings": [
+      "Search backend",
+      "Privacy",
+      "Safety",
+      "Letting a bot fetch without asking",
+      "Known risk",
+      "Check that it works",
+      "Browser use: what to expect"
+    ],
+    "summary": "Every bot can look things up on the web without opening a browser. The web"
+  },
+  {
+    "doc": "workflows.md",
+    "title": "Workflows: record, replay, remember",
+    "headings": [
+      "Workflows",
+      "Record and review a run",
+      "Step kinds",
+      "Running a workflow",
+      "Remember",
+      "The decision ladder, briefly",
+      "Planned"
+    ],
+    "summary": "Calling a language model for every click is slow and costs money. Praxi's answer"
+  }
+]

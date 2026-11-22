@@ -1251,7 +1251,7 @@ impl HostDesktopHandler {
         let outcome = self
             .deps
             .raw
-            .act_guarded(
+            .act_approved(
                 action,
                 ActGuard {
                     expect: prepared.target.identity.clone(),
@@ -1303,6 +1303,49 @@ impl HostDesktopHandler {
         Ok(serde_json::json!({ "pid": pid }))
     }
 
+    async fn focus(
+        &self,
+        peer: &Device,
+        caller: Option<&Caller>,
+        params: Value,
+    ) -> Result<Value, RpcError> {
+        let method = "desktop.focus";
+        if let Some(why) = self.base_refusal(peer, method) {
+            return Err(self.refuse(peer, method, &why));
+        }
+        let window_id = params
+            .get("window_id")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| RpcError::new(ERR_INVALID_PARAMS, "window_id is required"))?;
+        let target = self
+            .deps
+            .raw
+            .focus_target(window_id)
+            .await
+            .map_err(|e| desktop_error_to_rpc(&e))?
+            .filter(|t| t.identity.is_complete() && !is_praxi_target(t, self.deps.own_pid))
+            .ok_or_else(|| self.refuse(peer, method, "this window is unavailable for focus"))?;
+        let preview = PcPreview {
+            kind: "act",
+            action: "focus".into(),
+            target: (self.deps.redact)(&plain_line(&target.title, 120)),
+            payload: (self.deps.redact)(&target.identity.image_path),
+        };
+        self.approve_and_run(peer, caller, method, preview, PcFamily::Screen)
+            .await?;
+        self.deps
+            .raw
+            .focus(
+                window_id,
+                Some(ActGuard {
+                    expect: target.identity,
+                }),
+            )
+            .await
+            .map_err(|e| desktop_error_to_rpc(&e))?;
+        Ok(Value::Null)
+    }
+
     /// Latch and lease: the same refusal for every kind of input.
     fn base_refusal(&self, peer: &Device, _method: &str) -> Option<String> {
         if let Some(msg) = self.deps.gate.latch_refusal() {
@@ -1321,6 +1364,7 @@ impl HostDesktopHandler {
         family: PcFamily,
     ) -> Result<(), RpcError> {
         let gen_then = self.deps.access.family_gen(&peer.id, family);
+        let control_epoch = self.deps.gate.observation_epoch();
         let allowed = self.ask(peer, caller, preview.clone()).await;
         if !allowed {
             return Err(self.refuse(
@@ -1333,6 +1377,13 @@ impl HostDesktopHandler {
         // the card was open.
         if let Some(why) = self.base_refusal(peer, method) {
             return Err(self.refuse(peer, method, &why));
+        }
+        if self.deps.gate.observation_epoch() != control_epoch {
+            return Err(self.refuse(
+                peer,
+                method,
+                "control changed while approval was open; observe again",
+            ));
         }
         // The family this action needs, not just "some family": a delivered
         // allow does not outlive the switch that was turned off meanwhile.
@@ -1909,6 +1960,10 @@ impl RpcHandler for HostDesktopHandler {
             "desktop.act" => {
                 self.family_gate(peer, method, PcFamily::Screen)?;
                 self.act(peer, caller.as_ref(), params).await
+            }
+            "desktop.focus" => {
+                self.family_gate(peer, method, PcFamily::Screen)?;
+                self.focus(peer, caller.as_ref(), params).await
             }
             "desktop.launch" => {
                 self.family_gate(peer, method, PcFamily::Screen)?;

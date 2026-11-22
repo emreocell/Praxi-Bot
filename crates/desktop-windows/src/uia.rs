@@ -363,9 +363,9 @@ impl Worker {
     /// Fallback when `SendInput` is blocked (e.g. UIPI / non-interactive desktop):
     /// append `text` to the focused element's `ValuePattern`.
     fn uia_type_fallback(&self, text: &str) -> Res<()> {
-        let el = self.focused_element().ok_or_else(|| {
-            DesktopError::Accessibility("no focused element for UIA type fallback".into())
-        })?;
+        // SAFETY: reads the live focused element on the STA thread.
+        let el = unsafe { self.uia.GetFocusedElement() }.map_err(acc("GetFocusedElement"))?;
+        Self::refuse_password(&el)?;
         // SAFETY: COM calls on a live element owned by this STA thread.
         unsafe {
             let p = el
@@ -531,7 +531,7 @@ impl Worker {
     // ── run-scoped control grant: facts about the real receiver ──────────────
 
     /// The raw live properties of one UIA element (never the snapshot cache).
-    fn element_raw(el: &IUIAutomationElement) -> ElementRaw<HWND> {
+    fn element_raw(&self, el: &IUIAutomationElement) -> ElementRaw<HWND> {
         // SAFETY: live COM property reads on an element owned by this thread.
         unsafe {
             ElementRaw {
@@ -540,11 +540,38 @@ impl Worker {
                     .CurrentIsPassword()
                     .map(BOOL::as_bool)
                     .map_err(|_| Refusal::PasswordField),
-                native: el
-                    .CurrentNativeWindowHandle()
-                    .map(|h| (!h.0.is_null()).then_some(h))
-                    .map_err(|_| Refusal::NoIdentity),
+                native: self.element_native(el),
             }
+        }
+    }
+
+    /// UIA-only controls share their containing native window. Walk their live
+    /// ancestors without substituting a foreground window or crossing processes.
+    fn element_native(&self, el: &IUIAutomationElement) -> Result<Option<HWND>, Refusal> {
+        // SAFETY: all COM objects belong to this STA thread.
+        unsafe {
+            let identity = |_| Refusal::NoIdentity;
+            let native = el.CurrentNativeWindowHandle().map_err(identity)?;
+            if !native.0.is_null() {
+                return Ok(Some(native));
+            }
+            let process_id = el.CurrentProcessId().map_err(identity)?;
+            let pid = u32::try_from(process_id).map_err(|_| Refusal::NoIdentity)?;
+            let walker = self.uia.RawViewWalker().map_err(identity)?;
+            let mut ancestor = el.clone();
+            for _ in 0..pure::MAX_DEPTH {
+                ancestor = walker.GetParentElement(&ancestor).map_err(identity)?;
+                if ancestor.CurrentProcessId().map_err(identity)? != process_id {
+                    return Err(Refusal::NoIdentity);
+                }
+                let native = ancestor.CurrentNativeWindowHandle().map_err(identity)?;
+                if !native.0.is_null() {
+                    return (winlist::window_pid(native) == pid)
+                        .then_some(Some(native))
+                        .ok_or(Refusal::NoIdentity);
+                }
+            }
+            Ok(None)
         }
     }
 
@@ -552,7 +579,23 @@ impl Worker {
     fn focused_raw(&self) -> Result<ElementRaw<HWND>, Refusal> {
         // SAFETY: COM call on the STA thread's IUIAutomation instance.
         let focused = unsafe { self.uia.GetFocusedElement() }.map_err(|_| Refusal::NoIdentity)?;
-        Ok(Self::element_raw(&focused))
+        Ok(self.element_raw(&focused))
+    }
+
+    fn refuse_password(el: &IUIAutomationElement) -> Res<()> {
+        // SAFETY: reads the live property on the STA thread.
+        if unsafe { el.CurrentIsPassword() }.is_ok_and(|password| !password.as_bool()) {
+            return Ok(());
+        }
+        Err(DesktopError::GuardRefused(
+            Refusal::PasswordField.why().into(),
+        ))
+    }
+
+    fn refuse_focused_password(&self) -> Res<()> {
+        // SAFETY: reads the current keyboard focus, independent of cached elements.
+        let focused = unsafe { self.uia.GetFocusedElement() }.map_err(acc("GetFocusedElement"))?;
+        Self::refuse_password(&focused)
     }
 
     /// The facts that must all pass the guard before keyboard input: the
@@ -601,6 +644,7 @@ impl Worker {
             }
             Action::TypeText { text } => {
                 self.focus_target();
+                self.refuse_focused_password()?;
                 if let Err(e) = input::type_text(text) {
                     self.uia_type_fallback(text).map_err(|_| e)?;
                 }
@@ -609,6 +653,7 @@ impl Worker {
                 Target::ByIndex { index, generation } => {
                     let r = self.resolve(*index, *generation)?;
                     let el = r.element.clone();
+                    Self::refuse_password(&el)?;
                     verified = Self::set_value(&el, value)?;
                     self.last_focused = Some(el);
                 }
@@ -628,13 +673,12 @@ impl Worker {
                     Self::scroll(&r.element, *delta_x, *delta_y)?;
                 }
                 Target::ByCoordinate { .. } => {
-                    return Err(DesktopError::Unsupported(
-                        "scroll needs an element index".into(),
-                    ));
+                    input::scroll_at(self.point(target)?, *delta_x, *delta_y)?;
                 }
             },
             Action::KeyPress { keys } => {
                 self.focus_target();
+                self.refuse_focused_password()?;
                 if let Err(e) = input::key_chord(keys) {
                     self.uia_key_fallback(keys).map_err(|_| e)?;
                 }
@@ -655,6 +699,34 @@ impl Worker {
             verified,
             new_snapshot: None,
         })
+    }
+
+    pub fn act_approved(&mut self, action: &Action, guard: &ActGuard) -> Res<ActionResult> {
+        let facts = match action {
+            Action::Click {
+                target,
+                method: ClickMethod::Accessibility,
+            }
+            | Action::Scroll { target, .. } => match target {
+                Target::ByIndex { index, generation } => {
+                    let element = &self.resolve(*index, *generation)?.element;
+                    glue::element_fact(&RealOs, self.element_raw(element)).map(|fact| vec![fact])
+                }
+                Target::ByCoordinate { .. } => {
+                    let (x, y) = self.point(target)?;
+                    glue::point_facts(&RealOs, x, y)
+                }
+            },
+            _ => return self.act_guarded_flow(action, guard),
+        };
+        let mut result = None;
+        guarded::guarded_write(guard, facts, || {
+            result = Some(self.act(action).map_err(|e| e.to_string())?);
+            Ok(())
+        })
+        .map_err(|f| glue::to_error(&f))?;
+        result
+            .ok_or_else(|| DesktopError::Internal("approved action did not return a result".into()))
     }
 
     /// The run-scoped control grant's path: type, keys, the focusing click and
@@ -693,7 +765,7 @@ impl Worker {
                 let el = self.resolve(index, generation)?.element.clone();
                 // Live facts of the very element, plus the foreground and focus
                 // facts the keyboard path uses, read right before the write.
-                let facts = glue::write_facts(&RealOs, Self::element_raw(&el), self.focused_raw());
+                let facts = glue::write_facts(&RealOs, self.element_raw(&el), self.focused_raw());
                 guarded::guarded_write(g, facts, || {
                     Self::set_value_pattern_only(&el, value).map(|v| verified = Some(v))
                 })

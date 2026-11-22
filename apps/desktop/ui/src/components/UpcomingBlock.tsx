@@ -93,6 +93,7 @@ export function UpcomingBlock({
                 role="switch"
                 aria-checked={row.enabled}
                 aria-label={t("botPanel.upcoming.toggle", { name: row.name })}
+                title={t("botPanel.upcoming.toggle", { name: row.name })}
                 className={styles.toggle}
                 onClick={() => void onToggle(row.id)}
               />

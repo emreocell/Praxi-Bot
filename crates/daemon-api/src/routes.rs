@@ -857,6 +857,13 @@ fn profile_write_response(
 /// Drop what other stores keep about a deleted bot: its id in MCP servers'
 /// `bots` lists and its bound e-mail accounts.
 pub(crate) async fn forget_bot_links(s: &AppState, bot: &Bot) {
+    // Its scheduled jobs go too: a job of a deleted bot could only fail on every
+    // due time. Ids are never reused, so a failure here cannot give anyone access.
+    if let Ok(store) = s.schedule_store()
+        && let Err(e) = store.delete_by_bot(bot.id)
+    {
+        eprintln!("daemon-api: warning: could not remove schedules of deleted bot: {e:?}");
+    }
     // The bot's id must not linger in any MCP server's `bots` list.  Ids are
     // never reused, so a failure here cannot widen access; it is retried by
     // the next edit of the list.

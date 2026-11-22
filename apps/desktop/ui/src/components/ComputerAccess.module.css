@@ -95,3 +95,25 @@
   max-height: calc(var(--space-16) * 4);
   overflow-y: auto;
 }
+.enable {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-elevated);
+}
+
+.enable .stack {
+  flex: 1;
+  min-width: min(100%, var(--space-16));
+  gap: var(--space-1);
+}
+
+.enableIcon {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  color: var(--color-text-secondary);
+}

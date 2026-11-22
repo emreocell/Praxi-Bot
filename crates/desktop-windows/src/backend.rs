@@ -12,7 +12,9 @@ use desktop_api::{
 use futures::channel::oneshot;
 use parking_lot::Mutex as SyncMutex;
 
-use crate::{capture, live_view_win::open_windows_live_view_target, uia::Worker, winlist};
+use crate::{
+    capture, identity, live_view_win::open_windows_live_view_target, uia::Worker, winlist,
+};
 
 type Job = Box<dyn FnOnce(&mut Worker) + Send>;
 
@@ -79,7 +81,10 @@ impl WindowsBackend {
         let (otx, orx) = oneshot::channel();
         self.tx
             .send(Box::new(move |w| {
-                let _ = otx.send(f(w));
+                // A canceled request must not act after waiting in the STA queue.
+                if !otx.is_canceled() {
+                    let _ = otx.send(winlist::require_interactive_desktop().and_then(|()| f(w)));
+                }
             }))
             .map_err(|_| DesktopError::Internal("UIA thread is gone".into()))?;
         orx.await
@@ -99,11 +104,7 @@ impl WindowsBackend {
     ///
     /// Fails if the window no longer exists or Windows refuses the switch.
     pub async fn activate_window(&self, window_id: u64) -> Result<(), DesktopError> {
-        let res = self
-            .run(move |_| winlist::activate(winlist::hwnd_from_id(window_id)))
-            .await;
-        self.notify_live_view();
-        res
+        self.focus(window_id, None).await
     }
 }
 
@@ -133,6 +134,16 @@ impl DesktopBackend for WindowsBackend {
         res
     }
 
+    async fn act_approved(
+        &self,
+        action: Action,
+        guard: ActGuard,
+    ) -> Result<ActionResult, DesktopError> {
+        let res = self.run(move |w| w.act_approved(&action, &guard)).await;
+        self.notify_live_view();
+        res
+    }
+
     fn key_chord_refusal(&self, keys: &[String]) -> Option<Refusal> {
         (!desktop_api::guarded::chord_allowed(keys)).then_some(Refusal::Chord)
     }
@@ -144,6 +155,30 @@ impl DesktopBackend for WindowsBackend {
 
     async fn windows(&self) -> Result<Vec<WindowInfo>, DesktopError> {
         self.run(|_| winlist::list_windows()).await
+    }
+
+    async fn focus_target(&self, window_id: u64) -> Result<Option<InputTarget>, DesktopError> {
+        self.run(move |_| Ok(identity::top_level_facts(winlist::hwnd_from_id(window_id))))
+            .await
+    }
+
+    async fn focus(&self, window_id: u64, guard: Option<ActGuard>) -> Result<(), DesktopError> {
+        let res = self
+            .run(move |_| {
+                let hwnd = winlist::hwnd_from_id(window_id);
+                if let Some(guard) = guard
+                    && !identity::top_level_facts(hwnd)
+                        .is_some_and(|target| guard.expect.same_program(&target.identity))
+                {
+                    return Err(DesktopError::GuardRefused(
+                        Refusal::ForegroundChanged.why().into(),
+                    ));
+                }
+                winlist::activate(hwnd)
+            })
+            .await;
+        self.notify_live_view();
+        res
     }
 
     async fn launch(&self, app: AppSpec) -> Result<Pid, DesktopError> {

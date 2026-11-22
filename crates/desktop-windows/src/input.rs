@@ -6,8 +6,9 @@ use windows::Win32::UI::{
     Input::KeyboardAndMouse::{
         GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS,
         KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSE_EVENT_FLAGS,
-        MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE,
-        MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT, SendInput, VIRTUAL_KEY,
+        MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+        MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT, SendInput,
+        VIRTUAL_KEY,
     },
     WindowsAndMessaging::{
         GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
@@ -92,19 +93,49 @@ fn kbd(vk: u16, scan: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
 }
 
 fn mouse(dx: i32, dy: i32, flags: MOUSE_EVENT_FLAGS) -> INPUT {
+    mouse_with_data(dx, dy, flags, 0)
+}
+
+fn mouse_with_data(dx: i32, dy: i32, flags: MOUSE_EVENT_FLAGS, data: u32) -> INPUT {
     INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
             mi: MOUSEINPUT {
                 dx,
                 dy,
-                mouseData: 0,
+                mouseData: data,
                 dwFlags: flags,
                 time: 0,
                 dwExtraInfo: 0,
             },
         },
     }
+}
+
+/// Move to a screen point and scroll in both requested directions.
+pub fn scroll_at((x, y): (f64, f64), dx: f64, dy: f64) -> Result<(), DesktopError> {
+    if !dx.is_finite() || !dy.is_finite() {
+        return Err(DesktopError::Unsupported(
+            "scroll deltas must be finite".into(),
+        ));
+    }
+    let mut events = vec![move_event(x, y)];
+    for (delta, flag) in [(dx, MOUSEEVENTF_HWHEEL), (-dy, MOUSEEVENTF_WHEEL)] {
+        #[allow(clippy::cast_possible_truncation)]
+        let ticks = (delta.clamp(-50.0, 50.0) * 120.0).round() as i32;
+        if ticks != 0 {
+            events.push(mouse_with_data(
+                0,
+                0,
+                flag,
+                u32::from_ne_bytes(ticks.to_ne_bytes()),
+            ));
+        }
+    }
+    if events.len() == 1 {
+        return Ok(());
+    }
+    send(&events)
 }
 
 /// Convert physical screen pixels to the 0..=65535 virtual-desktop range.

@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "gen:api": "openapi-typescript ../../../docs/api/openapi.json -o src/api/schema.d.ts",
+    "build:guide-index": "node scripts/build-guide-index.mjs",
+    "check:guide-index": "node scripts/build-guide-index.mjs --check",
     "check:i18n": "node scripts/sort-locales.mjs --check && node scripts/check-i18n.mjs",
     "sort:i18n": "node scripts/sort-locales.mjs",
     "test": "node --test \"src/**/*.test.ts\" && pnpm test:contrast",

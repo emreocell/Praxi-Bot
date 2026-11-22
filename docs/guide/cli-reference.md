@@ -195,6 +195,18 @@ Share a bot as one file without secrets (see
 | `bot profile export <BOT_ID> [--out FILE] [--schedules]` | Write the bot's shareable profile (never overwrites a file) |
 | `bot profile import <FILE> [--level LEVEL] [--model M] [--name N] [--computer-files] [--yes]` | Show what the profile may do; with `--yes` create the bot, never above `--level` (default `read-only`) |
 
+### `bot import`
+
+Bring MCP servers and skills from Claude Desktop, Claude Code, OpenClaw or Hermes. A preview
+(will import / skipped and why) always comes first. Servers arrive switched off, every secret
+value goes to the secret store, and only skills the scanner rates low-risk are imported; others
+are left for `bot skills install`. Chats, notes, API keys and sign-ins are never copied.
+
+| Subcommand | Meaning |
+| --- | --- |
+| `bot import detect` | Look for other apps' setups and show the preview; writes nothing, needs no daemon |
+| `bot import run [--from claude\|openclaw\|hermes] [--yes]` | Show the preview; with `--yes` import it (needs the daemon for servers) |
+
 ### `bot approve <TOOL_CALL_ID>`
 
 Approve or deny a pending tool call.
@@ -393,6 +405,7 @@ install a skill.
 | `bot skills uninstall <NAME>` | Remove the skill folder, its lock entry and its usage counters |
 | `bot skills list` | Name, version, source, pinned commit, risk, usage; flags missing or locally modified skills |
 | `bot skills sync` | Reinstall locked skills whose folder is missing, verifying the locked hash |
+| `bot skills index validate <SOURCE>` | Check an index file or https URL against the [index format](../skills-index.md); non-zero exit on errors. Option: `--check-content` (fetches every entry, never installs, and compares its `sha256`) |
 
 See [Skills: install a skill](skills.md#install-a-skill).
 

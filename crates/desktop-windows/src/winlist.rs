@@ -16,6 +16,11 @@ use windows::{
         Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute},
         Storage::FileSystem::{GetFullPathNameW, SearchPathW},
         System::{
+            Com::{CLSCTX_LOCAL_SERVER, CoCreateInstance},
+            StationsAndDesktops::{
+                CloseDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_SWITCHDESKTOP, GetThreadDesktop,
+                GetUserObjectInformationW, OpenInputDesktop, UOI_NAME,
+            },
             SystemInformation::{GetSystemDirectoryW, GetWindowsDirectoryW},
             Threading::{
                 AttachThreadInput, GetCurrentThreadId, GetProcessId, WaitForInputIdle,
@@ -25,7 +30,8 @@ use windows::{
         UI::{
             HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext},
             Shell::{
-                ASSOCF_NONE, ASSOCSTR_COMMAND, AssocQueryStringW, SEE_MASK_NOCLOSEPROCESS,
+                AO_NOERRORUI, ASSOCF_NONE, ASSOCSTR_COMMAND, ApplicationActivationManager,
+                AssocQueryStringW, IApplicationActivationManager, SEE_MASK_NOCLOSEPROCESS,
                 SHELLEXECUTEINFOW, ShellExecuteExW,
             },
             WindowsAndMessaging::{
@@ -38,6 +44,39 @@ use windows::{
     },
     core::{PCWSTR, PWSTR},
 };
+
+/// Never read or inject input from a service, a locked desktop or another
+/// desktop in the same session.
+pub fn require_interactive_desktop() -> Result<(), DesktopError> {
+    let unavailable = || {
+        DesktopError::Unsupported(
+        "Windows desktop tools need the signed-in, unlocked desktop. Start Praxi from that Windows session.".into(),
+    )
+    };
+    // SAFETY: the thread desktop is borrowed and the input desktop is closed below.
+    unsafe {
+        let own = GetThreadDesktop(GetCurrentThreadId()).map_err(|_| unavailable())?;
+        let active = OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_SWITCHDESKTOP)
+            .map_err(|_| unavailable())?;
+        let interactive = is_default_desktop(HANDLE(own.0)) && is_default_desktop(HANDLE(active.0));
+        let _ = CloseDesktop(active);
+        if interactive {
+            Ok(())
+        } else {
+            Err(unavailable())
+        }
+    }
+}
+
+fn is_default_desktop(handle: HANDLE) -> bool {
+    let mut name = [0u16; 128];
+    // SAFETY: handle is a live desktop handle and name is writable for the declared length.
+    let result = unsafe {
+        GetUserObjectInformationW(handle, UOI_NAME, Some(name.as_mut_ptr().cast()), 256, None)
+    };
+    let end = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+    result.is_ok() && String::from_utf16_lossy(&name[..end]).eq_ignore_ascii_case("Default")
+}
 
 /// Make this process per-monitor DPI aware so that UIA rectangles, GDI capture
 /// and `SendInput` all use the same physical-pixel coordinate space.
@@ -275,6 +314,9 @@ fn launched_window_pid(process: HANDLE) -> Pid {
 /// Other images keep `CommandLineToArgvW` quoting. Returns the process id, or
 /// 0 when the shell handles the request without a new process.
 pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
+    if let Some(id) = app.executable.strip_prefix("appx:") {
+        return activate_packaged_app(id, &app.args);
+    }
     let resolved = resolved_image_path(&app.executable);
     let cmd_association =
         crate::pure::needs_association_check(&resolved) && association_expanded_by_cmd(&resolved);
@@ -336,6 +378,26 @@ pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
         let pid = launched_window_pid(info.hProcess);
         let _ = CloseHandle(info.hProcess);
         Ok(pid)
+    }
+}
+
+fn activate_packaged_app(id: &str, args: &[String]) -> Result<Pid, DesktopError> {
+    if !crate::pure::valid_packaged_app_id(id) || !args.is_empty() {
+        return Err(DesktopError::Unsupported(
+            "appx: requires a PackageFamilyName!AppUserModelID and takes no arguments".into(),
+        ));
+    }
+    let id = wide(id);
+    // SAFETY: launch runs on the COM-initialized UIA thread. The input is a
+    // validated AppUserModelID, passed to Windows as a NUL-terminated string.
+    unsafe {
+        let manager: IApplicationActivationManager =
+            CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER).map_err(
+                |e| DesktopError::Internal(format!("create app activation manager: {e}")),
+            )?;
+        manager
+            .ActivateApplication(PCWSTR(id.as_ptr()), PCWSTR::null(), AO_NOERRORUI)
+            .map_err(|e| DesktopError::Internal(format!("activate Windows app: {e}")))
     }
 }
 

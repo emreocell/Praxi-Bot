@@ -1,0 +1,121 @@
+{
+  "templates": [
+    {
+      "id": "daily-briefing",
+      "icon": "sun",
+      "freq": "daily",
+      "time": "08:00",
+      "text": {
+        "en": {
+          "name": "Daily briefing",
+          "blurb": "Every morning: what is on my plate today?",
+          "prompt": "Summarise my unread email and today's calendar in five short bullet points. Put the most urgent thing first."
+        },
+        "tr": {
+          "name": "Günlük özet",
+          "blurb": "Her sabah: bugün önümde ne var?",
+          "prompt": "Okunmamış e-postalarımı ve bugünkü takvimimi beş kısa maddede özetle. En acil olanı en başa koy."
+        },
+        "de": {
+          "name": "Tagesüberblick",
+          "blurb": "Jeden Morgen: Was steht heute an?",
+          "prompt": "Fasse meine ungelesenen E-Mails und den heutigen Kalender in fünf kurzen Stichpunkten zusammen. Das Dringendste zuerst."
+        }
+      }
+    },
+    {
+      "id": "weekly-review",
+      "icon": "calendar-check",
+      "freq": "weekly",
+      "time": "17:00",
+      "weekday": 5,
+      "text": {
+        "en": {
+          "name": "Weekly review",
+          "blurb": "Friday afternoon: what got done, what is next.",
+          "prompt": "Look back at this week's chats and notes. List what got done, what is still open, and three things to start with on Monday."
+        },
+        "tr": {
+          "name": "Haftalık değerlendirme",
+          "blurb": "Cuma öğleden sonra: neler bitti, sırada ne var.",
+          "prompt": "Bu haftaki sohbetlerime ve notlarıma bak. Nelerin bittiğini, nelerin açık kaldığını ve Pazartesi başlanacak üç şeyi listele."
+        },
+        "de": {
+          "name": "Wochenrückblick",
+          "blurb": "Freitagnachmittag: Was ist erledigt, was kommt als Nächstes.",
+          "prompt": "Sieh dir die Chats und Notizen dieser Woche an. Liste auf, was erledigt ist, was offen bleibt und womit ich am Montag beginnen sollte."
+        }
+      }
+    },
+    {
+      "id": "inbox-triage",
+      "icon": "inbox",
+      "freq": "weekdays",
+      "time": "09:00",
+      "text": {
+        "en": {
+          "name": "Inbox triage",
+          "blurb": "Weekday mornings: sort the unread email for me.",
+          "prompt": "Go through my unread email. Group it into: needs a reply today, can wait, and just information. Draft nothing and send nothing; only list it."
+        },
+        "tr": {
+          "name": "Gelen kutusu ayıklama",
+          "blurb": "Hafta içi sabahları: okunmamış e-postaları ayır.",
+          "prompt": "Okunmamış e-postalarımı gözden geçir. Şu gruplara ayır: bugün yanıt gerekir, bekleyebilir, sadece bilgi. Hiçbir şey yazma ve gönderme; sadece listele."
+        },
+        "de": {
+          "name": "Posteingang sortieren",
+          "blurb": "Werktags morgens: ungelesene E-Mails für mich sortieren.",
+          "prompt": "Geh meine ungelesenen E-Mails durch. Sortiere sie in: heute antworten, kann warten, nur zur Information. Schreibe und sende nichts; liste nur auf."
+        }
+      }
+    },
+    {
+      "id": "price-watcher",
+      "icon": "trending-down",
+      "freq": "daily",
+      "time": "12:00",
+      "text": {
+        "en": {
+          "name": "Price watcher",
+          "blurb": "Once a day: check a price and tell me if it dropped.",
+          "prompt": "Open the product page I name below, read the current price and tell me if it is lower than yesterday. Product page: (paste the link here)"
+        },
+        "tr": {
+          "name": "Fiyat takibi",
+          "blurb": "Günde bir kez: bir fiyatı kontrol et, düştüyse söyle.",
+          "prompt": "Aşağıda belirttiğim ürün sayfasını aç, güncel fiyatı oku ve dünden düşükse söyle. Ürün sayfası: (bağlantıyı buraya yapıştırın)"
+        },
+        "de": {
+          "name": "Preisbeobachter",
+          "blurb": "Einmal am Tag: einen Preis prüfen und melden, wenn er gefallen ist.",
+          "prompt": "Öffne die unten genannte Produktseite, lies den aktuellen Preis und sag mir, ob er niedriger ist als gestern. Produktseite: (Link hier einfügen)"
+        }
+      }
+    },
+    {
+      "id": "backup-reminder",
+      "icon": "hard-drive",
+      "freq": "weekly",
+      "time": "18:00",
+      "weekday": 0,
+      "text": {
+        "en": {
+          "name": "Backup reminder",
+          "blurb": "Sunday evening: remind me to back up my files.",
+          "prompt": "Remind me, in one friendly sentence, to back up my important files. Do not touch any files yourself."
+        },
+        "tr": {
+          "name": "Yedekleme hatırlatması",
+          "blurb": "Pazar akşamı: dosyalarımı yedeklemeyi hatırlat.",
+          "prompt": "Önemli dosyalarımı yedeklemem gerektiğini tek, samimi bir cümleyle hatırlat. Dosyalara kendin dokunma."
+        },
+        "de": {
+          "name": "Backup-Erinnerung",
+          "blurb": "Sonntagabend: Erinnere mich ans Sichern meiner Dateien.",
+          "prompt": "Erinnere mich in einem freundlichen Satz daran, meine wichtigen Dateien zu sichern. Fasse selbst keine Dateien an."
+        }
+      }
+    }
+  ]
+}

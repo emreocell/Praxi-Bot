@@ -725,9 +725,17 @@ async fn measured_version(
 async fn send(stdin: &mut tokio::process::ChildStdin, value: Value) -> Result<(), CliError> {
     let mut bytes = serde_json::to_vec(&value).map_err(|_| CliError::Protocol)?;
     bytes.push(b'\n');
-    stdin.write_all(&bytes).await?;
-    stdin.flush().await?;
-    Ok(())
+    // A CLI that already exited or closed stdin is a protocol failure, exactly
+    // like EOF on its stdout. Whether the write loses that race (EPIPE) or
+    // lands in the pipe buffer must not change the reported error.
+    let io = async {
+        stdin.write_all(&bytes).await?;
+        stdin.flush().await
+    };
+    io.await.map_err(|e| match e.kind() {
+        std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset => CliError::Protocol,
+        _ => CliError::Io,
+    })
 }
 
 #[allow(clippy::too_many_lines)] // Security-critical session handling, fixture-locked
@@ -1228,6 +1236,23 @@ fn read_usage(v: &Value, usage: &mut TurnUsage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn writing_to_an_exited_cli_is_a_protocol_error_not_io() {
+        #[cfg(windows)]
+        let mut cmd = tokio::process::Command::new("cmd.exe");
+        #[cfg(windows)]
+        cmd.args(["/C", "exit 0"]);
+        #[cfg(unix)]
+        let mut cmd = tokio::process::Command::new("true");
+        let mut child = cmd.stdin(Stdio::piped()).spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        child.wait().await.unwrap();
+        // Large enough that the pipe buffer cannot absorb it.
+        let big = json!({"pad": "x".repeat(1 << 20)});
+        assert_eq!(send(&mut stdin, big).await, Err(CliError::Protocol));
+    }
+
     struct NoCalls;
     #[async_trait]
     impl TurnHost for NoCalls {

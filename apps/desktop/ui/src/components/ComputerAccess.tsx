@@ -8,7 +8,7 @@ import { SwitchQueue } from "../lib/computerSwitchQueue";
 import { humanLine } from "../lib/humanError";
 import { useDaemon } from "../state/DaemonContext";
 import { Modal } from "./Modal";
-import { ServerOff } from "lucide-react";
+import { Monitor, ServerOff } from "lucide-react";
 import { EmptyNote, SettingRow, Switch } from "./SettingsUi";
 import styles from "./ComputerAccess.module.css";
 
@@ -29,6 +29,41 @@ export async function setHostComputerAccess(
   }
   const now = switchesOf(host);
   await api.setComputerAccess(host.id, { ...now, screen: enabled, alwaysRead: enabled && now.alwaysRead }, await ownerKey());
+}
+
+/** Shown in the chat that selected this PC while its paired host lacks screen access. */
+export function ComputerUseOffCard() {
+  const { t } = useTranslation();
+  const { home, workLocalNow, hostList, localApi, refreshHosts } = useDaemon();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const host = home.kind === "host" ? hostList?.hosts.find((h) => h.id === home.hostId) : undefined;
+  if (workLocalNow || !host || host.computer_access === true) return null;
+  const enable = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await setHostComputerAccess(localApi, host, true);
+      await refreshHosts();
+    } catch (e) {
+      setError(humanLine(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className={styles.enable} aria-label={t("computerAccess.enableTitle")} data-testid="computer-use-off">
+      <Monitor className={styles.enableIcon} aria-hidden="true" />
+      <div className={styles.stack}>
+        <strong>{t("computerAccess.enableTitle")}</strong>
+        <p className={styles.hint}>{t("computerAccess.enableHint", { name: host.name })}</p>
+        {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      </div>
+      <Button variant="primary" size="sm" disabled={busy || !localApi} onClick={() => void enable()}>
+        {t("computerAccess.enableAction")}
+      </Button>
+    </section>
+  );
 }
 
 type Family = "screen" | "browser" | "commands" | "files";

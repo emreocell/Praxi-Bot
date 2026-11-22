@@ -930,6 +930,7 @@
     },
     "color": "Color",
     "colorCustom": "Custom color",
+    "colorSwatch": "Color {{hex}}",
     "computer": "Computer",
     "editTitle": "Edit bot",
     "engine": {
@@ -997,7 +998,7 @@
   "botLimits": {
     "card": {
       "body": {
-        "tokens": "This bot used up its token limit. The run was stopped before the model was called, so nothing went over.",
+        "tokens": "This bot used up its usage limit (the amount of text the model may read and write). The run was stopped before the model was called, so nothing went over.",
         "usd": "This bot used up its spending limit. The run was stopped before the model was called, so nothing went over."
       },
       "raise": "Raise limit",
@@ -1012,15 +1013,15 @@
       "waiting": "Okay. The bot can work again after the limit resets on {{when}}.",
       "waitingUnknown": "Okay. The bot can work again after the limit resets."
     },
-    "defaultNote": "This bot has no saved limits yet, so a safe cap of {{usd}} or {{tokens}} tokens per day applies. Raise it here if the bot needs more.",
+    "defaultNote": "This bot has no saved limits yet, so a safe daily cap of {{usd}} or {{amount}} pieces of text applies. Raise it here if the bot needs more.",
     "field": {
-      "hard_tokens": "Stop at (tokens)",
+      "hard_tokens": "Stop at (usage)",
       "hard_usd": "Stop at (USD)",
-      "soft_tokens": "Warn at (tokens)",
+      "soft_tokens": "Warn at (usage)",
       "soft_usd": "Warn at (USD)"
     },
-    "hint": "A warning only notifies you at 80% and 100%. A stop ends the run before the model is called. Models with an unknown price count tokens only. Schedules and channel messages follow the same limits.",
-    "invalid": "Enter a positive amount (money from 0.01, tokens as whole numbers) or leave the field empty.",
+    "hint": "A warning only notifies you at 80% and 100%. A stop ends the run before the model is called. Models with an unknown price count usage only. Schedules and channel messages follow the same limits.",
+    "invalid": "Enter a positive amount (money from 0.01, usage as whole numbers) or leave the field empty.",
     "order": "The warning level must not be above the stop level.",
     "period": {
       "daily": "Per day",
@@ -1033,7 +1034,7 @@
     "saving": "Saving…",
     "unlimited": "No limit",
     "unreported": "{{count}} calls reported no usage and are counted by a cautious estimate.",
-    "used": "Used {{usd}} and {{tokens}} tokens. Resets {{when}}."
+    "used": "Used {{usd}} and {{amount}} of text usage. Resets {{when}}."
   },
   "botPanel": {
     "botsComputer": "{{bot}}'s computer · {{name}}",
@@ -2002,6 +2003,9 @@
     "deny": "Deny",
     "description": "Servers you paired can ask this computer to look at the screen and act on it, only when you allow it.",
     "details": "Exactly",
+    "enableAction": "Enable screen and input",
+    "enableHint": "Allow {{name}} to see and control this PC’s screen. Input still asks for your approval.",
+    "enableTitle": "Turn on computer use",
     "explain": "Off by default. When on, the server's bots can look at this computer's screen. Anything that clicks, types or opens something still asks you first, and Stop always wins.",
     "family": {
       "browser": "Let the bots on {{name}} use this computer's browser",
@@ -2088,12 +2092,7 @@
     },
     "localHint": "Runs here, on this PC",
     "makeHome": "Make this server my bots' home…",
-    "menu": "Computer",
-    "stopFailed": "Could not reach the host to stop its runs.",
-    "stopHost": "Stop all runs on the host",
-    "stopHostHint": "Stops what is running there now",
-    "stopNone": "Nothing is running on the host.",
-    "stopped": "Stopped {{count}} run(s) on the host."
+    "menu": "Computer"
   },
   "control": {
     "starting": "Working…"
@@ -2172,6 +2171,22 @@
     "runningLabel": "Bot Run Active",
     "sectionTitle": "Developer",
     "simulateBotRun": "Simulate bot run"
+  },
+  "digest": {
+    "cost": "{{calls}} model calls, {{cost}}.",
+    "done": "Done: {{count}}",
+    "empty": "Your bots have not done anything today.",
+    "failed": "Failed: {{count}}",
+    "noCalls": "No model calls yet.",
+    "notifyPrivate": "Your daily summary is ready. Open the app to read it.",
+    "notifyTitle": "Your bots today",
+    "ofLimit": "That is {{percent}} of the daily limit.",
+    "running": "Running: {{count}}",
+    "stopped": "Stopped: {{count}}",
+    "subtitle": "What your bots did since midnight and what it cost.",
+    "title": "Today",
+    "totalCost": "Cost: {{cost}}",
+    "waiting": "Waiting for you: {{count}}"
   },
   "engineConsent": {
     "allow": "Allow {{cli}}",
@@ -2984,6 +2999,8 @@
   "help": {
     "center": {
       "allDocs": "Open the full guide",
+      "guideNote": "Guide pages are in English for now.",
+      "guideTitle": "In the full guide",
       "intro": "Short answers to the questions people ask first. Type a word to search.",
       "noMatch": "No answer found. Try one simple word, or open the full guide below.",
       "readMore": "Read more in the guide",
@@ -3037,19 +3054,19 @@
       "title": "{{name}} is now your bots' home"
     },
     "banner": {
-      "back": "Back to {{name}}",
+      "back": "Switch to {{name}}",
       "offline": "Your bots' computer is offline. Reconnecting… The list is the last one seen.",
-      "temporary": "You are working on this computer for now. Your bots live on {{name}}.",
-      "workHere": "Work on this computer for now"
+      "temporary": "Your bots run on this computer. {{name}} stays set up and you can switch to it any time.",
+      "workHere": "Use this computer"
     },
     "chip": {
       "connecting": "{{name}} · connecting",
       "degraded": "{{name}} · limited",
       "local": "This computer",
       "offline": "{{name}} · offline",
-      "online": "{{name}} · online",
+      "online": "{{name}}",
       "starting": "{{name}} · starting",
-      "temporary": "This computer · for now"
+      "temporary": "This computer"
     },
     "copy": "Copy",
     "engines": {
@@ -3074,19 +3091,12 @@
     "hint": "on {{name}}",
     "menu": {
       "add": "Add a server",
-      "backHome": "Back to {{name}}",
-      "backHomeHint": "You are working on this computer for now.",
       "makeHome": "Make {{name}} my bots' home",
       "pcOff": "Off · your bots cannot use this computer",
       "pcOn": "On · every action asks you here",
-      "stop": "Stop everything on {{name}}",
-      "stopHint": "Stops every run that is going on there right now.",
       "sync": "Sync my setup to {{name}}",
       "terminal": "Terminal on the server",
-      "title": "Your bots' computer",
-      "viewScreen": "View its screen",
-      "workHere": "Work on this computer for now",
-      "workHereHint": "Shows this computer's own bots until you go back."
+      "viewScreen": "View its screen"
     },
     "saved": "Saved.",
     "target": {
@@ -3098,13 +3108,6 @@
   },
   "homeMenu": {
     "lastSync": "Last sync: {{when}}",
-    "lives": {
-      "connecting": "Your bots live here · connecting",
-      "local": "Your bots live here",
-      "offline": "Your bots live here · offline",
-      "online": "Your bots live here · online",
-      "temporary": "For now your bots work on this computer"
-    },
     "pcOff": "Your bots cannot use this computer",
     "pcOn": "Every action asks you here",
     "sync": "Sync my setup",
@@ -3426,6 +3429,34 @@
     "viewOnly": "View only",
     "watchAction": "Take control"
   },
+  "localInstall": {
+    "cancel": "Stop download",
+    "disclosure": "The program comes from github.com/ggml-org/llama.cpp and the model from huggingface.co. Praxi checks every file against a fixed checksum and refuses a file that does not match. You can stop at any time; a stopped download continues later.",
+    "download": "Download size: {{size}} (plus {{runtime}} for the program that runs it).",
+    "errorChecksum": "The downloaded file did not match the expected one and was deleted. Try again later.",
+    "errorDisk": "There is not enough free disk space. Free some space and try again.",
+    "errorNetwork": "The download was interrupted. Check your internet connection and try again.",
+    "errorOther": "Something went wrong while installing. Try again.",
+    "errorPortBusy": "Another program is already using port 8080. Close it and try again.",
+    "errorStartFailed": "The model could not be started. Try a smaller model.",
+    "errorUnsupported": "One-click local models are not available for this computer yet.",
+    "fitFast": "runs well",
+    "fitSlow": "runs, but slowly",
+    "install": "Install and start",
+    "intro": "Download a small AI model and run it on this computer. Nothing you write leaves this computer while you use it.",
+    "licence": "Licence: {{licence}}",
+    "noDisk": "not enough disk space",
+    "phaseCancelled": "Stopped. You can start again; the download continues where it left off.",
+    "phaseDownloadingModel": "Downloading the model… {{percent}}%",
+    "phaseDownloadingRuntime": "Downloading the program… {{percent}}%",
+    "phaseReady": "Running on this computer. Pick “llama.cpp” as your provider; Praxi finds it automatically.",
+    "phaseStarting": "Starting the model (this can take a minute)…",
+    "phaseUnpacking": "Unpacking the program…",
+    "recommended": "Suggested",
+    "stop": "Stop the local model",
+    "title": "One-click local model",
+    "tooLarge": "too big for this computer"
+  },
   "localModels": {
     "bestEffort": "These are estimates, not guarantees. Praxi never runs the commands for you, and this hardware information stays on this computer.",
     "cardDescription": "What fits on this computer for Ollama or LM Studio. Best effort.",
@@ -3666,12 +3697,14 @@
     "detail": {
       "failed": "Failed: {{detail}}",
       "longRun": "{{detail}}",
-      "needsYou": "{{detail}}"
+      "needsYou": "{{detail}}",
+      "scheduleDone": "{{detail}}"
     },
     "generic": {
       "failed": "A run failed.",
       "longRun": "Finished a long task.",
-      "needsYou": "Needs your attention."
+      "needsYou": "Needs your attention.",
+      "scheduleDone": "A scheduled job finished."
     }
   },
   "notifyHistory": {
@@ -3682,9 +3715,11 @@
     "held": "Held (quiet hours)",
     "heldMuted": "Held (bot muted)",
     "kind": {
+      "digest": "Daily summary",
       "failed": "Run failed",
       "longRun": "Long run finished",
-      "needsYou": "Needs you"
+      "needsYou": "Needs you",
+      "scheduleDone": "Scheduled job finished"
     },
     "markAllRead": "Mark all read",
     "openNeeds": "Open Needs you",
@@ -3730,7 +3765,9 @@
       "bot": "Bot",
       "chat": "Chat",
       "navigate": "Navigate",
-      "schedule": "Schedule"
+      "recentChat": "Recent chat",
+      "schedule": "Schedule",
+      "settings": "Settings"
     },
     "help": "Help and answers",
     "helpKeywords": "help questions faq how do I what is guide",
@@ -3739,6 +3776,7 @@
     "placeholder": "Type a command…",
     "runSchedule": "Run now: {{name}}",
     "scheduleStarted": "Schedule started",
+    "settingsPage": "Settings: {{name}}",
     "shortcuts": "Keyboard shortcuts",
     "switchBot": "Switch to {{name}}",
     "title": "Command palette"
@@ -3871,6 +3909,77 @@
     "resets": "Resets {{when}}",
     "title": "Quota left"
   },
+  "runLocation": {
+    "addHint": "Optional. Keeps your bots running when this computer is off.",
+    "on": "On {{name}}",
+    "serverHint": "Always on, even when this computer is off",
+    "serverState": {
+      "connecting": "connecting",
+      "degraded": "limited",
+      "offline": "offline",
+      "online": "online",
+      "starting": "starting"
+    },
+    "status": {
+      "connecting": "Connecting to {{name}}…",
+      "degraded": "Your bots run on {{name}} · limited",
+      "local": "Your bots run on this computer",
+      "offline": "{{name}} is offline",
+      "online": "Your bots run on {{name}} · online",
+      "starting": "Your bots run on {{name}} · starting",
+      "temporary": "Your bots run on this computer"
+    },
+    "stopAll": "Stop everything running on {{name}}",
+    "stopBody": "This stops the {{count}} runs going on {{name}} right now. Work already done is kept.",
+    "stopBody_one": "This stops the {{count}} run going on {{name}} right now. Work already done is kept.",
+    "stopConfirm": "Stop {{count}} runs",
+    "stopConfirm_one": "Stop {{count}} run",
+    "stopFailed": "Could not reach {{name}} to stop its runs.",
+    "stopHint": "{{count}} runs are going on right now",
+    "stopHint_one": "{{count}} run is going on right now",
+    "stopIdle": "Nothing is running right now",
+    "stopNone": "Nothing was running on {{name}}.",
+    "stopTitle": "Stop everything on {{name}}?",
+    "stopped": "Stopped {{count}} runs on {{name}}.",
+    "stopped_one": "Stopped {{count}} run on {{name}}.",
+    "switchBody": "{{count}} runs are still going on {{from}}. Nothing is stopped: they keep running there, and you can switch back any time.",
+    "switchBody_one": "{{count}} run is still going on {{from}}. Nothing is stopped: it keeps running there, and you can switch back any time.",
+    "switchConfirm": "Switch to {{to}}",
+    "switchTitle": "Switch to {{to}}?",
+    "thisComputer": "This computer",
+    "thisComputerHint": "Your bots run here. No server needed.",
+    "title": "Where do my bots run?"
+  },
+  "runReport": {
+    "answered": "You answered",
+    "approved": "You allowed it",
+    "asked": "Asked you a question",
+    "askedCredential": "Asked for a password or key",
+    "button": "Timeline",
+    "credentialCancelled": "You cancelled",
+    "credentialSaved": "You saved it",
+    "declined": "Not allowed",
+    "exportHtml": "Save as web page",
+    "exportMarkdown": "Save as text",
+    "exported": "Report saved",
+    "footer": "Made with Praxi. Private details are left out.",
+    "hint": "See what the bot did in this run, step by step",
+    "noSteps": "The bot did not use any tools in this run.",
+    "outcome": "Result",
+    "outcomes": {
+      "done": "Finished",
+      "failed": "Failed",
+      "stopped": "Stopped by you",
+      "unfinished": "Not finished"
+    },
+    "privacy": "Private details are left out: what was typed, read or answered is not shown, and anything that looks like a password or key is hidden.",
+    "started": "Started",
+    "title": "What the bot did",
+    "took": "Took",
+    "tookTime": "Took {{time}}",
+    "unanswered": "No answer",
+    "waitingForYou": "Waiting for you"
+  },
   "runStatus": {
     "showCard": "Show",
     "stopping": "Stopping…",
@@ -3931,14 +4040,28 @@
     "filterAll": "All",
     "filterIssues": "Failed & missed",
     "form": {
+      "advanced": "Advanced",
+      "advancedHint": "For people who know cron. Most people can skip this.",
       "botFixed": "The bot of a schedule cannot be changed.",
-      "cannotParse": "That phrase was not understood. Try \"every day at 9\" or use cron.",
+      "cannotParse": "I could not understand that. Try \"every day at 9\", \"weekdays at 8:30\" or \"her gün 09:00\", or use the Easy tab.",
       "cannotPreview": "Could not preview this schedule. Check the syntax and timezone.",
+      "confirmParsed": "Check this is what you meant, then press Create.",
       "create": "Create",
       "cron": "Cron expression",
       "cronHint": "Five fields, optionally followed by a timezone.",
+      "customHint": "Describe it in your own words, for example \"every Monday at 8\".",
+      "date": "On which day?",
       "editTitle": "Edit scheduled task",
       "firstRun": "first run {{when}}",
+      "freq": {
+        "custom": "Other",
+        "daily": "Every day",
+        "label": "How often?",
+        "monthly": "Every month",
+        "once": "Once",
+        "weekdays": "Weekdays",
+        "weekly": "Every week"
+      },
       "invalid": {
         "bot": "Pick a bot.",
         "cron": "Enter a cron expression.",
@@ -3950,28 +4073,52 @@
       "kind": {
         "cron": "Cron",
         "keep": "Keep current",
-        "natural": "In words"
+        "natural": "Type it in words",
+        "simple": "Easy"
       },
-      "misfire": "If the app was off at the scheduled time",
+      "misfire": "If the computer was off at the planned time",
+      "misfireHint": "Decides what happens if the computer was off or asleep when a run was due.",
       "misfirePolicy": {
-        "run_all": "Run every missed time",
-        "run_once": "Run once when back",
-        "skip": "Skip it"
+        "run_all": "Catch up: run every missed time (up to 10)",
+        "run_once": "Run once when the computer is back",
+        "skip": "Skip it and wait for the next time"
       },
+      "monthDay": "On which day of the month?",
+      "monthDayHint": "Days 1 to 28, so it works in every month.",
       "name": "Name",
       "newTitle": "New scheduled task",
       "nextRunsTitle": "Next 5 runs ({{tz}})",
       "noFirstRun": "no upcoming run",
+      "notify": {
+        "always": "Every time",
+        "hint": "Saved on this computer. If the bot needs your OK, you are always told.",
+        "label": "Tell me when it ran",
+        "never": "Never",
+        "problems": "Only if something goes wrong"
+      },
+      "parsedAs": "Understood as: {{what}}",
       "payloadKept": "This schedule runs a workflow or tool; that part stays unchanged.",
       "preview": "Preview",
       "prompt": "Prompt",
       "promptHint": "What the bot is asked to do each time.",
       "save": "Save",
+      "simpleProblem": {
+        "date": "Pick the day it should run.",
+        "past": "That time has already passed. Pick a later one.",
+        "time": "Pick a time like 09:00."
+      },
+      "templates": {
+        "hint": "Pick one to fill in the form. You can change everything afterwards.",
+        "title": "Start from an example"
+      },
       "text": "Schedule in words",
       "textHint": "English or Turkish. Times use {{tz}}.",
       "textPlaceholder": "every weekday at 9, her gün 09:00",
+      "time": "At what time?",
       "tz": "Timezone",
       "tzCronHint": "Used if the cron expression has 5 fields without a timezone.",
+      "tzShown": "Times are in {{tz}}.",
+      "weekday": "On which day of the week?",
       "when": "When"
     },
     "history": "Run history",
@@ -4180,6 +4327,12 @@
       },
       "noFile": "No background image selected",
       "title": "Background Image"
+    },
+    "digest": {
+      "enabled": "Send a daily summary",
+      "enabledHint": "One short notification a day with what your bots did and what it cost. Quiet hours apply: during them it only goes to the notification history.",
+      "time": "Send it at",
+      "title": "Daily summary"
     },
     "hotkey": {
       "currentLabel": "Active shortcut",
@@ -5023,7 +5176,7 @@
     "total": "Total",
     "trend": {
       "ariaLabel": "Daily {{metric}} trend over {{days}} days",
-      "dayReadout": "{{day}} · {{calls}} calls · {{tokens}} tokens · {{cost}}",
+      "dayReadout": "{{day}} · {{calls}} calls · {{amount}} tokens · {{cost}}",
       "hoverHint": "Hover or focus a day to see its totals.",
       "metric": "Chart metric",
       "metrics": {
@@ -5051,7 +5204,7 @@
       "approvalHint": "Approve or deny on the card in the chat. Approvals cannot be given by voice.",
       "captions": "Captions",
       "close": "Close",
-      "daemonUnavailable": "The voice service is unavailable. Reconnect the daemon on this computer and try again; update it if voice is not supported.",
+      "daemonUnavailable": "The voice service is unavailable. Reconnect the background service on this computer and try again; update it if voice is not supported.",
       "end": "End call",
       "geminiKeyMissing": "Add a Gemini API key in Settings → General → Dictation service, then try again.",
       "holdToTalk": "Hold to talk",
@@ -5062,7 +5215,7 @@
       "mute": "Mute microphone",
       "noSpeech": "No speech detected. Still listening.",
       "notConfigured": "Add a Gemini key and select Gemini Live in Settings → General → Dictation service, or configure a Whisper-compatible service.",
-      "ownerRequired": "Owner authorization is missing. Open Praxi-Bot on this computer and reconnect the local daemon, then try again.",
+      "ownerRequired": "Owner authorization is missing. Open Praxi-Bot on this computer and reconnect the local background service, then try again.",
       "phase": {
         "approval": "Waiting for your approval",
         "failed": "The call ended",

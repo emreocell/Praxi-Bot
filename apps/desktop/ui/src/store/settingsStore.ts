@@ -8,6 +8,7 @@ import {
 } from "../lib/appearance";
 import { parseBotOrder, parseHostBotOrders } from "../lib/botOrder";
 import { parseMutedBots } from "../lib/botMute";
+import { parseDigestTime } from "../lib/digestNotify";
 import { DEFAULT_QUIET_HOURS, parseQuietHours, type QuietHours } from "../lib/quietHours";
 import { defaultWindowFrame } from "../lib/windowChrome";
 
@@ -47,6 +48,10 @@ export interface AppSettings extends AppearanceSettings {
   notifyPrivate: boolean;
   /** Quiet hours: toasts are held and kept in the notification history. */
   quietHours: QuietHours;
+  /** Daily digest notification time ("HH:MM"), or "" = off. */
+  digestTime: string;
+  /** The local day (YYYY-MM-DD) the digest was last handled, so it fires once a day. */
+  digestLastDay: string;
   /** Bots whose long-run / failed notifications are muted (approvals still notify). */
   mutedBotIds: string[];
   /** Debug: also show the route chip for a plain `Agent` decision at K4. */
@@ -93,6 +98,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   notifyPrivate: false,
   quietHours: DEFAULT_QUIET_HOURS,
   mutedBotIds: [],
+  digestTime: "",
+  digestLastDay: "",
   showAgentRoute: false,
   accountName: "",
   windowFrame: defaultWindowFrame(typeof navigator === "undefined" ? "" : navigator.userAgent),
@@ -154,6 +161,8 @@ export function loadSettingsSync(): AppSettings | null {
       messageTimes: parseMessageTimes(parsed.messageTimes),
       quietHours: parseQuietHours(parsed.quietHours),
       mutedBotIds: parseMutedBots(parsed.mutedBotIds),
+      digestTime: parseDigestTime(parsed.digestTime),
+      digestLastDay: typeof parsed.digestLastDay === "string" ? parsed.digestLastDay : "",
       botOrder: parseBotOrder(parsed.botOrder),
       hostBotOrders: parseHostBotOrders(parsed.hostBotOrders),
       voiceName: parseVoiceName(parsed.voiceName),
@@ -216,6 +225,9 @@ export async function loadSettings(): Promise<AppSettings> {
         DEFAULT_SETTINGS.notifyFailed;
       const quietHours = parseQuietHours(await store.get<unknown>("quietHours"));
       const mutedBotIds = parseMutedBots(await store.get<unknown>("mutedBotIds"));
+      const digestTime = parseDigestTime(await store.get<unknown>("digestTime"));
+      const digestLastDayRaw = await store.get<unknown>("digestLastDay");
+      const digestLastDay = typeof digestLastDayRaw === "string" ? digestLastDayRaw : "";
       const notifyPrivate =
         (await store.get<boolean>("notifyPrivate")) ??
         DEFAULT_SETTINGS.notifyPrivate;
@@ -260,6 +272,8 @@ export async function loadSettings(): Promise<AppSettings> {
         notifyPrivate,
         quietHours,
         mutedBotIds,
+        digestTime,
+        digestLastDay,
         showAgentRoute,
         accountName,
         windowFrame,
@@ -310,6 +324,8 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
       await store.set("notifyPrivate", settings.notifyPrivate);
       await store.set("quietHours", settings.quietHours);
       await store.set("mutedBotIds", settings.mutedBotIds);
+      await store.set("digestTime", settings.digestTime);
+      await store.set("digestLastDay", settings.digestLastDay);
       await store.set("showAgentRoute", settings.showAgentRoute);
       await store.set("accountName", settings.accountName);
       await store.set(WINDOW_FRAME_KEY, settings.windowFrame);

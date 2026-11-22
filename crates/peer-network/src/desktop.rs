@@ -6,8 +6,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use base64::Engine as _;
 use desktop_api::{
-    Action, ActionResult, Capabilities, DesktopBackend, DesktopError, Image, Quality, Region,
-    Snapshot, WindowInfo,
+    ActGuard, Action, ActionResult, Capabilities, DesktopBackend, DesktopError, Image, Quality,
+    Region, Snapshot, WindowInfo,
     snapshot::{AppSpec, Pid},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -22,9 +22,8 @@ use crate::proto::{
 use crate::rpc::{RpcClient, RpcHandler};
 use crate::store::{Device, now_secs};
 
-/// Deadline of a mutating desktop call: the person at the desktop may need
-/// this long to answer the approval card (card wait 120 s + margin). Reads keep
-/// the short default deadline.
+/// Deadline for a desktop RPC that may wait for an approval card
+/// (card wait 120 s + margin), including the first read of a shared screen.
 pub const ACTION_RPC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(150);
 
 /// Application error code: element not found.
@@ -137,6 +136,11 @@ struct SnapshotParams {
 #[derive(Serialize, Deserialize)]
 struct ActParams {
     action: Action,
+}
+
+#[derive(Serialize, Deserialize)]
+struct FocusParams {
+    window_id: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -293,6 +297,13 @@ impl RpcHandler for DesktopRpcHandler {
                 let w = b.windows().await.map_err(|e| desktop_to_rpc(&e))?;
                 to_value(&w)
             }
+            "desktop.focus" => {
+                let p: FocusParams = parse(params)?;
+                b.focus(p.window_id, None)
+                    .await
+                    .map_err(|e| desktop_to_rpc(&e))?;
+                Ok(Value::Null)
+            }
             "desktop.launch" => {
                 let p: LaunchParams = parse(params)?;
                 let pid = b.launch(p.app).await.map_err(|e| desktop_to_rpc(&e))?;
@@ -385,8 +396,7 @@ impl RemoteDesktop {
         method: &str,
         params: Value,
     ) -> std::result::Result<T, DesktopError> {
-        let mutating = matches!(method, "desktop.act" | "desktop.launch");
-        let v = if mutating {
+        let v = if can_wait_for_desktop_approval(method) {
             self.client
                 .call_with_timeout(method, params, ACTION_RPC_TIMEOUT)
                 .await
@@ -396,6 +406,27 @@ impl RemoteDesktop {
         .map_err(peer_to_desktop)?;
         decode(v).map_err(peer_to_desktop)
     }
+}
+
+fn can_wait_for_desktop_approval(method: &str) -> bool {
+    matches!(
+        method,
+        "desktop.act"
+            | "desktop.focus"
+            | "desktop.launch"
+            | "desktop.snapshot"
+            | "desktop.screenshot"
+            | "desktop.windows"
+    )
+}
+
+#[cfg(test)]
+#[test]
+fn shared_screen_reads_have_time_for_owner_approval() {
+    assert!(can_wait_for_desktop_approval("desktop.windows"));
+    assert!(can_wait_for_desktop_approval("desktop.snapshot"));
+    assert!(can_wait_for_desktop_approval("desktop.screenshot"));
+    assert!(!can_wait_for_desktop_approval("desktop.capabilities"));
 }
 
 fn decode<T: DeserializeOwned>(v: Value) -> Result<T> {
@@ -408,6 +439,19 @@ fn enc<T: Serialize>(v: &T) -> std::result::Result<Value, DesktopError> {
 
 #[async_trait]
 impl DesktopBackend for RemoteDesktop {
+    async fn focus(
+        &self,
+        window_id: u64,
+        guard: Option<ActGuard>,
+    ) -> std::result::Result<(), DesktopError> {
+        if guard.is_some() {
+            return Err(DesktopError::GuardRefused(
+                "remote grants do not cover window focus".into(),
+            ));
+        }
+        self.call("desktop.focus", enc(&FocusParams { window_id })?)
+            .await
+    }
     async fn snapshot(&self, scope: Option<u64>) -> std::result::Result<Snapshot, DesktopError> {
         self.call("desktop.snapshot", enc(&SnapshotParams { scope })?)
             .await
@@ -495,6 +539,23 @@ impl AttributedDesktop {
 
 #[async_trait]
 impl DesktopBackend for AttributedDesktop {
+    async fn focus(
+        &self,
+        window_id: u64,
+        guard: Option<ActGuard>,
+    ) -> std::result::Result<(), DesktopError> {
+        if guard.is_some() {
+            return Err(DesktopError::GuardRefused(
+                "remote grants do not cover window focus".into(),
+            ));
+        }
+        self.remote
+            .call(
+                "desktop.focus",
+                self.with_extra(enc(&FocusParams { window_id })?),
+            )
+            .await
+    }
     async fn snapshot(&self, scope: Option<u64>) -> std::result::Result<Snapshot, DesktopError> {
         self.remote
             .call(
