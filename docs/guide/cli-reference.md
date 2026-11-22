@@ -91,8 +91,9 @@ before a provider is configured, reporting `setup_required` until you run
 
 ### `bot doctor`
 
-Check installation health (data dir, config, providers, daemon, browser, and more).
-Never prompts. Exits 1 when any check fails.
+Check installation health (data dir writability and free disk space, config,
+providers, daemon, browser, and more). Never prompts. Exits 1 when any check
+fails.
 
 | Option | Meaning |
 | --- | --- |

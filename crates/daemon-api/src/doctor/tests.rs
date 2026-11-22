@@ -101,7 +101,87 @@ fn missing_data_dir_offers_the_create_repair() {
     assert_eq!(c.repair, Some(Repair::CreateDataDir));
     let c = check_data_dir(d.path());
     assert_eq!(c.status, Status::Ok, "{}", c.detail);
+    assert!(
+        c.detail.contains("writable") && c.detail.contains("MiB free"),
+        "{}",
+        c.detail
+    );
     assert_eq!(c.repair, None);
+}
+
+#[test]
+fn data_dir_check_rejects_file_and_checks_free_space_thresholds() {
+    let d = tempfile::tempdir().unwrap();
+    let file = d.path().join("not-a-dir");
+    std::fs::write(&file, b"file").unwrap();
+    let c = check_data_dir(&file);
+    assert_eq!(c.status, Status::Fail, "{}", c.detail);
+    assert!(c.detail.contains("is not a directory"), "{}", c.detail);
+    assert!(c.hint.as_deref().unwrap().contains("--data-dir"));
+    assert_eq!(c.repair, None);
+
+    let under_file = file.join("child");
+    let c = check_data_dir(&under_file);
+    assert_eq!(c.status, Status::Fail, "{}", c.detail);
+    assert_eq!(c.repair, None);
+
+    let ok = data_dir_with_free_space(d.path(), Ok(DISK_WARN_BYTES));
+    assert_eq!(ok.status, Status::Ok);
+    assert!(
+        ok.detail.contains("writable, 1024 MiB free"),
+        "{}",
+        ok.detail
+    );
+
+    let warn = data_dir_with_free_space(d.path(), Ok(DISK_WARN_BYTES - 1));
+    assert_eq!(warn.status, Status::Warn);
+    assert!(
+        warn.detail.contains("writable, 1023 MiB free"),
+        "{}",
+        warn.detail
+    );
+    assert!(warn.hint.as_deref().unwrap().contains("1 GiB"));
+
+    let fail = data_dir_with_free_space(d.path(), Ok(DISK_FAIL_BYTES - 1));
+    assert_eq!(fail.status, Status::Fail);
+    assert!(
+        fail.detail.contains("writable, 99 MiB free"),
+        "{}",
+        fail.detail
+    );
+    assert!(
+        fail.hint
+            .as_deref()
+            .unwrap()
+            .contains("free some disk space")
+    );
+
+    let unknown = data_dir_with_free_space(d.path(), Err("denied".into()));
+    assert_eq!(unknown.status, Status::Warn);
+    assert!(
+        unknown.detail.contains("cannot read free space: denied"),
+        "{}",
+        unknown.detail
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn read_only_data_dir_fails_writability_probe() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let ro = d.path().join("readonly");
+    std::fs::create_dir(&ro).unwrap();
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let probe_blocked = std::fs::File::create(ro.join("root-check")).is_err();
+    let _ = std::fs::remove_file(ro.join("root-check"));
+    let c = check_data_dir(&ro);
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if probe_blocked {
+        assert_eq!(c.status, Status::Fail, "{}", c.detail);
+        assert!(c.detail.contains("is not writable"), "{}", c.detail);
+        assert!(c.hint.is_some());
+    }
 }
 
 #[test]
