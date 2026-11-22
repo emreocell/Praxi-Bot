@@ -186,7 +186,7 @@ pub(crate) struct ChatExport {
     approvals: Vec<ExportApproval>,
 }
 
-#[derive(Deserialize, IntoParams)]
+#[derive(Deserialize)]
 pub(crate) struct ImportQuery {
     /// Bot that will own the new chat.
     bot_id: Uuid,
@@ -232,7 +232,8 @@ pub(crate) struct ChatImportReport {
 /// untrusted history with origin `imported`; tool steps and approvals are
 /// counted but never executed or written to their tables.
 #[utoipa::path(post, operation_id = "import_chat", path = "/v1/chats/import", tag = "chats", security(("bearer" = [])),
-    params(ImportQuery), request_body = ChatImport,
+    params(("bot_id" = Uuid, Query, description = "Bot that will own the new chat.")),
+    request_body = ChatImport,
     responses((status = 200, body = ChatImportReport),
         (status = 400, body = ErrorBody), (status = 403, body = ErrorBody),
         (status = 404, body = ErrorBody)))]
