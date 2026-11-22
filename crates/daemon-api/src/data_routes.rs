@@ -106,14 +106,12 @@ fn usage(data_dir: &Path) -> DataUsageDto {
             }
         })
         .collect();
-    let other = std::fs::read_dir(data_dir)
-        .map(|rd| {
-            rd.flatten()
-                .filter(|e| !named.contains(e.file_name().to_string_lossy().as_ref()))
-                .map(|e| tree_size(&e.path()))
-                .sum()
-        })
-        .unwrap_or(0);
+    let other: u64 = std::fs::read_dir(data_dir).map_or(0, |rd| {
+        rd.flatten()
+            .filter(|e| !named.contains(e.file_name().to_string_lossy().as_ref()))
+            .map(|e| tree_size(&e.path()))
+            .sum()
+    });
     categories.push(DataCategoryDto {
         id: "other".into(),
         bytes: other,
