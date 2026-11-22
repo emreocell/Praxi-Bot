@@ -50,6 +50,14 @@ pub fn fail(code: i32, msg: impl Into<String>) -> Box<dyn std::error::Error> {
     })
 }
 
+/// Replace every Unicode control character with a space so a name or title
+/// cannot emit terminal escape sequences or split a line.
+pub fn printable(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
 /// Owner key of the daemons the tests start.
 #[cfg(test)]
 pub const TEST_OWNER_KEY: &str = "ownerkey0123456789abcdef0123456789abcdef0123456789abcdef";

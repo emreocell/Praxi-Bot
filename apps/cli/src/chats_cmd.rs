@@ -7,7 +7,7 @@ use clap::Subcommand;
 use reqwest::Method;
 
 use crate::Result;
-use crate::client::{Client, exit, fail};
+use crate::client::{Client, exit, fail, printable};
 
 /// `bot chats` subcommands.
 #[derive(Subcommand)]
@@ -101,14 +101,6 @@ async fn list(c: &Client, bot: Option<&str>, json: bool, out: &mut dyn Write) ->
         )?;
     }
     Ok(())
-}
-
-/// Replace every Unicode control character with a space so titles cannot emit
-/// terminal escape sequences or split lines.
-fn printable(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect()
 }
 
 async fn export(

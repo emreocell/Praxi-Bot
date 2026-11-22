@@ -9,7 +9,7 @@ use reqwest::Method;
 use serde_json::{Value, json};
 
 use crate::Result;
-use crate::client::{Client, decision_body, exit, fail};
+use crate::client::{Client, decision_body, exit, fail, printable};
 
 fn print_json(out: &mut dyn Write, v: &Value) -> Result<()> {
     writeln!(out, "{}", serde_json::to_string(v)?)?;
@@ -70,7 +70,7 @@ pub async fn bots_list(c: &Client, json_out: bool, out: &mut dyn Write) -> Resul
             out,
             "{}  {}  model={}",
             b["id"].as_str().unwrap_or("?"),
-            b["name"].as_str().unwrap_or("?"),
+            printable(b["name"].as_str().unwrap_or("?")),
             b["config"]["models"]["executor"].as_str().unwrap_or("-")
         )?;
     }
@@ -508,7 +508,7 @@ pub async fn schedules_list(c: &Client, json_out: bool, out: &mut dyn Write) -> 
             out,
             "{}  {}  {}  {}  next {}{}",
             s["id"].as_str().unwrap_or("?"),
-            s["name"].as_str().unwrap_or("?"),
+            printable(s["name"].as_str().unwrap_or("?")),
             when_text(&s["spec"]),
             if s["enabled"] == true { "on" } else { "off" },
             fmt_ms(s["next_run_at_ms"].as_i64()),
@@ -617,6 +617,8 @@ mod tests {
     use daemon_api::fake::FakeProvider;
     use daemon_api::{AppState, DaemonConfig};
     use storage::Storage;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
     use crate::client::ExitError;
@@ -1088,6 +1090,99 @@ mod tests {
         assert_eq!(
             c.request(Method::GET, "/v1/schedules", None).await.unwrap(),
             json!([])
+        );
+    }
+
+    /// A daemon stand-in that answers `GET <route>` with `body`.
+    async fn canned(route: &str, body: Value) -> (MockServer, Client) {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(route))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+        let c = Client::new(&server.uri(), TOKEN.to_owned());
+        (server, c)
+    }
+
+    #[tokio::test]
+    async fn bots_list_shows_control_characters_in_names_safely() {
+        let (_server, c) = canned(
+            "/v1/bots",
+            json!([
+                {
+                    "id": "bot-1",
+                    "name": "\u{1b}[2JProje\tnotları\0\nnext",
+                    "config": {"models": {"executor": "fake/echo"}}
+                },
+                {
+                    "id": "bot-2",
+                    "name": "Türkçe başlık — üğışçö",
+                    "config": {"models": {"executor": "fake/echo"}}
+                },
+            ]),
+        )
+        .await;
+
+        let mut out = Vec::new();
+        bots_list(&c, false, &mut out).await.unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "a name must not split its line: {text:?}");
+        for line in &lines {
+            assert!(
+                !line.chars().any(char::is_control),
+                "control character leaked into output: {line:?}"
+            );
+        }
+        assert!(lines[0].starts_with("bot-1  "), "{text:?}");
+        assert!(lines[0].contains("Proje"), "{text:?}");
+        assert!(lines[0].contains("notları"), "{text:?}");
+        assert_eq!(lines[1], "bot-2  Türkçe başlık — üğışçö  model=fake/echo");
+    }
+
+    #[tokio::test]
+    async fn schedules_list_shows_control_characters_in_names_safely() {
+        let (_server, c) = canned(
+            "/v1/schedules",
+            json!([
+                {
+                    "id": "sch-1",
+                    "name": "\u{1b}[2JGünlük\tyedek\0\nnext",
+                    "spec": {"cron": "0 9 * * *"},
+                    "enabled": true,
+                    "next_run_at_ms": 1_767_225_600_000_i64,
+                    "has_webhook": false
+                },
+                {
+                    "id": "sch-2",
+                    "name": "Türkçe başlık — üğışçö",
+                    "spec": {"cron": "0 9 * * *"},
+                    "enabled": true,
+                    "next_run_at_ms": 1_767_225_600_000_i64,
+                    "has_webhook": false
+                },
+            ]),
+        )
+        .await;
+
+        let mut out = Vec::new();
+        schedules_list(&c, false, &mut out).await.unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "a name must not split its line: {text:?}");
+        for line in &lines {
+            assert!(
+                !line.chars().any(char::is_control),
+                "control character leaked into output: {line:?}"
+            );
+        }
+        assert!(lines[0].starts_with("sch-1  "), "{text:?}");
+        assert!(lines[0].contains("Günlük"), "{text:?}");
+        assert!(lines[0].contains("yedek"), "{text:?}");
+        assert_eq!(
+            lines[1],
+            "sch-2  Türkçe başlık — üğışçö  cron 0 9 * * *  on  next 2026-01-01 00:00Z"
         );
     }
 
