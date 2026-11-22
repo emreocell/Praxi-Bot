@@ -369,6 +369,9 @@ fn build_agent_with_skills(
             knowledge_decider: Some(Arc::new(agent_core::HeuristicKnowledgeDecider::new(
                 Arc::clone(storage),
             ))),
+            // Unit tests drive the daemon with scripted providers that call
+            // tools directly; discovery is covered in agent-core and evals.
+            legacy_tool_surface: cfg!(test),
             ..LoopConfig::default()
         },
     )
