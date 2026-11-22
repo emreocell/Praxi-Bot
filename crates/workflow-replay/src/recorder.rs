@@ -10,14 +10,15 @@
 //! * The recorder returns an unsaved *proposal* for review. The caller can
 //!   explicitly persist it afterward with [`Recording::save_new`].
 //!
-//! TODO(model-assisted parametrisation): only whole-value substring matches are
-//! lifted; partial matches (`...?q=cats`), reworded values and dates need a
+//! TODO(model-assisted parametrisation): only whole-value substring matches and
+//! URL query parameter values are lifted; reworded values and dates need a
 //! small model pass over the proposal.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use chrono::{DateTime, Datelike, Utc};
 use protocol::RunId;
+use secret_store::Redactor;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use storage::{RunStep, Storage};
@@ -548,11 +549,138 @@ fn parse_desktop_line(line: &str) -> Option<DesktopNodeRec> {
 
 // ── Parameter lifting ───────────────────────────────────────────────────────
 
+const MAX_PARAM_NAME_LEN: usize = 48;
+const MAX_HINT_DESC_CHARS: usize = 64;
+
 #[derive(Default)]
 struct Lifter {
     message: String,
     params: Vec<Param>,
     by_value: BTreeMap<String, String>,
+    by_secret_value: HashMap<String, String>,
+    secret_values: HashSet<String>,
+    used_names: HashSet<String>,
+    name_next: HashMap<String, usize>,
+    redactor: Redactor,
+}
+
+fn sanitize_param_name(hint: &str) -> String {
+    let mut base = String::new();
+    let mut prev_underscore = false;
+    for c in hint.chars() {
+        if base.len() >= MAX_PARAM_NAME_LEN {
+            break;
+        }
+        if c.is_ascii_alphanumeric() {
+            base.push(c.to_ascii_lowercase());
+            prev_underscore = false;
+        } else if !base.is_empty() && !prev_underscore {
+            base.push('_');
+            prev_underscore = true;
+        }
+    }
+    while base.ends_with('_') {
+        base.pop();
+    }
+    if base.is_empty() {
+        "param".to_owned()
+    } else if base.starts_with(|c: char| c.is_ascii_digit()) {
+        let mut prefixed = format!("p_{base}");
+        prefixed.truncate(MAX_PARAM_NAME_LEN);
+        while prefixed.ends_with('_') {
+            prefixed.pop();
+        }
+        prefixed
+    } else {
+        base
+    }
+}
+
+fn bounded_hint(hint: &str) -> String {
+    let mut out: String = hint.chars().take(MAX_HINT_DESC_CHARS).collect();
+    if hint.chars().nth(MAX_HINT_DESC_CHARS).is_some() {
+        out.push('…');
+    }
+    out
+}
+
+fn decode_query_pair(pair: &str) -> Option<(String, String)> {
+    url::form_urlencoded::parse(pair.as_bytes())
+        .next()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+}
+
+fn is_secret_query_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    if [
+        "token",
+        "password",
+        "passwd",
+        "secret",
+        "session",
+        "signature",
+        "credential",
+        "apikey",
+        "accesskey",
+        "privatekey",
+        "clientkey",
+        "authtoken",
+        "authorization",
+        "bearer",
+        "cookie",
+    ]
+    .iter()
+    .any(|s| lower.contains(s))
+    {
+        return true;
+    }
+
+    // Split on separators and camelCase boundaries so e.g. `apiKey` / `x-auth`
+    // match `key` / `auth`, while `keyword` or `author` do not false-positive.
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut prev_lower_or_digit = false;
+    for c in key.chars() {
+        if c.is_ascii_alphanumeric() {
+            if c.is_ascii_uppercase() && prev_lower_or_digit && !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+            current.push(c.to_ascii_lowercase());
+            prev_lower_or_digit = c.is_ascii_lowercase() || c.is_ascii_digit();
+        } else {
+            if !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+            prev_lower_or_digit = false;
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+
+    words.iter().any(|w| {
+        matches!(
+            w.as_str(),
+            "token"
+                | "key"
+                | "password"
+                | "passwd"
+                | "pwd"
+                | "pass"
+                | "session"
+                | "auth"
+                | "oauth"
+                | "signature"
+                | "sig"
+                | "secret"
+                | "credential"
+                | "credentials"
+                | "cookie"
+                | "bearer"
+                | "otp"
+                | "authorization"
+        )
+    })
 }
 
 impl Lifter {
@@ -563,44 +691,137 @@ impl Lifter {
         }
     }
 
-    /// A template for `value`: `{param}` when it appears in the user message,
-    /// otherwise the escaped literal.
-    fn lift(&mut self, hint: &str, value: &str) -> String {
-        if value.chars().count() < MIN_LIFT_CHARS || !self.message.contains(value) {
-            return escape_literal(value);
+    fn alloc_name(&mut self, hint: &str) -> String {
+        let base = sanitize_param_name(hint);
+        if self.used_names.insert(base.clone()) {
+            return base;
+        }
+        let counter = self.name_next.entry(base.clone()).or_insert(2);
+        loop {
+            let candidate = format!("{base}_{}", *counter);
+            *counter += 1;
+            if self.used_names.insert(candidate.clone()) {
+                return candidate;
+            }
+        }
+    }
+
+    fn lift_normal(&mut self, hint: &str, value: &str) -> String {
+        if self.secret_values.contains(value) {
+            return self.lift_secret(hint, value);
         }
         if let Some(n) = self.by_value.get(value) {
             return format!("{{{n}}}");
         }
-        let base: String = hint
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() {
-                    c.to_ascii_lowercase()
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        let base = if base.is_empty() || base.starts_with(|c: char| c.is_ascii_digit()) {
-            format!("p_{base}")
-        } else {
-            base
-        };
-        let mut name = base.clone();
-        let mut n = 2;
-        while self.params.iter().any(|p| p.name == name) {
-            name = format!("{base}_{n}");
-            n += 1;
-        }
+        let name = self.alloc_name(hint);
         self.params.push(Param {
             name: name.clone(),
             ty: ParamType::String,
             default: Some(value.to_owned()),
-            description: format!("Recorded from the request ({hint})"),
+            description: format!("Recorded from the request ({})", bounded_hint(hint)),
         });
         self.by_value.insert(value.to_owned(), name.clone());
         format!("{{{name}}}")
+    }
+
+    fn lift_secret(&mut self, hint: &str, value: &str) -> String {
+        if let Some(n) = self.by_secret_value.get(value) {
+            return format!("{{{n}}}");
+        }
+        let name = self.alloc_name(hint);
+        self.params.push(Param {
+            name: name.clone(),
+            ty: ParamType::Secret,
+            default: None,
+            description: format!("Secret parameter from the request ({})", bounded_hint(hint)),
+        });
+        self.by_secret_value.insert(value.to_owned(), name.clone());
+        self.secret_values.insert(value.to_owned());
+        format!("{{{name}}}")
+    }
+
+    /// A template for `value`: `{param}` when it appears in the user message,
+    /// otherwise the escaped literal.
+    fn lift(&mut self, hint: &str, value: &str) -> String {
+        if self.secret_values.contains(value) || self.redactor.contains_secret(value) {
+            return self.lift_secret(hint, value);
+        }
+        if value.chars().count() < MIN_LIFT_CHARS || !self.message.contains(value) {
+            return escape_literal(value);
+        }
+        self.lift_normal(hint, value)
+    }
+
+    /// Lift URL query-string values (including secret-looking query parameters)
+    /// into workflow parameters while keeping the URL skeleton literal.
+    fn lift_url(&mut self, url: &str) -> String {
+        let (before_frag, fragment) = match url.split_once('#') {
+            Some((b, f)) => (b, Some(f)),
+            None => (url, None),
+        };
+        let (base, query) = match before_frag.split_once('?') {
+            Some((b, q)) => (b, Some(q)),
+            None => (before_frag, None),
+        };
+        let Some(q_str) = query.filter(|q| !q.is_empty()) else {
+            return self.lift("url", url);
+        };
+
+        let mut parts = Vec::new();
+        let mut any_lifted = false;
+        for pair in q_str.split('&') {
+            if pair.is_empty() {
+                parts.push(String::new());
+                continue;
+            }
+            let Some((raw_key, raw_val)) = pair.split_once('=') else {
+                parts.push(escape_literal(pair));
+                continue;
+            };
+            if raw_val.is_empty() {
+                parts.push(format!("{}=", escape_literal(raw_key)));
+                continue;
+            }
+            let (decoded_key, decoded_val) =
+                decode_query_pair(pair).unwrap_or_else(|| (raw_key.to_owned(), raw_val.to_owned()));
+            if decoded_val.is_empty() {
+                parts.push(format!("{}=", escape_literal(raw_key)));
+                continue;
+            }
+            let is_secret = is_secret_query_key(&decoded_key)
+                || self.redactor.contains_secret(&decoded_val)
+                || self.secret_values.contains(&decoded_val);
+            if is_secret {
+                let placeholder = self.lift_secret(&decoded_key, &decoded_val);
+                any_lifted = true;
+                parts.push(format!("{}={placeholder}", escape_literal(raw_key)));
+            } else if decoded_val.chars().count() >= MIN_LIFT_CHARS
+                && self.message.contains(&decoded_val)
+            {
+                let placeholder = self.lift_normal(&decoded_key, &decoded_val);
+                any_lifted = true;
+                parts.push(format!("{}={placeholder}", escape_literal(raw_key)));
+            } else {
+                parts.push(format!(
+                    "{}={}",
+                    escape_literal(raw_key),
+                    escape_literal(raw_val)
+                ));
+            }
+        }
+
+        if !any_lifted {
+            return self.lift("url", url);
+        }
+
+        let mut out = escape_literal(base);
+        out.push('?');
+        out.push_str(&parts.join("&"));
+        if let Some(frag) = fragment {
+            out.push('#');
+            out.push_str(&escape_literal(frag));
+        }
+        out
     }
 
     fn lift_value(&mut self, hint: &str, v: &Value) -> Value {
@@ -735,7 +956,7 @@ fn convert(name: &str, input: &Value, cx: &mut Cx) -> Conv {
                 return Conv::Dropped("missing url".into());
             };
             Conv::Step(Step::Navigate(Navigate {
-                url: cx.lifter.lift("url", url),
+                url: cx.lifter.lift_url(url),
                 profile: str_of(input, "profile").map(str::to_owned),
             }))
         }
@@ -1204,5 +1425,208 @@ mod tests {
         assert!(
             matches!(recording.save_new(&store), Err(SaveError::AlreadyExists(name)) if name == "chosen")
         );
+    }
+
+    fn record_url(user_msg: &str, url: &str) -> Workflow {
+        let steps = vec![
+            user_step(user_msg),
+            tool_step(
+                1,
+                json!([call("o", "browser_open", &json!({"url": url}))]),
+                json!([res("o", "browser_open", "# Page\n", false)]),
+            ),
+        ];
+        Recorder::new()
+            .from_steps(&steps, &RecordOptions::default())
+            .unwrap()
+            .workflow
+    }
+
+    fn navigate_url(wf: &Workflow) -> &str {
+        let Step::Navigate(n) = &wf.steps[0] else {
+            panic!("expected Navigate step, got {:?}", wf.steps);
+        };
+        &n.url
+    }
+
+    #[test]
+    fn query_value_matching_message_is_lifted_with_space_decoding() {
+        let wf = record_url(
+            "search the shop for red shoes",
+            "https://shop.test/search?q=red+shoes",
+        );
+        assert_eq!(navigate_url(&wf), "https://shop.test/search?q={q}");
+        assert_eq!(wf.params.len(), 1);
+        assert_eq!(wf.params[0].name, "q");
+        assert_eq!(wf.params[0].ty, ParamType::String);
+        assert_eq!(wf.params[0].default.as_deref(), Some("red shoes"));
+
+        // `%20` encoded space also decodes and lifts cleanly.
+        let wf_pct = record_url(
+            "search the shop for red shoes",
+            "https://shop.test/search?query=red%20shoes",
+        );
+        assert_eq!(
+            navigate_url(&wf_pct),
+            "https://shop.test/search?query={query}"
+        );
+        assert_eq!(wf_pct.params[0].default.as_deref(), Some("red shoes"));
+    }
+
+    #[test]
+    fn query_without_match_and_partial_match_preserve_literals() {
+        let no_match = record_url("search for hats", "https://shop.test/search?q=red+shoes");
+        assert_eq!(
+            navigate_url(&no_match),
+            "https://shop.test/search?q=red+shoes"
+        );
+        assert!(no_match.params.is_empty());
+
+        let two_values = record_url(
+            "search for red shoes",
+            "https://shop.test/search?q=red+shoes&sort=price_asc",
+        );
+        assert_eq!(
+            navigate_url(&two_values),
+            "https://shop.test/search?q={q}&sort=price_asc"
+        );
+        assert_eq!(two_values.params.len(), 1);
+        assert_eq!(two_values.params[0].name, "q");
+    }
+
+    #[test]
+    fn query_lifting_handles_unicode_repeated_keys_empty_values_and_fragments() {
+        // Unicode in both key and value, plus fragment preservation.
+        let uni = record_url(
+            "find café & résumé",
+            "https://shop.test/search?q=caf%C3%A9+%26+r%C3%A9sum%C3%A9&%E4%B8%AD=caf%C3%A9+%26+r%C3%A9sum%C3%A9#results",
+        );
+        // Same value is deduplicated to `{q}` across keys.
+        assert_eq!(
+            navigate_url(&uni),
+            "https://shop.test/search?q={q}&%E4%B8%AD={q}#results"
+        );
+        assert_eq!(uni.params.len(), 1);
+        assert_eq!(uni.params[0].default.as_deref(), Some("café & résumé"));
+
+        // Repeated keys: distinct values get unique sane names; identical values deduplicate.
+        let repeated = record_url(
+            "filter rust and wasm",
+            "https://shop.test/items?tag=rust&tag=wasm&tag=rust#top",
+        );
+        assert_eq!(
+            navigate_url(&repeated),
+            "https://shop.test/items?tag={tag}&tag={tag_2}&tag={tag}#top"
+        );
+        assert_eq!(repeated.params.len(), 2);
+        assert_eq!(repeated.params[0].name, "tag");
+        assert_eq!(repeated.params[0].default.as_deref(), Some("rust"));
+        assert_eq!(repeated.params[1].name, "tag_2");
+        assert_eq!(repeated.params[1].default.as_deref(), Some("wasm"));
+
+        // Empty values and valueless flags are never lifted (even with empty-string contains).
+        let empty = record_url(
+            "open shop with red shoes",
+            "https://shop.test/search?empty=&flag&token=&q=red+shoes#frag",
+        );
+        assert_eq!(
+            navigate_url(&empty),
+            "https://shop.test/search?empty=&flag&token=&q={q}#frag"
+        );
+        assert_eq!(empty.params.len(), 1);
+        assert_eq!(empty.params[0].name, "q");
+    }
+
+    #[test]
+    fn query_lifting_sane_naming_and_huge_urls() {
+        let messy_keys = record_url(
+            "find blue socks",
+            "https://shop.test/?filter[color]=blue%20socks&123=blue%20socks",
+        );
+        // Deduplicated by value; sanitized key is `filter_color`.
+        assert_eq!(
+            navigate_url(&messy_keys),
+            "https://shop.test/?filter[color]={filter_color}&123={filter_color}"
+        );
+        assert_eq!(messy_keys.params[0].name, "filter_color");
+
+        // Digit-only key gets `p_` prefix.
+        let digit_key = record_url("find blue socks", "https://shop.test/?123=blue+socks");
+        assert_eq!(digit_key.params[0].name, "p_123");
+
+        // Huge URL: 1,500 repeated keys with distinct values + a very long key.
+        let mut pairs = Vec::with_capacity(1501);
+        let mut msg = String::from("items:");
+        for i in 0..1500 {
+            let val = format!("val_{i:04}");
+            msg.push(' ');
+            msg.push_str(&val);
+            pairs.push(format!("tag={val}"));
+        }
+        let long_key = "k".repeat(400);
+        msg.push_str(" needle_value");
+        pairs.push(format!("{long_key}=needle_value"));
+        let huge_url = format!("https://shop.test/bulk?{}#end", pairs.join("&"));
+        let huge = record_url(&msg, &huge_url);
+        assert_eq!(huge.params.len(), 1501);
+        assert!(
+            huge.params
+                .iter()
+                .all(|p| p.name.len() <= MAX_PARAM_NAME_LEN)
+        );
+        assert!(navigate_url(&huge).ends_with("#end"));
+        huge.validate().unwrap();
+    }
+
+    #[test]
+    fn secret_looking_query_values_are_lifted_as_secret_params_without_stored_defaults() {
+        let url = "https://app.test/cb?token=tok-secret-1&api_key=key-secret-2&password=pw-secret-3&session=sess-secret-4&auth=auth-secret-5&signature=sig-secret-6&keyword=red+shoes&author=alice&q=ghp_1234567890abcdef1234567890abcdef1234";
+        // Even if the user message mentions some values or none, secrets are lifted without defaults.
+        let wf = record_url("search red shoes by alice", url);
+        let nav = navigate_url(&wf);
+        assert_eq!(
+            nav,
+            "https://app.test/cb?token={token}&api_key={api_key}&password={password}&session={session}&auth={auth}&signature={signature}&keyword={keyword}&author={author}&q={q}"
+        );
+        // Secret parameters have `ParamType::Secret` and `default: None`.
+        for secret_name in [
+            "token",
+            "api_key",
+            "password",
+            "session",
+            "auth",
+            "signature",
+            "q",
+        ] {
+            let p = wf.params.iter().find(|p| p.name == secret_name).unwrap();
+            assert_eq!(p.ty, ParamType::Secret, "{secret_name}");
+            assert!(p.default.is_none(), "{secret_name} must not have a default");
+        }
+        // `keyword` and `author` are NOT misclassified as secrets.
+        let kw = wf.params.iter().find(|p| p.name == "keyword").unwrap();
+        assert_eq!(kw.ty, ParamType::String);
+        assert_eq!(kw.default.as_deref(), Some("red shoes"));
+        let author = wf.params.iter().find(|p| p.name == "author").unwrap();
+        assert_eq!(author.ty, ParamType::String);
+        assert_eq!(author.default.as_deref(), Some("alice"));
+
+        // Serialized workflow files (TOML and JSON) and step description never contain any secret value.
+        let toml = wf.to_toml().unwrap();
+        let json = wf.to_json().unwrap();
+        let desc = wf.steps[0].describe();
+        for secret_val in [
+            "tok-secret-1",
+            "key-secret-2",
+            "pw-secret-3",
+            "sess-secret-4",
+            "auth-secret-5",
+            "sig-secret-6",
+            "ghp_1234567890abcdef1234567890abcdef1234",
+        ] {
+            assert!(!toml.contains(secret_val), "TOML leaked {secret_val}");
+            assert!(!json.contains(secret_val), "JSON leaked {secret_val}");
+            assert!(!desc.contains(secret_val), "describe leaked {secret_val}");
+        }
+        wf.validate().unwrap();
     }
 }

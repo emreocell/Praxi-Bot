@@ -1562,3 +1562,79 @@ mod secret_steps {
         assert!(json.contains("login/github") && !json.contains("\"value\""));
     }
 }
+
+#[tokio::test]
+async fn navigate_replay_encodes_query_values_and_redacts_secret_params_on_handover() {
+    let page = "# Search (https://shop.test/search)\n";
+    let browser = FakeBrowser::new(page);
+    let mut wf = Workflow::new("shop_search");
+    wf.params = vec![
+        Param {
+            name: "q".into(),
+            ty: ParamType::String,
+            default: Some("red shoes".into()),
+            description: String::new(),
+        },
+        Param {
+            name: "token".into(),
+            ty: ParamType::Secret,
+            default: None,
+            description: String::new(),
+        },
+    ];
+    wf.steps = vec![
+        Step::Navigate(crate::format::Navigate {
+            url: "https://shop.test/search?q={q}&token={token}#top".into(),
+            profile: None,
+        }),
+        // Force a handover after Navigate so we can inspect PartialState.params.
+        Step::Agent(AgentStep {
+            instruction: "done".into(),
+        }),
+    ];
+
+    let h = handles(None, Some(browser.clone()));
+    let gate = RecordingGate::default();
+    let report = replayer(h.clone(), ReplayOptions::instant())
+        .replay(
+            &wf,
+            &params(&json!({"q": "blue & green=100% 🚀", "token": "super-secret-value"})),
+            &gate,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        browser.calls.lock().as_slice(),
+        [
+            "open:https://shop.test/search?q=blue+%26+green%3D100%25+%F0%9F%9A%80&token=super-secret-value#top"
+        ]
+    );
+    let handover = report.handover().expect("agent step hands over");
+    assert_eq!(
+        handover
+            .partial_state
+            .params
+            .get("token")
+            .map(String::as_str),
+        Some(secret_store::REDACTED)
+    );
+    assert!(!format!("{report:?}").contains("super-secret-value"));
+
+    // Model-facing workflow_run tool refuses workflows with ParamType::Secret.
+    let dir = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(dir.path());
+    store.save(&wf).unwrap();
+    let run_tool = bound_tools(store, h, Arc::new(gate), ReplayOptions::instant())
+        .into_iter()
+        .find(|t| t.spec().name == crate::RUN_TOOL_NAME)
+        .unwrap();
+    let err = run_tool
+        .call(
+            &ToolContext::default(),
+            json!({"name": "shop_search", "params": {"q": "x", "token": "y"}}),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ToolError::PermissionDenied(_)), "{err:?}");
+}
