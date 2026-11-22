@@ -3272,6 +3272,7 @@
     "sources": {
       "api": "local API",
       "app": "this app",
+      "imported": "imported file",
       "peer": "another computer",
       "telegram": "Telegram",
       "unknown": "unknown"

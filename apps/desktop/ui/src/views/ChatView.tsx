@@ -1522,7 +1522,7 @@ export function ChatView({
                     >
                       <CopyButton text={e.text} />
                       <SpeakButton id={e.key} text={e.text} botId={e.botId ?? chat?.bot_id} />
-                      <MessageInfo side="bot" ts={e.ts} runId={e.runId} run={e.runId ? events.runs[e.runId] : undefined} runDto={runs.find((r) => r.id === e.runId)} />
+                      <MessageInfo side="bot" ts={e.ts} source={e.source} runId={e.runId} run={e.runId ? events.runs[e.runId] : undefined} runDto={runs.find((r) => r.id === e.runId)} />
                     </MessageActions>
                   </div>
                 );

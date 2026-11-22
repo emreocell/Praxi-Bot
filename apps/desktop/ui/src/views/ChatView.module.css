@@ -138,7 +138,6 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   line-height: var(--line-height-normal);
-  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
