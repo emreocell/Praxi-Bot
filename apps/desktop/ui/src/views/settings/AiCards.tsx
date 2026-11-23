@@ -16,6 +16,7 @@ import { ApiKeyPaste } from "./ApiKeyPaste";
 import { LocalInstallCard } from "../../components/LocalInstallCard";
 import { LocalModelsAdvice } from "../../components/LocalModelsAdvice";
 import { EnginesCard } from "./HomeCards";
+import { HelpersCard } from "./HelpersCard";
 import { KnowledgeCard } from "./KnowledgeCard";
 import { MemoryCard } from "./MemoryCard";
 import type { CardDef } from "./types";
@@ -142,6 +143,15 @@ export function aiCards(t: TFunction): CardDef[] {
       description: t("settingsModal.ai.defaultModel.description"),
       keywords: "model provider varsayilan",
       node: <DefaultModelRow />
+    },
+    {
+      id: "helpers",
+      section: "ai",
+      kind: "block",
+      title: t("helpers.title"),
+      description: t("helpers.description"),
+      keywords: "embedding embeddings gemini openai ollama decision helper yardimci karar anahtar helfer entscheidung bedeutung",
+      node: <HelpersCard />
     },
     {
       id: "providers",

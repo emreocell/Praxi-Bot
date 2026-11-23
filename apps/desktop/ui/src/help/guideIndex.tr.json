@@ -81,6 +81,19 @@
     "summary": "Praxi-Bot'taki her anahtarın ve uygulama bağlantısının bir Bağlantıyı dene düğmesi var: yapay zekâ"
   },
   {
+    "doc": "tr/embeddings.md",
+    "title": "Yardımcılar (isteğe bağlı): embedding ve karar yardımcısı",
+    "headings": [
+      "Embedding nedir?",
+      "Metniniz yalnızca izninizle gönderilir",
+      "Ücretsiz anahtarlar ve sınırlar",
+      "Yedek zinciri",
+      "Karar yardımcısı (isteğe bağlı)",
+      "Sorunlar"
+    ],
+    "summary": "Praxi'yi kullanmak için bunların hiçbirine ihtiyacınız yok. Anahtar yoksa Praxi"
+  },
+  {
     "doc": "tr/faq.md",
     "title": "SSS",
     "headings": [

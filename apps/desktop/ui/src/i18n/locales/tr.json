@@ -3290,6 +3290,81 @@
     "voiceCallEnd": "Sesli aramayı bitir",
     "voiceCallTalk": "Basılı tutarak konuşma aramasında konuş"
   },
+  "helpers": {
+    "add": {
+      "address": "Sunucu adresi",
+      "addressHint": "Örneğin Ollama, LM Studio, OpenRouter, Mistral veya Together.",
+      "cancel": "Vazgeç",
+      "compatible": "Diğer (OpenAI uyumlu)",
+      "dimensions": "Vektör boyutu",
+      "dimensionsHint": "Sağlayıcınız başka bir şey söylemiyorsa önerilen sayıyı olduğu gibi bırakın.",
+      "key": "API anahtarı",
+      "keyOptional": "Sunucu anahtar istemiyorsa boş bırakın.",
+      "keyStored": "Bu bilgisayarda güvenle saklanır. Bir daha gösterilmez.",
+      "kind": "Sağlayıcı",
+      "model": "Model",
+      "open": "Embedding sağlayıcısı ekle",
+      "otherName": "bu sunucu",
+      "reuseGemini": "Zaten eklediğim Gemini anahtarını kullan",
+      "save": "Sağlayıcıyı kaydet",
+      "use": "Şunun için kullan"
+    },
+    "allowSending": "Praxi'nin metnimi bu sağlayıcıya göndermesine izin ver",
+    "decision": {
+      "custom": "Bunu decider.toml dosyasında elle ayarlamışsınız.",
+      "description": "Basit sorularda hızlı tavsiye veren küçük bir çevrimiçi yardımcı. Yalnızca tavsiye verebilir: hiçbir zaman izin veremez veya bir şeyi onaylayamaz.",
+      "limits": "Ücretsiz sınırlar: dakikada {{rpm}} istek, dakikada {{tpm}} birim metin, günde {{rpd}} istek ({{date}} tarihinde kontrol edildi).",
+      "needKey": "Kullanmak için önce bir Gemini anahtarı ekleyin.",
+      "off": "Kapalı",
+      "on": "Açık",
+      "title": "Karar yardımcısı",
+      "turnOff": "Kapat",
+      "turnOn": "Aç"
+    },
+    "description": "Hafızayı ve kararları daha akıllı yapan ek hizmetler. Praxi'yi kullanmak için burada hiçbir şey gerekmez.",
+    "embeddings": {
+      "description": "Embedding sayesinde Praxi notları ve anıları yalnızca birebir kelimelere göre değil, anlamına göre bulur. Sağlayıcı yoksa Praxi basit bir çevrimdışı yöntem kullanır ve hiçbir şey bu bilgisayardan çıkmaz.",
+      "none": "Henüz sağlayıcı yok: Praxi çevrimdışı yöntemini kullanıyor.",
+      "title": "Anlam araması (embedding)"
+    },
+    "fallbackNote": "Bir sağlayıcı meşgulse, ücretsiz kotası bittiyse ya da ulaşılamıyorsa Praxi sıradakini, en sonunda da çevrimdışı yöntemi kullanır. Ücretsiz sınırı bilerek asla aşmaz.",
+    "keyOptional": "Gemini anahtarı isteğe bağlıdır; ücretsiz bir anahtar size daha akıllı bir hafıza ve daha hızlı kararlar sağlar.",
+    "learnMore": "Daha fazla bilgi",
+    "privacy": {
+      "agree": "Anladım, metnin {{provider}} sağlayıcısına gönderilmesine izin veriyorum",
+      "notice": "Notlarınızın, anılarınızın ve belgelerinizin metni, anlamına göre aranabilmesi için {{provider}} sağlayıcısına gönderilecek.",
+      "safeguards": "Parolalar ve anahtarlar önce çıkarılır. Gizli işaretlenen hiçbir şey gönderilmez. Bunu istediğiniz zaman kapatabilirsiniz."
+    },
+    "purpose": {
+      "memory": "Hafızayı hatırlama",
+      "router": "Doğru kısayolu veya aracı seçme"
+    },
+    "remote": "Yardımcıları değiştirmek için Ayarlar'ı bu bilgisayarda açın.",
+    "remove": "Kaldır",
+    "retryIn": "{{seconds}} sn sonra tekrar",
+    "state": {
+      "cooling_down": "Kısa bir süre dinleniyor",
+      "dimension_mismatch": "Yanıtların boyutu yanlış",
+      "key_missing": "Anahtar kaydedilmemiş",
+      "key_rejected": "Anahtar reddedildi",
+      "not_allowed": "İzninizi bekliyor",
+      "offline": "Ulaşılamıyor",
+      "ok": "Çalışıyor",
+      "rate_limited": "Ücretsiz sınıra ulaşıldı, bekliyor",
+      "rejected": "İstek reddedildi",
+      "unavailable": "Bu bilgisayarda yok"
+    },
+    "test": "Bağlantıyı dene",
+    "testOk": "Bağlantı çalışıyor",
+    "title": "Yardımcılar (isteğe bağlı)",
+    "usage": {
+      "noLimit": "{{used}} kullanıldı",
+      "of": "{{used}} / {{limit}}",
+      "perDay": "Günlük istek",
+      "perMinute": "Dakikadaki istek",
+      "tokensPerMinute": "Dakikadaki metin miktarı"
+    }
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} bazı şeyleri kendine saklar: yürütme politikası, komut satırı araç sunucuları, beceriler, e-posta hesapları ve kodlama CLI girişleri doğrudan {{name}} üzerinde değiştirilir.",

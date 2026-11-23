@@ -101,6 +101,7 @@ Seven short pages in plain words. Read them in this order:
 | Give a bot a scratchpad between runs | [Notes](agent-tools.md) |
 | Let a bot work in apps on your own PC | [Computer use](computer-use.md) |
 | Set up knowledge embeddings (optional; knowledge search works without them) | [Set up knowledge embeddings](knowledge-embeddings.md) |
+| Add optional helpers: embedding providers, free-key limits, decision helper | [Helpers (optional)](embeddings.md) |
 | Look up a command or flag | [CLI reference](cli-reference.md) |
 | Back up and restore your data (encrypted) | [Encrypted backup and restore](backup.md) |
 | Restore an older plaintext backup | [Restoring older plaintext backups](backup-and-restore.md) |

@@ -287,6 +287,19 @@
     "summary": "Praxi includes IMAP and SMTP tools that allow your bots to read, search, draft, and send e-mails."
   },
   {
+    "doc": "embeddings.md",
+    "title": "Helpers (optional): embeddings and the decision helper",
+    "headings": [
+      "What are embeddings?",
+      "Your text is only sent with your permission",
+      "Free keys and limits",
+      "Fallback chain",
+      "Decision helper (optional)",
+      "Problems"
+    ],
+    "summary": "You do not need any of this to use Praxi. With no keys, Praxi uses a simple"
+  },
+  {
     "doc": "faq.md",
     "title": "FAQ",
     "headings": [

@@ -81,6 +81,19 @@
     "summary": "Jeder Schlüssel und jede App-Verbindung in Praxi-Bot hat eine Schaltfläche Verbindung testen:"
   },
   {
+    "doc": "de/embeddings.md",
+    "title": "Helfer (optional): Embeddings und Entscheidungshelfer",
+    "headings": [
+      "Was sind Embeddings?",
+      "Ihr Text wird nur mit Ihrer Erlaubnis gesendet",
+      "Kostenlose Schlüssel und Limits",
+      "Rückfallkette",
+      "Entscheidungshelfer (optional)",
+      "Probleme"
+    ],
+    "summary": "Nichts davon brauchen Sie, um Praxi zu benutzen. Ohne Schlüssel nutzt Praxi eine"
+  },
+  {
     "doc": "de/faq.md",
     "title": "FAQ",
     "headings": [

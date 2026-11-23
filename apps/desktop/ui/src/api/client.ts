@@ -134,6 +134,10 @@ import type {
   TerminalInfo,
   TerminalOutput,
   SpendLimit,
+  EmbeddingsSetup,
+  EmbeddingsInput,
+  EmbeddingTest,
+  DecisionHelper,
   DataUsage,
   ClearCacheResult,
   BotSpendLimits,
@@ -992,6 +996,27 @@ export class ApiClient {
   /** Set (USD, at least 1) or clear (`null`) the monthly limit; owner only. */
   setSpendLimit(limitUsd: number | null): Promise<SpendLimit> {
     return this.request("PUT", "/spend-limit", { body: { limit_usd: limitUsd } });
+  }
+
+  /** Embedding providers, chains, usage bars and the dated model catalog (no keys). */
+  getEmbeddings(): Promise<EmbeddingsSetup> {
+    return this.request("GET", "/embeddings");
+  }
+  /** Save the embedding setup; owner only. A key is write-only. */
+  putEmbeddings(input: EmbeddingsInput): Promise<EmbeddingsSetup> {
+    return this.request("PUT", "/embeddings", { body: input });
+  }
+  /** Send one fixed test sentence to a provider; owner only. */
+  testEmbedding(id: string): Promise<EmbeddingTest> {
+    return this.request("POST", `/embeddings/${encodeURIComponent(id)}/test`);
+  }
+  /** The optional Gemini decision helper. */
+  getDecisionHelper(): Promise<DecisionHelper> {
+    return this.request("GET", "/decision-helper");
+  }
+  /** Switch the decision helper on or off; owner only. */
+  setDecisionHelper(enabled: boolean): Promise<DecisionHelper> {
+    return this.request("PUT", "/decision-helper", { body: { enabled } });
   }
 
   /** A bot's daily/weekly/monthly limits with what each period has used. */

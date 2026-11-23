@@ -3290,6 +3290,81 @@
     "voiceCallEnd": "Sprachanruf beenden",
     "voiceCallTalk": "Im Push-to-Talk-Anruf zum Sprechen halten"
   },
+  "helpers": {
+    "add": {
+      "address": "Serveradresse",
+      "addressHint": "Zum Beispiel Ollama, LM Studio, OpenRouter, Mistral oder Together.",
+      "cancel": "Abbrechen",
+      "compatible": "Andere (OpenAI-kompatibel)",
+      "dimensions": "Vektorgröße",
+      "dimensionsHint": "Lassen Sie die vorgeschlagene Zahl stehen, außer Ihr Anbieter nennt eine andere.",
+      "key": "API-Schlüssel",
+      "keyOptional": "Leer lassen, wenn der Server keinen Schlüssel braucht.",
+      "keyStored": "Wird sicher auf diesem Computer gespeichert und nie wieder angezeigt.",
+      "kind": "Anbieter",
+      "model": "Modell",
+      "open": "Embedding-Anbieter hinzufügen",
+      "otherName": "diesen Server",
+      "reuseGemini": "Den bereits hinzugefügten Gemini-Schlüssel verwenden",
+      "save": "Anbieter speichern",
+      "use": "Verwenden für"
+    },
+    "allowSending": "Praxi darf meinen Text an diesen Anbieter senden",
+    "decision": {
+      "custom": "Sie haben das von Hand in decider.toml eingerichtet.",
+      "description": "Ein kleiner Online-Helfer, der bei einfachen Fragen schnell berät. Er kann nur beraten: Er kann nie eine Erlaubnis erteilen oder etwas genehmigen.",
+      "limits": "Kostenlose Limits: {{rpm}} Anfragen pro Minute, {{tpm}} Texteinheiten pro Minute, {{rpd}} Anfragen pro Tag (geprüft am {{date}}).",
+      "needKey": "Fügen Sie zuerst einen Gemini-Schlüssel hinzu.",
+      "off": "Aus",
+      "on": "An",
+      "title": "Entscheidungshelfer",
+      "turnOff": "Ausschalten",
+      "turnOn": "Einschalten"
+    },
+    "description": "Zusätzliche Dienste, die Gedächtnis und Entscheidungen klüger machen. Für die Nutzung von Praxi ist hier nichts nötig.",
+    "embeddings": {
+      "description": "Mit Embeddings findet Praxi Notizen und Erinnerungen nach ihrer Bedeutung, nicht nur nach genauen Wörtern. Ohne Anbieter nutzt Praxi eine einfache Offline-Methode, und nichts verlässt diesen Computer.",
+      "none": "Noch kein Anbieter: Praxi nutzt seine Offline-Methode.",
+      "title": "Bedeutungssuche (Embeddings)"
+    },
+    "fallbackNote": "Ist ein Anbieter ausgelastet, ohne freies Kontingent oder nicht erreichbar, nimmt Praxi den nächsten und zuletzt die Offline-Methode. Ein kostenloses Limit wird nie absichtlich überschritten.",
+    "keyOptional": "Ein Gemini-Schlüssel ist optional; ein kostenloser Schlüssel bringt Ihnen ein klügeres Gedächtnis und schnellere Entscheidungen.",
+    "learnMore": "Mehr erfahren",
+    "privacy": {
+      "agree": "Ich verstehe das und erlaube das Senden von Text an {{provider}}",
+      "notice": "Der Text Ihrer Notizen, Erinnerungen und Dokumente wird an {{provider}} gesendet, damit er nach Bedeutung durchsucht werden kann.",
+      "safeguards": "Passwörter und Schlüssel werden vorher entfernt. Als privat Markiertes wird nie gesendet. Sie können das jederzeit ausschalten."
+    },
+    "purpose": {
+      "memory": "Erinnerungen abrufen",
+      "router": "Die passende Abkürzung oder das passende Werkzeug wählen"
+    },
+    "remote": "Öffnen Sie die Einstellungen auf diesem Computer, um Helfer zu ändern.",
+    "remove": "Entfernen",
+    "retryIn": "erneut in {{seconds}} s",
+    "state": {
+      "cooling_down": "Macht kurz Pause",
+      "dimension_mismatch": "Antworten haben die falsche Größe",
+      "key_missing": "Kein Schlüssel gespeichert",
+      "key_rejected": "Schlüssel wurde abgelehnt",
+      "not_allowed": "Wartet auf Ihre Erlaubnis",
+      "offline": "Nicht erreichbar",
+      "ok": "Funktioniert",
+      "rate_limited": "Kostenloses Limit erreicht, wartet",
+      "rejected": "Anfrage wurde abgelehnt",
+      "unavailable": "Auf diesem Computer nicht verfügbar"
+    },
+    "test": "Verbindung testen",
+    "testOk": "Verbindung funktioniert",
+    "title": "Helfer (optional)",
+    "usage": {
+      "noLimit": "{{used}} genutzt",
+      "of": "{{used}} von {{limit}}",
+      "perDay": "Anfragen pro Tag",
+      "perMinute": "Anfragen pro Minute",
+      "tokensPerMinute": "Textmenge pro Minute"
+    }
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} behält einiges für sich: Die Ausführungsrichtlinie, Kommandozeilen-Werkzeugserver, Skills, E-Mail-Konten und Coding-CLI-Anmeldungen werden direkt auf {{name}} geändert.",
