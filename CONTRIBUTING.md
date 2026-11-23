@@ -141,7 +141,15 @@ Testing) and the UI checks below. It also checks that `docs/api/openapi.json` an
 `apps/desktop/ui/src/api/schema.d.ts` are up to date: after an API change run
 `UPDATE_OPENAPI=1 cargo test -p daemon-api openapi_snapshot` and then
 `pnpm --dir apps/desktop/ui gen:api`, and commit both files. Pull requests that only change
-documentation skip the long Rust jobs. A PR is merged only when CI is green.
+documentation skip the long Rust jobs, but still run the Markdown link check
+(`python3 scripts/check_markdown_links.py`) and the guide-index check
+(`python3 scripts/check_guide_index.py`): run both locally when you edit `docs/` or a README. A PR is
+merged only when CI is green.
+
+**Evaluation scenarios.** Safety behaviour (approvals, the egress gate, prompt injection) is tested by
+hermetic YAML scenarios in `evals/scenarios/`, run by `cargo test -p evals` with no network and no
+real keys. When you change a gate or add a tool that reads untrusted content, add or update a
+scenario: see [adding eval scenarios](docs/contributing/eval-scenarios.md).
 
 To measure recent CI runs locally, use `python scripts/ci_report.py --runs 30`.
 See [reading CI timing reports](docs/contributing/ci-report.md) for prerequisites,
@@ -197,9 +205,13 @@ cargo deny check                            # when you change dependencies
 
 - **Rust.** `unsafe_code` is denied workspace-wide. Keep clippy pedantic clean; prefer fixing the
   code over adding `#[allow]`, and give any `#[allow]` a one-line reason.
-- **i18n.** Every user-facing string lives in both `apps/desktop/ui/src/i18n/locales/en.json` and
-  `tr.json`; `check:i18n` fails when the key sets differ or a `t("...")` key is missing. Adding a
-  language: see [docs/contributing/adding-a-language.md](docs/contributing/adding-a-language.md).
+- **i18n.** The UI has three locales: `en`, `tr` and `de`. Every user-facing string lives in all of
+  `apps/desktop/ui/src/i18n/locales/{en,tr,de}.json`, and the files are kept sorted
+  (`node apps/desktop/ui/scripts/sort-locales.mjs` does it). Write real translations, not copies of
+  the English text: `check:i18n` fails when the key sets differ, a `t("...")` key is missing or the
+  files are unsorted, and it warns about values identical to English. Keep placeholders such as
+  `{{name}}` identical. Adding a language: see
+  [docs/contributing/adding-a-language.md](docs/contributing/adding-a-language.md).
 - **Themes and CSS.** Use design tokens (`packages/ui/tokens.css`); stylelint rejects raw `px`,
   `rem`, `em` units and colour functions in component CSS. `check:themes` verifies contrast for
   every theme.
@@ -211,9 +223,10 @@ cargo deny check                            # when you change dependencies
   ```
   Commit both together with the route/DTO change.
 - **Errors reach the user through the human-error layer.** Daemon errors carry a stable `code`;
-  `apps/desktop/ui/src/lib/humanError.ts` maps each code to a title and hint in both languages.
+  `apps/desktop/ui/src/lib/humanError.ts` maps each code to a title and hint in every language.
   A test checks that every code the daemon can emit has text. New code → new entry in
-  `DAEMON_ERROR_CODES` and in the `errors.codes` block of both locale files.
+  `DAEMON_ERROR_CODES` and an `errors` entry (title and hint) in all three locale files; run the
+  whole `pnpm --dir apps/desktop/ui test`, not only your own test.
 - **Owner-only routes are classified.** Routes that change authority, secrets, providers or keys,
   install or run software, pair devices, take over control or decide an approval are listed in
   `OWNER_ROUTES` (`crates/daemon-api/src/owner.rs`); ordinary mutating routes are in
@@ -237,12 +250,14 @@ cargo deny check                            # when you change dependencies
    `*.test.ts` file so it can be tested without a browser.
 4. **Run the gates** listed above for what you touched.
 5. **UI changes need screenshots** in the PR: in mock mode (`?mock=1`) at least one dark theme and
-   the light theme, and both languages if text changed.
+   the light theme, and all three languages (en, tr, de) if text changed.
 6. **Fill in the pull request template.** Say what and why, how you tested it, which
    security-sensitive areas you touched, and whether generated files were regenerated.
 7. **CI must be green.** The check that gates merging is `ci-result`; it runs on every PR and
    passes when the jobs that were needed passed (a docs-only or UI-only PR skips the long Rust jobs). A
-   maintainer reviews, may ask for changes, and squash-merges. Security-sensitive changes get a
+   maintainer reviews, may ask for changes, and squash-merges. This is a small team, so there is
+   no guaranteed response time. Answer review comments with a push or a reason rather than
+   resolving them silently. Security-sensitive changes get a
    deeper review and may take longer. Your first PR from a fork needs a maintainer to approve the
    workflow run before CI starts; that is normal.
 8. Link the issue (`Closes #123`). By opening the PR you agree to the licensing terms below.

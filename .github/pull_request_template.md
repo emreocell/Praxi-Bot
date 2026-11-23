@@ -10,13 +10,15 @@
 - [ ] `cargo clippy -p <crates you touched> --all-targets -- -D warnings`
 - [ ] `cargo test -p <crates you touched>`
 - [ ] `pnpm typecheck`, `pnpm lint` and `pnpm --dir apps/desktop/ui test` (UI changes)
-- [ ] `pnpm --dir apps/desktop/ui check:i18n` and `check:themes` (UI text or styles)
+- [ ] `pnpm --dir apps/desktop/ui check:i18n` and `check:themes` (UI text or styles); new strings are really translated in en, tr and de
+- [ ] `cargo test -p evals` (a safety gate or a tool that reads untrusted content changed; scenario added or updated)
+- [ ] `python3 scripts/check_markdown_links.py` (docs or README changed)
 - [ ] `cargo deny check` (dependencies changed)
 - [ ] Other (describe): 
 
 ## Screenshots (UI changes)
 
-<!-- Mock mode (?mock=1): at least one dark theme and the light theme; both languages if text changed. -->
+<!-- Mock mode (?mock=1): at least one dark theme and the light theme; all three languages (en, tr, de) if text changed. -->
 
 ## Generated files
 
