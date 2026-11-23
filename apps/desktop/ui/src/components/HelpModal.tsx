@@ -56,18 +56,18 @@ export function HelpModal({
             {t("help.center.noMatch")}
           </p>
         ) : (
-          <div className={styles.faq} role="list">
+          <ul className={styles.faq}>
             {items.map((item) => (
-              <details key={item.id} className={styles.answer} role="listitem" open={query.trim() !== "" && items.length <= 3}>
+              <li key={item.id}><details className={styles.answer} open={query.trim() !== "" && items.length <= 3}>
                 <summary className={styles.question}>{item.q}</summary>
                 <p className={styles.text}>{item.a}</p>
                 <button type="button" className={styles.more} onClick={() => openExternal(docUrl(item))}>
                   {t("help.center.readMore")}
                   <ExternalLink aria-hidden="true" />
                 </button>
-              </details>
+              </details></li>
             ))}
-          </div>
+          </ul>
         )}
         {guidePages.length > 0 ? (
           <section className={styles.guide} aria-label={t("help.center.guideTitle")} data-testid="help-guide-results">

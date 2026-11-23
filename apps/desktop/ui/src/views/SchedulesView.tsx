@@ -1,3 +1,4 @@
+import { formatRunPreview } from "../lib/scheduleTime";
 import {
   ArrowUpRight,
   CalendarCheck,
@@ -1128,13 +1129,7 @@ function ScheduleForm({
     parsePayload(editing.payload).kind !== "agent_prompt";
   const selectedTz = draft.tz ?? LOCAL_TZ;
 
-  const fmt = (ms: number, tz?: string) =>
-    new Date(ms).toLocaleString(i18n.language, {
-      dateStyle: "medium",
-      timeStyle: "short",
-      weekday: "short",
-      ...(tz ? { timeZone: tz } : {})
-    });
+  const fmt = (ms: number, tz?: string) => formatRunPreview(ms, i18n.language, tz);
 
   const simpleSpecNow =
     draft.kind === "simple" &&

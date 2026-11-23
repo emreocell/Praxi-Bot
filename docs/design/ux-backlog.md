@@ -29,3 +29,22 @@ text; the "Is this your server?" card takes the keyboard. Servers: "Check now" (
   "Other". Calendar view day cells have no text for screen readers beyond the count.
 - **Keyboard:** the Add a server SSH/agent and key pickers are radiogroups where each radio is a separate Tab stop
   (no arrow-key roving as the Computer settings radios have).
+
+# Accessibility pass on the new UI (c545)
+
+`pnpm --dir apps/desktop/ui check:a11y` now also opens Settings search (with and without results), Help, the run
+location popover, Add a server, the schedule builder, the run timeline and the `/` and `@` popovers (axe incl.
+WCAG 2.2 target size), tabs through each of them in clay, obsidian, contrast-dark and contrast-light looking for a
+focus indicator, and checks that Escape returns focus to the control that opened the popover/dialog.
+
+## Fixed in this change
+- Schedule builder went blank in the browser (a date format mixed `dateStyle` with `weekday`, which throws).
+- Help answers were `role="listitem"` on `<details>` inside a `role="list"` div; now a real list.
+- Add a server: the step ("Step 2 of 3") and the install stage are announced through live regions.
+
+## Not fixed / not verified
+- Nobody has run a real screen reader (NVDA, VoiceOver, Orca) over these views; only axe and keyboard checks.
+- Windows forced-colours mode was not checked.
+- The Add a server radiogroups are still one Tab stop per radio (see above).
+- The composer's combobox-on-textarea and the muted panel labels stay in `a11y-allowlist.mjs`.
+- The Tab walk stops after 45 stops per view; very long lists (Help FAQ with search results) are only sampled.

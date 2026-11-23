@@ -250,6 +250,8 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
         leading={<Server aria-hidden="true" className={styles.headIcon} />}
         onClose={cancelAndClose}
       />
+      {/* Announces "Step 2 of 3" (or the server being set up) when the page changes. */}
+      <p className={dialog.visuallyHidden} role="status" data-testid="add-server-live">{subtitle}</p>
 
       {w.page === "intro" ? (
         <>
@@ -663,7 +665,7 @@ function Bar({ job }: { job: HostSetupJob }) {
         <span className={styles.barFill} style={{ inlineSize: `${pct}%` }} />
       </div>
       <p className={styles.note}>
-        {pct}% · {current ? t(`addServer.stage.${current}`) : t("addServer.state.pending")}
+        {pct}% · <span role="status">{current ? t(`addServer.stage.${current}`) : t("addServer.state.pending")}</span>
       </p>
     </div>
   );
