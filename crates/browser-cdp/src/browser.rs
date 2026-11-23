@@ -1,6 +1,7 @@
 // Adapted from vercel-labs/agent-browser (Apache-2.0): browser lifecycle (launch / attach / close).
 //! Browser lifecycle: launch Chrome/Edge with an isolated profile, or attach to a running one.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -37,14 +38,24 @@ pub struct Browser {
     owned_profile: Option<PathBuf>,
     /// The filtering proxy of a served session (stops with the browser).
     _proxy: Option<crate::proxy::FilterProxy>,
+    /// Tabs we own; set only on a launched, unserved browser (popup guard on).
+    guarded: Option<OwnedTargets>,
 }
 
-/// Close a popup a page opened (`--disable-popup-blocking` lets pages open
-/// them) as soon as it shows anything other than a blank or public web page.
-/// Tabs we open ourselves have no opener and were already checked by the tool.
-/// Residual: the browser has started that first request when the target
-/// reports its address, so one request may leave before the tab is closed.
-async fn spawn_popup_guard(client: &Arc<CdpClient>) {
+/// Target ids this process created or found at start (the managed tabs).
+type OwnedTargets = Arc<std::sync::Mutex<HashSet<String>>>;
+
+fn owned_lock(o: &OwnedTargets) -> std::sync::MutexGuard<'_, HashSet<String>> {
+    o.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Close every page we did not create that shows anything other than a blank
+/// or public web page. `--disable-popup-blocking` lets pages open tabs, and a
+/// `noopener` popup or `target=_blank` link has no opener, so ownership (not
+/// the opener) decides. Residual: the browser has started that first request
+/// when the target reports its address, so one request may leave before the
+/// tab is closed.
+async fn spawn_popup_guard(client: &Arc<CdpClient>, owned: &OwnedTargets) {
     let mut rx = client.subscribe();
     if client
         .send("Target.setDiscoverTargets", json!({"discover": true}))
@@ -54,38 +65,82 @@ async fn spawn_popup_guard(client: &Arc<CdpClient>) {
         tracing::warn!("could not watch popups opened by pages");
         return;
     }
+    // Tabs present now (the browser's first blank tab) belong to us.
+    if let Ok(r) = client.send("Target.getTargets", json!({})).await {
+        let mut set = owned_lock(owned);
+        for t in r["targetInfos"].as_array().into_iter().flatten() {
+            if t["type"].as_str() == Some("page")
+                && let Some(id) = t["targetId"].as_str()
+            {
+                set.insert(id.to_owned());
+            }
+        }
+    }
     let weak = Arc::downgrade(client);
+    let owned = Arc::clone(owned);
     tokio::spawn(async move {
         loop {
             match rx.recv().await {
                 Ok(ev) => {
-                    if let Some(id) = popup_to_close(&ev.method, &ev.params) {
+                    let id = popup_to_close(&ev.method, &ev.params, &owned_lock(&owned));
+                    if let Some(id) = id {
                         let Some(c) = weak.upgrade() else { break };
                         let _ = c.send("Target.closeTarget", json!({"targetId": id})).await;
                     }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // Events were dropped; one of them may have been a private tab.
+                    let Some(c) = weak.upgrade() else { break };
+                    reconcile_targets(&c, &owned).await;
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
     });
 }
 
-/// The target to close for one browser event, if it is a page opened by
-/// another page that now shows a non-public address.
-fn popup_to_close(method: &str, params: &Value) -> Option<String> {
-    if !matches!(method, "Target.targetCreated" | "Target.targetInfoChanged") {
-        return None;
+/// Ask the browser for every target and close the strays.
+async fn reconcile_targets(client: &Arc<CdpClient>, owned: &OwnedTargets) {
+    let Ok(r) = client.send("Target.getTargets", json!({})).await else {
+        return;
+    };
+    let strays = strays_to_close(&r, &owned_lock(owned));
+    for id in strays {
+        let _ = client
+            .send("Target.closeTarget", json!({"targetId": id}))
+            .await;
     }
-    let info = &params["targetInfo"];
-    let opened_by_page = info["openerId"].as_str().is_some_and(|o| !o.is_empty());
+}
+
+/// Page targets in a `Target.getTargets` result that we do not own and that
+/// show a non-public address.
+fn strays_to_close(result: &Value, owned: &HashSet<String>) -> Vec<String> {
+    result["targetInfos"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|info| stray_id(info, owned))
+        .collect()
+}
+
+fn stray_id(info: &Value, owned: &HashSet<String>) -> Option<String> {
+    let id = info["targetId"].as_str()?;
     if info["type"].as_str() != Some("page")
-        || !opened_by_page
+        || owned.contains(id)
         || crate::web_url::popup_url_allowed(info["url"].as_str().unwrap_or_default())
     {
         return None;
     }
-    info["targetId"].as_str().map(str::to_owned)
+    Some(id.to_owned())
+}
+
+/// The target to close for one browser event, if it is a page we do not own
+/// that now shows a non-public address.
+fn popup_to_close(method: &str, params: &Value, owned: &HashSet<String>) -> Option<String> {
+    if !matches!(method, "Target.targetCreated" | "Target.targetInfoChanged") {
+        return None;
+    }
+    stray_id(&params["targetInfo"], owned)
 }
 
 impl Browser {
@@ -174,9 +229,13 @@ impl Browser {
                 if let Some(net) = &opts.served {
                     client.set_destination_check(net.check.clone());
                 }
-                if opts.served.is_none() {
-                    spawn_popup_guard(&client).await;
-                }
+                let guarded = if opts.served.is_none() {
+                    let owned = OwnedTargets::default();
+                    spawn_popup_guard(&client, &owned).await;
+                    Some(owned)
+                } else {
+                    None
+                };
                 // A page must not be able to put a file on the owner's disk:
                 // every download is cancelled (the events stay on for tests
                 // and diagnostics). Chromium before this command existed
@@ -197,6 +256,7 @@ impl Browser {
                     own_process_group,
                     owned_profile: owned,
                     _proxy: proxy,
+                    guarded,
                 })
             }
             Err(e) => {
@@ -234,6 +294,7 @@ impl Browser {
             own_process_group: false,
             owned_profile: None,
             _proxy: None,
+            guarded: None,
         })
     }
 
@@ -251,6 +312,7 @@ impl Browser {
             own_process_group,
             owned_profile: None,
             _proxy: None,
+            guarded: None,
         })
     }
 
@@ -297,6 +359,9 @@ impl Browser {
 
     /// Open tabs (targets of type `page`).
     pub async fn pages(&self) -> Result<Vec<TargetInfo>> {
+        if let Some(owned) = &self.guarded {
+            reconcile_targets(&self.client, owned).await;
+        }
         Ok(self
             .targets()
             .await?
@@ -314,6 +379,9 @@ impl Browser {
         let id = r["targetId"]
             .as_str()
             .ok_or_else(|| Error::Json("createTarget returned no targetId".into()))?;
+        if let Some(owned) = &self.guarded {
+            owned_lock(owned).insert(id.to_owned());
+        }
         let page = Page::attach(self.client.clone(), id).await?;
         if url != "about:blank" {
             page.navigate(url).await?;
@@ -467,42 +535,52 @@ impl Drop for Browser {
 
 #[cfg(test)]
 mod popup_guard_tests {
-    use super::popup_to_close;
+    use super::{popup_to_close, strays_to_close};
     use serde_json::json;
+    use std::collections::HashSet;
 
     fn ev(url: &str, opener: Option<&str>, kind: &str) -> serde_json::Value {
         json!({"targetInfo": {"targetId": "T1", "type": kind, "url": url, "openerId": opener}})
     }
 
     #[test]
-    fn a_popup_to_a_private_address_is_closed_a_public_one_is_not() {
+    fn a_page_we_do_not_own_on_a_private_address_is_closed_with_or_without_opener() {
+        let owned = HashSet::new();
         for url in [
             "http://localhost:8080/admin",
             "file:///etc/passwd",
             "http://192.168.0.1/",
         ] {
-            assert_eq!(
-                popup_to_close("Target.targetInfoChanged", &ev(url, Some("P"), "page")).as_deref(),
-                Some("T1"),
-                "{url}"
-            );
+            for opener in [Some("P"), None] {
+                let e = ev(url, opener, "page");
+                assert_eq!(
+                    popup_to_close("Target.targetInfoChanged", &e, &owned).as_deref(),
+                    Some("T1"),
+                    "{url} {opener:?}"
+                );
+            }
         }
-        assert!(popup_to_close("Target.targetCreated", &ev("", Some("P"), "page")).is_none());
-        assert!(
-            popup_to_close(
-                "Target.targetCreated",
-                &ev("https://example.com/", Some("P"), "page")
-            )
-            .is_none()
-        );
-        // Our own tab (no opener) and non-page targets are not this guard's business.
-        assert!(popup_to_close("Target.targetCreated", &ev("file:///x", None, "page")).is_none());
-        assert!(
-            popup_to_close(
-                "Target.targetCreated",
-                &ev("file:///x", Some("P"), "service_worker")
-            )
-            .is_none()
-        );
+        let blank = ev("", None, "page");
+        assert!(popup_to_close("Target.targetCreated", &blank, &owned).is_none());
+        let public = ev("https://example.com/", None, "page");
+        assert!(popup_to_close("Target.targetCreated", &public, &owned).is_none());
+        let worker = ev("file:///x", Some("P"), "service_worker");
+        assert!(popup_to_close("Target.targetCreated", &worker, &owned).is_none());
+        // A tab we own was checked by the tool.
+        let owned: HashSet<String> = ["T1".to_owned()].into();
+        let mine = ev("file:///x", None, "page");
+        assert!(popup_to_close("Target.targetCreated", &mine, &owned).is_none());
+    }
+
+    #[test]
+    fn reconciliation_after_a_lag_finds_the_stray_private_tab() {
+        let owned: HashSet<String> = ["mine".to_owned()].into();
+        let r = json!({"targetInfos": [
+            {"targetId": "mine", "type": "page", "url": "about:blank"},
+            {"targetId": "pub", "type": "page", "url": "https://example.com/"},
+            {"targetId": "stray", "type": "page", "url": "http://127.0.0.1:9/"},
+            {"targetId": "sw", "type": "service_worker", "url": "file:///w.js"},
+        ]});
+        assert_eq!(strays_to_close(&r, &owned), vec!["stray".to_owned()]);
     }
 }

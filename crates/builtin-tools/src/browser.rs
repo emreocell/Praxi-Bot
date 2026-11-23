@@ -1556,7 +1556,7 @@ pub use browser_cdp::is_public_web_url;
 /// `localhost`, this computer's network, link-local, odd IP spellings and
 /// addresses with a user name are private machine data, which only the
 /// owner's own browser opens (after asking).
-fn check_open_url(url: &str) -> Result<(), ToolError> {
+fn check_open_url(url: &str, served: bool) -> Result<(), ToolError> {
     // Browsers drop ASCII tab/newline anywhere in a URL and trim control
     // characters and spaces at the ends, so a `java<newline>script:` URL is still a scheme.
     let cleaned: String = url
@@ -1565,13 +1565,19 @@ fn check_open_url(url: &str) -> Result<(), ToolError> {
         .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
         .collect();
     let lower = cleaned.to_ascii_lowercase();
-    if lower == "about:blank" || is_public_web_url(&cleaned) {
+    if lower == "about:blank" {
         return Ok(());
     }
     if ["http://", "https://"]
         .iter()
         .any(|p| lower.starts_with(p) && lower.len() > p.len())
     {
+        // A served (paired) browser sends private-range hosts through its own
+        // destination policy (the owner's allowance; loopback never), so only
+        // the scheme is checked here. The managed local browser is public-only.
+        if served || is_public_web_url(&cleaned) {
+            return Ok(());
+        }
         return Err(ToolError::InvalidInput(
             "browser_open only opens public web addresses. This one points at this computer, a private network or carries a user name, so it is not opened here. Do not retry or rewrite it: tell the user, who can open it in their own browser".into(),
         ));
@@ -1806,7 +1812,12 @@ impl BrowserTool {
         let text = match self.op {
             Op::Open => {
                 let i: OpenIn = parse(input)?;
-                check_open_url(&i.url)?;
+                let served = self
+                    .shared
+                    .control
+                    .as_ref()
+                    .is_some_and(|g| g.remote_browser_for_run(run_id).is_some());
+                check_open_url(&i.url, served)?;
                 let permit = self.gate(run_id, "open", i.url.clone()).await?;
                 if permit.needs_observation()
                     || self
@@ -3159,6 +3170,43 @@ mod tests {
             assert!(err.to_string().contains("computer target"));
         }
         assert!(fake.calls.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn served_driver_lets_the_destination_policy_judge_private_hosts_managed_refuses() {
+        struct Remote(Arc<FakeBrowser>);
+        #[async_trait]
+        impl DesktopControlGate for Remote {
+            fn remote_browser_for_run(&self, _: &str) -> Option<Arc<dyn BrowserDriver>> {
+                Some(self.0.clone())
+            }
+            async fn before_action(&self, _: &ControlRequest) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ToolContext::default();
+        let url = json!({"url": "http://192.168.1.1/"});
+        let remote = Arc::new(FakeBrowser::default());
+        let t = tools(
+            Arc::new(FakeBrowser::default()),
+            dir.path(),
+            Some(Arc::new(Remote(remote.clone()))),
+        );
+        get(&t, "browser_open")
+            .call(&ctx, url.clone())
+            .await
+            .unwrap();
+        assert!(
+            remote.calls.lock().iter().any(|c| c.starts_with("open")),
+            "{:?}",
+            remote.calls.lock()
+        );
+        let local = Arc::new(FakeBrowser::default());
+        let t = tools(local.clone(), dir.path(), None);
+        let err = get(&t, "browser_open").call(&ctx, url).await.unwrap_err();
+        assert!(matches!(err, ToolError::InvalidInput(_)), "{err}");
+        assert!(local.calls.lock().is_empty());
     }
 
     #[test]
