@@ -247,6 +247,7 @@
     "doc": "decision-pool.md",
     "title": "Optional decision pool",
     "headings": [
+      "Quick switch for Gemini",
       "Configure the pool",
       "Input, answers, and accounting"
     ],
