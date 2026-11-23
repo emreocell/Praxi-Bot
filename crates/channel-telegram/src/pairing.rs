@@ -260,26 +260,24 @@ impl PairingStore {
         written.map_err(storage_error)?;
         std::fs::rename(&tmp, path).map_err(storage_error)?;
         drop(cleanup);
-        if let Err(error) = self.sync_parent(parent) {
-            // Only an I/O error text, never state contents or secrets.
-            eprintln!("telegram: state saved, but syncing its directory failed: {error}");
-        }
-        Ok(())
-    }
-
-    #[allow(clippy::unused_self)] // `self` carries the test-only failure switch
-    fn sync_parent(&self, parent: &Path) -> std::io::Result<()> {
+        // Make the rename durable. Windows has no directory fsync.
+        #[cfg(unix)]
+        let synced = std::fs::File::open(parent).and_then(|dir| dir.sync_all());
+        #[cfg(not(unix))]
+        let synced: std::io::Result<()> = Ok(());
         #[cfg(test)]
-        if self
+        let synced = if self
             .fail_after_rename
             .load(std::sync::atomic::Ordering::Relaxed)
         {
-            return Err(std::io::Error::other("injected directory sync failure"));
+            Err(std::io::Error::other("injected directory sync failure"))
+        } else {
+            synced
+        };
+        if let Err(error) = synced {
+            // Only an I/O error text, never state contents or secrets.
+            eprintln!("telegram: state saved, but syncing its directory failed: {error}");
         }
-        #[cfg(unix)]
-        std::fs::File::open(parent)?.sync_all()?;
-        #[cfg(not(unix))]
-        let _ = parent;
         Ok(())
     }
 
