@@ -25,6 +25,8 @@
     "allow-daemon-restart",
     "allow-daemon-diagnostics",
     "allow-open-log-folder",
+    "allow-prereq-check",
+    "allow-open-webview-download",
     "allow-providers-cli",
     "allow-get-autostart",
     "allow-set-autostart",

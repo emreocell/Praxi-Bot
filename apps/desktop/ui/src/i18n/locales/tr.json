@@ -2765,6 +2765,40 @@
       "title": "Bu ekran denetlenemiyor"
     },
     "openSettings": "Ayarları aç",
+    "prereq": {
+      "advanced": "Gelişmiş (teknik ayrıntılar)",
+      "clock_wrong": {
+        "hint": "Tarih çok yanlışsa güvenli bağlantılar ve oturum açmalar başarısız olur. Windows ayarlarında doğru tarih ve saati ayarla, sonra Yeniden dene'ye bas.",
+        "title": "Bu bilgisayarın saati yanlış görünüyor"
+      },
+      "data_dir_network": {
+        "hint": "Praxi bu bilgisayardaki bir klasörle en iyi çalışır. Ağ sürücüsü yavaşlayabilir veya kaybolabilir. Veri klasörünü yerel bir diske taşımayı düşün.",
+        "title": "Veri klasörün bir ağ sürücüsünde"
+      },
+      "data_dir_unusable": {
+        "hint": "Praxi'nin botlarını sakladığı klasör yazılabilir değil veya engellenmiş. Klasörü aç; var olduğunu ve hesabının değiştirebildiğini kontrol et (diskin dolu veya salt okunur olmadığına da bak).",
+        "title": "Praxi veri klasörüne kaydedemiyor"
+      },
+      "detailsTitle": "Bu bilgisayarda kontrol edilenler (kişisel klasör adları çıkarıldı)",
+      "download": "WebView2'yi Microsoft'tan indir",
+      "openDataFolder": "Veri klasörünü aç",
+      "port_busy": {
+        "hint": "Bu bilgisayardaki başka bir program Praxi'nin ihtiyaç duyduğu adresi zaten kullanıyor. Diğer programı kapat veya bilgisayarı yeniden başlat, sonra Yeniden dene'ye bas.",
+        "title": "Başka bir program Praxi'nin kapısını kullanıyor"
+      },
+      "sidecar_missing": {
+        "hint": "Praxi'nin hizmet dosyası eksik; çoğunlukla antivirüs yazılımı onu karantinaya almıştır. Antivirüs programında karantinaya bak (\"Praxi\" veya \"bot.exe\") ve geri yükle ya da Praxi'yi yeniden kur, sonra Yeniden dene'ye bas.",
+        "title": "Praxi'nin ihtiyaç duyduğu bir dosya yok"
+      },
+      "webview2_missing": {
+        "hint": "Praxi, Windows'un Microsoft'tan gelen ücretsiz bir parçası olan Microsoft WebView2'ye ihtiyaç duyar. Microsoft'un resmî sayfasından indirip kur, sonra Praxi'yi yeniden başlat.",
+        "title": "Windows'ta Praxi'nin penceresi için gereken bir parça eksik"
+      },
+      "webview2_old": {
+        "hint": "Praxi hatalı görünebilir veya yanlış çalışabilir. Güncel WebView2'yi Microsoft'un resmî sayfasından indirip kur.",
+        "title": "WebView2 sürümün oldukça eski"
+      }
+    },
     "reload": "Yenile",
     "restartApp": "Praxi'yi yeniden başlat",
     "restartService": "Yerel servisi yeniden başlat",

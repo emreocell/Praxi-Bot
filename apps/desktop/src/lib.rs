@@ -6,6 +6,7 @@ pub mod control;
 pub mod daemon;
 pub mod listener;
 mod microphone;
+pub mod prereq;
 pub mod shell;
 pub mod update;
 pub mod widget_visibility;
@@ -795,6 +796,29 @@ fn open_log_folder(window: Window) -> Result<(), String> {
     open::that(&dir).map_err(|e| format!("cannot open {} ({e})", dir.display()))
 }
 
+/// First-run prerequisite check for the start-up screen: `WebView2`, the service file, the data
+/// folder, the clock and the port. Read-only and offline. Main window only.
+#[tauri::command]
+async fn prereq_check(
+    window: Window,
+    daemon: State<'_, Arc<DaemonHandle>>,
+) -> Result<prereq::Report, String> {
+    require_window(&window, MAIN_ONLY)?;
+    let daemon = Arc::clone(&daemon);
+    tokio::task::spawn_blocking(move || daemon::prereq_report(&daemon))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Open Microsoft's official `WebView2` download page in the browser. The address is a constant,
+/// never an argument. Main window only.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // tauri hands the window over by value
+fn open_webview_download(window: Window) -> Result<(), String> {
+    require_window(&window, MAIN_ONLY)?;
+    open::that(prereq::WEBVIEW2_DOWNLOAD_URL).map_err(|e| format!("cannot open the page ({e})"))
+}
+
 /// Arguments of `providers_cli` (typed so no free-form flag reaches the CLI).
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1078,6 +1102,11 @@ fn setup_dev_menu(app: &tauri::App, control: ControlHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::too_many_lines)] // one flat builder chain: plugins, state, setup, handlers
 pub fn run() {
+    // Without WebView2 no window can open: say so in plain words before anything else.
+    #[cfg(windows)]
+    if prereq::stop_if_webview2_missing() {
+        return;
+    }
     let control = ControlHandle::new(Duration::from_millis(DEFAULT_PRE_ACTION_HIGHLIGHT_MS));
     let control_for_setup = control.clone();
     let daemon_handle = Arc::new(DaemonHandle::default());
@@ -1180,6 +1209,8 @@ pub fn run() {
             daemon_restart,
             daemon_diagnostics,
             open_log_folder,
+            prereq_check,
+            open_webview_download,
             providers_cli,
             get_autostart,
             set_autostart,
@@ -1451,6 +1482,8 @@ mod acl_tests {
         ("daemon_restart", "MAIN_ONLY"),
         ("daemon_diagnostics", "MAIN_ONLY"),
         ("open_log_folder", "MAIN_ONLY"),
+        ("prereq_check", "MAIN_ONLY"),
+        ("open_webview_download", "MAIN_ONLY"),
         ("providers_cli", "MAIN_ONLY"),
         ("get_autostart", "MAIN_ONLY"),
         ("set_autostart", "MAIN_ONLY"),
@@ -1653,6 +1686,8 @@ mod acl_tests {
                 "daemon_restart",
                 "daemon_diagnostics",
                 "open_log_folder",
+                "prereq_check",
+                "open_webview_download",
                 "simulate_bot_run",
                 "set_stop_hotkey",
                 "notify_show",

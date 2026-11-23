@@ -2765,6 +2765,40 @@
       "title": "Dieser Bildschirm lässt sich nicht steuern"
     },
     "openSettings": "Einstellungen öffnen",
+    "prereq": {
+      "advanced": "Erweitert (technische Details)",
+      "clock_wrong": {
+        "hint": "Sichere Verbindungen und Anmeldungen schlagen fehl, wenn das Datum stark abweicht. Stelle in den Windows-Einstellungen Datum und Uhrzeit richtig ein und wähle dann „Erneut versuchen“.",
+        "title": "Die Uhr dieses Computers scheint falsch zu gehen"
+      },
+      "data_dir_network": {
+        "hint": "Praxi arbeitet am besten mit einem Ordner auf diesem Computer. Ein Netzlaufwerk kann langsam sein oder verschwinden. Verschiebe den Datenordner am besten auf eine lokale Festplatte.",
+        "title": "Dein Datenordner liegt auf einem Netzlaufwerk"
+      },
+      "data_dir_unusable": {
+        "hint": "Der Ordner, in dem Praxi deine Bots ablegt, ist nicht beschreibbar oder gesperrt. Öffne ihn und prüfe, ob er existiert und dein Konto ihn ändern darf (auch, ob die Festplatte nicht voll oder schreibgeschützt ist).",
+        "title": "Praxi kann nicht in seinen Datenordner speichern"
+      },
+      "detailsTitle": "Auf diesem Computer geprüft (persönliche Ordnernamen entfernt)",
+      "download": "WebView2 bei Microsoft herunterladen",
+      "openDataFolder": "Datenordner öffnen",
+      "port_busy": {
+        "hint": "Ein anderes Programm auf diesem Computer nutzt bereits die Adresse, die Praxi braucht. Schließe das andere Programm oder starte den Computer neu und wähle dann „Erneut versuchen“.",
+        "title": "Ein anderes Programm belegt den Port von Praxi"
+      },
+      "sidecar_missing": {
+        "hint": "Die Dienstdatei von Praxi fehlt, oft weil ein Virenscanner sie in Quarantäne verschoben hat. Stelle sie im Virenscanner wieder her (suche „Praxi“ oder „bot.exe“ in der Quarantäne) oder installiere Praxi neu und wähle dann „Erneut versuchen“.",
+        "title": "Eine Datei, die Praxi braucht, fehlt"
+      },
+      "webview2_missing": {
+        "hint": "Praxi braucht Microsoft WebView2, einen kostenlosen Windows-Bestandteil von Microsoft. Lade es von der offiziellen Microsoft-Seite herunter, installiere es und starte Praxi danach neu.",
+        "title": "Windows fehlt ein Teil, den Praxi für sein Fenster braucht"
+      },
+      "webview2_old": {
+        "hint": "Praxi kann falsch aussehen oder sich seltsam verhalten. Lade das aktuelle WebView2 von der offiziellen Microsoft-Seite herunter und installiere es.",
+        "title": "Dein WebView2 ist ziemlich alt"
+      }
+    },
     "reload": "Neu laden",
     "restartApp": "Praxi neu starten",
     "restartService": "Lokalen Dienst neu starten",

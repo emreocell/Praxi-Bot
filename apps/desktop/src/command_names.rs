@@ -34,6 +34,8 @@ pub const COMMAND_NAMES: &[&str] = &[
     "daemon_restart",
     "daemon_diagnostics",
     "open_log_folder",
+    "prereq_check",
+    "open_webview_download",
     "providers_cli",
     "get_autostart",
     "set_autostart",

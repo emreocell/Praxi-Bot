@@ -113,3 +113,15 @@ Siehe [Verbinde deine Apps](connect-your-apps.md).
 5. Der Job wartet vielleicht auf dein OK. Sieh unter **Braucht dich** nach.
 
 Siehe [Dinge automatisieren](automate.md).
+
+## 13. Praxi zeigt eine Startprüfung statt des Startbildschirms
+
+Wenn Praxi nicht starten kann, prüft es, wovon es abhängt, und nennt dir das erste, was nicht stimmt, mit einer Haupttaste. Beim Prüfen wird nichts verändert und nichts irgendwohin gesendet.
+
+- **Windows fehlt ein Teil, den Praxi für sein Fenster braucht** (Microsoft WebView2): Wähle **WebView2 bei Microsoft herunterladen**. Die offizielle Seite von Microsoft öffnet sich. Installiere es und starte Praxi neu. Fehlt WebView2, kann Praxi vor dem Schließen nur ein kleines Meldungsfenster zeigen: Wähle dort **Ja**, um dieselbe Seite zu öffnen.
+- **Eine Datei, die Praxi braucht, fehlt**: Virenscanner verschieben `bot.exe` oft in Quarantäne. Stelle sie im Virenscanner wieder her oder installiere Praxi neu und wähle dann **Erneut versuchen**.
+- **Praxi kann nicht in seinen Datenordner speichern**: Wähle **Datenordner öffnen**. Prüfe, ob er existiert, ob dein Konto ihn ändern darf und ob die Festplatte nicht voll oder schreibgeschützt ist.
+- **Ein anderes Programm belegt den Port von Praxi**: Schließe es oder starte den Computer neu und wähle dann **Erneut versuchen**.
+- **Die Uhr scheint falsch zu gehen**: Stelle in Windows Datum und Uhrzeit richtig ein und wähle dann **Erneut versuchen**.
+
+Mit **Details kopieren** kopierst du einen Bericht für eine Fehlermeldung. **Erweitert** zeigt die technischen Fakten; dein Benutzername und dein Home-Ordner werden durch `~` und `<user>` ersetzt.

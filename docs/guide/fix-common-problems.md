@@ -113,3 +113,15 @@ See [Connect your apps](connect-your-apps.md).
 5. The job may be waiting for your OK. Look in **Needs you**.
 
 See [Automate things](automate.md).
+
+## 13. Praxi shows a start-up check instead of the home screen
+
+When Praxi cannot start, it checks the things it depends on and tells you the first one that is wrong, with one main button. Nothing is changed and nothing is sent anywhere while it checks.
+
+- **Windows is missing a part Praxi needs to show its window** (Microsoft WebView2): press **Download WebView2 from Microsoft**. It opens Microsoft's official page. Install it, then start Praxi again. If WebView2 is missing, Praxi may only be able to show a small message box before it closes: choose **Yes** there to open the same page.
+- **A file Praxi needs is gone**: antivirus software often quarantines `bot.exe`. Restore it in your antivirus program or reinstall Praxi, then press **Try again**.
+- **Praxi cannot save to its data folder**: press **Open the data folder**. Check that it exists, that your account may change it and that the disk is not full or read-only.
+- **Another program is using Praxi's port**: close it or restart the computer, then press **Try again**.
+- **The clock looks wrong**: set the correct date and time in Windows, then press **Try again**.
+
+Press **Copy details** to copy a report for a bug report. **Advanced** shows the technical facts; your user name and home folder are replaced by `~` and `<user>`.

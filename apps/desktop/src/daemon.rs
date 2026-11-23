@@ -922,6 +922,18 @@ pub fn diagnostics(handle: &DaemonHandle) -> Diagnostics {
     }
 }
 
+/// The first-run prerequisite check for this app's data folder, service file and port.
+#[must_use]
+pub fn prereq_report(handle: &DaemonHandle) -> crate::prereq::Report {
+    let data = data_dir().unwrap_or_default();
+    crate::prereq::check(
+        &data,
+        Path::new(&bot_binary()),
+        port(),
+        handle.started_by_app(),
+    )
+}
+
 /// The last `n` lines of a text file (lossy UTF-8; empty when unreadable).
 fn read_tail(path: &Path, n: usize) -> Vec<String> {
     let Ok(bytes) = std::fs::read(path) else {

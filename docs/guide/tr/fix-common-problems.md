@@ -113,3 +113,15 @@ Bkz. [Uygulamalarını bağla](connect-your-apps.md).
 5. İş senin onayını bekliyor olabilir. **Senden bekleyenler**'e bak.
 
 Bkz. [İşleri otomatikleştir](automate.md).
+
+## 13. Praxi ana ekran yerine bir başlangıç kontrolü gösteriyor
+
+Praxi başlayamadığında, bağlı olduğu şeyleri kontrol eder ve yanlış olan ilkini tek bir ana düğmeyle söyler. Kontrol sırasında hiçbir şey değiştirilmez ve hiçbir yere bir şey gönderilmez.
+
+- **Windows'ta Praxi'nin penceresi için gereken bir parça eksik** (Microsoft WebView2): **WebView2'yi Microsoft'tan indir**'e bas. Microsoft'un resmî sayfası açılır. Kur, sonra Praxi'yi yeniden başlat. WebView2 yoksa Praxi kapanmadan önce yalnızca küçük bir mesaj kutusu gösterebilir: orada **Evet**'i seçersen aynı sayfa açılır.
+- **Praxi'nin ihtiyaç duyduğu bir dosya yok**: antivirüs yazılımları `bot.exe` dosyasını sık sık karantinaya alır. Antivirüs programında geri yükle ya da Praxi'yi yeniden kur, sonra **Yeniden dene**'ye bas.
+- **Praxi veri klasörüne kaydedemiyor**: **Veri klasörünü aç**'a bas. Klasörün var olduğunu, hesabının değiştirebildiğini ve diskin dolu ya da salt okunur olmadığını kontrol et.
+- **Başka bir program Praxi'nin kapısını kullanıyor**: onu kapat ya da bilgisayarı yeniden başlat, sonra **Yeniden dene**'ye bas.
+- **Saat yanlış görünüyor**: Windows'ta doğru tarih ve saati ayarla, sonra **Yeniden dene**'ye bas.
+
+Hata bildirimi için bir rapor kopyalamak istersen **Ayrıntıları kopyala**'ya bas. **Gelişmiş** teknik bilgileri gösterir; kullanıcı adın ve ana klasörün yerine `~` ve `<user>` yazılır.

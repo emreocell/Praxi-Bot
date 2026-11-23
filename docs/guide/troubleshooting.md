@@ -51,6 +51,10 @@ error.
   headless browser launch with a 5-second startup / 8-second overall timeout,
   `--online` connection tests).
 
+## Start-up check (desktop app)
+
+When the local service does not come up, the desktop app first checks its prerequisites and shows the first blocking one in plain words with one main button: WebView2 runtime missing (button opens Microsoft's official download page), the `bot` service file missing (typical antivirus quarantine), the data directory not writable, the daemon port taken by another program. Advice-only items (old WebView2, data directory on a network share, clock outside 2025–2100) appear under **Advanced**. All checks are read-only and offline; the data-directory check creates and removes one tiny probe file. The details are redacted (home folder and account name) before they are shown or copied. See [Fix common problems](fix-common-problems.md#13-praxi-shows-a-start-up-check-instead-of-the-home-screen).
+
 ## The always-on host
 
 Logs, restart, upgrade, backup and the host-offline / slow-start / peer table

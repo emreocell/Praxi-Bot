@@ -73,3 +73,20 @@
   justify-content: center;
   gap: var(--space-2);
 }
+
+.advanced {
+  align-self: stretch;
+  text-align: start;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.advanced summary {
+  cursor: pointer;
+  padding: var(--space-2) var(--space-0);
+}
+
+.advanced summary:focus-visible {
+  outline: var(--size-border-thick) solid var(--color-focus);
+  outline-offset: var(--space-1);
+}

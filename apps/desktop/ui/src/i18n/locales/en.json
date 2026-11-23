@@ -2765,6 +2765,40 @@
       "title": "This screen cannot be controlled"
     },
     "openSettings": "Open Settings",
+    "prereq": {
+      "advanced": "Advanced (technical details)",
+      "clock_wrong": {
+        "hint": "Secure connections and sign-ins fail when the date is far off. Set the correct date and time in Windows settings, then press Try again.",
+        "title": "The clock of this computer looks wrong"
+      },
+      "data_dir_network": {
+        "hint": "Praxi works best with a folder on this computer. A network drive can be slow or disappear. Consider moving the data folder to a local disk.",
+        "title": "Your data folder is on a network drive"
+      },
+      "data_dir_unusable": {
+        "hint": "The folder where Praxi keeps your bots is not writable or is blocked. Open it and check that it exists and your account may change it (also check that the disk is not full or read-only).",
+        "title": "Praxi cannot save to its data folder"
+      },
+      "detailsTitle": "Checked on this computer (personal folder names removed)",
+      "download": "Download WebView2 from Microsoft",
+      "openDataFolder": "Open the data folder",
+      "port_busy": {
+        "hint": "Something else on this computer already uses the address Praxi needs. Close the other program or restart the computer, then press Try again.",
+        "title": "Another program is using Praxi's port"
+      },
+      "sidecar_missing": {
+        "hint": "Praxi's service file is missing, often because antivirus software quarantined it. Restore it in your antivirus program (look for \"Praxi\" or \"bot.exe\" in its quarantine) or reinstall Praxi, then press Try again.",
+        "title": "A file Praxi needs is gone"
+      },
+      "webview2_missing": {
+        "hint": "Praxi needs Microsoft WebView2, a free part of Windows from Microsoft. Download it from the official Microsoft page, install it, then start Praxi again.",
+        "title": "Windows is missing a part Praxi needs to show its window"
+      },
+      "webview2_old": {
+        "hint": "Praxi may look wrong or misbehave. Download the current WebView2 from the official Microsoft page and install it.",
+        "title": "Your WebView2 is quite old"
+      }
+    },
     "reload": "Reload",
     "restartApp": "Restart Praxi",
     "restartService": "Restart the local service",

@@ -99,6 +99,41 @@ export async function startupDiagnostics(): Promise<StartupDiagnostics | null> {
   }
 }
 
+/** What the single primary button of the first-run check does (mirrors `prereq::Fix` in the app). */
+export type PrereqFix = "retry" | "open_data_folder" | "download_webview2";
+
+export interface PrereqIssue {
+  id: string;
+  fix: PrereqFix;
+  /** `true`: the app cannot work until fixed; `false`: advice only. */
+  blocking: boolean;
+}
+
+export interface PrereqReport {
+  issues: PrereqIssue[];
+  /** Technical details with the user's folder and account names already removed. */
+  details: string;
+}
+
+/** The app's own first-run check (WebView2, service file, data folder, clock, port); `null` outside the app. */
+export async function prereqCheck(): Promise<PrereqReport | null> {
+  if (isMockMode() || !isTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<PrereqReport>("prereq_check");
+  } catch {
+    return null;
+  }
+}
+
+/** Open Microsoft's official WebView2 page in the browser (app only; the address is fixed in the app). */
+export async function openWebview2Download(): Promise<void> {
+  if (isTauriRuntime() && !isMockMode()) {
+    await invoke("open_webview_download");
+  }
+}
+
 /** Show the folder with `desktop-daemon.log` in the file manager (app only). */
 export async function openLogFolder(): Promise<void> {
   if (isTauriRuntime() && !isMockMode()) {
