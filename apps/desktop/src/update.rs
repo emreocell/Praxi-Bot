@@ -344,6 +344,18 @@ impl UpdateRuntime {
         self.persist();
     }
 
+    /// End of the start-up watch. A failed automatic rollback leaves the bad
+    /// version on probation (the user can still go back by hand), so the run
+    /// is not declared healthy then.
+    #[doc(hidden)]
+    pub fn settle_after_start(&self, rollback: Option<Result<(), String>>) {
+        if let Some(Err(e)) = rollback {
+            eprintln!("bot-desktop: automatic rollback failed: {e}");
+            return;
+        }
+        self.mark_healthy();
+    }
+
     fn previous_version(&self) -> Option<String> {
         self.state
             .lock()
@@ -531,13 +543,13 @@ pub fn spawn_startup_watch<R: Runtime>(app: &AppHandle<R>) {
         let Some(rt) = app.try_state::<UpdateRuntime>() else {
             return;
         };
-        if rt.verdict == StartVerdict::RollbackNow
-            && let Err(e) = rollback(&app, &rt).await
-        {
-            eprintln!("bot-desktop: automatic rollback failed: {e}");
-        }
+        let attempt = if rt.verdict == StartVerdict::RollbackNow {
+            Some(rollback(&app, &rt).await)
+        } else {
+            None
+        };
         tokio::time::sleep(HEALTHY_AFTER).await;
-        rt.mark_healthy();
+        rt.settle_after_start(attempt);
     });
 }
 
@@ -643,6 +655,22 @@ mod tests {
         // After the rollback the old version starts: the bookkeeping is cleared.
         assert_eq!(s.begin_start("0.1.0"), StartVerdict::Normal);
         assert_eq!(s.pending, None);
+    }
+
+    #[test]
+    fn a_failed_automatic_rollback_keeps_the_probation() {
+        let rt = UpdateRuntime::detached(None, "0.2.0");
+        rt.state
+            .lock()
+            .expect("lock")
+            .record_install("0.1.0", "0.2.0");
+        rt.settle_after_start(Some(Err("network".to_owned())));
+        assert!(
+            rt.pending().is_some(),
+            "probation must survive a failed rollback"
+        );
+        rt.settle_after_start(None);
+        assert!(rt.pending().is_none(), "a normal healthy run ends it");
     }
 
     #[test]
