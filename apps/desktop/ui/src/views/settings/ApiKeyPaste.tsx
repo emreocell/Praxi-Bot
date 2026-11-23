@@ -19,6 +19,7 @@ import styles from "./AiPage.module.css";
 import { humanLine } from "../../lib/humanError";
 import { useBotsHome } from "../../state/useBotsHome";
 import { HomeHint } from "../../components/HomeHint";
+import { ConnectionTestButton } from "../../components/ConnectionTest";
 
 /** Open the collapsed "advanced providers" block (custom OpenAI-compatible servers). */
 function openAdvanced() {
@@ -60,6 +61,9 @@ export function ApiKeyPaste() {
   const ready = looksLikeKey(value);
   const hasKey = (id: string) =>
     dto?.configured.some((p) => p.id === id && p.has_key) === true;
+
+  /** Providers with a stored key (or a custom endpoint): each can be tested on the daemon. */
+  const testable = (dto?.configured ?? []).filter((p) => p.has_key || p.custom);
 
   const save = async () => {
     if (!client || !canConfigure || !target || !ready || busy) {
@@ -168,6 +172,20 @@ export function ApiKeyPaste() {
           {t("settingsModal.ai.keys.compatible")}
         </button>
       </div>
+
+      {testable.length > 0 ? (
+        <div className={styles.provs} role="group" aria-label={t("connectionTest.savedKeys")} data-testid="key-tests">
+          {testable.map((p) => (
+            <ConnectionTestButton
+              key={p.id}
+              testId={`key-test-${p.id}`}
+              label={t("connectionTest.testProvider", { provider: p.id })}
+              run={() => (client ? client.testConnection("provider", { id: p.id }) : Promise.reject(new Error("daemon not connected")))}
+              disabled={!client}
+            />
+          ))}
+        </div>
+      ) : null}
 
       {ready && !target ? (
         <p className={styles.hint} data-testid="key-unknown">

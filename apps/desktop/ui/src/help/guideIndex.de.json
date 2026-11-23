@@ -68,6 +68,19 @@
     "summary": "Eine App lässt deinen Bot mit einem anderen Dienst arbeiten, zum Beispiel Gmail, Notion, Linear oder deinen Dateien. Ohne Apps kann ein Bot nur chatten und seine Grundwerkzeuge nutzen."
   },
   {
+    "doc": "de/connection-test.md",
+    "title": "Verbindung testen",
+    "headings": [
+      "Falscher Schlüssel",
+      "Kein Netzwerk",
+      "Limit erreicht",
+      "Falsche Adresse",
+      "Störung beim Anbieter",
+      "Unklares Ergebnis"
+    ],
+    "summary": "Jeder Schlüssel und jede App-Verbindung in Praxi-Bot hat eine Schaltfläche Verbindung testen:"
+  },
+  {
     "doc": "de/faq.md",
     "title": "FAQ",
     "headings": [

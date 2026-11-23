@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { VoiceConfig, VoiceConfigInput } from "../../api/types";
+import { ConnectionTestButton } from "../../components/ConnectionTest";
 import formStyles from "../../components/Form.module.css";
 import { SettingRow } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
@@ -124,6 +125,13 @@ export function DictationCard() {
       <Button size="sm" disabled={busy} onClick={() => void save(provider === "local_voice" ? {} : sttKeyInput(provider, drafts))}>
         {t("voice.stt.save")}
       </Button>
+      {local ? null : (
+        <ConnectionTestButton
+          testId="voice-connection-test"
+          disabled={busy || !client}
+          run={() => (client ? client.testConnection("voice") : Promise.reject(new Error("daemon not connected")))}
+        />
+      )}
       {keyStored && !local ? (
         <Button
           size="sm"

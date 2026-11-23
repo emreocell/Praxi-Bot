@@ -431,6 +431,7 @@ export type WebSearchConfig = S["WebSearchConfigDto"];
 export type WebSearchConfigInput = S["WebSearchConfigInput"];
 export type WebSearchTestInput = S["WebSearchTestInput"];
 export type WebSearchTestReport = S["WebSearchTestReport"];
+export type ConnectionTestReport = S["ConnectionTestReport"];
 
 export type ChangeKind = S["ChangeKindDto"];
 export type DiffOmittedReason = S["DiffOmittedReasonDto"];

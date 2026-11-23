@@ -230,6 +230,19 @@
     "summary": "An app lets your bot work with another service, such as Gmail, Notion, Linear or your files. Without apps, a bot can only chat and use its basic tools."
   },
   {
+    "doc": "connection-test.md",
+    "title": "Test connection",
+    "headings": [
+      "Bad key",
+      "No network",
+      "Quota exceeded",
+      "Wrong endpoint",
+      "Provider outage",
+      "Unknown result"
+    ],
+    "summary": "Every key and app connection in Praxi-Bot has a Test connection button: AI provider keys"
+  },
+  {
     "doc": "decision-pool.md",
     "title": "Optional decision pool",
     "headings": [

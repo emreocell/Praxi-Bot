@@ -2123,6 +2123,44 @@
     "makeHome": "Diesen Server zum Zuhause meiner Bots machen …",
     "menu": "Computer"
   },
+  "connectionTest": {
+    "button": "Verbindung testen",
+    "details": "Details",
+    "learnMore": "Mehr im Handbuch lesen",
+    "outcome": {
+      "bad_key": {
+        "next": "Kopiere den Schlüssel erneut von der Website des Anbieters, achte darauf, dass am Anfang und Ende nichts fehlt, und füge ihn neu ein und speichere ihn.",
+        "title": "Der Schlüssel wurde nicht akzeptiert."
+      },
+      "no_network": {
+        "next": "Prüfe deine Internetverbindung, VPN oder Proxy. Bei einem Programm auf diesem Computer: Stelle sicher, dass es läuft, und versuche es erneut.",
+        "title": "Der Dienst war nicht erreichbar."
+      },
+      "ok": {
+        "next": "Du musst nichts tun. Du kannst dies schließen.",
+        "title": "Es funktioniert. Die Verbindung ist in Ordnung."
+      },
+      "provider_outage": {
+        "next": "Das liegt nicht an dir. Versuche es in ein paar Minuten erneut oder sieh auf der Statusseite des Anbieters nach.",
+        "title": "Der Dienst hat gerade ein Problem."
+      },
+      "quota_exceeded": {
+        "next": "Warte etwas und versuche es erneut, oder prüfe Tarif und Guthaben auf der Website des Anbieters.",
+        "title": "Der Schlüssel funktioniert, aber das Limit ist aufgebraucht."
+      },
+      "unknown": {
+        "next": "Öffne die Details unten und vergleiche sie mit dem Handbuch. Wenn das nicht hilft, kopiere die Details, wenn du um Hilfe bittest.",
+        "title": "Der Test brachte kein klares Ergebnis."
+      },
+      "wrong_endpoint": {
+        "next": "Prüfe die eingegebene Webadresse (oder den Befehl). Es sollte die Adresse aus der Dokumentation des Dienstes sein.",
+        "title": "Die Adresse scheint nicht zu stimmen."
+      }
+    },
+    "savedKeys": "Gespeicherte Schlüssel testen",
+    "testProvider": "{{provider}} testen",
+    "testing": "Wird getestet…"
+  },
   "control": {
     "starting": "Arbeitet …"
   },

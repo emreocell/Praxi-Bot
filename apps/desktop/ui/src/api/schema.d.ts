@@ -1146,6 +1146,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/connection-test/channel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test a channel token (Telegram: `getMe`). */
+        post: operations["test_channel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection-test/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test a saved e-mail account (including `AgentMail` API accounts). */
+        post: operations["test_email"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection-test/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test an MCP server: (re)start it and list its tools. No tool is called. */
+        post: operations["test_mcp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection-test/provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test an LLM provider key: list the models (or, when the provider has no model list, send a
+         *     one-token request) and report what the provider said.
+         */
+        post: operations["test_provider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection-test/voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test dictation: send half a second of silence to the configured speech service. */
+        post: operations["test_voice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connection-test/web": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test the web-search keys: one live probe through the configured backends. */
+        post: operations["test_web"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/control/override": {
         parameters: {
             query?: never;
@@ -4229,6 +4334,11 @@ export interface components {
             /** @description Polling lifecycle, including a persistent Telegram conflict notification. */
             status?: string | null;
         };
+        /** @description Body of `POST /v1/connection-test/channel`. */
+        ChannelTestInput: {
+            /** @description A registered channel id (`telegram`). */
+            id: string;
+        };
         /** @description A chat thread. */
         ChatDto: {
             /** @description Archived chats are hidden from the default list. */
@@ -4635,6 +4745,32 @@ export interface components {
              *     last-resort fallback the UI marks as such).
              */
             models_source?: string | null;
+        };
+        /**
+         * @description What a connection test found. The UI maps each value to a message and a next step.
+         * @enum {string}
+         */
+        ConnectionOutcome: "ok" | "bad_key" | "no_network" | "quota_exceeded" | "wrong_endpoint" | "provider_outage" | "unknown";
+        /** @description Result of one connection test. */
+        ConnectionTestReport: {
+            /** @description Technical text for an expandable "details" box. Secret-redacted and bounded. */
+            details: string;
+            /**
+             * Format: int64
+             * @description How long the test took in milliseconds.
+             */
+            elapsed_ms: number;
+            /**
+             * Format: int32
+             * @description HTTP status the service answered with, when there was one.
+             */
+            http_status?: number | null;
+            /** @description The typed result. */
+            outcome: components["schemas"]["ConnectionOutcome"];
+            /** @description The service's own error code (for example `invalid_api_key`), when it gave one. */
+            provider_code?: string | null;
+            /** @description What was tested: `provider`, `mcp`, `channel`, `web`, `voice` or `email`. */
+            target: string;
         };
         /** @description `POST /v1/control/{request_id}`. */
         ControlDecisionInput: {
@@ -5195,6 +5331,11 @@ export interface components {
             port?: number;
             /** @description Transport security, default implicit TLS. */
             security?: components["schemas"]["EmailSecurity"];
+        };
+        /** @description Body of `POST /v1/connection-test/email`. */
+        EmailTestInput: {
+            /** @description A saved e-mail account name. */
+            name: string;
         };
         /**
          * @description Result of a connection test: one status per server, nothing the servers
@@ -6731,6 +6872,11 @@ export interface components {
          * @enum {string}
          */
         McpStatus: "auth_required" | "connected" | "connecting" | "disconnected" | "error" | "quarantined";
+        /** @description Body of `POST /v1/connection-test/mcp`. */
+        McpTestInput: {
+            /** @description A configured MCP server name. */
+            name: string;
+        };
         /** @description Nonsecret grant, returned to the owner after storing a credential. */
         McpTokenGrant: {
             bots: string[];
@@ -7171,6 +7317,11 @@ export interface components {
         };
         /** @enum {string} */
         Profile: "watch" | "live";
+        /** @description Body of `POST /v1/connection-test/provider`. */
+        ProviderTestInput: {
+            /** @description A configured provider id (`gemini`, `openai`, `anthropic`, `local`, ...). */
+            id: string;
+        };
         /** @description Usage of one provider. */
         ProviderUsage: components["schemas"]["UsageTotals"] & {
             /**
@@ -11644,6 +11795,263 @@ export interface operations {
                 };
             };
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelTestInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestReport"];
+                };
+            };
+            /** @description no such channel */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_email: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailTestInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestReport"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_mcp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpTestInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestReport"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description MCP management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderTestInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestReport"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description no such provider */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description too many tests running */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_voice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestReport"];
+                };
+            };
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description dictation is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_web: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestReport"];
+                };
+            };
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description web search management is not available */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

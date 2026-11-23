@@ -2123,6 +2123,44 @@
     "makeHome": "Bu sunucuyu botlarımın evi yap…",
     "menu": "Bilgisayar"
   },
+  "connectionTest": {
+    "button": "Bağlantıyı dene",
+    "details": "Ayrıntılar",
+    "learnMore": "Rehberde devamını oku",
+    "outcome": {
+      "bad_key": {
+        "next": "Anahtarı sağlayıcının sitesinden yeniden kopyala, başında ya da sonunda eksik karakter olmadığından emin ol, sonra yapıştırıp yeniden kaydet.",
+        "title": "Anahtar kabul edilmedi."
+      },
+      "no_network": {
+        "next": "İnternet bağlantını, VPN'ini ya da proxy'ni kontrol et. Bu bilgisayardaki bir program için çalıştığından emin ol ve yeniden dene.",
+        "title": "Hizmete ulaşılamadı."
+      },
+      "ok": {
+        "next": "Yapman gereken bir şey yok. Bunu kapatabilirsin.",
+        "title": "Çalışıyor. Bağlantı sorunsuz."
+      },
+      "provider_outage": {
+        "next": "Bu senin hatan değil. Birkaç dakika sonra yeniden dene ya da sağlayıcının durum sayfasına bak.",
+        "title": "Hizmette şu an bir sorun var."
+      },
+      "quota_exceeded": {
+        "next": "Biraz bekleyip yeniden dene ya da sağlayıcının sitesinde planını ve kredini kontrol et.",
+        "title": "Anahtar çalışıyor ama limiti dolmuş."
+      },
+      "unknown": {
+        "next": "Aşağıdaki ayrıntıları açıp rehberle karşılaştır. Yardımcı olmazsa yardım isterken ayrıntıları kopyala.",
+        "title": "Deneme net bir sonuç vermedi."
+      },
+      "wrong_endpoint": {
+        "next": "Girdiğin web adresini (ya da komutu) kontrol et. Hizmetin belgelerinde yazan adres olmalı.",
+        "title": "Adres doğru görünmüyor."
+      }
+    },
+    "savedKeys": "Kayıtlı anahtarlarını dene",
+    "testProvider": "{{provider}} bağlantısını dene",
+    "testing": "Deneniyor…"
+  },
   "control": {
     "starting": "Çalışıyor…"
   },

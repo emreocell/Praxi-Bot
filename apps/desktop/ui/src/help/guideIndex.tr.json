@@ -68,6 +68,19 @@
     "summary": "Bazı uygulamalara MCP sunucusu denir. Bu yalnızca teknik bir addır: \"bir bota yeni araçlar veren eklenti\". Bundan fazlasını bilmen gerekmez."
   },
   {
+    "doc": "tr/connection-test.md",
+    "title": "Bağlantıyı dene",
+    "headings": [
+      "Hatalı anahtar",
+      "Ağ yok",
+      "Kota doldu",
+      "Yanlış adres",
+      "Hizmet kesintisi",
+      "Bilinmeyen sonuç"
+    ],
+    "summary": "Praxi-Bot'taki her anahtarın ve uygulama bağlantısının bir Bağlantıyı dene düğmesi var: yapay zekâ"
+  },
+  {
     "doc": "tr/faq.md",
     "title": "SSS",
     "headings": [
