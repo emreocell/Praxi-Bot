@@ -30,7 +30,7 @@ sudo bash ./install-linux.sh --headless --screen 1280x720x24 --version v0.1.0
 | --- | --- |
 | `praxi.service` | Restarts after a crash (after 5 seconds, at most 10 times in 10 minutes), sandboxed: no new privileges, read-only system, private temp folder. |
 | `praxi-xvfb.service` | The virtual display, no network access, private access cookie. |
-| Logs | Go to the system journal, which is capped at 500 MB and one month, so the disk cannot fill up. Read them with `journalctl -u praxi -f`. |
+| Logs | Go to the system journal. Praxi's units are rate-limited (at most 2000 lines per 30 seconds each), so a runaway bot cannot flood it. The installer does **not** change the size limit of the system journal and never restarts journald, because other services on the same server share it. Read Praxi's logs with `journalctl -u praxi -f`. |
 | Data | `/var/lib/praxi` (your bots, files, secrets). Settings in `/etc/praxi`. |
 
 ## 3. Check everything
@@ -67,9 +67,13 @@ sudo bash ./install-linux.sh --uninstall --purge  # also deletes all data. Canno
 
 Preview either with `--dry-run`.
 
+Older installers wrote a server-wide journal limit (`/etc/systemd/journald.conf.d/50-praxi.conf`). Both `--update` and `--uninstall` delete that file, but only if it still carries the "Written by the Praxi installer" line. A file you wrote yourself under that name is left alone. journald is not restarted, so the old limit stops applying at the next reboot (or when you run `sudo systemctl restart systemd-journald` yourself).
+
 ## 6. Logs
 
 ```bash
 sudo journalctl -u praxi --since "1 hour ago"
 sudo journalctl --disk-usage
 ```
+
+Want a size limit for the whole journal? That is your decision as the server owner: put `SystemMaxUse=500M` under `[Journal]` in a file in `/etc/systemd/journald.conf.d/` yourself. Praxi does not do it for you.
