@@ -1,0 +1,63 @@
+{
+  "summarise": {
+    "title": "Summarise this text",
+    "hint": "See how a bot reads and condenses something.",
+    "userText": "Summarise this text: \"Our team met on Monday. We agreed to ship the new price page on Friday, Anna will write the copy, and Tom will check the numbers. The old page stays up until then.\"",
+    "steps": ["Reading the text you pasted", "Finding the decisions and who owns them", "Writing a short summary"],
+    "approval": {
+      "title": "Save the summary to a file?",
+      "detail": "Save to: Documents/summary.txt (a new file)",
+      "note": "This is an example. A real bot asks like this before it saves, sends or deletes anything."
+    },
+    "answer": "Here is the short version:\n\n- The new price page ships on **Friday**.\n- **Anna** writes the copy, **Tom** checks the numbers.\n- The old page stays up until then.",
+    "denied": "No problem, I did not save anything. Here is the short version:\n\n- The new price page ships on **Friday**.\n- **Anna** writes the copy, **Tom** checks the numbers."
+  },
+  "plan": {
+    "title": "Plan my week",
+    "hint": "See how a bot turns a loose list into a plan.",
+    "userText": "Plan my week: dentist on Tuesday, a report due Thursday, and I want to exercise three times.",
+    "steps": ["Looking at the fixed dates", "Spreading the work over the days", "Adding time to rest"],
+    "approval": {
+      "title": "Add these to your calendar?",
+      "detail": "Add 5 events to: Calendar",
+      "note": "This is an example. A real bot asks like this before it changes your calendar."
+    },
+    "answer": "A calm plan for your week:\n\n- **Mon:** start the report, a short run\n- **Tue:** dentist, light work\n- **Wed:** finish the draft, gym\n- **Thu:** polish and send the report\n- **Fri:** a walk, then free time",
+    "denied": "Okay, your calendar stays untouched. A calm plan for your week:\n\n- **Mon:** start the report, a short run\n- **Tue:** dentist\n- **Wed:** finish the draft, gym\n- **Thu:** send the report"
+  },
+  "explain": {
+    "title": "Explain a file",
+    "hint": "See how a bot explains something in plain words.",
+    "userText": "Explain this file to me: budget.csv",
+    "steps": ["Asking to open the file", "Reading the columns and a few rows", "Explaining it in plain words"],
+    "approval": {
+      "title": "Read budget.csv?",
+      "detail": "Read: Documents/budget.csv (read only, nothing is changed)",
+      "note": "This is an example. A real bot asks before it opens your files, and you decide."
+    },
+    "answer": "This file is a simple budget table:\n\n- Each **row** is one expense.\n- The columns are the **date**, the **category** and the **amount**.\n- The biggest category is rent, then food.",
+    "denied": "Okay, I did not open the file. Without it I can only say that a .csv file is a plain table: one row per line, columns split by commas."
+  },
+  "ui": {
+    "label": "Demo: connect a model to get real answers",
+    "title": "Try it now",
+    "intro": "No key needed. This demo is made up and runs only on your screen.",
+    "stop": "Stop",
+    "stopped": "Stopped. Nothing else happens until you press a button. A real bot stops the same way, at once.",
+    "restart": "Play again",
+    "close": "Close",
+    "allow": "Allow (example)",
+    "deny": "Don't allow",
+    "approvalHeading": "Approval example",
+    "stepsHeading": "What the bot does",
+    "answerHeading": "Answer",
+    "tryAnother": "Try another sample",
+    "running": "The demo bot is working…",
+    "offlineNote": "Nothing was sent, saved or opened: this demo runs offline.",
+    "connectTitle": "Connect a model for real answers",
+    "connectBody": "Free options: a free Gemini key (a few minutes, no card), a model on your own computer if it is powerful enough (the setup shows if yours is), or another provider you already use.",
+    "connect": "Connect a model",
+    "help": "Demo",
+    "helpHint": "See what a bot does, what an approval looks like and how to stop it."
+  }
+}
