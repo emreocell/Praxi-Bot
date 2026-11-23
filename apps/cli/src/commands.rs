@@ -293,9 +293,12 @@ pub fn providers_default(
     if let Some(m) = model {
         cfg.set_model(id, m)?;
     }
+    let saved_model = cfg
+        .get(id)
+        .and_then(|provider| provider.default_model.clone());
     cfg.save(&path)?;
     if json_out {
-        out(&serde_json::json!({"default": id, "model": model}).to_string());
+        out(&serde_json::json!({"default": id, "model": saved_model}).to_string());
     } else {
         out(&format!("global default provider: {id}"));
     }
@@ -388,6 +391,18 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&lines[0]).unwrap(),
             serde_json::json!({"default": "b", "model": "mm"})
+        );
+        // Omitting --model keeps and reports the saved model.
+        let lines = collect(|o| providers_default(d.path(), "b", None, true, o));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&lines[0]).unwrap(),
+            serde_json::json!({"default": "b", "model": "mm"})
+        );
+        // A provider without a saved model reports null.
+        let lines = collect(|o| providers_default(d.path(), "a", None, true, o));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&lines[0]).unwrap(),
+            serde_json::json!({"default": "a", "model": null})
         );
         let mut sink = |_: &str| {};
         assert!(providers_default(d.path(), "zzz", None, false, &mut sink).is_err());
