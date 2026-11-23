@@ -845,6 +845,12 @@ Section Uninstall
   !else
     DeleteRegKey HKCU "${UNINSTKEY}"
   !endif
+  ; PRAXI: SHCTX can still point at HKCU when the uninstaller runs silently and in place, so an
+  ; install made for everyone must be removed from HKLM explicitly (we are elevated by now).
+  ${If} $PxAllUsers = 1
+    DeleteRegKey HKLM "${UNINSTKEY}"
+    DeleteRegKey HKLM "${MANUPRODUCTKEY}"
+  ${EndIf}
 
   ; Removes the Autostart entry for ${PRODUCTNAME} from the HKCU Run key if it exists.
   ; This ensures the program does not launch automatically after uninstallation if it exists.
