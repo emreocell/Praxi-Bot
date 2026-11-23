@@ -2,7 +2,7 @@
 
 Gördüğün iletiyi bul. Adımları sırayla yap. Aşağıdaki ileti başlıkları, uygulamanın gösterdiği sözlerdir.
 
-Hiçbiri işe yaramazsa: hesap menüsünden **Yardım**'ı aç, **Kopyalanacakları göster**'e bas, oku, sonra **Kopyala**'ya bas. Anahtarlar, parolalar ve e-posta adresleri gizlenir. Hiçbir yere bir şey gönderilmez. Metni bir hata raporuna yapıştır. Teknik [Sorun giderme](../troubleshooting.md) sayfasına da bak.
+Hiçbiri işe yaramazsa: hesap menüsünden **Yardım**'ı aç, **Kopyalanacakları göster**'e bas, oku, sonra **Kopyala**'ya bas. Anahtarlar, parolalar ve e-posta adresleri gizlenir. Hiçbir yere bir şey gönderilmez. Metni bir hata raporuna yapıştır. Teknik [Sorun giderme](troubleshooting.md) sayfasına da bak.
 
 ## 1. "Praxi'nin yerel servisi durdu" ya da "Praxi yerel servisine ulaşamıyor"
 

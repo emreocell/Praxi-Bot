@@ -30,7 +30,7 @@ sudo bash ./install-linux.sh --headless --screen 1280x720x24 --version v0.1.0
 | --- | --- |
 | `praxi.service` | Çökerse yeniden başlar (5 saniye sonra, 10 dakikada en fazla 10 kez); yeni yetki alamaz, sistem salt okunur, geçici klasörü ayrıdır. |
 | `praxi-xvfb.service` | Sanal ekran; ağa kapalı, özel erişim anahtarlı. |
-| Günlükler | Sistem günlüğüne gider; günlük 500 MB ve bir ayla sınırlıdır, disk dolmaz. Okumak için `journalctl -u praxi -f`. |
+| Günlükler | Sistem günlüğüne gider. Praxi'nin servislerine hız sınırı konur (her biri için 30 saniyede en fazla 2000 satır); böylece kontrolden çıkmış bir bot günlüğü boğamaz. Kurulum programı sistem günlüğünün boyut sınırını **değiştirmez** ve journald'yi asla yeniden başlatmaz, çünkü aynı sunucudaki diğer servisler de onu kullanır. Praxi'nin günlüklerini `journalctl -u praxi -f` ile oku. |
 | Veriler | `/var/lib/praxi` (botların, dosyaların, gizli bilgilerin). Ayarlar `/etc/praxi` içinde. |
 
 ## 3. Her şeyi denetle
@@ -67,9 +67,13 @@ sudo bash ./install-linux.sh --uninstall --purge  # tüm verileri de siler. Geri
 
 İkisini de önce `--dry-run` ile önizleyebilirsin.
 
+Eski kurulum programları sunucu genelinde bir günlük sınırı yazıyordu (`/etc/systemd/journald.conf.d/50-praxi.conf`). `--update` ve `--uninstall` bu dosyayı siler, ama yalnızca hâlâ "Written by the Praxi installer" satırını taşıyorsa. Bu adla kendi yazdığın bir dosyaya dokunulmaz. journald yeniden başlatılmaz; bu yüzden eski sınır bir sonraki yeniden başlatmada (ya da `sudo systemctl restart systemd-journald` komutunu kendin çalıştırdığında) geçerliliğini yitirir.
+
 ## 6. Günlükler
 
 ```bash
 sudo journalctl -u praxi --since "1 hour ago"
 sudo journalctl --disk-usage
 ```
+
+Tüm günlük için bir boyut sınırı mı istiyorsun? Bu, sunucunun sahibi olarak senin kararın: `/etc/systemd/journald.conf.d/` içindeki bir dosyada `[Journal]` altına `SystemMaxUse=500M` yazmak sana kalmış. Praxi bunu senin yerine yapmaz.

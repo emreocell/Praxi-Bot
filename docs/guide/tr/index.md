@@ -23,6 +23,8 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 | [Home Assistant](home-assistant.md) | Botların evdeki cihazları okuması ve yönetmesi. |
 | [Bilgisayar kullanımı](computer-use.md) | Botların kendi Windows bilgisayarında uygulama kullanması. |
 | [Eski yedekleri geri yükleme](backup-and-restore.md) | Eski, şifresiz yedekler. |
+| [Bağlantıyı dene](connection-test.md) | Anahtarların ve uygulama bağlantılarının çalışıp çalışmadığını tek tıkla gör. |
+| [Sorun giderme (teknik)](troubleshooting.md) | Terminal komutları, tanılama, güvenli mod ve hata mesajları. |
 | [SSS](faq.md) | Sık sorulan sorular. |
 | [Linux sunucuda 7/24 çalışma](linux-host.md) | Sanal ekran, güncelleme ve kaldırma için komutlar. |
 | [Sözlük](glossary.md) | Temel terimler. |

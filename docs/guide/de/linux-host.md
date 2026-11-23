@@ -30,7 +30,7 @@ sudo bash ./install-linux.sh --headless --screen 1280x720x24 --version v0.1.0
 | --- | --- |
 | `praxi.service` | Startet nach einem Absturz neu (nach 5 Sekunden, höchstens 10 Mal in 10 Minuten); abgesichert: keine neuen Rechte, schreibgeschütztes System, eigener Temp-Ordner. |
 | `praxi-xvfb.service` | Das virtuelle Display, ohne Netzwerkzugriff, mit privatem Zugangs-Cookie. |
-| Logs | Landen im System-Journal, das auf 500 MB und einen Monat begrenzt ist, die Platte läuft also nicht voll. Lesen mit `journalctl -u praxi -f`. |
+| Logs | Landen im System-Journal. Die Dienste von Praxi sind ratenbegrenzt (je höchstens 2000 Zeilen pro 30 Sekunden), damit ein außer Kontrolle geratener Bot es nicht fluten kann. Das Installationsprogramm ändert die Größenbegrenzung des System-Journals **nicht** und startet journald nie neu, weil andere Dienste auf demselben Server es mitnutzen. Lies die Logs von Praxi mit `journalctl -u praxi -f`. |
 | Daten | `/var/lib/praxi` (deine Bots, Dateien, Geheimnisse). Einstellungen in `/etc/praxi`. |
 
 ## 3. Alles prüfen
@@ -67,9 +67,13 @@ sudo bash ./install-linux.sh --uninstall --purge  # löscht auch alle Daten. Nic
 
 Beides lässt sich vorher mit `--dry-run` ansehen.
 
+Ältere Installationsprogramme haben eine serverweite Journal-Begrenzung geschrieben (`/etc/systemd/journald.conf.d/50-praxi.conf`). `--update` und `--uninstall` löschen diese Datei, aber nur, wenn sie noch die Zeile „Written by the Praxi installer“ enthält. Eine Datei, die du selbst unter diesem Namen angelegt hast, bleibt unberührt. journald wird nicht neu gestartet; die alte Begrenzung gilt daher ab dem nächsten Neustart nicht mehr (oder wenn du selbst `sudo systemctl restart systemd-journald` ausführst).
+
 ## 6. Logs
 
 ```bash
 sudo journalctl -u praxi --since "1 hour ago"
 sudo journalctl --disk-usage
 ```
+
+Du willst eine Größenbegrenzung für das gesamte Journal? Das entscheidest du als Server-Besitzer: Trage `SystemMaxUse=500M` unter `[Journal]` selbst in eine Datei in `/etc/systemd/journald.conf.d/` ein. Praxi macht das nicht für dich.

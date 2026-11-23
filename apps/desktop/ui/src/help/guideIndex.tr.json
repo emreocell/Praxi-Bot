@@ -246,5 +246,31 @@
       "Bilmen gerekenler"
     ],
     "summary": "Botlarınla telefonundan konuş. Daemon bir Telegram kanalı çalıştırır: botuna mesaj yazarsın, yanıtın akışını"
+  },
+  {
+    "doc": "tr/troubleshooting.md",
+    "title": "Sorun giderme (teknik)",
+    "headings": [
+      "Tanılama (Ayarlar → Tanılama, bot doctor)",
+      "7/24 çalışan sunucu",
+      "daemon not reachable at http://127.0.0.1:47821 (çıkış kodu 3)",
+      "Kimlik doğrulama reddedildi (çıkış kodu 4)",
+      "no usable provider; run bot setup or bot providers add",
+      "connection test failed",
+      "Bir bot \"has no usable profile\" yanıtı veriyor",
+      "bot bots add reddedildi (çıkış kodu 6)",
+      "Bot durup bekliyor",
+      "Bir araç çağrısı reddediliyor",
+      "\"Her zaman izin ver\" tutmuyor ya da hiç sormuyor",
+      "Gemini'den hız sınırı hataları (HTTP 429)",
+      "Güvenli mod: her şey kapalı başlasın",
+      "Zamanlamalar tetiklenmiyor",
+      "Telegram",
+      "Gizli bilgi deposu parola soruyor",
+      "Tarayıcı açılmıyor ya da zaman aşımına uğruyor",
+      "Windows SmartScreen kurulum programını engelliyor",
+      "Hata raporu için bilgi toplama"
+    ],
+    "summary": "Önce bot status komutunu çalıştır. Arka plan servisinin (daemon) çalıştığını, anahtarının kabul edildiğini ve kaç onayın seni beklediğini gösterir. Terminal kullanmıyorsan önce sade dille yazılmış Sı…"
   }
 ]
