@@ -233,6 +233,7 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/hosts/{}/terminal/{}/resize"),
     ("DELETE", "/v1/hosts/{}/terminal/{}"),
     ("POST", "/v1/hosts/setup"),
+    ("POST", "/v1/hosts/setup/update"),
     ("POST", "/v1/hosts/setup/{}/host-key"),
     ("POST", "/v1/hosts/setup/{}/cancel"),
     ("POST", "/v1/host/invite"),

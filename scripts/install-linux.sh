@@ -1941,6 +1941,21 @@ else
 fi
 INSTALL_SUCCEEDED=1
 
+# After a successful in-place update keep the previous program files next to the new ones
+# (${PREFIX}.backup-<timestamp>, newest one only) so a bad release can be rolled back by hand.
+# The data and config directories are never copied: they are not touched by an update.
+if [[ "${UPDATE}" -eq 1 && -d "${WORK}/backup/prefix" ]]; then
+  for old_backup in "${PREFIX}".backup-*; do
+    [[ -d "${old_backup}" ]] && rm -rf -- "${old_backup}"
+  done
+  kept="${PREFIX}.backup-$(date -u +%Y%m%dT%H%M%SZ)"
+  if mv "${WORK}/backup/prefix" "${kept}" 2>/dev/null; then
+    log "previous version kept at ${kept}"
+  else
+    warn "could not keep a backup of the previous version"
+  fi
+fi
+
 # ------------------------------------------------------------ next steps
 cat <<EOF
 

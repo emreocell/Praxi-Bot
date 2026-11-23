@@ -3,7 +3,7 @@
 //! Every step is idempotent. A failed run stops at the failing step and a
 //! re-run starts from the top: steps that are already satisfied on the server
 //! (installed, paired) report `skip`, so "resume" is just running it again.
-use std::time::Duration;
+use std::{cmp::Ordering, time::Duration};
 
 use serde::Deserialize;
 
@@ -167,6 +167,7 @@ fn detect_only(existing: &Existing, app: &str) -> StepResult {
             version,
             host_mode: true,
             active: true,
+            ..
         } if facts::semver(version) == facts::semver(app) => StepResult::skip(
             "install",
             T,
@@ -176,6 +177,7 @@ fn detect_only(existing: &Existing, app: &str) -> StepResult {
             version,
             host_mode: true,
             active: true,
+            ..
         } => StepResult::warn(
             "install",
             T,
@@ -467,9 +469,15 @@ impl Engine<'_> {
             return self.finish(report, r);
         }
 
+        let app_tag = install_tag(self.params.release_tag.as_deref(), &app).ok();
         let (run, snapshot) = match (&existing, mode) {
-            (Existing::Installed { version, .. }, _)
-                if facts::semver(version) > facts::semver(&app) =>
+            (Existing::Installed { version, build, .. }, _)
+                if facts::semver(version) > facts::semver(&app)
+                    || build
+                        .as_deref()
+                        .zip(app_tag.as_deref())
+                        .and_then(|(b, a)| facts::release_cmp(b, a))
+                        == Some(Ordering::Greater) =>
             {
                 let r = StepResult::warn(
                     "install",
@@ -502,13 +510,34 @@ impl Engine<'_> {
                 );
                 return self.finish(report, r);
             }
+            // An update skips the install only when the server reports exactly the tag this app
+            // attests: equal cargo versions (`0.1.0`) say nothing about which alpha is running.
+            (
+                Existing::Installed {
+                    version,
+                    build,
+                    host_mode: true,
+                    active: true,
+                },
+                Mode::Upgrade,
+            ) if build.as_deref().map(|b| b.strip_prefix('v').unwrap_or(b))
+                == app_tag.as_deref().map(|t| t.strip_prefix('v').unwrap_or(t)) =>
+            {
+                let r = StepResult::skip(
+                    "install",
+                    T,
+                    format!("Praxi {version} already installed in host mode"),
+                );
+                return self.finish(report, r);
+            }
             (
                 Existing::Installed {
                     version,
                     host_mode: true,
                     active: true,
+                    ..
                 },
-                Mode::Add | Mode::Upgrade,
+                Mode::Add,
             ) if facts::semver(version) == facts::semver(&app) => {
                 let r = StepResult::skip(
                     "install",
@@ -575,14 +604,15 @@ impl Engine<'_> {
                         true,
                     )
                     .map(|o| {
-                        let line = o
-                            .stdout
-                            .lines()
-                            .chain(o.stderr.lines())
-                            .find(|l| l.contains("snapshot:"))
-                            .unwrap_or("done")
-                            .trim()
-                            .to_owned();
+                        let line = sanitize(
+                            o.stdout
+                                .lines()
+                                .chain(o.stderr.lines())
+                                .find(|l| l.contains("snapshot:"))
+                                .unwrap_or("done")
+                                .trim(),
+                            200,
+                        );
                         StepResult::pass("install.snapshot", "Snapshot existing data", line)
                     })
                     .unwrap_or_else(|r| r);
@@ -606,7 +636,10 @@ impl Engine<'_> {
                 })
                 .unwrap_or_else(|r| r);
             s.finish(report, r)?;
-            let params = format!("version={tag}\ndesktop={}\n", u8::from(s.params.desktop));
+            let mut params = format!("version={tag}\ndesktop={}\n", u8::from(s.params.desktop));
+            if mode == Mode::Upgrade {
+                params.push_str("update=1\n");
+            }
             let r = s
                 .exec(
                     "install.run",

@@ -2032,6 +2032,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/hosts/setup/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["hosts_setup_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/hosts/setup/{job}": {
         parameters: {
             query?: never;
@@ -2223,6 +2239,22 @@ export interface paths {
         put?: never;
         /** `POST /v1/hosts/{id}/terminal/{tid}/resize`. */
         post: operations["hosts_terminal_resize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/hosts/{id}/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["hosts_version"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5816,6 +5848,11 @@ export interface components {
             /** Format: int64 */
             ttl_secs?: number | null;
         };
+        /**
+         * @description What a job does on the server.
+         * @enum {string}
+         */
+        HostJobKind: "setup" | "update";
         /** @description `POST /v1/hosts/setup/{job}/host-key`. */
         HostKeyAnswer: {
             accept: boolean;
@@ -5873,6 +5910,11 @@ export interface components {
             hosts: components["schemas"]["HostLinkInfo"][];
             /** @description HTTP API version of this computer's daemon. */
             local_api_version: string;
+            /**
+             * @description Release tag this app was built from (`v0.1.0`), when the build knows it.
+             *     Names the version "Update server" installs and the tag in the copy-paste commands.
+             */
+            local_release_tag?: string | null;
             /** @description Version of this computer's daemon. */
             local_version: string;
         };
@@ -5905,6 +5947,8 @@ export interface components {
              *     runs Praxi can be added.
              */
             install_available: boolean;
+            /** @description Setup of a new server or update of an existing one. */
+            kind?: components["schemas"]["HostJobKind"];
             /** @description Free-text progress lines ("installing ..."). */
             notes: string[];
             state: components["schemas"]["HostSetupState"];
@@ -5937,6 +5981,8 @@ export interface components {
         HostStatus: {
             api_version: string;
             arch: string;
+            /** @description Identifies this exact build (the release tag, else `<version>+g<hash>`). */
+            build_id?: string;
             endpoint_id?: string | null;
             /** Format: int64 */
             epoch: number;
@@ -5947,9 +5993,20 @@ export interface components {
             os: string;
             peers: components["schemas"]["HostPeer"][];
             relay_url?: string | null;
+            /** @description Release tag this server was built from (`v0.1.0-alpha.3`); absent for untagged builds. */
+            release_tag?: string | null;
             state: components["schemas"]["HostState"];
             /** Format: int64 */
             total_ram_mb: number;
+            version: string;
+        };
+        /** @description `GET /v1/hosts/{id}/version`: what a paired server runs. */
+        HostVersion: {
+            api_version: string;
+            /** @description The server's exact build id; empty for servers that predate it. */
+            build_id?: string;
+            /** @description Release tag the server was built from; absent for untagged builds and old servers. */
+            release_tag?: string | null;
             version: string;
         };
         /** @description One scan finding. The text never contains a matched secret. */
@@ -8481,6 +8538,14 @@ export interface components {
             port?: number | null;
             /** @description SSH user (default `ubuntu`). */
             user?: string | null;
+        };
+        /**
+         * @description `POST /v1/hosts/setup/update`: update the program on a server this computer
+         *     added with the wizard (its SSH details are stored here already).
+         */
+        StartHostUpdateInput: {
+            /** @description Paired host id (`GET /v1/hosts`). */
+            host_id: string;
         };
         /** @description Body of `POST /v1/local-install`. */
         StartInstallRequest: {
@@ -13848,6 +13913,45 @@ export interface operations {
             };
         };
     };
+    hosts_setup_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartHostUpdateInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostSetupJob"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     hosts_setup_get: {
         parameters: {
             query?: never;
@@ -14208,6 +14312,35 @@ export interface operations {
                 content?: never;
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    hosts_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostVersion"];
+                };
+            };
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

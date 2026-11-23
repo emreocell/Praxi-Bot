@@ -401,7 +401,9 @@ impl HostLinks for CliHostLinks {
         body: Option<serde_json::Value>,
     ) -> Result<daemon_api::host_links::HostCall, HostLinkError> {
         // Only administration, bot and health paths of the host API.
-        if !(path.starts_with("/v1/admin/") || path.starts_with("/v1/bots")) {
+        // `GET /v1/host` is the host's read-only status (its version for "Update available").
+        let status_read = method.eq_ignore_ascii_case("GET") && path == "/v1/host";
+        if !(status_read || path.starts_with("/v1/admin/") || path.starts_with("/v1/bots")) {
             return Err(HostLinkError::Invalid("path not allowed".into()));
         }
         let conn = self.connect(id).await?;

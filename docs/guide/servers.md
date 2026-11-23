@@ -41,6 +41,14 @@ When it is done, pick the server in the computer menu to chat with its bots, wat
 
 Computer menu, **Your servers**, lists every server with its state. **Remove** forgets the server on this computer only. The server itself, its bots and its files are not touched and keep running; you can add it again later.
 
+## Updating a server
+
+**Your servers** (and the Computer menu while the server is selected) shows each server's version next to this app's. When the server is older you see **Update available**; **Check again** asks the server once more. If Terminal or another feature says the server runs an older Praxi-Bot, the same **Update server** button is offered there.
+
+**Update server** first says what will happen: the server restarts for a few seconds, bots running there pause and carry on, your data and settings are kept, and the previous version stays on the server (`/opt/praxi.backup-<time>`, the newest one only). Then it connects with the login details saved when you added the server (nothing new is stored), takes a copy of the data, and runs the same verified update as `bot host upgrade`: only the release that matches this app is installed, after its signature is checked. If anything fails, the installer puts the previous version back and the app tells you in plain words what happened and what to do. **Show details** lists every step.
+
+For a server that was added another way (no saved login on this computer), or when this computer cannot use SSH, the app shows the exact commands to paste on the server instead: the verified bootstrap from [Releasing the Linux server packages](release-linux.md) with `--update --version <tag>`. Only the computer's owner can start an update; a paired phone or computer cannot.
+
 ## Fixing common problems
 
 | Message | What it means | Fix |
@@ -54,4 +62,5 @@ Computer menu, **Your servers**, lists every server with its state. **Remove** f
 ## Limits today
 
 - Installing Praxi for you needs a published release; until then the server must already run Praxi.
-- There is no clock-sync check yet, and no one-click update; update from the server's terminal with `sudo bash ./install-linux.sh --update` (see [Linux always-on host](linux-host.md); your data is kept).
+- There is no clock-sync check yet.
+- The update needs the saved SSH login of the "Add server" wizard; the server-side updater unit (`praxi-update.service`) is not installed by the installer yet, so there is no login-free update.

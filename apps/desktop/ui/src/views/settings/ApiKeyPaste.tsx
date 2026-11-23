@@ -18,6 +18,7 @@ import { notifyProvidersChanged, useProviders } from "../../state/useProviders";
 import styles from "./AiPage.module.css";
 import { humanLine } from "../../lib/humanError";
 import { useBotsHome } from "../../state/useBotsHome";
+import { useActiveHost } from "../../state/useActiveHost";
 import { HomeHint } from "../../components/HomeHint";
 import { ConnectionTestButton } from "../../components/ConnectionTest";
 
@@ -48,6 +49,8 @@ export function ApiKeyPaste() {
   const mock = client?.baseUrl === MOCK_BASE_URL;
   const providerTarget = { connection: conn, baseUrl: client?.baseUrl };
   const home = useBotsHome();
+  const active = useActiveHost();
+  const serverName = active.name || t("computerPicker.host");
   const canConfigure = mock || home.target === "host" || (isTauriRuntime() && canManageProviders(providerTarget));
   const { dto, reload } = useProviders();
   const [value, setValue] = useState("");
@@ -79,7 +82,12 @@ export function ApiKeyPaste() {
       setPicked(null);
       await reload();
       notifyProvidersChanged();
-      toast.show(t("settingsModal.ai.keys.saved", { provider: target.id }), "success");
+      toast.show(
+        home.target === "host"
+          ? t("settingsModal.ai.keys.savedOn", { provider: target.id, name: serverName })
+          : t("settingsModal.ai.keys.saved", { provider: target.id }),
+        "success"
+      );
     } catch (e) {
       const msg = scrubSecret(humanLine(e), secret);
       setError(msg);
@@ -173,7 +181,7 @@ export function ApiKeyPaste() {
         </button>
       </div>
 
-      {testable.length > 0 ? (
+      {testable.length > 0 && !active.isHost ? (
         <div className={styles.provs} role="group" aria-label={t("connectionTest.savedKeys")} data-testid="key-tests">
           {testable.map((p) => (
             <ConnectionTestButton
@@ -192,7 +200,11 @@ export function ApiKeyPaste() {
           {t("settingsModal.ai.keys.unknown")}
         </p>
       ) : (
-        <p className={styles.hint}>{t("settingsModal.ai.keys.description")}</p>
+        <p className={styles.hint} data-testid="key-where">
+          {home.target === "host"
+            ? t("settingsModal.ai.keys.hostDescription", { name: serverName })
+            : t("settingsModal.ai.keys.description")}
+        </p>
       )}
       {error ? (
         <p className={styles.error} role="alert">

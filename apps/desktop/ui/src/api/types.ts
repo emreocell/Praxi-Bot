@@ -51,6 +51,7 @@ export type PcRequestList = S["PcRequestList"];
 export type HostLinkList = S["HostLinkList"];
 export type StartHostSetupInput = S["StartHostSetupInput"];
 export type HostSetupJob = S["HostSetupJob"];
+export type HostVersion = S["HostVersion"];
 export type HostSetupStep = S["HostSetupStep"];
 export type SshKeyHint = S["SshKeyHint"];
 export type HostLinkConnection = S["HostLinkConnection"];

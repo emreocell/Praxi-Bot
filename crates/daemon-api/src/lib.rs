@@ -130,6 +130,33 @@ pub const DEFAULT_PORT: u16 = 47821;
 /// HTTP API compatibility version advertised by health and host status.
 pub const API_VERSION: &str = "1.0";
 
+/// Release tag this binary was built from (`v0.1.0-alpha.3`), set at build time by the
+/// release workflows through `PRAXI_RELEASE_TAG`; `None` for local builds.
+#[must_use]
+pub fn release_tag() -> Option<&'static str> {
+    option_env!("PRAXI_RELEASE_TAG").filter(|t| !t.is_empty())
+}
+
+/// Identifies this exact build: the release tag, else `<cargo version>+g<git hash>`
+/// (just the cargo version when the build had no git checkout).
+#[must_use]
+pub fn build_id() -> &'static str {
+    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ID.get_or_init(|| match (release_tag(), option_env!("PRAXI_BUILD_HASH")) {
+        (Some(tag), _) => tag.to_owned(),
+        (None, Some(hash)) => format!("{}+g{hash}", env!("CARGO_PKG_VERSION")),
+        (None, None) => env!("CARGO_PKG_VERSION").to_owned(),
+    })
+}
+
+/// `bot --version` text after the program name: `0.1.0 v0.1.0-alpha.3`. The second word is
+/// read by the server preflight, so keep it a single token.
+#[must_use]
+pub fn version_line() -> &'static str {
+    static LINE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    LINE.get_or_init(|| format!("{} {}", env!("CARGO_PKG_VERSION"), build_id()))
+}
+
 /// Origins of the desktop app (Tauri, per platform) accepted by default.
 pub const DEFAULT_ALLOWED_ORIGINS: &[&str] = &[
     "tauri://localhost",
@@ -1171,6 +1198,8 @@ fn api_routes() -> Router<AppState> {
         )
         .route("/v1/hosts/setup", post(host_setup::start))
         .route("/v1/hosts/setup/ssh-keys", get(host_setup::ssh_keys))
+        .route("/v1/hosts/setup/update", post(host_setup::start_update))
+        .route("/v1/hosts/{id}/version", get(host_links::host_version))
         .route("/v1/hosts/setup/{job}", get(host_setup::get))
         .route("/v1/hosts/setup/{job}/host-key", post(host_setup::host_key))
         .route("/v1/hosts/setup/{job}/cancel", post(host_setup::cancel))
@@ -1671,8 +1700,12 @@ async fn serve_with_startup_timeout(
         // The work runs in its own task so that a panic is caught at the join.
         let work = {
             let leader = leader.clone();
+            let boot_state = state.clone();
             tokio::spawn(async move {
                 prepare.await;
+                // A restart-interrupted takeover whose screen is gone must not
+                // keep the bot paused with nobody driving.
+                live_view::boot_recover_stale_takeover(&boot_state).await;
                 leader.start().await
             })
         };

@@ -195,6 +195,9 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/only the local user (may do this|can clear it)|local user stopped the takeover/i, "localOnly"],
   [/disabled in safe mode|unavailable in safe mode/i, "safeModeBlocked"],
   [/no input backend/i, "noInputBackend"],
+  [/explicit (reacquisition\/)?recovery required/i, "takeoverRecoveryRequired"],
+  [/(?<!release )request conflict/i, "takeoverRequestConflict"],
+  [/takeover already owned/i, "takeoverAlreadyOwned"],
   [/did not confirm|pressed-key reset did not complete|did not answer in time/i, "screenNoConfirm"],
   [/executor is busy|is busy; (try|retry)|previous input still draining|already in progress/i, "hostBusy"]
 ];

@@ -4,6 +4,7 @@ import { type HomeClient, type LocalProviders, botsHome } from "../lib/botsHome"
 import { canManageProviders } from "../lib/providerConnection";
 import { addProvider, setDefaultProvider } from "../lib/providers";
 import { useDaemon } from "./DaemonContext";
+import { useActiveHost } from "./useActiveHost";
 
 /**
  * `botsHome` wired to the running app: writes go to the bots' home (the adopted host, through the
@@ -12,12 +13,13 @@ import { useDaemon } from "./DaemonContext";
  * guards the local copy-setup call.
  */
 export function useBotsHome() {
-  const { client, localApi, localConn, home, workLocalNow, activeComputerId } = useDaemon();
+  const { client, localApi, localConn } = useDaemon();
+  const active = useActiveHost();
   return useMemo(() => {
     const mock = client?.baseUrl === MOCK_BASE_URL;
-    const onHome = home.kind === "host" && !workLocalNow && activeComputerId === home.hostId;
-    // While the home is the active computer `client` is the host's client.
-    const host: HomeClient | null = onHome && client ? client : null;
+    // While a server is the active computer `client` is that server's client: this computer is a
+    // paired peer there, so keys and the default model go through host administration.
+    const host: HomeClient | null = active.isHost && client ? client : null;
     const local = mock ? client : localApi;
     const target = { connection: localConn, baseUrl: localApi?.baseUrl };
     const fail = (r: { code: number; stdout: string; stderr: string }) => {
@@ -53,7 +55,7 @@ export function useBotsHome() {
       localProviders,
       host
     });
-  }, [client, localApi, localConn, home, workLocalNow, activeComputerId]);
+  }, [client, localApi, localConn, active.isHost]);
 }
 
 const reject = () => Promise.reject(new Error("local_daemon_unavailable"));

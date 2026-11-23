@@ -77,7 +77,10 @@ export function ProvidersSection() {
         // (an older daemon, the fake provider) is a restart needed.
         let reloaded = false;
         try {
-          await client?.reloadProviders();
+          if (!onHome) {
+            // A server rebuilds its own providers after an administrator change.
+            await client?.reloadProviders();
+          }
           reloaded = true;
         } catch {
           reloaded = false;

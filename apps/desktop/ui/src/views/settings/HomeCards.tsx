@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { AdminCliEngine, AdminCliInstall, AdminState } from "../../api/types";
 import { humanError } from "../../lib/humanError";
 import { useDaemon } from "../../state/DaemonContext";
+import { useActiveHost } from "../../state/useActiveHost";
 import { RunOnServer } from "../../components/RunOnServer";
 import { ServerSignInModal } from "../../components/ServerSignInModal";
 import { DetectedAccountsBlock } from "./DetectedAccountsBlock";
@@ -38,8 +39,9 @@ export function CopyBlock({ text }: { text: string }) {
 }
 
 function useHostAdmin() {
-  const { client, home, workLocalNow, activeComputerId } = useDaemon();
-  const onHome = home.kind === "host" && !workLocalNow && activeComputerId === home.hostId;
+  const { client } = useDaemon();
+  const active = useActiveHost();
+  const onHome = active.isHost;
   const [state, setState] = useState<AdminState | null>(null);
   const [engines, setEngines] = useState<AdminCliEngine[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -62,7 +64,7 @@ function useHostAdmin() {
       live = false;
     };
   }, [onHome, client, tick]);
-  return { onHome, name: home.kind === "host" ? home.name : "", state, engines, problem, reload };
+  return { onHome, name: active.name, state, engines, problem, reload };
 }
 
 /**
@@ -109,8 +111,8 @@ export function HostAdminNote() {
  */
 export function EngineSetup({ engine, onChanged }: { engine: AdminCliEngine; onChanged?: () => void }) {
   const { t } = useTranslation();
-  const { client, home } = useDaemon();
-  const serverName = home.kind === "host" ? home.name : t("computerPicker.host");
+  const { client } = useDaemon();
+  const serverName = useActiveHost().name || t("computerPicker.host");
   const [signingIn, setSigningIn] = useState(false);
   const [run, setRun] = useState<AdminCliInstall | null>(null);
   const [problem, setProblem] = useState<{ code: string; text: string } | null>(null);
@@ -269,8 +271,7 @@ function HostEnginesBlock() {
 
 /** "Found on this computer" locally; the server's own engines when the home is a host. */
 export function EnginesCard() {
-  const { home, workLocalNow, activeComputerId } = useDaemon();
-  const onHome = home.kind === "host" && !workLocalNow && activeComputerId === home.hostId;
+  const onHome = useActiveHost().isHost;
   // Even when the bots live on a server, this computer's own CLIs are listed too: sign in and
   // use them on Windows (bots that run "on this computer" use them), each part clearly titled.
   return onHome ? (

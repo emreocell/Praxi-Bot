@@ -38,6 +38,16 @@ const TIMELINE: HostSetupStep[][] = [
   ]
 ];
 
+/** Update of a server that is already added (`?update=fail` style hosts fail at the install row). */
+const UPDATE_TIMELINE: HostSetupStep[][] = [
+  [pass("hostkey", "Server identity (host key)", "pinned"), pass("connect", "SSH login", "logged in as ubuntu")],
+  [pass("preflight.os", "Operating system", "Ubuntu 24.04"), pass("preflight.disk", "Disk space", "38 GB free")],
+  [pass("install.stage", "Upload install scripts", "2 scripts staged"), pass("install.snapshot", "Snapshot existing data", "snapshot: /var/backups/praxi/praxi-data.tgz")],
+  [pass("install.run", "Install Praxi", "Praxi v0.1.0 installed in host mode; previous version kept at /opt/praxi.backup-20261123T100000Z")],
+  [pass("pair", "Pair this computer", "already connected")],
+  [pass("health.service", "Service running in host mode", "praxi.service active"), pass("health.version", "Version", "0.1.0")]
+];
+
 const FAILURES: Record<string, { at: number; step: HostSetupStep }> = {
   fail: {
     at: 0,
@@ -66,11 +76,34 @@ export class MockHostSetup {
   private job: HostSetupJob | null = null;
   private scenario = "ok";
   private polls = 0;
+  private timeline = TIMELINE;
+
+  /** Update an already added server: one poll moves one step. */
+  startUpdate(hostId: string): HostSetupJob {
+    this.scenario = hostId.includes("fail") ? "update-fail" : "update";
+    this.timeline = UPDATE_TIMELINE;
+    this.polls = 0;
+    this.job = {
+      id: "mock-update",
+      kind: "update",
+      state: "running",
+      target: "ubuntu@203.0.113.7:22",
+      steps: [],
+      notes: [],
+      host_key: null,
+      host_id: hostId,
+      host_name: null,
+      view_targets: null,
+      install_available: true
+    };
+    return structuredClone(this.job);
+  }
 
   start(input: StartHostSetupInput): HostSetupJob {
     const host = input.host.toLowerCase();
     this.scenario = host.includes("fail") ? "fail" : host.includes("fresh") ? "fresh" : "ok";
     this.polls = 0;
+    this.timeline = TIMELINE;
     this.job = {
       id: "mock-job",
       state: "awaiting_host_key",
@@ -104,18 +137,30 @@ export class MockHostSetup {
   }
 
   private advance(job: HostSetupJob): void {
+    if (this.scenario === "update-fail" && this.polls === 3) {
+      this.polls += 1;
+      job.steps.push({
+        id: "install.run",
+        title: "Install Praxi",
+        status: "fail",
+        detail: "exit 1: attestation verification failed | [praxi-install] rollback complete; previously active services restarted and active",
+        hint: null
+      });
+      job.state = "failed";
+      return;
+    }
     const failure = FAILURES[this.scenario];
     const index = this.polls;
     this.polls += 1;
     if (failure && index === failure.at) {
-      if (failure.at > 0) job.steps.push(...TIMELINE[index]);
+      if (failure.at > 0) job.steps.push(...this.timeline[index]);
       else job.steps.push(pass("hostkey", "Server identity (host key)", "first contact, pinned"));
       job.steps.push(failure.step);
       job.state = "failed";
       return;
     }
-    job.steps.push(...(TIMELINE[index] ?? []));
-    if (index >= TIMELINE.length - 1) {
+    job.steps.push(...(this.timeline[index] ?? []));
+    if (index >= this.timeline.length - 1) {
       job.state = "succeeded";
       job.host_id = "mockhost1";
       job.host_name = "Oracle";

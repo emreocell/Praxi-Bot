@@ -48,6 +48,25 @@ function sameMinor(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
+/**
+ * Which side is behind when the app and the host run different versions: the one with the lower
+ * `major.minor.patch`. `"unknown"` when the versions cannot be compared.
+ */
+export function olderSide(local: string, host: string): "app" | "host" | "unknown" {
+  const parts = (v: string) => v.split(/[.+-]/).slice(0, 3).map((n) => Number.parseInt(n, 10));
+  const a = parts(local);
+  const b = parts(host);
+  if (a.length < 3 || b.length < 3 || [...a, ...b].some((n) => Number.isNaN(n))) {
+    return "unknown";
+  }
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] !== b[i]) {
+      return a[i] < b[i] ? "app" : "host";
+    }
+  }
+  return "unknown";
+}
+
 export function deriveHostState(input: {
   link: HostLinkLike | null;
   health: HostHealthLike | null;

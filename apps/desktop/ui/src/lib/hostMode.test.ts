@@ -34,7 +34,9 @@ test("every host refusal maps to a translated sentence, never the raw daemon tex
     "Composio connections are managed by the owner's desktop only",
     "only the local user answers overlay questions",
     "schedule triggers and prechecks are local-owner only",
-    "peer role does not allow this operation"
+    "peer role does not allow this operation",
+    "host-local provider management is not allowed for peers",
+    "connection tests spend this host's stored keys and are an owner action"
   ];
   const tr = flat("tr");
   const en = flat("en");

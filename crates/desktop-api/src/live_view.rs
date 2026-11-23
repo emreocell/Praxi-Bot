@@ -1641,6 +1641,29 @@ fn run_availability_probe_loop(core_weak: &Weak<TargetCore>, probe_sync: &ProbeS
     }
 }
 
+/// A target id that survives a daemon restart: the same host showing the same
+/// screen (and owned by the same bot) gets the same id every time, so a
+/// takeover that was persisted before a restart still points at a target that
+/// exists afterwards. FNV-1a (128 bit) over the identity, stamped as a UUID.
+/// Not a secret and not used for access control.
+#[must_use]
+pub fn stable_target_id(options: &LiveViewOptions) -> Uuid {
+    const OFFSET: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+    let identity = format!(
+        "praxi-live-view-target\u{1f}{}\u{1f}{:?}\u{1f}{:?}",
+        options.host_id, options.scope, options.bot_id
+    );
+    let mut hash = OFFSET;
+    for byte in identity.bytes() {
+        hash ^= u128::from(byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    // Version 8 (custom) and the RFC 4122 variant bits.
+    let hash = (hash & !(0xf_u128 << 76) & !(0x3_u128 << 62)) | (0x8_u128 << 76) | (0x2_u128 << 62);
+    Uuid::from_u128(hash)
+}
+
 /// Shared [`ViewTarget`] + [`FrameSource`] + [`InputSink`] coordinator used by OS backends.
 pub struct DesktopViewTarget {
     core: Arc<TargetCore>,
@@ -1663,7 +1686,7 @@ impl DesktopViewTarget {
         let (frames_tx, _rx) = watch::channel(None);
         let input_available = config.input_factory.is_some();
         let core = Arc::new(TargetCore {
-            target_id: Uuid::now_v7(),
+            target_id: stable_target_id(&config.options),
             options: config.options,
             capture_factory: config.capture_factory,
             probe: config.probe,
@@ -3168,6 +3191,16 @@ fn unix_now_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn target_id_is_stable_for_the_same_screen_and_differs_between_screens() {
+        let a = stable_target_id(&LiveViewOptions::new("host-a"));
+        assert_eq!(a, stable_target_id(&LiveViewOptions::new("host-a")));
+        assert_ne!(a, stable_target_id(&LiveViewOptions::new("host-b")));
+        let mut other = LiveViewOptions::new("host-a");
+        other.scope = CaptureScope::PrimaryMonitor;
+        assert_ne!(a, stable_target_id(&other));
+        assert_eq!(a.get_version_num(), 8);
+    }
     use super::*;
     use crate::{
         Action, ActionResult, Capabilities, DesktopBackend, DesktopError, Image, Quality, Region,

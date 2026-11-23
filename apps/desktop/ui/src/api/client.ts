@@ -66,6 +66,7 @@ import type {
   HostLinkInfo,
   PcRequestList,
   HostSetupJob,
+  HostVersion,
   SshKeyHint,
   StartHostSetupInput,
   HostLinkList,
@@ -629,6 +630,14 @@ export class ApiClient {
   /** "Add server" wizard (this computer's own daemon, local owner only). */
   startHostSetup(input: StartHostSetupInput): Promise<HostSetupJob> {
     return this.request("POST", "/hosts/setup", { body: input });
+  }
+  /** Update the program on a server this computer added (owner only; its stored SSH details are used). */
+  startHostUpdate(hostId: string): Promise<HostSetupJob> {
+    return this.request("POST", "/hosts/setup/update", { body: { host_id: hostId } });
+  }
+  /** The version a paired server runs (fails when it is off). */
+  getHostVersion(hostId: string): Promise<HostVersion> {
+    return this.request("GET", `/hosts/${encodeURIComponent(hostId)}/version`);
   }
   getHostSetup(job: string): Promise<HostSetupJob> {
     return this.request("GET", `/hosts/setup/${encodeURIComponent(job)}`);

@@ -1,6 +1,6 @@
 //! Preflight facts (parsed from `provision.sh preflight`) and the pure rules
 //! that turn them into pass / warn / fail results.
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 use crate::result::{Status, StepResult};
 
@@ -37,6 +37,12 @@ impl Facts {
         Some(self.get("praxi_version")).filter(|v| !v.is_empty())
     }
 
+    /// The server's build id from `bot --version` (`v0.1.0-alpha.3` for a release build,
+    /// `0.1.0+g1a2b3c4` for an untagged one); empty for servers that predate it.
+    pub fn installed_build(&self) -> Option<&str> {
+        Some(self.get("praxi_build")).filter(|v| !v.is_empty())
+    }
+
     pub fn service_active(&self) -> bool {
         self.get("unit_active") == "active"
     }
@@ -48,6 +54,52 @@ pub fn semver(v: &str) -> Option<(u64, u64, u64)> {
     let core = v.split(['-', '+']).next()?;
     let mut p = core.split('.').map(|x| x.parse::<u64>().ok());
     Some((p.next()??, p.next()??, p.next()??))
+}
+
+/// Orders two release tags including the pre-release part (`alpha.4` > `alpha.3`, and a final
+/// release is newer than any pre-release of the same core). `None` when either is not a tag.
+pub fn release_cmp(a: &str, b: &str) -> Option<Ordering> {
+    // `0.1.0+g1a2b3c4` is an untagged local build: it has no place in release ordering.
+    if a.contains('+') || b.contains('+') {
+        return None;
+    }
+    let core = semver(a)?.cmp(&semver(b)?);
+    if core != Ordering::Equal {
+        return Some(core);
+    }
+    let pre = |v: &str| {
+        v.strip_prefix('v')
+            .unwrap_or(v)
+            .split_once('-')
+            .map(|(_, p)| p.to_owned())
+    };
+    Some(match (pre(a), pre(b)) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (Some(x), Some(y)) => cmp_pre(&x, &y),
+    })
+}
+
+/// Semver pre-release precedence: numeric parts by value, numeric < alphanumeric, shorter first.
+fn cmp_pre(x: &str, y: &str) -> Ordering {
+    let (mut xs, mut ys) = (x.split('.'), y.split('.'));
+    loop {
+        let o = match (xs.next(), ys.next()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(p), Some(q)) => match (p.parse::<u64>(), q.parse::<u64>()) {
+                (Ok(p), Ok(q)) => p.cmp(&q),
+                (Ok(_), Err(_)) => Ordering::Less,
+                (Err(_), Ok(_)) => Ordering::Greater,
+                (Err(_), Err(_)) => p.cmp(q),
+            },
+        };
+        if o != Ordering::Equal {
+            return o;
+        }
+    }
 }
 
 fn major_minor(v: &str) -> (u64, u64) {
@@ -71,6 +123,8 @@ pub enum Existing {
     Fresh,
     Installed {
         version: String,
+        /// Build id the server reports (release tag or `<version>+g<hash>`), when it has one.
+        build: Option<String>,
         host_mode: bool,
         active: bool,
     },
@@ -81,6 +135,7 @@ pub fn existing(f: &Facts) -> Existing {
         None => Existing::Fresh,
         Some(v) => Existing::Installed {
             version: v.to_owned(),
+            build: f.installed_build().map(str::to_owned),
             host_mode: f.flag("unit_hostmode"),
             active: f.service_active(),
         },
@@ -237,6 +292,7 @@ pub fn evaluate(f: &Facts) -> Vec<StepResult> {
             version,
             host_mode,
             active,
+            ..
         } => (
             Status::Pass,
             format!(
@@ -262,6 +318,8 @@ pub fn evaluate(f: &Facts) -> Vec<StepResult> {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+
     use super::*;
 
     pub fn good() -> &'static str {
@@ -284,6 +342,19 @@ mod tests {
             .collect();
         assert_eq!(bad.len(), 2);
         assert!(bad.iter().all(|c| c.remediation.is_some()));
+        assert_eq!(
+            release_cmp("v0.1.0-alpha.4", "v0.1.0-alpha.3"),
+            Some(Greater)
+        );
+        assert_eq!(
+            release_cmp("v0.1.0-alpha.10", "v0.1.0-alpha.9"),
+            Some(Greater)
+        );
+        assert_eq!(release_cmp("v0.1.0", "v0.1.0-alpha.9"), Some(Greater));
+        assert_eq!(release_cmp("v0.1.0-alpha.4", "0.1.0-alpha.4"), Some(Equal));
+        assert_eq!(release_cmp("v0.2.0-alpha.1", "v0.1.9"), Some(Greater));
+        assert_eq!(release_cmp("0.1.0-alpha.3", "v0.1.0-alpha.4"), Some(Less));
+        assert_eq!(release_cmp("0.1.0+g1a2b3c4", "v0.1.0-alpha.4"), None);
         assert_eq!(semver("v0.1.0"), Some((0, 1, 0)));
     }
 }

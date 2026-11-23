@@ -7,7 +7,8 @@ import {
   hostAcceptsWork,
   liveRunIds,
   type HostHealthLike,
-  type HostLinkLike
+  type HostLinkLike,
+  olderSide
 } from "./hostState.ts";
 
 const link = (state: HostLinkLike["state"]): HostLinkLike => ({
@@ -127,4 +128,11 @@ test("a host that reports starting or degraded startup is shown honestly", () =>
   assert.equal(hostAcceptsWork(derive("starting")), true);
   const home = { kind: "host", hostId: "h1", name: "Oracle" } as const;
   assert.equal(homeStatus(home, false, derive("degraded")), "degraded");
+});
+
+test("the banner can name which side to update", () => {
+  assert.equal(olderSide("0.9.2", "0.10.0"), "app");
+  assert.equal(olderSide("1.2.0", "1.1.9"), "host");
+  assert.equal(olderSide("1.2.0", "1.2.0"), "unknown");
+  assert.equal(olderSide("dev", "1.2.0"), "unknown");
 });

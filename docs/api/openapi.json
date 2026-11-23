@@ -7192,6 +7192,61 @@
         ]
       }
     },
+    "/v1/hosts/setup/update": {
+      "post": {
+        "tags": [
+          "host"
+        ],
+        "operationId": "hosts_setup_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartHostUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostSetupJob"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/hosts/setup/{job}": {
       "get": {
         "tags": [
@@ -7806,6 +7861,51 @@
             "description": ""
           },
           "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/hosts/{id}/version": {
+      "get": {
+        "tags": [
+          "host"
+        ],
+        "operationId": "hosts_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostVersion"
+                }
+              }
+            }
+          },
+          "502": {
             "description": "",
             "content": {
               "application/json": {
@@ -18568,6 +18668,14 @@
           }
         }
       },
+      "HostJobKind": {
+        "type": "string",
+        "description": "What a job does on the server.",
+        "enum": [
+          "setup",
+          "update"
+        ]
+      },
       "HostKeyAnswer": {
         "type": "object",
         "description": "`POST /v1/hosts/setup/{job}/host-key`.",
@@ -18720,6 +18828,13 @@
             "type": "string",
             "description": "HTTP API version of this computer's daemon."
           },
+          "local_release_tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Release tag this app was built from (`v0.1.0`), when the build knows it.\nNames the version \"Update server\" installs and the tag in the copy-paste commands."
+          },
           "local_version": {
             "type": "string",
             "description": "Version of this computer's daemon."
@@ -18821,6 +18936,10 @@
           "install_available": {
             "type": "boolean",
             "description": "False while Praxi has no published release: only a server that already\nruns Praxi can be added."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/HostJobKind",
+            "description": "Setup of a new server or update of an existing one."
           },
           "notes": {
             "type": "array",
@@ -18932,6 +19051,10 @@
           "arch": {
             "type": "string"
           },
+          "build_id": {
+            "type": "string",
+            "description": "Identifies this exact build (the release tag, else `<version>+g<hash>`)."
+          },
           "endpoint_id": {
             "type": [
               "string",
@@ -18973,6 +19096,13 @@
               "null"
             ]
           },
+          "release_tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Release tag this server was built from (`v0.1.0-alpha.3`); absent for untagged builds."
+          },
           "state": {
             "$ref": "#/components/schemas/HostState"
           },
@@ -18980,6 +19110,33 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "HostVersion": {
+        "type": "object",
+        "description": "`GET /v1/hosts/{id}/version`: what a paired server runs.",
+        "required": [
+          "version",
+          "api_version"
+        ],
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "build_id": {
+            "type": "string",
+            "description": "The server's exact build id; empty for servers that predate it."
+          },
+          "release_tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Release tag the server was built from; absent for untagged builds and old servers."
           },
           "version": {
             "type": "string"
@@ -25651,6 +25808,19 @@
               "null"
             ],
             "description": "SSH user (default `ubuntu`)."
+          }
+        }
+      },
+      "StartHostUpdateInput": {
+        "type": "object",
+        "description": "`POST /v1/hosts/setup/update`: update the program on a server this computer\nadded with the wizard (its SSH details are stored here already).",
+        "required": [
+          "host_id"
+        ],
+        "properties": {
+          "host_id": {
+            "type": "string",
+            "description": "Paired host id (`GET /v1/hosts`)."
           }
         }
       },

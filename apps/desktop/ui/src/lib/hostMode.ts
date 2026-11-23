@@ -47,6 +47,8 @@ const REFUSALS: ReadonlyArray<readonly [needle: string, key: string]> = [
   ["screen:input denied", "screenInput"],
   ["screen:view denied", "screenInput"],
   ["input grant for this device", "screenInput"],
+  ["host-local provider management is not allowed", "localProviders"],
+  ["connection tests spend this host", "connectionTest"],
   ["local-owner only", "ownerOnly"],
   ["peer role does not allow this operation", "role"],
   ["paired peer identity required", "role"]

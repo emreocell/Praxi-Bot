@@ -175,6 +175,9 @@ test("takeover and pause failures name their real reason, never the generic sent
       [{ status: 403, code: "forbidden", host: "Praxi host", message: "only the local user may do this" }, "host_refusal"],
       [{ status: 403, code: "forbidden", host: "Praxi host", message: "some brand new refusal" }, "host_refusal"],
       [{ status: 409, code: "conflict", message: "this screen target has no input backend, so it cannot be taken over" }, "noInputBackend"],
+      [{ status: 409, code: "conflict", message: "explicit reacquisition/recovery required" }, "takeoverRecoveryRequired"],
+      [{ status: 409, code: "conflict", message: "request conflict" }, "takeoverRequestConflict"],
+      [{ status: 409, code: "conflict", message: "takeover already owned" }, "takeoverAlreadyOwned"],
       [{ status: 409, code: "conflict", message: "workflows are disabled in safe mode" }, "safeModeBlocked"],
       [{ status: 503, code: "unavailable", message: "the executor is busy; try again" }, "hostBusy"],
       [{ status: 503, code: "unavailable", message: "the display target did not confirm the key reset; the latch is kept, try again" }, "screenNoConfirm"],
@@ -187,6 +190,11 @@ test("takeover and pause failures name their real reason, never the generic sent
       assert.notEqual(h, generic);
       assert.ok(h.length > 10);
     }
+    // A release conflict is not a takeover request conflict.
+    assert.notEqual(
+      layer.humanError({ status: 409, code: "conflict", message: "release request conflict" }).code,
+      "takeoverRequestConflict"
+    );
     // The unknown host refusal keeps the daemon's reason in the sentence.
     assert.match(layer.humanLine(cases[1][0]), /some brand new refusal/);
   }
