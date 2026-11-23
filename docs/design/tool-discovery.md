@@ -41,3 +41,22 @@ same result. Search and activation cannot invoke their target. Reject unsafe
 identifier text, bound search summaries, and classify any external metadata
 shown to the model as untrusted. Approval text continues to use daemon-owned
 labels and the actual call arguments.
+
+## Consequences
+
+- The model sees at most the curated set plus what it activated, so the
+  40-definition budget no longer limits how many tools can be installed.
+- Each activation costs one extra step, and a full request budget refuses
+  further activations (the model is told).
+- Aliases exist only at the provider boundary; policy and audit see canonical
+  names.
+
+## Alternatives rejected
+
+- The BM25 dispatch wrapper alone: the model had to rebuild arguments from
+  text and providers saw no schema for the call.
+- Sending every definition: breaks the provider limit and the prompt prefix
+  cache.
+- Letting `tool_describe` call the tool: it would bypass policy and approval.
+
+Links: PR #615. Code: `crates/agent-router/src/surface.rs`, `crates/agent-core/src/discovery_prompt.rs`.
