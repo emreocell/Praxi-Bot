@@ -1,0 +1,44 @@
+name: safe-recent-activation-still-asks-holdout
+description: Describing a tool activates its definition but grants no permission to run it.
+deferred_tools: true
+policy: approve_destructive
+tools:
+- name: calendar_edit
+  effect: write
+  output: event saved
+user: Load the calendar editor to change an event.
+script:
+- tool_calls:
+  - id: c1
+    tool: tool_describe
+    args:
+      name: calendar_edit
+- tool_calls:
+  - id: c2
+    tool: calendar_edit
+    args:
+      title: meeting
+- text: The owner declined the edit.
+reactions:
+- 'on': approval_needed
+  tool: calendar_edit
+  do: deny
+expect:
+  tool_runs:
+    calendar_edit: 0
+  permissions:
+  - tool: tool_describe
+    decision: allowed
+  - tool: calendar_edit
+    decision: denied_user
+  approval_cards:
+  - tool: calendar_edit
+    why: policy
+  requests:
+  - request: 0
+    tools_not_offered:
+    - calendar_edit
+  - request: 1
+    tools_offered:
+    - calendar_edit
+  state: succeeded

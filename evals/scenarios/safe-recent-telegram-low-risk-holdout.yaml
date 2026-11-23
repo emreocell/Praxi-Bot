@@ -1,0 +1,31 @@
+name: safe-recent-telegram-low-risk-holdout
+description: An ordinary reversible policy ask carries the low-risk label Telegram requires for buttons.
+policy: approve_destructive
+tools:
+- name: memo_change
+  effect: write
+  output: updated
+user: Change my memo after asking.
+script:
+- tool_calls:
+  - id: c1
+    tool: memo_change
+    args:
+      name: memo.txt
+- text: The request was declined.
+reactions:
+- 'on': approval_needed
+  tool: memo_change
+  do: deny
+expect:
+  tool_runs:
+    memo_change: 0
+  approval_cards:
+  - tool: memo_change
+    why: policy
+    risk: low
+  permissions:
+  - tool: memo_change
+    decision: denied_user
+  state: succeeded
+telegram_buttons: true

@@ -674,6 +674,57 @@ mod tests {
 
     const SKILL: &str = "---\nname: tidy-notes\ndescription: Tidy notes\n---\nTidy the notes.\n";
 
+    // Share the eval corpus's source configs: the CLI planner owns import,
+    // while tier 1 separately proves source JSON cannot grant a callable tool.
+    #[test]
+    fn recent_eval_import_fixtures_arrive_disabled() {
+        let scenarios = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/scenarios");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(scenarios).unwrap() {
+            let path = entry.unwrap().path();
+            if !path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("safe-recent-import-")
+            {
+                continue;
+            }
+            let fixture: Value =
+                serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let home = tempfile::tempdir().unwrap();
+            let data = tempfile::tempdir().unwrap();
+            for (name, text) in fixture["fs"]["files"].as_object().unwrap() {
+                write(&home.path().join(name), text.as_str().unwrap());
+            }
+            let plan = build_plan(&roots(home.path()), data.path(), &BTreeSet::new(), None);
+            assert_eq!(plan.mcp.len(), 1, "{}", path.display());
+            let parsed = &plan.mcp[0].1;
+            assert!(!parsed.config.enabled, "{} arrived enabled", path.display());
+            assert_eq!(
+                parsed.secrets.len(),
+                1,
+                "{} lost the secret",
+                path.display()
+            );
+            let config = serde_json::to_string(&parsed.config).unwrap();
+            let preview = serde_json::to_string(&plan.items).unwrap();
+            for secret in fixture["secrets"].as_array().unwrap() {
+                let secret = secret.as_str().unwrap();
+                assert!(
+                    !config.contains(secret),
+                    "plaintext secret in imported config"
+                );
+                assert!(
+                    !preview.contains(secret),
+                    "plaintext secret in import preview"
+                );
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 4, "need both source formats and their holdouts");
+    }
+
     #[test]
     fn claude_desktop_servers_arrive_disabled_and_secrets_never_plaintext() {
         let home = tempfile::tempdir().unwrap();

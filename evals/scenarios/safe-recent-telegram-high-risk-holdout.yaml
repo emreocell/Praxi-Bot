@@ -1,0 +1,31 @@
+name: safe-recent-telegram-high-risk-holdout
+description: Telegram receives a high-risk label for destructive actions.
+policy: approve_destructive
+tools:
+- name: backup_purge
+  effect: destructive
+  output: updated
+user: Change my memo after asking.
+script:
+- tool_calls:
+  - id: c1
+    tool: backup_purge
+    args:
+      name: memo.txt
+- text: The request was declined.
+reactions:
+- 'on': approval_needed
+  tool: backup_purge
+  do: deny
+expect:
+  tool_runs:
+    backup_purge: 0
+  approval_cards:
+  - tool: backup_purge
+    why: policy
+    risk: high
+  permissions:
+  - tool: backup_purge
+    decision: denied_user
+  state: succeeded
+telegram_buttons: false

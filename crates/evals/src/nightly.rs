@@ -366,8 +366,15 @@ fn preflight(scenarios: &[Scenario], models: &[String], limits: &Limits) -> Resu
             || !s.workflows.is_empty()
             || !s.profile_toml.trim().is_empty()
             || s.settle_ms != 0
+            || s.notes
+            || s.bot_limits.is_some()
+            || s.bundle.is_some()
+            || s.diagnostic_report.is_some()
+            || s.desktop.is_some()
+            || s.peer_limit_attempt
+            || s.telegram_buttons.is_some()
         {
-            return Err("nightly scenarios require plain names and fixture tools only: no fs, subagents, workflows, profile overrides or settle waits".into());
+            return Err("nightly scenarios require plain names and fake tools only: no filesystem or production-component fixtures, subagents, workflows, profile overrides or settle waits".into());
         }
     }
     Ok(())
@@ -1043,5 +1050,28 @@ script:
         s.subagents = true;
         assert!(preflight(&[s], &models, &caps).is_err());
         assert!(preflight(&[], &models, &caps).is_err());
+    }
+
+    #[test]
+    fn production_component_fixtures_stay_out_of_paid_nightly_runs() {
+        let cases = scenario::load_dir(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../evals/scenarios"),
+        )
+        .unwrap();
+        for mut case in cases.into_iter().filter(|s| {
+            s.notes
+                || s.bot_limits.is_some()
+                || s.bundle.is_some()
+                || s.diagnostic_report.is_some()
+                || s.desktop.is_some()
+                || s.peer_limit_attempt
+                || s.telegram_buttons.is_some()
+        }) {
+            // Remove older reasons to refuse, so the component fixture itself
+            // must be what prevents this scenario entering a paid run.
+            case.profile_toml.clear();
+            case.fs = None;
+            assert!(preflight(&[case], &["fake/model".into()], &limits()).is_err());
+        }
     }
 }

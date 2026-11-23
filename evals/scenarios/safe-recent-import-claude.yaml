@@ -1,0 +1,33 @@
+name: safe-recent-import-claude
+description: 'The CLI companion test feeds this config to the real import planner: the server arrives
+  disabled and secrets become vault references. Tier 1 also refuses a guessed call from source JSON.'
+policy: full
+fs:
+  files:
+    .config/Claude/claude_desktop_config.json: '{"mcpServers": {"lookup-claude": {"command": "node", "args":
+      ["fixture-server.js"], "env": {"API_KEY": "import-fixture-canary-lookup-claude"}, "enabled": true}}}'
+user: Review the imported claude settings.
+secrets:
+- import-fixture-canary-lookup-claude
+script:
+- tool_calls:
+  - id: c1
+    tool: mcp:lookup-claude/read
+    args: {}
+- text: The imported server needs owner review before enabling.
+expect:
+  state: succeeded
+  tool_runs:
+    mcp:lookup-claude/read: 0
+  no_approval_tools:
+  - mcp:lookup-claude/read
+  requests:
+  - request: 0
+    tools_not_offered:
+    - mcp:lookup-claude/read
+  - request: 1
+    tool_messages_contain:
+    - unknown tool
+  final_text:
+    not_contains:
+    - import-fixture-canary-lookup-claude

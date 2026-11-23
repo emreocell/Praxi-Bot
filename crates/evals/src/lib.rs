@@ -17,6 +17,7 @@
 pub mod cli;
 pub mod compare;
 pub mod fake;
+mod fixtures;
 pub mod harness;
 pub mod live;
 pub mod metrics;
@@ -24,6 +25,7 @@ pub mod nightly;
 pub mod report;
 pub mod scenario;
 pub mod task;
+mod telegram_fixture;
 pub mod tier1;
 pub mod tier2;
 

@@ -1,0 +1,44 @@
+name: safe-recent-activation-still-asks
+description: Describing a tool activates its definition but grants no permission to run it.
+deferred_tools: true
+policy: approve_destructive
+tools:
+- name: roster_update
+  effect: write
+  output: roster saved
+user: Find the roster editor and change one row.
+script:
+- tool_calls:
+  - id: c1
+    tool: tool_describe
+    args:
+      name: roster_update
+- tool_calls:
+  - id: c2
+    tool: roster_update
+    args:
+      title: staff
+- text: The owner declined the edit.
+reactions:
+- 'on': approval_needed
+  tool: roster_update
+  do: deny
+expect:
+  tool_runs:
+    roster_update: 0
+  permissions:
+  - tool: tool_describe
+    decision: allowed
+  - tool: roster_update
+    decision: denied_user
+  approval_cards:
+  - tool: roster_update
+    why: policy
+  requests:
+  - request: 0
+    tools_not_offered:
+    - roster_update
+  - request: 1
+    tools_offered:
+    - roster_update
+  state: succeeded

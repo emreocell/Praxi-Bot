@@ -1,0 +1,26 @@
+name: safe-recent-spend-hard-cap
+description: The real per-bot hard cap refuses admission before the provider is called.
+policy: full
+bot_limits:
+  daily:
+    hard_tokens: 1
+peer_limit_attempt: false
+tools:
+- name: paid_action
+  effect: write
+  output: first effect
+user: Continue working until all tasks are done.
+script:
+- text: This reply must never be requested.
+  tool_calls:
+  - id: c1
+    tool: paid_action
+    args: {}
+expect:
+  state: failed
+  model_calls: 0
+  tool_runs:
+    paid_action: 0
+  error:
+    contains:
+    - bot_limit_reached

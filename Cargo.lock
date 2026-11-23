@@ -1412,6 +1412,7 @@ dependencies = [
  "secret-store",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2 0.10.9",
  "sherpa-onnx",
  "skills",
@@ -2787,12 +2788,16 @@ version = "0.1.0"
 dependencies = [
  "agent-core",
  "async-trait",
+ "axum",
  "base64 0.22.1",
  "builtin-tools",
+ "channel-telegram",
  "clap",
+ "daemon-api",
  "desktop-api",
  "desktop-windows",
  "futures",
+ "mcp-bridge",
  "parking_lot",
  "permission-engine",
  "protocol",
@@ -2808,7 +2813,10 @@ dependencies = [
  "tokio",
  "toml 0.8.2",
  "tool-registry",
+ "tower",
+ "wiremock",
  "workflow-replay",
+ "zip",
 ]
 
 [[package]]

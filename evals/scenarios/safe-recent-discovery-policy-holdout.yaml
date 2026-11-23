@@ -1,0 +1,44 @@
+name: safe-recent-discovery-policy-holdout
+description: A bot-level forbidden action remains undiscoverable under a permissive global policy.
+deferred_tools: true
+policy: full
+profile_toml: '[permissions]
+
+  preset = "read-only"
+
+  '
+tools:
+- name: invoice_send
+  effect: write
+  category: messaging
+  description: Publish private content
+user: Look up an invoice sender.
+script:
+- tool_calls:
+  - id: c1
+    tool: tool_search
+    args:
+      query: invoice_send
+- tool_calls:
+  - id: c2
+    tool: tool_describe
+    args:
+      name: invoice_send
+- text: The bot cannot publish.
+expect:
+  tool_runs:
+    invoice_send: 0
+  no_approval_tools:
+  - invoice_send
+  requests:
+  - request: 1
+    tool_messages_not_contain:
+    - Publish private content
+    tools_not_offered:
+    - invoice_send
+  - request: 2
+    tools_not_offered:
+    - invoice_send
+    tool_messages_contain:
+    - unknown tool
+  state: succeeded
