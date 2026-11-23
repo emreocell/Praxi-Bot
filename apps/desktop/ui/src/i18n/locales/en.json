@@ -2124,6 +2124,44 @@
     "makeHome": "Make this server my bots' home…",
     "menu": "Computer"
   },
+  "connectionTest": {
+    "button": "Test connection",
+    "details": "Details",
+    "learnMore": "Read more in the guide",
+    "outcome": {
+      "bad_key": {
+        "next": "Copy the key again from the provider's website, make sure nothing is missing at the start or end, then paste and save it again.",
+        "title": "The key was not accepted."
+      },
+      "no_network": {
+        "next": "Check your internet connection, VPN or proxy. For a program on this computer, make sure it is running, then try again.",
+        "title": "Could not reach the service."
+      },
+      "ok": {
+        "next": "Nothing to do. You can close this.",
+        "title": "It works. The connection is fine."
+      },
+      "provider_outage": {
+        "next": "This is not your fault. Try again in a few minutes, or check the provider's status page.",
+        "title": "The service has a problem right now."
+      },
+      "quota_exceeded": {
+        "next": "Wait a little and try again, or check your plan and credit on the provider's website.",
+        "title": "The key works, but its limit is used up."
+      },
+      "unknown": {
+        "next": "Open the details below and compare them with the guide. If that does not help, copy the details when you ask for help.",
+        "title": "The test gave an unclear result."
+      },
+      "wrong_endpoint": {
+        "next": "Check the web address (or the command) you entered. It should be the one the service documents.",
+        "title": "The address does not look right."
+      }
+    },
+    "savedKeys": "Test your saved keys",
+    "testProvider": "Test {{provider}}",
+    "testing": "Testing…"
+  },
   "control": {
     "starting": "Working…"
   },

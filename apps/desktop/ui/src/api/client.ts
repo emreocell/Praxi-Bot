@@ -145,6 +145,7 @@ import type {
   WebSearchConfigInput,
   WebSearchTestInput,
   WebSearchTestReport,
+  ConnectionTestReport,
   RunChanges,
   RestorePreview,
   RestoreResponse,
@@ -1455,5 +1456,17 @@ export class ApiClient {
 
   testWebSearch(input: WebSearchTestInput = {}): Promise<WebSearchTestReport> {
     return this.request("POST", "/web/search/test", { body: input });
+  }
+
+  /**
+   * "Test connection": the daemon checks one stored key or app connection and answers with a typed
+   * result (never a secret). `body` names the thing: `{ id }` for a provider or channel, `{ name }`
+   * for an MCP server or e-mail account, nothing for web search and dictation.
+   */
+  testConnection(
+    target: "provider" | "mcp" | "channel" | "web" | "voice" | "email",
+    body: { id?: string; name?: string } = {}
+  ): Promise<ConnectionTestReport> {
+    return this.request("POST", `/connection-test/${target}`, { body });
   }
 }

@@ -283,6 +283,9 @@ fn normalize_deny_path(path: &str) -> String {
 /// Why `method path` is refused to every paired peer role, if it is: the
 /// host-local provider management, MCP management and diagnostics endpoints.
 fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> {
+    if under(check_path, "/v1/connection-test") {
+        return Some("connection tests spend this host's stored keys and are an owner action");
+    }
     if check_path == "/v1/mcp-server" || check_path.starts_with("/v1/mcp-server/") {
         return Some("the MCP server facade is host-local and requires scoped credentials");
     }
@@ -637,6 +640,18 @@ mod tests {
             }
         }
         assert!(host_local_denial(&Method::PUT, "/v1/bots/abc").is_none());
+    }
+
+    #[test]
+    fn peers_never_run_connection_tests() {
+        for path in ["/v1/connection-test/provider", "/v1/connection-test/mcp"] {
+            for method in [Method::POST, Method::GET] {
+                assert!(
+                    host_local_denial(&method, path).is_some(),
+                    "{method} {path}"
+                );
+            }
+        }
     }
 
     #[test]

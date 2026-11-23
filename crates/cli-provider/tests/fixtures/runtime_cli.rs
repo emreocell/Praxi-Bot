@@ -192,6 +192,12 @@ fn main() {
             json!({"type":"stream_event","event":{"delta":{"type":"thinking_delta","thinking":"PRIVATE_THINKING"}}}),
         );
         emit(json!({"type":"stream_event","event":{"delta":{"type":"text_delta","text":"hello"}}}));
+        if mode == "usage-then-cut" {
+            emit(json!({"type":"stream_event","event":{
+                "type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":4}}
+            }}));
+            return;
+        }
         let m = &v["mcpServers"]["praxi"];
         (
             m["url"].as_str().unwrap().to_owned(),

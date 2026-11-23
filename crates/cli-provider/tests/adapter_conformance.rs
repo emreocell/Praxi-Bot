@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use cli_provider::{
     ApprovalLevel, Driver, PathEnv,
     adapter::EngineAdapter,
-    runtime::{CliError, ToolReply, Turn, TurnHost},
+    runtime::{CliError, ToolReply, Turn, TurnHost, TurnUsage},
 };
 use parking_lot::Mutex;
 use serde_json::Value;
@@ -104,11 +104,14 @@ async fn every_adapter_detects_only_hermetic_binaries() {
 }
 
 #[derive(Default)]
-struct Host(Mutex<String>);
+struct Host(Mutex<String>, Mutex<Option<(u64, u64)>>);
 #[async_trait]
 impl TurnHost for Host {
     fn text(&self, text: &str) {
         self.0.lock().push_str(text);
+    }
+    fn usage_snapshot(&self, usage: &TurnUsage) {
+        *self.1.lock() = Some((usage.input, usage.output));
     }
     async fn call(&self, _: &str, _: Value) -> ToolReply {
         panic!("unexpected tool call")
@@ -151,6 +154,27 @@ fn level(driver: Driver) -> ApprovalLevel {
     } else {
         ApprovalLevel::Ask
     }
+}
+
+#[tokio::test]
+async fn codex_usage_reaches_the_host_before_an_unfinished_native_turn_fails() {
+    let driver = Driver::Codex;
+    let (_bin, workspace, env) = setup(driver, "usage-then-cut");
+    let host = Arc::new(Host::default());
+    let error = driver
+        .run_turn(
+            "fixture",
+            &env,
+            turn(),
+            workspace.path().to_owned(),
+            level(driver),
+            host.clone(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error, CliError::Protocol);
+    assert_eq!(*host.1.lock(), Some((12, 4)));
 }
 
 fn log(bin: &tempfile::TempDir, name: &str) -> String {

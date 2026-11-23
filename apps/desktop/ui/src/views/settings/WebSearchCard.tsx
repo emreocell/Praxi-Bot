@@ -18,6 +18,7 @@ import type {
   WebSearchTestReport
 } from "../../api/types";
 import formStyles from "../../components/Form.module.css";
+import { ConnectionTestButton } from "../../components/ConnectionTest";
 import { SettingGroup, Switch } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { applyWebSearchUpdate } from "../../lib/webSearchDraft";
@@ -449,6 +450,12 @@ export function WebSearchCard() {
                   : t("settingsModal.webSearch.test")}
               </Button>
             </div>
+
+            <ConnectionTestButton
+              testId="web-connection-test"
+              disabled={saving || !client}
+              run={() => (client ? client.testConnection("web") : Promise.reject(new Error("daemon not connected")))}
+            />
 
             {report ? (
               <div className={styles.result} data-testid="web-search-test-result">

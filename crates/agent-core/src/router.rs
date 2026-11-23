@@ -35,7 +35,10 @@ use futures::StreamExt;
 use parking_lot::Mutex;
 use protocol::event::{MessageDelta, RouteDecided};
 use protocol::{BotId, ChatId, Event, RunId};
-use provider_catalog::{ChatChunk, ChatRequest, Message, MessageRole, ModelRef};
+use provider_catalog::{
+    CHAT_STREAM_IDLE, ChatChunk, ChatProvider, ChatRequest, FinishReason, Message, MessageRole,
+    ModelRef, ProviderError,
+};
 use serde_json::{Value, json};
 use storage::{Chat, Run, RunStep, now_ms};
 use task_runtime::{ExecError, StepSpec, StepStatus};
@@ -149,11 +152,11 @@ impl Classifier for ProviderClassifier {
         let provider = self
             .providers
             .pick(&model)
-            .map_err(|e| BackendError::new(e.to_string()))?;
+            .map_err(|e| BackendError::provider(e.class()))?;
         let mut call = crate::usage::Scope::call(&self.model, crate::CallPurpose::Router)?;
         classify_json(provider.as_ref(), model, prompt, max_tokens, &mut call)
             .await
-            .map_err(|e| BackendError::new(e.to_string()))
+            .map_err(|e| BackendError::provider(e.class()))
     }
 }
 
@@ -168,17 +171,41 @@ pub(crate) async fn classify_json(
     req.max_tokens = Some(max_tokens);
     req.temperature = Some(0.0);
     req.json_mode = true;
-    let mut stream = provider.stream(req).await?;
+    collect_model_text(provider, req, call).await
+}
+
+pub(crate) async fn collect_model_text(
+    provider: &dyn ChatProvider,
+    req: ChatRequest,
+    call: &mut crate::usage::CallGuard,
+) -> Result<String, ProviderError> {
+    let mut stream = tokio::time::timeout(CHAT_STREAM_IDLE, provider.stream_once(req))
+        .await
+        .map_err(|_| ProviderError::Timeout)??;
     let mut out = String::new();
-    while let Some(chunk) = stream.next().await {
-        match chunk? {
-            ChatChunk::TextDelta(t) => out.push_str(&t),
+    loop {
+        let chunk = tokio::time::timeout(CHAT_STREAM_IDLE, stream.next())
+            .await
+            .map_err(|_| ProviderError::Timeout)?
+            .ok_or(ProviderError::Interrupted("no completion was received"))??;
+        match chunk {
+            ChatChunk::TextDelta(t) => {
+                out.push_str(&t);
+                call.stream_progress(out.len())
+                    .map_err(ProviderError::InvalidRequest)?;
+            }
             ChatChunk::Usage(u) => call.usage(&u),
-            ChatChunk::Done { .. } => break,
+            ChatChunk::Done {
+                finish_reason: FinishReason::ContentFilter,
+            } => {
+                return Err(ProviderError::ContentFilter(
+                    "the model blocked the response".into(),
+                ));
+            }
+            ChatChunk::Done { .. } => return Ok(out),
             _ => {}
         }
     }
-    Ok(out)
 }
 
 /// What the router asked of K4 for this turn.

@@ -10,6 +10,52 @@ fn rows(env: &Env, action: &str) -> Vec<storage::AuditEntry> {
         .collect()
 }
 
+#[tokio::test]
+async fn cut_stream_cannot_dispatch_a_tool_and_settles_its_usage_once() {
+    let env = setup();
+    let read = Arc::new(tool("t.read", Effect::Read, "must never run"));
+    let fake = Fake::new(vec![
+        Reply::Chunks(vec![
+            ChatChunk::ToolCall(ToolCall::new("cut", "t__read", "{}")),
+            ChatChunk::ToolCallDelta {
+                call_id: "second".into(),
+                name: Some("t__read".into()),
+                input_delta: "{\"partial\":".into(),
+            },
+            ChatChunk::Usage(Usage {
+                prompt_tokens: 47,
+                completion_tokens: 3,
+                ..Usage::default()
+            }),
+        ]),
+        text("recovered"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.model_retry.max_attempts = 1;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&read)],
+        profile("fallback = [\"fake/backup\"]\n"),
+        config,
+    );
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(fake.request(1).model.0, "fake/backup");
+    assert_eq!(read.count.load(Ordering::SeqCst), 0);
+    let settlements = rows(&env, "usage");
+    assert_eq!(settlements.len(), 2);
+    assert_eq!(
+        settlements
+            .iter()
+            .filter(|r| r.detail["prompt_tokens"] == 47)
+            .count(),
+        1
+    );
+    assert_eq!(rows(&env, "llm.call_started").len(), 2);
+}
+
 async fn paused_after_model_call() -> (Env, AgentLoop, Arc<Fake>, protocol::RunId) {
     let env = setup();
     let write = Arc::new(tool("t.write", Effect::Write, "must stay unapproved"));

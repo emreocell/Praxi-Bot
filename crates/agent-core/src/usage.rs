@@ -579,6 +579,7 @@ pub(crate) struct CallGuard {
     prompt_est: u64,
     /// Streamed bytes at which the hard limits are checked next.
     next_check_bytes: usize,
+    cli_usage: Option<Arc<Mutex<Option<Usage>>>>,
 }
 
 /// Streamed text is re-checked against the hard limits every this many bytes.
@@ -656,6 +657,7 @@ impl CallGuard {
             bot: ctx.bot_id,
             prompt_est,
             next_check_bytes: STREAM_CHECK_BYTES,
+            cli_usage: None,
         })
     }
 
@@ -776,10 +778,19 @@ impl CallGuard {
             self.detail["cost_source"] = json!("subscription_estimate");
         }
     }
+
+    pub(crate) fn cli_usage_sink(&mut self) -> Arc<Mutex<Option<Usage>>> {
+        self.cli_usage.get_or_insert_with(Arc::default).clone()
+    }
 }
 
 impl Drop for CallGuard {
     fn drop(&mut self) {
+        if let Some(sink) = self.cli_usage.take()
+            && let Some(usage) = sink.lock().take()
+        {
+            self.usage(&usage);
+        }
         self.detail["latency_ms"] =
             json!(u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX));
         let _ = self

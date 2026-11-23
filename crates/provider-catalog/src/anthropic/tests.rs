@@ -457,7 +457,7 @@ async fn truncated_stream_is_an_error() {
         .mount(&server)
         .await;
     let err = collect(&provider(&server, 0), req()).await.unwrap_err();
-    assert!(matches!(err, ProviderError::Stream(_)));
+    assert!(matches!(err, ProviderError::Interrupted(_)));
 }
 
 async fn status_error(

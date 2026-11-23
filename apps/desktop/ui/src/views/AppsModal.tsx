@@ -10,6 +10,7 @@ import { botView } from "../lib/botProfile";
 import { McpToolList } from "./McpToolList.tsx";
 import { ApiError } from "../api/client";
 import type { McpAuthState, McpCatalogEntry, McpServer } from "../api/types";
+import { ConnectionTestButton } from "../components/ConnectionTest";
 import formStyles from "../components/Form.module.css";
 import { BotAccessPicker } from "../components/BotAccessPicker";
 import { Modal } from "../components/Modal";
@@ -354,6 +355,15 @@ function ConnectedCell({
           <span className={styles.panelLabel}>{t("apps.access.label")}</span>
           <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
           <McpToolList server={server} client={client} busy={busy} onChange={onSaveTools} />
+          <ConnectionTestButton
+            testId={`mcp-connection-test-${server.name}`}
+            disabled={busy || !client}
+            run={() =>
+              client
+                ? client.testConnection("mcp", { name: server.name })
+                : Promise.reject(new Error("daemon not connected"))
+            }
+          />
           <div className={styles.actions}>
             <Button
               size="sm"

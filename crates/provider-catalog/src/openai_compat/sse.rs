@@ -11,7 +11,7 @@ use crate::{
         checked_size,
     },
     provider::{ChatChunk, FinishReason, ToolCall, Usage},
-    util::{ThoughtFilter, finish_error},
+    util::{EventDecoder, ThoughtFilter, classify_response, finish_error},
 };
 
 /// Incremental server-sent-events decoder. Yields the `data` payload of each
@@ -117,6 +117,7 @@ pub(super) struct Assembler {
     thoughts: ThoughtFilter,
     /// Set once `[DONE]` or a finish reason has been seen.
     pub(super) finished: bool,
+    terminal: bool,
 }
 
 /// A finish reason is metadata; only an explicit `[DONE]` ends transport reads.
@@ -136,30 +137,23 @@ fn parse_finish(s: &str) -> FinishReason {
 }
 
 fn parse_usage(u: &Value) -> Option<Usage> {
-    if !u.is_object() {
+    let get = |k: &str| u.get(k).and_then(Value::as_u64);
+    let prompt = get("prompt_tokens");
+    let completion = get("completion_tokens");
+    if prompt.is_none() && completion.is_none() {
         return None;
     }
-    let get = |k: &str| u.get(k).and_then(Value::as_u64);
     let cached = u
         .pointer("/prompt_tokens_details/cached_tokens")
         .and_then(Value::as_u64)
         // DeepSeek reports cache hits at the top level.
         .or_else(|| get("prompt_cache_hit_tokens"));
     Some(Usage {
-        prompt_tokens: get("prompt_tokens").unwrap_or(0),
-        completion_tokens: get("completion_tokens").unwrap_or(0),
+        prompt_tokens: prompt.unwrap_or(0),
+        completion_tokens: completion.unwrap_or(0),
         cached_tokens: cached,
         cache_write_tokens: None,
     })
-}
-
-fn error_message(v: &Value) -> Option<String> {
-    let e = v.get("error")?;
-    Some(
-        e.get("message")
-            .and_then(Value::as_str)
-            .map_or_else(|| e.to_string(), str::to_owned),
-    )
 }
 
 impl Assembler {
@@ -192,16 +186,17 @@ impl Assembler {
         let data = data.trim();
         if data == "[DONE]" {
             self.finished = true;
+            self.terminal = true;
             return Ok(Assembly::Done);
         }
         let v: Value = serde_json::from_str(data)
             .map_err(|e| ProviderError::Stream(format!("invalid JSON chunk: {e}")))?;
-        if let Some(msg) = error_message(&v) {
-            return Err(ProviderError::Stream(format!("provider error: {msg}")));
-        }
         let mut out = Vec::new();
         if let Some(u) = v.get("usage").and_then(parse_usage) {
             self.usage = Some(u);
+        }
+        if v.get("error").is_some_and(|error| !error.is_null()) {
+            return Err(classify_response(0, None, data));
         }
         let Some(choice) = v.pointer("/choices/0") else {
             return Ok(Assembly::Chunks(out));
@@ -263,8 +258,8 @@ impl Assembler {
     /// without any terminator (truncated).
     pub(super) fn finish(&mut self) -> Result<Vec<ChatChunk>, ProviderError> {
         if !self.finished {
-            return Err(ProviderError::Stream(
-                "stream ended before a finish reason or [DONE]".into(),
+            return Err(ProviderError::Interrupted(
+                "no finish reason or end marker was received",
             ));
         }
         let mut out = Vec::new();
@@ -274,6 +269,11 @@ impl Assembler {
         }
         if let Some(e) = self.finish.as_ref().and_then(finish_error) {
             return Err(e);
+        }
+        if self.finish == Some(FinishReason::Length) && !self.calls.is_empty() {
+            return Err(ProviderError::MalformedToolCall(
+                "the output limit interrupted a tool call".into(),
+            ));
         }
         for (idx, p) in std::mem::take(&mut self.calls) {
             out.push(ChatChunk::ToolCall(ToolCall {
@@ -302,6 +302,27 @@ impl Assembler {
             finish_reason: reason,
         });
         Ok(out)
+    }
+}
+
+impl EventDecoder for Assembler {
+    fn feed(&mut self, payload: &str) -> Result<Vec<ChatChunk>, ProviderError> {
+        match Self::feed(self, payload)? {
+            Assembly::Chunks(chunks) => Ok(chunks),
+            Assembly::Done => Ok(Vec::new()),
+        }
+    }
+
+    fn finish(&mut self) -> Result<Vec<ChatChunk>, ProviderError> {
+        Self::finish(self)
+    }
+
+    fn terminal(&self) -> bool {
+        self.terminal
+    }
+
+    fn take_usage(&mut self) -> Option<Usage> {
+        self.usage.take()
     }
 }
 

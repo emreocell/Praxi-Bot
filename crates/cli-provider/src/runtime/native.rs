@@ -201,6 +201,7 @@ async fn session(
         #[cfg(windows)]
         job: job.clone(),
         listen: Arc::new(OnceLock::new()),
+        active_tools: tokio::sync::watch::Sender::new(0),
     };
     let server = BridgeServer::open(bridge.clone()).await?;
     if stop.is_cancelled() {
@@ -328,12 +329,9 @@ async fn session(
             let mut combined = Vec::with_capacity(ring.len());
             combined.extend_from_slice(head);
             combined.extend_from_slice(tail);
-            if is_signed_out_text(&String::from_utf8_lossy(&combined)) {
-                return Err(CliError::SignedOut);
-            }
-        } else {
-            abort_handle.abort();
+            return Err(classify_child_error(&String::from_utf8_lossy(&combined)));
         }
+        abort_handle.abort();
         return result;
     }
     stderr_task.abort();
@@ -352,9 +350,15 @@ struct Run<'a> {
 struct Frames {
     reader: BufReader<tokio::process::ChildStdout>,
     total: usize,
+    active_tools: tokio::sync::watch::Sender<usize>,
 }
 impl Frames {
     async fn next(&mut self) -> Result<Value, CliError> {
+        let active = self.active_tools.clone();
+        with_idle_deadline(&active, STREAM_IDLE, self.read()).await
+    }
+
+    async fn read(&mut self) -> Result<Value, CliError> {
         loop {
             let mut bytes = Vec::new();
             let n = (&mut self.reader)
@@ -362,17 +366,14 @@ impl Frames {
                 .read_until(b'\n', &mut bytes)
                 .await?;
             self.total += n;
-            if n == 0 || n > MAX_LINE || self.total > MAX_TOTAL {
+            if !bytes.ends_with(b"\n") || n > MAX_LINE || self.total > MAX_TOTAL {
                 return Err(CliError::Protocol);
             }
             if bytes.iter().all(u8::is_ascii_whitespace) {
                 continue;
             }
             let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
-                if is_signed_out_text(&String::from_utf8_lossy(&bytes)) {
-                    return Err(CliError::SignedOut);
-                }
-                return Err(CliError::Protocol);
+                return Err(classify_child_error(&String::from_utf8_lossy(&bytes)));
             };
             return Ok(v);
         }
@@ -394,6 +395,7 @@ impl Run<'_> {
         let frames = Frames {
             reader: BufReader::new(stdout),
             total: 0,
+            active_tools: self.bridge.active_tools.clone(),
         };
         match self.nt.driver.transport() {
             Transport::StreamJson => self.claude(stdin, frames).await,
@@ -420,6 +422,7 @@ impl Run<'_> {
         let mut partial = false;
         loop {
             let v = frames.next().await?;
+            record_usage(&v, &mut usage, self.host);
             if v.get("error").is_some() || v["is_error"] == true || v["method"] == "error" {
                 return Err(child_error(&v));
             }
@@ -455,7 +458,6 @@ impl Run<'_> {
                     {
                         return Err(child_error(&v));
                     }
-                    read_usage(&v["usage"], &mut usage);
                     return Ok(usage);
                 }
                 // `system`, `user` (tool results), rate-limit notices...: the CLI's own business.
@@ -483,6 +485,7 @@ impl Run<'_> {
         let mut file_changes = std::collections::HashMap::<String, Value>::new();
         loop {
             let v = frames.next().await?;
+            record_usage(&v, &mut usage, self.host);
             if v.get("method").is_none() && (v.get("error").is_some() || v["is_error"] == true) {
                 return Err(child_error(&v));
             }
@@ -550,7 +553,6 @@ impl Run<'_> {
                         self.host.text(t);
                     }
                 }
-                "thread/tokenUsage/updated" => read_usage(&p["tokenUsage"]["last"], &mut usage),
                 "turn/completed" => {
                     if thread.is_none() || p["turn"]["status"] != "completed" {
                         return Err(child_error(&v));
@@ -695,14 +697,11 @@ impl Run<'_> {
                 continue;
             }
             if v.get("error").is_some() {
-                if v["error"]["code"] == -32000
-                    || v["error"]["message"]
-                        .as_str()
-                        .is_some_and(|m| m.to_ascii_lowercase().contains("auth"))
-                {
+                let classified = child_error(&v);
+                if classified == CliError::Protocol && v["error"]["code"] == -32000 {
                     return Err(CliError::SignedOut);
                 }
-                return Err(child_error(&v));
+                return Err(classified);
             }
             match v["id"].as_i64() {
                 Some(1) => {

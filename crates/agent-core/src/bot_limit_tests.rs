@@ -2,7 +2,7 @@
 
 use permission_engine::Policy;
 use protocol::{Event, RunId};
-use provider_catalog::ChatChunk;
+use provider_catalog::{ChatChunk, FinishReason};
 use serde_json::json;
 use task_runtime::RunState;
 
@@ -111,7 +111,12 @@ async fn unknown_price_counts_tokens_only_and_unreported_usage_is_not_free() {
     // Provider reports no usage: the start-of-call estimate counts instead.
     let env = setup();
     set_limits(&env, &daily(|d| d.hard_usd = Some(5_000.0)));
-    let silent = Reply::Chunks(vec![ChatChunk::TextDelta("x".into())]);
+    let silent = Reply::Chunks(vec![
+        ChatChunk::TextDelta("x".into()),
+        ChatChunk::Done {
+            finish_reason: FinishReason::Stop,
+        },
+    ]);
     let fake = Fake::new(vec![silent, text("never")]);
     let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), priced());
     let run = lp.run_turn(env.chat, "one").unwrap();

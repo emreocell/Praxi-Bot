@@ -42,8 +42,9 @@ use crate::{
     openai_compat::OpenAiCompatConfig,
     provider::{ChatChunk, ChatProvider, ChatRequest},
     util::{
-        ChunkStream, Classify, Reopen, Secret, build_client, dump_failed_request, error_message,
-        event_stream, key_from_env, model_name, retry_after, retry_malformed_once, send_with_retry,
+        ChunkStream, Classify, Reopen, Secret, backoff, build_client, classify_response,
+        dump_failed_request, error_message, event_stream, key_from_env, model_name, retry_after,
+        retry_malformed_once, send_once, send_with_retry,
     },
 };
 
@@ -92,15 +93,40 @@ impl GeminiProvider {
     }
 
     /// POST the request and return the decoded event stream.
-    async fn open(&self, url: &str, body: &Value) -> Result<ChunkStream, ProviderError> {
+    async fn open(
+        &self,
+        url: &str,
+        body: &Value,
+        retry: bool,
+    ) -> Result<ChunkStream, ProviderError> {
         let make = || self.authed(self.client.post(url).json(body));
-        match send_with_retry(&self.config, &make, classify as Classify).await {
-            Ok(resp) => Ok(event_stream(resp, stream::Decoder::default())),
+        let response = if retry {
+            send_with_retry(&self.config, &make, classify).await
+        } else {
+            send_once(make(), classify).await
+        };
+        match response {
+            Ok(resp) => Ok(event_stream(
+                resp,
+                stream::Decoder::default(),
+                self.config.timeout,
+            )),
             Err(e) => {
                 dump_failed_request(&self.config, &self.entry.id, body, &e);
                 Err(e)
             }
         }
+    }
+
+    fn request(&self, req: &ChatRequest) -> Result<(String, Value), ProviderError> {
+        let model = model_name(&self.entry.id, req);
+        let model = model.strip_prefix("models/").unwrap_or(model);
+        let body = request::build_body(&self.entry, model, req)?;
+        let url = format!(
+            "{}/models/{model}:streamGenerateContent?alt=sse",
+            self.base()
+        );
+        Ok((url, body))
     }
 
     fn authed(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
@@ -124,16 +150,30 @@ pub(crate) fn classify(status: u16, headers: &HeaderMap, body: &str) -> Provider
                     .any(|e| e.get("reason").and_then(Value::as_str) == Some("API_KEY_INVALID"))
             })
     }) || message.contains("API key not valid");
-    match status {
-        401 | 403 => ProviderError::Auth(message),
-        400 if bad_key => ProviderError::Auth(message),
-        400 | 413 | 422 => ProviderError::InvalidRequest(message),
-        429 => ProviderError::RateLimited {
-            retry_after: retry_after(headers).or_else(|| stream::retry_delay(body)),
-        },
-        s @ 500..=599 => ProviderError::Upstream { status: s, message },
-        s => ProviderError::Api { status: s, message },
+    if matches!(status, 0 | 400) && bad_key {
+        return ProviderError::Auth(message);
     }
+    match classify_response(
+        status,
+        retry_after(headers).or_else(|| stream::retry_delay(body)),
+        body,
+    ) {
+        ProviderError::Api {
+            status: 400 | 413 | 422,
+            message,
+        } => ProviderError::InvalidRequest(message),
+        error => error,
+    }
+}
+
+/// Classify a failed Gemini HTTP response using a bounded body read.
+pub async fn response_error(response: reqwest::Response) -> ProviderError {
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
+    let body = crate::limits::error_body(response)
+        .await
+        .unwrap_or_default();
+    classify(status, &headers, &body)
 }
 
 #[async_trait]
@@ -146,20 +186,23 @@ impl ChatProvider for GeminiProvider {
         &self,
         req: ChatRequest,
     ) -> Result<BoxStream<'static, Result<ChatChunk, ProviderError>>, ProviderError> {
-        let model = model_name(&self.entry.id, &req);
-        let model = model.strip_prefix("models/").unwrap_or(model);
-        let body = request::build_body(&self.entry, model, &req)?;
-        let url = format!(
-            "{}/models/{model}:streamGenerateContent?alt=sse",
-            self.base()
-        );
-        let first = self.open(&url, &body).await?;
+        let (url, body) = self.request(&req)?;
+        let first = self.open(&url, &body, true).await?;
         let this = self.clone();
         let reopen: Reopen = Box::new(move || {
             let (this, url, body) = (this.clone(), url.clone(), body.clone());
-            Box::pin(async move { this.open(&url, &body).await })
+            Box::pin(async move { this.open(&url, &body, false).await })
         });
-        Ok(retry_malformed_once(first, reopen))
+        Ok(retry_malformed_once(
+            first,
+            reopen,
+            backoff(&self.config, 0, None),
+        ))
+    }
+
+    async fn stream_once(&self, req: ChatRequest) -> Result<ChunkStream, ProviderError> {
+        let (url, body) = self.request(&req)?;
+        self.open(&url, &body, false).await
     }
 
     async fn list_models(&self) -> Result<Vec<String>, ProviderError> {

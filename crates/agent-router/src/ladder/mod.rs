@@ -76,14 +76,48 @@ pub enum RouterError {
 
 /// A failed call to an embedding / classifier backend. Never contains secrets.
 #[derive(Debug, Clone, thiserror::Error)]
-#[error("{0}")]
-pub struct BackendError(String);
+#[error("{message}")]
+pub struct BackendError {
+    message: String,
+    class: Option<provider_catalog::FailureClass>,
+}
 
 impl BackendError {
     /// New error with a message.
     #[must_use]
     pub fn new(msg: impl Into<String>) -> Self {
-        Self(msg.into())
+        Self {
+            message: msg.into(),
+            class: None,
+        }
+    }
+
+    /// Keep the failure class without retaining a provider-supplied message.
+    #[must_use]
+    pub fn provider(class: provider_catalog::FailureClass) -> Self {
+        use provider_catalog::FailureClass;
+        let message = match class {
+            FailureClass::Auth => "The model provider rejected the credentials.",
+            FailureClass::Quota | FailureClass::RateLimit => "The model provider limited requests.",
+            FailureClass::Overloaded => "The model provider is busy.",
+            FailureClass::ContextTooLong => "The request is too long for the model.",
+            FailureClass::ContentFiltered => "The model blocked the response.",
+            FailureClass::Network => "Could not connect to the model provider.",
+            FailureClass::Timeout => "The model provider took too long to reply.",
+            FailureClass::Protocol | FailureClass::MalformedToolCall => {
+                "The model provider returned an unreadable response."
+            }
+            _ => "The model provider could not complete the request.",
+        };
+        Self {
+            message: message.into(),
+            class: Some(class),
+        }
+    }
+
+    #[must_use]
+    pub const fn class(&self) -> Option<provider_catalog::FailureClass> {
+        self.class
     }
 }
 

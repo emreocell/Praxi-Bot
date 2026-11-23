@@ -1,0 +1,118 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.box {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: var(--size-border) solid var(--color-danger);
+  border-radius: var(--radius-card);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text);
+  text-align: left;
+  max-width: 100%;
+}
+
+.ok {
+  border-color: var(--color-success);
+  background-color: color-mix(in srgb, var(--color-success) 14%, transparent);
+}
+
+.icon {
+  flex-shrink: 0;
+  width: var(--size-icon);
+  height: var(--size-icon);
+  color: var(--color-danger);
+}
+
+.ok .icon {
+  color: var(--color-success);
+}
+
+.text {
+  flex: 1;
+  min-width: var(--space-0);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.title {
+  margin: var(--space-0);
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-semibold);
+}
+
+.hint {
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: fit-content;
+  padding: var(--space-0);
+  border: none;
+  background: transparent;
+  color: var(--color-accent-text);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.link:focus-visible,
+.details summary:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.link svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.details {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.details summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.raw {
+  margin: var(--space-2) var(--space-0);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background-color: var(--color-code-bg);
+  color: var(--color-code-text);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}

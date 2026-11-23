@@ -108,7 +108,7 @@ Seven short pages in plain words. Read them in this order:
 | Look up a term | [Glossary](glossary.md) |
 | See keyboard shortcuts | [Keyboard shortcuts](keyboard-shortcuts.md) |
 | Use Praxi with a keyboard, screen reader, high-contrast theme, or reduced motion | [Accessibility](accessibility.md) |
-| Something does not work | [Troubleshooting](troubleshooting.md), [FAQ](faq.md) |
+| Something does not work | [Troubleshooting](troubleshooting.md), [Test connection](connection-test.md), [FAQ](faq.md) |
 
 ## The pieces
 

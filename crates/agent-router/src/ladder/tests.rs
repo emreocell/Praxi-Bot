@@ -558,7 +558,11 @@ async fn gemini_embedder_and_classifier_wire_format() {
     // HTTP error -> BackendError without the key
     let bad = GeminiClassifier::new("k-test", "missing").with_base_url(server.uri());
     let err = bad.classify("p", 64).await.unwrap_err();
-    assert!(err.to_string().contains("404"));
+    assert_eq!(
+        err.class(),
+        Some(provider_catalog::FailureClass::InvalidRequest)
+    );
+    assert!(!err.to_string().contains("k-test"));
 }
 
 #[tokio::test]

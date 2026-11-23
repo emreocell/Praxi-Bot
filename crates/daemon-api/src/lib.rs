@@ -23,6 +23,7 @@ mod cli_login;
 pub mod components;
 pub mod composio;
 mod composio_routes;
+pub mod connection_test;
 pub mod control;
 pub mod doctor;
 mod doctor_routes;
@@ -206,6 +207,11 @@ pub trait ChannelControl: Send + Sync {
     /// # Errors
     /// The reason the channel cannot pair (e.g. it is not running).
     fn create_pair_code(&self) -> Result<dto::PairCodeDto, String>;
+    /// Check the stored token against the service (Telegram: `getMe`) and say what happened in
+    /// the typed shape of `POST /v1/connection-test/channel`. `None`: no such test.
+    async fn test_connection(&self) -> Option<connection_test::ConnectionTestReport> {
+        None
+    }
 }
 
 struct Inner {
@@ -252,6 +258,7 @@ struct Inner {
     skill_mutations: parking_lot::Mutex<()>,
     /// Bounds concurrent web search probes (see `web_routes`).
     web_tests: Arc<tokio::sync::Semaphore>,
+    connection_tests: Arc<tokio::sync::Semaphore>,
     /// Write-only secret sink of `POST /v1/secrets/{name}`.
     secrets: OnceLock<Arc<dyn secret_store::SecretStore>>,
     owner_key: OnceLock<String>,
@@ -445,6 +452,7 @@ impl AppState {
             skills: OnceLock::new(),
             skill_mutations: parking_lot::Mutex::new(()),
             web_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
+            connection_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
             secrets: OnceLock::new(),
             owner_key: OnceLock::new(),
             fill_secrets: OnceLock::new(),
@@ -655,6 +663,13 @@ impl AppState {
                     "too many connection tests are running; try again in a moment",
                 )
             })
+    }
+
+    /// A slot for one `/v1/connection-test/*` run, or `None` when two already run.
+    pub(crate) fn connection_test_permit(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        Arc::clone(&self.0.connection_tests)
+            .try_acquire_owned()
+            .ok()
     }
 
     /// A slot for one live web search probe, or `429`.
@@ -1539,6 +1554,24 @@ fn api_routes() -> Router<AppState> {
             get(w::get_web_search).put(w::update_web_search),
         )
         .route("/v1/web/search/test", post(w::test_web_search))
+        .route(
+            "/v1/connection-test/provider",
+            post(connection_test::test_provider),
+        )
+        .route("/v1/connection-test/mcp", post(connection_test::test_mcp))
+        .route(
+            "/v1/connection-test/channel",
+            post(connection_test::test_channel),
+        )
+        .route("/v1/connection-test/web", post(connection_test::test_web))
+        .route(
+            "/v1/connection-test/voice",
+            post(connection_test::test_voice),
+        )
+        .route(
+            "/v1/connection-test/email",
+            post(connection_test::test_email),
+        )
         .route(
             "/v1/spend-limit",
             get(spend_routes::get_spend_limit).put(spend_routes::put_spend_limit),

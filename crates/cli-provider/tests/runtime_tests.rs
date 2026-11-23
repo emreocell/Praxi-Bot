@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use cli_provider::{
     PathEnv,
-    runtime::{CliEngine, CliError, Engine, ToolReply, Turn, TurnHost},
+    runtime::{CliEngine, CliError, Engine, ToolReply, Turn, TurnHost, TurnUsage},
 };
 use parking_lot::Mutex;
 use serde_json::{Value, json};
@@ -24,6 +24,7 @@ struct Host {
     checks: AtomicUsize,
     approvals: AtomicUsize,
     text: Mutex<String>,
+    usage: Mutex<Vec<(u64, u64)>>,
 }
 impl Host {
     fn new(allow: bool) -> Arc<Self> {
@@ -33,6 +34,7 @@ impl Host {
             checks: AtomicUsize::new(0),
             approvals: AtomicUsize::new(0),
             text: Mutex::new(String::new()),
+            usage: Mutex::new(Vec::new()),
         })
     }
 }
@@ -40,6 +42,9 @@ impl Host {
 impl TurnHost for Host {
     fn text(&self, t: &str) {
         self.text.lock().push_str(t);
+    }
+    fn usage_snapshot(&self, usage: &TurnUsage) {
+        self.usage.lock().push((usage.input, usage.output));
     }
     async fn call(&self, name: &str, _: Value) -> ToolReply {
         assert_eq!(name, "known.tool");
@@ -307,6 +312,19 @@ async fn quota_and_unbounded_lines_are_non_retryable() {
             error
         );
     }
+}
+
+#[tokio::test]
+async fn usage_reported_before_an_unfinished_turn_reaches_the_host() {
+    let (_dir, cli) = fixture(Engine::Claude, "usage-then-cut", false);
+    let host = Host::new(true);
+    let error = cli
+        .run_turn(turn(), host.clone(), CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error, CliError::Protocol);
+    assert_eq!(*host.usage.lock(), [(12, 4)]);
+    assert_eq!(host.calls.load(Ordering::SeqCst), 0);
 }
 #[tokio::test]
 async fn cancellation_and_future_drop_reap_child() {

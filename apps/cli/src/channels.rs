@@ -179,6 +179,9 @@ pub struct TelegramRuntime {
     channel: parking_lot::Mutex<Option<TelegramChannel>>,
     config: Option<TelegramConfig>,
     client: Arc<HttpDaemonClient>,
+    /// For `test_connection`, which must work while the channel is switched off.
+    store: Arc<dyn SecretStore>,
+    api_base_url: String,
 }
 
 impl TelegramRuntime {
@@ -239,6 +242,61 @@ impl ChannelControl for TelegramRuntime {
         }
     }
 
+    async fn test_connection(&self) -> Option<daemon_api::connection_test::ConnectionTestReport> {
+        use daemon_api::connection_test::{ConnectionOutcome as O, ConnectionTestReport as R};
+        let token = match self.store.get(TELEGRAM_BOT_TOKEN_SECRET) {
+            Ok(Some(t)) if !t.expose().trim().is_empty() => t,
+            Ok(_) => {
+                return Some(R::failed(
+                    "channel",
+                    O::BadKey,
+                    None,
+                    None,
+                    "no Telegram bot token is saved",
+                ));
+            }
+            Err(e) => return Some(R::failed("channel", O::Unknown, None, None, e.to_string())),
+        };
+        let client = channel_telegram::BotApiClient::with_base_url(token, &self.api_base_url);
+        Some(match client.get_me().await {
+            Ok(me) => R::ok(
+                "channel",
+                format!(
+                    "token belongs to the bot @{}",
+                    me.username.unwrap_or_default()
+                ),
+            ),
+            Err(channel_telegram::TelegramError::TelegramApi {
+                error_code,
+                description,
+            }) => {
+                let status = error_code.and_then(|c| u16::try_from(c).ok());
+                // Telegram answers a revoked or mistyped token with 401 (and 404 for a token
+                // that is not even shaped like one).
+                let outcome = match status {
+                    Some(401 | 403 | 404) => O::BadKey,
+                    Some(s) => daemon_api::connection_test::classify_http_status(s),
+                    None => O::Unknown,
+                };
+                R::failed(
+                    "channel",
+                    outcome,
+                    status,
+                    error_code.map(|c| c.to_string()),
+                    description,
+                )
+            }
+            Err(channel_telegram::TelegramError::RateLimited { retry_after_secs }) => R::failed(
+                "channel",
+                O::QuotaExceeded,
+                Some(429),
+                None,
+                format!("Telegram asked to wait {retry_after_secs}s"),
+            ),
+            Err(e) => R::failed("channel", O::NoNetwork, None, None, e.to_string()),
+        })
+    }
+
     fn create_pair_code(&self) -> std::result::Result<PairCodeDto, String> {
         match &*self.channel.lock() {
             Some(c) => Ok(PairCodeDto {
@@ -294,8 +352,8 @@ pub fn telegram_runtime(
     let configured = telegram_configured(store.as_ref()).unwrap_or(false);
     let enabled = telegram_enabled(data_dir);
     let config = if configured && enabled {
-        let mut cfg =
-            TelegramConfig::new(store).with_state_path(data_dir.join(TELEGRAM_STATE_FILE));
+        let mut cfg = TelegramConfig::new(Arc::clone(&store))
+            .with_state_path(data_dir.join(TELEGRAM_STATE_FILE));
         if let Some(url) = api_base_url {
             cfg = cfg.with_api_base_url(url);
         }
@@ -314,6 +372,10 @@ pub fn telegram_runtime(
         data_dir: data_dir.to_path_buf(),
         channel: parking_lot::Mutex::new(None),
         config,
+        store,
+        api_base_url: api_base_url
+            .unwrap_or(channel_telegram::DEFAULT_TELEGRAM_API_URL)
+            .to_owned(),
         // The channel decides approvals for the owner's authenticated chat, so it
         // carries the owner key like the desktop app does.
         client: Arc::new(
@@ -382,6 +444,8 @@ mod conflict_status_tests {
                 "http://127.0.0.1:1",
                 SecretValue::new("local-token"),
             )),
+            store: Arc::new(secret_store::MemoryStore::new()),
+            api_base_url: server.uri(),
         };
         runtime.start();
         tokio::time::timeout(Duration::from_secs(3), async {

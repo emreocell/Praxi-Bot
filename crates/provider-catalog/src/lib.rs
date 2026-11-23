@@ -45,7 +45,7 @@ pub use entry::{
     Auth, CapabilityOverrides, CompatFlags, ModelCapabilities, ModelInfo, ProviderEntry,
     ProviderKind,
 };
-pub use error::ProviderError;
+pub use error::{FailureClass, ProviderError};
 pub use factory::{build_chat_provider, build_embedding_provider};
 pub use gemini::GeminiProvider;
 pub use hardware::{GpuInfo, HardwareInfo, probe_hardware};
@@ -56,8 +56,9 @@ pub use model_metadata::{
 };
 pub use openai_compat::{OpenAiCompatConfig, OpenAiCompatProvider};
 pub use provider::{
-    ChatChunk, ChatProvider, ChatRequest, FinishReason, Message, MessageRole, ModelRef, ToolCall,
-    ToolChoice, Usage,
+    CHAT_STREAM_IDLE, ChatChunk, ChatProvider, ChatRequest, ChatStream, FinishReason, Message,
+    MessageRole, ModelRef, ToolCall, ToolChoice, Usage,
 };
 pub use selector::ModelSelector;
 pub use setup::{ProviderChoice, SetupError, configure_provider, custom_entry, entry_for};
+pub use util::jittered_backoff;

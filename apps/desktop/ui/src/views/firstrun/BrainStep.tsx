@@ -6,6 +6,7 @@ import { isMockMode, MOCK_BASE_URL } from "../../api/mockMode";
 import type { CliEngineDto, ProvidersDto } from "../../api/types";
 import { BrandIcon } from "../../components/BrandIcon";
 import { BrandMark } from "../../components/BrandMark";
+import { ConnectionTestButton } from "../../components/ConnectionTest";
 import { LocalInstallCard } from "../../components/LocalInstallCard";
 import { LocalModelsAdvice } from "../../components/LocalModelsAdvice";
 import { ModelPicker } from "../../components/ModelPicker";
@@ -71,6 +72,8 @@ export function BrainStep({
   const [autoRef, setAutoRef] = useState("");
   /** Name used in error sentences: the CLI or provider the user just tried. */
   const [subject, setSubject] = useState("");
+  /** The provider the last connect attempt used: what "Test connection" asks the daemon about. */
+  const [lastProvider, setLastProvider] = useState("");
   const keyInput = useRef<HTMLInputElement | null>(null);
   /** Local model servers answering on loopback (null while looking). */
   const [local, setLocal] = useState<LocalServer[] | null>(null);
@@ -165,6 +168,7 @@ export function BrainStep({
       return;
     }
     dispatch({ type: "connecting" });
+    setLastProvider(provider);
     try {
       const current = dto ?? (await fresh());
       const target = keyTargets(current?.catalog ?? []).find((k) => k.id === provider);
@@ -536,6 +540,12 @@ export function BrainStep({
               error ?? (keyProblem ? t(`firstRun.brain.keyProblem.${keyProblem}`) : t("firstRun.brain.keyHint"))
             )}
           </p>
+          {error && !busy && lastProvider ? (
+            <ConnectionTestButton
+              testId="fr-test-connection"
+              run={() => (client ? client.testConnection("provider", { id: lastProvider }) : Promise.reject(new Error("daemon not connected")))}
+            />
+          ) : null}
         </section>
       ) : null}
 

@@ -24,6 +24,7 @@ import { MAIL_CHANGED_EVENT, nextStep } from "../../lib/botMail";
 import type { EmailAccount, EmailTestReport } from "../../api/types";
 import { openExternal } from "../../lib/externalLink";
 import { BotAccessPicker } from "../../components/BotAccessPicker";
+import { ConnectionTestButton } from "../../components/ConnectionTest";
 import formStyles from "../../components/Form.module.css";
 import { Segmented } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
@@ -657,7 +658,7 @@ function AccountRow({
   onTest: () => Promise<EmailTestReport | null>;
 }) {
   const { t } = useTranslation();
-  const { bots } = useDaemon();
+  const { bots, client } = useDaemon();
   const [confirm, setConfirm] = useState(false);
   const [alsoRemote, setAlsoRemote] = useState(false);
   const isAgentmail = account.provider === "agentmail";
@@ -708,6 +709,17 @@ function AccountRow({
           )}
         </div>
         {report ? <TestResult report={report} /> : null}
+        {isAgentmail ? (
+          <ConnectionTestButton
+            testId={`email-connection-test-${account.name}`}
+            disabled={busy}
+            run={() =>
+              client
+                ? client.testConnection("email", { name: account.name })
+                : Promise.reject(new Error("daemon not connected"))
+            }
+          />
+        ) : null}
       </div>
       <div className={styles.rowActions}>
         <Button

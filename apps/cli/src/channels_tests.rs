@@ -291,3 +291,61 @@ async fn standby_telegram_runtime_does_not_poll_until_started_and_can_restart() 
     assert!(runtime.info().running);
     runtime.shutdown().await;
 }
+
+#[tokio::test]
+async fn test_connection_asks_get_me_and_types_the_answer() {
+    use daemon_api::connection_test::ConnectionOutcome as O;
+    let dir = tempfile::tempdir().unwrap();
+    // Works even while the channel is switched off.
+    set_telegram_enabled(dir.path(), false).unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/bot{TOKEN}/getMe")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"ok": true, "result": {"id": 1, "is_bot": true, "username": "praxi_test_bot"}}),
+        ))
+        .mount(&server)
+        .await;
+    let t = start_telegram(
+        dir.path(),
+        store_with_token(),
+        "http://127.0.0.1:1",
+        "tok",
+        Some(&server.uri()),
+    );
+    let ok = t.test_connection().await.unwrap();
+    assert_eq!(ok.outcome, O::Ok);
+    assert!(ok.details.contains("praxi_test_bot"));
+
+    // A revoked or mistyped token: Telegram answers 401 and the token is never echoed.
+    let bad = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(401).set_body_json(
+                json!({"ok": false, "error_code": 401, "description": "Unauthorized"}),
+            ),
+        )
+        .mount(&bad)
+        .await;
+    let t = start_telegram(
+        dir.path(),
+        store_with_token(),
+        "http://127.0.0.1:1",
+        "tok",
+        Some(&bad.uri()),
+    );
+    let r = t.test_connection().await.unwrap();
+    assert_eq!(r.outcome, O::BadKey);
+    assert_eq!(r.http_status, Some(401));
+    assert!(!format!("{r:?}").contains(TOKEN));
+
+    // No token saved at all.
+    let t = start_telegram(
+        dir.path(),
+        Arc::new(MemoryStore::new()),
+        "http://127.0.0.1:1",
+        "tok",
+        Some(&bad.uri()),
+    );
+    assert_eq!(t.test_connection().await.unwrap().outcome, O::BadKey);
+}

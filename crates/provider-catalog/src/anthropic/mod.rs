@@ -41,8 +41,8 @@ use crate::{
     openai_compat::OpenAiCompatConfig,
     provider::{ChatChunk, ChatProvider, ChatRequest},
     util::{
-        Classify, Secret, build_client, error_message, event_stream, key_from_env, model_name,
-        retry_after, send_with_retry,
+        Classify, Secret, build_client, classify_response, event_stream, key_from_env, model_name,
+        retry_after, send_once, send_with_retry,
     },
 };
 
@@ -111,6 +111,31 @@ impl AnthropicProvider {
             None => rb,
         }
     }
+
+    async fn open(
+        &self,
+        req: ChatRequest,
+        retry: bool,
+    ) -> Result<crate::ChatStream, ProviderError> {
+        let body = request::build_body(
+            &self.entry,
+            model_name(&self.entry.id, &req),
+            &req,
+            self.caching,
+        )?;
+        let url = format!("{}/v1/messages", self.base());
+        let make = || self.authed(self.client.post(&url).json(&body));
+        let resp = if retry {
+            send_with_retry(&self.config, &make, classify).await?
+        } else {
+            send_once(make(), classify).await?
+        };
+        Ok(event_stream(
+            resp,
+            stream::Decoder::default(),
+            self.config.timeout,
+        ))
+    }
 }
 
 /// Map an Anthropic error `type` to the HTTP status it corresponds to.
@@ -123,7 +148,8 @@ pub(crate) fn status_for_error_type(t: &str) -> u16 {
         "request_too_large" => 413,
         "rate_limit_error" => 429,
         "overloaded_error" => 529,
-        _ => 500,
+        "api_error" => 500,
+        _ => 0,
     }
 }
 
@@ -133,31 +159,12 @@ pub(crate) fn classify(
     headers: &reqwest::header::HeaderMap,
     body: &str,
 ) -> ProviderError {
-    let message = error_message(body);
-    let overloaded = serde_json::from_str::<Value>(body)
-        .ok()
-        .and_then(|v| {
-            v.pointer("/error/type")
-                .and_then(Value::as_str)
-                .map(|t| t == "overloaded_error")
-        })
-        .unwrap_or(false);
-    match status {
-        401 | 403 => ProviderError::Auth(message),
-        400 | 413 | 422 => ProviderError::InvalidRequest(message),
-        429 => ProviderError::RateLimited {
-            retry_after: retry_after(headers),
-        },
-        529 => ProviderError::Upstream {
-            status: 529,
+    match classify_response(status, retry_after(headers), body) {
+        ProviderError::Api {
+            status: 400 | 413 | 422,
             message,
-        },
-        _ if overloaded => ProviderError::Upstream {
-            status: 529,
-            message,
-        },
-        s @ 500..=599 => ProviderError::Upstream { status: s, message },
-        s => ProviderError::Api { status: s, message },
+        } => ProviderError::InvalidRequest(message),
+        error => error,
     }
 }
 
@@ -171,16 +178,11 @@ impl ChatProvider for AnthropicProvider {
         &self,
         req: ChatRequest,
     ) -> Result<BoxStream<'static, Result<ChatChunk, ProviderError>>, ProviderError> {
-        let body = request::build_body(
-            &self.entry,
-            model_name(&self.entry.id, &req),
-            &req,
-            self.caching,
-        )?;
-        let url = format!("{}/v1/messages", self.base());
-        let make = || self.authed(self.client.post(&url).json(&body));
-        let resp = send_with_retry(&self.config, &make, classify as Classify).await?;
-        Ok(event_stream(resp, stream::Decoder::default()))
+        self.open(req, true).await
+    }
+
+    async fn stream_once(&self, req: ChatRequest) -> Result<crate::ChatStream, ProviderError> {
+        self.open(req, false).await
     }
 
     async fn list_models(&self) -> Result<Vec<String>, ProviderError> {

@@ -502,7 +502,7 @@ async fn truncated_stream_is_an_error() {
         .await;
     assert!(matches!(
         collect(&provider(&server, 0), req()).await.unwrap_err(),
-        ProviderError::Stream(_)
+        ProviderError::Interrupted(_)
     ));
 }
 
