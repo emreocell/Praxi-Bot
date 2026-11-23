@@ -33,6 +33,8 @@ const LOCAL_ONLY: Record<string, string> = {
   "components/SettingsUi.tsx": "arrow keys on a segmented radio group",
   "components/useBotReorder.ts": "keyboard reordering of the bot list",
   "lib/liveViewInput.ts": "forwards keys to the remote screen, not app shortcuts",
+  "views/LiveViewer.tsx": "toolbar keys F and Ctrl+Shift+D, listed in the viewer's own ? popover",
+  "lib/liveViewToolbar.ts": "live view toolbar keys (F, Ctrl+Shift+D), listed in the viewer's own ? popover",
   "lib/liveViewLayers.ts": "layer routing for the live view",
   "overlay/events.ts": "stop hotkey formatting (documented as the stop entry)",
   "views/BotEditModal.tsx": "arrow keys on editor section tabs",

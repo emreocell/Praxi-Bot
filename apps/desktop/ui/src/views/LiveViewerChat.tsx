@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { ApiClient } from "../api/client";
 import { humanLine } from "../lib/humanError";
+import { loadChatOpen, saveChatOpen } from "../lib/liveViewToolbar";
 import { useDaemon } from "../state/DaemonContext";
 import type { NeedsYouEntry } from "../state/timeline";
 import styles from "./LiveViewer.module.css";
@@ -52,7 +53,7 @@ export function LiveViewerChat({
 }) {
   const { client, needs } = useDaemon();
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => loadChatOpen());
   const status = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLDivElement>(null);
   const approvals = needs.filter((entry) => entry.kind === "approval");
@@ -66,7 +67,7 @@ export function LiveViewerChat({
   if (!onChatSlots && (!client || approvals.length === 0)) return null;
 
   return (
-    <section className={styles.chatOverlay} aria-label={t("liveView.chat.title")}>
+    <section className={styles.chatOverlay} data-open={expanded ? "true" : "false"} data-testid="live-viewer-chat" aria-label={t("liveView.chat.title")}>
       {client && approvals.length ? (
         <ul className={styles.chatApprovals} aria-label={t("liveView.approvalsWaiting", { count: approvals.length })} data-testid="live-viewer-approvals">
           {approvals.map((approval) => <PendingApproval key={approval.callId} approval={approval} client={client} />)}
@@ -79,14 +80,20 @@ export function LiveViewerChat({
               size="sm"
               variant="secondary"
               aria-expanded={expanded}
-              onClick={() => setExpanded((open) => !open)}
+              aria-controls="live-viewer-chat-body"
+              onClick={() =>
+                setExpanded((open) => {
+                  saveChatOpen(!open);
+                  return !open;
+                })
+              }
             >
               <MessageSquare aria-hidden="true" />
               {t(expanded ? "liveView.chat.collapse" : "liveView.chat.title")}
             </Button>
             <div ref={status} className={styles.chatStatusSlot} />
           </div>
-          {expanded ? <div ref={composer} data-testid="live-viewer-composer" /> : null}
+          {expanded ? <div ref={composer} id="live-viewer-chat-body" data-testid="live-viewer-composer" /> : null}
         </>
       ) : null}
     </section>

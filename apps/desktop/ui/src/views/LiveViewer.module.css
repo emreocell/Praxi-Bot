@@ -37,11 +37,111 @@
 }
 
 .headerRight {
+  position: relative;
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: var(--space-2);
-  flex-shrink: 0;
+  min-width: var(--space-0);
+}
+
+/* Quality selector and link chip: inline when there is room, a dropdown behind "..." when not. */
+.tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.moreBtn {
+  display: none;
+}
+
+/* stylelint-disable-next-line unit-disallowed-list -- window width where the toolbar no longer fits in one row */
+@media (width <= 60em) {
+  .moreBtn {
+    display: inline-grid;
+  }
+
+  .tools {
+    display: none;
+    position: absolute;
+    inset-block-start: calc(100% + var(--space-2));
+    inset-inline-end: var(--space-0);
+    z-index: 5;
+    flex-wrap: wrap;
+    padding: var(--space-2);
+    border-radius: var(--radius-card);
+    background-color: var(--color-surface-elevated);
+    box-shadow: var(--shadow-overlay);
+  }
+
+  .tools[data-open="true"] {
+    display: flex;
+  }
+}
+
+.helpWrap {
+  position: relative;
+}
+
+.helpPanel {
+  position: absolute;
+  inset-block-start: calc(100% + var(--space-2));
+  inset-inline-end: var(--space-0);
+  z-index: 6;
+  min-width: calc(var(--space-12) * 4);
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated);
+  box-shadow: var(--shadow-overlay);
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+}
+
+.helpPanel dl {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-0);
+}
+
+.helpPanel dl > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.helpPanel dd {
+  margin: var(--space-0);
+  color: var(--color-text-secondary);
+}
+
+.helpPanel kbd {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-active);
+  font: inherit;
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+
+.srOnly {
+  position: absolute;
+  width: var(--size-border);
+  height: var(--size-border);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* "Fill": the stream takes all the room and drops its frame; the picture still keeps its shape. */
+.stageArea[data-fit="fill"] {
+  padding: var(--space-0);
+}
+
+.stageArea[data-fit="fill"] .stageFrame {
+  border-radius: var(--space-0);
+  border-width: var(--space-0);
 }
 
 .stateBadge {
@@ -398,13 +498,15 @@
   min-height: var(--space-8);
 }
 
+/* In the flow under the stream (never over it): a compact pill while collapsed. */
 .chatOverlay {
-  position: absolute;
+  position: relative;
   z-index: 4;
-  inset-inline-end: var(--space-5);
-  bottom: var(--space-10);
+  align-self: flex-end;
+  flex-shrink: 0;
   display: grid;
-  width: min(var(--size-content-max), calc(100% - var(--space-10)));
+  width: auto;
+  max-width: min(var(--size-content-max), 100%);
   gap: var(--space-2);
   padding: var(--space-2);
   border: var(--size-border) solid var(--color-border);
@@ -440,4 +542,8 @@
 .chatApproval > span {
   overflow-wrap: anywhere;
   font-size: var(--font-size-sm);
+}
+
+.chatOverlay[data-open="true"] {
+  width: min(var(--size-content-max), 100%);
 }

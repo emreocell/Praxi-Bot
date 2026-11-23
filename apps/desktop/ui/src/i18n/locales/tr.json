@@ -3543,6 +3543,11 @@
     "url": "Kaydedilmiş sayfanın adresi"
   },
   "liveView": {
+    "announce": {
+      "connecting": "Ekrana bağlanılıyor.",
+      "reconnecting": "Ekranla bağlantı koptu, yeniden bağlanılıyor.",
+      "stalled": "Görüntü güncellenmeyi bıraktı."
+    },
     "approvalsWaiting": "Kararını bekleyen {{count}} öğe var. Aşağıdan veya sohbette karar ver.",
     "backToChat": "Geri",
     "captureTab": "Tab tuşunu yakala",
@@ -3695,6 +3700,19 @@
     "targetLocked": "Ekran hedefini değiştirmeden önce kontrolü geri ver (Bitirdim).",
     "targetsLabel": "Hedef ekran",
     "title": "Canlı ekran görünümü",
+    "toolbar": {
+      "fitOff": "Pencereyi doldur",
+      "fitOn": "Normal boyuta dön",
+      "keys": {
+        "exit": "Ekran görünümünden çık",
+        "fit": "Pencereyi doldur / normal boyut",
+        "release": "Düğmeleri kullanmak için ekrandan çık",
+        "takeover": "Kontrolü devral"
+      },
+      "more": "Daha fazla seçenek",
+      "shortcuts": "Klavye kısayolları",
+      "takeoverHint": "Bu ekranın kontrolünü kendin al (Ctrl+Shift+D). Sen geri verene kadar botlar durur."
+    },
     "viewOnly": "Salt izleme",
     "watchAction": "Devral"
   },
@@ -4087,7 +4105,9 @@
   },
   "peerLink": {
     "direct": "Doğrudan · {{rtt}} ms",
-    "relay": "Röle · {{rtt}} ms"
+    "directHint": "Doğrudan: uygulama bilgisayarla birebir konuşuyor, en hızlı yol bu. Sayı gecikmedir.",
+    "relay": "Röle · {{rtt}} ms",
+    "relayHint": "Aktarmalı: bağlantı bir yardımcı sunucudan geçiyor, bu yüzden biraz yavaş olabilir. Sayı gecikmedir."
   },
   "profileShare": {
     "back": "Geri",

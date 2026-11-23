@@ -3543,6 +3543,11 @@
     "url": "URL der gespeicherten Seite"
   },
   "liveView": {
+    "announce": {
+      "connecting": "Verbindung zum Bildschirm wird aufgebaut.",
+      "reconnecting": "Verbindung zum Bildschirm verloren, es wird neu verbunden.",
+      "stalled": "Das Bild wird nicht mehr aktualisiert."
+    },
     "approvalsWaiting": "Offene Entscheidungen: {{count}}. Entscheide unten oder im Chat.",
     "backToChat": "Zurück",
     "captureTab": "Tab erfassen",
@@ -3695,6 +3700,19 @@
     "targetLocked": "Beende die Kontrolle („Ich bin fertig“), bevor du das Bildschirmziel wechselst.",
     "targetsLabel": "Zielbildschirm",
     "title": "Live-Ansicht des Computers",
+    "toolbar": {
+      "fitOff": "Fenster ausfüllen",
+      "fitOn": "Zurück zur normalen Größe",
+      "keys": {
+        "exit": "Bildschirmansicht verlassen",
+        "fit": "Fenster ausfüllen / normale Größe",
+        "release": "Bildschirm verlassen, um die Schaltflächen zu nutzen",
+        "takeover": "Steuerung übernehmen"
+      },
+      "more": "Weitere Optionen",
+      "shortcuts": "Tastenkürzel",
+      "takeoverHint": "Übernimm diesen Bildschirm selbst (Strg+Umschalt+D). Die Bots pausieren, bis du ihn zurückgibst."
+    },
     "viewOnly": "Nur ansehen",
     "watchAction": "Kontrolle übernehmen"
   },
@@ -4087,7 +4105,9 @@
   },
   "peerLink": {
     "direct": "Direkt · {{rtt}} ms",
-    "relay": "Relay · {{rtt}} ms"
+    "directHint": "Direkt: Die App spricht unmittelbar mit dem Computer, das ist der schnellste Weg. Die Zahl ist die Verzögerung.",
+    "relay": "Relay · {{rtt}} ms",
+    "relayHint": "Über Relay: Die Verbindung läuft über einen Hilfsserver und kann etwas langsamer sein. Die Zahl ist die Verzögerung."
   },
   "profileShare": {
     "back": "Zurück",

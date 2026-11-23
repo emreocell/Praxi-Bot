@@ -42,7 +42,13 @@ export function PeerLinkBadge({
 
   const link = enabled && value?.client === client ? value.link : null;
   return link ? (
-    <small id={id} className={className} data-testid="peer-link-badge">
+    <small
+      id={id}
+      className={className}
+      data-testid="peer-link-badge"
+      tabIndex={0}
+      title={t(link.relay ? "peerLink.relayHint" : "peerLink.directHint")}
+    >
       {t(link.relay ? "peerLink.relay" : "peerLink.direct", { rtt: link.rtt_ms })}
     </small>
   ) : null;

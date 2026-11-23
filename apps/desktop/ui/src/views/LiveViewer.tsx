@@ -1,8 +1,12 @@
 import { StreamQuality } from "../components/StreamQuality";
 import {
   ArrowLeft,
+  CircleHelp,
+  Ellipsis,
   Globe,
   Info,
+  Maximize2,
+  Minimize2,
   Monitor,
   OctagonX,
   RefreshCw
@@ -41,6 +45,13 @@ import {
   visibleActions
 } from "../lib/liveViewState";
 import { viewerKeyAction } from "../lib/liveViewLayers";
+import {
+  VIEWER_SHORTCUTS,
+  toggleFit,
+  viewerAnnouncementKey,
+  viewerShortcut,
+  type FitMode
+} from "../lib/liveViewToolbar";
 import { layerStack } from "../lib/modalStack";
 import { noScreenCode } from "../lib/computerLabel";
 import { explainScreen } from "../lib/screenReason";
@@ -54,6 +65,19 @@ import styles from "./LiveViewer.module.css";
 
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== "string") {
+    return false;
+  }
+  return (
+    el.isContentEditable === true ||
+    el.tagName === "INPUT" ||
+    el.tagName === "TEXTAREA" ||
+    el.tagName === "SELECT"
+  );
+}
 
 function targetOptionHint(
   tInfo: TargetInfo,
@@ -128,6 +152,11 @@ export function LiveViewer({
   const [stageFocused, setStageFocused] = useState(false);
   const [captureTab, setCaptureTab] = useState(false);
   const [imeBuffer, setImeBuffer] = useState("");
+  const [fit, setFit] = useState<FitMode>("fit");
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  // The latest "take over" ability for the key handler, which lives above the early return.
+  const takeoverRef = useRef<(() => void) | null>(null);
   const [stageBox, setStageBox] = useState<{ w: number; h: number }>({
     w: 0,
     h: 0
@@ -196,6 +225,36 @@ export function LiveViewer({
       return undefined;
     }
     const onGlobalKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape" && (helpOpen || moreOpen) && layerStack.isTop(layerSeqRef.current)) {
+        // A small popover is open: Esc closes it first, not the whole viewer.
+        e.preventDefault();
+        setHelpOpen(false);
+        setMoreOpen(false);
+        return;
+      }
+      const shortcut = layerStack.isTop(layerSeqRef.current)
+        ? viewerShortcut(
+            {
+              key: e.key,
+              ctrlKey: e.ctrlKey,
+              metaKey: e.metaKey,
+              altKey: e.altKey,
+              shiftKey: e.shiftKey,
+              defaultPrevented: e.defaultPrevented,
+              editable: isEditableTarget(e.target)
+            },
+            { interactive: isInteractive, stageFocused }
+          )
+        : null;
+      if (shortcut) {
+        e.preventDefault();
+        if (shortcut === "fit") {
+          setFit(toggleFit);
+        } else {
+          takeoverRef.current?.();
+        }
+        return;
+      }
       const action = viewerKeyAction({
         stack: layerStack,
         seq: layerSeqRef.current,
@@ -210,7 +269,7 @@ export function LiveViewer({
     };
     window.addEventListener("keydown", onGlobalKey);
     return () => window.removeEventListener("keydown", onGlobalKey);
-  }, [viewerOpen, isInteractive, stageFocused, closeViewer]);
+  }, [viewerOpen, isInteractive, stageFocused, closeViewer, helpOpen, moreOpen]);
 
   const mapPointer = useCallback(
     (clientX: number, clientY: number, clamp: boolean) => {
@@ -389,6 +448,15 @@ export function LiveViewer({
     state.viewState === "watch" &&
     state.pendingRequest === null;
 
+  takeoverRef.current = canTakeover ? () => void requestTakeover() : null;
+
+  const announceKey = viewerAnnouncementKey({
+    hasTarget: Boolean(selectedTarget) && Boolean(targetSummary?.available),
+    frameShown: Boolean(frameUrl && state.latestFrame),
+    disconnected: state.disconnected,
+    stalled: state.streamStale
+  });
+
   const KindIcon = selectedTarget?.kind === "browser" ? Globe : Monitor;
 
   return createPortal(
@@ -400,6 +468,9 @@ export function LiveViewer({
       ref={backdropRef}
     >
       <header className={styles.header}>
+        <div className={styles.srOnly} role="status" aria-live="polite" data-testid="live-viewer-announce">
+          {announceKey ? t(`liveView.announce.${announceKey}`) : ""}
+        </div>
         <div className={styles.headerLeft}>
           <Button
             variant="ghost"
@@ -453,8 +524,73 @@ export function LiveViewer({
         </div>
 
         <div className={styles.headerRight}>
-          <StreamQuality mode={qualityMode} onChange={setQualityMode} />
-          <PeerLinkBadge enabled={source === "home" && !isLocalClient} className={styles.stateBadge} />
+          <div
+            id="live-viewer-tools"
+            className={styles.tools}
+            data-open={moreOpen ? "true" : "false"}
+            data-testid="live-viewer-tools"
+          >
+            <StreamQuality mode={qualityMode} onChange={setQualityMode} />
+            <PeerLinkBadge enabled={source === "home" && !isLocalClient} className={styles.stateBadge} />
+          </div>
+          <button
+            type="button"
+            className={`${styles.iconBtn} ${styles.moreBtn}`}
+            aria-expanded={moreOpen}
+            aria-controls="live-viewer-tools"
+            title={t("liveView.toolbar.more")}
+            aria-label={t("liveView.toolbar.more")}
+            data-testid="live-viewer-more"
+            onClick={() => setMoreOpen((open) => !open)}
+          >
+            <Ellipsis />
+          </button>
+          <button
+            type="button"
+            className={styles.iconBtn}
+            aria-pressed={fit === "fill"}
+            title={t(fit === "fill" ? "liveView.toolbar.fitOn" : "liveView.toolbar.fitOff")}
+            aria-label={t(fit === "fill" ? "liveView.toolbar.fitOn" : "liveView.toolbar.fitOff")}
+            aria-keyshortcuts="F"
+            data-testid="live-viewer-fit"
+            onClick={() => setFit(toggleFit)}
+          >
+            {fit === "fill" ? <Minimize2 /> : <Maximize2 />}
+          </button>
+          <div className={styles.helpWrap}>
+            <button
+              type="button"
+              className={styles.iconBtn}
+              aria-expanded={helpOpen}
+              aria-controls="live-viewer-shortcuts"
+              title={t("liveView.toolbar.shortcuts")}
+              aria-label={t("liveView.toolbar.shortcuts")}
+              data-testid="live-viewer-help"
+              onClick={() => setHelpOpen((open) => !open)}
+            >
+              <CircleHelp />
+            </button>
+            {helpOpen ? (
+              <div
+                id="live-viewer-shortcuts"
+                className={styles.helpPanel}
+                role="group"
+                aria-label={t("liveView.toolbar.shortcuts")}
+                data-testid="live-viewer-shortcuts"
+              >
+                <dl>
+                  {VIEWER_SHORTCUTS.map((item) => (
+                    <div key={item.id}>
+                      <dt>
+                        <kbd>{item.keys}</kbd>
+                      </dt>
+                      <dd>{t(`liveView.toolbar.keys.${item.id}`)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            ) : null}
+          </div>
           <span
             className={styles.stateBadge}
             data-tone={tone}
@@ -532,7 +668,7 @@ export function LiveViewer({
         </div>
       ) : null}
 
-      <div className={styles.stageArea}>
+      <div className={styles.stageArea} data-fit={fit}>
         <div
           className={styles.stageFrame}
           data-active={isInteractive ? "true" : "false"}
@@ -798,6 +934,8 @@ export function LiveViewer({
               size="sm"
               disabled={!canTakeover}
               data-testid="live-view-takeover"
+              title={t("liveView.toolbar.takeoverHint")}
+              aria-keyshortcuts="Control+Shift+D"
               onClick={() => void requestTakeover()}
             >
               {t("liveView.watchAction")}

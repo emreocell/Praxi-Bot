@@ -3543,6 +3543,11 @@
     "url": "Saved page URL"
   },
   "liveView": {
+    "announce": {
+      "connecting": "Connecting to the screen.",
+      "reconnecting": "Connection to the screen lost, reconnecting.",
+      "stalled": "The picture has stopped updating."
+    },
     "approvalsWaiting": "{{count}} item(s) are waiting for your decision. Decide below or in the chat.",
     "backToChat": "Back",
     "captureTab": "Capture Tab",
@@ -3695,6 +3700,19 @@
     "targetLocked": "Finish control (“I'm done”) before switching the screen target.",
     "targetsLabel": "Target screen",
     "title": "Computer live view",
+    "toolbar": {
+      "fitOff": "Fill the window",
+      "fitOn": "Back to normal size",
+      "keys": {
+        "exit": "Leave the screen view",
+        "fit": "Fill the window / normal size",
+        "release": "Leave the screen to use the buttons",
+        "takeover": "Take control"
+      },
+      "more": "More options",
+      "shortcuts": "Keyboard shortcuts",
+      "takeoverHint": "Take control of this screen yourself (Ctrl+Shift+D). The bots pause until you hand it back."
+    },
     "viewOnly": "View only",
     "watchAction": "Take control"
   },
@@ -4087,7 +4105,9 @@
   },
   "peerLink": {
     "direct": "Direct · {{rtt}} ms",
-    "relay": "Relay · {{rtt}} ms"
+    "directHint": "Direct: this app talks straight to the computer, which is the fastest way. The number is the delay.",
+    "relay": "Relay · {{rtt}} ms",
+    "relayHint": "Relayed: the connection goes through a helper server, so it can be a little slower. The number is the delay."
   },
   "profileShare": {
     "back": "Back",
