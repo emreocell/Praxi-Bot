@@ -445,11 +445,11 @@ The timeline for a finished run can be saved as text (Markdown), a web page
 (HTML), or a JSON file. Saving a report downloads a local file; it does not
 send the run anywhere.
 
-#### JSON format, version 2
+#### JSON format, version 3
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "outcome": "done",
   "duration_ms": 1400,
   "steps": [
@@ -471,8 +471,14 @@ send the run anywhere.
     },
     {
       "step_id": "step-1",
+      "kind": "approval_recorded",
+      "offset_ms": 150,
+      "outcome": "approved"
+    },
+    {
+      "step_id": "step-1",
       "kind": "tool_outcome",
-      "offset_ms": 350,
+      "offset_ms": 400,
       "outcome": "done"
     }
   ]
@@ -492,15 +498,20 @@ send the run anywhere.
 - `depends_on` is reserved for a list of export-local step IDs when a dependency
   is known, or `null` when unknown. The current timeline does not retain causal
   links, so the field is `null`; it is not an assertion of no dependencies.
-- Version 2 adds `approval_events`, an array grouped by the export-local
-  `step_id`. A recorded pending card gives `waiting_for_approval`; a retained
-  decision gives `approval_recorded` with `approved` or `denied`; a completed
-  gated call gives `tool_outcome` with `done` or `error`. The waiting outcome is
-  `null`. Event times are offsets in milliseconds, or `null` if not recorded.
-  The timeline folds updates into one step, so completion can replace an
-  approved state. A missing event means there is no retained evidence for that
-  event in this export, not that it did not happen. Expiry is not a denial.
-  Version 1 has the same run and step fields but no `approval_events`.
+- `approval_events` is grouped by export-local `step_id`. An observed waiting
+  card gives `waiting_for_approval` with a `null` outcome. Version 3 keeps a
+  recorded decision as `approval_recorded` (`approved` or `denied`) even after the
+  tool finishes. A completed gated call separately gives `tool_outcome`
+  (`done` or `error`). Decision times use the daemon event's time relative to
+  the start of the run, not the time someone clicked; unavailable or invalid
+  offsets are `null`.
+- A denial is reported as a decision only when the corresponding gate was
+  observed. Expiry and policy veto aren't owner denials. The daemon sends the
+  reason as text, so if an owner types a reason that looks like expiry or
+  matches the reserved policy-veto reason, the export can't tell them apart and
+  omits the decision. A missing event means no retained evidence, not proof
+  that it didn't happen. Version 2 had approval events but did not retain an
+  approval after completion; version 1 had no `approval_events`.
 
 JSON excludes free text and internal IDs, including bot names, prompts, tool
 arguments and results, attachment URLs, and error messages. Use the text or web

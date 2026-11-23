@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { DaemonEvent } from "../api/types.ts";
 import { buildRunReport, renderHtml, renderMarkdown, scrubText, type ReportText } from "./runReport.ts";
@@ -89,10 +90,10 @@ test("exported report never contains private data (canary)", () => {
   assert.equal(report.steps.length, 5);
 });
 
-test("JSON schema v2 exposes only the documented run, step and approval-event fields", () => {
+test("JSON schema v3 exposes only the documented run, step and approval-event fields", () => {
   const json = renderRunReportJson(run());
   assert.deepEqual(JSON.parse(json), {
-    schema_version: 2,
+    schema_version: 3,
     outcome: "failed",
     duration_ms: 4000,
     steps: [
@@ -104,7 +105,6 @@ test("JSON schema v2 exposes only the documented run, step and approval-event fi
     ],
     approval_events: [
       { step_id: "step-3", kind: "waiting_for_approval", offset_ms: null, outcome: null },
-      { step_id: "step-3", kind: "approval_recorded", offset_ms: null, outcome: "denied" },
     ]
   });
   for (const canary of [...Object.values(PRIVATE), KEY, "hunter2canary"]) {
@@ -122,7 +122,7 @@ test("JSON leaves unrecorded timing and dependencies unknown", () => {
     }]
   }));
   assert.deepEqual(JSON.parse(json), {
-    schema_version: 2,
+    schema_version: 3,
     outcome: "unfinished",
     duration_ms: null,
     steps: [{
@@ -141,41 +141,72 @@ const started: DaemonEvent = { type: "run_started", run_id: runId, chat_id: "PRI
 const requested: DaemonEvent = { type: "tool_call_requested", ...tool };
 const waiting: DaemonEvent = { type: "approval_needed", ...tool, summary: "PRIVATE-APPROVAL-SUMMARY" };
 const approved: DaemonEvent = { type: "tool_call_approved", run_id: runId, call_id: tool.call_id, approved_by: "PRIVATE-APPROVER" };
+const completed: DaemonEvent = {
+  type: "tool_call_completed", run_id: runId, call_id: tool.call_id, error: null,
+  output_preview: PRIVATE.output
+};
+const denied: DaemonEvent = {
+  type: "tool_call_denied", run_id: runId, call_id: tool.call_id, denied_by: "PRIVATE-DENIER", reason: "PRIVATE-REASON"
+};
+const expiryReason = "expired: nobody answered in time";
+const policyDenyReason = "denied by policy";
+const pending = { step_id: "step-1", kind: "waiting_for_approval", offset_ms: null, outcome: null };
 
-function exportRecordedEvents(events: DaemonEvent[]) {
+function exportRecordedEvents(events: DaemonEvent[], sequences?: number[]) {
   const state = events.reduce(
-    (state, event, i) => applyEvent(state, { v: 1, seq: i + 1, gseq: i + 1, ts_ms: 1000 + i * 100, event }),
+    (state, event, i) => {
+      const seq = sequences?.[i] ?? i + 1;
+      return applyEvent(state, { v: 1, seq, gseq: seq, ts_ms: 1000 + i * 100, event });
+    },
     EMPTY_EVENTS
   );
   const json = renderRunReportJson(state.runs[runId]);
   assert.ok(!json.includes("PRIVATE-"));
+  for (const canary of Object.values(PRIVATE)) assert.ok(!json.includes(canary));
   return JSON.parse(json).approval_events;
 }
 
-test("JSON separates observed waiting and decisions, without reconstructing approval after completion", () => {
-  const pending = { step_id: "step-1", kind: "waiting_for_approval", offset_ms: null, outcome: null };
-  const decision = { step_id: "step-1", kind: "approval_recorded", offset_ms: null, outcome: "approved" };
+test("JSON retains the recorded approval time after the same tool completes", () => {
+  const decision = { step_id: "step-1", kind: "approval_recorded", offset_ms: 300, outcome: "approved" };
   assert.deepEqual(exportRecordedEvents([started, requested, waiting, approved]), [pending, decision]);
-  assert.deepEqual(exportRecordedEvents([started, requested, approved]), [decision]);
-  assert.deepEqual(exportRecordedEvents([started, requested, waiting, approved, {
-    type: "tool_call_completed", run_id: runId, call_id: tool.call_id, error: "PRIVATE-ERROR",
-    output_preview: PRIVATE.output,
-  }]), [pending, { step_id: "step-1", kind: "tool_outcome", offset_ms: 400, outcome: "error" }]);
+  assert.deepEqual(exportRecordedEvents([started, requested, approved]), [{ ...decision, offset_ms: 200 }]);
+  assert.deepEqual(exportRecordedEvents([started, requested, waiting, approved, completed]), [
+    pending, decision, { step_id: "step-1", kind: "tool_outcome", offset_ms: 400, outcome: "done" }
+  ]);
+  assert.deepEqual(
+    exportRecordedEvents([started, requested, waiting, approved, approved, { ...completed, error: "PRIVATE-ERROR" }], [1, 2, 3, 4, 4, 5]),
+    [pending, decision, { step_id: "step-1", kind: "tool_outcome", offset_ms: 500, outcome: "error" }]
+  );
 });
 
-test("JSON distinguishes a recorded denial from expiry or an ungated outcome", () => {
-  const pending = { step_id: "step-1", kind: "waiting_for_approval", offset_ms: null, outcome: null };
-  const denied: DaemonEvent = {
-    type: "tool_call_denied", run_id: runId, call_id: tool.call_id, denied_by: "PRIVATE-DENIER", reason: "PRIVATE-REASON"
-  };
+test("JSON does not apply an earlier decision to a reopened approval gate", () => {
+  assert.deepEqual(exportRecordedEvents([started, requested, waiting, approved, waiting]), [pending]);
+});
+
+test("JSON records a denial only after an observed gate and leaves reserved reasons ambiguous", () => {
   assert.deepEqual(exportRecordedEvents([started, requested, waiting, denied]), [
     pending,
     { step_id: "step-1", kind: "approval_recorded", offset_ms: 300, outcome: "denied" },
   ]);
-  assert.deepEqual(exportRecordedEvents([started, requested, waiting, { ...denied, reason: "expired" }]), [pending]);
-  assert.deepEqual(exportRecordedEvents([started, requested, {
-    type: "tool_call_completed", run_id: runId, call_id: tool.call_id, error: null
-  }]), []);
+  assert.deepEqual(exportRecordedEvents([started, requested, denied]), []);
+  assert.deepEqual(exportRecordedEvents([started, requested, completed]), []);
+  assert.deepEqual(exportRecordedEvents([started, requested, waiting, completed]), [
+    pending, { step_id: "step-1", kind: "tool_outcome", offset_ms: 300, outcome: "done" }
+  ]);
+  for (const reason of [expiryReason, policyDenyReason, "expired is the reason I typed"]) {
+    // An owner's supplied reason can be identical to a reserved daemon reason.
+    assert.deepEqual(exportRecordedEvents([started, requested, waiting, { ...denied, reason }]), [pending]);
+  }
+});
+
+test("approval report fixtures pin the daemon's expiry and policy-veto reasons", () => {
+  const read = (file: string) =>
+    readFileSync(new URL(`../../../../../crates/agent-core/src/${file}`, import.meta.url), "utf8");
+  assert.equal(/const EXPIRED_REASON: &str = "([^"]+)";/.exec(read("approval.rs"))?.[1], expiryReason);
+  for (const file of ["approval.rs", "exec.rs"]) {
+    const veto = /Event::ToolCallDenied\(ToolCallDenied \{[^}]*reason: Some\("([^"]+)"\.into\(\)\),\s*\}\)/.exec(read(file))?.[1];
+    assert.equal(veto, policyDenyReason, `policy veto reason in ${file}`);
+  }
 });
 
 test("stopped and unfinished runs still produce a report", () => {

@@ -39,12 +39,16 @@ function appendApprovalEvents(
   if (item.status === "awaiting_approval" || item.summary !== undefined) {
     events.push({ step_id: stepId, kind: "waiting_for_approval", offset_ms: null, outcome: null });
   }
-  if (item.status === "running") {
-    events.push({ step_id: stepId, kind: "approval_recorded", offset_ms: null, outcome: "approved" });
-  } else if (item.status === "denied") {
-    events.push({ step_id: stepId, kind: "approval_recorded", offset_ms: completionOffset, outcome: "denied" });
-  } else if (item.status === "done" || item.status === "error") {
-    // Completion replaces the running state. It does not retain a separate approval decision.
+  const decision = item.approvalDecision;
+  if (decision?.outcome === "approved" || decision?.outcome === "denied") {
+    events.push({
+      step_id: stepId,
+      kind: "approval_recorded",
+      offset_ms: milliseconds(decision.offsetMs),
+      outcome: decision.outcome
+    });
+  }
+  if (item.status === "done" || item.status === "error") {
     events.push({ step_id: stepId, kind: "tool_outcome", offset_ms: completionOffset, outcome: item.status });
   }
 }
@@ -79,7 +83,7 @@ export function renderRunReportJson(run: RunState): string {
     : run.stopped ? "stopped"
       : run.error ? "failed" : "done";
   return JSON.stringify({
-    schema_version: 2,
+    schema_version: 3,
     outcome,
     duration_ms: run.finishedMs === undefined ? null : milliseconds(run.finishedMs - run.startedMs),
     steps,

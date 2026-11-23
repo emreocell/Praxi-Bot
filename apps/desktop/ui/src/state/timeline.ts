@@ -36,6 +36,8 @@ export interface ToolItem {
   details?: unknown;
   /** The call went through an approval gate. */
   gated: boolean;
+  /** The observed decision for this gate, relative to the run's start. */
+  approvalDecision?: { outcome: "approved" | "denied"; offsetMs: number };
   error?: string;
   denyReason?: string;
 }
@@ -157,6 +159,9 @@ export function itemTs(i: TimelineItem): number {
 export function isExpiredReason(reason: string | null | undefined): boolean {
   return typeof reason === "string" && reason.startsWith("expired");
 }
+
+// Policy vetoes share the denial event: crates/agent-core/src/{approval,exec}.rs.
+const POLICY_DENIAL_REASON = "denied by policy";
 
 /** Tool names that spawn another agent (rendered as a subagent card). */
 export function isSubagentTool(name: string): boolean {
@@ -366,7 +371,8 @@ function reduce(
           status: "awaiting_approval",
           summary: e.summary,
           details: e.details,
-          gated: true
+          gated: true,
+          approvalDecision: undefined
         }))
       );
     case "tool_call_approved":
@@ -374,7 +380,11 @@ function reduce(
         updateTool(r, e.call_id, (t) => ({
           ...t,
           status: "running",
-          gated: true
+          gated: true,
+          approvalDecision: t.approvalDecision ?? {
+            outcome: "approved",
+            offsetMs: ts - r.startedMs
+          }
         }))
       );
     case "tool_call_denied":
@@ -385,7 +395,11 @@ function reduce(
           // A card nobody answered in time (or whose wait ended) is "expired", not a refusal.
           status: expired ? "expired" : "denied",
           denyReason: e.reason ?? undefined,
-          completedMs: ts
+          completedMs: ts,
+          approvalDecision:
+            t.status === "awaiting_approval" && !expired && e.reason !== POLICY_DENIAL_REASON
+              ? { outcome: "denied", offsetMs: ts - r.startedMs }
+              : t.approvalDecision
         }));
         return {
           ...denied,
@@ -924,6 +938,7 @@ export function restorePending(
       details: t.details ?? a.details,
       input: t.input ?? a.input ?? null,
       gated: true,
+      approvalDecision: undefined,
       completedMs: undefined
     });
     next = withRun(next, a.run_id, a.requested_at_ms, (r) => {
