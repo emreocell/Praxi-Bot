@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildRunReport, renderHtml, renderMarkdown, scrubText, type ReportText } from "./runReport.ts";
+import { renderRunReportJson } from "./runReportJson.ts";
 import type { RunState } from "../state/timeline.ts";
 
 const t = (key: string, v?: Record<string, unknown>) => `${key}${v ? JSON.stringify(v) : ""}`;
@@ -85,6 +86,45 @@ test("exported report never contains private data (canary)", () => {
   }
   assert.equal(report.outcome, "failed");
   assert.equal(report.steps.length, 5);
+});
+
+test("JSON schema v1 exposes only the documented run and step fields", () => {
+  const json = renderRunReportJson(run());
+  assert.deepEqual(JSON.parse(json), {
+    schema_version: 1,
+    outcome: "failed",
+    duration_ms: 4000,
+    steps: [
+      { id: "step-1", kind: "tool", offset_ms: 100, duration_ms: 40, outcome: "done", depends_on: null },
+      { id: "step-2", kind: "tool", offset_ms: 150, duration_ms: null, outcome: "error", depends_on: null },
+      { id: "step-3", kind: "tool", offset_ms: 200, duration_ms: null, outcome: "denied", depends_on: null },
+      { id: "step-4", kind: "question", offset_ms: 300, duration_ms: null, outcome: "answered", depends_on: null },
+      { id: "step-5", kind: "secret", offset_ms: 400, duration_ms: null, outcome: "stored", depends_on: null },
+    ]
+  });
+  for (const canary of [...Object.values(PRIVATE), KEY, "hunter2canary"]) {
+    assert.ok(!json.includes(canary), `JSON leaked ${canary}`);
+  }
+});
+
+test("JSON leaves unrecorded timing and dependencies unknown", () => {
+  const json = renderRunReportJson(run({
+    finishedMs: undefined,
+    error: null,
+    items: [{
+      kind: "tool", key: "private-item-id", callId: "private-call-id", name: "read_file",
+      input: {}, status: "awaiting_approval", requestedMs: 999, gated: true,
+    }]
+  }));
+  assert.deepEqual(JSON.parse(json), {
+    schema_version: 1,
+    outcome: "unfinished",
+    duration_ms: null,
+    steps: [{
+      id: "step-1", kind: "tool", offset_ms: null, duration_ms: null,
+      outcome: "awaiting_approval", depends_on: null,
+    }]
+  });
 });
 
 test("stopped and unfinished runs still produce a report", () => {

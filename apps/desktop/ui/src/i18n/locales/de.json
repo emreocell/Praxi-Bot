@@ -4053,6 +4053,7 @@
     "credentialSaved": "Du hast es gespeichert",
     "declined": "Nicht erlaubt",
     "exportHtml": "Als Webseite speichern",
+    "exportJson": "Als JSON speichern",
     "exportMarkdown": "Als Text speichern",
     "exported": "Bericht gespeichert",
     "footer": "Mit Praxi erstellt. Private Details sind nicht enthalten.",

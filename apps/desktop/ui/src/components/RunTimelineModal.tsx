@@ -10,13 +10,15 @@ import {
   saveTextFile,
   type ReportText
 } from "../lib/runReport";
+import { renderRunReportJson } from "../lib/runReportJson";
 import type { RunState } from "../state/timeline";
 import { DialogBody, DialogFooter, DialogHeader } from "./DialogParts";
 import { Modal } from "./Modal";
 import { useToast } from "./Toast";
+import dialog from "./Dialog.module.css";
 import styles from "./RunTimelineModal.module.css";
 
-/** What a bot did in one finished run, step by step, with a redacted HTML / Markdown export. */
+/** What a bot did in one finished run, step by step, with redacted report exports. */
 export function RunTimelineModal({
   run,
   botName,
@@ -57,17 +59,21 @@ export function RunTimelineModal({
     };
   }, [report, t, i18n.language]);
 
-  const save = (kind: "html" | "md") => {
+  const save = (kind: "html" | "md" | "json") => {
     if (!report || !run) return;
-    const body = kind === "html" ? renderHtml(report, text) : renderMarkdown(report, text);
-    saveTextFile(`run-${run.id.slice(0, 8)}.${kind}`, kind === "html" ? "text/html" : "text/markdown", body);
+    if (kind === "json") {
+      saveTextFile("run-report.json", "application/json", renderRunReportJson(run));
+    } else {
+      const body = kind === "html" ? renderHtml(report, text) : renderMarkdown(report, text);
+      saveTextFile(`run-${run.id.slice(0, 8)}.${kind}`, kind === "html" ? "text/html" : "text/markdown", body);
+    }
     toast.show(t("runReport.exported"), "success");
   };
 
   return (
     <Modal open={run !== null} onClose={onClose} size="md" label={t("runReport.title")}>
       {report ? (
-        <>
+        <div className={dialog.root}>
           <DialogHeader title={t("runReport.title")} subtitle={report.botName} onClose={onClose} />
           <DialogBody>
             <p className={styles.fact}>
@@ -95,11 +101,14 @@ export function RunTimelineModal({
             <Button variant="ghost" onClick={() => save("md")}>
               <Download aria-hidden="true" />{t("runReport.exportMarkdown")}
             </Button>
+            <Button variant="ghost" onClick={() => save("json")}>
+              <Download aria-hidden="true" />{t("runReport.exportJson")}
+            </Button>
             <Button onClick={() => save("html")}>
               <Download aria-hidden="true" />{t("runReport.exportHtml")}
             </Button>
           </DialogFooter>
-        </>
+        </div>
       ) : null}
     </Modal>
   );

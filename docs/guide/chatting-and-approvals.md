@@ -438,3 +438,47 @@ app become one row ("Playwright ×9"), a finished run shows one summary line
 ("16 steps · Playwright · 2 minutes") that opens the full timeline, and failed
 or refused steps and the step running right now are always visible. Opening a
 row shows the individual steps with their times.
+
+### Save a diagnostic timeline
+
+The timeline for a finished run can be saved as text (Markdown), a web page
+(HTML), or a JSON file. Saving a report downloads a local file; it does not
+send the run anywhere.
+
+#### JSON format, version 1
+
+```json
+{
+  "schema_version": 1,
+  "outcome": "done",
+  "duration_ms": 1400,
+  "steps": [
+    {
+      "id": "step-1",
+      "kind": "tool",
+      "offset_ms": 100,
+      "duration_ms": 250,
+      "outcome": "done",
+      "depends_on": null
+    }
+  ]
+}
+```
+
+- The run outcome is `done`, `failed`, `stopped`, or `unfinished`. The run
+  duration is in milliseconds, or `null` when unknown.
+- Step IDs are generated for the exported file, not taken from the run. Steps
+  are ordered by their requested time; order alone does not imply dependency.
+- Step kinds are `tool`, `question`, and `secret`. Tool outcomes are
+  `requested`, `awaiting_approval`, `running`, `denied`, `done`, `error`, or
+  `expired`. Questions use `answered` or `unanswered`; credential requests use
+  `stored`, `cancelled`, or `unanswered`. An unrecognized tool outcome is `null`.
+- `offset_ms` measures from the start of the run. Both step times are in
+  milliseconds, or `null` when unavailable or invalid.
+- `depends_on` is reserved for a list of export-local step IDs when a dependency
+  is known, or `null` when unknown. The current timeline does not retain causal
+  links, so the field is `null`; it is not an assertion of no dependencies.
+
+JSON excludes free text and internal IDs, including bot names, prompts, tool
+arguments and results, attachment URLs, and error messages. Use the text or web
+page report when you need human-readable steps and scrubbed error summaries.

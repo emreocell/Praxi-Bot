@@ -4053,6 +4053,7 @@
     "credentialSaved": "Sen kaydettin",
     "declined": "İzin verilmedi",
     "exportHtml": "Web sayfası olarak kaydet",
+    "exportJson": "JSON olarak kaydet",
     "exportMarkdown": "Metin olarak kaydet",
     "exported": "Rapor kaydedildi",
     "footer": "Praxi ile hazırlandı. Özel ayrıntılar dışarıda bırakıldı.",
