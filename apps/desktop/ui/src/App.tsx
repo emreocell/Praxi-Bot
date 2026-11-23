@@ -102,6 +102,7 @@ import { AddSkillModal } from "./components/AddSkillModal";
 import { useToast } from "./components/Toast";
 import { createChatFor, newChatFailureNeedsToast } from "./lib/newChat";
 import { LeaveGuardProvider, useLeaveRegistry } from "./state/LeaveGuard";
+import { SkillMarketModal } from "./components/SkillMarketModal";
 import { SkillsModal } from "./components/SkillsModal";
 import { useBotSkills } from "./state/useBotSkills";
 import { BotEditModal } from "./views/BotEditModal";
@@ -264,6 +265,7 @@ function AppShell() {
   const [botProfileOpen, setBotProfileOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [addSkillOpen, setAddSkillOpen] = useState(false);
+  const [marketOpen, setMarketOpen] = useState(false);
   // Review hooks (mock mode only): `?screen=botform&section=models`, `?screen=addskill&step=install`.
   const [review] = useState(() => {
     const q = isMockMode() && typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
@@ -725,7 +727,7 @@ function AppShell() {
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
   const closeSearch = useCallback(() => setBotSearch(null), []);
   // A dialog opened by a shortcut sits above the Search popover: close the popover instead of leaving it beneath.
-  const dialogOpen = settingsOpen !== null || appsOpen || newBotOpen || helpOpen || botEditOpen || botProfileOpen || skillsOpen || addSkillOpen;
+  const dialogOpen = settingsOpen !== null || appsOpen || newBotOpen || helpOpen || botEditOpen || botProfileOpen || skillsOpen || addSkillOpen || marketOpen;
   useEffect(() => {
     if (dialogOpen) setBotSearch(null);
   }, [dialogOpen]);
@@ -1250,6 +1252,13 @@ function AppShell() {
         skills={botSkills}
         onClose={() => setSkillsOpen(false)}
         onAddSkill={() => setAddSkillOpen(true)}
+        onBrowse={() => setMarketOpen(true)}
+      />
+      <SkillMarketModal
+        open={marketOpen && botInView}
+        client={client}
+        onClose={() => setMarketOpen(false)}
+        onChanged={() => void botSkills.reload()}
       />
       <AddSkillModal
         open={addSkillOpen && botInView}

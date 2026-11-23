@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { Library, Plus } from "lucide-react";
 import { type MutableRefObject, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
@@ -22,13 +22,16 @@ export function SkillsModal({
   botName,
   skills,
   onClose,
-  onAddSkill
+  onAddSkill,
+  onBrowse
 }: {
   open: boolean;
   botName: string;
   skills: BotSkillsState;
   onClose: () => void;
   onAddSkill: () => void;
+  /** Open the skill library (browse, install, update, remove). */
+  onBrowse: () => void;
 }) {
   const { t } = useTranslation();
   const closeGuard = useRef<() => void>(onClose);
@@ -41,6 +44,7 @@ export function SkillsModal({
           closeGuard={closeGuard}
           onClose={onClose}
           onAddSkill={onAddSkill}
+          onBrowse={onBrowse}
         />
       ) : null}
     </Modal>
@@ -52,7 +56,8 @@ function SkillsDialog({
   skills,
   closeGuard,
   onClose,
-  onAddSkill
+  onAddSkill,
+  onBrowse
 }: {
   botName: string;
   skills: BotSkillsState;
@@ -60,6 +65,7 @@ function SkillsDialog({
   closeGuard: MutableRefObject<() => void>;
   onClose: () => void;
   onAddSkill: () => void;
+  onBrowse: () => void;
 }) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -128,10 +134,16 @@ function SkillsDialog({
         closeDisabled={saving}
         onClose={requestClose}
         actions={
-          <Button size="sm" variant="secondary" onClick={onAddSkill} data-testid="skills-add-button">
-            <Plus aria-hidden="true" />
-            {t("addSkill.open")}
-          </Button>
+          <>
+            <Button size="sm" variant="secondary" onClick={onBrowse} disabled={saving} data-testid="skills-browse-button">
+              <Library aria-hidden="true" />
+              {t("bots.skills.browseLibrary")}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={onAddSkill} data-testid="skills-add-button">
+              <Plus aria-hidden="true" />
+              {t("addSkill.open")}
+            </Button>
+          </>
         }
       />
       <div className={dialogStyles.body} inert={saving}>

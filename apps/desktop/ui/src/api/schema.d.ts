@@ -3256,6 +3256,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/skills/market/index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Read the skill list: the bundled one, or a custom `https://` index. */
+        post: operations["market_index"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/market/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install or update a skill the owner confirmed. */
+        post: operations["market_install"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/market/installed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Skills installed from a skill source, with version, source and what they ask for. */
+        get: operations["market_installed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/market/installed/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove an installed skill; refused while bots use it unless `force` is explicit. */
+        delete: operations["market_uninstall"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/skills/market/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fetch one skill, scan it and compare it with the installed copy; nothing is installed. */
+        post: operations["market_preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/skills/{name}": {
         parameters: {
             query?: never;
@@ -6380,6 +6465,105 @@ export interface components {
             /** @description Always `shared` for owner-managed skills. */
             scope: string;
             version: string;
+        };
+        MarketIndexDto: {
+            name?: string | null;
+            skills: components["schemas"]["MarketSkillDto"][];
+            /** @description `bundled` or `custom`. */
+            source: string;
+        };
+        /** @description Which index to read. Empty means the bundled one. */
+        MarketIndexInput: {
+            /** @description Custom `https://` index address; the bundled index when absent. */
+            url?: string | null;
+        };
+        MarketInstallInput: {
+            /** @description `fingerprint` of the preview the owner confirmed. */
+            accept: string;
+            /** @description The owner accepts that an update asks for more than the installed copy. */
+            accept_more_access?: boolean;
+            /** @description The owner accepts a skill the scanner rates above Low. */
+            accept_risk?: boolean;
+            index_url?: string | null;
+            name: string;
+            update?: boolean;
+        };
+        MarketInstalledDto: {
+            commit?: string | null;
+            description: string;
+            installed_at: string;
+            name: string;
+            needs: string[];
+            /** @description `low`, `medium` or `high` at install time. */
+            risk: string;
+            /** @description Host of the source for `index` and `git`; empty otherwise. */
+            source_host: string;
+            /** @description `bundled`, `index`, `git` or `local`. */
+            source_kind: string;
+            /** @description `ok`, `missing` (folder gone) or `modified` (edited after install). */
+            state: string;
+            version: string;
+        };
+        MarketInstalledSummary: {
+            needs: string[];
+            /** @description `low`, `medium` or `high`. */
+            risk: string;
+            version: string;
+        };
+        /** @description What the skill would ask for, with the scan, shown before anything is installed. */
+        MarketPreviewDto: {
+            active: boolean;
+            added_needs: string[];
+            description: string;
+            files: number;
+            findings: components["schemas"]["HubFindingDto"][];
+            /** @description Pass back as `accept` to install exactly this content. */
+            fingerprint: string;
+            installed?: null | components["schemas"]["MarketInstalledSummary"];
+            name: string;
+            /**
+             * @description What the skill may ask the bot to do: `scripts`, `network`, `credentials`, `hidden`,
+             *     `steering`, `large` or `active_files`.
+             */
+            needs: string[];
+            removed_needs: string[];
+            /** @description An update asks for more than before: it needs `accept_more_access`. */
+            requires_access_confirmation: boolean;
+            /** @description Risk is above Low: the install needs `accept_risk`. */
+            requires_risk_acceptance: boolean;
+            /** @description `low`, `medium` or `high`. */
+            risk: string;
+            /** Format: int64 */
+            total_bytes: number;
+            version: string;
+        };
+        MarketPreviewInput: {
+            /** @description Index to read; the bundled one when absent. Ignored for an update. */
+            index_url?: string | null;
+            name: string;
+            /** @description Compare the installed copy with what its source offers now. */
+            update?: boolean;
+        };
+        MarketPreviewResponse: {
+            preview?: null | components["schemas"]["MarketPreviewDto"];
+            /** @description An update check found nothing newer. */
+            up_to_date: boolean;
+        };
+        /** @description One skill an index offers. Display text only; nothing here was scanned yet. */
+        MarketSkillDto: {
+            /**
+             * @description A skill with this name already exists (built in or made by the owner): it cannot be
+             *     installed over.
+             */
+            already_available: boolean;
+            author?: string | null;
+            description: string;
+            homepage?: string | null;
+            /** @description Installed from a skill source (can be updated or removed here). */
+            installed: boolean;
+            license?: string | null;
+            name: string;
+            tags: string[];
         };
         /** @description Body of `POST /v1/mcp/servers/{name}/approve-tool-changes`. */
         McpApproveChangesInput: {
@@ -16208,6 +16392,253 @@ export interface operations {
                 };
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    market_index: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketIndexInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketIndexDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    market_install: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketInstallInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketInstalledDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    market_installed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketInstalledDto"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    market_uninstall: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteSkillResult"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteSkillResult"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    market_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketPreviewInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketPreviewResponse"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
