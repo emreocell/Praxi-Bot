@@ -1,0 +1,236 @@
+{
+  "version": 1,
+  "name": "Praxi-Bot skills",
+  "description": "Skills that ship in the Praxi-Bot repository.",
+  "homepage": "https://github.com/emreocell/Praxi-Bot",
+  "skills": [
+    {
+      "name": "blocked-page-recovery",
+      "description": "Page blocked (403, paywall)? Try archives or feeds.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/blocked-page-recovery",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "competitor-news-monitor",
+      "description": "Watch companies for key news; short cited digests.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/competitor-news-monitor",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "cookie-consent-banners",
+      "description": "Dismiss cookie and consent banners choosing the most privacy-preserving option.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/cookie-consent-banners",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "custom-dropdowns",
+      "description": "Operate non-native dropdowns, comboboxes and autocomplete lists built from divs.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/custom-dropdowns",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "date-pickers",
+      "description": "Enter dates in text inputs and calendar popups, including format and month navigation pitfalls.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/date-pickers",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "document-to-action-items",
+      "description": "Cited deadlines, obligations and tasks from a document.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/document-to-action-items",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "email-inbox-triage",
+      "description": "Sort an inbox and draft replies; never sends unasked.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/email-inbox-triage",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "github-basics",
+      "description": "Navigate github.com repositories, issues, pull requests and search efficiently.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/github-basics",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "grounded-citations",
+      "description": "Numbered citations and a Sources list from pages you read.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/grounded-citations",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "linux-file-upload-dialog",
+      "description": "Operate native GTK and Qt file chooser dialogs on Linux after clicking a web upload button.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/linux-file-upload-dialog",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "maps",
+      "description": "Places, directions, distance and nearby spots (OpenStreetMap).",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/maps",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "meeting-action-items",
+      "description": "Meeting notes into decisions, owners and follow-up drafts.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/meeting-action-items",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "product-price-monitor",
+      "description": "Watch a price or stock level and alert at the target.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/product-price-monitor",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "shadow-dom-and-iframes",
+      "description": "Reach elements hidden inside shadow DOM or iframes when browser_snapshot does not list them.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/shadow-dom-and-iframes",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "sign-in-forms",
+      "description": "Handle multi-step sign-in flows, SSO redirects, and 2FA prompts safely using stored fill secrets.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/sign-in-forms",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "web-tables-and-spreadsheets",
+      "description": "Navigate, read, and edit grid cells, paginated tables, and spreadsheet web apps reliably.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/web-tables-and-spreadsheets",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "weekly-review-planning",
+      "description": "Weekly review: commitments, stalled work, next-week plan.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/weekly-review-planning",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "windows-file-upload-dialog",
+      "description": "Handle the native Windows \"Open\" file picker that appears after clicking an upload button.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/windows-file-upload-dialog",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "windows-settings-navigation",
+      "description": "Open and navigate the Windows Settings app via ms-settings URIs and its accessibility tree.",
+      "git": "https://github.com/emreocell/Praxi-Bot.git",
+      "commit": "0c4819d19c892c7b1c7f7ab0d2a7c294bb4da97c",
+      "subdir": "skills/windows-settings-navigation",
+      "tags": [
+        "praxi"
+      ],
+      "author": "Praxi-Bot",
+      "license": "Apache-2.0"
+    }
+  ]
+}

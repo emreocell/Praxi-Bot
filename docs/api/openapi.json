@@ -11372,6 +11372,357 @@
         ]
       }
     },
+    "/v1/skills/market/index": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Read the skill list: the bundled one, or a custom `https://` index.",
+        "operationId": "market_index",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarketIndexInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketIndexDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/skills/market/install": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Install or update a skill the owner confirmed.",
+        "operationId": "market_install",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarketInstallInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketInstalledDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/skills/market/installed": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Skills installed from a skill source, with version, source and what they ask for.",
+        "operationId": "market_installed",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MarketInstalledDto"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/skills/market/installed/{name}": {
+      "delete": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Remove an installed skill; refused while bots use it unless `force` is explicit.",
+        "operationId": "market_uninstall",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSkillResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSkillResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/skills/market/preview": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Fetch one skill, scan it and compare it with the installed copy; nothing is installed.",
+        "operationId": "market_preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarketPreviewInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketPreviewResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/skills/{name}": {
       "put": {
         "tags": [
@@ -20199,6 +20550,349 @@
           },
           "version": {
             "type": "string"
+          }
+        }
+      },
+      "MarketIndexDto": {
+        "type": "object",
+        "required": [
+          "source",
+          "skills"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketSkillDto"
+            }
+          },
+          "source": {
+            "type": "string",
+            "description": "`bundled` or `custom`."
+          }
+        }
+      },
+      "MarketIndexInput": {
+        "type": "object",
+        "description": "Which index to read. Empty means the bundled one.",
+        "properties": {
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Custom `https://` index address; the bundled index when absent."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarketInstallInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "accept"
+        ],
+        "properties": {
+          "accept": {
+            "type": "string",
+            "description": "`fingerprint` of the preview the owner confirmed."
+          },
+          "accept_more_access": {
+            "type": "boolean",
+            "description": "The owner accepts that an update asks for more than the installed copy."
+          },
+          "accept_risk": {
+            "type": "boolean",
+            "description": "The owner accepts a skill the scanner rates above Low."
+          },
+          "index_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "update": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarketInstalledDto": {
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "version",
+          "source_kind",
+          "source_host",
+          "risk",
+          "needs",
+          "state",
+          "installed_at"
+        ],
+        "properties": {
+          "commit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "installed_at": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "needs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "risk": {
+            "type": "string",
+            "description": "`low`, `medium` or `high` at install time."
+          },
+          "source_host": {
+            "type": "string",
+            "description": "Host of the source for `index` and `git`; empty otherwise."
+          },
+          "source_kind": {
+            "type": "string",
+            "description": "`bundled`, `index`, `git` or `local`."
+          },
+          "state": {
+            "type": "string",
+            "description": "`ok`, `missing` (folder gone) or `modified` (edited after install)."
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "MarketInstalledSummary": {
+        "type": "object",
+        "required": [
+          "version",
+          "risk",
+          "needs"
+        ],
+        "properties": {
+          "needs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "risk": {
+            "type": "string",
+            "description": "`low`, `medium` or `high`."
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "MarketPreviewDto": {
+        "type": "object",
+        "description": "What the skill would ask for, with the scan, shown before anything is installed.",
+        "required": [
+          "name",
+          "description",
+          "version",
+          "risk",
+          "active",
+          "files",
+          "total_bytes",
+          "fingerprint",
+          "findings",
+          "needs",
+          "requires_risk_acceptance",
+          "added_needs",
+          "removed_needs",
+          "requires_access_confirmation"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "added_needs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "files": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HubFindingDto"
+            }
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "Pass back as `accept` to install exactly this content."
+          },
+          "installed": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MarketInstalledSummary",
+                "description": "The installed copy, for an update."
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "needs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the skill may ask the bot to do: `scripts`, `network`, `credentials`, `hidden`,\n`steering`, `large` or `active_files`."
+          },
+          "removed_needs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires_access_confirmation": {
+            "type": "boolean",
+            "description": "An update asks for more than before: it needs `accept_more_access`."
+          },
+          "requires_risk_acceptance": {
+            "type": "boolean",
+            "description": "Risk is above Low: the install needs `accept_risk`."
+          },
+          "risk": {
+            "type": "string",
+            "description": "`low`, `medium` or `high`."
+          },
+          "total_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "MarketPreviewInput": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "index_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Index to read; the bundled one when absent. Ignored for an update."
+          },
+          "name": {
+            "type": "string"
+          },
+          "update": {
+            "type": "boolean",
+            "description": "Compare the installed copy with what its source offers now."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarketPreviewResponse": {
+        "type": "object",
+        "required": [
+          "up_to_date"
+        ],
+        "properties": {
+          "preview": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MarketPreviewDto"
+              }
+            ]
+          },
+          "up_to_date": {
+            "type": "boolean",
+            "description": "An update check found nothing newer."
+          }
+        }
+      },
+      "MarketSkillDto": {
+        "type": "object",
+        "description": "One skill an index offers. Display text only; nothing here was scanned yet.",
+        "required": [
+          "name",
+          "description",
+          "tags",
+          "installed",
+          "already_available"
+        ],
+        "properties": {
+          "already_available": {
+            "type": "boolean",
+            "description": "A skill with this name already exists (built in or made by the owner): it cannot be\ninstalled over."
+          },
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "homepage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "installed": {
+            "type": "boolean",
+            "description": "Installed from a skill source (can be updated or removed here)."
+          },
+          "license": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
