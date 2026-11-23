@@ -220,6 +220,9 @@ pub fn from_provider_error(e: &ProviderError) -> ConnectionTestReport {
             Some(429),
             "too many requests or limit reached".to_owned(),
         ),
+        // The provider layer folds a 402 and an `insufficient_quota` 429 into this one
+        // error, so the real status is gone; report only the outcome.
+        ProviderError::Quota => (ConnectionOutcome::QuotaExceeded, None, e.to_string()),
         ProviderError::Upstream { status, message } => (
             ConnectionOutcome::ProviderOutage,
             Some(*status),
