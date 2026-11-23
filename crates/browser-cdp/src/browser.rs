@@ -39,6 +39,55 @@ pub struct Browser {
     _proxy: Option<crate::proxy::FilterProxy>,
 }
 
+/// Close a popup a page opened (`--disable-popup-blocking` lets pages open
+/// them) as soon as it shows anything other than a blank or public web page.
+/// Tabs we open ourselves have no opener and were already checked by the tool.
+/// Residual: the browser has started that first request when the target
+/// reports its address, so one request may leave before the tab is closed.
+async fn spawn_popup_guard(client: &Arc<CdpClient>) {
+    let mut rx = client.subscribe();
+    if client
+        .send("Target.setDiscoverTargets", json!({"discover": true}))
+        .await
+        .is_err()
+    {
+        tracing::warn!("could not watch popups opened by pages");
+        return;
+    }
+    let weak = Arc::downgrade(client);
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(ev) => {
+                    if let Some(id) = popup_to_close(&ev.method, &ev.params) {
+                        let Some(c) = weak.upgrade() else { break };
+                        let _ = c.send("Target.closeTarget", json!({"targetId": id})).await;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+/// The target to close for one browser event, if it is a page opened by
+/// another page that now shows a non-public address.
+fn popup_to_close(method: &str, params: &Value) -> Option<String> {
+    if !matches!(method, "Target.targetCreated" | "Target.targetInfoChanged") {
+        return None;
+    }
+    let info = &params["targetInfo"];
+    let opened_by_page = info["openerId"].as_str().is_some_and(|o| !o.is_empty());
+    if info["type"].as_str() != Some("page")
+        || !opened_by_page
+        || crate::web_url::popup_url_allowed(info["url"].as_str().unwrap_or_default())
+    {
+        return None;
+    }
+    info["targetId"].as_str().map(str::to_owned)
+}
+
 impl Browser {
     /// Launch Chrome/Edge with a fresh isolated profile (unless `user_data_dir` is given).
     pub async fn launch(mut opts: LaunchOptions) -> Result<Self> {
@@ -124,6 +173,9 @@ impl Browser {
             Ok((client, endpoint)) => {
                 if let Some(net) = &opts.served {
                     client.set_destination_check(net.check.clone());
+                }
+                if opts.served.is_none() {
+                    spawn_popup_guard(&client).await;
                 }
                 // A page must not be able to put a file on the owner's disk:
                 // every download is cancelled (the events stay on for tests
@@ -410,5 +462,47 @@ impl Drop for Browser {
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod popup_guard_tests {
+    use super::popup_to_close;
+    use serde_json::json;
+
+    fn ev(url: &str, opener: Option<&str>, kind: &str) -> serde_json::Value {
+        json!({"targetInfo": {"targetId": "T1", "type": kind, "url": url, "openerId": opener}})
+    }
+
+    #[test]
+    fn a_popup_to_a_private_address_is_closed_a_public_one_is_not() {
+        for url in [
+            "http://localhost:8080/admin",
+            "file:///etc/passwd",
+            "http://192.168.0.1/",
+        ] {
+            assert_eq!(
+                popup_to_close("Target.targetInfoChanged", &ev(url, Some("P"), "page")).as_deref(),
+                Some("T1"),
+                "{url}"
+            );
+        }
+        assert!(popup_to_close("Target.targetCreated", &ev("", Some("P"), "page")).is_none());
+        assert!(
+            popup_to_close(
+                "Target.targetCreated",
+                &ev("https://example.com/", Some("P"), "page")
+            )
+            .is_none()
+        );
+        // Our own tab (no opener) and non-page targets are not this guard's business.
+        assert!(popup_to_close("Target.targetCreated", &ev("file:///x", None, "page")).is_none());
+        assert!(
+            popup_to_close(
+                "Target.targetCreated",
+                &ev("file:///x", Some("P"), "service_worker")
+            )
+            .is_none()
+        );
     }
 }

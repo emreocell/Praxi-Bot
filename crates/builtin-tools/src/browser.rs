@@ -1548,9 +1548,14 @@ struct EvalIn {
     js: String,
 }
 
-/// Only `http`, `https` and `about:blank` may be opened. `file:`, `javascript:`,
-/// `data:`, `chrome:` and friends would bypass the Fs and Script permission
-/// categories (and `view-source:`/`blob:` can wrap them).
+pub use browser_cdp::is_public_web_url;
+
+/// Only public `http(s)` web addresses and `about:blank` may be opened.
+/// `file:`, `javascript:`, `data:`, `chrome:` and friends would bypass the Fs
+/// and Script permission categories (and `view-source:`/`blob:` can wrap them);
+/// `localhost`, this computer's network, link-local, odd IP spellings and
+/// addresses with a user name are private machine data, which only the
+/// owner's own browser opens (after asking).
 fn check_open_url(url: &str) -> Result<(), ToolError> {
     // Browsers drop ASCII tab/newline anywhere in a URL and trim control
     // characters and spaces at the ends, so a `java<newline>script:` URL is still a scheme.
@@ -1560,17 +1565,20 @@ fn check_open_url(url: &str) -> Result<(), ToolError> {
         .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
         .collect();
     let lower = cleaned.to_ascii_lowercase();
-    let ok = lower == "about:blank"
-        || ["http://", "https://"]
-            .iter()
-            .any(|p| lower.starts_with(p) && lower.len() > p.len());
-    if ok {
-        Ok(())
-    } else {
-        Err(ToolError::InvalidInput(
-            "browser_open only accepts full http:// or https:// web addresses (or about:blank). Files on this computer (file:), scripts and browser-internal pages are never opened this way: if the user wants a local file read, use the file tools; if the address lacks https://, add it".into(),
-        ))
+    if lower == "about:blank" || is_public_web_url(&cleaned) {
+        return Ok(());
     }
+    if ["http://", "https://"]
+        .iter()
+        .any(|p| lower.starts_with(p) && lower.len() > p.len())
+    {
+        return Err(ToolError::InvalidInput(
+            "browser_open only opens public web addresses. This one points at this computer, a private network or carries a user name, so it is not opened here. Do not retry or rewrite it: tell the user, who can open it in their own browser".into(),
+        ));
+    }
+    Err(ToolError::InvalidInput(
+        "browser_open only accepts full http:// or https:// web addresses (or about:blank). Files on this computer (file:), scripts and browser-internal pages are never opened this way: if the user wants a local file read, use the file tools. If a public website address only lacks https://, add it; never turn a local or network address into a web address".into(),
+    ))
 }
 
 /// Type the owner's fill secret `name` into field `r`.
@@ -2745,6 +2753,15 @@ mod tests {
             "example.com",
             "https://",
             "",
+            "http://localhost:3000/a",
+            "http://127.0.0.1:8080",
+            "http://0x7f.1/",
+            "http://2130706433/",
+            "http://192.168.1.1/admin",
+            "http://169.254.169.254/latest/meta-data",
+            "http://[::1]/",
+            "https://user:pw@example.com/",
+            "http://printer.local/",
         ] {
             let err = get(&t, "browser_open")
                 .call(&ctx, json!({"url": bad}))
@@ -2763,8 +2780,22 @@ mod tests {
             err.contains("file tools") && err.contains("https://"),
             "{err}"
         );
+        // The sentence must not coach the model into https-ing a local address.
+        assert!(
+            err.contains("never turn a local or network address"),
+            "{err}"
+        );
+        let local = get(&t, "browser_open")
+            .call(&ctx, json!({"url": "http://localhost:3000/a"}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            local.contains("own browser") && !local.contains("add it"),
+            "{local}"
+        );
         for good in [
-            "http://localhost:3000/a",
+            "http://example.org:3000/a",
             "HTTPS://example.com",
             "about:blank",
         ] {

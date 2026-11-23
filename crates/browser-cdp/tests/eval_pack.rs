@@ -20,7 +20,7 @@ const THANKS: &str = "<title>Thanks</title><h1>Thanks</h1>";
 const STUCK: &str = "<title>Stuck</title><h1>Hello from a slow page</h1>\
 <img src=\"/hold.png\" width=1 height=1><button>Ok</button>";
 
-const BANNER: &str = "<title>News</title><h1>Daily news</h1><p>Top story of the day.</p><div id=cookies role=dialog aria-label=\"Cookie notice\"><p>We use cookies.</p><button onclick=\"document.getElementById('cookies').remove();document.getElementById('state').textContent='Preferences saved'\">Accept all</button><button onclick=\"document.getElementById('cookies').remove()\">Reject</button></div><p id=state></p>";
+const BANNER: &str = "<title>News</title><h1>Daily news</h1><p>Top story of the day.</p><div id=cookies role=dialog aria-label=\"Cookie notice\"><p>We use cookies.</p><button onclick=\"document.getElementById('cookies').remove();document.getElementById('state').textContent='Preferences saved'\">Accept all</button><button onclick=\"document.getElementById('cookies').remove();document.getElementById('state').textContent='Only necessary cookies'\">Reject non-essential</button></div><p id=state></p>";
 const WIZARD1: &str = "<title>Step 1</title><h1>Step 1 of 2</h1><form action=\"/wizard2\" method=\"get\"><label>Full name <input name=who type=text></label><button type=submit>Next</button></form>";
 const WIZARD2: &str = "<title>Step 2</title><h1>Step 2 of 2</h1><form action=\"/wizard-done\" method=\"get\"><label>Plan <select name=plan><option value=free>Free</option><option value=pro>Pro</option></select></label><label><input type=checkbox name=terms value=yes> I accept the terms</label><button type=submit>Finish</button></form>";
 const WIZARD_DONE: &str = "<title>Done</title><h1>All done</h1>";
@@ -261,12 +261,13 @@ async fn a_cookie_banner_is_dismissed_with_its_button_then_the_task_continues() 
     let s = snap(&page).await;
     assert!(s.render().contains("We use cookies"), "{}", s.render());
     let r = page
-        .click(&ref_of(&s, "button", "Accept all"))
+        .click(&ref_of(&s, "button", "Reject non-essential"))
         .await
         .unwrap();
     assert!(r.ok, "{:?}", r.error);
     let text = r.snapshot.render();
     assert!(!text.contains("We use cookies"), "{text}");
+    assert!(text.contains("Only necessary cookies"), "{text}");
     assert!(text.contains("Top story of the day"), "{text}");
     let _ = b.close().await;
 }
