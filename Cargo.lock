@@ -2345,6 +2345,7 @@ dependencies = [
  "getrandom 0.3.4",
  "open",
  "parking_lot",
+ "process-guard",
  "serde",
  "serde_json",
  "storage",

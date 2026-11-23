@@ -24,6 +24,7 @@ support-logs = { path = "../../crates/support-logs", version = "0.1.0" }
 getrandom = "0.3"
 open = { version = "5", features = ["shellexecute-on-windows"] }
 parking_lot.workspace = true
+process-guard = { path = "../../crates/process-guard", version = "0.1.0" }
 serde.workspace = true
 serde_json.workspace = true
 storage.workspace = true
@@ -49,6 +50,7 @@ windows = { workspace = true, features = [
     "Win32_Security",
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 

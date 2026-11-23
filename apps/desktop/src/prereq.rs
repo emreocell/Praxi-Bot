@@ -10,6 +10,7 @@
 //! a tiny probe file that is removed again, the only network use is none. The one network action,
 //! opening the official Microsoft `WebView2` page, is a separate explicit command.
 
+#[cfg(test)]
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -255,7 +256,8 @@ pub fn gather(data_dir: &Path, sidecar: &Path, port: u16, daemon_running: bool) 
         now_unix: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs()),
-        port_busy: !daemon_running && TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_err(),
+        // A busy preferred port is recoverable: startup reserves a free loopback port.
+        port_busy: !daemon_running && process_guard::lifecycle::bind(port).is_err(),
     }
 }
 
@@ -462,12 +464,12 @@ mod tests {
     }
 
     #[test]
-    fn a_taken_port_is_seen_but_skipped_while_our_service_runs() {
+    fn a_taken_preferred_port_does_not_block_startup_when_a_fallback_is_available() {
         let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = l.local_addr().unwrap().port();
         let dir = std::env::temp_dir();
         let me = std::env::current_exe().unwrap();
-        assert!(gather(&dir, &me, port, false).port_busy);
+        assert!(!gather(&dir, &me, port, false).port_busy);
         assert!(!gather(&dir, &me, port, true).port_busy);
     }
 

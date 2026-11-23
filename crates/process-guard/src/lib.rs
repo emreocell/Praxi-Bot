@@ -30,6 +30,11 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+pub mod lifecycle;
+
+#[cfg(windows)]
+pub mod supervision;
+
 #[cfg(windows)]
 mod windows;
 

@@ -5,6 +5,8 @@ pub mod command_names;
 pub mod control;
 pub mod daemon;
 mod deep_link;
+#[cfg(windows)]
+mod lifecycle_windows;
 pub mod listener;
 mod microphone;
 pub mod popout;
@@ -1292,6 +1294,8 @@ pub fn run() {
             if app.state::<deep_link::Pending>().has_pending() {
                 focus_main_for_launch(&app_handle, true);
             }
+            #[cfg(windows)]
+            lifecycle_windows::install(&app_handle, Arc::clone(&daemon_for_setup))?;
             #[cfg(windows)]
             microphone::install(&app_handle)?;
             control_for_setup.set_sink(Arc::new(TauriOverlaySink {

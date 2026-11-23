@@ -79,14 +79,28 @@ fn start_daemon_with(
     data: &std::path::Path,
     extra: &[&str],
 ) -> (Daemon, SocketAddr, Instant, std::thread::JoinHandle<String>) {
+    start_daemon_on(data, extra, 0)
+}
+
+fn start_daemon_on(
+    data: &std::path::Path,
+    extra: &[&str],
+    port: u16,
+) -> (Daemon, SocketAddr, Instant, std::thread::JoinHandle<String>) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_bot"));
     command
         .arg("--data-dir")
         .arg(data)
-        .args(["--secrets-backend", "file", "--port", "0", "serve"])
+        .args(["--secrets-backend", "file", "--port"])
+        .arg(port.to_string())
+        .arg("serve")
         .args(extra)
         .env("BOT_SECRETS_PASSPHRASE", "first-run-smoke-test-only")
-        .stdin(Stdio::null())
+        .stdin(if extra.contains(&"--owner-key-stdin") {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     for name in [
@@ -101,6 +115,9 @@ fn start_daemon_with(
         command.env_remove(name);
     }
     let mut daemon = Daemon(command.spawn().expect("start bot serve"));
+    if let Some(stdin) = daemon.0.stdin.as_mut() {
+        writeln!(stdin, "{}", "a".repeat(64)).unwrap();
+    }
 
     // The daemon announces its (free) port on stdout; keep draining so it never blocks.
     let stdout = daemon.0.stdout.take().unwrap();
@@ -132,6 +149,52 @@ fn start_daemon_with(
     assert!(addr.ip().is_loopback());
 
     (daemon, addr, deadline, reader)
+}
+
+#[test]
+fn desktop_sidecar_falls_back_discovers_and_stops_through_its_private_pipe() {
+    let busy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let requested = busy.local_addr().unwrap().port();
+    let data = tempfile::tempdir().unwrap();
+    let (mut daemon, addr, _, reader) = start_daemon_on(
+        data.path(),
+        &["--owner-key-stdin", "--shutdown-grace", "1"],
+        requested,
+    );
+    assert_ne!(addr.port(), requested);
+    let endpoint = process_guard::lifecycle::discover(data.path()).expect("live discovery");
+    assert_eq!(endpoint.port, addr.port());
+    assert_eq!(endpoint.pid, daemon.0.id());
+
+    let client = Command::new(env!("CARGO_BIN_EXE_bot"))
+        .arg("--data-dir")
+        .arg(data.path())
+        .args(["--json", "status"])
+        .env_remove("BOT_URL")
+        .env_remove("BOT_PORT")
+        .env_remove("BOT_API_TOKEN")
+        .output()
+        .unwrap();
+    assert!(
+        client.status.success(),
+        "{}",
+        String::from_utf8_lossy(&client.stderr)
+    );
+
+    let second = Command::new(env!("CARGO_BIN_EXE_bot"))
+        .arg("--data-dir")
+        .arg(data.path())
+        .arg("serve")
+        .output()
+        .unwrap();
+    assert!(!second.status.success());
+    assert!(String::from_utf8_lossy(&second.stderr).contains("already using this data folder"));
+
+    daemon.0.stdin.take().unwrap().write_all(b"stop\n").unwrap();
+    let status = wait_for_exit(&mut daemon.0);
+    assert!(status.success(), "{status:?}");
+    assert!(reader.join().unwrap().contains("stopped;"));
+    assert!(process_guard::lifecycle::discover(data.path()).is_none());
 }
 
 /// Stop the daemon and check it ends (and releases the port).

@@ -10,40 +10,34 @@
 
 !include "FileFunc.nsh"
 
-; Stop ONLY the Praxi-Bot processes that run from $INSTDIR (never by image name: an unrelated
-; bot.exe of another program or of another user session must not be touched). A helper script is
-; written to $TEMP (works in installer and uninstaller, no non-ASCII/quoting issues because the
-; install dir is passed as one quoted argument). Steps: CloseMainWindow (graceful quit), wait up
-; to 10 s, then force-kill (with child tree) only the pids whose ExecutablePath is under $INSTDIR.
-; Does nothing when the app is not running.
-!macro PRAXI_STOP_OUR_PROCESSES
-  Push $0
-  Push $1
-  GetTempFileName $0
-  Delete "$0"
-  StrCpy $0 "$0.ps1"
-  FileOpen $1 "$0" w
-  FileWrite $1 "param([string]$$Dir)$\r$\n"
-  FileWrite $1 "$$ErrorActionPreference='SilentlyContinue'$\r$\n"
-  FileWrite $1 "$$Dir=$$Dir.Trim().Trim([char]34).TrimEnd('\')$\r$\n"
-  FileWrite $1 "if(-not $$Dir){exit 0}$\r$\n"
-  FileWrite $1 "$$t=@((Join-Path $$Dir 'bot-desktop.exe'),(Join-Path $$Dir 'bot.exe'))$\r$\n"
-  FileWrite $1 "function Ours{@(Get-CimInstance Win32_Process|Where-Object{$$_.ExecutablePath -and ($$t -contains $$_.ExecutablePath)})}$\r$\n"
-  FileWrite $1 "Ours|ForEach-Object{(Get-Process -Id $$_.ProcessId).CloseMainWindow()|Out-Null}$\r$\n"
-  FileWrite $1 "for($$i=0;$$i -lt 20 -and (Ours).Count -gt 0;$$i++){Start-Sleep -Milliseconds 500}$\r$\n"
-  FileWrite $1 "Ours|ForEach-Object{& ($$env:SystemRoot+'\System32\taskkill.exe') /PID $$_.ProcessId /T /F|Out-Null}$\r$\n"
-  FileWrite $1 "exit 0$\r$\n"
-  FileClose $1
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$0" -Dir "$INSTDIR"'
-  Pop $1
-  Delete "$0"
-  Pop $1
-  Pop $0
+; Literal language IDs work even when Tauri includes hooks before MUI languages.
+LangString PraxiStopFailed 1033 "Praxi could not stop. Close Praxi and any Praxi command windows, then try again. Your data has not been removed."
+LangString PraxiStopFailed 1055 "Praxi durdurulamadı. Praxi'yi ve açık Praxi komut pencerelerini kapatıp yeniden deneyin. Verileriniz silinmedi."
+LangString PraxiStopFailed 1031 "Praxi konnte nicht beendet werden. Schließen Sie Praxi und alle Praxi-Konsolenfenster und versuchen Sie es erneut. Ihre Daten wurden nicht gelöscht."
+
+!macro PRAXI_STOP_INSTALLATION HELPER
+  ; The helper matches full executable paths and uses owner-only native stop events.
+  ; It waits for graceful shutdown, then process handles/jobs bound the fallback.
+  ${If} ${FileExists} "$INSTDIR\bot-desktop.exe"
+    nsExec::ExecToStack '"${HELPER}" --stop-for-uninstall "$INSTDIR"'
+    Pop $R0
+    Pop $R1
+    ${If} $R0 != 0
+      ; Fail closed: never remove binaries or data while Praxi may still be running.
+      MessageBox MB_OK|MB_ICONEXCLAMATION "$(PraxiStopFailed)" /SD IDOK
+      Abort
+    ${EndIf}
+  ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
-  ; Stop the Praxi-Bot desktop/daemon processes running from $INSTDIR before replacing binaries
-  !insertmacro PRAXI_STOP_OUR_PROCESSES
+  ; Run this version's helper; old versions may ignore the flag and open the UI.
+  ; MAINBINARYSRCPATH is provided by Tauri's installer template.
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=praxi-lifecycle.exe "${MAINBINARYSRCPATH}"
+  !insertmacro PRAXI_STOP_INSTALLATION "$PLUGINSDIR\praxi-lifecycle.exe"
+  SetOutPath "$INSTDIR"
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
@@ -60,8 +54,7 @@
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  ; Stop running desktop shell and bundled daemon before uninstalling
-  !insertmacro PRAXI_STOP_OUR_PROCESSES
+  !insertmacro PRAXI_STOP_INSTALLATION "$INSTDIR\bot-desktop.exe"
 
   ; Always clean up the per-user autostart registry entry on uninstall
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Praxi-Bot"

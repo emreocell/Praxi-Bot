@@ -639,31 +639,10 @@ fn explain_import_error(e: Box<dyn std::error::Error>) -> Box<dyn std::error::Er
 }
 
 /// Hold the daemon lock file in `data_dir` for the life of the returned file.
-/// `bot serve` calls this at start. `Ok(None)` means the lock could not be
-/// created at all (read-only directory); `Err` means another process (a running
-/// daemon or a restore in progress) holds it, and the caller must not start.
+/// `bot serve` calls this at start. Failure to create or acquire the lock is
+/// fatal: running without ownership could open the same database twice.
 pub fn hold_daemon_lock(data_dir: &Path) -> crate::Result<Option<std::fs::File>> {
-    if std::fs::create_dir_all(data_dir).is_err() {
-        return Ok(None);
-    }
-    let Ok(file) = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(data_dir.join(DAEMON_LOCK))
-    else {
-        return Ok(None);
-    };
-    if file.try_lock().is_ok() {
-        Ok(Some(file))
-    } else {
-        Err(format!(
-            "another Praxi process (a running daemon or a backup restore) is using {}; stop it first",
-            data_dir.display()
-        )
-        .into())
-    }
+    Ok(Some(process_guard::lifecycle::acquire(data_dir)?))
 }
 
 /// Read-only check used before anything is created: refuse while a daemon
@@ -1033,9 +1012,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let first = hold_daemon_lock(dir.path()).unwrap().expect("lock");
         let err = hold_daemon_lock(dir.path()).unwrap_err().to_string();
-        assert!(err.contains("another Praxi process"), "{err}");
+        assert!(err.contains("already using this data folder"), "{err}");
         drop(first);
         assert!(hold_daemon_lock(dir.path()).unwrap().is_some());
+    }
+
+    #[test]
+    fn serve_never_runs_without_a_writable_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("not-a-folder");
+        std::fs::write(&file, "fixture").unwrap();
+        assert!(hold_daemon_lock(&file).is_err());
     }
 
     #[test]

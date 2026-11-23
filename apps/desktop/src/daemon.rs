@@ -1,7 +1,7 @@
 //! Daemon lifecycle for the desktop app (task 017).
 //!
 //! The app talks to `bot serve` over loopback HTTP.  [`connect`] probes the
-//! configured port; if no daemon answers it starts `bot serve` as a child
+//! per-data-folder discovery record; if no daemon answers it starts `bot serve` as a child
 //! process (a "sidecar": the `bot` binary next to the app), waits until it is
 //! healthy and reads the per-install bearer token from `<data dir>/api-token`.
 //! A daemon the app started is stopped again when the app exits; one that was
@@ -55,6 +55,9 @@ pub struct DaemonHandle {
     /// retry) never start two daemons.
     connecting: tokio::sync::Mutex<()>,
     child: Mutex<Option<Child>>,
+    #[cfg(windows)]
+    job: Mutex<Option<process_guard::supervision::Job>>,
+    shutting_down: AtomicBool,
     fake: Mutex<bool>,
     /// Safe mode for every daemon this app starts, until a restart says otherwise. Held in
     /// memory only: a fresh launch of the app always starts normally.
@@ -80,7 +83,7 @@ pub enum Stage {
     Idle,
     /// The OS is still creating the process (antivirus scans happen here).
     Spawning,
-    /// The process runs; its health probe does not answer yet.
+    /// The process runs; its health probe has not signalled readiness yet.
     Waiting,
     /// Connected.
     Ready,
@@ -286,8 +289,43 @@ fn classify_spawn_error(e: &std::io::Error, sidecar_exists: bool) -> Stage {
 impl DaemonHandle {
     /// Stop the daemon if (and only if) this app started it.
     pub fn stop(&self) {
-        if let Some(mut child) = self.child.lock().take() {
-            let _ = child.kill();
+        self.shutting_down.store(true, Ordering::SeqCst);
+        self.stop_for("app quit, uninstall or Windows logoff");
+    }
+
+    fn stop_for(&self, reason: &str) {
+        // Hold the slot across shutdown, so an in-flight spawn cannot escape quit.
+        let mut slot = self.child.lock();
+        if let Some(mut child) = slot.take() {
+            if let Ok(data) = data_dir() {
+                append_log(
+                    &data,
+                    "app",
+                    &format!("stop pid {} reason={reason}", child.id()),
+                );
+            }
+            if let Some(mut stdin) = child.stdin.take() {
+                use std::io::Write;
+                let _ = writeln!(stdin, "stop");
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while matches!(child.try_wait(), Ok(None)) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            let forced = matches!(child.try_wait(), Ok(None));
+            if forced && let Ok(data) = data_dir() {
+                append_log(
+                    &data,
+                    "app",
+                    "grace deadline reached; terminating process tree",
+                );
+            }
+            // Even after graceful exit, close the job to remove remaining descendants.
+            #[cfg(windows)]
+            drop(self.job.lock().take());
+            if forced {
+                let _ = child.kill();
+            }
             let _ = child.wait();
         }
     }
@@ -327,7 +365,14 @@ fn port() -> u16 {
 fn base_url() -> Result<String, String> {
     match std::env::var("BOT_URL") {
         Ok(u) if !u.trim().is_empty() => validate_bot_url(u.trim()),
-        _ => Ok(format!("http://127.0.0.1:{}", port())),
+        _ => {
+            if let Ok(data) = data_dir()
+                && let Some(endpoint) = process_guard::lifecycle::discover(&data)
+            {
+                return Ok(endpoint.url());
+            }
+            Ok(format!("http://127.0.0.1:{}", port()))
+        }
     }
 }
 
@@ -390,8 +435,13 @@ enum HealthState {
 }
 
 impl HealthState {
+    #[cfg(test)]
     fn is_up(self) -> bool {
         self != Self::Unreachable
+    }
+
+    fn is_ready(self) -> bool {
+        matches!(self, Self::Ok | Self::SetupRequired | Self::Degraded)
     }
 }
 
@@ -417,14 +467,15 @@ fn health_state(text: &str) -> HealthState {
     }
 }
 
+#[cfg(test)]
 fn health_reply_is_alive(text: &str) -> bool {
     health_state(text).is_up()
 }
 
 /// Plain HTTP/1.1 `GET /v1/health` over loopback (no HTTP client needed).
-async fn healthy(url: &str) -> bool {
+async fn probe_health(url: &str) -> HealthState {
     let Some(hp) = host_port(url) else {
-        return false;
+        return HealthState::Unreachable;
     };
     let probe = async {
         let mut s = TcpStream::connect(&hp).await.ok()?;
@@ -433,12 +484,18 @@ async fn healthy(url: &str) -> bool {
         let mut buf = Vec::new();
         s.read_to_end(&mut buf).await.ok()?;
         let text = String::from_utf8_lossy(&buf);
-        health_reply_is_alive(&text).then_some(())
+        Some(health_state(&text))
     };
-    matches!(
-        tokio::time::timeout(PROBE_TIMEOUT, probe).await,
-        Ok(Some(()))
-    )
+    tokio::time::timeout(PROBE_TIMEOUT, probe)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(HealthState::Unreachable)
+}
+
+#[cfg(test)]
+async fn healthy(url: &str) -> bool {
+    probe_health(url).await.is_up()
 }
 
 fn valid_token(s: &str) -> bool {
@@ -560,6 +617,7 @@ pub fn owner_key() -> Result<&'static str, String> {
 fn spawn_daemon(handle: &DaemonHandle, data_dir: &Path, fake: bool) -> Result<Child, String> {
     let mut cmd = bot_command();
     cmd.arg("serve").arg("--port").arg(port().to_string());
+    cmd.arg("--shutdown-grace").arg("3");
     cmd.arg("--owner-key-stdin");
     if *handle.safe.lock() {
         cmd.arg("--safe");
@@ -594,6 +652,10 @@ fn spawn_daemon(handle: &DaemonHandle, data_dir: &Path, fake: bool) -> Result<Ch
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
+    #[cfg(windows)]
+    let job = process_guard::supervision::Job::new().map_err(|e| {
+        format!("Praxi could not protect its background processes ({e}). Restart Praxi.")
+    })?;
     let mut child = cmd.spawn().map_err(|e| {
         let msg = format!(
             "cannot start `{}` ({e}); set PRAXIBOT_BOT_BIN or put `bot` next to the app",
@@ -603,6 +665,22 @@ fn spawn_daemon(handle: &DaemonHandle, data_dir: &Path, fake: bool) -> Result<Ch
         handle.set_stage(classify_spawn_error(&e, sidecar_exists), Some(msg.clone()));
         msg
     })?;
+    #[cfg(windows)]
+    {
+        // A competing launch can lose the directory lock and exit before job
+        // assignment. It never passed the stdin handshake or spawned tools;
+        // retain its stderr/exit status so connect can wait for and reuse the winner.
+        if let Err(e) = job.assign(&child)
+            && !matches!(child.try_wait(), Ok(Some(_)))
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "Praxi could not protect its background processes ({e}). Restart Praxi."
+            ));
+        }
+        *handle.job.lock() = Some(job);
+    }
     handle.tail.lock().clear();
     if let Some(stderr) = child.stderr.take() {
         let done = Arc::new(AtomicBool::new(false));
@@ -615,20 +693,19 @@ fn spawn_daemon(handle: &DaemonHandle, data_dir: &Path, fake: bool) -> Result<Ch
         );
     }
     append_log(data_dir, "app", &format!("started pid {}", child.id()));
-    // One line on the child's stdin, then the pipe is closed: the key is in no
-    // argument, file or environment variable.
-    if let Some(mut stdin) = child.stdin.take() {
+    // Keep the private pipe open after the key: stop/EOF requests graceful shutdown.
+    // The key is still in no argument, file or environment variable.
+    if let Some(stdin) = child.stdin.as_mut() {
         use std::io::Write;
         let key = match owner_key() {
             Ok(key) => key,
             Err(e) => {
                 let _ = child.kill();
+                let _ = child.wait();
                 handle.set_stage(Stage::SpawnFailed, Some(e.clone()));
                 return Err(e);
             }
         };
-        // Written and flushed, then `stdin` drops at the end of this block and closes the pipe,
-        // so the daemon's `read_line` returns at once.
         if let Err(e) = writeln!(stdin, "{key}").and_then(|()| stdin.flush()) {
             append_log(
                 data_dir,
@@ -667,6 +744,10 @@ fn no_usable_provider_since(data_dir: &Path, offset: u64) -> bool {
 
 /// Spawn the daemon and remember where its log output will start.
 fn spawn_tracked(handle: &DaemonHandle, data: &Path, fake: bool) -> Result<(), String> {
+    let mut slot = handle.child.lock();
+    if handle.shutting_down.load(Ordering::SeqCst) {
+        return Err("Praxi is closing. Open it again to reconnect.".to_owned());
+    }
     handle.set_stage(Stage::Spawning, None);
     // The OS may take long to create the process (antivirus scan of a new, unsigned program).
     let _ = std::fs::create_dir_all(data);
@@ -675,7 +756,7 @@ fn spawn_tracked(handle: &DaemonHandle, data: &Path, fake: bool) -> Result<(), S
     let child = spawn_daemon(handle, data, fake)?;
     handle.set_stage(Stage::Waiting, None);
     *handle.log_offset.lock() = offset;
-    *handle.child.lock() = Some(child);
+    *slot = Some(child);
     *handle.fake.lock() = fake;
     *handle.last_spawn.lock() = Some(Instant::now());
     append_log(
@@ -721,7 +802,11 @@ async fn check_listener(handle: &DaemonHandle, url: &str, after_spawn: bool) -> 
                  refusing to send the API token"
             ));
         }
-        None => Expect::SameUser,
+        None => data_dir()
+            .ok()
+            .and_then(|data| process_guard::lifecycle::discover(&data))
+            .filter(|endpoint| endpoint.port == port)
+            .map_or(Expect::SameUser, |endpoint| Expect::Recorded(endpoint.pid)),
     };
     tokio::task::spawn_blocking(move || listener::verify(port, expect))
         .await
@@ -819,13 +904,12 @@ pub async fn restart(
         "app",
         &format!("restart requested, reason: {reason}, safe mode: {safe:?}"),
     );
-    handle.stop();
+    handle.stop_for("restart");
     // `None` keeps the current mode (a provider reload must not leave safe mode);
     // only the owner's explicit choice in the app changes it.
     if let Some(safe) = safe {
         *handle.safe.lock() = safe;
     }
-    tokio::time::sleep(Duration::from_millis(300)).await;
     connect_locked(handle).await
 }
 
@@ -855,24 +939,25 @@ fn clean_reason(reason: &str) -> String {
 
 /// [`connect`] with the `connecting` lock already held by the caller.
 async fn connect_locked(handle: &DaemonHandle) -> Result<Connection, String> {
-    let url = base_url()?;
+    let mut url = base_url()?;
     let data = data_dir()?;
-    if healthy(&url).await {
+    if handle.shutting_down.load(Ordering::SeqCst) {
+        return Err("Praxi is closing. Open it again to reconnect.".to_owned());
+    }
+    if (std::env::var_os("BOT_URL").is_some()
+        || process_guard::lifecycle::discover(&data).is_some()
+        || handle.started_by_app())
+        && probe_health(&url).await.is_ready()
+    {
         check_listener(handle, &url, false).await?;
         handle.set_stage(Stage::Ready, None);
         return connection(handle, url, &data);
     }
     // A previously started child that died is dropped first.
     if !handle.started_by_app() {
-        handle.stop();
+        handle.stop_for("recover exited daemon");
         if std::env::var_os("BOT_URL").is_some() {
             return Err(format!("no daemon answers at {url}"));
-        }
-        if let Some(who) = foreign_listener(&url).await {
-            let msg = format!("port {} is in use by another program{who}", port());
-            append_log(&data, "app", &msg);
-            handle.set_stage(Stage::PortInUse, Some(msg.clone()));
-            return Err(msg);
         }
         let fake = wants_fake();
         spawn_tracked(handle, &data, fake)?;
@@ -880,7 +965,24 @@ async fn connect_locked(handle: &DaemonHandle) -> Result<Connection, String> {
     let mut fake = *handle.fake.lock();
     let deadline = tokio::time::Instant::now() + START_TIMEOUT;
     loop {
-        if healthy(&url).await {
+        if tokio::time::Instant::now() >= deadline {
+            let msg = format!(
+                "Praxi did not finish starting at {url}. Restart Praxi; details are in {}.",
+                log_path(&data).display()
+            );
+            append_log(&data, "app", &msg);
+            handle.set_stage(Stage::NotResponding, Some(msg.clone()));
+            handle.stop_for("readiness deadline exceeded");
+            return Err(msg);
+        }
+        // Discovery is published only after the daemon has reserved its actual port.
+        // Readiness still requires health AND the existing socket identity gate.
+        if std::env::var_os("BOT_URL").is_none() {
+            url = base_url()?;
+        }
+        let endpoint = process_guard::lifecycle::discover(&data);
+        let own_listener = endpoint.is_some_and(|e| Some(e.pid) == child_pid(handle));
+        if own_listener && probe_health(&url).await.is_ready() {
             if let Err(e) = check_listener(handle, &url, true).await {
                 append_log(&data, "app", &e);
                 handle.set_stage(Stage::Unreachable, Some(e.clone()));
@@ -891,6 +993,24 @@ async fn connect_locked(handle: &DaemonHandle) -> Result<Connection, String> {
         // A child that already exited will never answer.
         if let Some(code) = child_exit_code(handle) {
             wait_for_pump(handle).await;
+            // Another launch won the per-directory lock. Reuse only its verified
+            // listener, retaining the same-user gate; never transfer an owner key.
+            if endpoint.is_some() && probe_health(&url).await.is_ready() {
+                check_listener(handle, &url, false).await?;
+                handle.stop_for("reuse daemon that won the startup lock");
+                handle.set_stage(Stage::Ready, None);
+                return connection(handle, url, &data);
+            }
+            if handle
+                .tail
+                .lock()
+                .iter()
+                .any(|line| line.contains("already using this data folder"))
+            {
+                // The winner may still be opening its database or preparing channels.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
             // No usable provider (none configured, all disabled, key missing):
             // `bot serve` exits immediately.  Retry once with `--fake-provider`
             // so the UI can still connect and the user can fix it, but only
@@ -900,20 +1020,15 @@ async fn connect_locked(handle: &DaemonHandle) -> Result<Connection, String> {
                 && no_usable_provider_since(&data, offset)
                 && spawn_tracked(handle, &data, true).is_ok()
             {
+                append_log(
+                    &data,
+                    "app",
+                    "restart reason=no usable provider; using setup fallback",
+                );
                 fake = true;
-                tokio::time::sleep(Duration::from_millis(250)).await;
                 continue;
             }
             return Err(exited(handle, &data, code));
-        }
-        if tokio::time::Instant::now() >= deadline {
-            let msg = format!(
-                "the daemon did not become healthy at {url} (see {})",
-                log_path(&data).display()
-            );
-            append_log(&data, "app", &msg);
-            handle.set_stage(Stage::NotResponding, Some(msg.clone()));
-            return Err(msg);
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
@@ -974,35 +1089,6 @@ async fn wait_for_pump(handle: &DaemonHandle) {
     }
 }
 
-/// Whether a socket is open on `url` that is not a Praxi daemon (it accepts connections but never
-/// answers the health probe).  Returns " (pid N)" when the owner is known, else an empty string.
-async fn foreign_listener(url: &str) -> Option<String> {
-    let hp = host_port(url)?;
-    let open = matches!(
-        tokio::time::timeout(PROBE_TIMEOUT, TcpStream::connect(&hp)).await,
-        Ok(Ok(_))
-    );
-    if !open {
-        return None;
-    }
-    // A daemon that is just binding answers within a moment.
-    for _ in 0..4 {
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        if healthy(url).await {
-            return None;
-        }
-    }
-    let owners = loopback_port(url)
-        .map(listener::listener_owners)
-        .unwrap_or_default();
-    Some(
-        owners
-            .iter()
-            .next()
-            .map_or_else(String::new, |pid| format!(" (pid {pid})")),
-    )
-}
-
 /// The start-up facts for the "the service does not start" screen.
 #[must_use]
 pub fn diagnostics(handle: &DaemonHandle) -> Diagnostics {
@@ -1028,7 +1114,10 @@ pub fn diagnostics(handle: &DaemonHandle) -> Diagnostics {
         elapsed_ms: since.map_or(0, |s| {
             u64::try_from(s.elapsed().as_millis()).unwrap_or(u64::MAX)
         }),
-        port: port(),
+        port: base_url()
+            .ok()
+            .and_then(|u| loopback_port(&u))
+            .unwrap_or_else(port),
         base_url: base_url().unwrap_or_default(),
         data_dir: data.display().to_string(),
         log_path: log_path(&data).display().to_string(),
@@ -1050,7 +1139,10 @@ pub fn prereq_report(handle: &DaemonHandle) -> crate::prereq::Report {
     crate::prereq::check(
         &data,
         Path::new(&bot_binary()),
-        port(),
+        base_url()
+            .ok()
+            .and_then(|u| loopback_port(&u))
+            .unwrap_or_else(port),
         handle.started_by_app(),
     )
 }
@@ -1128,6 +1220,15 @@ pub const KEY_ENV: &str = "PRAXIBOT_UI_API_KEY";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_waits_for_readiness_but_allows_setup_and_degraded_recovery() {
+        assert!(!HealthState::Starting.is_ready());
+        assert!(!HealthState::Unreachable.is_ready());
+        assert!(HealthState::SetupRequired.is_ready());
+        assert!(HealthState::Ok.is_ready());
+        assert!(HealthState::Degraded.is_ready());
+    }
 
     #[test]
     fn host_port_parses_loopback_urls() {
