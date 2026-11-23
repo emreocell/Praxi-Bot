@@ -10,7 +10,7 @@ import { transcribePayload } from "../../lib/voiceAudio";
 import { callReducer, initialCallState, type CallState } from "../../lib/voiceCall/callMachine";
 import { cancelQueuedSpeech, queueSpeech, setDrainedHandler } from "../../lib/voiceCall/callSpeaker";
 import { takeSpeakable } from "../../lib/voiceCall/sentences";
-import { callMicrophone, voiceConfigNotice, voiceFailureNotice } from "../../lib/voiceCall/readiness";
+import { callMicrophone, knownVoiceConfig, rememberVoiceConfig, STEP_DEADLINE_MS, voiceConfigNotice, voiceFailureNotice, withDeadline } from "../../lib/voiceCall/readiness";
 import { ownerKey } from "../../lib/ownerKey";
 import { BARGE_IN_VAD, createVad, LISTEN_VAD, rmsOf } from "../../lib/voiceCall/vad";
 import { DEFAULT_SETTINGS, loadSettingsSync } from "../../store/settingsStore";
@@ -25,7 +25,8 @@ export interface VoiceCall {
   level: number;
   /** What was heard and what the bot says; kept in memory only, cleared when the call ends. */
   captions: { you: string; bot: string };
-  start: () => void;
+  /** `fresh` (used by "Try again") ignores the remembered settings and asks the service again. */
+  start: (opts?: { fresh?: boolean }) => void;
   end: () => void;
   interrupt: () => void;
   toggleMute: () => void;
@@ -250,7 +251,17 @@ export function useVoiceCall({ botId, runs, awaitingApproval, runActive, sendTex
     }
   }, [finishUtterance, interrupt, startRecorder, stopRecorder]);
 
-  const start = useCallback(() => {
+  // Load the voice settings in the background while the chat is open, so pressing the call button
+  // can decide at once (no waiting on the service) whether a key is missing.
+  useEffect(() => {
+    if (!client || mock) return;
+    withDeadline(client.getVoice())
+      .then((config) => rememberVoiceConfig(client.baseUrl, config))
+      .catch(() => undefined);
+    void ownerKey(client.baseUrl);
+  }, [client, mock]);
+
+  const start = useCallback((opts?: { fresh?: boolean }) => {
     if (stateRef.current.phase !== "idle" && stateRef.current.phase !== "failed") {
       return;
     }
@@ -260,17 +271,30 @@ export function useVoiceCall({ botId, runs, awaitingApproval, runActive, sendTex
       dispatch({ type: "FAILED", notice: blockedReason });
       return;
     }
+    // Already-loaded settings answer immediately: both events are batched into one render, so
+    // "Starting the microphone…" never flashes and nothing waits on the network.
+    const known = client && !mock && !opts?.fresh ? knownVoiceConfig(client.baseUrl) : undefined;
+    const knownNotice = known ? voiceConfigNotice(known) : null;
+    if (client && knownNotice) {
+      dispatch({ type: "FAILED", notice: knownNotice });
+      // Refresh quietly so a key added meanwhile (another window) is seen on the next try.
+      withDeadline(client.getVoice()).then((c) => rememberVoiceConfig(client.baseUrl, c)).catch(() => undefined);
+      return;
+    }
     void (async () => {
       try {
         if (!client) return;
-        const config = await client.getVoice();
-        if (gen !== callGen.current) return;
-        const notice = voiceConfigNotice(config);
-        if (notice) {
-          dispatch({ type: "FAILED", notice });
-          return;
+        if (!known) {
+          const config = await withDeadline(client.getVoice());
+          if (gen !== callGen.current) return;
+          rememberVoiceConfig(client.baseUrl, config);
+          const notice = voiceConfigNotice(config);
+          if (notice) {
+            dispatch({ type: "FAILED", notice });
+            return;
+          }
         }
-        const key = await ownerKey(client.baseUrl);
+        const key = await withDeadline(ownerKey(client.baseUrl));
         if (gen !== callGen.current) return;
         if (!key) {
           dispatch({ type: "FAILED", notice: "voice.call.ownerRequired" });
@@ -303,7 +327,7 @@ export function useVoiceCall({ botId, runs, awaitingApproval, runActive, sendTex
           callGen.current += 1;
           releaseMic();
           dispatch({ type: "FAILED", notice: "voice.call.micTimeout" });
-        }, 10_000);
+        }, STEP_DEADLINE_MS);
         try { await ctx.resume(); }
         finally { window.clearTimeout(resumeTimer); }
         if (gen !== callGen.current) return;

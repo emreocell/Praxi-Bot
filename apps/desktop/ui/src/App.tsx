@@ -138,6 +138,7 @@ import { SchedulesView } from "./views/SchedulesView";
 import { AppsModal } from "./views/AppsModal";
 import { NewBotModal } from "./views/NewBotModal";
 import { SettingsModal } from "./views/SettingsModal";
+import { OPEN_SETTINGS_EVENT, type SettingsTarget } from "./lib/settingsLink";
 import { OPEN_AI_SETTINGS_EVENT } from "./state/useCliEngineRows";
 import { OPEN_BOT_LIMITS_EVENT } from "./lib/botLimits";
 import type { BotEditorSection } from "./lib/botEditor";
@@ -257,6 +258,12 @@ function AppShell() {
     const open = () => setSettingsOpen("ai");
     window.addEventListener(OPEN_AI_SETTINGS_EVENT, open);
     return () => window.removeEventListener(OPEN_AI_SETTINGS_EVENT, open);
+  }, []);
+  // A message can point at a place in Settings (e.g. the voice call card's "Open settings").
+  useEffect(() => {
+    const open = (e: Event) => setSettingsOpen((e as CustomEvent<SettingsTarget>).detail.page);
+    window.addEventListener(OPEN_SETTINGS_EVENT, open);
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
   }, []);
   const [newBotOpen, setNewBotOpen] = useState(false);
   // The dialogs of a bot (card 244-C): edit and profile replace the old pages; "add skill" can

@@ -29,8 +29,8 @@ export function ChatFindBar({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [current, setCurrent] = useState(-1);
-  const [total, setTotal] = useState(0);
-  const rangesRef = useRef<Range[]>([]);
+  const [ranges, setRanges] = useState<Range[]>([]);
+  const total = ranges.length;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -44,25 +44,37 @@ export function ChatFindBar({
     if (!root) {
       return;
     }
-    const nodes = collectTextNodes(root);
-    const matches = findMatches(
-      nodes.map((n) => n.nodeValue ?? ""),
-      query
-    );
-    rangesRef.current = matchRanges(nodes, matches);
-    setTotal(rangesRef.current.length);
-    setCurrent((c) => (rangesRef.current.length === 0 ? -1 : c >= 0 && c < rangesRef.current.length ? c : 0));
+    const scan = () => {
+      const nodes = collectTextNodes(root);
+      const matches = findMatches(nodes.map((n) => n.nodeValue ?? ""), query);
+      const next = matchRanges(nodes, matches);
+      setRanges(next);
+      setCurrent((c) => (next.length === 0 ? -1 : c >= 0 && c < next.length ? c : 0));
+    };
+    scan();
+    // Lazy highlighting replaces plain code with token nodes after scrolling.
+    // Rebuild ranges even if the query and number of matches are unchanged.
+    let frame: number | undefined;
+    const observer = new MutationObserver(() => {
+      if (frame !== undefined) return;
+      frame = requestAnimationFrame(() => { frame = undefined; scan(); });
+    });
+    observer.observe(root, { childList: true, characterData: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
   }, [query, contentKey, rootRef]);
 
   // paint + keep the current match in view
   useEffect(() => {
-    paintHighlights(rangesRef.current, current);
-    const r = rangesRef.current[current];
+    paintHighlights(ranges, current);
+    const r = ranges[current];
     const el = r?.startContainer.parentElement;
     el?.scrollIntoView?.({ block: "center" });
-  }, [current, total, query]);
+  }, [current, ranges]);
 
-  const step = (dir: 1 | -1) => setCurrent((c) => stepMatch(c, rangesRef.current.length, dir));
+  const step = (dir: 1 | -1) => setCurrent((c) => stepMatch(c, ranges.length, dir));
 
   return (
     <div className={styles.bar} role="search" data-find-skip data-testid="chat-find">

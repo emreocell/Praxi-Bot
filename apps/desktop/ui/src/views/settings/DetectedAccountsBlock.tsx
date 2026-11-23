@@ -20,6 +20,7 @@ import {
 import { openExternal } from "../../lib/externalLink";
 import { useDaemon } from "../../state/DaemonContext";
 import { notifyProvidersChanged, useProviders } from "../../state/useProviders";
+import { redactDetails } from "../../lib/redactDetails";
 import styles from "./AiPage.module.css";
 
 const STATUS_KEY: Record<CliStatus, string> = {
@@ -82,7 +83,7 @@ export function DetectedAccountsBlock({ local = false }: { local?: boolean } = {
       try {
         setEngines(await client.cliEngines(refresh));
       } catch (e) {
-        setLoadError(e instanceof Error && e.message ? e.message : "detect_failed");
+        setLoadError(redactDetails(e instanceof Error && e.message ? e.message : "detect_failed"));
       } finally {
         setLoading(false);
       }
@@ -108,7 +109,7 @@ export function DetectedAccountsBlock({ local = false }: { local?: boolean } = {
   const fail = (error: unknown) => {
     setProblem({
       message: t("settingsModal.ai.detected.problem"),
-      details: error instanceof Error ? error.message : String(error)
+      details: redactDetails(error instanceof Error ? error.message : String(error))
     });
   };
 
@@ -136,7 +137,7 @@ export function DetectedAccountsBlock({ local = false }: { local?: boolean } = {
         message: t(`settingsModal.ai.detected.installErrors.${code}`, {
           defaultValue: t("settingsModal.ai.detected.installErrors.install_failed")
         }),
-        details: installOutput.current || code
+        details: redactDetails(installOutput.current || code)
       });
     } finally { setInstalling(false); await loadDetected(true); }
   };

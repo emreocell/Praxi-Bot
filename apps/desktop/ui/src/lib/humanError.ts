@@ -1,6 +1,7 @@
 import i18n from "i18next";
 import type { StartupDiagnostics } from "../api/connection.ts";
 import { hostRefusalKey } from "./hostMode.ts";
+import { redactDetails } from "./redactDetails.ts";
 
 /**
  * The one place that turns "anything that went wrong" into words a person can act on:
@@ -271,7 +272,7 @@ export function humanError(err: unknown): HumanError {
   const env = (err && typeof err === "object" ? err : {}) as Envelope;
   const status = typeof env.status === "number" ? env.status : undefined;
   const code = typeof env.code === "string" ? env.code : undefined;
-  const details = [status ? `HTTP ${status}` : "", code ?? "", raw].filter(Boolean).join(" · ");
+  const details = redactDetails([status ? `HTTP ${status}` : "", code ?? "", raw].filter(Boolean).join(" · "));
 
   // A paired host's refusal: one sentence naming the server (the raw daemon text stays in details).
   const host = typeof env.host === "string" ? env.host : undefined;
@@ -352,7 +353,7 @@ export function humanService(problem: ServiceProblem, raw = ""): HumanError {
     title: tr(`errors.${key}.title`),
     hint: tr(`errors.${key}.hint`),
     action: problem === "starting" ? undefined : "restartService",
-    details: raw
+    details: redactDetails(raw)
   };
 }
 
@@ -418,6 +419,6 @@ export function humanStartup(d: StartupDiagnostics, raw = ""): HumanError {
     title: tr(`errors.startup.${key}.title`, params),
     hint: tr(`errors.startup.${key}.hint`, params),
     action: undefined,
-    details: startupReport(d, raw)
+    details: redactDetails(startupReport(d, raw))
   };
 }
