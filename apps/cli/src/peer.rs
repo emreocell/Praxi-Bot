@@ -10,17 +10,14 @@ pub(crate) fn config(data: &Path, host: bool) -> Result<(PeerConfig, Option<bool
         // A desktop serves input requests that wait for its owner's card.
         cfg.rpc_timeout = peer_network::ACTION_RPC_TIMEOUT;
     }
-    // The PC shows up on the server under its own name ("EMRE-PC"), not a generic label.
-    cfg.display_name = if host {
-        "Praxi host".to_owned()
-    } else {
-        std::env::var("COMPUTERNAME")
-            .or_else(|_| std::env::var("HOSTNAME"))
-            .ok()
-            .map(|n| n.trim().to_owned())
-            .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| "Praxi desktop".to_owned())
-    };
+    // Computers show up under their own machine name ("EMRE-PC", "vps-1234"), never a brand label.
+    let machine = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok()
+        .map(|n| n.trim().to_owned())
+        .filter(|n| !n.is_empty());
+    cfg.display_name =
+        machine.unwrap_or_else(|| if host { "My server" } else { "My computer" }.to_owned());
     let path = data.join("config.toml");
     let config = match std::fs::read_to_string(path) {
         Ok(text) => text.parse::<toml::Value>()?,

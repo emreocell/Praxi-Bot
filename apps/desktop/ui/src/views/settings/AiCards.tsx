@@ -78,7 +78,7 @@ function DefaultModelRow() {
         <ModelPicker
           groups={groups}
           value={override ?? current}
-          disabled={!canChange || groups.length === 0}
+          disabled={!canChange}
           onPick={(ref) => void pick(ref)}
         />
       </div>

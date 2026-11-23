@@ -3855,6 +3855,10 @@
       "unsupported": "Burada desteklenmiyor"
     },
     "connect": "{{name}} bağla",
+    "connectAction": "Model bağla",
+    "connectBody": "Praxi'nin yanıt verebilmesi için bir yapay zekâ modeli gerekir. Bir API anahtarı ekle ya da bir kodlama CLI'sıyla giriş yap; yaklaşık bir dakika sürer.",
+    "connectModel": "Model bağla",
+    "connectTitle": "Sohbete başlamak için bir model bağla",
     "empty": "Eşleşen model yok.",
     "engineError": "Bu CLI bağlanamadı.",
     "hint": {

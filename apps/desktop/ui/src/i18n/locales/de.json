@@ -3855,6 +3855,10 @@
       "unsupported": "Hier nicht unterstützt"
     },
     "connect": "{{name}} verbinden",
+    "connectAction": "Modell verbinden",
+    "connectBody": "Praxi braucht ein KI-Modell, um zu antworten. Füge einen API-Schlüssel hinzu oder melde dich mit einer Coding-CLI an; das dauert etwa eine Minute.",
+    "connectModel": "Modell verbinden",
+    "connectTitle": "Verbinde ein Modell, um zu chatten",
     "empty": "Keine passenden Modelle.",
     "engineError": "Diese CLI konnte nicht verbunden werden.",
     "hint": {
