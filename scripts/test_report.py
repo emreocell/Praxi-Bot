@@ -7,7 +7,10 @@ failing tests. Used by .github/workflows/test-report.yml; also runs locally.
     python3 scripts/test_report.py --self-test
 
 A test is *flaky* when it failed and then passed on a retry (nextest writes a
-`flakyFailure` element), and *failing* when every attempt failed (`failure`).
+`flakyFailure` or `flakyError` element per failed attempt), and *failing* when
+every attempt failed (`failure` or `error`, then `rerunFailure`/`rerunError`).
+A test's time is the sum of all its attempts: nextest stores the last attempt
+in `testcase.time` and each earlier one on its retry element.
 """
 from __future__ import annotations
 
@@ -42,11 +45,12 @@ def parse(xml_text: str) -> list[Case]:
     for suite in root.iter("testsuite"):
         binary = suite.get("name", "")
         for case in suite.iter("testcase"):
-            flaky = case.findall("flakyFailure")
+            # Document order, so the first failure shown is the first attempt's.
+            flaky = [e for e in case if e.tag in ("flakyFailure", "flakyError")]
+            reruns = [e for e in case if e.tag in ("rerunFailure", "rerunError")]
             failure = case.find("failure")
             if failure is None:
                 failure = case.find("error")
-            reruns = case.findall("rerunFailure") + case.findall("rerunError")
             if failure is not None:
                 status, attempts, first = "failed", 1 + len(reruns), failure
             elif flaky:
@@ -56,9 +60,8 @@ def parse(xml_text: str) -> list[Case]:
             else:
                 status, attempts, first = "passed", 0, None
             message = (first.get("message") or "") if first is not None else ""
-            cases.append(
-                Case(binary, case.get("name", ""), float(case.get("time") or 0), status, attempts, message)
-            )
+            seconds = float(case.get("time") or 0) + sum(float(e.get("time") or 0) for e in flaky + reruns)
+            cases.append(Case(binary, case.get("name", ""), seconds, status, attempts, message))
     return cases
 
 
@@ -151,11 +154,18 @@ def main(argv: list[str]) -> int:
 
 
 SAMPLE = """<?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="nextest-run" tests="4" failures="1">
-  <testsuite name="demo" tests="3">
+<testsuites name="nextest-run" tests="6" failures="1">
+  <testsuite name="demo" tests="5">
     <testcase name="steady" classname="demo" time="0.010"/>
     <testcase name="flaky_once" classname="demo" time="0.009">
       <flakyFailure time="0.010" message="panicked at src/lib.rs:6:5" type="test failure">x</flakyFailure>
+    </testcase>
+    <testcase name="flaky_error" classname="demo" time="0.001">
+      <flakyError time="0.002" message="could not start" type="execution failure">x</flakyError>
+    </testcase>
+    <testcase name="flaky_mixed" classname="demo" time="1.000">
+      <flakyError time="0.500" message="first: could not start" type="execution failure">x</flakyError>
+      <flakyFailure time="90.000" message="second: timed out" type="test failure">x</flakyFailure>
     </testcase>
     <testcase name="always_fails" classname="demo" time="0.010">
       <failure message="panicked at src/lib.rs:9:21 | broken" type="test failure">x</failure>
@@ -180,18 +190,30 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(by_name["steady"].status, "passed")
         self.assertEqual((by_name["flaky_once"].status, by_name["flaky_once"].failed_attempts), ("flaky", 1))
         self.assertEqual((by_name["always_fails"].status, by_name["always_fails"].failed_attempts), ("failed", 3))
-        self.assertEqual([c["name"] for c in self.summary["flaky"]], ["flaky_once"])
+        self.assertEqual((by_name["flaky_error"].status, by_name["flaky_error"].failed_attempts), ("flaky", 1))
+        mixed = by_name["flaky_mixed"]
+        self.assertEqual((mixed.status, mixed.failed_attempts), ("flaky", 2))
+        self.assertEqual(mixed.message, "first: could not start")
+        self.assertEqual([c["name"] for c in self.summary["flaky"]], ["flaky_once", "flaky_error", "flaky_mixed"])
         self.assertEqual([c["name"] for c in self.summary["failed"]], ["always_fails"])
 
+    def test_counts_every_attempt_in_a_tests_time(self) -> None:
+        by_name = {c.name: c for c in self.cases}
+        self.assertAlmostEqual(by_name["steady"].seconds, 0.010)
+        self.assertAlmostEqual(by_name["flaky_once"].seconds, 0.019)
+        self.assertAlmostEqual(by_name["flaky_mixed"].seconds, 91.5)
+        self.assertAlmostEqual(by_name["always_fails"].seconds, 0.027)
+
     def test_orders_slowest_tests_and_binaries(self) -> None:
-        self.assertEqual(self.summary["slowest_tests"][0]["name"], "slow")
-        self.assertEqual(self.summary["slowest_binaries"][0]["binary"], "demo::integration")
-        self.assertEqual(self.summary["slowest_binaries"][1]["tests"], 3)
+        self.assertEqual(self.summary["slowest_tests"][0]["name"], "flaky_mixed")
+        self.assertEqual(self.summary["slowest_tests"][1]["name"], "slow")
+        self.assertEqual(self.summary["slowest_binaries"][0]["binary"], "demo")
+        self.assertEqual(self.summary["slowest_binaries"][0]["tests"], 5)
         self.assertEqual(self.cases[-1].crate, "demo")
 
     def test_markdown_escapes_table_cells(self) -> None:
         text = markdown(self.summary, "sample")
-        self.assertIn("4 tests, 2.5 s of test time in total, 1 flaky, 1 failing.", text)
+        self.assertIn("6 tests, 94.1 s of test time in total, 3 flaky, 1 failing.", text)
         self.assertIn("src/lib.rs:9:21 \\| broken", text)
 
 
