@@ -6,6 +6,7 @@ import { ApiClient, ApiError } from "./client.ts";
 import { MOCK_MCP_CATALOG } from "./mockCatalog.ts";
 import { MockHostSetup } from "./mockHostSetup.ts";
 import { MockLiveViewService } from "./mockLiveView.ts";
+import { longChatEvents, longChatMessages } from "./mockLongChat.ts";
 import type {
   BotSpendLimits,
   Bot,
@@ -1291,6 +1292,11 @@ export class MockApiClient extends ApiClient {
         if (seg[2] === "messages") {
           if (this.messages.has(seg[1])) return ok(this.messages.get(seg[1]));
           if ((typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "empty") || seg[1] !== CHAT_ID) return ok([]);
+          if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "long-chat") {
+            const seeded = longChatMessages();
+            this.messages.set(seg[1], seeded);
+            return ok(seeded);
+          }
           const tr = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("lang") !== "en";
           const content = tr ? [
             "Bu haftaki çalışma özetini hazırlar mısın? Tamamlanan işleri ve sonraki adımları görmek istiyorum.",
@@ -2437,6 +2443,7 @@ function mockLiveRunId(): string | null {
 export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["event"] }[] {
   const out: { ts_ms: number; event: GlobalEnvelope["event"] }[] = [];
   const screen = new URLSearchParams(window.location.search).get("screen");
+  if (screen === "long-chat") return longChatEvents();
   if (screen === "approval" || screen?.startsWith("approval-schedule") || screen === "streaming" || screen === "working" || screen === "subagents") {
     const bot_id = "11111111-1111-4111-8111-111111111111";
     const chat_id = "33333333-3333-4333-8333-333333333333";
