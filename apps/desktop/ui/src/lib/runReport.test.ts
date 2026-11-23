@@ -22,6 +22,11 @@ const PRIVATE = {
   question: "CANARY-QUESTION-TEXT",
   credName: "CANARY-CRED-NAME",
   purpose: "CANARY-PURPOSE",
+  argumentToken: "CANARY-NESTED-ARG-TOKEN",
+  resultToken: "CANARY-NESTED-RESULT-TOKEN",
+  urlUserInfo: "CANARY-ATTACHMENT-USERINFO",
+  urlQuery: "CANARY-ATTACHMENT-QUERY",
+  toolErrorToken: "CANARY-TOOL-ERROR-TOKEN",
 };
 
 function run(over: Partial<RunState> = {}): RunState {
@@ -35,8 +40,22 @@ function run(over: Partial<RunState> = {}): RunState {
     items: [
       { kind: "text", key: "a", ts: 1001, text: PRIVATE.reply },
       {
-        kind: "tool", key: "t1", callId: "1", name: "read_file", input: { path: PRIVATE.input },
-        status: "done", requestedMs: 1100, durationMs: 40, outputPreview: PRIVATE.output, gated: false,
+        kind: "tool", key: "t1", callId: "1", name: "read_file",
+        input: {
+          path: PRIVATE.input,
+          metadata: { auth: { token: PRIVATE.argumentToken } },
+          attachments: [
+            { url: `https://user:${PRIVATE.urlUserInfo}@example.invalid/report?token=${PRIVATE.urlQuery}` },
+          ],
+        },
+        status: "done", requestedMs: 1100, durationMs: 40,
+        outputPreview: JSON.stringify({ result: { text: PRIVATE.output, token: PRIVATE.resultToken } }),
+        gated: false,
+      },
+      {
+        kind: "tool", key: "t3", callId: "5", name: "read_file", input: { path: PRIVATE.input },
+        status: "error", requestedMs: 1150,
+        error: `Read failed with api_key=${PRIVATE.toolErrorToken}`, gated: false,
       },
       {
         kind: "tool", key: "t2", callId: "2", name: "run_command", input: { command: `curl -H ${KEY}` },
@@ -54,13 +73,18 @@ function run(over: Partial<RunState> = {}): RunState {
 
 test("exported report never contains private data (canary)", () => {
   const report = buildRunReport(run(), "Helper", t, (n) => `${n}ms`);
-  const out = [renderMarkdown(report, text), renderHtml(report, text)].join("\n");
-  for (const canary of [...Object.values(PRIVATE), KEY, "hunter2canary"]) {
-    assert.ok(!out.includes(canary), `leaked ${canary}`);
+  for (const [format, out, redaction] of [
+    ["Markdown", renderMarkdown(report, text), "\\[hidden\\]"],
+    ["HTML", renderHtml(report, text), "[hidden]"],
+  ] as const) {
+    for (const canary of [...Object.values(PRIVATE), KEY, "hunter2canary"]) {
+      assert.ok(!out.includes(canary), `${format} leaked ${canary}`);
+    }
+    assert.ok(out.includes("Read failed"), `${format} should keep the scrubbed error`);
+    assert.ok(out.includes(redaction), `${format} should show the redaction marker`);
   }
   assert.equal(report.outcome, "failed");
-  assert.equal(report.steps.length, 4);
-  assert.ok(out.includes("[hidden]"));
+  assert.equal(report.steps.length, 5);
 });
 
 test("stopped and unfinished runs still produce a report", () => {
