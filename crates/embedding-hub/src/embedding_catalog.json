@@ -1,0 +1,43 @@
+{
+  "last_reviewed": "2026-11-24",
+  "note": "Free-tier limits are per Google AI Studio project and can change; they are read from the owner's AI Studio rate-limit table (columns RPM / TPM / RPD). Embedding limits are not on the public docs page, so they come from that table. Review again before relying on them.",
+  "embedding_models": [
+    {
+      "provider": "gemini", "model": "gemini-embedding-001", "label": "Gemini Embedding 1",
+      "dimensions": 768, "max_dimensions": 3072, "max_input_tokens": 2048, "format": "gemini001",
+      "free_tier": {"rpm": 100, "tpm": 30000, "rpd": 1000},
+      "source": "AI Studio rate-limit table (owner screenshot) and https://aistudio.google.com/docs/embeddings", "last_reviewed": "2026-11-24"
+    },
+    {
+      "provider": "gemini", "model": "gemini-embedding-2", "label": "Gemini Embedding 2",
+      "dimensions": 768, "max_dimensions": 3072, "max_input_tokens": 8192, "format": "gemini2",
+      "free_tier": {"rpm": 100, "tpm": 30000, "rpd": 1000},
+      "source": "AI Studio rate-limit table (owner screenshot) and https://aistudio.google.com/docs/embeddings", "last_reviewed": "2026-11-24"
+    },
+    {
+      "provider": "openai", "model": "text-embedding-3-small", "label": "OpenAI text-embedding-3-small",
+      "dimensions": 1536, "max_dimensions": 1536, "max_input_tokens": 8191, "format": "plain",
+      "free_tier": null,
+      "source": "https://platform.openai.com/docs/guides/embeddings", "last_reviewed": "2026-11-24"
+    },
+    {
+      "provider": "openai", "model": "text-embedding-3-large", "label": "OpenAI text-embedding-3-large",
+      "dimensions": 3072, "max_dimensions": 3072, "max_input_tokens": 8191, "format": "plain",
+      "free_tier": null,
+      "source": "https://platform.openai.com/docs/guides/embeddings", "last_reviewed": "2026-11-24"
+    },
+    {
+      "provider": "local", "model": "multilingual-e5-small", "label": "Local model (multilingual E5 small)",
+      "dimensions": 384, "max_dimensions": 384, "max_input_tokens": 512, "format": "e5",
+      "free_tier": null,
+      "source": "built into the local-embeddings build", "last_reviewed": "2026-11-24"
+    }
+  ],
+  "decision_models": [
+    {
+      "provider": "gemini", "model": "gemini-decision-1", "label": "Gemini Decision 1",
+      "free_tier": {"rpm": 200, "tpm": 50000, "rpd": 10000},
+      "source": "https://aistudio.google.com/docs/rate-limits and https://aistudio.google.com/docs/decisions-api", "last_reviewed": "2026-11-24"
+    }
+  ]
+}
