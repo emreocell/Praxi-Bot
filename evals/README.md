@@ -5,7 +5,7 @@ This directory holds the data-driven evaluation suites run by [`crates/evals`](.
 Use [`cargo xtask record` / `cargo xtask replay`](../docs/contributing/eval-record-replay.md)
 to capture sanitized real-model exchanges and replay them offline.
 
-- **`scenarios/`** — Tier-1 hermetic YAML scenarios (scripted fake model, fake or sandboxed local tools, zero network, zero API keys). Run in CI via `cargo test -p evals`.
+- **`scenarios/`** — Tier-1 hermetic YAML scenarios (scripted fake model, fake or sandboxed local tools, no external network, zero API keys). Telegram card fixtures use a loopback mock API. Run in CI via `cargo test -p evals`; the shared import fixtures also run through `cargo test -p cli recent_eval_import_fixtures_arrive_disabled`.
 - **`tasks/`** — Tier-2 live YAML tasks (browser/desktop/files, opt-in via `BOT_EVAL_LIVE=1`).
 - **`baselines/`** — Checked-in JSONL baselines for regression comparison (`injection-pack.jsonl`, `safety-pack.jsonl`). See [baselines/README.md](baselines/README.md).
 - **`retrieval/`** — Offline retrieval evaluation fixtures.

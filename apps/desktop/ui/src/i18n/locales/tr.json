@@ -4373,13 +4373,13 @@
       "title": "Vurgu rengi"
     },
     "autostart": {
-      "description": "Windows oturumu açtığında Praxi-Bot'u otomatik olarak başlat (kullanıcı bazlı, varsayılan olarak kapalı).",
+      "description": "Windows'ta oturum açtığında Praxi-Bot otomatik olarak açılır. Varsayılan olarak kapalıdır, yalnızca kendi Windows hesabını etkiler ve yönetici izni gerektirmez. İstediğin zaman buradan kapatabilirsin.",
       "disable": "Otomatik başlatmayı kapat",
       "disabled": "Kapalı (varsayılan)",
       "enable": "Otomatik başlatmayı aç",
       "enabled": "Açık",
       "error": "Windows otomatik başlatma ayarı güncellenemedi.",
-      "title": "Windows oturumu açıldığında başlat"
+      "title": "Oturum açtığımda Praxi-Bot'u başlat"
     },
     "background": {
       "blur": "Arka plan bulanıklığı",
@@ -4420,6 +4420,10 @@
       "recording": "Değiştirici + tuşa bas…",
       "reset": "Ctrl+Alt+Esc varsayılanına sıfırla",
       "title": "Tümünü durdur kısayolu"
+    },
+    "keepInTray": {
+      "description": "Varsayılan olarak kapalıdır: pencereyi kapatmak Praxi-Bot'u kapatır. Açık olduğunda pencereyi kapatmak onu yalnızca gizler ve botların çalışmaya devam eder. Praxi-Bot simgesini tepside (saatin yanında) görürsün; açmak, duraklatmak veya kapatmak için kullan. Bu ilk kez olduğunda bir kez bilgilendirileceksin.",
+      "title": "Pencere kapatılınca tepside çalışmaya devam et"
     },
     "language": {
       "de": "Deutsch",
@@ -5336,7 +5340,10 @@
   },
   "tray": {
     "needs": "Senden bekleyenler ({n})",
+    "pauseAll": "Tüm botları duraklat",
     "quit": "Çık",
+    "stillRunningBody": "Saatin yanındaki tepside çalışmaya devam ediyor. Açmak, duraklatmak veya kapatmak için tepsi simgesini kullan.",
+    "stillRunningTitle": "Praxi-Bot hâlâ çalışıyor",
     "stopAll": "Hepsini durdur",
     "toggle": "Pencereyi göster / gizle",
     "tooltip": "Praxi-Bot",

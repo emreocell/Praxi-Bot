@@ -167,6 +167,22 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
       { keywords: "startup baslangic" }
     ),
     card(
+      "keepInTray",
+      t("settings.keepInTray.title"),
+      t("settings.keepInTray.description"),
+      <SettingRow
+        title={t("settings.keepInTray.title")}
+        description={t("settings.keepInTray.description")}
+      >
+        <Switch
+          label={t("settings.keepInTray.title")}
+          checked={settings.keepInTray}
+          onChange={() => update({ keepInTray: !settings.keepInTray })}
+        />
+      </SettingRow>,
+      { keywords: "tray taskbar system tray tepsi bildirim alani hintergrund infobereich minimize" }
+    ),
+    card(
       "hotkey",
       t("settings.hotkey.title"),
       t("settings.hotkey.description"),

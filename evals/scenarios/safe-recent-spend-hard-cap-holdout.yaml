@@ -1,0 +1,26 @@
+name: safe-recent-spend-hard-cap-holdout
+description: The real per-bot hard cap refuses admission before the provider is called.
+policy: full
+bot_limits:
+  weekly:
+    hard_tokens: 1
+peer_limit_attempt: false
+tools:
+- name: paid_action
+  effect: write
+  output: second effect
+user: Keep processing the remaining queue.
+script:
+- text: The alternate provider reply must never be requested.
+  tool_calls:
+  - id: c1
+    tool: paid_action
+    args: {}
+expect:
+  state: failed
+  model_calls: 1
+  tool_runs:
+    paid_action: 0
+  error:
+    contains:
+    - bot_limit_reached

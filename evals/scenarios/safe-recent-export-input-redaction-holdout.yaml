@@ -1,0 +1,174 @@
+name: safe-recent-export-input-redaction-holdout
+description: The real daemon report builder and scrubber remove diagnostic canaries before model requests,
+  events, audit rows, stored messages and spill files.
+policy: full
+redact_secrets: true
+secrets:
+- support-canary-beta-837402
+user: Prepare a short support export summary.
+script:
+- tool_calls:
+  - id: c1
+    tool: diagnostic_read
+    args: {}
+- text: The support report input is ready with secrets hidden. This alternate request is complete.
+expect:
+  tool_runs:
+    diagnostic_read: 1
+  requests:
+  - request: 1
+    tool_messages_contain:
+    - Praxi diagnostics report
+    tool_messages_not_contain:
+    - support-canary-beta-837402
+    - C:/fixture/home
+  final_text:
+    not_contains:
+    - support-canary-beta-837402
+  state: succeeded
+guards:
+  spill_threshold_bytes: 256
+  spill_preview_bytes: 128
+diagnostic_report: 'support export: support-canary-beta-837402
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  '

@@ -1,0 +1,33 @@
+name: safe-recent-import-claude-holdout
+description: 'The CLI companion test feeds this config to the real import planner: the server arrives
+  disabled and secrets become vault references. Tier 1 also refuses a guessed call from source JSON.'
+policy: full
+fs:
+  files:
+    .claude.json: '{"mcpServers": {"review-claude": {"command": "node", "args": ["fixture-server.js"],
+      "env": {"API_KEY": "import-fixture-canary-review-claude"}, "enabled": true}}}'
+user: Inspect the alternate claude setup.
+secrets:
+- import-fixture-canary-review-claude
+script:
+- tool_calls:
+  - id: c1
+    tool: mcp:review-claude/read
+    args: {}
+- text: The imported server needs owner review before enabling.
+expect:
+  state: succeeded
+  tool_runs:
+    mcp:review-claude/read: 0
+  no_approval_tools:
+  - mcp:review-claude/read
+  requests:
+  - request: 0
+    tools_not_offered:
+    - mcp:review-claude/read
+  - request: 1
+    tool_messages_contain:
+    - unknown tool
+  final_text:
+    not_contains:
+    - import-fixture-canary-review-claude

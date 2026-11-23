@@ -33,6 +33,7 @@ use serde_json::Value;
 use crate::Result;
 
 /// A tier-1 scenario.
+#[allow(clippy::struct_excessive_bools)] // Each flag enables an independent fixture or loop feature.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
@@ -50,6 +51,27 @@ pub struct Scenario {
     /// Use the deferred tool surface. Older scripts replay the original definitions.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub deferred_tools: bool,
+    /// Register the real notes tools in the isolated data directory.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notes: bool,
+    /// Persist actual per-bot limits before starting the turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_limits: Option<agent_core::bot_limits::BotLimits>,
+    /// Install a synthetic bundle through the real offline installer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<BundleFixture>,
+    /// Build and scrub an actual daemon support report containing synthetic diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic_report: Option<String>,
+    /// Use desktop tools against an in-memory backend, never the real desktop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desktop: Option<DesktopFixture>,
+    /// Attempt to clear limits through real peer ingress before starting the run.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub peer_limit_attempt: bool,
+    /// Replay the emitted approval through the real Telegram bridge and check buttons and replay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telegram_buttons: Option<bool>,
     /// Guard overrides.
     #[serde(default)]
     pub guards: GuardOverrides,
@@ -157,6 +179,28 @@ pub struct FsFixture {
     /// A directory symlink; on Windows a junction when symlinks are not permitted.
     #[serde(default)]
     pub links: Vec<LinkSpec>,
+}
+
+/// Offline MCP bundle inputs. The installer never starts the bundled program.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BundleFixture {
+    /// Manifest JSON, stored in an in-memory archive.
+    pub manifest: Value,
+    /// Owner-supplied configuration values.
+    pub values: BTreeMap<String, String>,
+}
+
+/// Facts supplied by an in-memory desktop backend.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesktopFixture {
+    /// Refuse actions and observations while the human is controlling the PC.
+    #[serde(default)]
+    pub human_driving: bool,
+    /// A live password field, independently checked by the real guarded sender.
+    #[serde(default)]
+    pub password_focus: bool,
 }
 
 /// One directory link of an [`FsFixture`].
@@ -565,6 +609,9 @@ pub struct ApprovalCardExpect {
     /// Substrings excluded from the summary and all structured card details.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub text_not_contains: Vec<String>,
+    /// Daemon risk classification consumed by Telegram's button gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<String>,
 }
 
 /// All assertions of a scenario; absent fields are not checked.

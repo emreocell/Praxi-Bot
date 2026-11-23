@@ -9,6 +9,8 @@ export const SHELL_EVENT_NOTIFICATION_ACTIVATED = "shell:notification_activated"
 export const SHELL_EVENT_NOTIFICATION_ACTION = "shell:notification_action";
 export const SHELL_EVENT_TRAY_OPEN_NEEDS = "shell:tray_open_needs";
 export const SHELL_EVENT_TRAY_STOP_ALL = "shell:tray_stop_all";
+/** The window was hidden into the tray for the first time (the notice was shown). */
+export const SHELL_EVENT_TRAY_NOTICE_SHOWN = "shell:tray_notice_shown";
 
 export interface NativeNotification {
   title: string;
@@ -81,13 +83,26 @@ export async function setNeedsCount(count: number): Promise<void> {
 export async function setTrayLabels(labels: {
   toggle: string;
   needs: string;
+  pauseAll: string;
   stopAll: string;
   quit: string;
   tooltip: string;
   tooltipNeeds: string;
+  stillRunningTitle: string;
+  stillRunningBody: string;
 }): Promise<void> {
   if (isTauriRuntime()) {
     await invoke("set_tray_labels", { labels });
+  }
+}
+
+/** Tell the shell whether closing the window keeps the app in the tray. */
+export async function setKeepInTray(
+  enabled: boolean,
+  noticeSeen: boolean
+): Promise<void> {
+  if (isTauriRuntime()) {
+    await invoke("set_keep_in_tray", { enabled, noticeSeen });
   }
 }
 

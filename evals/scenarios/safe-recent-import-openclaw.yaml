@@ -1,0 +1,33 @@
+name: safe-recent-import-openclaw
+description: 'The CLI companion test feeds this config to the real import planner: the server arrives
+  disabled and secrets become vault references. Tier 1 also refuses a guessed call from source JSON.'
+policy: full
+fs:
+  files:
+    .openclaw/mcp-servers.json: '{"lookup-openclaw": {"command": "node", "args": ["fixture-server.js"],
+      "env": {"API_KEY": "import-fixture-canary-lookup-openclaw"}, "enabled": true}}'
+user: Review the imported openclaw settings.
+secrets:
+- import-fixture-canary-lookup-openclaw
+script:
+- tool_calls:
+  - id: c1
+    tool: mcp:lookup-openclaw/read
+    args: {}
+- text: The imported server needs owner review before enabling.
+expect:
+  state: succeeded
+  tool_runs:
+    mcp:lookup-openclaw/read: 0
+  no_approval_tools:
+  - mcp:lookup-openclaw/read
+  requests:
+  - request: 0
+    tools_not_offered:
+    - mcp:lookup-openclaw/read
+  - request: 1
+    tool_messages_contain:
+    - unknown tool
+  final_text:
+    not_contains:
+    - import-fixture-canary-lookup-openclaw

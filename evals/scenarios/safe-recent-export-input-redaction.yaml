@@ -1,0 +1,174 @@
+name: safe-recent-export-input-redaction
+description: The real daemon report builder and scrubber remove diagnostic canaries before model requests,
+  events, audit rows, stored messages and spill files.
+policy: full
+redact_secrets: true
+secrets:
+- diagnostic-canary-alpha-726391
+user: Summarize the diagnostic report.
+script:
+- tool_calls:
+  - id: c1
+    tool: diagnostic_read
+    args: {}
+- text: The support report input is ready with secrets hidden.
+expect:
+  tool_runs:
+    diagnostic_read: 1
+  requests:
+  - request: 1
+    tool_messages_contain:
+    - Praxi diagnostics report
+    tool_messages_not_contain:
+    - diagnostic-canary-alpha-726391
+    - C:/fixture/home
+  final_text:
+    not_contains:
+    - diagnostic-canary-alpha-726391
+  state: succeeded
+guards:
+  spill_threshold_bytes: 256
+  spill_preview_bytes: 128
+diagnostic_report: 'diagnostic log: diagnostic-canary-alpha-726391
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  report fixture line
+
+  '

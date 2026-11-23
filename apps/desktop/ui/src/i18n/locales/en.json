@@ -4373,13 +4373,13 @@
       "title": "Accent Color"
     },
     "autostart": {
-      "description": "Start Praxi-Bot automatically when you sign in to Windows (per-user, off by default).",
+      "description": "Opens Praxi-Bot automatically when you sign in to Windows. It is off by default, only affects your own Windows account and needs no administrator rights. Switch it off here at any time.",
       "disable": "Disable autostart",
       "disabled": "Off (default)",
       "enable": "Enable autostart",
       "enabled": "Enabled",
       "error": "Could not update Windows autostart setting.",
-      "title": "Launch at Windows sign-in"
+      "title": "Start Praxi-Bot when I sign in"
     },
     "background": {
       "blur": "Background Blur",
@@ -4420,6 +4420,10 @@
       "recording": "Press modifier + key...",
       "reset": "Reset to Ctrl+Alt+Esc",
       "title": "Stop All Shortcut"
+    },
+    "keepInTray": {
+      "description": "Off by default: closing the window quits Praxi-Bot. When this is on, closing the window only hides it, and your bots keep working. You will see Praxi-Bot's icon in the tray (next to the clock); use it to open, pause or quit. You will get a one-time notice the first time this happens.",
+      "title": "Keep running in the tray when the window is closed"
     },
     "language": {
       "de": "Deutsch",
@@ -5336,7 +5340,10 @@
   },
   "tray": {
     "needs": "Needs you ({n})",
+    "pauseAll": "Pause all bots",
     "quit": "Quit",
+    "stillRunningBody": "It keeps working in the tray, next to the clock. Use the tray icon to open, pause or quit it.",
+    "stillRunningTitle": "Praxi-Bot is still running",
     "stopAll": "Stop all",
     "toggle": "Show / hide window",
     "tooltip": "Praxi-Bot",

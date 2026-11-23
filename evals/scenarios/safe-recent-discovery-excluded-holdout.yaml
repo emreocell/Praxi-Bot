@@ -1,0 +1,55 @@
+name: safe-recent-discovery-excluded-holdout
+description: An excluded tool is absent from search, activation, and every provider request.
+deferred_tools: true
+policy: full
+profile_toml: '[tools]
+
+  exclude = ["archive_delete"]
+
+  '
+tools:
+- name: archive_delete
+  effect: write
+  description: Erase private records
+user: Search archive housekeeping actions.
+script:
+- tool_calls:
+  - id: c1
+    tool: tool_search
+    args:
+      query: archive
+- tool_calls:
+  - id: c2
+    tool: tool_describe
+    args:
+      name: archive_delete
+- tool_calls:
+  - id: c3
+    tool: archive_delete
+    args: {}
+- text: The excluded operation is unavailable.
+expect:
+  tool_runs:
+    archive_delete: 0
+  no_approval_tools:
+  - archive_delete
+  requests:
+  - request: 0
+    tools_not_offered:
+    - archive_delete
+  - request: 1
+    tools_not_offered:
+    - archive_delete
+    tool_messages_not_contain:
+    - Erase private records
+  - request: 2
+    tools_not_offered:
+    - archive_delete
+    tool_messages_not_contain:
+    - Erase private records
+  - request: 3
+    tools_not_offered:
+    - archive_delete
+    tool_messages_not_contain:
+    - Erase private records
+  state: succeeded

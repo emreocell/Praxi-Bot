@@ -1017,6 +1017,7 @@ function AppShell() {
           settings={settings}
           onOpenChat={openChat}
           onOpenNeeds={openNeeds}
+          onTrayNoticeShown={() => updateSettings({ trayNoticeSeen: true })}
         />
         <DigestNotifier
           digestTime={settings.digestTime}

@@ -59,6 +59,10 @@ pub struct TurnConfig {
 /// Optional extras of a turn; the default is a plain human turn with fake tools only.
 #[derive(Default)]
 pub struct TurnExtras {
+    /// A paired peer attempts to clear this bot's limits before the run.
+    pub peer_limit_attempt: bool,
+    /// Stored per-bot spending limits, enforced by the real usage ledger.
+    pub bot_limits: Option<agent_core::bot_limits::BotLimits>,
     /// Use the deferred catalog surface for this turn.
     pub deferred_tools: bool,
     /// Masks secrets in tool output and events, as the daemon's vault redactor does.
@@ -327,6 +331,15 @@ pub async fn run_turn_ext(cfg: TurnConfig, extras: TurnExtras) -> Result<TurnTra
     };
     let storage = Arc::new(Storage::open(dir.path())?);
     let (user, bot, chat) = seed(&storage)?;
+    if let Some(limits) = &extras.bot_limits {
+        limits.validate().map_err(|e| -> Error { e.into() })?;
+        storage.set_bot_spend_limits(
+            user,
+            bot,
+            &serde_json::to_string(limits)?,
+            &json!({"source": "eval"}),
+        )?;
+    }
     let mut loop_cfg = build_config(&cfg);
     loop_cfg.legacy_tool_surface = !extras.deferred_tools;
     loop_cfg.redactor.clone_from(&extras.redactor);
@@ -374,6 +387,10 @@ pub async fn run_turn_ext(cfg: TurnConfig, extras: TurnExtras) -> Result<TurnTra
         BotProfile::from_toml_str(&profile_toml(&cfg))
             .map_err(|e| -> Error { e.to_string().into() })?,
     );
+
+    if extras.peer_limit_attempt {
+        crate::fixtures::peer_cannot_clear_limits(&lp, &storage, bot).await?;
+    }
 
     let mut rx = lp.subscribe();
     let started_ms = now_ms();

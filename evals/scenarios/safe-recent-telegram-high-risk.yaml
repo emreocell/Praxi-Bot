@@ -1,0 +1,31 @@
+name: safe-recent-telegram-high-risk
+description: Telegram receives a high-risk label for destructive actions.
+policy: approve_destructive
+tools:
+- name: records_destroy
+  effect: destructive
+  output: saved
+user: Save the draft after review.
+script:
+- tool_calls:
+  - id: c1
+    tool: records_destroy
+    args:
+      name: notes.txt
+- text: The request was declined.
+reactions:
+- 'on': approval_needed
+  tool: records_destroy
+  do: deny
+expect:
+  tool_runs:
+    records_destroy: 0
+  approval_cards:
+  - tool: records_destroy
+    why: policy
+    risk: high
+  permissions:
+  - tool: records_destroy
+    decision: denied_user
+  state: succeeded
+telegram_buttons: false
