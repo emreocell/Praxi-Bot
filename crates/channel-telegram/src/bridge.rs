@@ -922,7 +922,7 @@ impl TelegramChannel {
 
     async fn dead_letter(&self, id: i64) -> Result<()> {
         if let Some(chat_id) = self.inner.inbox.dead(id)? {
-            let notice = format!("Could not process message {id}.");
+            let notice = Message::CouldNotProcess { id }.render(self.language(chat_id));
             tokio::select! {
                 biased;
                 () = self.inner.cancel.cancelled() => {},
@@ -1258,7 +1258,7 @@ impl TelegramChannel {
             IncomingKind::Unsupported(label) => {
                 self.send_redacted(
                     chat_id,
-                    &format!("I can't read a {label} yet. Please send your request as text."),
+                    &Message::Unsupported { label: &label }.render(self.language(chat_id)),
                     None,
                 )
                 .await?;
@@ -1282,8 +1282,12 @@ impl TelegramChannel {
             .split_once(char::is_whitespace)
             .map_or("", |(_, rest)| rest.trim());
         if code.is_empty() {
-            self.send_redacted(chat_id, "Usage: /pair <6-digit-code>", None)
-                .await?;
+            self.send_redacted(
+                chat_id,
+                &Message::PairUsage.render(self.language(chat_id)),
+                None,
+            )
+            .await?;
             return Ok(());
         }
 
@@ -1295,38 +1299,22 @@ impl TelegramChannel {
             .as_deref()
             .and_then(Language::from_tag);
         let language = Language::for_new_pairing(telegram_language, desktop);
-        match self
+        let reply = match self
             .inner
             .pairing
             .redeem_code_in_chat(user_id, code, chat_id, language)?
         {
-            PairAttempt::Paired => {
-                self.send_redacted(
-                    chat_id,
-                    "✅ Paired successfully! Send a message or use /bots to choose a bot.",
-                    None,
-                )
-                .await?;
-            }
-            PairAttempt::AlreadyPaired => {
-                self.send_redacted(chat_id, "✅ Your Telegram account is already paired.", None)
-                    .await?;
-            }
-            PairAttempt::Expired => {
-                self.send_redacted(
-                    chat_id,
-                    "❌ Pairing code has expired. Generate a new code and try again.",
-                    None,
-                )
-                .await?;
-            }
-            PairAttempt::InvalidCode => {
-                self.send_redacted(chat_id, "❌ Invalid pairing code.", None)
-                    .await?;
-            }
+            PairAttempt::Paired => Message::Paired,
+            PairAttempt::AlreadyPaired => Message::AlreadyPaired,
+            PairAttempt::Expired => Message::PairExpired,
+            PairAttempt::InvalidCode => Message::PairInvalid,
             // Locked-out guesser: stay silent.
-            PairAttempt::RateLimited => {}
-        }
+            PairAttempt::RateLimited => return Ok(()),
+        };
+        // Read after redeeming: a new pairing has just stored its chat's language.
+        // A chat that is not paired has none and stays English.
+        self.send_redacted(chat_id, &reply.render(self.language(chat_id)), None)
+            .await?;
         Ok(())
     }
 
@@ -1510,8 +1498,12 @@ impl TelegramChannel {
 
     async fn handle_use_command(&self, chat_id: i64, query: &str) -> Result<()> {
         if query.is_empty() {
-            self.send_redacted(chat_id, "Usage: /use <bot-name-or-id>", None)
-                .await?;
+            self.send_redacted(
+                chat_id,
+                &Message::UseUsage.render(self.language(chat_id)),
+                None,
+            )
+            .await?;
             return Ok(());
         }
         let bots = self.inner.api_client.list_bots().await?;
@@ -1538,7 +1530,11 @@ impl TelegramChannel {
         self.inner.pairing.set_bot_for_chat(chat_id, bot.id)?;
         self.send_redacted(
             chat_id,
-            &format!("Switched active bot to {} ({}).", bot.name, bot.id),
+            &Message::BotSwitched {
+                name: &bot.name,
+                id: &bot.id.to_string(),
+            }
+            .render(self.language(chat_id)),
             None,
         )
         .await?;
@@ -1581,8 +1577,9 @@ impl TelegramChannel {
         if let Some(run_id) = active_run {
             self.inner.api_client.cancel_run(run_id).await?;
             self.inner.inbox.delivered(update_id, None)?;
-            self.send_redacted(chat_id, &format!("🛑 Stopped run {run_id}."), None)
-                .await?;
+            let run = run_id.to_string();
+            let text = Message::RunStoppedId { run: &run }.render(self.language(chat_id));
+            self.send_redacted(chat_id, &text, None).await?;
         } else {
             self.inner.inbox.delivered(update_id, None)?;
             self.send_redacted(
@@ -1607,12 +1604,17 @@ impl TelegramChannel {
             rt.chat_active_run.get(&chat_id).copied()
         };
 
-        let bot_line = active_bot.map_or_else(|| "default".to_owned(), |id| id.to_string());
-        let run_line = active_run.map_or_else(|| "idle".to_owned(), |id| id.to_string());
-        let msg = format!(
-            "Daemon: {} (v{}, up {}s)\nPending approvals: {}\nBot: {}\nRun: {}",
-            st.status, st.version, st.uptime_secs, st.pending_approvals, bot_line, run_line
-        );
+        let bot = active_bot.map(|id| id.to_string());
+        let run = active_run.map(|id| id.to_string());
+        let msg = Message::Status {
+            status: &st.status,
+            version: &st.version,
+            uptime_secs: st.uptime_secs,
+            pending: st.pending_approvals,
+            bot: bot.as_deref(),
+            run: run.as_deref(),
+        }
+        .render(self.language(chat_id));
         self.send_redacted(chat_id, &msg, None).await?;
         Ok(())
     }
@@ -1679,7 +1681,7 @@ impl TelegramChannel {
                 Err(TelegramError::Daemon(message)) if message.contains("no bots configured") => {
                     self.send_redacted(
                         telegram_chat_id,
-                        "No bots configured on the daemon. Add a bot first.",
+                        &Message::NoBotsOnDaemon.render(self.language(telegram_chat_id)),
                         None,
                     )
                     .await?;
@@ -1780,7 +1782,7 @@ impl TelegramChannel {
                 self.inner.wake.notify_one();
                 self.send_redacted(
                     telegram_chat_id,
-                    "⏳ Message queued behind the active run.",
+                    &Message::Queued.render(self.language(telegram_chat_id)),
                     None,
                 )
                 .await?;
@@ -1794,7 +1796,7 @@ impl TelegramChannel {
                 {
                     self.send_redacted(
                         telegram_chat_id,
-                        "⚠️ Too many runs are being followed right now; this run's output will not be streamed here. Try again in a moment.",
+                        &Message::TooManyRuns.render(self.language(telegram_chat_id)),
                         None,
                     )
                     .await?;
@@ -2171,7 +2173,7 @@ impl TelegramChannel {
         }
         self.send_redacted(
             chat_id,
-            "⚠️ Lost the connection to the run's event stream; it may still be running.",
+            &Message::StreamLost.render(self.language(chat_id)),
             None,
         )
         .await?;
@@ -2185,7 +2187,7 @@ impl TelegramChannel {
         let chat_id = run.telegram_chat_id;
         if run.is_child {
             if let Some(err) = error {
-                let text = format!("❌ Subagent failed: {err}");
+                let text = Message::SubagentFailed { error: &err }.render(self.language(chat_id));
                 self.send_redacted(chat_id, &text, None).await?;
             }
             return Ok(());
@@ -2194,11 +2196,11 @@ impl TelegramChannel {
         run.editor.push(&self.inner.bot_api, &clean).await?;
         run.editor.flush_final(&self.inner.bot_api).await?;
         if let Some(err) = error {
-            let text = format!("❌ Run failed: {err}");
+            let text = Message::RunFailed { error: &err }.render(self.language(chat_id));
             self.send_redacted(chat_id, &text, None).await?;
         } else if run.editor.message_id().is_none() {
-            self.send_redacted(chat_id, "✅ Run finished.", None)
-                .await?;
+            let text = Message::RunFinished.render(self.language(chat_id));
+            self.send_redacted(chat_id, &text, None).await?;
         }
         Ok(())
     }

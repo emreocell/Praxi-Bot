@@ -48,31 +48,101 @@ impl Language {
 pub(crate) enum Message<'a> {
     NoBots,
     AvailableBots,
-    BotNotFound { query: &'a str },
+    BotNotFound {
+        query: &'a str,
+    },
     InputTooLong,
     NoActiveRun,
     RunStopped,
     UnknownOrExpiredRequest,
     OnceOnly,
     ApproveOnce,
-    ApproveForTask { program: &'a str },
+    ApproveForTask {
+        program: &'a str,
+    },
     Always,
     Deny,
     Approved,
     Denied,
     Answered,
-    ApprovalHeading { tool: &'a str, subagent: bool },
-    ApprovalMasked { tool: &'a str },
-    ApprovalDetailsUnavailable { tool: &'a str },
-    ApprovalTooLarge { tool: &'a str },
+    ApprovalHeading {
+        tool: &'a str,
+        subagent: bool,
+    },
+    ApprovalMasked {
+        tool: &'a str,
+    },
+    ApprovalDetailsUnavailable {
+        tool: &'a str,
+    },
+    ApprovalTooLarge {
+        tool: &'a str,
+    },
     ApprovalIncomplete,
-    ApprovalDesktopOnly { tool: &'a str },
+    ApprovalDesktopOnly {
+        tool: &'a str,
+    },
     LanguageSet,
-    LanguageUsage { current: Language },
+    LanguageUsage {
+        current: Language,
+    },
     VoiceUnavailable,
     VoiceTooLong,
     VoiceFailed,
     VoiceEmpty,
+    PairUsage,
+    Paired,
+    AlreadyPaired,
+    PairExpired,
+    PairInvalid,
+    UseUsage,
+    BotSwitched {
+        name: &'a str,
+        id: &'a str,
+    },
+    RunStoppedId {
+        run: &'a str,
+    },
+    Status {
+        status: &'a str,
+        version: &'a str,
+        uptime_secs: u64,
+        pending: usize,
+        bot: Option<&'a str>,
+        run: Option<&'a str>,
+    },
+    NoBotsOnDaemon,
+    Unsupported {
+        label: &'a str,
+    },
+    Queued,
+    TooManyRuns,
+    StreamLost,
+    SubagentFailed {
+        error: &'a str,
+    },
+    RunFailed {
+        error: &'a str,
+    },
+    RunFinished,
+    CouldNotProcess {
+        id: i64,
+    },
+}
+
+/// Turkish object form of an attachment label from `TgMedia::label` ("photo" ->
+/// "Fotoğrafları"). An unknown label stays as it is.
+fn turkish_attachment(label: &str) -> Cow<'_, str> {
+    match label {
+        "voice message" => "Sesli mesajları".into(),
+        "audio file" => "Ses dosyalarını".into(),
+        "video message" => "Görüntülü mesajları".into(),
+        "video" => "Videoları".into(),
+        "photo" => "Fotoğrafları".into(),
+        "file" => "Dosyaları".into(),
+        "sticker" => "Çıkartmaları".into(),
+        other => format!("{other} türündeki ekleri").into(),
+    }
 }
 
 impl<'a> Message<'a> {
@@ -81,6 +151,7 @@ impl<'a> Message<'a> {
         self.render(Language::EN)
     }
 
+    #[allow(clippy::too_many_lines)] // the catalog: one arm per message and language
     pub(crate) fn render(self, language: Language) -> Cow<'a, str> {
         match (self, language.0) {
             (Self::NoBots, false) => "No bots configured.".into(),
@@ -160,6 +231,50 @@ impl<'a> Message<'a> {
             (Self::VoiceFailed, true) => "Sesli mesajı metne çeviremedim. Lütfen tekrar dene ya da yaz.".into(),
             (Self::VoiceEmpty, false) => "I did not hear any speech in that voice note.".into(),
             (Self::VoiceEmpty, true) => "Sesli mesajda konuşma duyamadım.".into(),
+            (Self::PairUsage, false) => "Usage: /pair <6-digit-code>".into(),
+            (Self::PairUsage, true) => "Kullanım: /pair <6 haneli kod>".into(),
+            (Self::Paired, false) => "✅ Paired successfully! Send a message or use /bots to choose a bot.".into(),
+            (Self::Paired, true) => "✅ Eşleşme tamamlandı! Bir mesaj gönder ya da bot seçmek için /bots komutunu kullan.".into(),
+            (Self::AlreadyPaired, false) => "✅ Your Telegram account is already paired.".into(),
+            (Self::AlreadyPaired, true) => "✅ Telegram hesabın zaten eşleşmiş.".into(),
+            (Self::PairExpired, false) => "❌ Pairing code has expired. Generate a new code and try again.".into(),
+            (Self::PairExpired, true) => "❌ Eşleşme kodunun süresi dolmuş. Yeni bir kod oluşturup tekrar dene.".into(),
+            (Self::PairInvalid, false) => "❌ Invalid pairing code.".into(),
+            (Self::PairInvalid, true) => "❌ Eşleşme kodu geçersiz.".into(),
+            (Self::UseUsage, false) => "Usage: /use <bot-name-or-id>".into(),
+            (Self::UseUsage, true) => "Kullanım: /use <bot adı veya kimliği>".into(),
+            (Self::BotSwitched { name, id }, false) => format!("Switched active bot to {name} ({id}).").into(),
+            (Self::BotSwitched { name, id }, true) => format!("Etkin bot {name} ({id}) olarak değiştirildi.").into(),
+            (Self::RunStoppedId { run }, false) => format!("🛑 Stopped run {run}.").into(),
+            (Self::RunStoppedId { run }, true) => format!("🛑 {run} çalışması durduruldu.").into(),
+            (Self::Status { status, version, uptime_secs, pending, bot, run }, false) => format!(
+                "Daemon: {status} (v{version}, up {uptime_secs}s)\nPending approvals: {pending}\nBot: {}\nRun: {}",
+                bot.unwrap_or("default"),
+                run.unwrap_or("idle"),
+            ).into(),
+            (Self::Status { status, version, uptime_secs, pending, bot, run }, true) => format!(
+                "Daemon: {status} (v{version}, {uptime_secs} sn'dir açık)\nBekleyen onaylar: {pending}\nBot: {}\nÇalışma: {}",
+                bot.unwrap_or("varsayılan"),
+                run.unwrap_or("boşta"),
+            ).into(),
+            (Self::NoBotsOnDaemon, false) => "No bots configured on the daemon. Add a bot first.".into(),
+            (Self::NoBotsOnDaemon, true) => "Daemon'da ayarlanmış bot yok. Önce bir bot ekle.".into(),
+            (Self::Unsupported { label }, false) => format!("I can't read a {label} yet. Please send your request as text.").into(),
+            (Self::Unsupported { label }, true) => format!("{} henüz okuyamıyorum. Lütfen isteğini yazıyla gönder.", turkish_attachment(label)).into(),
+            (Self::Queued, false) => "⏳ Message queued behind the active run.".into(),
+            (Self::Queued, true) => "⏳ Mesaj, etkin çalışmanın arkasında sıraya alındı.".into(),
+            (Self::TooManyRuns, false) => "⚠️ Too many runs are being followed right now; this run's output will not be streamed here. Try again in a moment.".into(),
+            (Self::TooManyRuns, true) => "⚠️ Şu anda çok fazla çalışma izleniyor; bu çalışmanın çıktısı buraya aktarılmayacak. Birazdan tekrar dene.".into(),
+            (Self::StreamLost, false) => "⚠️ Lost the connection to the run's event stream; it may still be running.".into(),
+            (Self::StreamLost, true) => "⚠️ Çalışmanın olay akışıyla bağlantı koptu; çalışma hâlâ sürüyor olabilir.".into(),
+            (Self::SubagentFailed { error }, false) => format!("❌ Subagent failed: {error}").into(),
+            (Self::SubagentFailed { error }, true) => format!("❌ Alt ajan başarısız oldu: {error}").into(),
+            (Self::RunFailed { error }, false) => format!("❌ Run failed: {error}").into(),
+            (Self::RunFailed { error }, true) => format!("❌ Çalışma başarısız oldu: {error}").into(),
+            (Self::RunFinished, false) => "✅ Run finished.".into(),
+            (Self::RunFinished, true) => "✅ Çalışma bitti.".into(),
+            (Self::CouldNotProcess { id }, false) => format!("Could not process message {id}.").into(),
+            (Self::CouldNotProcess { id }, true) => format!("{id} numaralı mesaj işlenemedi.").into(),
             (Self::LanguageSet, false) => "This chat now uses English.".into(),
             (Self::LanguageSet, true) => "Bu sohbet artık Türkçe.".into(),
             (Self::LanguageUsage { current }, false) => {
@@ -212,6 +327,131 @@ mod tests {
         );
         assert_eq!(Language::for_new_pairing(Some("de"), None), Language::EN);
         assert_eq!(Language::for_new_pairing(None, None), Language::EN);
+    }
+
+    #[test]
+    fn remaining_english_messages_are_unchanged() {
+        let status = Message::Status {
+            status: "ok",
+            version: "0.1.0",
+            uptime_secs: 120,
+            pending: 1,
+            bot: None,
+            run: None,
+        };
+        for (message, english) in [
+            (Message::PairUsage, "Usage: /pair <6-digit-code>"),
+            (
+                Message::Paired,
+                "✅ Paired successfully! Send a message or use /bots to choose a bot.",
+            ),
+            (
+                Message::AlreadyPaired,
+                "✅ Your Telegram account is already paired.",
+            ),
+            (
+                Message::PairExpired,
+                "❌ Pairing code has expired. Generate a new code and try again.",
+            ),
+            (Message::PairInvalid, "❌ Invalid pairing code."),
+            (Message::UseUsage, "Usage: /use <bot-name-or-id>"),
+            (
+                Message::BotSwitched {
+                    name: "Mira",
+                    id: "b1",
+                },
+                "Switched active bot to Mira (b1).",
+            ),
+            (Message::RunStoppedId { run: "r1" }, "🛑 Stopped run r1."),
+            (
+                status,
+                "Daemon: ok (v0.1.0, up 120s)\nPending approvals: 1\nBot: default\nRun: idle",
+            ),
+            (
+                Message::NoBotsOnDaemon,
+                "No bots configured on the daemon. Add a bot first.",
+            ),
+            (
+                Message::Unsupported { label: "photo" },
+                "I can't read a photo yet. Please send your request as text.",
+            ),
+            (Message::Queued, "⏳ Message queued behind the active run."),
+            (
+                Message::TooManyRuns,
+                "⚠️ Too many runs are being followed right now; this run's output will not be streamed here. Try again in a moment.",
+            ),
+            (
+                Message::StreamLost,
+                "⚠️ Lost the connection to the run's event stream; it may still be running.",
+            ),
+            (
+                Message::SubagentFailed { error: "boom" },
+                "❌ Subagent failed: boom",
+            ),
+            (Message::RunFailed { error: "boom" }, "❌ Run failed: boom"),
+            (Message::RunFinished, "✅ Run finished."),
+            (
+                Message::CouldNotProcess { id: 42 },
+                "Could not process message 42.",
+            ),
+        ] {
+            assert_eq!(message.english(), english);
+        }
+    }
+
+    #[test]
+    fn remaining_messages_keep_their_arguments_in_both_languages() {
+        let (name, id, run, error) = ("Mira Bot", "bot-7f3a", "run-91c2", "disk full: /tmp");
+        for language in [Language::EN, Language::TR] {
+            let once = |text: &str, part: &str| {
+                assert_eq!(text.matches(part).count(), 1, "{part:?} in {text:?}");
+            };
+            let switched = Message::BotSwitched { name, id }.render(language);
+            once(&switched, name);
+            once(&switched, id);
+            once(&Message::RunStoppedId { run }.render(language), run);
+            once(&Message::RunFailed { error }.render(language), error);
+            once(&Message::SubagentFailed { error }.render(language), error);
+            once(
+                &Message::CouldNotProcess { id: 4242 }.render(language),
+                "4242",
+            );
+            once(&Message::PairUsage.render(language), "/pair");
+            once(&Message::UseUsage.render(language), "/use");
+            once(&Message::Paired.render(language), "/bots");
+            let status = Message::Status {
+                status: "degraded",
+                version: "9.8.7",
+                uptime_secs: 3605,
+                pending: 17,
+                bot: Some(id),
+                run: Some(run),
+            }
+            .render(language);
+            for part in ["degraded", "v9.8.7", "3605", "17", id, run] {
+                once(&status, part);
+            }
+        }
+    }
+
+    #[test]
+    fn every_attachment_label_has_a_turkish_name() {
+        // The labels `TgMedia::label` produces.
+        for label in [
+            "voice message",
+            "audio file",
+            "video message",
+            "video",
+            "photo",
+            "file",
+            "sticker",
+        ] {
+            let text = Message::Unsupported { label }.render(Language::TR);
+            assert!(!text.contains(label), "{label} not translated: {text}");
+            assert!(text.ends_with("Lütfen isteğini yazıyla gönder."));
+        }
+        let unknown = Message::Unsupported { label: "poll" }.render(Language::TR);
+        assert!(unknown.starts_with("poll türündeki ekleri"));
     }
 
     #[test]

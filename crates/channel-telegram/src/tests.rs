@@ -4407,3 +4407,88 @@ async fn an_expired_card_is_refused() {
             .any(|a| a.to_string().contains("expired"))
     );
 }
+
+#[tokio::test]
+async fn a_turkish_chat_gets_turkish_command_replies_and_run_notices() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let channel = TelegramChannel::new(
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_api_base_url(server.uri())
+            .with_paired_users([PAIRED_USER_ID]),
+        daemon.clone(),
+    )
+    .unwrap();
+    let run_id = RunId::new();
+    daemon.queue_run_events(
+        run_id,
+        vec![Event::RunFinished(RunFinished {
+            run_id,
+            error: None,
+        })],
+    );
+    let mut photo = text_update(5, PAIRED_USER_ID, TEST_CHAT_ID, "");
+    photo["message"].as_object_mut().unwrap().remove("text");
+    photo["message"]["photo"] = json!([{"file_id": "p"}]);
+    for u in [
+        update(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "/lang tr")),
+        update(text_update(2, PAIRED_USER_ID, TEST_CHAT_ID, "/use")),
+        update(text_update(3, PAIRED_USER_ID, TEST_CHAT_ID, "/status")),
+        update(text_update(4, PAIRED_USER_ID, TEST_CHAT_ID, "/pair 000000")),
+        update(photo),
+        update(text_update(6, PAIRED_USER_ID, TEST_CHAT_ID, "hello")),
+    ] {
+        channel.handle_update(u).await.unwrap();
+    }
+    let replies = replies_to(&server, TEST_CHAT_ID).await;
+    assert_eq!(replies[0], "Bu sohbet artık Türkçe.");
+    assert_eq!(replies[1], "Kullanım: /use <bot adı veya kimliği>");
+    assert!(
+        replies[2].starts_with("Daemon: ok (v0.1.0, 120 sn'dir açık)\nBekleyen onaylar: 1\nBot: "),
+        "{}",
+        replies[2]
+    );
+    assert!(replies[2].ends_with("\nÇalışma: boşta"), "{}", replies[2]);
+    assert_eq!(replies[3], "❌ Eşleşme kodu geçersiz.");
+    assert_eq!(
+        replies[4],
+        "Fotoğrafları henüz okuyamıyorum. Lütfen isteğini yazıyla gönder."
+    );
+    assert_eq!(replies.last().unwrap(), "✅ Çalışma bitti.");
+}
+
+#[tokio::test]
+async fn pairing_replies_follow_the_new_chat_language_and_unpaired_chats_stay_english() {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let channel = no_bot_channel(
+        &server,
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN),
+    );
+    let code = channel.create_pair_code();
+    for (id, text) in [
+        (1, "/pair"),
+        (2, "/pair 000000"),
+        (3, &format!("/pair {code}")),
+    ] {
+        channel
+            .handle_update(text_update_from(
+                id,
+                SECOND_USER_ID,
+                SECOND_CHAT_ID,
+                text,
+                "tr",
+            ))
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        replies_to(&server, SECOND_CHAT_ID).await,
+        [
+            "Usage: /pair <6-digit-code>",
+            "❌ Invalid pairing code.",
+            "✅ Eşleşme tamamlandı! Bir mesaj gönder ya da bot seçmek için /bots komutunu kullan.",
+        ]
+    );
+}
