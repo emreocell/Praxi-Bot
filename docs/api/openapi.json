@@ -4632,6 +4632,352 @@
         ]
       }
     },
+    "/v1/connection-test/channel": {
+      "post": {
+        "tags": [
+          "connection-test"
+        ],
+        "summary": "Test a channel token (Telegram: `getMe`).",
+        "operationId": "test_channel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelTestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestReport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/connection-test/email": {
+      "post": {
+        "tags": [
+          "connection-test"
+        ],
+        "summary": "Test a saved e-mail account (including `AgentMail` API accounts).",
+        "operationId": "test_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailTestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestReport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "e-mail management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/connection-test/mcp": {
+      "post": {
+        "tags": [
+          "connection-test"
+        ],
+        "summary": "Test an MCP server: (re)start it and list its tools. No tool is called.",
+        "operationId": "test_mcp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpTestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestReport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "MCP management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/connection-test/provider": {
+      "post": {
+        "tags": [
+          "connection-test"
+        ],
+        "summary": "Test an LLM provider key: list the models (or, when the provider has no model list, send a\none-token request) and report what the provider said.",
+        "operationId": "test_provider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderTestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too many tests running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/connection-test/voice": {
+      "post": {
+        "tags": [
+          "connection-test"
+        ],
+        "summary": "Test dictation: send half a second of silence to the configured speech service.",
+        "operationId": "test_voice",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestReport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "dictation is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/connection-test/web": {
+      "post": {
+        "tags": [
+          "connection-test"
+        ],
+        "summary": "Test the web-search keys: one live probe through the configured backends.",
+        "operationId": "test_web",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestReport"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "web search management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/control/override": {
       "post": {
         "tags": [
@@ -14326,6 +14672,19 @@
           }
         }
       },
+      "ChannelTestInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/connection-test/channel`.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A registered channel id (`telegram`)."
+          }
+        }
+      },
       "ChatDto": {
         "type": "object",
         "description": "A chat thread.",
@@ -15367,6 +15726,65 @@
               "null"
             ],
             "description": "Coding CLIs only: where the list came from (`cli`, `local_cache` or `bundled`, the\nlast-resort fallback the UI marks as such)."
+          }
+        }
+      },
+      "ConnectionOutcome": {
+        "type": "string",
+        "description": "What a connection test found. The UI maps each value to a message and a next step.",
+        "enum": [
+          "ok",
+          "bad_key",
+          "no_network",
+          "quota_exceeded",
+          "wrong_endpoint",
+          "provider_outage",
+          "unknown"
+        ]
+      },
+      "ConnectionTestReport": {
+        "type": "object",
+        "description": "Result of one connection test.",
+        "required": [
+          "target",
+          "outcome",
+          "details",
+          "elapsed_ms"
+        ],
+        "properties": {
+          "details": {
+            "type": "string",
+            "description": "Technical text for an expandable \"details\" box. Secret-redacted and bounded."
+          },
+          "elapsed_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long the test took in milliseconds.",
+            "minimum": 0
+          },
+          "http_status": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "HTTP status the service answered with, when there was one.",
+            "minimum": 0
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ConnectionOutcome",
+            "description": "The typed result."
+          },
+          "provider_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The service's own error code (for example `invalid_api_key`), when it gave one."
+          },
+          "target": {
+            "type": "string",
+            "description": "What was tested: `provider`, `mcp`, `channel`, `web`, `voice` or `email`."
           }
         }
       },
@@ -16690,6 +17108,19 @@
           "security": {
             "$ref": "#/components/schemas/EmailSecurity",
             "description": "Transport security, default implicit TLS."
+          }
+        }
+      },
+      "EmailTestInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/connection-test/email`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "A saved e-mail account name."
           }
         }
       },
@@ -21113,6 +21544,19 @@
           "quarantined"
         ]
       },
+      "McpTestInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/connection-test/mcp`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "A configured MCP server name."
+          }
+        }
+      },
       "McpTokenGrant": {
         "type": "object",
         "description": "Nonsecret grant, returned to the owner after storing a credential.",
@@ -22123,6 +22567,19 @@
           "watch",
           "live"
         ]
+      },
+      "ProviderTestInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/connection-test/provider`.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A configured provider id (`gemini`, `openai`, `anthropic`, `local`, ...)."
+          }
+        }
       },
       "ProviderUsage": {
         "allOf": [
@@ -25919,6 +26376,9 @@
     },
     {
       "name": "web"
+    },
+    {
+      "name": "connection-test"
     }
   ]
 }

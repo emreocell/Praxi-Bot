@@ -502,6 +502,15 @@ impl BotApiClient {
         }
     }
 
+    /// `getMe`: who the token belongs to. The cheapest call that proves the token works.
+    ///
+    /// # Errors
+    /// Transport or Telegram API errors.
+    pub async fn get_me(&self) -> Result<TgUser> {
+        self.post("getMe", &serde_json::json!({}), Duration::from_secs(10))
+            .await
+    }
+
     /// Long-poll `getUpdates` for new messages and callback queries.
     ///
     /// # Errors

@@ -28,6 +28,7 @@ mod bot_tools;
 mod chat_history;
 mod cli_engines;
 mod composio;
+mod connection_test;
 mod doctor;
 mod email;
 mod fill_secrets;

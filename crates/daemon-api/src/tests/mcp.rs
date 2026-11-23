@@ -1096,3 +1096,41 @@ async fn approving_changed_tools_reaches_the_host() {
     .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
 }
+
+/// `POST /v1/connection-test/mcp`: owner-only, typed outcome, no tool is run.
+#[tokio::test]
+async fn connection_test_mcp_maps_state_to_typed_outcome() {
+    use super::{OWNER_KEY, call_token_only};
+    use crate::mcp::McpErrorKind;
+    let _ = OWNER_KEY;
+    let (t, fake) = with_mcp();
+    let input: McpServerInput = serde_json::from_value(stdio_body("demo")).unwrap();
+    fake.servers.lock().push(FakeMcp::dto("demo", &input));
+    let body = || Some(json!({"name": "demo"}));
+    let path = "/v1/connection-test/mcp";
+
+    // The token alone cannot start a server process.
+    let r = call_token_only(&t, Method::POST, path, body()).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    let r = call(&t, Method::POST, path, body()).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json());
+    assert_eq!(r.json()["outcome"], "ok");
+
+    {
+        let mut all = fake.servers.lock();
+        all[0].status = McpStatus::Error;
+        all[0].error = Some("failed to start `npx`".into());
+        all[0].error_kind = Some(McpErrorKind::RuntimeMissing);
+    }
+    let r = call(&t, Method::POST, path, body()).await;
+    assert_eq!(r.json()["outcome"], "wrong_endpoint");
+    assert!(r.json()["details"].as_str().unwrap().contains("npx"));
+
+    {
+        let mut all = fake.servers.lock();
+        all[0].error_kind = Some(McpErrorKind::Timeout);
+    }
+    let r = call(&t, Method::POST, path, body()).await;
+    assert_eq!(r.json()["outcome"], "no_network");
+}

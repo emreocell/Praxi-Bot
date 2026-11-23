@@ -14,6 +14,7 @@ use crate::cli_login;
 use crate::components;
 use crate::composio;
 use crate::composio_routes;
+use crate::connection_test;
 use crate::data_routes;
 use crate::doctor;
 use crate::doctor_routes;
@@ -331,6 +332,12 @@ impl Modify for Security {
         data_routes::post_clear_cache,
         spend_routes::get_spend_limit,
         spend_routes::put_spend_limit,
+        connection_test::test_provider,
+        connection_test::test_mcp,
+        connection_test::test_channel,
+        connection_test::test_web,
+        connection_test::test_voice,
+        connection_test::test_email,
         web_routes::get_web_search,
         web_routes::test_web_search,
         web_routes::update_web_search,
@@ -341,6 +348,12 @@ impl Modify for Security {
         ::live_view::ScreenStatus,
         ::live_view::ScreenStreamState,
         ::live_view::SourceRect,
+        connection_test::ConnectionOutcome,
+        connection_test::ConnectionTestReport,
+        connection_test::ProviderTestInput,
+        connection_test::McpTestInput,
+        connection_test::ChannelTestInput,
+        connection_test::EmailTestInput,
         changes::ChangeKindDto,
         changes::CheckpointComputerDto,
         changes::CheckpointLocationDto,
@@ -685,6 +698,7 @@ impl Modify for Security {
         (name = "view"),
         (name = "voice"),
         (name = "web"),
+        (name = "connection-test"),
     )
 )]
 pub struct ApiDoc;
