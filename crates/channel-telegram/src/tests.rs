@@ -2477,7 +2477,6 @@ async fn a_stream_that_drops_without_run_finished_still_shows_the_last_word() {
     );
 }
 
-// Audit BUG-18: failed persistence must not grant access, consume an invite, or
 type PairingSetter = fn(&crate::PairingStore, &str) -> crate::Result<()>;
 type PairingCheck = fn(&crate::PairingStore) -> bool;
 
@@ -2578,6 +2577,7 @@ fn every_pairing_setter_keeps_memory_and_file_in_agreement() {
     }
 }
 
+// Audit BUG-18: failed persistence must not grant access, consume an invite, or
 // publish a different bot/thread/offset. Failure injection is independent of OS ACLs.
 #[test]
 fn failed_pairing_save_preserves_invite_and_all_live_state() {
