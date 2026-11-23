@@ -71,6 +71,26 @@
   margin: 0 auto;
 }
 
+/* Keep the DOM searchable and keyboard/screen-reader accessible. The browser skips
+   offscreen layout/paint and `auto` remembers each row's actual measured height.
+   Token-derived estimates are used only until a row has been laid out once. */
+.timeline > .userRow,
+.timeline > .assistantRow,
+.timeline > .chainRow,
+.timeline > .itemRow {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto calc(var(--space-6) * 8);
+}
+
+.timeline > .userRow {
+  contain-intrinsic-block-size: auto calc(var(--space-6) * 3);
+}
+
+/* Focused controls must remain rendered while tabbing through older messages. */
+.timeline > :focus-within {
+  content-visibility: visible;
+}
+
 /* A new turn starts further down than the rows of one bot block. */
 .timeline > .userRow:not(:first-child),
 .timeline > .conversationLabel + .userRow {
