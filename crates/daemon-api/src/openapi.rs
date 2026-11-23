@@ -46,6 +46,7 @@ use crate::skill_hub;
 use crate::skill_management;
 use crate::skill_market;
 use crate::skills;
+use crate::embeddings_routes;
 use crate::spend_routes;
 use crate::sse;
 use crate::terminal;
@@ -339,6 +340,11 @@ impl Modify for Security {
         bot_limits_routes::put_bot_spend_limits,
         data_routes::get_data_usage,
         data_routes::post_clear_cache,
+        embeddings_routes::get_embeddings,
+        embeddings_routes::put_embeddings,
+        embeddings_routes::test_embedding,
+        embeddings_routes::get_decision_helper,
+        embeddings_routes::put_decision_helper,
         spend_routes::get_spend_limit,
         spend_routes::put_spend_limit,
         connection_test::test_provider,
@@ -686,6 +692,19 @@ impl Modify for Security {
         data_routes::DataCategoryDto,
         data_routes::DataUsageDto,
         data_routes::ClearCacheDto,
+        embeddings_routes::MeterDto,
+        embeddings_routes::UsageDto,
+        embeddings_routes::LimitsDto,
+        embeddings_routes::EmbeddingProviderDto,
+        embeddings_routes::CatalogModelDto,
+        embeddings_routes::DecisionModelDto,
+        embeddings_routes::EmbeddingCatalogDto,
+        embeddings_routes::EmbeddingsDto,
+        embeddings_routes::EmbeddingProviderInput,
+        embeddings_routes::EmbeddingsInput,
+        embeddings_routes::EmbeddingTestDto,
+        embeddings_routes::DecisionHelperDto,
+        embeddings_routes::DecisionHelperInput,
         spend_routes::SpendLimitDto,
         spend_routes::SpendLimitInput,
         web::WebSearchConfigDto,

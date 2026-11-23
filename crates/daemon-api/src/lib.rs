@@ -71,6 +71,7 @@ pub mod skill_hub;
 pub mod skill_management;
 pub mod skill_market;
 pub mod skills;
+mod embeddings_routes;
 mod spend_routes;
 mod sse;
 mod stop;
@@ -1601,6 +1602,18 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/connection-test/email",
             post(connection_test::test_email),
+        )
+        .route(
+            "/v1/embeddings",
+            get(embeddings_routes::get_embeddings).put(embeddings_routes::put_embeddings),
+        )
+        .route(
+            "/v1/decision-helper",
+            get(embeddings_routes::get_decision_helper).put(embeddings_routes::put_decision_helper),
+        )
+        .route(
+            "/v1/embeddings/{id}/test",
+            post(embeddings_routes::test_embedding),
         )
         .route(
             "/v1/spend-limit",

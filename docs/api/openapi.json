@@ -5377,6 +5377,76 @@
         ]
       }
     },
+    "/v1/decision-helper": {
+      "get": {
+        "tags": [
+          "embeddings"
+        ],
+        "summary": "The optional decision helper (Gemini Decisions) and its state.",
+        "operationId": "get_decision_helper",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionHelperDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "embeddings"
+        ],
+        "summary": "Switch the decision helper on or off (owner only). It only ever gives\nadvice: a decision never grants a permission.",
+        "operationId": "put_decision_helper",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionHelperInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionHelperDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/doctor": {
       "get": {
         "tags": [
@@ -6180,6 +6250,143 @@
           },
           "503": {
             "description": "e-mail management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/embeddings": {
+      "get": {
+        "tags": [
+          "embeddings"
+        ],
+        "summary": "The embedding setup with live state and usage (no secrets).",
+        "operationId": "get_embeddings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingsDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "embeddings"
+        ],
+        "summary": "Save the embedding setup (owner only). Text is only ever sent to a provider\nwhose `allow_remote` the owner switched on.",
+        "operationId": "put_embeddings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmbeddingsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/embeddings/{id}/test": {
+      "post": {
+        "tags": [
+          "embeddings"
+        ],
+        "summary": "Send one fixed test sentence to a provider (owner only).",
+        "operationId": "test_embedding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "provider id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingTestDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
@@ -14966,6 +15173,63 @@
           }
         }
       },
+      "CatalogModelDto": {
+        "type": "object",
+        "description": "One model of the catalog.",
+        "required": [
+          "provider",
+          "model",
+          "label",
+          "dimensions",
+          "max_dimensions",
+          "max_input_tokens",
+          "last_reviewed"
+        ],
+        "properties": {
+          "dimensions": {
+            "type": "integer",
+            "description": "Recommended vector size.",
+            "minimum": 0
+          },
+          "free_tier": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LimitsDto",
+                "description": "Free-tier limits."
+              }
+            ]
+          },
+          "label": {
+            "type": "string",
+            "description": "Plain-language name."
+          },
+          "last_reviewed": {
+            "type": "string",
+            "description": "`YYYY-MM-DD` last reviewed."
+          },
+          "max_dimensions": {
+            "type": "integer",
+            "description": "Largest vector size.",
+            "minimum": 0
+          },
+          "max_input_tokens": {
+            "type": "integer",
+            "description": "Longest input in tokens.",
+            "minimum": 0
+          },
+          "model": {
+            "type": "string",
+            "description": "Model id."
+          },
+          "provider": {
+            "type": "string",
+            "description": "`gemini`, `openai` or `local`."
+          }
+        }
+      },
       "CatalogProviderDto": {
         "type": "object",
         "description": "A catalog entry.",
@@ -17021,6 +17285,103 @@
           "deny"
         ]
       },
+      "DecisionHelperDto": {
+        "type": "object",
+        "description": "`GET /v1/decision-helper`.",
+        "required": [
+          "available",
+          "enabled",
+          "custom_file",
+          "model",
+          "last_reviewed"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "A Gemini key is set up, so the helper can be switched on."
+          },
+          "custom_file": {
+            "type": "boolean",
+            "description": "`decider.toml` was written by hand; switching here would replace it."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "The helper is on."
+          },
+          "free_tier": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LimitsDto",
+                "description": "Free-tier limits of that model (dated catalog)."
+              }
+            ]
+          },
+          "last_reviewed": {
+            "type": "string",
+            "description": "`YYYY-MM-DD` the limits were last reviewed."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model used."
+          }
+        }
+      },
+      "DecisionHelperInput": {
+        "type": "object",
+        "description": "`PUT /v1/decision-helper`.",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Switch the helper on or off."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DecisionModelDto": {
+        "type": "object",
+        "description": "The Gemini decision helper model of the catalog.",
+        "required": [
+          "provider",
+          "model",
+          "label",
+          "last_reviewed"
+        ],
+        "properties": {
+          "free_tier": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LimitsDto",
+                "description": "Free-tier limits."
+              }
+            ]
+          },
+          "label": {
+            "type": "string",
+            "description": "Plain-language name."
+          },
+          "last_reviewed": {
+            "type": "string",
+            "description": "`YYYY-MM-DD` last reviewed."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model id."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Provider id."
+          }
+        }
+      },
       "DecisionResponse": {
         "type": "object",
         "description": "Response of a decision.",
@@ -17711,6 +18072,40 @@
           }
         }
       },
+      "EmbeddingCatalogDto": {
+        "type": "object",
+        "description": "The dated catalog.",
+        "required": [
+          "last_reviewed",
+          "note",
+          "models",
+          "decision_models"
+        ],
+        "properties": {
+          "decision_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecisionModelDto"
+            },
+            "description": "Decision models."
+          },
+          "last_reviewed": {
+            "type": "string",
+            "description": "`YYYY-MM-DD` last reviewed."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogModelDto"
+            },
+            "description": "Embedding models."
+          },
+          "note": {
+            "type": "string",
+            "description": "Caveat for the numbers."
+          }
+        }
+      },
       "EmbeddingGrantTarget": {
         "oneOf": [
           {
@@ -17747,6 +18142,265 @@
             }
           }
         ]
+      },
+      "EmbeddingProviderDto": {
+        "type": "object",
+        "description": "One configured provider.",
+        "required": [
+          "id",
+          "kind",
+          "model",
+          "dimensions",
+          "request_dimensions",
+          "has_key",
+          "allow_remote",
+          "state",
+          "retry_in_secs",
+          "usage",
+          "remote"
+        ],
+        "properties": {
+          "allow_remote": {
+            "type": "boolean",
+            "description": "The owner agreed that text is sent to this provider."
+          },
+          "base_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Endpoint, if not the default."
+          },
+          "dimensions": {
+            "type": "integer",
+            "description": "Vector size.",
+            "minimum": 0
+          },
+          "has_key": {
+            "type": "boolean",
+            "description": "Whether an API key is stored (the key itself is never returned)."
+          },
+          "id": {
+            "type": "string",
+            "description": "Short id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`gemini`, `openai`, `compatible` or `local`."
+          },
+          "limits": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LimitsDto",
+                "description": "Limits overridden by the owner."
+              }
+            ]
+          },
+          "model": {
+            "type": "string",
+            "description": "Model id."
+          },
+          "remote": {
+            "type": "boolean",
+            "description": "Whether text leaves this computer."
+          },
+          "request_dimensions": {
+            "type": "boolean",
+            "description": "Whether the `dimensions` parameter is sent."
+          },
+          "retry_in_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds until the provider is tried again.",
+            "minimum": 0
+          },
+          "state": {
+            "type": "string",
+            "description": "`ok`, `not_allowed`, `key_missing`, `cooling_down`, `key_rejected`,\n`rate_limited`, `offline`, `dimension_mismatch`, `rejected` or `unavailable`."
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageDto",
+            "description": "Used / limit bars."
+          }
+        }
+      },
+      "EmbeddingProviderInput": {
+        "type": "object",
+        "description": "A provider as the owner edits it.",
+        "required": [
+          "id",
+          "kind",
+          "model",
+          "dimensions"
+        ],
+        "properties": {
+          "allow_remote": {
+            "type": "boolean",
+            "description": "The owner agrees that text is sent to this provider."
+          },
+          "api_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New API key (write-only; leave out to keep the stored key)."
+          },
+          "base_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Endpoint (required for `compatible`)."
+          },
+          "clear_key": {
+            "type": "boolean",
+            "description": "Remove the stored key."
+          },
+          "dimensions": {
+            "type": "integer",
+            "description": "Vector size.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Short id (`a-z`, `0-9`, `-`)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`gemini`, `openai`, `compatible` or `local`."
+          },
+          "limits": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LimitsDto",
+                "description": "Replace the limits of the catalog."
+              }
+            ]
+          },
+          "model": {
+            "type": "string",
+            "description": "Model id."
+          },
+          "request_dimensions": {
+            "type": "boolean",
+            "description": "Send the `dimensions` parameter."
+          },
+          "reuse_key_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Copy the key of a chat provider (`gemini`) instead of typing it."
+          }
+        },
+        "additionalProperties": false
+      },
+      "EmbeddingTestDto": {
+        "type": "object",
+        "description": "Result of `POST /v1/embeddings/{id}/test`.",
+        "required": [
+          "outcome"
+        ],
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "description": "`ok` or the reason (see `state` of a provider)."
+          }
+        }
+      },
+      "EmbeddingsDto": {
+        "type": "object",
+        "description": "`GET /v1/embeddings`.",
+        "required": [
+          "providers",
+          "chains",
+          "remote_denied_bots",
+          "catalog",
+          "reusable_keys"
+        ],
+        "properties": {
+          "catalog": {
+            "$ref": "#/components/schemas/EmbeddingCatalogDto",
+            "description": "Known models and limits."
+          },
+          "chains": {
+            "type": "object",
+            "description": "Per purpose (`router`, `memory`, `knowledge`): provider ids in priority\norder. The offline embedder is always tried last.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmbeddingProviderDto"
+            },
+            "description": "Configured providers."
+          },
+          "remote_denied_bots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Bots that never use a remote provider."
+          },
+          "reusable_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Chat providers whose key can be reused (`gemini`)."
+          }
+        }
+      },
+      "EmbeddingsInput": {
+        "type": "object",
+        "description": "`PUT /v1/embeddings`.",
+        "required": [
+          "providers"
+        ],
+        "properties": {
+          "chains": {
+            "type": "object",
+            "description": "Provider ids per purpose.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmbeddingProviderInput"
+            },
+            "description": "The complete provider list."
+          },
+          "remote_denied_bots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Bots that never use a remote provider."
+          }
+        },
+        "additionalProperties": false
       },
       "EnableCliProviderInput": {
         "type": "object",
@@ -20835,6 +21489,39 @@
           }
         }
       },
+      "LimitsDto": {
+        "type": "object",
+        "description": "Provider limits (RPM / TPM / RPD).",
+        "properties": {
+          "rpd": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Requests per day.",
+            "minimum": 0
+          },
+          "rpm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Requests per minute.",
+            "minimum": 0
+          },
+          "tpm": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Tokens per minute.",
+            "minimum": 0
+          }
+        }
+      },
       "LocalAdviceDto": {
         "type": "object",
         "description": "Advice for this machine. `recommended` null means \"no recommendation\".",
@@ -22911,6 +23598,30 @@
           "used_write_tools": {
             "type": "boolean",
             "description": "Only set on the messages of the chat's last turn: the run behind it used\na tool that is not read-only, so redoing the turn could repeat an effect."
+          }
+        }
+      },
+      "MeterDto": {
+        "type": "object",
+        "description": "A used / limit pair for the usage bars.",
+        "required": [
+          "used"
+        ],
+        "properties": {
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Provider limit, if known.",
+            "minimum": 0
+          },
+          "used": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Used in the current window.",
+            "minimum": 0
           }
         }
       },
@@ -26628,6 +27339,29 @@
           }
         },
         "additionalProperties": false
+      },
+      "UsageDto": {
+        "type": "object",
+        "description": "Usage bars: requests/min, tokens/min, requests/day.",
+        "required": [
+          "requests_per_minute",
+          "tokens_per_minute",
+          "requests_per_day"
+        ],
+        "properties": {
+          "requests_per_day": {
+            "$ref": "#/components/schemas/MeterDto",
+            "description": "Requests in the last 24 hours."
+          },
+          "requests_per_minute": {
+            "$ref": "#/components/schemas/MeterDto",
+            "description": "Requests in the last minute."
+          },
+          "tokens_per_minute": {
+            "$ref": "#/components/schemas/MeterDto",
+            "description": "Tokens in the last minute."
+          }
+        }
       },
       "UsageSummary": {
         "type": "object",

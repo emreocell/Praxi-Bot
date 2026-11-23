@@ -31,6 +31,7 @@ mod composio;
 mod connection_test;
 mod doctor;
 mod email;
+mod embeddings;
 mod fill_secrets;
 mod host;
 mod host_admin;

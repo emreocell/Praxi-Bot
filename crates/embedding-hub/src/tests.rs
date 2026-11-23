@@ -8,7 +8,7 @@ use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::config::{EmbeddingConfig, ProviderConfig, ProviderType, Purpose, VectorSpace};
-use crate::hub::{EmbedItem, EmbeddingHub, KeyResolver, Outcome, Redactor, Task};
+use crate::hub::{EmbedItem, EmbeddingHub, Outcome, Redactor, Task};
 use crate::limiter::Limits;
 
 const SECRET: &str = "sk-CANARY-1234567890abcdef";
@@ -30,6 +30,10 @@ fn provider(id: &str, kind: ProviderType, url: &str, dims: usize) -> ProviderCon
     }
 }
 
+fn keys(_: &str) -> Option<String> {
+    Some("test-key".to_owned())
+}
+
 fn hub_with(providers: Vec<ProviderConfig>, chain: &[&str]) -> EmbeddingHub {
     let mut config = EmbeddingConfig {
         providers,
@@ -40,9 +44,8 @@ fn hub_with(providers: Vec<ProviderConfig>, chain: &[&str]) -> EmbeddingHub {
             .chains
             .insert(p, chain.iter().map(|s| (*s).to_owned()).collect());
     }
-    let keys: KeyResolver = Arc::new(|_| Some("test-key".to_owned()));
     let redact: Redactor = Arc::new(|t| t.replace(SECRET, "[redacted]"));
-    EmbeddingHub::new(config, keys, redact).unwrap()
+    EmbeddingHub::new(config, &keys, Some(redact)).unwrap()
 }
 
 async fn embed(hub: &EmbeddingHub, texts: &[&str]) -> crate::hub::Embedded {
@@ -238,7 +241,7 @@ async fn nothing_is_sent_without_opt_in_for_private_text_or_denied_bots() {
 
     let mut cfg = hub.config();
     cfg.remote_denied_bots.insert("bot-a".into());
-    hub.reconfigure(cfg).unwrap();
+    hub.reconfigure(cfg, &keys).unwrap();
     let e = hub
         .embed(
             Purpose::Memory,
@@ -318,28 +321,28 @@ fn config_validation_is_plain_and_round_trips() {
     p.base_url = None;
     cfg.providers.push(p.clone());
     assert!(
-        hub.reconfigure(cfg.clone())
+        hub.reconfigure(cfg.clone(), &keys)
             .unwrap_err()
             .0
             .contains("endpoint")
     );
     p.base_url = Some("http://user:pw@host/v1".into());
     cfg.providers[0] = p.clone();
-    assert!(hub.reconfigure(cfg.clone()).is_err());
+    assert!(hub.reconfigure(cfg.clone(), &keys).is_err());
     p.base_url = Some("http://localhost:11434/v1".into());
     p.dimensions = 99_999;
     cfg.providers[0] = p;
-    assert!(hub.reconfigure(cfg.clone()).is_err());
+    assert!(hub.reconfigure(cfg.clone(), &keys).is_err());
     cfg.providers[0].dimensions = 768;
     cfg.chains.insert(Purpose::Memory, vec!["nope".into()]);
     assert!(
-        hub.reconfigure(cfg.clone())
+        hub.reconfigure(cfg.clone(), &keys)
             .unwrap_err()
             .0
             .contains("unknown")
     );
     cfg.chains.clear();
-    hub.reconfigure(cfg.clone()).unwrap();
+    hub.reconfigure(cfg.clone(), &keys).unwrap();
 
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("embeddings.json");
@@ -351,4 +354,17 @@ fn config_validation_is_plain_and_round_trips() {
     );
     // The file never holds a key.
     assert!(!std::fs::read_to_string(&file).unwrap().contains("test-key"));
+}
+
+#[tokio::test]
+async fn without_a_redactor_remote_providers_are_never_called() {
+    let server = openai_server(200, openai_body(1, 8), None).await;
+    let hub = hub_with(
+        vec![provider("o", ProviderType::Openai, &server.uri(), 8)],
+        &["o"],
+    );
+    hub.set_redactor(None);
+    let e = embed(&hub, &["x"]).await;
+    assert_eq!(attempt(&e, 0), Outcome::NotAllowed);
+    assert!(server.received_requests().await.unwrap().is_empty());
 }

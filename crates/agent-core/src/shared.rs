@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
 use agent_router::ToolSurface;
-use agent_router::ladder::{GeminiEmbedder, gemini};
 use computer_target::{
     ComputerLabel, ComputerProvider, ComputerTarget, Resolution, WAIT_FOR_PC_REASON,
     resolve as resolve_computer,
@@ -23,7 +22,7 @@ use protocol::{
 use provider_catalog::config::CliSettings;
 use provider_catalog::{
     Auth, Catalog, ChatProvider, ModelInfo, ModelRef, OpenAiCompatConfig, ProviderConfig,
-    ProviderEntry, ProviderKind, ProviderSettings, config_path,
+    ProviderEntry, ProviderSettings, config_path,
 };
 use secret_store::SecretStore;
 use serde::{Deserialize, Serialize};
@@ -229,6 +228,8 @@ pub struct Providers {
     /// Embedding backend of the K2 router (`None` = BM25 only).
     embedder: Option<Arc<dyn agent_router::ladder::Embedder>>,
     decider: Option<Arc<crate::decider::TurnDecider>>,
+    /// Provider-agnostic embeddings (router, memory, knowledge).
+    embedding_hub: Option<Arc<embedding_hub::EmbeddingHub>>,
     /// Masks secrets in every request sent through [`Self::pick`]ed providers.
     redactor: Option<SharedRedactor>,
 }
@@ -245,6 +246,7 @@ impl Providers {
             prices: HashMap::new(),
             embedder: None,
             decider: None,
+            embedding_hub: None,
             redactor: None,
         }
     }
@@ -269,6 +271,7 @@ impl Providers {
             prices: HashMap::new(),
             embedder: None,
             decider: None,
+            embedding_hub: None,
             redactor: None,
         }
     }
@@ -277,6 +280,12 @@ impl Providers {
     /// tool results) before it reaches a provider.
     #[must_use]
     pub(crate) fn with_redactor(mut self, redactor: Option<SharedRedactor>) -> Self {
+        if let Some(hub) = &self.embedding_hub {
+            // Texts sent to an embedding provider pass the same live redactor.
+            hub.set_redactor(redactor.clone().map(|r| {
+                Arc::new(move |t: &str| r.redact(t)) as embedding_hub::hub::Redactor
+            }));
+        }
         self.redactor = redactor;
         self
     }
@@ -288,6 +297,19 @@ impl Providers {
     pub fn with_embedder(mut self, embedder: Arc<dyn agent_router::ladder::Embedder>) -> Self {
         self.embedder = Some(embedder);
         self
+    }
+
+    /// Attach the embedding hub (tests and custom hosts; `build_providers` does this itself).
+    #[must_use]
+    pub fn with_embedding_hub(mut self, hub: Arc<embedding_hub::EmbeddingHub>) -> Self {
+        self.embedding_hub = Some(hub);
+        self
+    }
+
+    /// The shared embedding hub (config, usage, test connection).
+    #[must_use]
+    pub fn embedding_hub(&self) -> Option<Arc<embedding_hub::EmbeddingHub>> {
+        self.embedding_hub.clone()
     }
 
     /// The K2 embedding backend, if any.
@@ -489,29 +511,45 @@ pub fn build_providers(
     {
         providers = providers.with_default_id(def);
     }
-    // K2 embeddings (decision ladder): Gemini when a Gemini key is configured.
-    if !providers.setup_required()
-        && let Some(key) = gemini_key(&cfg, catalog, store)
-    {
-        providers = providers.with_embedder(Arc::new(GeminiEmbedder::new(
-            key,
-            gemini::DEFAULT_EMBED_MODEL,
-        )));
+    // Embeddings: one hub for router, memory and knowledge. Default (no
+    // `embeddings.json`) is the offline hash embedder; remote providers need the
+    // owner's explicit opt-in recorded in that file.
+    let embed_cfg = embedding_hub::EmbeddingConfig::load(&data_dir.join("embeddings.json"))
+        .unwrap_or_else(|e| {
+            warn(&format!("embeddings: {e}; using the offline embedder"));
+            embedding_hub::EmbeddingConfig::default()
+        });
+    let keys = embedding_key_resolver(store);
+    let hub = embedding_hub::EmbeddingHub::new(embed_cfg.clone(), &keys, None).or_else(|e| {
+        warn(&format!("embeddings: {e}; using the offline embedder"));
+        embedding_hub::EmbeddingHub::new(embedding_hub::EmbeddingConfig::default(), &keys, None)
+    });
+    if let Ok(hub) = hub {
+        let hub = Arc::new(hub);
+        if hub
+            .config()
+            .chains
+            .get(&embedding_hub::Purpose::Router)
+            .is_some_and(|c| !c.is_empty())
+        {
+            providers = providers.with_embedder(Arc::new(crate::embedding::HubRouterEmbedder::new(
+                Arc::clone(&hub),
+            )));
+        }
+        providers.embedding_hub = Some(hub);
     }
     providers.decider = crate::decider::build(data_dir, &providers, &cfg, catalog, store, warn);
     Ok(providers)
 }
 
-/// The API key of the first enabled Gemini provider that has one (stored
-/// secret or environment variable), for the router's embedder.
-fn gemini_key(cfg: &ProviderConfig, catalog: &Catalog, store: &dyn SecretStore) -> Option<String> {
-    cfg.providers.iter().filter(|p| p.enabled).find_map(|s| {
-        let entry = s.custom.as_ref().or_else(|| catalog.get(&s.id))?;
-        if entry.kind != ProviderKind::Gemini {
-            return None;
-        }
-        provider_key(s, entry, store)
-    })
+/// Resolve the secret-store name of an embedding provider's API key.
+/// Names that are not valid secret references resolve to nothing.
+pub fn embedding_key_resolver(store: &dyn SecretStore) -> impl Fn(&str) -> Option<String> + '_ {
+    move |name: &str| {
+        let r = secret_store::SecretRef::try_from(name.to_owned()).ok()?;
+        let key = secret_store::resolve(store, &r).ok()?;
+        Some(key.expose().to_string()).filter(|k| !k.trim().is_empty())
+    }
 }
 
 pub(crate) fn provider_key(

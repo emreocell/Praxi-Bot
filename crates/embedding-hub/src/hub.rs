@@ -126,8 +126,8 @@ pub trait LocalEmbedder: Send + Sync {
 
 /// Removes secrets from a text before it leaves the computer.
 pub type Redactor = Arc<dyn Fn(&str) -> String + Send + Sync>;
-/// Looks up an API key by secret-store name.
-pub type KeyResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+/// Looks up an API key by secret-store name (called while (re)configuring).
+pub type KeyResolver<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 struct Health {
     cooldown_until: Option<Instant>,
@@ -170,8 +170,7 @@ pub struct ProviderStatus {
 pub struct EmbeddingHub {
     state: RwLock<Arc<State>>,
     catalog: EmbeddingCatalog,
-    keys: KeyResolver,
-    redact: Redactor,
+    redact: RwLock<Option<Redactor>>,
     locals: Mutex<HashMap<String, Arc<dyn LocalEmbedder>>>,
 }
 
@@ -286,8 +285,8 @@ impl EmbeddingHub {
     /// The configuration is invalid.
     pub fn new(
         config: EmbeddingConfig,
-        keys: KeyResolver,
-        redact: Redactor,
+        keys: KeyResolver<'_>,
+        redact: Option<Redactor>,
     ) -> Result<Self, ConfigError> {
         let hub = Self {
             state: RwLock::new(Arc::new(State {
@@ -295,12 +294,20 @@ impl EmbeddingHub {
                 backends: HashMap::new(),
             })),
             catalog: EmbeddingCatalog::builtin(),
-            keys,
-            redact,
+            redact: RwLock::new(redact),
             locals: Mutex::new(HashMap::new()),
         };
-        hub.reconfigure(config)?;
+        hub.reconfigure(config, keys)?;
         Ok(hub)
+    }
+
+    /// Install the secret redactor. Without one, remote providers are never
+    /// called (fail closed).
+    pub fn set_redactor(&self, redact: Option<Redactor>) {
+        *self
+            .redact
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = redact;
     }
 
     /// The compiled-in catalog.
@@ -332,8 +339,8 @@ impl EmbeddingHub {
     }
 
     /// Re-read keys and local models with the current configuration.
-    pub fn refresh(&self) {
-        let _ = self.reconfigure(self.config());
+    pub fn refresh(&self, keys: KeyResolver<'_>) {
+        let _ = self.reconfigure(self.config(), keys);
     }
 
     /// Replace the configuration. Usage counters of unchanged providers
@@ -341,7 +348,11 @@ impl EmbeddingHub {
     ///
     /// # Errors
     /// The configuration is invalid; the old one stays active.
-    pub fn reconfigure(&self, config: EmbeddingConfig) -> Result<(), ConfigError> {
+    pub fn reconfigure(
+        &self,
+        config: EmbeddingConfig,
+        keys: KeyResolver<'_>,
+    ) -> Result<(), ConfigError> {
         config.validate(&self.catalog)?;
         let old = self.snapshot();
         let locals = self
@@ -357,7 +368,7 @@ impl EmbeddingHub {
                     .and_then(|m| m.free_tier)
                     .unwrap_or_default()
             });
-            let key = cfg.key_ref.as_deref().and_then(|r| (self.keys)(r));
+            let key = cfg.key_ref.as_deref().and_then(|r| keys(r));
             let local = if cfg.kind == ProviderType::Local {
                 locals.get(&cfg.id).cloned()
             } else {
@@ -592,10 +603,18 @@ impl EmbeddingHub {
             return Err(Outcome::CoolingDown);
         }
         // Secrets never leave; each text is also cut to the model's input size.
+        let Some(redact) = self
+            .redact
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return Err(Outcome::NotAllowed);
+        };
         let texts: Vec<String> = items
             .iter()
             .map(|i| {
-                let red = (self.redact)(&i.text);
+                let red = redact(&i.text);
                 let t = cut(&red, b.max_input_bytes).trim().to_owned();
                 if t.is_empty() {
                     "(empty)".to_owned()

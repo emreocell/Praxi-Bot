@@ -103,6 +103,10 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("GET", "/v1/workflows/{}"),
     // policy, bot authority
     ("PUT", "/v1/policy"),
+    // embedding providers: keys, the opt-in to send text out, and test calls
+    ("PUT", "/v1/embeddings"),
+    ("POST", "/v1/embeddings/{}/test"),
+    ("PUT", "/v1/decision-helper"),
     // monthly spending limit: a token holder must not lift its own cap
     ("PUT", "/v1/spend-limit"),
     // per-bot spending limits: a bot or token holder must not lift its own cap
