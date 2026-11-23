@@ -1153,9 +1153,22 @@ assert_file_contains "${SVC_FILE}" "Restart=on-failure"
 assert_file_contains "${SVC_FILE}" "StartLimitBurst=10"
 assert_file_contains "${SVC_FILE}" "NoNewPrivileges=true"
 assert_file_contains "${SVC_FILE}" "/bot serve --host"
-JOURNALD_FILE="${SANDBOX}/etc/systemd/journald.conf.d/50-praxi.conf"
-assert_file_contains "${JOURNALD_FILE}" "SystemMaxUse=500M"
-assert_file_contains "${JOURNALD_FILE}" "MaxRetentionSec=1month"
+JOURNALD_DIR_SB="${SANDBOX}/etc/systemd/journald.conf.d"
+JOURNALD_FILE="${JOURNALD_DIR_SB}/50-praxi.conf"
+# The log limit is per unit; the installer must not write host-wide journald
+# config or restart journald (shared servers).
+assert_file_contains "${SVC_FILE}" "LogRateLimitBurst=2000"
+[[ ! -e "${JOURNALD_FILE}" ]] || fail "installer wrote a host-wide journald drop-in"
+assert_file_not_contains "${SANDBOX_STATE}/systemctl.log" "journald"
+# Legacy file from an older installer: ours is removed, an admin's own is kept.
+mkdir -p "${JOURNALD_DIR_SB}"
+printf '# Written by the Praxi installer; removed by install-linux.sh --uninstall.\n[Journal]\nSystemMaxUse=500M\n' > "${JOURNALD_FILE}"
+: > "${SANDBOX_STATE}/systemctl.log"
+run_timed bash "${SB_INSTALL}" --update --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
+  --skip-packages --no-start > "${TMP_ROOT}/update-legacy.log" 2>&1
+[[ ! -e "${JOURNALD_FILE}" ]] || fail "--update left the legacy journald drop-in"
+assert_file_not_contains "${SANDBOX_STATE}/systemctl.log" "journald"
+printf '[Journal]\nSystemMaxUse=2G\n' > "${JOURNALD_FILE}"
 assert_file_contains "${XVFB_FILE}" "-screen 0 1920x1080x24"
 run_timed bash "${SB_INSTALL}" --dry-run --headless --screen 1280x720x24 > "${TMP_ROOT}/dry-install.log" 2>&1
 assert_file_contains "${TMP_ROOT}/dry-install.log" "Xvfb :99 screen 1280x720x24"
@@ -1167,8 +1180,11 @@ run_timed bash "${SB_INSTALL}" --update --version v0.1.0 --file "${RELEASE_DIR}/
   --skip-packages --no-start > "${TMP_ROOT}/update.log" 2>&1
 assert_file_contains "${TMP_ROOT}/update.log" "updating in place"
 run_timed bash "${SB_INSTALL}" --uninstall > "${TMP_ROOT}/uninstall.log" 2>&1
-[[ ! -f "${JOURNALD_FILE}" ]] || fail "--uninstall left the journald drop-in"
-pass "host polish: restart limits, journald cap, dry-run, --update, uninstall cleanup"
+[[ -f "${JOURNALD_FILE}" ]] || fail "--uninstall removed a journald drop-in it did not write"
+assert_file_contains "${JOURNALD_FILE}" "SystemMaxUse=2G"
+assert_file_not_contains "${SANDBOX_STATE}/systemctl.log" "journald"
+rm -f "${JOURNALD_FILE}"
+pass "host polish: restart limits, per-unit log limit, no journald changes, dry-run, --update, uninstall cleanup"
 
 # 11. systemd-analyze verify check on remaining service unit when available
 if command -v systemd-analyze >/dev/null 2>&1; then

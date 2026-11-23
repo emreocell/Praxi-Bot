@@ -38,6 +38,10 @@ export interface AppSettings extends AppearanceSettings {
   onboardingSkipped: boolean;
   onboardingStep: number;
   autostart: boolean;
+  /** Closing the window hides it into the tray instead of quitting (off by default). */
+  keepInTray: boolean;
+  /** The one-time "still running in the tray" notice was shown. */
+  trayNoticeSeen: boolean;
   /** OS notification when an approval or question waits (window unfocused). */
   notifyNeedsYou: boolean;
   /** ... when a run longer than 30 s finishes (window unfocused). */
@@ -92,6 +96,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   onboardingSkipped: false,
   onboardingStep: 1,
   autostart: false,
+  keepInTray: false,
+  trayNoticeSeen: false,
   notifyNeedsYou: true,
   notifyLongRun: true,
   notifyFailed: true,
@@ -214,6 +220,11 @@ export async function loadSettings(): Promise<AppSettings> {
         DEFAULT_SETTINGS.onboardingStep;
       const autostart =
         (await store.get<boolean>("autostart")) ?? DEFAULT_SETTINGS.autostart;
+      const keepInTray =
+        (await store.get<boolean>("keepInTray")) ?? DEFAULT_SETTINGS.keepInTray;
+      const trayNoticeSeen =
+        (await store.get<boolean>("trayNoticeSeen")) ??
+        DEFAULT_SETTINGS.trayNoticeSeen;
       const notifyNeedsYou =
         (await store.get<boolean>("notifyNeedsYou")) ??
         DEFAULT_SETTINGS.notifyNeedsYou;
@@ -266,6 +277,8 @@ export async function loadSettings(): Promise<AppSettings> {
         onboardingSkipped,
         onboardingStep,
         autostart,
+        keepInTray,
+        trayNoticeSeen,
         notifyNeedsYou,
         notifyLongRun,
         notifyFailed,
@@ -318,6 +331,8 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
       await store.set("onboardingSkipped", settings.onboardingSkipped);
       await store.set("onboardingStep", settings.onboardingStep);
       await store.set("autostart", settings.autostart);
+      await store.set("keepInTray", settings.keepInTray);
+      await store.set("trayNoticeSeen", settings.trayNoticeSeen);
       await store.set("notifyNeedsYou", settings.notifyNeedsYou);
       await store.set("notifyLongRun", settings.notifyLongRun);
       await store.set("notifyFailed", settings.notifyFailed);

@@ -1,0 +1,32 @@
+name: safe-recent-schedule-read-only
+description: Scheduled runs retain the bot permission ceiling under a more permissive global policy.
+policy: full
+initiator: schedule
+profile_toml: '[permissions]
+
+  preset = "read-only"
+
+  '
+tools:
+- name: schedule_write
+  effect: destructive
+  category: fs
+  output: sent
+user: Run the morning reminder job.
+script:
+- tool_calls:
+  - id: c1
+    tool: schedule_write
+    args:
+      target: morning
+- text: The schedule stayed within the bot permissions.
+reactions: []
+expect:
+  tool_runs:
+    schedule_write: 0
+  permissions:
+  - tool: schedule_write
+    decision: denied_policy
+  no_approval_tools:
+  - schedule_write
+  state: succeeded

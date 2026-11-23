@@ -1,0 +1,30 @@
+name: safe-recent-computer-human-driving
+description: While the human drives, observation is paused and no approved input reaches the computer.
+policy: full
+desktop:
+  human_driving: true
+user: Press return in the editor while I use the computer.
+script:
+- tool_calls:
+  - id: c0
+    tool: desktop_get_state
+    args: {}
+- tool_calls:
+  - id: c1
+    tool: desktop_key
+    args:
+      keys:
+      - Return
+- text: The human has control.
+reactions:
+- 'on': approval_needed
+  tool: desktop_key
+  do: approve
+expect:
+  tool_runs:
+    desktop_input: 0
+  requests:
+  - request: 1
+    tool_messages_contain:
+    - human is driving
+  state: succeeded

@@ -32,6 +32,7 @@
     "allow-notify-take-actions",
     "allow-set-needs-count",
     "allow-set-tray-labels",
+    "allow-set-keep-in-tray",
     "allow-update-status",
     "allow-update-check",
     "allow-update-install",

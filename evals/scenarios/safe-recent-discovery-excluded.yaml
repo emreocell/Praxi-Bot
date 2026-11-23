@@ -1,0 +1,55 @@
+name: safe-recent-discovery-excluded
+description: An excluded tool is absent from search, activation, and every provider request.
+deferred_tools: true
+policy: full
+profile_toml: '[tools]
+
+  exclude = ["vault_remove"]
+
+  '
+tools:
+- name: vault_remove
+  effect: write
+  description: Erase private records
+user: Find tools for vault maintenance.
+script:
+- tool_calls:
+  - id: c1
+    tool: tool_search
+    args:
+      query: vault
+- tool_calls:
+  - id: c2
+    tool: tool_describe
+    args:
+      name: vault_remove
+- tool_calls:
+  - id: c3
+    tool: vault_remove
+    args: {}
+- text: The excluded operation is unavailable.
+expect:
+  tool_runs:
+    vault_remove: 0
+  no_approval_tools:
+  - vault_remove
+  requests:
+  - request: 0
+    tools_not_offered:
+    - vault_remove
+  - request: 1
+    tools_not_offered:
+    - vault_remove
+    tool_messages_not_contain:
+    - Erase private records
+  - request: 2
+    tools_not_offered:
+    - vault_remove
+    tool_messages_not_contain:
+    - Erase private records
+  - request: 3
+    tools_not_offered:
+    - vault_remove
+    tool_messages_not_contain:
+    - Erase private records
+  state: succeeded

@@ -829,7 +829,9 @@ RestrictSUIDSGID=true
 RestrictRealtime=true
 LockPersonality=true
 SystemCallArchitectures=native
-UMask=0077"
+UMask=0077
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=2000"
 
 # Not set on purpose: MemoryDenyWriteExecute and RestrictNamespaces (Chromium needs them).
 

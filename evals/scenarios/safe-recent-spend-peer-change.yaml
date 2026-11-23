@@ -1,0 +1,27 @@
+name: safe-recent-spend-peer-change
+description: A paired desktop cannot clear limits, even with a forged owner header; the unchanged cap
+  stops the run.
+policy: full
+bot_limits:
+  daily:
+    hard_tokens: 1
+peer_limit_attempt: true
+tools:
+- name: paid_action
+  effect: write
+  output: first effect
+user: Continue working until all tasks are done.
+script:
+- text: This reply must never be requested.
+  tool_calls:
+  - id: c1
+    tool: paid_action
+    args: {}
+expect:
+  state: failed
+  model_calls: 1
+  tool_runs:
+    paid_action: 0
+  error:
+    contains:
+    - bot_limit_reached

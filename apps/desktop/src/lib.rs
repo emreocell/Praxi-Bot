@@ -1141,6 +1141,11 @@ pub fn run() {
                 // back hides it again, so it never sits on top of the chat or right panel.
                 apply_widget_visibility(window.app_handle());
             }
+            if let WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == "main"
+            {
+                shell::handle_close_request(window.app_handle(), api);
+            }
             if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
                 // `exit` may end the process without running `RunEvent::Exit`,
                 // so stop a daemon this app started right here.
@@ -1183,6 +1188,7 @@ pub fn run() {
             shell::notify_take_actions,
             shell::set_needs_count,
             shell::set_tray_labels,
+            shell::set_keep_in_tray,
             update::update_status,
             update::update_check,
             update::update_install,
@@ -1452,6 +1458,7 @@ mod acl_tests {
         ("notify_take_actions", "MAIN_ONLY"),
         ("set_needs_count", "MAIN_ONLY"),
         ("set_tray_labels", "MAIN_ONLY"),
+        ("set_keep_in_tray", "MAIN_ONLY"),
         ("update_status", "MAIN_ONLY"),
         ("update_check", "MAIN_ONLY"),
         ("update_install", "MAIN_ONLY"),
@@ -1652,6 +1659,7 @@ mod acl_tests {
                 "notify_take_actions",
                 "set_needs_count",
                 "set_tray_labels",
+                "set_keep_in_tray",
             ] {
                 assert!(
                     !allowed.contains(sensitive),

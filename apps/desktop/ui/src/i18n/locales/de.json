@@ -4398,13 +4398,13 @@
       "title": "Akzentfarbe"
     },
     "autostart": {
-      "description": "Praxi-Bot automatisch starten, wenn du dich bei Windows anmeldest (pro Benutzer, standardmäßig aus).",
+      "description": "Öffnet Praxi-Bot automatisch, wenn du dich bei Windows anmeldest. Standardmäßig aus, betrifft nur dein eigenes Windows-Konto und braucht keine Administratorrechte. Du kannst es hier jederzeit ausschalten.",
       "disable": "Autostart deaktivieren",
       "disabled": "Aus (Standard)",
       "enable": "Autostart aktivieren",
       "enabled": "Aktiviert",
       "error": "Die Windows-Autostart-Einstellung konnte nicht aktualisiert werden.",
-      "title": "Beim Windows-Login starten"
+      "title": "Praxi-Bot beim Anmelden starten"
     },
     "background": {
       "blur": "Hintergrundunschärfe",
@@ -4445,6 +4445,10 @@
       "recording": "Modifikator + Taste drücken …",
       "reset": "Auf Strg+Alt+Esc zurücksetzen",
       "title": "Tastenkürzel „Alles stoppen“"
+    },
+    "keepInTray": {
+      "description": "Standardmäßig aus: Beim Schließen des Fensters wird Praxi-Bot beendet. Ist dies an, wird das Fenster nur ausgeblendet und deine Bots arbeiten weiter. Das Praxi-Bot-Symbol erscheint im Infobereich (neben der Uhr); darüber kannst du es öffnen, pausieren oder beenden. Beim ersten Mal erhältst du einen einmaligen Hinweis.",
+      "title": "Im Infobereich weiterlaufen, wenn das Fenster geschlossen wird"
     },
     "language": {
       "de": "Deutsch",
@@ -5267,7 +5271,10 @@
   },
   "tray": {
     "needs": "Braucht dich ({n})",
+    "pauseAll": "Alle Bots pausieren",
     "quit": "Beenden",
+    "stillRunningBody": "Es arbeitet im Infobereich neben der Uhr weiter. Über das Symbol kannst du es öffnen, pausieren oder beenden.",
+    "stillRunningTitle": "Praxi-Bot läuft noch",
     "stopAll": "Alles stoppen",
     "toggle": "Fenster anzeigen / ausblenden",
     "tooltip": "Praxi-Bot",

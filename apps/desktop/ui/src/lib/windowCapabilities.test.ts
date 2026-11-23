@@ -129,7 +129,7 @@ test("widget and overlays cannot call the run, daemon, provider or OS commands",
     for (const command of [
       "start_bot_run", "finish_bot_run", "ack_stop", "begin_action", "providers_cli", "get_autostart", "set_autostart",
       "daemon_connect", "daemon_restart", "simulate_bot_run", "set_stop_hotkey", "notify_show", "notify_take_actions",
-      "set_needs_count", "set_tray_labels"
+      "set_needs_count", "set_tray_labels", "set_keep_in_tray"
     ]) {
       assert.ok(!allowed.includes(command), `${label} must not be granted ${command}`);
     }

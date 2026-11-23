@@ -5,6 +5,7 @@
 //! tray menu and the "needs you" count shown in the tray tooltip and menu.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -27,7 +28,11 @@ pub const EVENT_TRAY_OPEN_NEEDS: &str = "shell:tray_open_needs";
 /// Tray menu "Stop all" was chosen (the UI cancels the daemon's runs).
 pub const EVENT_TRAY_STOP_ALL: &str = "shell:tray_stop_all";
 
+/// The window was hidden into the tray for the first time (the UI remembers it was explained).
+pub const EVENT_TRAY_NOTICE_SHOWN: &str = "shell:tray_notice_shown";
+
 const TRAY_ID: &str = "main";
+const MENU_PAUSE_ALL: &str = "tray.pause_all";
 const MENU_TOGGLE: &str = "tray.toggle";
 const MENU_NEEDS: &str = "tray.needs";
 const MENU_STOP_ALL: &str = "tray.stop_all";
@@ -108,6 +113,8 @@ pub struct TrayLabels {
     pub toggle: String,
     /// "Needs you ({n})".
     pub needs: String,
+    /// "Pause all bots".
+    pub pause_all: String,
     /// "Stop all".
     pub stop_all: String,
     /// "Quit".
@@ -116,6 +123,10 @@ pub struct TrayLabels {
     pub tooltip: String,
     /// Tooltip with `{n}` things pending.
     pub tooltip_needs: String,
+    /// Title of the one-time "still running in the tray" notification.
+    pub still_running_title: String,
+    /// Body of the one-time "still running in the tray" notification.
+    pub still_running_body: String,
 }
 
 impl Default for TrayLabels {
@@ -123,10 +134,15 @@ impl Default for TrayLabels {
         Self {
             toggle: "Show / hide window".to_owned(),
             needs: "Needs you ({n})".to_owned(),
+            pause_all: "Pause all bots".to_owned(),
             stop_all: "Stop all".to_owned(),
             quit: "Quit".to_owned(),
             tooltip: "Praxi-Bot".to_owned(),
             tooltip_needs: "Praxi-Bot: {n} need you".to_owned(),
+            still_running_title: "Praxi-Bot is still running".to_owned(),
+            still_running_body:
+                "It keeps working in the tray. Use the tray icon to open, pause or quit it."
+                    .to_owned(),
         }
     }
 }
@@ -151,6 +167,7 @@ struct TrayParts {
     tray: TrayIcon<Wry>,
     toggle: MenuItem<Wry>,
     needs: MenuItem<Wry>,
+    pause_all: MenuItem<Wry>,
     stop_all: MenuItem<Wry>,
     quit: MenuItem<Wry>,
 }
@@ -163,6 +180,82 @@ pub struct TrayState {
     parts: Mutex<Option<TrayParts>>,
     /// Toast button presses not yet taken by the main window.
     actions: Mutex<Vec<ActionPayload>>,
+    /// "Keep running in the tray when the window is closed" (off until the UI says otherwise).
+    keep_in_tray: AtomicBool,
+    /// The one-time "still running in the tray" notice was already shown.
+    notice_seen: AtomicBool,
+    /// The tray icon exists; without it closing must quit (nothing could bring the app back).
+    tray_ready: AtomicBool,
+}
+
+/// What closing the main window does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseAction {
+    /// Close the window and exit the app.
+    Quit,
+    /// Hide the window; the app keeps running in the tray.
+    Hide,
+    /// Hide the window and tell the user, once, that the app is still running.
+    HideWithNotice,
+}
+
+/// Decide what a close request does. Quits unless the user opted in AND a tray icon exists.
+#[must_use]
+pub fn close_action(keep_in_tray: bool, tray_ready: bool, notice_seen: bool) -> CloseAction {
+    match (keep_in_tray && tray_ready, notice_seen) {
+        (false, _) => CloseAction::Quit,
+        (true, true) => CloseAction::Hide,
+        (true, false) => CloseAction::HideWithNotice,
+    }
+}
+
+/// Handle a close request of the main window: hide it into the tray when the user chose that,
+/// otherwise let it close (which ends the app).
+pub fn handle_close_request(app: &AppHandle, api: &tauri::CloseRequestApi) {
+    let state = app.state::<TrayState>();
+    let action = close_action(
+        state.keep_in_tray.load(Ordering::SeqCst),
+        state.tray_ready.load(Ordering::SeqCst),
+        state.notice_seen.load(Ordering::SeqCst),
+    );
+    if action == CloseAction::Quit {
+        return;
+    }
+    api.prevent_close();
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+    if action == CloseAction::HideWithNotice {
+        state.notice_seen.store(true, Ordering::SeqCst);
+        let labels = state.labels.lock().clone();
+        let _ = show_native(
+            app,
+            &labels.still_running_title,
+            &labels.still_running_body,
+            None,
+            None,
+            &[],
+        );
+        let _ = app.emit(EVENT_TRAY_NOTICE_SHOWN, ());
+    }
+}
+
+/// UI -> shell: the "keep running in the tray" choice and whether its one-time notice was shown.
+///
+/// # Errors
+/// When the calling window is not the main window.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // tauri commands take owned arguments
+pub fn set_keep_in_tray(
+    window: tauri::Window,
+    state: State<'_, TrayState>,
+    enabled: bool,
+    notice_seen: bool,
+) -> Result<(), String> {
+    crate::window_gate::require_window(&window, crate::window_gate::MAIN_ONLY)?;
+    state.keep_in_tray.store(enabled, Ordering::SeqCst);
+    state.notice_seen.store(notice_seen, Ordering::SeqCst);
+    Ok(())
 }
 
 impl TrayState {
@@ -173,6 +266,7 @@ impl TrayState {
             let _ = p.toggle.set_text(&labels.toggle);
             let _ = p.needs.set_text(with_count(&labels.needs, n));
             let _ = p.needs.set_enabled(n > 0);
+            let _ = p.pause_all.set_text(&labels.pause_all);
             let _ = p.stop_all.set_text(&labels.stop_all);
             let _ = p.quit.set_text(&labels.quit);
             let _ = p.tray.set_tooltip(Some(tooltip_for(&labels, n)));
@@ -226,10 +320,14 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         false,
         None::<&str>,
     )?;
+    let pause_all = MenuItem::with_id(app, MENU_PAUSE_ALL, &labels.pause_all, true, None::<&str>)?;
     let stop_all = MenuItem::with_id(app, MENU_STOP_ALL, &labels.stop_all, true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, MENU_QUIT, &labels.quit, true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&toggle, &needs, &stop_all, &sep, &quit_item])?;
+    let menu = Menu::with_items(
+        app,
+        &[&toggle, &needs, &pause_all, &stop_all, &sep, &quit_item],
+    )?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
@@ -240,6 +338,12 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             MENU_NEEDS => {
                 focus_main(app);
                 let _ = app.emit(EVENT_TRAY_OPEN_NEEDS, ());
+            }
+            MENU_PAUSE_ALL => {
+                // Refused when nothing is running; that is fine, there is nothing to pause.
+                if let Some(control) = app.try_state::<ControlHandle>() {
+                    let _ = control.pause();
+                }
             }
             MENU_STOP_ALL => {
                 if let Some(control) = app.try_state::<ControlHandle>() {
@@ -268,9 +372,11 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         tray,
         toggle,
         needs,
+        pause_all,
         stop_all,
         quit: quit_item,
     });
+    state.tray_ready.store(true, Ordering::SeqCst);
     Ok(())
 }
 
@@ -430,8 +536,8 @@ fn show_native(
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionPayload, NotifyAction, TrayLabels, action_argument, checked_actions,
-        parse_action_argument, tooltip_for, with_count,
+        ActionPayload, CloseAction, NotifyAction, TrayLabels, action_argument, checked_actions,
+        close_action, parse_action_argument, tooltip_for, with_count,
     };
 
     #[test]
@@ -477,10 +583,18 @@ mod tests {
     #[test]
     fn labels_parse_from_the_ui_payload() {
         let l: TrayLabels = serde_json::from_str(
-            r#"{"toggle":"a","needs":"b {n}","stopAll":"c","quit":"d","tooltip":"e","tooltipNeeds":"f {n}"}"#,
+            r#"{"toggle":"a","needs":"b {n}","pauseAll":"p","stopAll":"c","quit":"d","tooltip":"e","tooltipNeeds":"f {n}","stillRunningTitle":"t","stillRunningBody":"b"}"#,
         )
         .expect("labels");
         assert_eq!(l.stop_all, "c");
         assert_eq!(tooltip_for(&l, 1), "f 1");
+    }
+
+    #[test]
+    fn closing_quits_unless_opted_in_and_a_tray_icon_exists() {
+        assert_eq!(close_action(false, true, false), CloseAction::Quit);
+        assert_eq!(close_action(true, false, false), CloseAction::Quit);
+        assert_eq!(close_action(true, true, false), CloseAction::HideWithNotice);
+        assert_eq!(close_action(true, true, true), CloseAction::Hide);
     }
 }

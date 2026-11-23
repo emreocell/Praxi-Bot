@@ -105,6 +105,20 @@ log() { printf '[praxi-install] %s\n' "$*"; }
 warn() { printf '[praxi-install] warning: %s\n' "$*" >&2; }
 die() { printf '[praxi-install] error: %s\n' "$*" >&2; exit 1; }
 
+# Versions before this one wrote a host-wide journald cap. Remove that file only
+# when it carries our marker line (never a file an admin wrote under that name),
+# and never restart journald as a side effect.
+remove_legacy_journald_dropin() {
+  local f="${JOURNALD_DIR}/50-praxi.conf"
+  [[ -f "${f}" ]] || return 0
+  if grep -q '^# Written by the Praxi installer' "${f}" 2>/dev/null; then
+    rm -f "${f:?}"
+    log "removed the old host-wide journald cap ${f} (journald keeps its current limits until its next restart)"
+  else
+    warn "${f} was not written by the Praxi installer; left untouched"
+  fi
+}
+
 usage() {
   cat <<'USAGE'
 Usage (as root):
@@ -272,7 +286,7 @@ fi
 if [[ "${DRY_RUN}" -eq 1 ]]; then
   if [[ "${UNINSTALL}" -eq 1 ]]; then
     log "[dry-run] would stop and remove praxi.service, praxi-node.service, praxi-desktop.service, praxi-xvfb.service, ${SLICE_NAME}"
-    log "[dry-run] would remove ${PREFIX}, ${JOURNALD_DIR}/50-praxi.conf and the praxi command wrappers"
+    log "[dry-run] would remove ${PREFIX} and the praxi command wrappers (plus ${JOURNALD_DIR}/50-praxi.conf only if an older installer wrote it)"
     if [[ "${PURGE}" -eq 1 ]]; then
       log "[dry-run] would DELETE ${DATA_DIR}, ${CONF_DIR} and the ${SVC_USER} user (--purge)"
     else
@@ -287,7 +301,7 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
     if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
       log "[dry-run] virtual display: Xvfb ${DISPLAY_NUM} screen ${SCREEN_SPEC} (praxi-xvfb.service)"
     fi
-    log "[dry-run] would write ${UNIT_DIR}/praxi.service (Restart=on-failure, sandboxed) and ${JOURNALD_DIR}/50-praxi.conf (log size cap)"
+    log "[dry-run] would write ${UNIT_DIR}/praxi.service (Restart=on-failure, sandboxed) (log rate limit on our own units only; journald settings are not touched)"
   fi
   log "[dry-run] nothing was changed"
   exit 0
@@ -303,10 +317,7 @@ if [[ "${UNINSTALL}" -eq 1 ]]; then
   rm -rf "${UNIT_DIR:?}/praxi.service.d" "${UNIT_DIR:?}/praxi-node.service.d" \
     "${UNIT_DIR:?}/praxi-desktop.service.d" "${UNIT_DIR:?}/praxi-xvfb.service.d"
   systemctl daemon-reload
-  if [[ -f "${JOURNALD_DIR}/50-praxi.conf" ]]; then
-    rm -f "${JOURNALD_DIR:?}/50-praxi.conf"
-    systemctl restart systemd-journald >/dev/null 2>&1 || true
-  fi
+  remove_legacy_journald_dropin
   rm -rf "${PREFIX:?}"
   rm -f /usr/local/bin/praxi /usr/local/bin/praxi-node
   if [[ "${PURGE}" -eq 1 ]]; then
@@ -1145,7 +1156,11 @@ RestrictSUIDSGID=true
 RestrictRealtime=true
 LockPersonality=true
 SystemCallArchitectures=native
-UMask=0077"
+UMask=0077
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=2000"
+# Log volume is limited per unit (above), never host-wide: the installer does not
+# touch journald.conf or restart journald, so other services' logs are unaffected.
 # Not set on purpose: MemoryDenyWriteExecute and RestrictNamespaces (Chromium needs them).
 
 SLICE_LINE=""
@@ -1223,16 +1238,10 @@ ${HARDENING}
 WantedBy=multi-user.target
 UNIT
 
-# Logs go to journald; cap their size so a small VM disk never fills up.
-install -d -m 0755 "${JOURNALD_DIR}"
-cat > "${JOURNALD_DIR}/50-praxi.conf" <<'JOURNALD'
-# Written by the Praxi installer; removed by install-linux.sh --uninstall.
-[Journal]
-SystemMaxUse=500M
-SystemMaxFileSize=50M
-MaxRetentionSec=1month
-JOURNALD
-systemctl restart systemd-journald >/dev/null 2>&1 || true
+# Older installer versions wrote a host-wide journald cap. Remove it (only if it
+# is ours) so a shared server's other logs are no longer limited. journald is NOT
+# restarted: the old limit simply stops applying at its next normal restart/reboot.
+remove_legacy_journald_dropin
 
 # Only desktop.conf belongs to the installer. Other drop-ins (for example a
 # Chromium relaxation; see docs/guide/remote-host.md) are left in place.
@@ -1941,7 +1950,7 @@ Praxi-Bot is installed.
   Data:     ${DATA_DIR}
   Env:      ${ENV_FILE} (mode 0640; daemon, contains the secret-store passphrase)
             ${NODE_ENV_FILE} (mode 0640; node-agent, no BOT_SECRETS_PASSPHRASE)
-  Logs:     journalctl -u praxi -f   (rotated by journald: max 500M, 1 month)
+  Logs:     journalctl -u praxi -f   (rate-limited per unit; disk use: journalctl --disk-usage)
   CLI:      praxi <command>        (wrapper for 'bot' running as the ${SVC_USER} user)
 
 Next steps:

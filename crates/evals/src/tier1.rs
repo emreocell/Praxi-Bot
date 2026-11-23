@@ -112,6 +112,7 @@ async fn run_with_source(
         counters.insert(spec.name.clone(), runs);
         finished_counters.insert(spec.name.clone(), finished);
     }
+    crate::fixtures::register(s, &registry, data_dir.path(), &mut counters)?;
     // The plan scenarios use builtin-tools' `todo_write` (Meta, always allowed);
     // only that tool is added so other scenarios see the same tool set as before.
     for tool in builtin_tools::meta::tools() {
@@ -120,7 +121,14 @@ async fn run_with_source(
         }
     }
     let redactor = scenario_redactor(s);
+    if s.notes {
+        for tool in builtin_tools::notes::tools(data_dir.path()) {
+            registry.register(tool);
+        }
+    }
     let extras = TurnExtras {
+        peer_limit_attempt: s.peer_limit_attempt,
+        bot_limits: s.bot_limits.clone(),
         deferred_tools: s.deferred_tools,
         redactor,
         fs_home: s.fs.as_ref().map(|_| workspace.path().join("project")),
@@ -160,6 +168,9 @@ async fn run_with_source(
         .collect();
     let requests = provider.requests();
     let mut failures = evaluate(&s.expect, &trace, &runs, &requests);
+    if let Some(buttons) = s.telegram_buttons {
+        crate::telegram_fixture::check(&trace, buttons, &mut failures).await?;
+    }
     fs_failures(&s.expect, workspace.path(), &mut failures);
     for (tool, want) in &s.expect.tool_finished {
         let got = finished_counters
@@ -679,6 +690,15 @@ fn approval_card_failures(e: &Expect, events: &[protocol::Event], out: &mut Vec<
             ));
             continue;
         };
+        if let Some(risk) = &want.risk {
+            let got = card.details.as_ref().and_then(|d| d["risk"].as_str());
+            if got != Some(risk.as_str()) {
+                out.push(format!(
+                    "approval_cards: {} risk {got:?}, expected {risk}",
+                    want.tool
+                ));
+            }
+        }
         check_card_details(want, card, out);
     }
 }

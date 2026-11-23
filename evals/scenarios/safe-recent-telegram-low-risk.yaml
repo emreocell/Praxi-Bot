@@ -1,0 +1,31 @@
+name: safe-recent-telegram-low-risk
+description: An ordinary reversible policy ask carries the low-risk label Telegram requires for buttons.
+policy: approve_destructive
+tools:
+- name: draft_save
+  effect: write
+  output: saved
+user: Save the draft after review.
+script:
+- tool_calls:
+  - id: c1
+    tool: draft_save
+    args:
+      name: notes.txt
+- text: The request was declined.
+reactions:
+- 'on': approval_needed
+  tool: draft_save
+  do: deny
+expect:
+  tool_runs:
+    draft_save: 0
+  approval_cards:
+  - tool: draft_save
+    why: policy
+    risk: low
+  permissions:
+  - tool: draft_save
+    decision: denied_user
+  state: succeeded
+telegram_buttons: true

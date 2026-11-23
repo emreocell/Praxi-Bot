@@ -1,6 +1,6 @@
 # Adding prompt-injection & safety eval scenarios
 
-Tier-1 evaluation scenarios live as YAML data files under [`evals/scenarios/`](../../evals/scenarios/) and run hermetically in CI (`cargo test -p evals`) with no network access and no real provider keys.
+Tier-1 evaluation scenarios live as YAML data files under [`evals/scenarios/`](../../evals/scenarios/) and run hermetically in CI (`cargo test -p evals`) with no external network access and no real provider keys.
 
 To capture a real model turn and replay its sanitized transcript through the same
 loop, see [Record and replay](eval-record-replay.md).
@@ -30,3 +30,54 @@ scenarios. A fake MCP tool's optional `description` is ingested as untrusted
 catalog metadata. Use `expect.requests` to check the tools offered before and
 after activation and `approval_cards[].text_not_contains` to check the entire
 approval summary and details for catalog prose.
+
+## Recent feature fixtures
+
+`safe-recent-*` adds 21 cases with differently worded holdouts (42 files).
+They cover deferred discovery/activation, catalog approval text, offline bundle
+secret references, Telegram risk/buttons/replay, human computer control and live
+password focus, spending admission/stream cuts/peer refusal, secret-looking
+notes, redaction of persisted report inputs, and scheduled permission ceilings.
+
+Optional fixture fields exercise production checks without external services:
+
+- `notes: true` registers the real notes tools in the isolated data directory.
+- `bot_limits` stores real daily/weekly/monthly limits before the turn.
+- `peer_limit_attempt: true` attempts to clear those limits through the actual
+  paired-desktop router (including a forged owner header); requires HTTP 403
+  and unchanged stored limits. No listening port is used.
+- `bundle: {manifest, values}` creates a synthetic archive and runs the real
+  inspector/installer, then exposes its serialized configuration through
+  `bundle_config`. The bundled program is never executed.
+- `diagnostic_report` feeds synthetic check details through the daemon's real
+  Markdown report builder and scrubber, checking canaries before the agent
+  loop redactor runs. `diagnostic_read` exposes the resulting report.
+- `desktop: {human_driving, password_focus}` registers real desktop tools with
+  an in-memory OS backend and the real guarded sender. Assert
+  `tool_runs: {desktop_input: 0}` to check that no input reached the fake sink.
+- `approval_cards[].risk` asserts the daemon risk classification.
+- `telegram_buttons: true|false` sends that real approval event through the
+  production Telegram bridge against a loopback-only mock Bot API. It checks
+  button availability, presses a button twice with distinct update IDs, and
+  requires exactly one daemon decision for low risk or zero for high risk.
+
+Import fixtures are also consumed by
+`cargo test -p cli recent_eval_import_fixtures_arrive_disabled`: the CLI's real
+planner reads their Claude/OpenClaw files and must produce disabled servers
+with vault references and redacted previews. Tier 1 separately checks that a
+guessed call from source JSON cannot grant a callable MCP tool. Both runners
+are needed for import coverage. Import application through a daemon is not
+covered by these fixtures.
+
+Redaction cases scan model requests, events, audit rows, stored messages, and
+data files. They protect inputs to diagnostics/report exports; they do not run
+the desktop UI's HTML/Markdown export renderer.
+
+Definition pinning is covered by `mcp-changed-description-held-back`
+(merged with the pinning work in #633); the `safe-recent-*` cases add no
+expected-failure exemptions.
+
+Two things worth knowing when writing cases: a bot's permission preset gates
+*calls* and does not hide tools, so use `[tools] exclude` in `profile_toml` to
+test discoverability; and a refused spending admission still records one model
+step, so assert `model_calls: 1` together with `tool_runs: 0` rather than `0`.
