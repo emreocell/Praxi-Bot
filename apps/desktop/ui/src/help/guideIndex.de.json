@@ -123,7 +123,8 @@
       "9. „… hat nicht geantwortet“ oder „Der Bot konnte den Zielcomputer nicht erreichen“",
       "10. „Bot-Limit erreicht“ oder „Dieser Bot nähert sich seinem Limit“",
       "11. Eine App zeigt „Fehler“, „Anmeldung erforderlich“ oder „In Quarantäne“",
-      "12. Ein geplanter Job lief nicht, oder „Dieser Zeitplan ist ungültig“"
+      "12. Ein geplanter Job lief nicht, oder „Dieser Zeitplan ist ungültig“",
+      "13. Praxi zeigt eine Startprüfung statt des Startbildschirms"
     ],
     "summary": "Suche die Meldung, die du siehst. Führe die Schritte der Reihe nach aus. Die Meldungstitel unten sind die Worte, die die App zeigt."
   },

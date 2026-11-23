@@ -123,7 +123,8 @@
       "9. \"… yanıt vermedi\" ya da \"Bot hedef bilgisayara ulaşamadı\"",
       "10. \"Bot limitine ulaşıldı\" ya da \"Bu bot limitine yaklaştı\"",
       "11. Bir uygulama \"Hata\", \"Oturum açılması gerekiyor\" ya da \"Karantinada\" gösteriyor",
-      "12. Zamanlanmış bir iş çalışmadı ya da \"Bu zamanlama geçerli değil\""
+      "12. Zamanlanmış bir iş çalışmadı ya da \"Bu zamanlama geçerli değil\"",
+      "13. Praxi ana ekran yerine bir başlangıç kontrolü gösteriyor"
     ],
     "summary": "Gördüğün iletiyi bul. Adımları sırayla yap. Aşağıdaki ileti başlıkları, uygulamanın gösterdiği sözlerdir."
   },
