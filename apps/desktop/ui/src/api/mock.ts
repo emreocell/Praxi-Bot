@@ -991,6 +991,7 @@ export class MockApiClient extends ApiClient {
     if (seg[0] === "hosts" && seg[1] === "setup") {
       const body = opts.body as { host: string; accept: boolean };
       if (!seg[2] && method === "POST") return ok(this.hostSetup.start(opts.body as never));
+      if (seg[2] === "update" && method === "POST") return ok(this.hostSetup.startUpdate((opts.body as { host_id: string }).host_id));
       if (seg[2] === "ssh-keys") return ok({ keys: this.hostSetup.keys() });
       if (seg[2] === "bootstrap") {
         const command = ["S=; [ \"$(id -u)\" -eq 0 ] || S=sudo; $S bash -s <<'PRAXI_SETUP'", "PRAXI_TAG=v0.1.0", "# (mock)", "praxi_main </dev/null", "PRAXI_SETUP", ""].join("\n");
@@ -1000,6 +1001,7 @@ export class MockApiClient extends ApiClient {
       if (seg[3] === "cancel") return ok(this.hostSetup.cancel(seg[2]));
       return ok(this.hostSetup.get(seg[2]));
     }
+    if (seg[0] === "hosts" && seg[2] === "version") return ok({ version: "0.0.9", api_version: "1" });
     if (seg[0] === "hosts" && seg[1] === "home") return ok({ host_id: mockHostScenario() ? MOCK_HOST_ID : null });
     // Host administration (review states): the desktop is confirmed, the server has two CLIs.
     if (seg[0] === "admin" && seg[1] === "state") return ok({ granted: new URLSearchParams(window.location.search).get("admin") !== "needs", secrets_available: true, confirm_command: "bot host admin --all-desktops", secrets_hint: null, adopted: true });

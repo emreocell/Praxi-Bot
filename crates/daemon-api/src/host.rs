@@ -798,6 +798,12 @@ pub struct HostStatus {
     pub endpoint_id: Option<String>,
     pub relay_url: Option<String>,
     pub version: String,
+    /// Release tag this server was built from (`v0.1.0-alpha.3`); absent for untagged builds.
+    #[serde(default)]
+    pub release_tag: Option<String>,
+    /// Identifies this exact build (the release tag, else `<version>+g<hash>`).
+    #[serde(default)]
+    pub build_id: String,
     pub api_version: String,
     pub os: String,
     pub arch: String,
@@ -887,6 +893,8 @@ pub(crate) async fn status(State(s): State<AppState>) -> Json<HostStatus> {
             .and_then(|n| n.addr().relay_urls().next().map(ToString::to_string)),
         endpoint_id: net.map(|n| n.id().to_string()),
         version: env!("CARGO_PKG_VERSION").into(),
+        release_tag: crate::release_tag().map(str::to_owned),
+        build_id: crate::build_id().to_owned(),
         api_version: crate::API_VERSION.into(),
         os: host.os,
         arch: host.arch,

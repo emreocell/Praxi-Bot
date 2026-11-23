@@ -2532,7 +2532,7 @@
         "title": "O bilgisayar terminale izin vermedi"
       },
       "host_outdated": {
-        "hint": "Bilgisayar çevrimiçi ama Praxi-Bot sürümü terminali henüz bilmiyor. Orada Praxi-Bot'u güncelleyip yeniden başlat, sonra yeniden dene.",
+        "hint": "Bilgisayar çevrimiçi, ama Praxi-Bot sürümü terminali henüz tanımıyor. Sunucuyu güncelle, sonra yeniden dene.",
         "title": "O bilgisayarda Praxi-Bot eski sürüm"
       },
       "host_setup_conflict": {
@@ -3012,6 +3012,18 @@
       "retry": "Yeniden dene",
       "waited": "{{seconds}} sn'dir bekleniyor"
     },
+    "takeoverAlreadyOwned": {
+      "hint": "O cihaz bırakana kadar bekle; bu bilgisayarın sahibiysen önce onun duraklatmasını kaldır.",
+      "title": "Bu ekranı başka bir cihaz kontrol ediyor"
+    },
+    "takeoverRecoveryRequired": {
+      "hint": "Ekran devralma açıkken sunucu yeniden başladı (ya da bağlantı koptu). Devam etmek için pencerenin üstündeki \"Duraklatmayı kaldır\" düğmesine bas.",
+      "title": "Sunucuda hâlâ açık bir ekran devralma var"
+    },
+    "takeoverRequestConflict": {
+      "hint": "Aynı numaralı başka bir devralma isteği sunucuda zaten kayıtlı. Canlı görünümü kapatıp yeniden aç ve tekrar dene.",
+      "title": "Bu devralma isteği öncekiyle çakışıyor"
+    },
     "timeout": {
       "hint": "Bağlantını kontrol edip yeniden dene.",
       "title": "Bu çok uzun sürdü"
@@ -3375,12 +3387,14 @@
     "refusal": {
       "botPermissions": "Bir botun izinleri ve araçları {{name}} üzerinde yönetilir. Ad, kişilik ve model buradan değiştirilebilir.",
       "composio": "Uygulama bağlantıları {{name}} üzerinde değil, bu bilgisayarın sahibi tarafında yönetilir.",
+      "connectionTest": "Anahtar testleri {{name}} üzerinde çalışır, bu uygulamadan yapılamaz.",
       "credentials": "E-posta ve arama hesapları {{name}} üzerinde bağlanır.",
       "generic": "{{name}} buna izin vermedi: {{reason}}",
       "hostTransfer": "Sunucuyu taşıma ve kanal eşleştirme {{name}} üzerinde yapılır.",
       "knowledge": "Bilgi ayarları {{name}} üzerinde yönetilir.",
       "lifecycle": "Eşleştirme ve sunucu güncellemeleri {{name}} üzerinde yapılır.",
       "localOnly": "Bunu yalnızca {{name}} başındaki kişi yapabilir, bu uygulama yapamaz.",
+      "localProviders": "Yerel modeller ve kodlama araçları botun çalıştığı bilgisayara aittir. Kurmak için Bu bilgisayar'a geç.",
       "overlay": "Bu soruyu yalnızca {{name}} başındaki kişi yanıtlayabilir.",
       "ownerOnly": "Bu yalnızca {{name}} üzerinde yapılabilir.",
       "policy": "Çalıştırma politikası bu uygulamadan değil, {{name}} üzerinde ayarlanır.",
@@ -3410,6 +3424,8 @@
     "noModelKey": "{{name}} sunucusunda henüz model anahtarı yok. Ekranını izleyebilir ve botlarını yönetebilirsin; sunucuya bir anahtar eklenene kadar sohbetlere yanıt gelmez.",
     "notPaired": "{{name}} artık bu bilgisayarı kabul etmiyor. Yeni bir biletle yeniden eşleştir.",
     "offline": "{{name}} yanıt vermiyor. Botları çalışmaya devam eder; uygulama kendiliğinden yeniden bağlanır.",
+    "updateApp": "Güncelleme gerekli: bu uygulama ({{local}}), {{name}} ({{host}}) sunucusundan eski. {{name}} ile çalışmak için bu uygulamayı güncelle.",
+    "updateHost": "Güncelleme gerekli: {{name}} ({{host}}), bu uygulamadan ({{local}}) eski. {{name}} sunucusunu bu uygulamaya uyacak şekilde güncelle.",
     "useThisComputer": "Bu bilgisayarı kullan",
     "versionBlocking": "Bu uygulama ({{local}}) ile {{name}} ({{host}}) farklı sürümlerde. Sunucuyu kullanmadan önce ikisini aynı sürüme getir.",
     "versionWarning": "Uygulama {{local}}, {{name}} {{host}}: küçük bir fark, her şeyin çalışması beklenir."
@@ -3583,6 +3599,15 @@
       "unknown": "ekran kullanılamıyor",
       "unsupported_platform": "bu platformda ekran yakalama yok",
       "wayland": "Wayland oturumları desteklenmiyor, X11 oturumu kullan"
+    },
+    "noScreenFix": {
+      "addSession": "Sunucuda henüz bir masaüstü oturumu yok. Sunucuda şu komutu çalıştırarak ekle, sonra ekranı yeniden aç:",
+      "generic": "Çoğunlukla sunucuda henüz masaüstü oturumu yoktur, ekranı yanıt vermez ya da ekran izni eksiktir. Masaüstü oturumunu eklemek için sunucuda şunu çalıştır:",
+      "locked": "Sunucudaki oturumun kilidini aç ve ekran izninin verildiğini kontrol et, sonra yeniden dene.",
+      "platform": "Bu bilgisayar ekranını gösteremez. Masaüstü oturumu olan bir Linux sunucusu ya da Windows veya macOS bilgisayar kullan.",
+      "restart": "Sunucuda Praxi hizmetini yeniden başlat, sonra yeniden dene.",
+      "wait": "Sunucu ekranını hâlâ kontrol ediyor. Birkaç saniye bekleyip yenile.",
+      "wayland": "Sunucunun masaüstünü X11 oturumuna geçir, sonra ekranı yeniden aç."
     },
     "noTargets": "Henüz bildirilen bir ekran hedefi yok.",
     "openScreen": "Ekranı aç",
@@ -4536,7 +4561,7 @@
       "unreachable": "Ulaşılamıyor"
     },
     "title": "Sunucuların",
-    "updateHelp": "Bir sunucuyu güncellemek için terminalini açıp Praxi güncellemesini orada çalıştır. Tek tıkla güncelleme henüz yok."
+    "updateHelp": "Uygulamayla eklenen sunucular burada güncellenebilir. Diğer sunucular için Sunucuyu güncelle, üzerinde çalıştıracağın komutları gösterir."
   },
   "settings": {
     "accent": {
@@ -4783,10 +4808,12 @@
         "addTo": "{{provider}} için ekle",
         "compatible": "OpenAI uyumlu sunucu",
         "description": "Anahtarlar sistem anahtarlığında saklanır ve bir daha gösterilmez.",
+        "hostDescription": "Anahtar {{name}} sunucusuna gönderilir ve orada saklanır. Bu bilgisayarda tutulmaz ve bir daha gösterilmez.",
         "pasteLabel": "API anahtarı",
         "placeholder": "Anahtarı yapıştır. Sağlayıcıyı biz tanırız.",
         "providers": "Sağlayıcı",
         "saved": "{{provider}} anahtarı kaydedildi",
+        "savedOn": "{{provider}} anahtarı {{name}} üzerine kaydedildi",
         "stored": "Anahtar kayıtlı",
         "title": "API anahtarıyla ekle",
         "unknown": "Bu anahtarın hangi sağlayıcıya ait olduğunu anlayamadık. Aşağıdan birini seç."
@@ -5518,6 +5545,10 @@
       "wine": "Şarap"
     }
   },
+  "thisComputerOnly": {
+    "body": "Yerel modeller botun çalıştığı bilgisayarda çalışır. {{name}} bir sunucu, bu yüzden bunları Bu bilgisayar'da kur.",
+    "switch": "Bu bilgisayara geç"
+  },
   "tray": {
     "needs": "Senden bekleyenler ({n})",
     "pauseAll": "Tüm botları duraklat",
@@ -5528,6 +5559,115 @@
     "toggle": "Pencereyi göster / gizle",
     "tooltip": "Praxi-Bot",
     "tooltipNeeds": "Praxi-Bot: {n} öğe seni bekliyor"
+  },
+  "updateServer": {
+    "available": "Güncelleme var",
+    "button": "Sunucuyu güncelle",
+    "buttonAnyway": "Yine de güncelle",
+    "checkAgain": "Yeniden kontrol et",
+    "checking": "Sunucunun sürümüne bakılıyor…",
+    "commandsLabel": "Sunucuda çalıştırılacak komutlar",
+    "confirm": "Sunucuyu güncelle",
+    "copied": "Komutlar kopyalandı.",
+    "copy": "Komutları kopyala",
+    "copyFailed": "Kopyalanamadı. Metni seçip elle kopyala.",
+    "doneBody": "Sunucu yeniden başladı ve yanıt veriyor. Botların ve verilerin bıraktığın gibi.",
+    "doneTitle": "{{name}} güncel",
+    "dontClose": "Bu birkaç dakika sürer. Bu pencereyi açık bırakabilirsin; sunucu sona doğru yeniden başlar.",
+    "fail": {
+      "generic": {
+        "body": "Sunucuda bir şey ters gitti. Kurucu yeterince ilerlediyse önceki sürümü geri koymuştur.",
+        "next": "Aşağıdaki ayrıntılara bak. Yeniden deneyebilir ya da komutları sunucuda kendin çalıştırabilirsin.",
+        "title": "Güncelleme tamamlanamadı"
+      },
+      "host_key": {
+        "body": "Sunucunun parmak izini onaylamadın (ya da sunucuyu eklediğinden beri değişti). Hiçbir şey değişmedi.",
+        "next": "Sunucuda bir şey değiştirmediysen biri onun yerine geçmeye çalışıyor olabilir: devam etme. Aksi halde yeniden dene ve parmak izini kontrol et.",
+        "title": "Sunucunun kimliği onaylanmadı"
+      },
+      "no_ssh": {
+        "body": "Sunuculara giriş yapan program (OpenSSH) bulunamadı ya da hazırlanamadı.",
+        "next": "Bu bilgisayara OpenSSH kur ya da onun yerine komutları kullan.",
+        "title": "Praxi-Bot buradan giriş yapamıyor"
+      },
+      "rolled_back": {
+        "body": "Yeni sürüm sunucuda başlayamadı, bu yüzden Praxi-Bot önceki sürümü geri koydu. Verilerine dokunulmadı.",
+        "next": "Daha sonra yeniden dene ya da yardım isterken aşağıdaki ayrıntıları kopyala.",
+        "title": "Güncelleme olmadı, eski sürüm geri geldi"
+      },
+      "unreachable": {
+        "body": "Sunucu girişi kabul etmedi ya da yanıt vermedi. Hiçbir şey değişmedi.",
+        "next": "Sunucunun açık olduğunu ve hâlâ giriş yapabildiğini kontrol et, sonra yeniden dene.",
+        "title": "Sunucuya bağlanılamadı"
+      },
+      "verify": {
+        "body": "Sürüm imza denetiminden geçmedi, bu yüzden kurulmadı. Sunucu eski sürümünde çalışmaya devam ediyor.",
+        "next": "Verilerinde bir sorun yok. Birkaç dakika sonra yeniden dene. Tekrarlarsa elle kurma, yardım iste.",
+        "title": "İndirilen sürüm doğrulanamadı"
+      }
+    },
+    "hostKeyBody": "{{host}} kendini bu parmak iziyle tanıttı. Yalnızca sunucu sağlayıcından ya da sunucunun kendisinden aldığınla aynıysa devam et.",
+    "hostKeyNo": "Hayır, dur",
+    "hostKeyTitle": "Bu gerçekten senin sunucun mu?",
+    "hostKeyYes": "Evet, devam et",
+    "lead": "Sunucuna bu uygulamayla aynı Praxi-Bot sürümünü kur.",
+    "logEmpty": "Henüz bir şey yok.",
+    "manualBody": "Bu bilgisayarda bu sunucu için kayıtlı bir giriş yok (başka yolla eklenmiş). Sunucuya giriş yap ve aşağıdaki komutları yapıştır. Bu uygulamayla eşleşen sürümü indirir ve kurmadan önce imzasını doğrular.",
+    "manualNoSsh": "Praxi-Bot senin yerine bu sunucuya giriş yapamıyor",
+    "manualNote": "Verilerin korunur. Sonra buraya dön ve Yeniden kontrol et'e bas.",
+    "manualTitle": "Güncellemeyi sunucuda kendin çalıştır",
+    "newer": "Bu uygulamadan daha yeni",
+    "noRelease": "Bu uygulama hangi sürümden geldiğini bilmiyor, bu yüzden tam sürümü söyleyemez. Praxi-Bot rehberindeki (Linux sunucu sayfası) son sürümü --update seçeneğiyle kur.",
+    "p1": "Sunucu birkaç saniyeliğine yeniden başlar.",
+    "p2": "Orada çalışan botlar o an duraklar, sonra kaldığı yerden devam eder.",
+    "p3": "Verilerin, botların ve ayarların korunur.",
+    "p4": "Önceki program dosyaları sunucuda /opt/praxi.backup-<zaman> klasöründe saklanır; verilerin de güncellemeden önce ayrıca yedeklenir. İkisi de geri konabilir.",
+    "p5": "Yalnızca bu uygulamayla eşleşen sürüm kurulur ve Praxi-Bot önce imzasını doğrular. Doğrulanmamış hiçbir şey çalıştırılmaz.",
+    "progress": "Güncelleme ilerlemesi",
+    "retry": "Yeniden dene",
+    "rows": {
+      "backup": {
+        "done": "Kopya kaydedildi",
+        "failed": "Kopya kaydedilemedi",
+        "pending": "Bekliyor",
+        "running": "Verilerinin bir kopyası kaydediliyor…",
+        "title": "Yedek alma"
+      },
+      "check": {
+        "done": "Sunucu yanıt veriyor",
+        "failed": "Sunucu yanıt vermedi",
+        "pending": "Bekliyor",
+        "running": "Sunucuya durumu soruluyor…",
+        "title": "Çalıştığını kontrol etme"
+      },
+      "connect": {
+        "done": "Bağlandı",
+        "failed": "Bağlanılamadı",
+        "pending": "Bekliyor",
+        "running": "Giriş yapılıyor, sunucu kontrol ediliyor…",
+        "title": "Sunucuya bağlanma"
+      },
+      "install": {
+        "done": "Yeni sürüm kuruldu",
+        "failed": "Güncelleme tamamlanamadı",
+        "pending": "Bekliyor",
+        "running": "Sürüm indiriliyor, doğrulanıyor, kuruluyor ve sunucu yeniden başlatılıyor…",
+        "title": "İndirme, doğrulama ve kurma"
+      }
+    },
+    "safe": "Bir şey ters giderse sunucu eski sürümüne döner. Ne olduğunu ve sonra ne yapacağını görürsün.",
+    "showCommands": "Bunun yerine komutları göster",
+    "showLog": "Ayrıntıları göster",
+    "starting": "Güncelleme başlatılıyor…",
+    "stopped": "Güncelleme bitmeden durduruldu.",
+    "thisServer": "bu sunucu",
+    "title": "Sunucuyu güncelle",
+    "titleFor": "{{name}} sunucusunu güncelle",
+    "unknown": "Sürüm bilinmiyor (sunucu kapalı olabilir).",
+    "upToDate": "Güncel",
+    "versionLine": "Sunucu sürümü {{server}} · bu uygulama {{app}}",
+    "versionUnknown": "Tam sürüm bilinmiyor (eski bir sunucu)",
+    "whatHappens": "Neler olacak"
   },
   "usage": {
     "bot": "Bot",

@@ -81,6 +81,7 @@ cmd_preflight() {
   fi
   kv gh_version "$(gh_version || true)"
   kv praxi_version "$("${PREFIX}/bin/bot" --version 2>/dev/null | awk '{print $2}' || true)"
+  kv praxi_build "$("${PREFIX}/bin/bot" --version 2>/dev/null | awk '{print $3}' | tr -cd 'A-Za-z0-9.+_-' || true)"
   if [[ -f "${UNIT}" ]]; then kv unit_present 1; else kv unit_present 0; fi
   if unit_hostmode; then kv unit_hostmode 1; else kv unit_hostmode 0; fi
   kv unit_active "$(systemctl is-active praxi.service 2>/dev/null || true)"
@@ -165,7 +166,13 @@ cmd_install() {
   [[ "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.+-]+)?$ ]] || die "bad or missing version"
   [[ -f "${STAGE}/install-linux.sh" ]] || die "install-linux.sh was not uploaded"
   local args=(--version "${version}" --host-mode)
-  [[ "${P[desktop]:-1}" != "1" ]] || args+=(--with-desktop-session)
+  if [[ "${P[update]:-0}" == "1" ]]; then
+    # In-place update: the installer keeps data, config, display and mode, rolls back by itself if
+    # anything fails and keeps the previous program files as /opt/praxi.backup-<timestamp>.
+    args+=(--update)
+  else
+    [[ "${P[desktop]:-1}" != "1" ]] || args+=(--with-desktop-session)
+  fi
   DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 bash "${STAGE}/install-linux.sh" "${args[@]}"
 }
 

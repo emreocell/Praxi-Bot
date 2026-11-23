@@ -73,7 +73,24 @@ pub struct HostLinkList {
     pub local_version: String,
     /// HTTP API version of this computer's daemon.
     pub local_api_version: String,
+    /// Release tag this app was built from (`v0.1.0`), when the build knows it.
+    /// Names the version "Update server" installs and the tag in the copy-paste commands.
+    #[serde(default)]
+    pub local_release_tag: Option<String>,
     pub hosts: Vec<HostLinkInfo>,
+}
+
+/// `GET /v1/hosts/{id}/version`: what a paired server runs.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct HostVersion {
+    pub version: String,
+    /// Release tag the server was built from; absent for untagged builds and old servers.
+    #[serde(default)]
+    pub release_tag: Option<String>,
+    /// The server's exact build id; empty for servers that predate it.
+    #[serde(default)]
+    pub build_id: String,
+    pub api_version: String,
 }
 
 /// `POST /v1/hosts/pair`.
@@ -208,8 +225,45 @@ pub(crate) async fn list(State(s): State<AppState>) -> Json<HostLinkList> {
     Json(HostLinkList {
         local_version: env!("CARGO_PKG_VERSION").into(),
         local_api_version: crate::API_VERSION.into(),
+        local_release_tag: crate::release_tag().map(str::to_owned),
         hosts: s.host_links().map(|l| l.list()).unwrap_or_default(),
     })
+}
+
+#[utoipa::path(get, operation_id = "hosts_version", path = "/v1/hosts/{id}/version", tag = "host", security(("bearer" = [])), params(("id" = String, Path)), responses((status = 200, body = HostVersion), (status = 502, body = crate::error::ErrorBody)))]
+pub(crate) async fn host_version(
+    State(s): State<AppState>,
+    peer: Option<Extension<crate::PeerIdentity>>,
+    Path(id): Path<String>,
+) -> Result<Json<HostVersion>, ApiError> {
+    if peer.is_some() {
+        return Err(ApiError::forbidden("host links are local only"));
+    }
+    if !valid_id(&id) {
+        return Err(ApiError::bad_request("invalid host id"));
+    }
+    let call = links(&s)?.call(&id, "GET", "/v1/host", None).await?;
+    let text = |k: &str| {
+        call.body[k].as_str().map(|v| {
+            v.chars()
+                .filter(|c| !c.is_control())
+                .take(64)
+                .collect::<String>()
+        })
+    };
+    match (call.status, text("version")) {
+        (200, Some(version)) => Ok(Json(HostVersion {
+            version,
+            release_tag: text("release_tag").filter(|t| !t.is_empty()),
+            build_id: text("build_id").unwrap_or_default(),
+            api_version: text("api_version").unwrap_or_default(),
+        })),
+        _ => Err(ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "host_link_failed",
+            "the server did not report its version",
+        )),
+    }
 }
 
 #[utoipa::path(post, operation_id = "hosts_pair", path = "/v1/hosts/pair", tag = "host", security(("bearer" = [])), request_body = PairHostInput, responses((status = 200, body = HostLinkInfo)))]

@@ -24,8 +24,9 @@ use std::{
 use daemon_api::{
     host_links::{HostLinkError, HostLinks},
     host_setup::{
-        BootstrapCommand, HostKeyPrompt, HostSetup, HostSetupError, HostSetupJob, HostSetupState,
-        HostSetupStep, HostSetupStepStatus, SshKeyHint, StartHostSetupInput,
+        BootstrapCommand, HostJobKind, HostKeyPrompt, HostSetup, HostSetupError, HostSetupJob,
+        HostSetupState, HostSetupStep, HostSetupStepStatus, SshKeyHint, StartHostSetupInput,
+        StartHostUpdateInput,
     },
 };
 use host_provision::{
@@ -95,6 +96,67 @@ impl CliHostSetup {
         }
     }
 
+    fn launch(
+        &self,
+        record: HostRecord,
+        mode: Mode,
+        kind: HostJobKind,
+    ) -> Result<HostSetupJob, HostSetupError> {
+        let handle = tokio::runtime::Handle::try_current()
+            .map_err(|_| HostSetupError::Conflict("the daemon is shutting down".into()))?;
+
+        let (tx, rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let id = uuid::Uuid::new_v4().to_string();
+        let job = HostSetupJob {
+            id: id.clone(),
+            kind,
+            state: HostSetupState::Running,
+            target: format!("{}@{}:{}", record.user, record.host, record.port),
+            steps: Vec::new(),
+            notes: Vec::new(),
+            host_key: None,
+            host_id: None,
+            host_name: None,
+            view_targets: None,
+            install_available: install_available(),
+        };
+        {
+            let mut jobs = self.jobs.lock();
+            if jobs.iter().any(|s| busy(s.job.state)) {
+                return Err(HostSetupError::Conflict(
+                    "another server setup is still running".into(),
+                ));
+            }
+            while jobs.len() >= KEEP_JOBS {
+                jobs.pop_front();
+            }
+            jobs.push_back(Slot {
+                job: job.clone(),
+                cancel: cancel.clone(),
+                answer: tx,
+            });
+        }
+
+        let worker = Worker {
+            data: self.data.clone(),
+            links: self.links.clone(),
+            jobs: self.jobs.clone(),
+            handle,
+            id,
+            cancel,
+            rx,
+            record,
+            transport: self.transport.clone(),
+            mode,
+        };
+        std::thread::Builder::new()
+            .name("host-setup".into())
+            .spawn(move || worker.run())
+            .map_err(|e| HostSetupError::Conflict(format!("could not start the setup: {e}")))?;
+        Ok(job)
+    }
+
     #[cfg(test)]
     fn with_transport(mut self, factory: TransportFactory) -> Self {
         self.transport = factory;
@@ -141,57 +203,30 @@ impl HostSetup for CliHostSetup {
         let mut record = record;
         record.key_path.clone_from(&key);
         record.port = port;
-        let handle = tokio::runtime::Handle::try_current()
-            .map_err(|_| HostSetupError::Conflict("the daemon is shutting down".into()))?;
+        self.launch(record, Mode::Add, HostJobKind::Setup)
+    }
 
-        let (tx, rx) = mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let id = uuid::Uuid::new_v4().to_string();
-        let job = HostSetupJob {
-            id: id.clone(),
-            state: HostSetupState::Running,
-            target: format!("{}@{}:{}", record.user, record.host, record.port),
-            steps: Vec::new(),
-            notes: Vec::new(),
-            host_key: None,
-            host_id: None,
-            host_name: None,
-            view_targets: None,
-            install_available: install_available(),
-        };
-        {
-            let mut jobs = self.jobs.lock();
-            if jobs.iter().any(|s| busy(s.job.state)) {
-                return Err(HostSetupError::Conflict(
-                    "another server setup is still running".into(),
-                ));
-            }
-            while jobs.len() >= KEEP_JOBS {
-                jobs.pop_front();
-            }
-            jobs.push_back(Slot {
-                job: job.clone(),
-                cancel: cancel.clone(),
-                answer: tx,
-            });
+    fn start_update(&self, input: StartHostUpdateInput) -> Result<HostSetupJob, HostSetupError> {
+        let store = Store::from_data_dir(&self.data);
+        // The SSH details the "Add server" wizard stored for this server: nothing new is saved.
+        let record = store
+            .list()
+            .into_iter()
+            .find(|r| r.paired_host_id.as_deref() == Some(input.host_id.as_str()))
+            .ok_or_else(|| {
+                HostSetupError::Invalid(
+                    "no saved login details for this server on this computer".into(),
+                )
+            })?;
+        // The stored file is plain JSON on disk: re-check every field that reaches ssh's argv.
+        let mut record = record;
+        validate::host(&record.host).map_err(invalid)?;
+        validate::user(&record.user).map_err(invalid)?;
+        validate::port(u32::from(record.port)).map_err(invalid)?;
+        if let Some(key) = record.key_path.take() {
+            record.key_path = Some(validate::key_path(&key).map_err(invalid)?);
         }
-
-        let worker = Worker {
-            data: self.data.clone(),
-            links: self.links.clone(),
-            jobs: self.jobs.clone(),
-            handle,
-            id,
-            cancel,
-            rx,
-            record,
-            transport: self.transport.clone(),
-        };
-        std::thread::Builder::new()
-            .name("host-setup".into())
-            .spawn(move || worker.run())
-            .map_err(|e| HostSetupError::Conflict(format!("could not start the setup: {e}")))?;
-        Ok(job)
+        self.launch(record, Mode::Upgrade, HostJobKind::Update)
     }
 
     fn job(&self, id: &str) -> Option<HostSetupJob> {
@@ -318,6 +353,7 @@ struct Worker {
     rx: mpsc::Receiver<bool>,
     record: HostRecord,
     transport: TransportFactory,
+    mode: Mode,
 }
 
 impl Worker {
@@ -385,12 +421,14 @@ impl Worker {
             known_hosts,
             params: Params {
                 record: self.record.clone(),
-                mode: Mode::Add,
+                mode: self.mode,
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
                 release_tag: option_env!("PRAXI_RELEASE_TAG").map(str::to_owned),
                 desktop: true,
                 retry_delay: Duration::from_secs(5),
-                allow_install: install_available(),
+                // An update is the owner's explicit click and the installer verifies the
+                // release attestation itself; adding a new server stays behind the flag.
+                allow_install: self.mode == Mode::Upgrade || install_available(),
             },
         };
         let report = engine.run();
@@ -674,5 +712,130 @@ mod tests {
         assert!(pinned.contains("203.0.113.7 ssh-ed25519"), "{pinned}");
         setup.cancel(&job.id).unwrap();
         let _ = _Status::Pass;
+    }
+
+    /// A server added with the wizard before: its record and a scripted server.
+    struct UpdateFake {
+        install_exit: i32,
+        install_stderr: &'static str,
+    }
+
+    impl Transport for UpdateFake {
+        fn scan_host_keys(&self) -> Result<Vec<ScannedKey>, TransportError> {
+            Fake.scan_host_keys()
+        }
+        fn run(
+            &self,
+            cmd: RemoteCmd,
+            _stdin: &[u8],
+            _t: Duration,
+        ) -> Result<Output, TransportError> {
+            let (code, stdout, stderr) = match cmd {
+                RemoteCmd::Probe => (
+                    0,
+                    "praxi-ok
+"
+                    .to_owned(),
+                    String::new(),
+                ),
+                RemoteCmd::Provision(Sub::Preflight) => (
+                    0,
+                    "uid=1001
+os_id=ubuntu
+os_version=24.04
+os_like=debian
+os_name=Ubuntu
+arch=aarch64
+systemd=1
+sudo_n=1
+ram_mb=24000
+disk_mb=150000
+curl=1
+https=1
+gh_version=
+praxi_version=0.0.1
+unit_present=1
+unit_hostmode=1
+unit_active=active
+data_dir=1
+port=47821
+port_busy=0
+"
+                    .to_owned(),
+                    String::new(),
+                ),
+                RemoteCmd::Provision(Sub::Install) => (
+                    self.install_exit,
+                    String::new(),
+                    self.install_stderr.to_owned(),
+                ),
+                _ => (0, String::new(), String::new()),
+            };
+            Ok(Output {
+                code,
+                stdout,
+                stderr,
+                ..Output::default()
+            })
+        }
+    }
+
+    fn saved_server(data: &std::path::Path) -> CliHostSetup {
+        let store = Store::from_data_dir(data);
+        store
+            .save(&HostRecord {
+                name: "oracle".into(),
+                user: "ubuntu".into(),
+                host: "203.0.113.7".into(),
+                port: 22,
+                key_path: None,
+                fingerprint: None,
+                paired_host_id: Some("hostid1".into()),
+                desktop_key: Some("deskkey1".into()),
+                installed_version: None,
+            })
+            .unwrap();
+        let links = Arc::new(CliHostLinks::new(data.to_path_buf(), None));
+        CliHostSetup::new(data.to_path_buf(), links).with_transport(Arc::new(|_, _| {
+            Ok(Box::new(UpdateFake {
+                install_exit: 1,
+                install_stderr: "attestation verification failed: digest mismatch
+[praxi-install] rollback complete; previously active services restarted and active",
+            }) as Box<dyn Transport>)
+        }))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn update_without_saved_login_details_is_refused_with_a_plain_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let links = Arc::new(CliHostLinks::new(dir.path().to_path_buf(), None));
+        let setup = CliHostSetup::new(dir.path().to_path_buf(), links);
+        let err = setup
+            .start_update(StartHostUpdateInput {
+                host_id: "nothere".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, HostSetupError::Invalid(m) if m.contains("no saved login")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failed_update_ends_as_failed_with_the_rollback_note_and_no_health_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let setup = saved_server(dir.path());
+        let job = setup
+            .start_update(StartHostUpdateInput {
+                host_id: "hostid1".into(),
+            })
+            .unwrap();
+        assert_eq!(job.kind, HostJobKind::Update);
+        wait(&setup, &job.id, |j| {
+            j.state == HostSetupState::AwaitingHostKey
+        });
+        setup.answer_host_key(&job.id, true).unwrap();
+        let done = wait(&setup, &job.id, |j| j.state == HostSetupState::Failed);
+        let install = done.steps.iter().find(|s| s.id == "install.run").unwrap();
+        assert_eq!(install.status, HostSetupStepStatus::Fail);
+        assert!(install.detail.contains("rollback complete"), "{install:?}");
+        assert!(!done.steps.iter().any(|s| s.id.starts_with("health")));
     }
 }

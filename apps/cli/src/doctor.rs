@@ -61,6 +61,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         check_peer_relay(env),
         check_host_display(env),
         check_desktop_backend(env),
+        check_desktop_session(env),
         check_free_ram(),
         core::check_data_dir(env.data_dir),
         core::check_config(env.data_dir),
@@ -283,6 +284,42 @@ fn diagnose_host_display(
             f.display.unwrap_or_default().trim(),
             p.display()
         )),
+    }
+}
+
+/// The exact command that adds the Xfce desktop session to an installed host.
+const FIX_DESKTOP_SESSION: &str = "run `sudo ./install-linux.sh --update --with-desktop-session` on the host, then `sudo praxi doctor`";
+
+/// A host without the desktop session service shows a black screen in the live view.
+/// `Ok(detail)` when the session is installed, otherwise `Err((what is missing, fix))`.
+fn diagnose_desktop_session(unit_installed: bool) -> std::result::Result<String, (String, String)> {
+    if unit_installed {
+        Ok("desktop session installed (praxi-desktop.service)".into())
+    } else {
+        Err((
+            "desktop session: not installed (screen view shows a black screen)".into(),
+            FIX_DESKTOP_SESSION.into(),
+        ))
+    }
+}
+
+fn check_desktop_session(env: &DoctorEnv<'_>) -> Check {
+    if !daemon_api::host::HostConfig::load(env.data_dir)
+        .is_ok_and(|c| c.mode == daemon_api::host::HostMode::Host)
+    {
+        return Check::ok("desktop_session", "desktop session", "not in host mode");
+    }
+    if !cfg!(target_os = "linux") {
+        return Check::skipped(
+            "desktop_session",
+            "desktop session",
+            "only checked on a Linux host",
+        );
+    }
+    let unit = Path::new("/etc/systemd/system/praxi-desktop.service");
+    match diagnose_desktop_session(unit.is_file()) {
+        Ok(detail) => Check::ok("desktop_session", "desktop session", detail),
+        Err((detail, hint)) => Check::warn("desktop_session", "desktop session", detail, hint),
     }
 }
 
@@ -1094,6 +1131,17 @@ mod tests {
         })
         .unwrap_err();
         assert!(d.contains("no browser"), "{d}");
+    }
+
+    #[test]
+    fn missing_desktop_session_names_the_black_screen_and_the_fix() {
+        let (detail, hint) = diagnose_desktop_session(false).unwrap_err();
+        assert!(detail.contains("black screen"), "{detail}");
+        assert!(
+            hint.contains("install-linux.sh --update --with-desktop-session"),
+            "{hint}"
+        );
+        assert!(diagnose_desktop_session(true).is_ok());
     }
 
     #[test]

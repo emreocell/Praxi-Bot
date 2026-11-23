@@ -2,10 +2,11 @@ import "@xterm/xterm/css/xterm.css";
 import { Terminal as TerminalIcon, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ApiClient } from "../api/client";
+import { ApiError, type ApiClient } from "../api/client";
 import { humanLine } from "../lib/humanError";
 import { TerminalLink, type TerminalApiLike } from "../lib/terminalSession";
 import styles from "./ServerTerminal.module.css";
+import { UpdateServerModal } from "./UpdateServerModal";
 
 type Phase = "starting" | "live" | "ended" | "failed";
 
@@ -50,6 +51,9 @@ export function ServerTerminal({
   const [phase, setPhase] = useState<Phase>("starting");
   const [problem, setProblem] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // The server runs an older version with no terminal: offer the update right here.
+  const [outdated, setOutdated] = useState(false);
+  const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
     const node = holder.current;
@@ -62,6 +66,7 @@ export function ServerTerminal({
     let term: import("@xterm/xterm").Terminal | null = null;
     setPhase("starting");
     setProblem(null);
+    setOutdated(false);
     void (async () => {
       const [{ Terminal }, { FitAddon }] = await Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]);
       if (stopped) {
@@ -89,6 +94,7 @@ export function ServerTerminal({
         ended: () => setPhase("ended"),
         failed: (e) => {
           setProblem(humanLine(e));
+          setOutdated(e instanceof ApiError && e.code === "host_outdated");
           setPhase("failed");
         }
       });
@@ -143,6 +149,11 @@ export function ServerTerminal({
       {phase === "failed" || phase === "ended" ? (
         <p className={styles.note} role="alert">
           {phase === "failed" ? (problem ?? t("terminal.failed")) : t("terminal.ended")}
+          {phase === "failed" && outdated ? (
+            <button type="button" className={styles.again} onClick={() => setUpdating(true)} data-testid="terminal-update-server">
+              {t("updateServer.button")}
+            </button>
+          ) : null}
           <button type="button" className={styles.again} onClick={() => setAttempt((n) => n + 1)}>
             {t("terminal.again")}
           </button>
@@ -150,6 +161,12 @@ export function ServerTerminal({
       ) : (
         <p className={styles.note}>{t("terminal.note")}</p>
       )}
+      <UpdateServerModal
+        open={updating}
+        hostId={hostId}
+        onClose={() => setUpdating(false)}
+        onDone={() => setAttempt((n) => n + 1)}
+      />
     </section>
   );
 }

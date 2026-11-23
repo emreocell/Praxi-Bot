@@ -663,6 +663,7 @@
       "A spare computer at home",
       "Advanced: connect over SSH",
       "Your servers",
+      "Updating a server",
       "Limits today"
     ],
     "summary": "A server is another computer that stays on day and night, usually rented online. Your bots can live there, so they keep working when your own computer is off."

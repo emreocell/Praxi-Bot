@@ -24,6 +24,21 @@ pub struct OwnedTakeover {
     #[serde(skip)]
     pub input_deadline: Option<tokio::time::Instant>,
 }
+impl OwnedTakeover {
+    /// May `actor` take this paused/expired takeover back with a plain request?
+    /// Yes for the same actor that names its id or uses the same target, and for
+    /// the same actor when the takeover was only interrupted by a daemon restart
+    /// (the restored record has no live ids and its target ids may have changed).
+    /// Never for another actor, and never for a local override.
+    #[must_use]
+    pub fn retakeable_by(&self, actor: &str, reacquire: Option<Uuid>, target: Uuid) -> bool {
+        self.actor == actor
+            && self.info.reason != Some(Reason::LocalOverride)
+            && (reacquire == Some(self.info.id)
+                || self.info.target_id == target
+                || self.info.reason == Some(Reason::Restart))
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)] // Independent, persisted release-progress markers.
 pub struct ReleaseJournal {
@@ -316,8 +331,7 @@ impl ControlHub {
             // The same actor taking its own expired/paused takeover back on the same
             // target needs no remembered id: a reopened live view or a reload loses
             // the id, and a single user must not be refused by their own leftover.
-            let same = old.actor == actor
-                && (req.reacquire_takeover_id == Some(old.info.id) || old.info.target_id == target);
+            let same = old.retakeable_by(actor, req.reacquire_takeover_id, target);
             if !expired || !(same || (req.recover && privileged && req.reason.is_some())) {
                 return Err("takeover already owned".into());
             }
@@ -588,7 +602,24 @@ impl ControlHub {
     /// # Errors
     /// Keeps the pause if the durable write fails.
     pub fn clear_owned_latch(&self) -> Result<Option<OwnedTakeover>, String> {
+        self.clear_owned_latch_if(|_, _| true)
+    }
+    /// Like [`Self::clear_owned_latch`], but decided under the same lock that
+    /// the clear happens under: `keep` sees the CURRENT takeover and the latch
+    /// is dropped only when it returns `true`. Anything that changed it since
+    /// the caller looked (a local Stop, a new takeover, pending work) is left
+    /// untouched and `Ok(None)` is returned.
+    /// # Errors
+    /// Keeps the pause if the durable write fails.
+    pub fn clear_owned_latch_if(
+        &self,
+        should_clear: impl FnOnce(&OwnedTakeover, (bool, bool)) -> bool,
+    ) -> Result<Option<OwnedTakeover>, String> {
         let mut st = self.state.lock();
+        let pending = (st.reset_pending, st.audit_pending);
+        if !st.owned.as_ref().is_some_and(|t| should_clear(t, pending)) {
+            return Ok(None);
+        }
         let Some(old) = st.owned.take() else {
             return Ok(None);
         };

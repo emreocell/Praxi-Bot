@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
+import { olderSide } from "../lib/hostState";
 import { LOCAL_COMPUTER, useDaemon } from "../state/DaemonContext";
 import styles from "./HostStateBanner.module.css";
 
@@ -49,11 +50,20 @@ export function HostStateBanner() {
       break;
     case "version_mismatch":
       tone = hostState.blocking ? "bad" : "warn";
-      text = t(hostState.blocking ? "hostState.versionBlocking" : "hostState.versionWarning", {
-        name,
-        local: hostState.local || versions.local || "?",
-        host: hostState.host || versions.host || "?"
-      });
+      {
+        const local = hostState.local || versions.local || "?";
+        const host = hostState.host || versions.host || "?";
+        const side = hostState.blocking ? olderSide(local, host) : "unknown";
+        // Name the side to update: the one that is behind.
+        const key = !hostState.blocking
+          ? "hostState.versionWarning"
+          : side === "app"
+            ? "hostState.updateApp"
+            : side === "host"
+              ? "hostState.updateHost"
+              : "hostState.versionBlocking";
+        text = t(key, { name, local, host });
+      }
       break;
     case "starting":
     case "degraded":

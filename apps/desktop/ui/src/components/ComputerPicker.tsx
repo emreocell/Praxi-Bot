@@ -10,6 +10,9 @@ import { type RunPlace, stopResult, switchNeedsConfirm } from "../lib/runLocatio
 import { useDaemon } from "../state/DaemonContext";
 import { useLiveView } from "../state/LiveViewContext";
 import { useServerTerminal } from "../state/ServerTerminalContext";
+import { useServerVersions } from "../state/useServerVersions";
+import { UpdateServerModal } from "./UpdateServerModal";
+import { stateOf, VersionLine } from "./ServersModal";
 import styles from "./ComputerPicker.module.css";
 import { AddServerModal } from "./AddServerModal";
 import { ServersModal } from "./ServersModal";
@@ -31,7 +34,7 @@ import { useToast } from "./Toast";
 export function ComputerPicker() {
   const { t, i18n } = useTranslation();
   const toast = useToast();
-  const { home, workLocalNow, setWorkLocalNow, hostState, hostList, stopHostRuns, localApi, refreshHosts, runs } = useDaemon();
+  const { client, home, workLocalNow, setWorkLocalNow, hostState, hostList, stopHostRuns, localApi, refreshHosts, runs } = useDaemon();
   const { openViewer, viewerOpen } = useLiveView();
   const serverTerminal = useServerTerminal();
   // Design review (mock mode only): `?menu=1` opens the menu.
@@ -40,6 +43,7 @@ export function ComputerPicker() {
   const [pairOpen, setPairOpen] = useState(false);
   const [serversOpen, setServersOpen] = useState(false);
   const [syncHost, setSyncHost] = useState<string | null>(null);
+  const [updateHost, setUpdateHost] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [confirm, setConfirm] = useState<null | { kind: "switch"; to: RunPlace } | { kind: "stop" }>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
@@ -78,6 +82,15 @@ export function ComputerPicker() {
     const p = lastSyncParts(ms, Date.now(), i18n.language);
     return p.day ? `${p.day} ${p.time}` : t("homeMenu.today", { time: p.time });
   };
+
+  // The server's version, asked only while the menu is open on the server.
+  const homeId = home.kind === "host" ? home.hostId : "";
+  const { versions, recheck } = useServerVersions(isMockMode() ? client : localApi, homeId ? [homeId] : [], open && place === "server" && status === "online");
+  const homeVersion = versions[homeId];
+  const appBuild = { version: hostList?.local_version ?? "", releaseTag: hostList?.local_release_tag ?? null };
+  const homeState = stateOf(homeVersion, appBuild);
+  const homeOlder = homeState === "older";
+  const homeUnknown = homeState === "unknown";
 
   const nameOf = (p: RunPlace) => (p === "server" ? serverName : t("runLocation.thisComputer"));
 
@@ -244,6 +257,24 @@ export function ComputerPicker() {
             {serverTerminal.available && status === "online"
               ? item("home-terminal", <Terminal aria-hidden="true" className={styles.icon} />, t("home.menu.terminal"), () => serverTerminal.open())
               : null}
+            <div className={styles.section} data-testid="home-version" aria-live="polite">
+              <VersionLine v={homeVersion} app={appBuild} />
+              <button type="button" className={styles.item} onClick={recheck} data-testid="home-version-recheck">
+                <RefreshCw aria-hidden="true" className={styles.icon} />
+                <span className={styles.itemText}>
+                  <b>{t("updateServer.checkAgain")}</b>
+                </span>
+              </button>
+            </div>
+            {homeOlder || homeUnknown
+              ? item(
+                  "home-update",
+                  <RefreshCw aria-hidden="true" className={styles.icon} />,
+                  t(homeOlder ? "updateServer.button" : "updateServer.buttonAnyway"),
+                  () => setUpdateHost(homeId),
+                  { hint: t(homeOlder ? "updateServer.available" : "updateServer.versionUnknown") }
+                )
+              : null}
             {item("home-sync", <RefreshCw aria-hidden="true" className={styles.icon} />, t("homeMenu.sync"), () => setSyncHost(home.hostId), {
               hint: syncedAt === null ? undefined : t("homeMenu.lastSync", { when: syncWhen(syncedAt) })
             })}
@@ -333,6 +364,7 @@ export function ComputerPicker() {
           setAddOpen(true);
         }}
       />
+      <UpdateServerModal open={updateHost !== null} hostId={updateHost ?? ""} onClose={() => setUpdateHost(null)} />
       <PairHostModal open={pairOpen} onClose={() => setPairOpen(false)} />
       <CopySetupModal open={syncHost !== null} hostId={syncHost ?? ""} onClose={() => setSyncHost(null)} />
     </>

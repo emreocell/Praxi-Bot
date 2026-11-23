@@ -504,6 +504,17 @@ async fn host_link_routes_work_for_the_local_user_and_keep_secrets_out_of_the_au
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.json()["hosts"], json!([]));
     assert_eq!(r.json()["local_version"], env!("CARGO_PKG_VERSION"));
+    // /v1/host names the exact build, not just the cargo version every alpha shares.
+    let r2 = call(&t, Method::GET, "/v1/host", None).await;
+    assert_eq!(r2.status, StatusCode::OK);
+    assert_eq!(r2.json()["build_id"], crate::build_id());
+    assert!(
+        r2.json()["build_id"]
+            .as_str()
+            .is_some_and(|b| b.starts_with(env!("CARGO_PKG_VERSION")) || b.starts_with('v')),
+        "{}",
+        r2.json()
+    );
     let r = call(
         &t,
         Method::POST,
@@ -608,6 +619,32 @@ async fn on_a_host_no_peer_can_mint_tickets_revoke_devices_or_change_leadership(
 }
 
 #[tokio::test]
+async fn no_paired_peer_can_start_a_server_update_or_probe_a_server() {
+    let t = host_daemon();
+    for role in [
+        crate::PeerRole::Desktop,
+        crate::PeerRole::Phone,
+        crate::PeerRole::Host,
+    ] {
+        for (method, path) in [
+            (Method::POST, "/v1/hosts/setup/update"),
+            (Method::GET, "/v1/hosts/abcd/version"),
+        ] {
+            let r = peer_call(
+                &t,
+                role,
+                method.clone(),
+                path,
+                Some(json!({"host_id": "abcd"})),
+            )
+            .await;
+            assert_eq!(r.status, StatusCode::FORBIDDEN, "{role:?} {method} {path}");
+        }
+    }
+    assert_eq!(count_audit(&t, "host_update.start"), 0);
+}
+
+#[tokio::test]
 async fn on_a_host_a_peer_cannot_relax_execution_policy_but_can_edit_the_rest_of_a_bot() {
     let t = host_daemon();
     let desktop = crate::PeerRole::Desktop;
@@ -703,6 +740,7 @@ struct FakeSetup {
 fn fake_job() -> crate::host_setup::HostSetupJob {
     crate::host_setup::HostSetupJob {
         id: "job-1".into(),
+        kind: crate::host_setup::HostJobKind::Setup,
         state: crate::host_setup::HostSetupState::Running,
         target: "ubuntu@203.0.113.7:22".into(),
         steps: Vec::new(),

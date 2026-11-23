@@ -42,6 +42,9 @@ import {
 } from "../lib/liveViewState";
 import { viewerKeyAction } from "../lib/liveViewLayers";
 import { layerStack } from "../lib/modalStack";
+import { noScreenCode } from "../lib/computerLabel";
+import { explainScreen } from "../lib/screenReason";
+import { CopyBlock } from "./settings/HomeCards";
 import { useDaemon } from "../state/DaemonContext";
 import { LiveViewerChat, type LiveChatSlots } from "./LiveViewerChat";
 import { useLiveView, useLocalLiveView } from "../state/LiveViewContext";
@@ -95,6 +98,7 @@ export function LiveViewer({
     frameUrl,
     streamFailure,
     targetsError,
+    availability,
     retryStream,
     viewerOpen,
     loadingTargets,
@@ -370,6 +374,12 @@ export function LiveViewer({
   const unavailableReason =
     state.reason ?? targetSummary?.reason ?? (selectedTarget ? null : "unavailable");
 
+  // "Unavailable" on its own says nothing: name the real cause (no desktop session, ...) and the fix.
+  const screenWhy = explainScreen(
+    selectedTarget ? unavailableReason : null,
+    noScreenCode(availability)
+  );
+
   const canTakeover =
     Boolean(selectedTarget) &&
     Boolean(targetSummary?.available) &&
@@ -642,12 +652,20 @@ export function LiveViewer({
                   : t("botPanel.computer")}
               </p>
               <p className={styles.emptyBody}>
-                {unavailableReason
-                  ? t(`liveView.reasons.${unavailableReason}`, {
-                      defaultValue: t("liveView.reasons.unavailable")
-                    })
-                  : t("liveView.noTargets")}
+                {screenWhy
+                  ? t("liveView.panelSummary.noScreenReason", { detail: t(screenWhy.detailKey) })
+                  : unavailableReason
+                    ? t(`liveView.reasons.${unavailableReason}`, {
+                        defaultValue: t("liveView.reasons.unavailable")
+                      })
+                    : t("liveView.noTargets")}
               </p>
+              {screenWhy ? (
+                <div className={styles.emptyBody} data-testid="live-viewer-fix">
+                  <p>{t(screenWhy.fixKey)}</p>
+                  {screenWhy.command ? <CopyBlock text={screenWhy.command} /> : null}
+                </div>
+              ) : null}
               <Button
                 variant="secondary"
                 size="sm"

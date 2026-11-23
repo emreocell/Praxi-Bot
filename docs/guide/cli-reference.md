@@ -446,7 +446,7 @@ and [host operations](host-operations.md)).
 | Subcommand | Meaning |
 | --- | --- |
 | `bot host join <TICKET>` | Pair this fresh installation with a desktop before starting the service. Local only |
-| `bot host invite --role <phone\|desktop\|node\|host>` | Create a single-use invite and print its QR and confirmation code. `--role` is required |
+| `bot host invite --role <phone\|desktop\|node\|host> [--ttl-secs <1-1800>] [--ticket-only]` | Create a single-use invite and print its QR and confirmation code. `--role` is required. `--ttl-secs` sets how long the invite stays valid (1 to 1800 seconds). `--ticket-only` prints only the pairing ticket, for scripts such as the one-command server setup |
 | `bot host status` | Show host status (JSON) |
 | `bot host devices` | List paired devices (JSON) |
 | `bot host revoke <KEY>` | Revoke a paired device |

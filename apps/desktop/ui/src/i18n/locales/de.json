@@ -2532,7 +2532,7 @@
         "title": "Dieser Computer hat das Terminal nicht erlaubt"
       },
       "host_outdated": {
-        "hint": "Der Computer ist online, aber seine Praxi-Bot-Version kennt das Terminal noch nicht. Aktualisiere Praxi-Bot dort, starte es neu und versuche es erneut.",
+        "hint": "Der Computer ist online, aber seine Praxi-Bot-Version kennt das Terminal noch nicht. Aktualisiere den Server und versuche es dann erneut.",
         "title": "Auf diesem Computer läuft ein älteres Praxi-Bot"
       },
       "host_setup_conflict": {
@@ -3012,6 +3012,18 @@
       "retry": "Erneut versuchen",
       "waited": "Wartet seit {{seconds}} s"
     },
+    "takeoverAlreadyOwned": {
+      "hint": "Warte, bis dieses Gerät loslässt, oder hebe zuerst seine Pause auf, wenn dir dieser Computer gehört.",
+      "title": "Ein anderes Gerät steuert diesen Bildschirm bereits"
+    },
+    "takeoverRecoveryRequired": {
+      "hint": "Der Server wurde neu gestartet (oder die Verbindung riss ab), während eine Bildschirm-Übernahme offen war. Klicke oben im Fenster auf \"Pause aufheben\", um fortzufahren.",
+      "title": "Auf dem Server ist noch eine Bildschirm-Übernahme offen"
+    },
+    "takeoverRequestConflict": {
+      "hint": "Eine andere Übernahme-Anfrage mit derselben Nummer ist dem Server schon bekannt. Schließe die Live-Ansicht, öffne sie neu und versuche es erneut.",
+      "title": "Diese Übernahme-Anfrage kollidiert mit einer früheren"
+    },
     "timeout": {
       "hint": "Prüfe deine Verbindung und versuche es erneut.",
       "title": "Das hat zu lange gedauert"
@@ -3375,12 +3387,14 @@
     "refusal": {
       "botPermissions": "Berechtigungen und Werkzeuge eines Bots werden auf {{name}} selbst verwaltet. Name, Persona und Modell können hier geändert werden.",
       "composio": "App-Verbindungen werden auf der Besitzerseite dieses Computers verwaltet, nicht auf {{name}}.",
+      "connectionTest": "Schlüsseltests laufen auf {{name}} selbst und sind in dieser App nicht möglich.",
       "credentials": "E-Mail- und Suchkonten werden auf {{name}} selbst verbunden.",
       "generic": "{{name}} hat das nicht erlaubt: {{reason}}",
       "hostTransfer": "Das Verschieben des Hosts und der Kopplungskanäle erfolgt auf {{name}} selbst.",
       "knowledge": "Wissenseinstellungen werden auf {{name}} selbst verwaltet.",
       "lifecycle": "Kopplung und Host-Updates erfolgen auf {{name}} selbst.",
       "localOnly": "Das kann nur die Person an {{name}} tun, nicht diese App.",
+      "localProviders": "Lokale Modelle und Programmier-Tools gehören zu dem Computer, auf dem der Bot läuft. Wechsle zu Dieser Computer, um sie einzurichten.",
       "overlay": "Nur die Person an {{name}} kann diese Aufforderung beantworten.",
       "ownerOnly": "Das kann nur auf {{name}} selbst erledigt werden.",
       "policy": "Die Ausführungsrichtlinie wird auf {{name}} selbst festgelegt, nicht über diese App.",
@@ -3410,6 +3424,8 @@
     "noModelKey": "{{name}} hat noch keinen Modellschlüssel. Du kannst seinen Bildschirm ansehen und seine Bots verwalten, aber Chats können erst beantwortet werden, wenn auf dem Host ein Schlüssel hinzugefügt wurde.",
     "notPaired": "{{name}} akzeptiert diesen Computer nicht mehr. Koppele erneut mit einem neuen Ticket.",
     "offline": "{{name}} antwortet nicht. Seine Bots laufen weiter; diese App verbindet sich von selbst neu.",
+    "updateApp": "Update nötig: Diese App ({{local}}) ist älter als {{name}} ({{host}}). Aktualisiere diese App, um {{name}} zu nutzen.",
+    "updateHost": "Update nötig: {{name}} ({{host}}) ist älter als diese App ({{local}}). Aktualisiere {{name}}, damit es zu dieser App passt.",
     "useThisComputer": "Diesen Computer verwenden",
     "versionBlocking": "Diese App ({{local}}) und {{name}} ({{host}}) haben unterschiedliche Versionen. Aktualisiere sie auf dieselbe Version, bevor du den Host verwendest.",
     "versionWarning": "Diese App hat {{local}} und {{name}} hat {{host}}: ein kleiner Unterschied, alles sollte funktionieren."
@@ -3583,6 +3599,15 @@
       "unknown": "der Bildschirm ist nicht verfügbar",
       "unsupported_platform": "diese Plattform hat keine Bildschirmaufnahme",
       "wayland": "Wayland-Sitzungen werden nicht unterstützt, verwende eine X11-Sitzung"
+    },
+    "noScreenFix": {
+      "addSession": "Auf dem Server gibt es noch keine Desktop-Sitzung. Füge sie hinzu, indem du dies auf dem Server ausführst, und öffne den Bildschirm dann erneut:",
+      "generic": "Meist hat der Server noch keine Desktop-Sitzung, sein Display antwortet nicht oder die Bildschirmfreigabe fehlt. So fügst du die Desktop-Sitzung hinzu, auf dem Server ausführen:",
+      "locked": "Entsperre die Sitzung auf dem Server und prüfe, ob die Bildschirmfreigabe erteilt ist, dann versuche es erneut.",
+      "platform": "Dieser Computer kann seinen Bildschirm nicht zeigen. Nutze einen Linux-Server mit Desktop-Sitzung oder einen Windows- oder macOS-Computer.",
+      "restart": "Starte den Praxi-Dienst auf dem Server neu und versuche es dann erneut.",
+      "wait": "Der Server prüft seinen Bildschirm noch. Warte ein paar Sekunden und aktualisiere.",
+      "wayland": "Stelle den Desktop des Servers auf eine X11-Sitzung um und öffne den Bildschirm dann erneut."
     },
     "noTargets": "Noch keine Bildschirmziele gemeldet.",
     "openScreen": "Bildschirm öffnen",
@@ -4536,7 +4561,7 @@
       "unreachable": "Nicht erreichbar"
     },
     "title": "Deine Server",
-    "updateHelp": "Um einen Server zu aktualisieren, öffne sein Terminal und führe dort das Praxi-Update aus. Ein Update mit einem Klick gibt es noch nicht."
+    "updateHelp": "Mit der App hinzugefügte Server lassen sich hier aktualisieren. Für jeden anderen Server zeigt Server aktualisieren die genauen Befehle für den Server."
   },
   "settings": {
     "accent": {
@@ -4783,10 +4808,12 @@
         "addTo": "Zu {{provider}} hinzufügen",
         "compatible": "OpenAI-kompatibler Server",
         "description": "Schlüssel werden im Schlüsselbund deines Systems gespeichert und nie wieder angezeigt.",
+        "hostDescription": "Der Schlüssel wird an {{name}} gesendet und dort gespeichert. Er bleibt nicht auf diesem Computer und wird nie wieder angezeigt.",
         "pasteLabel": "API-Schlüssel",
         "placeholder": "Füge einen Schlüssel ein. Wir erkennen den Anbieter.",
         "providers": "Anbieter",
         "saved": "Schlüssel für {{provider}} gespeichert",
+        "savedOn": "Schlüssel für {{provider}} auf {{name}} gespeichert",
         "stored": "Ein Schlüssel ist gespeichert",
         "title": "Mit API-Schlüssel hinzufügen",
         "unknown": "Wir können nicht erkennen, für welchen Anbieter dieser Schlüssel gilt. Wähle unten einen aus."
@@ -5518,6 +5545,10 @@
       "wine": "Wein"
     }
   },
+  "thisComputerOnly": {
+    "body": "Lokale Modelle laufen auf dem Computer, auf dem der Bot läuft. {{name}} ist ein Server, richte sie daher auf Diesem Computer ein.",
+    "switch": "Zu diesem Computer wechseln"
+  },
   "tray": {
     "needs": "Braucht dich ({n})",
     "pauseAll": "Alle Bots pausieren",
@@ -5528,6 +5559,115 @@
     "toggle": "Fenster anzeigen / ausblenden",
     "tooltip": "Praxi-Bot",
     "tooltipNeeds": "Praxi-Bot: {n} brauchen dich"
+  },
+  "updateServer": {
+    "available": "Update verfügbar",
+    "button": "Server aktualisieren",
+    "buttonAnyway": "Trotzdem aktualisieren",
+    "checkAgain": "Erneut prüfen",
+    "checking": "Die Version des Servers wird geprüft …",
+    "commandsLabel": "Befehle für den Server",
+    "confirm": "Server aktualisieren",
+    "copied": "Befehle kopiert.",
+    "copy": "Befehle kopieren",
+    "copyFailed": "Kopieren nicht möglich. Markiere den Text und kopiere ihn von Hand.",
+    "doneBody": "Der Server wurde neu gestartet und antwortet. Deine Bots und Daten sind wie zuvor.",
+    "doneTitle": "{{name}} ist aktuell",
+    "dontClose": "Das dauert ein paar Minuten. Du kannst dieses Fenster offen lassen; der Server startet gegen Ende neu.",
+    "fail": {
+      "generic": {
+        "body": "Auf dem Server ist etwas schiefgelaufen. Ist der Installer weit genug gekommen, hat er die vorherige Version wiederhergestellt.",
+        "next": "Sieh dir die Details unten an. Du kannst es erneut versuchen oder die Befehle selbst auf dem Server ausführen.",
+        "title": "Das Update wurde nicht abgeschlossen"
+      },
+      "host_key": {
+        "body": "Du hast den Fingerabdruck des Servers nicht bestätigt (oder er hat sich geändert, seit du den Server hinzugefügt hast). Es wurde nichts geändert.",
+        "next": "Hast du am Server nichts geändert, gibt sich vielleicht jemand als er aus: mach nicht weiter. Sonst versuche es erneut und prüfe den Fingerabdruck.",
+        "title": "Die Identität des Servers wurde nicht bestätigt"
+      },
+      "no_ssh": {
+        "body": "Das Programm für die Anmeldung an Servern (OpenSSH) wurde nicht gefunden oder ließ sich nicht vorbereiten.",
+        "next": "Installiere OpenSSH auf diesem Computer oder nutze stattdessen die Befehle.",
+        "title": "Praxi-Bot kann sich von hier nicht anmelden"
+      },
+      "rolled_back": {
+        "body": "Die neue Version ließ sich auf dem Server nicht starten, deshalb hat Praxi-Bot die vorherige Version wiederhergestellt. Deine Daten wurden nicht angetastet.",
+        "next": "Versuche es später erneut oder kopiere die Details unten, wenn du um Hilfe bittest.",
+        "title": "Das Update hat nicht geklappt, die alte Version ist zurück"
+      },
+      "unreachable": {
+        "body": "Der Server hat die Anmeldung nicht akzeptiert oder nicht geantwortet. Es wurde nichts geändert.",
+        "next": "Prüfe, ob der Server an ist und du dich noch anmelden kannst, und versuche es dann erneut.",
+        "title": "Verbindung zum Server nicht möglich"
+      },
+      "verify": {
+        "body": "Die Version hat die Signaturprüfung nicht bestanden und wurde deshalb nicht installiert. Der Server läuft weiter mit seiner bisherigen Version.",
+        "next": "Mit deinen Daten ist alles in Ordnung. Versuche es in ein paar Minuten erneut. Passiert es wieder, installiere nichts von Hand, sondern frag um Hilfe.",
+        "title": "Der Download konnte nicht verifiziert werden"
+      }
+    },
+    "hostKeyBody": "{{host}} hat sich mit diesem Fingerabdruck gemeldet. Mach nur weiter, wenn er mit dem deines Server-Anbieters oder des Servers selbst übereinstimmt.",
+    "hostKeyNo": "Nein, abbrechen",
+    "hostKeyTitle": "Ist das wirklich dein Server?",
+    "hostKeyYes": "Ja, weiter",
+    "lead": "Installiere auf deinem Server die Praxi-Bot-Version, die zu dieser App passt.",
+    "logEmpty": "Noch nichts.",
+    "manualBody": "Dieser Computer hat keine gespeicherte Anmeldung für diesen Server (er wurde anders hinzugefügt). Melde dich am Server an und füge die Befehle unten ein. Sie laden die zu dieser App passende Version herunter und prüfen ihre Signatur vor der Installation.",
+    "manualNoSsh": "Praxi-Bot kann sich für dich nicht an diesem Server anmelden",
+    "manualNote": "Deine Daten bleiben erhalten. Komm danach hierher zurück und drücke Erneut prüfen.",
+    "manualTitle": "Das Update selbst auf dem Server ausführen",
+    "newer": "Neuer als diese App",
+    "noRelease": "Diese App weiß nicht, aus welcher Version sie stammt, und kann die genaue Version daher nicht nennen. Installiere die neueste Version aus der Praxi-Bot-Anleitung (Seite Linux-Server) mit der Option --update.",
+    "p1": "Der Server startet für ein paar Sekunden neu.",
+    "p2": "Bots, die dort laufen, pausieren kurz und machen danach weiter.",
+    "p3": "Deine Daten, Bots und Einstellungen bleiben erhalten.",
+    "p4": "Die bisherigen Programmdateien bleiben auf dem Server unter /opt/praxi.backup-<Zeit> erhalten, und deine Daten werden vor dem Update separat gesichert. Beides lässt sich zurückspielen.",
+    "p5": "Es wird nur die Version installiert, die zu dieser App passt, und Praxi-Bot prüft zuerst ihre Signatur. Nichts Ungeprüftes wird ausgeführt.",
+    "progress": "Fortschritt des Updates",
+    "retry": "Erneut versuchen",
+    "rows": {
+      "backup": {
+        "done": "Kopie gespeichert",
+        "failed": "Kopie konnte nicht gespeichert werden",
+        "pending": "Wartet",
+        "running": "Eine Kopie deiner Daten wird gespeichert …",
+        "title": "Sicherheitskopie anlegen"
+      },
+      "check": {
+        "done": "Der Server antwortet",
+        "failed": "Der Server hat nicht geantwortet",
+        "pending": "Wartet",
+        "running": "Der Server wird nach seinem Zustand gefragt …",
+        "title": "Prüfen, ob alles läuft"
+      },
+      "connect": {
+        "done": "Verbunden",
+        "failed": "Verbindung nicht möglich",
+        "pending": "Wartet",
+        "running": "Anmelden und den Server prüfen …",
+        "title": "Mit dem Server verbinden"
+      },
+      "install": {
+        "done": "Neue Version installiert",
+        "failed": "Das Update wurde nicht abgeschlossen",
+        "pending": "Wartet",
+        "running": "Die Version wird heruntergeladen, geprüft, installiert und der Server neu gestartet …",
+        "title": "Herunterladen, prüfen und installieren"
+      }
+    },
+    "safe": "Geht etwas schief, kehrt der Server zu seiner vorherigen Version zurück. Du siehst, was passiert ist und was du als Nächstes tun kannst.",
+    "showCommands": "Stattdessen die Befehle zeigen",
+    "showLog": "Details anzeigen",
+    "starting": "Das Update wird gestartet …",
+    "stopped": "Das Update wurde vor dem Ende gestoppt.",
+    "thisServer": "dieser Server",
+    "title": "Server aktualisieren",
+    "titleFor": "{{name}} aktualisieren",
+    "unknown": "Version unbekannt (der Server ist vielleicht aus).",
+    "upToDate": "Aktuell",
+    "versionLine": "Server-Version {{server}} · diese App {{app}}",
+    "versionUnknown": "Genaue Version unbekannt (älterer Server)",
+    "whatHappens": "Was passiert"
   },
   "usage": {
     "bot": "Bot",

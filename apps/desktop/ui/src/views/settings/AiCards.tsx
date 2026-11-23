@@ -21,6 +21,7 @@ import { MemoryCard } from "./MemoryCard";
 import type { CardDef } from "./types";
 import { humanLine } from "../../lib/humanError";
 import { useBotsHome } from "../../state/useBotsHome";
+import { ThisComputerOnly } from "../../components/ThisComputerOnly";
 import { HomeHint } from "../../components/HomeHint";
 
 /** Default provider + model: a searchable dropdown grouped by provider. */
@@ -48,7 +49,10 @@ function DefaultModelRow() {
     }
     try {
       await home.setDefaultModel(provider, model);
-      await client?.reloadProviders().catch(() => {});
+      if (home.target !== "host") {
+        // A server rebuilds its own providers after an administrator change; peers may not ask.
+        await client?.reloadProviders().catch(() => {});
+      }
       await reload();
       toast.show(t("modelPicker.switchedDefault", { model: ref }), "success");
     } catch (e) {
@@ -115,10 +119,10 @@ export function aiCards(t: TFunction): CardDef[] {
       description: t("localModels.cardDescription"),
       keywords: "ollama lmstudio local model hardware gpu ram yerel donanim lokal modell hardware",
       node: (
-        <>
+        <ThisComputerOnly>
           <LocalInstallCard />
           <LocalModelsAdvice />
-        </>
+        </ThisComputerOnly>
       )
     },
     {

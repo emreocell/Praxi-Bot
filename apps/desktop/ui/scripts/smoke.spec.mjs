@@ -278,9 +278,10 @@ export async function flows(ctx) {
     await page.getByTestId('computer-picker').click();
     await page.getByTestId('computer-add').click();
     await page.getByTestId('add-server').waitFor(T);
-    // Step 0 explains what a server is, then the person chooses a path.
-    await page.getByTestId('add-server-next').click();
-    await page.getByTestId('choose-ssh').click();
+    // The first screen offers three paths; the SSH form hides under "I have a server" > Advanced.
+    await page.getByTestId('choose-have').click();
+    await page.getByTestId('advanced-ssh').locator('summary').click();
+    await page.getByTestId('advanced-ssh-go').click();
     const start = page.getByTestId('add-server-start');
     await page.getByTestId('add-server-host').fill('not a host !!');
     // A typo is explained in plain words at once, with no SSH attempt.

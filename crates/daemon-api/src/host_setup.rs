@@ -42,6 +42,25 @@ pub struct StartHostSetupInput {
     pub name: Option<String>,
 }
 
+/// `POST /v1/hosts/setup/update`: update the program on a server this computer
+/// added with the wizard (its SSH details are stored here already).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct StartHostUpdateInput {
+    /// Paired host id (`GET /v1/hosts`).
+    pub host_id: String,
+}
+
+/// What a job does on the server.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HostJobKind {
+    /// Add (or repair) a server.
+    #[default]
+    Setup,
+    /// Update the program on a server that is already added.
+    Update,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HostSetupState {
@@ -85,6 +104,9 @@ pub struct HostKeyPrompt {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HostSetupJob {
     pub id: String,
+    /// Setup of a new server or update of an existing one.
+    #[serde(default)]
+    pub kind: HostJobKind,
     pub state: HostSetupState,
     /// `user@host:port` being set up.
     pub target: String,
@@ -152,6 +174,15 @@ pub enum HostSetupError {
 #[allow(clippy::missing_errors_doc)] // one shared error contract, described above
 pub trait HostSetup: Send + Sync {
     fn start(&self, input: StartHostSetupInput) -> Result<HostSetupJob, HostSetupError>;
+    /// Update the program on an already added server (the SSH details the
+    /// wizard stored; nothing new is persisted). `Invalid` when this computer
+    /// has no stored SSH details for that server: the app then shows the
+    /// copy-paste commands instead.
+    fn start_update(&self, _input: StartHostUpdateInput) -> Result<HostSetupJob, HostSetupError> {
+        Err(HostSetupError::Invalid(
+            "updating a server is not available in this daemon".into(),
+        ))
+    }
     fn job(&self, id: &str) -> Option<HostSetupJob>;
     fn answer_host_key(&self, id: &str, accept: bool) -> Result<HostSetupJob, HostSetupError>;
     fn cancel(&self, id: &str) -> Result<HostSetupJob, HostSetupError>;
@@ -214,6 +245,31 @@ pub(crate) async fn start(
         }),
     )?;
     Ok(Json(setup.start(input)?))
+}
+
+#[utoipa::path(post, operation_id = "hosts_setup_update", path = "/v1/hosts/setup/update", tag = "host", security(("bearer" = [])), request_body = StartHostUpdateInput, responses((status = 200, body = HostSetupJob), (status = 400, body = crate::error::ErrorBody), (status = 409, body = crate::error::ErrorBody)))]
+pub(crate) async fn start_update(
+    State(s): State<AppState>,
+    peer: Option<Extension<crate::PeerIdentity>>,
+    headers: axum::http::HeaderMap,
+    ApiJson(input): ApiJson<StartHostUpdateInput>,
+) -> Result<Json<HostSetupJob>, ApiError> {
+    local_only(peer.as_ref())?;
+    s.require_owner(&headers)?;
+    if input.host_id.is_empty()
+        || input.host_id.len() > 128
+        || !input.host_id.chars().all(|c| c.is_ascii_alphanumeric())
+    {
+        return Err(ApiError::bad_request("invalid host id"));
+    }
+    let setup = setup(&s)?;
+    // Only the public device id is logged: no address, user name or key path.
+    audit(
+        &s,
+        "host_update.start",
+        &serde_json::json!({"host": input.host_id}),
+    )?;
+    Ok(Json(setup.start_update(input)?))
 }
 
 #[utoipa::path(get, operation_id = "hosts_setup_get", path = "/v1/hosts/setup/{job}", tag = "host", security(("bearer" = [])), params(("job" = String, Path)), responses((status = 200, body = HostSetupJob)))]

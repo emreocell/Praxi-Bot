@@ -522,6 +522,9 @@ jobs:
       - name: Build bot and bot-node
         env:
           TARGET: ${{ matrix.target }}
+          # The server reports this tag (`bot --version`, GET /v1/host) so the app can tell
+          # which alpha it runs; the cargo version (0.1.0) is the same for all of them.
+          PRAXI_RELEASE_TAG: ${{ needs.plan.outputs.tag }}
         run: cargo build --release --locked --target "$TARGET" -p cli -p node-agent
 
       - name: Package tarball
