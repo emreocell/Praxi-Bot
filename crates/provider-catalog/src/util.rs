@@ -5,7 +5,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt,
     hash::{BuildHasher, Hasher},
-    time::{Duration, Instant},
+    time::{Duration, SystemTime},
 };
 
 use futures::{StreamExt, stream, stream::BoxStream};
@@ -16,7 +16,7 @@ use crate::{
     error::ProviderError,
     limits::error_body,
     openai_compat::{OpenAiCompatConfig, sse::SseDecoder},
-    provider::{ChatChunk, ChatRequest, FinishReason},
+    provider::{ChatChunk, ChatRequest, ChatStream, FinishReason, Usage},
 };
 
 /// API key that never appears in `Debug` output.
@@ -43,6 +43,7 @@ pub(crate) fn build_client(config: &OpenAiCompatConfig) -> Result<reqwest::Clien
     reqwest::Client::builder()
         .connect_timeout(config.connect_timeout)
         .read_timeout(config.timeout)
+        .retry(reqwest::retry::never())
         .build()
         .map_err(|e| ProviderError::Connection(e.to_string()))
 }
@@ -50,19 +51,26 @@ pub(crate) fn build_client(config: &OpenAiCompatConfig) -> Result<reqwest::Clien
 pub(crate) fn map_reqwest_error(e: reqwest::Error) -> ProviderError {
     if e.is_timeout() {
         ProviderError::Timeout
+    } else if e.is_builder() {
+        ProviderError::InvalidRequest("the model provider request could not be built".into())
     } else {
         // Strip the URL: it may carry credentials in unusual setups.
         ProviderError::Connection(e.without_url().to_string())
     }
 }
 
-/// `Retry-After` header in whole seconds.
+/// `Retry-After` accepts either delay-seconds or an HTTP date.
 pub(crate) fn retry_after(headers: &HeaderMap) -> Option<Duration> {
-    headers
-        .get(RETRY_AFTER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .map(Duration::from_secs)
+    let value = headers.get(RETRY_AFTER)?.to_str().ok()?.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let deadline = httpdate::parse_http_date(value).ok()?;
+    Some(
+        deadline
+            .duration_since(SystemTime::now())
+            .unwrap_or_default(),
+    )
 }
 
 /// Jittered exponential backoff, capped at `max_delay`. An explicit
@@ -82,46 +90,52 @@ pub(crate) fn backoff(
         .base_delay
         .saturating_mul(2u32.saturating_pow(attempt))
         .min(max);
-    // Equal jitter: uniformly in [exp/2, exp].
+    jittered_backoff(exp)
+}
+
+/// Equal jitter between half of an exponential delay and its capped value.
+#[must_use]
+pub fn jittered_backoff(delay: Duration) -> Duration {
     let rnd = std::hash::RandomState::new().build_hasher().finish();
     let frac = f64::from(u32::try_from(rnd >> 40).unwrap_or(0)) / f64::from(1u32 << 24);
-    exp.mul_f64(0.5 + 0.5 * frac)
+    delay.mul_f64(0.5 + 0.5 * frac)
 }
 
 /// Turns a failed response (status, headers, raw body) into a [`ProviderError`].
 pub(crate) type Classify = fn(u16, &HeaderMap, &str) -> ProviderError;
 
-/// Send a request, retrying 429/5xx (rate limit / upstream) with backoff.
-/// Returns the first successful response. Retrying stops (returning the last
-/// error) once `max_retries` is reached or the next backoff would push the
-/// total time spent past `config.max_total_retry`.
+pub(crate) async fn send_once(
+    request: reqwest::RequestBuilder,
+    classify: Classify,
+) -> Result<reqwest::Response, ProviderError> {
+    let resp = request.send().await.map_err(map_reqwest_error)?;
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(resp);
+    }
+    let headers = resp.headers().clone();
+    let body = error_body(resp).await.unwrap_or_default();
+    Err(classify(status.as_u16(), &headers, &body))
+}
+
+/// Retry transient failures before a response body is streamed. A retry must
+/// fit both the attempt limit and the wall-clock budget for scheduling retries.
 pub(crate) async fn send_with_retry(
     config: &OpenAiCompatConfig,
     make: &(dyn Fn() -> reqwest::RequestBuilder + Sync),
     classify: Classify,
 ) -> Result<reqwest::Response, ProviderError> {
-    let started = Instant::now();
+    let started = tokio::time::Instant::now();
     let mut attempt = 0;
     loop {
-        let resp = make().send().await.map_err(map_reqwest_error)?;
-        let status = resp.status();
-        if status.is_success() {
-            return Ok(resp);
-        }
-        let headers = resp.headers().clone();
-        let body = error_body(resp).await.unwrap_or_default();
-        let err = classify(status.as_u16(), &headers, &body);
-        let retry = match &err {
-            ProviderError::RateLimited { retry_after } => Some(*retry_after),
-            ProviderError::Upstream { .. } => Some(None),
-            _ => None,
+        let err = match send_once(make(), classify).await {
+            Ok(resp) => return Ok(resp),
+            Err(err) => err,
         };
-        let Some(retry_after) = retry else {
-            return Err(err);
-        };
-        if attempt >= config.max_retries {
+        if attempt >= config.max_retries || !err.is_retryable() {
             return Err(err);
         }
+        let retry_after = err.retry_after();
         // A requested wait longer than we are willing to sleep can never be
         // honoured: retrying earlier is futile, so fail now.
         if retry_after.is_some_and(|ra| ra > config.max_delay) {
@@ -136,10 +150,95 @@ pub(crate) async fn send_with_retry(
     }
 }
 
+/// Normalize HTTP errors and structured error events across the wire dialects.
+/// A status of zero means the event supplied no HTTP status.
+pub(crate) fn classify_response(status: u16, delay: Option<Duration>, body: &str) -> ProviderError {
+    let message = error_message(body);
+    let value = serde_json::from_str::<Value>(body).unwrap_or(Value::Null);
+    let error = value.get("error").unwrap_or(&value);
+    let codes = ["code", "type", "status"].map(|key| error[key].as_str().unwrap_or_default());
+    let has = |known: &[&str]| codes.iter().any(|code| known.contains(code));
+    let lower = message.to_ascii_lowercase();
+    let mentions = |known: &[&str]| known.iter().any(|text| lower.contains(text));
+    let status = if status == 0 {
+        error["code"]
+            .as_u64()
+            .and_then(|n| u16::try_from(n).ok())
+            .unwrap_or(0)
+    } else {
+        status
+    };
+    let err = if status == 401
+        || has(&["invalid_api_key", "authentication_error", "UNAUTHENTICATED"])
+    {
+        ProviderError::Auth(message)
+    } else if has(&["content_filter", "content_policy_violation", "safety_error"]) {
+        ProviderError::ContentFilter("the response was blocked by a content filter".into())
+    } else if status == 403 || has(&["permission_error", "PERMISSION_DENIED"]) {
+        ProviderError::Auth(message)
+    } else if has(&[
+        "insufficient_quota",
+        "billing_hard_limit_reached",
+        "billing_error",
+    ]) || status == 402
+    {
+        ProviderError::Quota
+    } else if has(&[
+        "context_length_exceeded",
+        "context_window_exceeded",
+        "prompt_too_long",
+        "exceed_context_size_error",
+    ]) || (matches!(status, 0 | 400 | 413 | 422)
+        && mentions(&[
+            "context length",
+            "context window",
+            "context size",
+            "prompt is too long",
+            "prompt too long",
+            "input token count exceeds",
+            "input token count (",
+        ]))
+    {
+        ProviderError::ContextTooLong
+    } else if status == 429
+        || has(&[
+            "rate_limit_exceeded",
+            "rate_limit_error",
+            "RESOURCE_EXHAUSTED",
+        ])
+    {
+        ProviderError::RateLimited { retry_after: delay }
+    } else if matches!(status, 408 | 504) || has(&["timeout", "timeout_error", "DEADLINE_EXCEEDED"])
+    {
+        ProviderError::Timeout
+    } else if matches!(status, 500..=599)
+        || has(&["overloaded_error", "overloaded", "UNAVAILABLE", "INTERNAL"])
+        || (status == 0 && matches!(lower.as_str(), "overloaded" | "service unavailable"))
+    {
+        ProviderError::Upstream {
+            status: if status >= 500 { status } else { 503 },
+            message,
+        }
+    } else if status == 0 {
+        ProviderError::Stream("the model provider returned an unrecognized error".into())
+    } else {
+        ProviderError::Api { status, message }
+    };
+    if let Some(delay) = delay
+        && matches!(err, ProviderError::Timeout | ProviderError::Upstream { .. })
+    {
+        return ProviderError::RetryAfter {
+            source: Box::new(err),
+            delay,
+        };
+    }
+    err
+}
+
 /// The error for a response whose finish reason is not a normal completion, or
 /// `None` for `Stop` / `Length` / `ToolCalls`. Safety-type reasons become
 /// [`ProviderError::ContentFilter`], `MALFORMED_FUNCTION_CALL` becomes
-/// [`ProviderError::MalformedToolCall`], anything else unknown a retryable
+/// [`ProviderError::MalformedToolCall`], anything else unknown a
 /// [`ProviderError::Stream`] (never a silent empty "stop").
 pub(crate) fn finish_error(reason: &FinishReason) -> Option<ProviderError> {
     match reason {
@@ -149,32 +248,32 @@ pub(crate) fn finish_error(reason: &FinishReason) -> Option<ProviderError> {
         )),
         FinishReason::Other(raw) => {
             let up = raw.to_ascii_uppercase();
-            Some(
-                if up.contains("MALFORMED") || up.contains("UNEXPECTED_TOOL_CALL") {
-                    ProviderError::MalformedToolCall(format!("finish reason {raw}"))
-                } else if [
-                    "SAFETY",
-                    "RECITATION",
-                    "FILTER",
-                    "BLOCK",
-                    "PROHIBITED",
-                    "SPII",
-                    "LANGUAGE",
-                ]
-                .iter()
-                .any(|k| up.contains(k))
-                {
-                    ProviderError::ContentFilter(format!("finish reason {raw}"))
-                } else {
-                    ProviderError::Stream(format!("unexpected finish reason {raw}"))
-                },
-            )
+            Some(if up == "MODEL_CONTEXT_WINDOW_EXCEEDED" {
+                ProviderError::ContextTooLong
+            } else if up.contains("MALFORMED") || up.contains("UNEXPECTED_TOOL_CALL") {
+                ProviderError::MalformedToolCall(format!("finish reason {raw}"))
+            } else if [
+                "SAFETY",
+                "RECITATION",
+                "FILTER",
+                "BLOCK",
+                "PROHIBITED",
+                "SPII",
+                "LANGUAGE",
+            ]
+            .iter()
+            .any(|k| up.contains(k))
+            {
+                ProviderError::ContentFilter(format!("finish reason {raw}"))
+            } else {
+                ProviderError::Stream(format!("unexpected finish reason {raw}"))
+            })
         }
     }
 }
 
 /// Boxed chunk stream, as returned by [`crate::provider::ChatProvider::stream`].
-pub(crate) type ChunkStream = BoxStream<'static, Result<ChatChunk, ProviderError>>;
+pub(crate) type ChunkStream = ChatStream;
 
 /// Boxed future that (re)opens a [`ChunkStream`].
 pub(crate) type Reopen =
@@ -182,18 +281,24 @@ pub(crate) type Reopen =
 
 /// Wrap `first` so that a [`ProviderError::MalformedToolCall`] raised before any
 /// chunk was yielded is retried exactly once by calling `reopen`.
-pub(crate) fn retry_malformed_once(first: ChunkStream, reopen: Reopen) -> ChunkStream {
+pub(crate) fn retry_malformed_once(
+    first: ChunkStream,
+    reopen: Reopen,
+    delay: Duration,
+) -> ChunkStream {
     struct St {
         cur: ChunkStream,
         reopen: Reopen,
         emitted: bool,
         retried: bool,
+        delay: Duration,
     }
     let st = St {
         cur: first,
         reopen,
         emitted: false,
         retried: false,
+        delay,
     };
     stream::unfold(st, |mut st| async move {
         loop {
@@ -204,6 +309,7 @@ pub(crate) fn retry_malformed_once(first: ChunkStream, reopen: Reopen) -> ChunkS
                 }
                 Some(Err(ProviderError::MalformedToolCall(_))) if !st.emitted && !st.retried => {
                     st.retried = true;
+                    tokio::time::sleep(st.delay).await;
                     match (st.reopen)().await {
                         Ok(s) => st.cur = s,
                         Err(e) => {
@@ -371,6 +477,12 @@ pub(crate) trait EventDecoder: Send + 'static {
     fn feed(&mut self, payload: &str) -> Result<Vec<ChatChunk>, ProviderError>;
     /// Called at end of stream; emits the final chunks or errors if truncated.
     fn finish(&mut self) -> Result<Vec<ChatChunk>, ProviderError>;
+    /// An explicit final wire event permits closing the body immediately.
+    fn terminal(&self) -> bool {
+        false
+    }
+    /// Preserve the last available usage if the stream failed before finishing.
+    fn take_usage(&mut self) -> Option<Usage>;
 }
 
 struct StreamState<D, B> {
@@ -378,41 +490,75 @@ struct StreamState<D, B> {
     sse: SseDecoder,
     dec: D,
     pending: VecDeque<ChatChunk>,
-    eof: bool,
+    frame: Option<(B, usize)>,
+    failure: Option<ProviderError>,
+    idle: Duration,
     done: bool,
 }
 
-async fn next_chunk<D: EventDecoder, B: AsRef<[u8]> + Send + 'static>(
-    mut st: StreamState<D, B>,
-) -> Result<Option<(ChatChunk, StreamState<D, B>)>, ProviderError> {
-    loop {
-        if let Some(c) = st.pending.pop_front() {
-            return Ok(Some((c, st)));
-        }
-        if st.done {
-            return Ok(None);
-        }
-        if st.eof {
-            if let Some(tail) = st.sse.finish()? {
-                let chunks = st.dec.feed(&tail)?;
-                st.pending.extend(chunks);
+impl<D: EventDecoder, B: AsRef<[u8]> + Send + 'static> StreamState<D, B> {
+    async fn read_chunks(&mut self) -> Result<(), ProviderError> {
+        while self.pending.is_empty() {
+            if self.dec.terminal() {
+                return self.finish();
             }
-            let chunks = st.dec.finish()?;
-            st.pending.extend(chunks);
-            st.done = true;
-            continue;
-        }
-        match st.bytes.next().await {
-            Some(Ok(b)) => {
-                let mut input = b.as_ref();
-                while let Some(payload) = st.sse.next_event(&mut input)? {
-                    let chunks = st.dec.feed(&payload)?;
-                    st.pending.extend(chunks);
+            if let Some((bytes, offset)) = &mut self.frame {
+                let mut input = &bytes.as_ref()[*offset..];
+                let before = input.len();
+                let event = self.sse.next_event(&mut input)?;
+                *offset += before - input.len();
+                if input.is_empty() {
+                    self.frame = None;
+                }
+                if let Some(payload) = event {
+                    self.pending.extend(self.dec.feed(&payload)?);
+                }
+                continue;
+            }
+            match self.bytes.next().await {
+                Some(Ok(bytes)) => self.frame = Some((bytes, 0)),
+                Some(Err(err)) => return Err(err),
+                None => {
+                    if let Some(tail) = self.sse.finish()? {
+                        self.pending.extend(self.dec.feed(&tail)?);
+                    }
+                    return self.finish();
                 }
             }
-            Some(Err(e)) => return Err(e),
-            None => st.eof = true,
         }
+        Ok(())
+    }
+
+    fn finish(&mut self) -> Result<(), ProviderError> {
+        self.pending.extend(self.dec.finish()?);
+        self.close();
+        Ok(())
+    }
+
+    fn close(&mut self) {
+        self.done = true;
+        self.frame = None;
+        self.bytes = stream::empty().boxed();
+    }
+
+    async fn next(mut self) -> Option<(Result<ChatChunk, ProviderError>, Self)> {
+        if self.pending.is_empty() && !self.done {
+            let result = tokio::time::timeout(self.idle, self.read_chunks())
+                .await
+                .unwrap_or(Err(ProviderError::Timeout));
+            if let Err(error) = result {
+                self.close();
+                self.pending
+                    .extend(self.dec.take_usage().map(ChatChunk::Usage));
+                self.failure = Some(error);
+            }
+        }
+        let item = self
+            .pending
+            .pop_front()
+            .map(Ok)
+            .or_else(|| self.failure.take().map(Err))?;
+        Some((item, self))
     }
 }
 
@@ -420,20 +566,35 @@ async fn next_chunk<D: EventDecoder, B: AsRef<[u8]> + Send + 'static>(
 pub(crate) fn event_stream<D: EventDecoder>(
     resp: reqwest::Response,
     decoder: D,
-) -> BoxStream<'static, Result<ChatChunk, ProviderError>> {
+    idle: Duration,
+) -> ChatStream {
     let bytes = resp
         .bytes_stream()
         .map(|r| r.map_err(map_reqwest_error))
         .boxed();
+    event_stream_bytes(bytes, decoder, idle)
+}
+
+pub(crate) fn event_stream_bytes<D, B>(
+    bytes: BoxStream<'static, Result<B, ProviderError>>,
+    decoder: D,
+    idle: Duration,
+) -> ChatStream
+where
+    D: EventDecoder,
+    B: AsRef<[u8]> + Send + 'static,
+{
     let state = StreamState {
         bytes,
         sse: SseDecoder::default(),
         dec: decoder,
         pending: VecDeque::new(),
-        eof: false,
+        frame: None,
+        failure: None,
+        idle,
         done: false,
     };
-    stream::try_unfold(state, next_chunk).boxed()
+    stream::unfold(state, StreamState::next).boxed()
 }
 
 /// Model name to send: strips the `<provider>/` prefix when it names us.

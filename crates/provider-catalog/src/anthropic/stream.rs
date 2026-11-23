@@ -90,7 +90,7 @@ pub(super) struct Decoder {
 fn parse_finish(s: &str) -> FinishReason {
     match s {
         "end_turn" | "stop_sequence" => FinishReason::Stop,
-        "max_tokens" | "model_context_window_exceeded" => FinishReason::Length,
+        "max_tokens" => FinishReason::Length,
         "tool_use" => FinishReason::ToolCalls,
         "refusal" => FinishReason::ContentFilter,
         other => FinishReason::Other(other.to_owned()),
@@ -102,7 +102,7 @@ fn stream_error(v: &Value) -> ProviderError {
     let status = e
         .get("type")
         .and_then(Value::as_str)
-        .map_or(500, status_for_error_type);
+        .map_or(0, status_for_error_type);
     classify(status, &HeaderMap::new(), &v.to_string())
 }
 
@@ -233,8 +233,21 @@ impl EventDecoder for Decoder {
 
     fn finish(&mut self) -> Result<Vec<ChatChunk>, ProviderError> {
         if !self.finished {
-            return Err(ProviderError::Stream(
-                "stream ended before message_stop".into(),
+            return Err(ProviderError::Interrupted(
+                "Anthropic did not send a message stop event",
+            ));
+        }
+        if let Some(e) = self.finish.as_ref().and_then(finish_error) {
+            return Err(e);
+        }
+        if self.finish == Some(FinishReason::Length)
+            && self
+                .blocks
+                .values()
+                .any(|b| matches!(b, Block::Tool { .. }))
+        {
+            return Err(ProviderError::MalformedToolCall(
+                "the output limit interrupted a tool call".into(),
             ));
         }
         let mut out = Vec::new();
@@ -255,9 +268,6 @@ impl EventDecoder for Decoder {
         if self.usage.seen {
             out.push(ChatChunk::Usage(self.usage.usage()?));
         }
-        if let Some(e) = self.finish.as_ref().and_then(finish_error) {
-            return Err(e);
-        }
         let reason = self.finish.take().unwrap_or_else(|| {
             if out.iter().any(|c| matches!(c, ChatChunk::ToolCall(_))) {
                 FinishReason::ToolCalls
@@ -269,5 +279,13 @@ impl EventDecoder for Decoder {
             finish_reason: reason,
         });
         Ok(out)
+    }
+
+    fn terminal(&self) -> bool {
+        self.finished
+    }
+
+    fn take_usage(&mut self) -> Option<Usage> {
+        self.usage.seen.then(|| self.usage.usage().ok()).flatten()
     }
 }

@@ -4,6 +4,25 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+/// What went wrong, independent of which provider or transport supplied it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureClass {
+    Auth,
+    Quota,
+    RateLimit,
+    Overloaded,
+    ContextTooLong,
+    ContentFiltered,
+    Network,
+    Timeout,
+    Protocol,
+    InvalidRequest,
+    Unsupported,
+    MalformedToolCall,
+    Cancelled,
+    Configuration,
+}
+
 /// Errors from catalog loading or provider operations.
 #[derive(Debug, Error)]
 pub enum ProviderError {
@@ -38,9 +57,25 @@ pub enum ProviderError {
         retry_after: Option<Duration>,
     },
 
+    /// Account or subscription quota is exhausted.
+    #[error("the model provider's usage quota is exhausted")]
+    Quota,
+
+    /// The request exceeds the model's context window.
+    #[error("context limit exceeded: this conversation is too long for the model")]
+    ContextTooLong,
+
     /// The provider failed on its side (HTTP 5xx).
     #[error("upstream error ({status}): {message}")]
     Upstream { status: u16, message: String },
+
+    /// A retryable response with an explicit server-requested delay.
+    #[error("{source}")]
+    RetryAfter {
+        #[source]
+        source: Box<Self>,
+        delay: Duration,
+    },
 
     /// The model's output was blocked by a safety / content filter
     /// (Gemini `SAFETY`, `RECITATION`, ..., `OpenAI` `content_filter`).
@@ -73,7 +108,77 @@ pub enum ProviderError {
     #[error("connection error: {0}")]
     Connection(String),
 
+    /// The connection closed before the stream's terminal event.
+    #[error("the model response ended early: {0}")]
+    Interrupted(&'static str),
+
     /// A streaming response could not be decoded.
     #[error("stream error: {0}")]
     Stream(String),
+
+    /// A whole CLI turn failed. It may have taken actions before failing.
+    #[error("{message}")]
+    CliTurn {
+        class: FailureClass,
+        message: String,
+    },
+}
+
+impl ProviderError {
+    /// Classify failures for retry decisions without parsing displayed errors.
+    #[must_use]
+    pub fn class(&self) -> FailureClass {
+        match self {
+            Self::Auth(_) => FailureClass::Auth,
+            Self::Quota => FailureClass::Quota,
+            Self::RateLimited { .. } | Self::Api { status: 429, .. } => FailureClass::RateLimit,
+            Self::Upstream { .. }
+            | Self::Api {
+                status: 500..=599, ..
+            } => FailureClass::Overloaded,
+            Self::ContextTooLong => FailureClass::ContextTooLong,
+            Self::ContentFilter(_) => FailureClass::ContentFiltered,
+            Self::Connection(_) | Self::Interrupted(_) => FailureClass::Network,
+            Self::Timeout | Self::Api { status: 408, .. } => FailureClass::Timeout,
+            Self::Stream(_) => FailureClass::Protocol,
+            Self::InvalidRequest(_) | Self::Api { .. } => FailureClass::InvalidRequest,
+            Self::Unsupported { .. } => FailureClass::Unsupported,
+            Self::MalformedToolCall(_) => FailureClass::MalformedToolCall,
+            Self::CliSession | Self::CatalogParse { .. } | Self::NoProvider(_) => {
+                FailureClass::Configuration
+            }
+            Self::RetryAfter { source, .. } => source.class(),
+            Self::CliTurn { class, .. } => *class,
+        }
+    }
+
+    #[must_use]
+    pub fn retry_after(&self) -> Option<Duration> {
+        match self {
+            Self::RateLimited { retry_after } => *retry_after,
+            Self::RetryAfter { delay, .. } => Some(*delay),
+            _ => None,
+        }
+    }
+
+    /// Whether repeating an attempted request is allowed. A whole CLI turn
+    /// cannot be replayed automatically because tools may already have run.
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        !matches!(self, Self::CliTurn { .. })
+            && matches!(
+                self.class(),
+                FailureClass::RateLimit
+                    | FailureClass::Overloaded
+                    | FailureClass::Timeout
+                    | FailureClass::Network
+                    | FailureClass::MalformedToolCall
+            )
+    }
+
+    /// A different model can also resolve a capability mismatch.
+    #[must_use]
+    pub fn can_fallback(&self) -> bool {
+        self.is_retryable() || matches!(self, Self::Unsupported { .. })
+    }
 }

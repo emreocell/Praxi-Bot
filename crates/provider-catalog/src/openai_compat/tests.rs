@@ -379,7 +379,7 @@ async fn truncated_stream_is_an_error() {
         .mount(&server)
         .await;
     let err = collect(&provider(&server), req()).await.unwrap_err();
-    assert!(matches!(err, ProviderError::Stream(_)));
+    assert!(matches!(err, ProviderError::Interrupted(_)));
 }
 
 #[tokio::test]
@@ -390,7 +390,7 @@ async fn in_stream_error_event_is_reported() {
         .mount(&server)
         .await;
     let err = collect(&provider(&server), req()).await.unwrap_err();
-    assert!(matches!(err, ProviderError::Stream(ref m) if m.contains("overloaded")));
+    assert_eq!(err.class(), crate::FailureClass::Overloaded);
 }
 
 #[tokio::test]
@@ -457,25 +457,20 @@ async fn audit_rel09_newline_free_stream_stops_at_line_budget() {
             Ok(vec![b'x'; CHUNK_BYTES])
         })
         .boxed();
-    let state = super::StreamState {
+    let chunks = crate::util::event_stream_bytes(
         bytes,
-        sse: SseDecoder::default(),
-        asm: super::sse::Assembler::default(),
-        pending: std::collections::VecDeque::new(),
-        eof: false,
-        done: false,
-    };
-    let result = stream::try_unfold(state, super::next_chunk)
-        .try_collect::<Vec<_>>()
-        .await;
+        super::sse::Assembler::default(),
+        Duration::from_secs(1),
+    );
+    let result = chunks.try_collect::<Vec<_>>().await;
     assert!(matches!(result, Err(ProviderError::Stream(_))));
     assert!(polls.load(Ordering::Relaxed) <= LINE_LIMIT / CHUNK_BYTES + 1);
 }
 
 // Regression for REL-19: the transport never closes; completion must come from
 // [DONE]. Polling once (without a clock or timeout) proves no further read waits.
-#[test]
-fn audit_rel19_done_flushes_once_without_waiting_for_eof() {
+#[tokio::test]
+async fn audit_rel19_done_flushes_once_without_waiting_for_eof() {
     use futures::{FutureExt, StreamExt, stream};
 
     let bytes = stream::iter([
@@ -489,15 +484,12 @@ fn audit_rel19_done_flushes_once_without_waiting_for_eof() {
     ])
     .chain(stream::pending())
     .boxed();
-    let state = super::StreamState {
+    let chunks = crate::util::event_stream_bytes(
         bytes,
-        sse: SseDecoder::default(),
-        asm: super::sse::Assembler::default(),
-        pending: std::collections::VecDeque::new(),
-        eof: false,
-        done: false,
-    };
-    let chunks = stream::try_unfold(state, super::next_chunk)
+        super::sse::Assembler::default(),
+        Duration::from_secs(1),
+    );
+    let chunks = chunks
         .try_collect::<Vec<_>>()
         .now_or_never()
         .expect("[DONE] must complete even when the transport stays open")

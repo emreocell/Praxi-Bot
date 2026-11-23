@@ -1,5 +1,7 @@
 //! The `ChatProvider` trait and associated message types.
 
+use std::time::Duration;
+
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -206,11 +208,17 @@ pub enum ChatChunk {
     /// A complete tool call, assembled from the provider's streamed deltas.
     /// Emitted after all text, in call-index order.
     ToolCall(ToolCall),
-    /// Token usage, when the provider reports it (at most once, before `Done`).
+    /// Token usage, when reported (at most once, before `Done` or an error).
     Usage(Usage),
     /// The stream has finished.
     Done { finish_reason: FinishReason },
 }
+
+/// Maximum wait between model chunks under the default configuration.
+pub const CHAT_STREAM_IDLE: Duration = Duration::from_secs(120);
+
+/// A streaming model response.
+pub type ChatStream = BoxStream<'static, Result<ChatChunk, ProviderError>>;
 
 /// A streaming LLM chat provider.
 ///
@@ -221,10 +229,13 @@ pub trait ChatProvider: Send + Sync {
     fn id(&self) -> &str;
 
     /// Send a chat request and return a streaming response.
-    async fn stream(
-        &self,
-        req: ChatRequest,
-    ) -> Result<BoxStream<'static, Result<ChatChunk, ProviderError>>, ProviderError>;
+    async fn stream(&self, req: ChatRequest) -> Result<ChatStream, ProviderError>;
+
+    /// Send exactly one request. Callers with a spending ledger use this
+    /// entry point and make their own retry decisions per recorded attempt.
+    async fn stream_once(&self, req: ChatRequest) -> Result<ChatStream, ProviderError> {
+        self.stream(req).await
+    }
 
     /// List the model ids the provider offers. Providers without a listing
     /// endpoint return an empty list.

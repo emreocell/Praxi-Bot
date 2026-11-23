@@ -78,12 +78,20 @@ impl EventDecoder for Decoder {
     fn feed(&mut self, payload: &str) -> Result<Vec<ChatChunk>, ProviderError> {
         let v: Value = serde_json::from_str(payload.trim())
             .map_err(|e| ProviderError::Stream(format!("invalid JSON chunk: {e}")))?;
-        if let Some(code) = v.pointer("/error/code").and_then(Value::as_u64) {
-            let status = u16::try_from(code).unwrap_or(500);
-            return Err(classify(status, &HeaderMap::new(), payload));
-        }
-        if let Some(u) = v.get("usageMetadata") {
+        if let Some(u) = v.get("usageMetadata")
+            && [
+                "promptTokenCount",
+                "candidatesTokenCount",
+                "thoughtsTokenCount",
+                "cachedContentTokenCount",
+            ]
+            .iter()
+            .any(|key| u.get(key).is_some())
+        {
             self.usage = Some(parse_usage(u)?);
+        }
+        if v.get("error").is_some_and(|error| !error.is_null()) {
+            return Err(classify(0, &HeaderMap::new(), payload));
         }
         let mut out = Vec::new();
         // A blocked prompt has no candidates, only a block reason.
@@ -139,12 +147,17 @@ impl EventDecoder for Decoder {
 
     fn finish(&mut self) -> Result<Vec<ChatChunk>, ProviderError> {
         if !self.finished {
-            return Err(ProviderError::Stream(
-                "stream ended before a finish reason".into(),
+            return Err(ProviderError::Interrupted(
+                "Gemini did not send a finish reason",
             ));
         }
         if let Some(e) = self.finish.as_ref().and_then(finish_error) {
             return Err(e);
+        }
+        if self.finish == Some(FinishReason::Length) && !self.calls.is_empty() {
+            return Err(ProviderError::MalformedToolCall(
+                "the output limit interrupted a tool call".into(),
+            ));
         }
         let mut out: Vec<ChatChunk> = Vec::new();
         let tail = self.thoughts.finish();
@@ -170,5 +183,13 @@ impl EventDecoder for Decoder {
             finish_reason: reason,
         });
         Ok(out)
+    }
+
+    fn terminal(&self) -> bool {
+        self.finish == Some(FinishReason::ContentFilter)
+    }
+
+    fn take_usage(&mut self) -> Option<Usage> {
+        self.usage.take()
     }
 }
