@@ -134,6 +134,8 @@ pub struct PairingStore {
     inner: Mutex<StateInner>,
     #[cfg(test)]
     fail_saves: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    fail_after_rename: std::sync::atomic::AtomicBool,
 }
 
 /// Uniform 6-digit code from the OS CSPRNG (via a v4 UUID), using rejection sampling.
@@ -167,6 +169,8 @@ impl PairingStore {
             path: None,
             #[cfg(test)]
             fail_saves: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_after_rename: std::sync::atomic::AtomicBool::new(false),
             inner: Mutex::new(StateInner {
                 persisted: PersistedFile {
                     version: 1,
@@ -196,6 +200,8 @@ impl PairingStore {
             path: Some(path),
             #[cfg(test)]
             fail_saves: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_after_rename: std::sync::atomic::AtomicBool::new(false),
             inner: Mutex::new(StateInner {
                 persisted,
                 ..StateInner::default()
@@ -203,6 +209,23 @@ impl PairingStore {
         })
     }
 
+    /// Persist `candidate`, then make it the in-memory state. Every setter goes
+    /// through here, so memory always matches what the file holds: an error means
+    /// the file was not replaced and nothing changed.
+    fn commit(&self, guard: &mut StateInner, candidate: PersistedFile) -> Result<()> {
+        self.save_locked(&candidate)?;
+        guard.persisted = candidate;
+        Ok(())
+    }
+
+    /// Write `data` to the state file atomically (temporary file, `fsync`, rename).
+    ///
+    /// Returns an error only if the file was not replaced. Once the rename has
+    /// succeeded the new state is what a restart loads, so a failing directory
+    /// `fsync` after it is reported and not returned: callers must adopt the new
+    /// state, or memory and the file would disagree. If the machine loses power
+    /// before the directory entry is durable, the previous file can come back; the
+    /// next save syncs the directory again.
     fn save_locked(&self, data: &PersistedFile) -> Result<()> {
         #[cfg(test)]
         if self.fail_saves.load(std::sync::atomic::Ordering::Relaxed) {
@@ -236,11 +259,27 @@ impl PairingStore {
         drop(file);
         written.map_err(storage_error)?;
         std::fs::rename(&tmp, path).map_err(storage_error)?;
-        #[cfg(unix)]
-        std::fs::File::open(parent)
-            .and_then(|dir| dir.sync_all())
-            .map_err(storage_error)?;
         drop(cleanup);
+        if let Err(error) = self.sync_parent(parent) {
+            // Only an I/O error text, never state contents or secrets.
+            eprintln!("telegram: state saved, but syncing its directory failed: {error}");
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::unused_self)] // `self` carries the test-only failure switch
+    fn sync_parent(&self, parent: &Path) -> std::io::Result<()> {
+        #[cfg(test)]
+        if self
+            .fail_after_rename
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(std::io::Error::other("injected directory sync failure"));
+        }
+        #[cfg(unix)]
+        std::fs::File::open(parent)?.sync_all()?;
+        #[cfg(not(unix))]
+        let _ = parent;
         Ok(())
     }
 
@@ -248,6 +287,19 @@ impl PairingStore {
     pub(crate) fn fail_saves(&self, enabled: bool) {
         self.fail_saves
             .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Fail the directory sync that follows a successful rename.
+    #[cfg(test)]
+    pub(crate) fn fail_after_rename(&self, enabled: bool) {
+        self.fail_after_rename
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The in-memory persisted state, as the file would hold it.
+    #[cfg(test)]
+    pub(crate) fn persisted_json(&self) -> String {
+        serde_json::to_string(&self.inner.lock().persisted).expect("state serializes")
     }
 
     /// Generate a new one-time 6-digit pairing code valid for [`PAIR_CODE_TTL`] (10 minutes).
@@ -311,8 +363,7 @@ impl PairingStore {
                         .entry(chat)
                         .or_insert_with(|| language.code().to_owned());
                 }
-                self.save_locked(&candidate)?;
-                guard.persisted = candidate;
+                self.commit(&mut guard, candidate)?;
                 guard.invites.consume(&user_id, ticket);
                 guard.refused_at.remove(&user_id);
                 Ok(if newly_inserted {
@@ -336,8 +387,7 @@ impl PairingStore {
         if !guard.persisted.paired_users.contains(&user_id) {
             let mut candidate = guard.persisted.clone();
             candidate.paired_users.insert(user_id);
-            self.save_locked(&candidate)?;
-            guard.persisted = candidate;
+            self.commit(&mut guard, candidate)?;
             guard.refused_at.remove(&user_id);
         }
         Ok(())
@@ -427,9 +477,7 @@ impl PairingStore {
         candidate.offset_saved_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        self.save_locked(&candidate)?;
-        guard.persisted = candidate;
-        Ok(())
+        self.commit(&mut guard, candidate)
     }
 
     /// Get the bot currently mapped to `telegram_chat_id`.
@@ -451,9 +499,7 @@ impl PairingStore {
         let mut guard = self.inner.lock();
         let mut candidate = guard.persisted.clone();
         candidate.chat_bots.insert(telegram_chat_id, bot_id);
-        self.save_locked(&candidate)?;
-        guard.persisted = candidate;
-        Ok(())
+        self.commit(&mut guard, candidate)
     }
 
     /// Language of `telegram_chat_id`; English when none (or an unknown one) is stored.
@@ -478,9 +524,7 @@ impl PairingStore {
         candidate
             .chat_languages
             .insert(telegram_chat_id, language.code().to_owned());
-        self.save_locked(&candidate)?;
-        guard.persisted = candidate;
-        Ok(())
+        self.commit(&mut guard, candidate)
     }
 
     /// Get the daemon [`ChatId`] previously created for `(telegram_chat_id, bot_id)`.
@@ -504,9 +548,7 @@ impl PairingStore {
         let mut guard = self.inner.lock();
         let mut candidate = guard.persisted.clone();
         candidate.chat_threads.insert(key, chat_id);
-        self.save_locked(&candidate)?;
-        guard.persisted = candidate;
-        Ok(())
+        self.commit(&mut guard, candidate)
     }
 }
 

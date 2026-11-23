@@ -2478,6 +2478,106 @@ async fn a_stream_that_drops_without_run_finished_still_shows_the_last_word() {
 }
 
 // Audit BUG-18: failed persistence must not grant access, consume an invite, or
+type PairingSetter = fn(&crate::PairingStore, &str) -> crate::Result<()>;
+type PairingCheck = fn(&crate::PairingStore) -> bool;
+
+/// Every setter of `PairingStore`, with a check that its change is visible in memory.
+/// The `&str` is a live pairing code for the store (used by `redeem_code`).
+fn pairing_setters() -> Vec<(&'static str, PairingSetter, PairingCheck)> {
+    use crate::messages::Language;
+    fn bot() -> BotId {
+        BotId(uuid::Uuid::from_u128(1))
+    }
+    fn chat() -> ChatId {
+        ChatId(uuid::Uuid::from_u128(2))
+    }
+    vec![
+        (
+            "redeem_code",
+            |s, code| s.redeem_code(7, code).map(|_| ()),
+            |s| s.is_paired(7),
+        ),
+        (
+            "add_paired_user",
+            |s, _| s.add_paired_user(8),
+            |s| s.is_paired(8),
+        ),
+        (
+            "save_offset",
+            |s, _| s.save_offset("bot", 42),
+            |s| s.saved_offset("bot") == Some(42),
+        ),
+        (
+            "set_bot_for_chat",
+            |s, _| s.set_bot_for_chat(1, bot()),
+            |s| s.bot_for_chat(1) == Some(bot()),
+        ),
+        (
+            "set_thread_for",
+            |s, _| s.set_thread_for(1, bot(), chat()),
+            |s| s.thread_for(1, bot()) == Some(chat()),
+        ),
+        (
+            "set_chat_language",
+            |s, _| s.set_chat_language(1, Language::TR),
+            |s| s.chat_language(1) == Language::TR,
+        ),
+    ]
+}
+
+// #535: once the rename has published the new file, a failing directory sync must
+// not leave memory behind the file. Before the rename, nothing may change.
+#[test]
+fn every_pairing_setter_keeps_memory_and_file_in_agreement() {
+    for (name, set, applied) in pairing_setters() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("telegram_state.json");
+        let store = crate::PairingStore::open(&path).unwrap();
+        store.add_paired_user(1).unwrap();
+        let code = store.create_code();
+        let before = std::fs::read(&path).unwrap();
+        let memory_before = store.persisted_json();
+
+        store.fail_saves(true);
+        assert!(
+            set(&store, &code).is_err(),
+            "{name}: failure before the rename"
+        );
+        assert!(
+            !applied(&store),
+            "{name}: memory changed after a failed write"
+        );
+        assert_eq!(store.persisted_json(), memory_before, "{name}");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "{name}: file changed"
+        );
+        store.fail_saves(false);
+
+        store.fail_after_rename(true);
+        assert!(
+            set(&store, &code).is_ok(),
+            "{name}: failure after the rename"
+        );
+        assert!(
+            applied(&store),
+            "{name}: memory is behind the published file"
+        );
+        let reloaded = crate::PairingStore::open(&path).unwrap();
+        assert_eq!(
+            store.persisted_json(),
+            reloaded.persisted_json(),
+            "{name}: memory and the reloaded file disagree"
+        );
+        assert_ne!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "{name}: file not replaced"
+        );
+    }
+}
+
 // publish a different bot/thread/offset. Failure injection is independent of OS ACLs.
 #[test]
 fn failed_pairing_save_preserves_invite_and_all_live_state() {
