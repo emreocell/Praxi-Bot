@@ -17,10 +17,6 @@ use super::HubError;
 /// Largest index document accepted.
 pub const MAX_INDEX_BYTES: usize = 1024 * 1024;
 
-/// Redirects followed when downloading an index. Kept small so a hostile
-/// server cannot bounce the client around indefinitely.
-const MAX_REDIRS: &str = "5";
-
 /// What to install.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallSource {
@@ -57,30 +53,6 @@ pub trait Fetcher: Send + Sync {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CurlFetcher;
 
-fn curl_command_args(url: &str) -> Vec<String> {
-    // `--max-filesize` is intentionally absent: curl ignores it for chunked
-    // responses and for responses without `Content-Length`, and `output()`
-    // would buffer the body before a length check could run.
-    vec![
-        "--fail".to_string(),
-        "--silent".to_string(),
-        "--show-error".to_string(),
-        "--location".to_string(),
-        "--proto".to_string(),
-        "=https".to_string(),
-        "--proto-redir".to_string(),
-        "=https".to_string(),
-        "--max-time".to_string(),
-        "30".to_string(),
-        "--max-redirs".to_string(),
-        MAX_REDIRS.to_string(),
-        "--output".to_string(),
-        "-".to_string(),
-        "--".to_string(),
-        url.to_string(),
-    ]
-}
-
 /// Read `reader` until EOF. Stop and return an error once more than `max`
 /// bytes have been seen, without pulling the rest of the stream.
 ///
@@ -104,7 +76,7 @@ pub(super) fn read_capped<R: Read>(mut reader: R, max: usize) -> Result<Vec<u8>,
     Ok(buf)
 }
 
-fn drain_capped(mut reader: impl Read, max: usize) -> Vec<u8> {
+pub(super) fn drain_capped(mut reader: impl Read, max: usize) -> Vec<u8> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     loop {
@@ -124,37 +96,11 @@ fn drain_capped(mut reader: impl Read, max: usize) -> Vec<u8> {
 
 impl Fetcher for CurlFetcher {
     fn get(&self, url: &str) -> Result<Vec<u8>, HubError> {
-        let mut child = Command::new("curl")
-            .args(curl_command_args(url))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| HubError::Source(format!("cannot run curl: {e}")))?;
-        let stderr = child.stderr.take();
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| HubError::Source("curl stdout missing".into()))?;
-        let err_thread = std::thread::spawn(move || {
-            stderr.map_or_else(Vec::new, |pipe| drain_capped(pipe, 64 * 1024))
-        });
-        let body = read_capped(stdout, MAX_INDEX_BYTES);
-        if body.is_err() {
-            let _ = child.kill();
-        }
-        let status = child
-            .wait()
-            .map_err(|e| HubError::Source(format!("curl wait: {e}")))?;
-        let stderr_buf = err_thread.join().unwrap_or_default();
-        let body = body?;
-        if !status.success() {
-            return Err(HubError::Source(format!(
-                "curl failed: {}",
-                String::from_utf8_lossy(&stderr_buf).trim()
-            )));
-        }
-        Ok(body)
+        super::net_guard::guarded_get(
+            url,
+            &super::net_guard::SystemResolver,
+            &super::net_guard::CurlTransport,
+        )
     }
 }
 
@@ -166,6 +112,44 @@ pub trait GitBackend: Send + Sync {
     /// # Errors
     /// Any git failure.
     fn checkout(&self, url: &str, rev: Option<&str>, dest: &Path) -> Result<String, HubError>;
+
+    /// Like [`GitBackend::checkout`], for a host whose addresses were already
+    /// validated: the real backend connects only to `target.ips` and refuses
+    /// to follow HTTP redirects. The default ignores `target` (test doubles
+    /// that never touch the network).
+    ///
+    /// # Errors
+    /// Any git failure.
+    fn checkout_pinned(
+        &self,
+        url: &str,
+        rev: Option<&str>,
+        dest: &Path,
+        target: &super::net_guard::GitTarget,
+    ) -> Result<String, HubError> {
+        let _ = target;
+        self.checkout(url, rev, dest)
+    }
+}
+
+/// `git -c` arguments that pin a fetch to validated addresses and stop git
+/// from following any HTTP redirect (the default, `initial`, follows the
+/// first response's redirect to an unchecked host).
+///
+/// Residual: `http.curloptResolve` needs git 2.37+ (older git ignores it and
+/// resolves DNS again, leaving a rebinding window; redirects stay refused),
+/// and it covers HTTP(S) only, so the in-app flow stays https-only.
+#[must_use]
+pub(super) fn pinned_git_config(target: &super::net_guard::GitTarget) -> Vec<String> {
+    let mut args = vec!["-c".to_string(), "http.followRedirects=false".to_string()];
+    for ip in &target.ips {
+        args.push("-c".to_string());
+        args.push(format!(
+            "http.curloptResolve={}:{}:{ip}",
+            target.host, target.port
+        ));
+    }
+    args
 }
 
 /// Uses the `git` CLI: `init` + `fetch --depth 1` + `checkout`, which works
@@ -631,7 +615,12 @@ fn all_filter_blanks(dir: &Path) -> Result<Vec<String>, HubError> {
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<String, HubError> {
-    let extra = all_filter_blanks(dir)?;
+    git_with(dir, args, &[])
+}
+
+fn git_with(dir: &Path, args: &[&str], more_c: &[String]) -> Result<String, HubError> {
+    let mut extra = all_filter_blanks(dir)?;
+    extra.extend_from_slice(more_c);
     let owned: Vec<String> = args.iter().map(|s| (*s).to_string()).collect();
     let out = spawn_git(dir, &owned, &extra)?;
     if out.status.success() {
@@ -647,13 +636,34 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, HubError> {
 
 impl GitBackend for GitCli {
     fn checkout(&self, url: &str, rev: Option<&str>, dest: &Path) -> Result<String, HubError> {
+        checkout_with(url, rev, dest, &[])
+    }
+
+    fn checkout_pinned(
+        &self,
+        url: &str,
+        rev: Option<&str>,
+        dest: &Path,
+        target: &super::net_guard::GitTarget,
+    ) -> Result<String, HubError> {
+        checkout_with(url, rev, dest, &pinned_git_config(target))
+    }
+}
+
+fn checkout_with(
+    url: &str,
+    rev: Option<&str>,
+    dest: &Path,
+    net_c: &[String],
+) -> Result<String, HubError> {
+    {
         validate_git_url(url)?;
         if let Some(r) = rev {
             validate_rev(r)?;
         }
         git(dest, &["init", "--quiet"])?;
         git(dest, &["remote", "add", "origin", url])?;
-        git(
+        git_with(
             dest,
             &[
                 "fetch",
@@ -664,6 +674,7 @@ impl GitBackend for GitCli {
                 "origin",
                 rev.unwrap_or("HEAD"),
             ],
+            net_c,
         )?;
         git(dest, &["checkout", "--quiet", "--detach", "FETCH_HEAD"])?;
         git(dest, &["rev-parse", "HEAD"])
@@ -820,8 +831,84 @@ mod tests {
     use std::process::Command;
 
     use super::{
-        MAX_INDEX_BYTES, curl_command_args, git, read_capped, validate_commit_pin, validate_git_url,
+        MAX_INDEX_BYTES, git, git_with, pinned_git_config, read_capped, validate_commit_pin,
+        validate_git_url,
     };
+    use crate::hub::net_guard::GitTarget;
+
+    #[test]
+    fn pinned_git_config_disables_redirects_and_pins_every_address() {
+        let target = GitTarget {
+            host: "git.example.com".into(),
+            port: 443,
+            ips: vec![
+                "93.184.216.34".parse().unwrap(),
+                "2606:2800::1".parse().unwrap(),
+            ],
+        };
+        let args = pinned_git_config(&target);
+        assert_eq!(
+            args,
+            [
+                "-c",
+                "http.followRedirects=false",
+                "-c",
+                "http.curloptResolve=git.example.com:443:93.184.216.34",
+                "-c",
+                "http.curloptResolve=git.example.com:443:2606:2800::1",
+            ]
+        );
+    }
+
+    #[test]
+    fn pinned_fetch_does_not_follow_a_redirect_to_loopback() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("d");
+        fs::create_dir_all(&dest).unwrap();
+        let hop = TcpListener::bind("127.0.0.1:0").unwrap();
+        hop.set_nonblocking(true).unwrap();
+        let hop_port = hop.local_addr().unwrap().port();
+        let front = TcpListener::bind("127.0.0.1:0").unwrap();
+        let front_port = front.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            if let Ok((mut c, _)) = front.accept() {
+                let mut buf = [0u8; 2048];
+                let _ = c.read(&mut buf);
+                let _ = write!(
+                    c,
+                    "HTTP/1.1 302 Found
+Location: http://127.0.0.1:{hop_port}/r.git/info/refs
+Content-Length: 0
+Connection: close
+
+"
+                );
+            }
+        });
+        git(&dest, &["init", "--quiet"]).unwrap();
+        let url = format!("http://127.0.0.1:{front_port}/r.git");
+        let net = vec!["-c".to_string(), "http.followRedirects=false".to_string()];
+        let res = git_with(
+            &dest,
+            &[
+                "-c",
+                "protocol.http.allow=always",
+                "fetch",
+                "--quiet",
+                &url,
+                "HEAD",
+            ],
+            &net,
+        );
+        server.join().unwrap();
+        assert!(res.is_err(), "redirect must fail the fetch");
+        assert!(
+            hop.accept().is_err(),
+            "git followed the redirect to the second listener"
+        );
+    }
 
     #[test]
     fn rejects_local_file_http_git_and_unc_urls() {
@@ -902,20 +989,6 @@ mod tests {
         };
         let body = read_capped(&mut exact, 250).unwrap();
         assert_eq!(body.len(), 250);
-    }
-
-    #[test]
-    fn curl_index_fetch_limits_redirects_without_max_filesize() {
-        let args = curl_command_args("https://example.com/index.json");
-        assert!(args.windows(2).any(|pair| pair == ["--max-redirs", "5"]));
-        assert!(args.windows(2).any(|pair| pair == ["--proto", "=https"]));
-        assert!(
-            args.windows(2)
-                .any(|pair| pair == ["--proto-redir", "=https"])
-        );
-        assert!(!args.iter().any(|arg| arg == "--max-filesize"));
-        let split = args.iter().position(|arg| arg == "--").unwrap();
-        assert_eq!(args[split + 1], "https://example.com/index.json");
     }
 
     fn raw_git(dir: &Path, args: &[&str]) {

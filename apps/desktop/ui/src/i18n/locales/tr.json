@@ -1174,6 +1174,7 @@
     "notFound": "Bu bot artık yok.",
     "skills": {
       "boundaryHint": "Bu, botun önüne konan ve beceri araçlarıyla yükleyebildiği becerileri sınırlar. Gizli bir depo değildir: dosya ya da kabuk erişimi olan bir bot, beceri klasörünü diskten yine de okuyabilir.",
+      "browseLibrary": "Beceri kitaplığı",
       "conflict": "Bu pencere açıldıktan sonra beceriler değişti (başka bir pencere ya da cihaz kaydetti). Güncel atama yeniden yüklendi; gözden geçirip yeniden dene.",
       "emptyCatalog": "Henüz ortak veya yerleşik beceri yüklü değil.",
       "emptySearch": "Aramana uyan beceri yok.",
@@ -2607,6 +2608,10 @@
         "hint": "Ayarlardan bir model bağlayıp yeniden dene.",
         "title": "Önce Praxi'ye bir beyin gerekiyor"
       },
+      "skill_access_not_accepted": {
+        "hint": "Yeni olanları incele, kutuyu işaretle ve yeniden dene.",
+        "title": "Bu güncelleme öncekinden daha fazlasını istiyor"
+      },
       "skill_changed": {
         "hint": "Beceriyi eklemeden önce yeniden incele.",
         "title": "Depo önizlemeden sonra değişti"
@@ -2619,9 +2624,17 @@
         "hint": "Gizli bilgiyi dosyalardan çıkarıp yeniden ekle.",
         "title": "Becerinin içinde parola ya da anahtar var gibi"
       },
+      "skill_index_invalid": {
+        "hint": "Adresi denetle ya da Praxi ile gelen listeye dön.",
+        "title": "Bu beceri listesi geçerli değil"
+      },
       "skill_not_found": {
         "hint": "Listeyi yenile.",
         "title": "Bu beceri artık yok"
+      },
+      "skill_risk_not_accepted": {
+        "hint": "Bulguları oku, kutuyu işaretle ve yeniden dene.",
+        "title": "Bu beceri için açık onayın gerekiyor"
       },
       "skill_source_unreachable": {
         "hint": "Adresi ve bağlantını kontrol edip yeniden dene.",
@@ -5217,6 +5230,100 @@
     "unreadBot": "Bu bottan yeni mesajlar var",
     "usage": "Kullanım"
   },
+  "skillMarket": {
+    "acceptMore": "Yeni sürümün, elimdekinden daha fazlasını istediğini kabul ediyorum.",
+    "acceptRisk": "Bulguları okudum ve bu beceriyi yine de yüklemek istiyorum.",
+    "advanced": "Gelişmiş: başka bir beceri listesi kullan",
+    "advancedHint": "Beceri listesi, yükleyebileceğin becerileri sıralayan internetteki bir dosyadır. Başka bir adres girmezsen Praxi ile gelen liste kullanılır.",
+    "alreadyIncluded": "Praxi içinde zaten var",
+    "alreadyInstalled": "Zaten yüklü",
+    "back": "Geri",
+    "boundary": "Bir beceri bota yalnızca yönerge verir. Yaptığı her şey yine senin izinlerine uyar ve riskli adımlar yine önce sana sorulur.",
+    "browseEmpty": "Bu listede henüz beceri yok.",
+    "checkUpdate": "Güncellemeyi denetle",
+    "customActive": "{{url}} adresindeki bir beceri listesine bakıyorsun. Yalnızca güvendiğin kişilerin becerilerini ekle.",
+    "diffAdded": "Artık öncekinden daha fazlasını istiyor",
+    "diffRemoved": "Artık istenmeyenler:",
+    "diffRisk": "Risk {{from}} düzeyinden {{to}} düzeyine değişiyor.",
+    "diffSame": "Yeni bir şey istemiyor.",
+    "diffTitle": "Bu güncellemede neler değişiyor",
+    "diffVersion": "Sürüm {{from}}, {{to}} oluyor.",
+    "files": "{{count}} dosya",
+    "files_one": "{{count}} dosya",
+    "installNow": "{{name}} yükle",
+    "installedEmpty": "Kitaplıktan henüz bir şey yüklenmedi. Beceri bulmak için Göz at sekmesini aç.",
+    "installedToast": "{{name}} yüklendi.",
+    "listFailed": "Beceri listesi yüklenemedi",
+    "loadFailed": "Becerilerin yüklenemedi",
+    "loading": "Yükleniyor…",
+    "moreTitle": "Bu güncelleme daha fazlasını istiyor",
+    "needs": {
+      "active_files": "Betik ya da program dosyaları içeriyor (saklanır, hiç çalıştırılmaz)",
+      "credentials": "Parola, anahtar ya da giriş bilgilerinden söz ediyor",
+      "hidden": "Kodlanmış ya da gizli metin içeriyor",
+      "large": "Alışılmadık büyüklükte dosyalar içeriyor",
+      "network": "Web adreslerinden ya da internet erişiminden söz ediyor",
+      "none": "Olağan dışı bir şey bulunmadı: yalnızca yazılı yönergeler.",
+      "other": "Güvenlik denetiminin işaretlediği başka bir şey",
+      "scripts": "Bota komut ya da betik çalıştırmasını söyleyebilir",
+      "steering": "Botu yönlendirmeye çalışan ifadeler içeriyor"
+    },
+    "needsLead": "Becerinin dosyalarına bakan bir güvenlik denetimiyle bulundu. Denetim yardımcı olur ama bir şeyleri kaçırabilir.",
+    "needsTitle": "Bu becerinin istedikleri",
+    "remove": "Kaldır",
+    "removeAria": "{{name}} becerisini kaldır",
+    "removeBody": "Beceri ve dosyaları bu bilgisayardan silinir. Sonra yeniden yükleyebilirsin.",
+    "removeTitle": "{{name}} kaldırılsın mı?",
+    "removeUsedBody": "Bu botlar kullanıyor: {{bots}}. Kaldırırsan, yeniden yükleyene kadar onu kullanamazlar.",
+    "removeUsedTitle": "{{name}} kullanılıyor",
+    "removed": "{{name}} kaldırıldı.",
+    "review": "İncele ve yükle",
+    "reviewAria": "{{name}} becerisini incele ve yükle",
+    "reviewSubtitle": "Bu becerinin neler istediğini oku. Sen onaylamadan hiçbir şey yüklenmez.",
+    "reviewTitle": "{{name}} yüklensin mi?",
+    "reviewUpdateTitle": "{{name}} güncellensin mi?",
+    "risk": {
+      "high": "Yüksek risk",
+      "low": "Düşük risk",
+      "medium": "Orta risk"
+    },
+    "riskTitle": "{{risk}}: güvenlik denetimi bir şey buldu",
+    "scanAdvisory": "Temiz sonuç, becerinin güvenli olduğunu kanıtlamaz. Yalnızca güvendiğin kişilerin becerilerini yükle.",
+    "scanClean": "Denetim uyarıya değer bir şey bulmadı.",
+    "scanTitle": "Güvenlik denetimi",
+    "search": "Becerilerde ara",
+    "searchEmpty": "Aramana uyan beceri yok.",
+    "severity": {
+      "high": "Ciddi",
+      "warn": "Kontrol et"
+    },
+    "source": {
+      "bundled": "Praxi ile gelen listeden",
+      "git": "{{host}} adresindeki depodan",
+      "index": "{{host}} adresindeki listeden",
+      "local": "Bu bilgisayardaki bir klasörden",
+      "other": "Bilinmeyen bir kaynaktan"
+    },
+    "state": {
+      "missing": "Dosyalar eksik",
+      "modified": "Yüklemeden sonra değişti"
+    },
+    "subtitle": "Beceriler, bir bota tek bir işi öğreten yazılı yönergelerdir. İstediklerini ekle.",
+    "tabBrowse": "Göz at",
+    "tabInstalled": "Yüklü",
+    "tickFirst": "Devam etmek için yukarıdaki kutuyu işaretle.",
+    "title": "Beceri kitaplığı",
+    "upToDate": "{{name}} zaten güncel.",
+    "updateNow": "{{name}} güncelle",
+    "updated": "{{name}} güncellendi.",
+    "urlBadHost": "Bir web sitesi adı kullan. Yalnızca rakamlardan oluşan ya da içinde kullanıcı girişi olan adresler kabul edilmez.",
+    "urlLabel": "Beceri listesi adresi",
+    "urlNotHttps": "Adres https:// ile başlamalı.",
+    "urlTrust": "Praxi yalnızca listeyi okur. Bir beceriyi inceleyip onaylamadan hiçbir şey yüklenmez.",
+    "useDefault": "Praxi listesine dön",
+    "useList": "Bu listeyi kullan",
+    "version": "Sürüm {{version}}"
+  },
   "stopStatus": {
     "detail": {
       "expiredNone": "Arka plan servisi bu durdurmanın kaydını artık tutmuyordu; bekletilen çalışmaların hiçbiri devam etmiyor.",
@@ -5408,11 +5515,12 @@
     },
     "call": {
       "approvalHint": "Sohbetteki karttan onaylayın veya reddedin. Onaylar sesle verilemez.",
+      "cancel": "Vazgeç",
       "captions": "Altyazılar",
       "close": "Kapat",
       "daemonUnavailable": "Ses hizmeti kullanılamıyor. Bu bilgisayardaki arka plan hizmetine yeniden bağlanıp tekrar deneyin; ses desteği yoksa hizmeti güncelleyin.",
       "end": "Aramayı bitir",
-      "geminiKeyMissing": "Ayarlar → Genel → Dikte hizmeti bölümünde bir Gemini API anahtarı ekleyin, ardından tekrar deneyin.",
+      "geminiKeyMissing": "Ayarlar → Ses → Sesle yazma servisi bölümünde bir Gemini API anahtarı ekleyin, ardından tekrar deneyin.",
       "holdToTalk": "Konuşmak için basılı tut",
       "interrupt": "Sözünü kes",
       "micMuted": "Mikrofon susturuldu",
@@ -5420,7 +5528,8 @@
       "micTimeout": "Mikrofon yanıt vermedi. Mikrofon izni istemini onaylayın. Windows Ayarları → Gizlilik ve güvenlik → Mikrofon bölümünde mikrofon erişimine ve masaüstü uygulamalarına izin verip tekrar deneyin.",
       "mute": "Mikrofonu sustur",
       "noSpeech": "Konuşma algılanmadı. Dinlemeye devam ediyorum.",
-      "notConfigured": "Ayarlar → Genel → Dikte hizmeti bölümünde bir Gemini anahtarı ekleyip Gemini Live sağlayıcısını seçin veya Whisper uyumlu bir hizmet yapılandırın.",
+      "notConfigured": "Ayarlar → Ses → Sesle yazma servisi bölümünde bir Gemini anahtarı ekleyip Gemini Live sağlayıcısını seçin veya Whisper uyumlu bir hizmet yapılandırın.",
+      "openSettings": "Ayarları aç",
       "ownerRequired": "Sahip yetkilendirmesi eksik. Bu bilgisayarda Praxi-Bot uygulamasını açıp yerel arka plan hizmetine yeniden bağlanın, ardından tekrar deneyin.",
       "phase": {
         "approval": "Onayınız bekleniyor",
@@ -5435,14 +5544,15 @@
       "replyFailed": "Bot yanıt veremedi. Lütfen tekrar deneyin.",
       "retry": "Tekrar dene",
       "runActive": "Bir bot çalışıyor. Tamamlanmasını bekleyin veya sohbetten durdurun, ardından sesli sohbeti tekrar başlatın. Mikrofon kapalı.",
-      "serviceRefused": "Dikte hizmeti isteği reddetti. Ayarlar → Genel → Dikte hizmeti bölümünde sağlayıcıyı, API anahtarını, modeli ve kotayı kontrol edin.",
+      "serviceRefused": "Dikte hizmeti isteği reddetti. Ayarlar → Ses → Sesle yazma servisi bölümünde sağlayıcıyı, API anahtarını, modeli ve kotayı kontrol edin.",
       "simulate": "Konuşmayı simüle et (sahte)",
       "start": "Sesli sohbeti başlat",
+      "stepTimeout": "Başlatma çok uzun sürdüğü için arama durduruldu. İnternet bağlantını ve arka plan servisinin çalıştığını kontrol edip tekrar dene.",
       "title": "Sesli arama",
       "transcribeFailed": "Bu yazıya çevrilemedi. Lütfen tekrar söyleyin.",
       "unmute": "Mikrofonu aç",
       "unsupported": "Bu pencere ses kaydedemiyor.",
-      "wrongProvider": "Gemini anahtarınızı kullanmak için Ayarlar → Genel → Dikte hizmeti bölümünde Gemini Live sağlayıcısını seçin veya seçili Whisper hizmetini yapılandırın."
+      "wrongProvider": "Gemini anahtarınızı kullanmak için Ayarlar → Ses → Sesle yazma servisi bölümünde Gemini Live sağlayıcısını seçin veya seçili Whisper hizmetini yapılandırın."
     },
     "codeOmitted": "(kod atlandı)",
     "description": "Sesli oku düğmesinin sesi ve hızı. Sistemin konuşma motorunu kullanır.",
@@ -5462,7 +5572,7 @@
     "micBusy": "Mikrofon başka bir uygulama tarafından kullanılıyor. Onu kapatıp tekrar dene.",
     "micDenied": "Praxi-Bot için mikrofon erişimine izin verin. Windows Ayarları → Gizlilik ve güvenlik → Mikrofon bölümünde Mikrofon erişimi ve Masaüstü uygulamalarının mikrofonunuza erişmesine izin ver seçeneklerini açın. Ardından Praxi-Bot uygulamasını yeniden başlatıp tekrar deneyin.",
     "micMissing": "Mikrofon bulunamadı. Bir mikrofon bağlayıp tekrar dene.",
-    "notConfigured": "Sesle yazma henüz kurulu değil. Ayarlar > Genel bölümünden bir yazıya çevirme servisi ekle.",
+    "notConfigured": "Sesle yazma henüz kurulu değil. Ayarlar → Ses → Sesle yazma servisi bölümünden bir yazıya çevirme servisi ekle.",
     "online": "çevrimiçi",
     "speak": "Sesli oku",
     "speakAuto": {

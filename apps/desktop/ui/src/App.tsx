@@ -102,6 +102,7 @@ import { AddSkillModal } from "./components/AddSkillModal";
 import { useToast } from "./components/Toast";
 import { createChatFor, newChatFailureNeedsToast } from "./lib/newChat";
 import { LeaveGuardProvider, useLeaveRegistry } from "./state/LeaveGuard";
+import { SkillMarketModal } from "./components/SkillMarketModal";
 import { SkillsModal } from "./components/SkillsModal";
 import { useBotSkills } from "./state/useBotSkills";
 import { BotEditModal } from "./views/BotEditModal";
@@ -137,6 +138,7 @@ import { SchedulesView } from "./views/SchedulesView";
 import { AppsModal } from "./views/AppsModal";
 import { NewBotModal } from "./views/NewBotModal";
 import { SettingsModal } from "./views/SettingsModal";
+import { OPEN_SETTINGS_EVENT, type SettingsTarget } from "./lib/settingsLink";
 import { OPEN_AI_SETTINGS_EVENT } from "./state/useCliEngineRows";
 import { OPEN_BOT_LIMITS_EVENT } from "./lib/botLimits";
 import type { BotEditorSection } from "./lib/botEditor";
@@ -257,6 +259,12 @@ function AppShell() {
     window.addEventListener(OPEN_AI_SETTINGS_EVENT, open);
     return () => window.removeEventListener(OPEN_AI_SETTINGS_EVENT, open);
   }, []);
+  // A message can point at a place in Settings (e.g. the voice call card's "Open settings").
+  useEffect(() => {
+    const open = (e: Event) => setSettingsOpen((e as CustomEvent<SettingsTarget>).detail.page);
+    window.addEventListener(OPEN_SETTINGS_EVENT, open);
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
+  }, []);
   const [newBotOpen, setNewBotOpen] = useState(false);
   // The dialogs of a bot (card 244-C): edit and profile replace the old pages; "add skill" can
   // sit on top of the skills dialog or the edit dialog.
@@ -264,6 +272,7 @@ function AppShell() {
   const [botProfileOpen, setBotProfileOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [addSkillOpen, setAddSkillOpen] = useState(false);
+  const [marketOpen, setMarketOpen] = useState(false);
   // Review hooks (mock mode only): `?screen=botform&section=models`, `?screen=addskill&step=install`.
   const [review] = useState(() => {
     const q = isMockMode() && typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
@@ -725,7 +734,7 @@ function AppShell() {
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
   const closeSearch = useCallback(() => setBotSearch(null), []);
   // A dialog opened by a shortcut sits above the Search popover: close the popover instead of leaving it beneath.
-  const dialogOpen = settingsOpen !== null || appsOpen || newBotOpen || helpOpen || botEditOpen || botProfileOpen || skillsOpen || addSkillOpen;
+  const dialogOpen = settingsOpen !== null || appsOpen || newBotOpen || helpOpen || botEditOpen || botProfileOpen || skillsOpen || addSkillOpen || marketOpen;
   useEffect(() => {
     if (dialogOpen) setBotSearch(null);
   }, [dialogOpen]);
@@ -1251,6 +1260,13 @@ function AppShell() {
         skills={botSkills}
         onClose={() => setSkillsOpen(false)}
         onAddSkill={() => setAddSkillOpen(true)}
+        onBrowse={() => setMarketOpen(true)}
+      />
+      <SkillMarketModal
+        open={marketOpen && botInView}
+        client={client}
+        onClose={() => setMarketOpen(false)}
+        onChanged={() => void botSkills.reload()}
       />
       <AddSkillModal
         open={addSkillOpen && botInView}

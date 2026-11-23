@@ -68,7 +68,7 @@ export function useBotSkills(botId: string | null, client: ApiClient | null): Bo
   const save = useCallback(
     async (payload: PutBotSkillsInput): Promise<SkillsSaveResult> => {
       if (!client || !botId) {
-        return { ok: false, failure: "error", message: "" };
+        return { ok: false, failure: "error", message: humanLine({ status: 503, code: "unavailable", message: "" }) };
       }
       try {
         const next = await client.putBotSkills(botId, payload);

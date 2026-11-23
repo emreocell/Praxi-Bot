@@ -125,6 +125,28 @@ A running daemon picks up installed, updated and removed skills the next time
 it reloads its skills; restart it if a change does not show up. Installed
 skills land in the shared layer, so a bot can read them like any other skill.
 
+## Skill library in the app
+
+A bot's **Skills** dialog has a **Skill library** button. It has two tabs.
+
+- **Installed** lists the skills added from a skill source: name, description,
+  version, where it came from, the risk the safety check gave it and what it
+  asks for, in plain words. Each one has **Check for update** and **Remove**.
+  Removing a skill that bots use names those bots and asks again first.
+- **Browse** reads the skill list that ships with Praxi (`skills/index.json`).
+  **Review and install** fetches the skill, runs the same safety check as the
+  command line and shows what it asks for before anything is installed. Install
+  is always a button you press after reading; it is bound to the fingerprint
+  you reviewed, so content that changed in between is refused.
+
+A skill the check rates above Low only installs after you tick that you read the
+findings. An update that asks for more than the installed version (a new kind of
+request or a higher risk) shows what is new and needs a second tick. A skill
+whose name is already taken by a built-in or your own skill is not offered for
+install. Under **Advanced** you can use another skill list instead: it must be
+an `https://` address on a website name (no IP address, `localhost` or login).
+The app only reads the list; the same review applies to every skill in it.
+
 ## Managing shared skills through the API
 
 The local owner (not a paired device) can create, import, update and delete

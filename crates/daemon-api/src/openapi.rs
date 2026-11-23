@@ -44,6 +44,7 @@ use crate::routes;
 use crate::secret_request_routes;
 use crate::skill_hub;
 use crate::skill_management;
+use crate::skill_market;
 use crate::skills;
 use crate::spend_routes;
 use crate::sse;
@@ -298,6 +299,11 @@ impl Modify for Security {
         routes::webhook,
         skill_hub::hub_install,
         skill_hub::hub_preview,
+        skill_market::market_index,
+        skill_market::market_install,
+        skill_market::market_installed,
+        skill_market::market_preview,
+        skill_market::market_uninstall,
         skill_management::create,
         skill_management::delete,
         skill_management::import,
@@ -618,6 +624,15 @@ impl Modify for Security {
         skill_hub::HubInstallInput,
         skill_hub::HubPreviewDto,
         skill_hub::HubSourceInput,
+        skill_market::MarketIndexDto,
+        skill_market::MarketIndexInput,
+        skill_market::MarketInstallInput,
+        skill_market::MarketInstalledDto,
+        skill_market::MarketInstalledSummary,
+        skill_market::MarketPreviewDto,
+        skill_market::MarketPreviewInput,
+        skill_market::MarketPreviewResponse,
+        skill_market::MarketSkillDto,
         skill_management::DeleteSkillQuery,
         skill_management::DeleteSkillResult,
         skill_management::ManagedSkillDto,

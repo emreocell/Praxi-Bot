@@ -2,7 +2,7 @@
 
 Suche die Meldung, die du siehst. Führe die Schritte der Reihe nach aus. Die Meldungstitel unten sind die Worte, die die App zeigt.
 
-Wenn nichts hilft: Öffne im Kontomenü **Hilfe**, drücke **Anzeigen, was kopiert wird**, lies es und drücke dann **Kopieren**. Schlüssel, Passwörter und E-Mail-Adressen werden unkenntlich gemacht. Es wird nichts irgendwohin gesendet. Füge den Text in einen Fehlerbericht ein. Sieh dir auch die technische Seite [Fehlerbehebung](../troubleshooting.md) an.
+Wenn nichts hilft: Öffne im Kontomenü **Hilfe**, drücke **Anzeigen, was kopiert wird**, lies es und drücke dann **Kopieren**. Schlüssel, Passwörter und E-Mail-Adressen werden unkenntlich gemacht. Es wird nichts irgendwohin gesendet. Füge den Text in einen Fehlerbericht ein. Sieh dir auch die technische Seite [Fehlerbehebung](troubleshooting.md) an.
 
 ## 1. „Der lokale Dienst von Praxi wurde gestoppt“ oder „Praxi kann seinen lokalen Dienst nicht erreichen“
 

@@ -1174,6 +1174,7 @@
     "notFound": "This bot no longer exists.",
     "skills": {
       "boundaryHint": "This limits what the bot is offered and can load with its skill tools. It is not a secret store: a bot with file or shell access may still read the skills folder on disk.",
+      "browseLibrary": "Skill library",
       "conflict": "Skills changed since you opened this dialog (another window or device saved them). The current assignment was reloaded; review it and try again.",
       "emptyCatalog": "No shared or bundled skills are installed yet.",
       "emptySearch": "No skills match your search.",
@@ -2607,6 +2608,10 @@
         "hint": "Connect a model in Settings, then try again.",
         "title": "Praxi needs a brain first"
       },
+      "skill_access_not_accepted": {
+        "hint": "Review what is new, tick the box and try again.",
+        "title": "This update asks for more than before"
+      },
       "skill_changed": {
         "hint": "Review it again before you add the skill.",
         "title": "The repository changed since the preview"
@@ -2619,9 +2624,17 @@
         "hint": "Remove the secret from its files, then add it again.",
         "title": "The skill seems to contain a password or key"
       },
+      "skill_index_invalid": {
+        "hint": "Check the address, or go back to the list that comes with Praxi.",
+        "title": "That skill list is not valid"
+      },
       "skill_not_found": {
         "hint": "Reload the list.",
         "title": "That skill no longer exists"
+      },
+      "skill_risk_not_accepted": {
+        "hint": "Read the findings, tick the box and try again.",
+        "title": "This skill needs your explicit okay"
       },
       "skill_source_unreachable": {
         "hint": "Check the address and your connection, then try again.",
@@ -5217,6 +5230,100 @@
     "unreadBot": "New messages from this bot",
     "usage": "Usage"
   },
+  "skillMarket": {
+    "acceptMore": "I accept that the new version asks for more than the one I have.",
+    "acceptRisk": "I read the findings and I want to install this skill anyway.",
+    "advanced": "Advanced: use another skill list",
+    "advancedHint": "A skill list is a file on the internet that names skills you can install. The list that comes with Praxi is used unless you enter another address.",
+    "alreadyIncluded": "Already included in Praxi",
+    "alreadyInstalled": "Already installed",
+    "back": "Back",
+    "boundary": "A skill only gives a bot instructions. Anything it does still follows your permissions, and risky steps still ask you first.",
+    "browseEmpty": "This list has no skills yet.",
+    "checkUpdate": "Check for update",
+    "customActive": "You are looking at a skill list from {{url}}. Only add skills from people you trust.",
+    "diffAdded": "It now asks for more than before",
+    "diffRemoved": "No longer asked for:",
+    "diffRisk": "Risk changes from {{from}} to {{to}}.",
+    "diffSame": "It asks for nothing new.",
+    "diffTitle": "What changes in this update",
+    "diffVersion": "Version {{from}} becomes {{to}}.",
+    "files": "{{count}} files",
+    "files_one": "{{count}} file",
+    "installNow": "Install {{name}}",
+    "installedEmpty": "Nothing installed from the library yet. Open Browse to find skills.",
+    "installedToast": "{{name}} was installed.",
+    "listFailed": "Could not load the skill list",
+    "loadFailed": "Could not load your skills",
+    "loading": "Loading…",
+    "moreTitle": "This update asks for more",
+    "needs": {
+      "active_files": "Comes with script or program files (they are stored, never run)",
+      "credentials": "Mentions passwords, keys or sign-in details",
+      "hidden": "Contains encoded or hidden text",
+      "large": "Contains unusually large files",
+      "network": "Mentions web addresses or internet access",
+      "none": "Nothing unusual found: it is plain written instructions.",
+      "other": "Something else the safety check flagged",
+      "scripts": "May tell the bot to run commands or scripts",
+      "steering": "Contains wording that tries to steer the bot"
+    },
+    "needsLead": "Found by a safety check of the skill's files. The check helps, but it can miss things.",
+    "needsTitle": "What this skill asks for",
+    "remove": "Remove",
+    "removeAria": "Remove {{name}}",
+    "removeBody": "The skill and its files are deleted from this computer. You can install it again later.",
+    "removeTitle": "Remove {{name}}?",
+    "removeUsedBody": "These bots use it: {{bots}}. If you remove it, they lose it until you install it again.",
+    "removeUsedTitle": "{{name}} is in use",
+    "removed": "{{name}} was removed.",
+    "review": "Review and install",
+    "reviewAria": "Review and install {{name}}",
+    "reviewSubtitle": "Read what this skill asks for. Nothing is installed until you confirm.",
+    "reviewTitle": "Install {{name}}?",
+    "reviewUpdateTitle": "Update {{name}}?",
+    "risk": {
+      "high": "High risk",
+      "low": "Low risk",
+      "medium": "Medium risk"
+    },
+    "riskTitle": "{{risk}}: the safety check found something",
+    "scanAdvisory": "A clean result does not prove a skill is safe. Install skills from people you trust.",
+    "scanClean": "The check found nothing worth a warning.",
+    "scanTitle": "Safety check",
+    "search": "Search skills",
+    "searchEmpty": "No skill matches your search.",
+    "severity": {
+      "high": "Serious",
+      "warn": "Check"
+    },
+    "source": {
+      "bundled": "From the list that comes with Praxi",
+      "git": "From the repository at {{host}}",
+      "index": "From the list at {{host}}",
+      "local": "From a folder on this computer",
+      "other": "From an unknown source"
+    },
+    "state": {
+      "missing": "Files missing",
+      "modified": "Changed after install"
+    },
+    "subtitle": "Skills are written instructions that teach a bot one job. Add the ones you want.",
+    "tabBrowse": "Browse",
+    "tabInstalled": "Installed",
+    "tickFirst": "Tick the box above to continue.",
+    "title": "Skill library",
+    "upToDate": "{{name}} is already up to date.",
+    "updateNow": "Update {{name}}",
+    "updated": "{{name}} was updated.",
+    "urlBadHost": "Use a website name. Addresses made of numbers, or with a login inside, are not accepted.",
+    "urlLabel": "Skill list address",
+    "urlNotHttps": "The address must start with https://",
+    "urlTrust": "Praxi only reads the list. Nothing is installed until you review a skill and confirm.",
+    "useDefault": "Back to the Praxi list",
+    "useList": "Use this list",
+    "version": "Version {{version}}"
+  },
   "stopStatus": {
     "detail": {
       "expiredNone": "The background service no longer had this Stop on record; none of the runs it held is still going.",
@@ -5408,11 +5515,12 @@
     },
     "call": {
       "approvalHint": "Approve or deny on the card in the chat. Approvals cannot be given by voice.",
+      "cancel": "Cancel",
       "captions": "Captions",
       "close": "Close",
       "daemonUnavailable": "The voice service is unavailable. Reconnect the background service on this computer and try again; update it if voice is not supported.",
       "end": "End call",
-      "geminiKeyMissing": "Add a Gemini API key in Settings → General → Dictation service, then try again.",
+      "geminiKeyMissing": "Add a Gemini API key in Settings → Voice → Dictation service, then try again.",
       "holdToTalk": "Hold to talk",
       "interrupt": "Interrupt",
       "micMuted": "Microphone muted",
@@ -5420,7 +5528,8 @@
       "micTimeout": "The microphone did not respond. Allow the microphone prompt. In Windows Settings → Privacy & security → Microphone, allow microphone access and desktop apps, then retry.",
       "mute": "Mute microphone",
       "noSpeech": "No speech detected. Still listening.",
-      "notConfigured": "Add a Gemini key and select Gemini Live in Settings → General → Dictation service, or configure a Whisper-compatible service.",
+      "notConfigured": "Add a Gemini key and select Gemini Live in Settings → Voice → Dictation service, or configure a Whisper-compatible service.",
+      "openSettings": "Open settings",
       "ownerRequired": "Owner authorization is missing. Open Praxi-Bot on this computer and reconnect the local background service, then try again.",
       "phase": {
         "approval": "Waiting for your approval",
@@ -5435,14 +5544,15 @@
       "replyFailed": "The bot could not answer. Please try again.",
       "retry": "Try again",
       "runActive": "A bot is running. Wait for it to finish, or stop it in the chat, then try voice chat again. The microphone is off.",
-      "serviceRefused": "The transcription service refused the request. Check the selected provider, API key, model and quota in Settings → General → Dictation service.",
+      "serviceRefused": "The transcription service refused the request. Check the selected provider, API key, model and quota in Settings → Voice → Dictation service.",
       "simulate": "Simulate speech (mock)",
       "start": "Start voice chat",
+      "stepTimeout": "Starting took too long, so the call was stopped. Check your internet connection and that the background service is running, then try again.",
       "title": "Voice call",
       "transcribeFailed": "Could not transcribe that. Please say it again.",
       "unmute": "Unmute microphone",
       "unsupported": "This window cannot record audio.",
-      "wrongProvider": "Select Gemini Live in Settings → General → Dictation service to use your Gemini key, or configure the selected Whisper service."
+      "wrongProvider": "Select Gemini Live in Settings → Voice → Dictation service to use your Gemini key, or configure the selected Whisper service."
     },
     "codeOmitted": "(code omitted)",
     "description": "Reply voice and speed for the read-aloud button. Uses your system's speech engine.",
@@ -5462,7 +5572,7 @@
     "micBusy": "The microphone is in use by another app. Close it and try again.",
     "micDenied": "Allow microphone access for Praxi-Bot. In Windows Settings → Privacy & security → Microphone, enable Microphone access and Let desktop apps access your microphone. Then restart Praxi-Bot and retry.",
     "micMissing": "No microphone was found. Connect one and try again.",
-    "notConfigured": "Dictation is not set up yet. Add a transcription service in Settings > General.",
+    "notConfigured": "Dictation is not set up yet. Add a transcription service in Settings → Voice → Dictation service.",
     "online": "online",
     "speak": "Read aloud",
     "speakAuto": {

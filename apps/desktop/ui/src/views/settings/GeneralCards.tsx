@@ -145,7 +145,7 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
       t("voice.stt.title"),
       t("voice.stt.description"),
       <DictationCard />,
-      { keywords: "dictation mikrofon microphone whisper transcribe yazdir diktat" }
+      { keywords: "dictation dikte ses sesli arama voice call gemini whisper api key anahtar schluessel mikrofon microphone transcribe yazdir diktat sprache anruf" }
     ),
     card(
       "autostart",

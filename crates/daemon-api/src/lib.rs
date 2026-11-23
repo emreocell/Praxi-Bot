@@ -69,6 +69,7 @@ mod schedule;
 mod schedule_tools;
 pub mod skill_hub;
 pub mod skill_management;
+pub mod skill_market;
 pub mod skills;
 mod spend_routes;
 mod sse;
@@ -1315,6 +1316,23 @@ fn api_routes() -> Router<AppState> {
         )
         .route("/v1/skills/hub/preview", post(skill_hub::hub_preview))
         .route("/v1/skills/hub/install", post(skill_hub::hub_install))
+        .route("/v1/skills/market/index", post(skill_market::market_index))
+        .route(
+            "/v1/skills/market/preview",
+            post(skill_market::market_preview),
+        )
+        .route(
+            "/v1/skills/market/install",
+            post(skill_market::market_install),
+        )
+        .route(
+            "/v1/skills/market/installed",
+            get(skill_market::market_installed),
+        )
+        .route(
+            "/v1/skills/market/installed/{name}",
+            axum::routing::delete(skill_market::market_uninstall),
+        )
         .route(
             "/v1/skills/{name}",
             axum::routing::put(skill_management::update).delete(skill_management::delete),

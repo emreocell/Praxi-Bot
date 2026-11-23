@@ -2,13 +2,14 @@ import { Check, Copy } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Token } from "../lib/highlight";
+import { whenNearViewport } from "../lib/nearViewport";
 import styles from "./Markdown.module.css";
 
 const COPIED_MS = 1500;
 
 /**
  * A fenced code block with a copy button. The highlighter is loaded lazily on
- * first use; until then (and for unknown languages) the code is shown plain.
+ * near the viewport; offscreen history stays plain, searchable and copyable.
  */
 export const CodeBlock = memo(function CodeBlock({
   code,
@@ -18,23 +19,34 @@ export const CodeBlock = memo(function CodeBlock({
   lang: string;
 }) {
   const { t } = useTranslation();
-  const [tokens, setTokens] = useState<Token[] | null>(null);
+  const [highlighted, setHighlighted] = useState<{ code: string; lang: string; tokens: Token[] } | null>(null);
+  const tokens = highlighted?.code === code && highlighted.lang === lang ? highlighted.tokens : null;
+  const blockRef = useRef<HTMLDivElement | null>(null);
+  const [near, setNear] = useState(false);
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
+    const block = blockRef.current;
+    return block ? whenNearViewport(block, () => setNear(true)) : undefined;
+  }, []);
+
+  useEffect(() => {
+    if (!near) return;
     let cancelled = false;
-    void import("../lib/highlight")
+    // Coalesce code changes too: never highlight an intermediate token in the same frame.
+    const frame = requestAnimationFrame(() => void import("../lib/highlight")
       .then((m) => {
         if (!cancelled) {
-          setTokens(m.highlight(code, lang));
+          setHighlighted({ code, lang, tokens: m.highlight(code, lang) });
         }
       })
-      .catch(() => {});
+      .catch(() => {}));
     return () => {
       cancelled = true;
+      cancelAnimationFrame(frame);
     };
-  }, [code, lang]);
+  }, [code, lang, near]);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
@@ -50,7 +62,7 @@ export const CodeBlock = memo(function CodeBlock({
   };
 
   return (
-    <div className={styles.codeBlock} data-testid="code-block">
+    <div ref={blockRef} className={styles.codeBlock} data-testid="code-block">
       <div className={styles.codeBar}>
         <span className={styles.codeLang}>{lang || t("chat.md.code")}</span>
         <button

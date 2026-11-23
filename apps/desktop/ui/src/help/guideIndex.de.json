@@ -247,5 +247,31 @@
       "Gut zu wissen"
     ],
     "summary": "Sprich von deinem Handy aus mit deinen Bots. Der Daemon betreibt einen Telegram-Kanal: Du schreibst deinem Bot,"
+  },
+  {
+    "doc": "de/troubleshooting.md",
+    "title": "Fehlerbehebung (technisch)",
+    "headings": [
+      "Diagnose (Einstellungen → Diagnose, bot doctor)",
+      "Der Dauerbetriebs-Host",
+      "daemon not reachable at http://127.0.0.1:47821 (Exit-Code 3)",
+      "Authentifizierung abgelehnt (Exit-Code 4)",
+      "no usable provider; run bot setup or bot providers add",
+      "connection test failed",
+      "Ein Bot antwortet „has no usable profile“",
+      "bot bots add wird abgelehnt (Exit-Code 6)",
+      "Der Bot hält an und wartet",
+      "Ein Werkzeugaufruf wird abgelehnt",
+      "„Immer erlauben“ bleibt nicht gespeichert oder fragt nie",
+      "Rate-Limit-Fehler von Gemini (HTTP 429)",
+      "Sicherer Modus: alles aus starten",
+      "Zeitpläne lösen nicht aus",
+      "Telegram",
+      "Der Geheimnisspeicher fragt nach einer Passphrase",
+      "Der Browser öffnet sich nicht oder läuft in ein Zeitlimit",
+      "Windows SmartScreen blockiert das Installationsprogramm",
+      "Informationen für einen Fehlerbericht sammeln"
+    ],
+    "summary": "Beginne mit bot status. Der Befehl zeigt, ob der Hintergrunddienst (Daemon) läuft, ob dein Token akzeptiert wird und wie viele Genehmigungen auf dich warten. Wenn du kein Terminal benutzt, schau zuer…"
   }
 ]

@@ -6,6 +6,7 @@ import { ApiClient, ApiError } from "./client.ts";
 import { MOCK_MCP_CATALOG } from "./mockCatalog.ts";
 import { MockHostSetup } from "./mockHostSetup.ts";
 import { MockLiveViewService } from "./mockLiveView.ts";
+import { longChatEvents, longChatMessages } from "./mockLongChat.ts";
 import type {
   BotSpendLimits,
   Bot,
@@ -1268,6 +1269,9 @@ export class MockApiClient extends ApiClient {
         return ok(structuredClone(prev));
       }
     }
+    if (seg[0] === "skills" && seg[1] === "market") {
+      return ok(this.marketMock(method, seg, opts.body));
+    }
     switch (`${method} /${seg[0] ?? ""}`) {
       case "GET /health":
         return ok({ status: mockHostScenario() === "empty" ? "setup_required" : "ok", uptime_secs: 3600, version: "0.1.0-mock", api_version: "1" });
@@ -1288,6 +1292,11 @@ export class MockApiClient extends ApiClient {
         if (seg[2] === "messages") {
           if (this.messages.has(seg[1])) return ok(this.messages.get(seg[1]));
           if ((typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "empty") || seg[1] !== CHAT_ID) return ok([]);
+          if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "long-chat") {
+            const seeded = longChatMessages();
+            this.messages.set(seg[1], seeded);
+            return ok(seeded);
+          }
           const tr = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("lang") !== "en";
           const content = tr ? [
             "Bu haftaki çalışma özetini hazırlar mısın? Tamamlanan işleri ve sonraki adımları görmek istiyorum.",
@@ -1892,6 +1901,65 @@ export class MockApiClient extends ApiClient {
     throw new ApiError(404, "not_found", `mock control: ${method} /${seg.join("/")}`);
   }
 
+  private marketInstalledRows: Array<Record<string, unknown>> = [];
+
+  /** Skill library in mock mode: one plain skill, one that asks for more on update, one risky. */
+  private marketMock(method: string, seg: string[], body: unknown): unknown {
+    const req = (body ?? {}) as { name?: string; update?: boolean; accept?: string; accept_risk?: boolean; accept_more_access?: boolean };
+    const entry = (name: string, description: string, tags: string[]) => ({
+      name, description, tags, author: "Praxi", license: "Apache-2.0", homepage: null,
+      installed: this.marketInstalledRows.some((r) => r.name === name), already_available: false
+    });
+    const previews: Record<string, Record<string, unknown>> = {
+      "tidy-downloads": { description: "Sort a messy Downloads folder into tidy folders.", version: "1.0.0", risk: "low", needs: [], findings: [] },
+      "news-watch": {
+        description: "Read a few news sites each morning and summarise them.", version: "1.1.0", risk: "medium", needs: ["network"],
+        findings: [{ severity: "warn", kind: "network", file: "SKILL.md", line: 12, message: "Mentions web addresses the bot may open." }]
+      }
+    };
+    const base = (name: string) => {
+      const p = previews[name];
+      if (!p) throw new ApiError(404, "skill_not_found", "no such skill");
+      const risk = p.risk as string;
+      return { name, active: false, files: 1, total_bytes: 2048, fingerprint: `mock-${name}`, requires_risk_acceptance: risk !== "low", installed: null, added_needs: [], removed_needs: [], requires_access_confirmation: false, ...p };
+    };
+    if (seg[2] === "index") {
+      return { source: "bundled", name: "Praxi-Bot skills", skills: [
+        entry("tidy-downloads", "Sort a messy Downloads folder into tidy folders.", ["files"]),
+        entry("news-watch", "Read a few news sites each morning and summarise them.", ["web"]),
+        { ...entry("github-basics", "Navigate GitHub.", ["github"]), already_available: true }
+      ] };
+    }
+    if (seg[2] === "preview") {
+      const name = req.name ?? "";
+      const p = base(name);
+      const row = this.marketInstalledRows.find((r) => r.name === name);
+      if (req.update) {
+        if (!row) throw new ApiError(404, "skill_not_found", "not installed");
+        if (name === "tidy-downloads") return { up_to_date: true, preview: null };
+        return { up_to_date: false, preview: { ...p, version: "1.2.0", needs: ["network", "scripts"], risk: "high", requires_risk_acceptance: true, installed: { version: String(row.version), risk: String(row.risk), needs: row.needs }, added_needs: ["scripts"], requires_access_confirmation: true } };
+      }
+      if (row) throw new ApiError(409, "skill_conflict", "exists");
+      return { up_to_date: false, preview: p };
+    }
+    if (seg[2] === "install") {
+      const name = req.name ?? "";
+      const p = base(name) as Record<string, unknown>;
+      if (req.accept !== p.fingerprint) throw new ApiError(409, "skill_changed", "changed");
+      if (p.requires_risk_acceptance && !req.accept_risk) throw new ApiError(409, "skill_risk_not_accepted", "risk");
+      if (req.update && !req.accept_more_access) throw new ApiError(409, "skill_access_not_accepted", "more");
+      const row = { name, description: p.description, version: req.update ? "1.2.0" : p.version, source_kind: "bundled", source_host: "", commit: null, risk: req.update ? "high" : p.risk, needs: req.update ? ["network", "scripts"] : p.needs, state: "ok", installed_at: "2026-01-01T00:00:00Z" };
+      this.marketInstalledRows = [...this.marketInstalledRows.filter((r) => r.name !== name), row];
+      return row;
+    }
+    if (seg[2] === "installed" && method === "GET") return structuredClone(this.marketInstalledRows);
+    if (seg[2] === "installed" && method === "DELETE" && seg[3]) {
+      this.marketInstalledRows = this.marketInstalledRows.filter((r) => r.name !== seg[3]);
+      return { deleted: true, used_by: [] };
+    }
+    throw new ApiError(404, "not_found", "unknown skills route");
+  }
+
   private getBotSkillsState(botId: string): BotSkills {
     if (!this.bots.some((b) => b.id === botId)) {
       throw new ApiError(404, "not_found", `bot ${botId} not found`);
@@ -2375,6 +2443,7 @@ function mockLiveRunId(): string | null {
 export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["event"] }[] {
   const out: { ts_ms: number; event: GlobalEnvelope["event"] }[] = [];
   const screen = new URLSearchParams(window.location.search).get("screen");
+  if (screen === "long-chat") return longChatEvents();
   if (screen === "approval" || screen?.startsWith("approval-schedule") || screen === "streaming" || screen === "working" || screen === "subagents") {
     const bot_id = "11111111-1111-4111-8111-111111111111";
     const chat_id = "33333333-3333-4333-8333-333333333333";

@@ -81,13 +81,28 @@ fn label<T: Serialize>(value: &T) -> String {
         .unwrap_or_default()
 }
 
-fn hub_error(error: &HubError) -> ApiError {
+pub(crate) fn hub_error(error: &HubError) -> ApiError {
     // The hub's own text can echo remote output; the API keeps one fixed sentence per class.
     let (status, code, message) = match error {
         HubError::Source(_) | HubError::InvalidSkill(_) | HubError::Unsafe(_) => (
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_skill",
             "the repository does not hold a valid, safe skill",
+        ),
+        HubError::AlreadyInstalled(_) => (
+            StatusCode::CONFLICT,
+            "skill_conflict",
+            "a skill with this name is already installed",
+        ),
+        HubError::NotInstalled(_) => (
+            StatusCode::NOT_FOUND,
+            "skill_not_found",
+            "this skill was not installed from a skill source",
+        ),
+        HubError::HashMismatch { .. } => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_skill",
+            "the skill does not match the fingerprint its index lists",
         ),
         HubError::TooLarge(_) => (
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -108,31 +123,34 @@ fn hub_error(error: &HubError) -> ApiError {
     ApiError::new(status, code, message)
 }
 
+/// `https://` on a named host: no credentials, no IP literal, no `localhost`.
+pub(crate) fn is_https_named_host(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let numeric = host
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == '.' || c == ':');
+    !(host.is_empty()
+        || host.contains(['@', '[', ']'])
+        || !host.contains('.')
+        || numeric
+        || host.eq_ignore_ascii_case("localhost"))
+}
+
 /// Only `https://` on a named host: no credentials, no IP literal, no `localhost`.
 fn source_of(
     url: String,
     rev: Option<String>,
     subdir: Option<String>,
 ) -> Result<InstallSource, ApiError> {
-    let bad = || {
-        ApiError::new(
+    if !is_https_named_host(&url) {
+        return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_skill",
             "use an https:// repository address",
-        )
-    };
-    let rest = url.strip_prefix("https://").ok_or_else(bad)?;
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let numeric = host
-        .chars()
-        .all(|c| c.is_ascii_digit() || c == '.' || c == ':');
-    if host.is_empty()
-        || host.contains(['@', '[', ']'])
-        || !host.contains('.')
-        || numeric
-        || host.eq_ignore_ascii_case("localhost")
-    {
-        return Err(bad());
+        ));
     }
     Ok(InstallSource::Git {
         url,

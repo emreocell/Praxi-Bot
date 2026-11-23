@@ -2,6 +2,7 @@
 
 mod hub;
 mod management;
+mod market;
 
 use std::fs;
 use std::path::Path;

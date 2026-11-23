@@ -167,11 +167,11 @@ pub(crate) fn input<T>(json: Result<Json<T>, JsonRejection>) -> Result<T, ApiErr
         .map_err(|_| ApiError::bad_request("invalid skill request body"))
 }
 
-fn store(state: &AppState) -> OwnerSkillStore {
+pub(crate) fn store(state: &AppState) -> OwnerSkillStore {
     OwnerSkillStore::new(state.data_dir().join("skills"))
 }
 
-fn audit(state: &AppState, action: &str, files: usize) -> Result<(), ApiError> {
+pub(crate) fn audit(state: &AppState, action: &str, files: usize) -> Result<(), ApiError> {
     // Only fixed host-authored action and numeric counts enter the audit log.
     state
         .storage()
@@ -196,7 +196,7 @@ fn scrub(state: &AppState, skill: &skills::Skill) -> ManagedSkillDto {
     }
 }
 
-fn check_secrets(state: &AppState, prepared: &PreparedSkill) -> Result<(), ApiError> {
+pub(crate) fn check_secrets(state: &AppState, prepared: &PreparedSkill) -> Result<(), ApiError> {
     state.agent().refresh_external_redactor();
     if prepared
         .contains_filtered_content(|text| state.agent().redact_external_text(text.to_owned()))
@@ -304,7 +304,7 @@ pub(crate) async fn update(
     Ok(Json(dto))
 }
 
-fn using_bots(state: &AppState, name: &str) -> Result<Vec<SkillUsingBotDto>, ApiError> {
+pub(crate) fn using_bots(state: &AppState, name: &str) -> Result<Vec<SkillUsingBotDto>, ApiError> {
     let bots = state
         .storage()
         .list_bots(state.user_id())

@@ -1174,6 +1174,7 @@
     "notFound": "Dieser Bot existiert nicht mehr.",
     "skills": {
       "boundaryHint": "Das begrenzt, was dem Bot angeboten wird und was er mit seinen Skill-Werkzeugen laden kann. Es ist kein Schlüsselspeicher: Ein Bot mit Datei- oder Shell-Zugriff kann den Skills-Ordner auf dem Datenträger dennoch lesen.",
+      "browseLibrary": "Skill-Bibliothek",
       "conflict": "Die Skills haben sich geändert, seit du diesen Dialog geöffnet hast (ein anderes Fenster oder Gerät hat sie gespeichert). Die aktuelle Zuweisung wurde neu geladen; prüfe sie und versuche es erneut.",
       "emptyCatalog": "Es sind noch keine geteilten oder mitgelieferten Skills installiert.",
       "emptySearch": "Keine Skills passen zu deiner Suche.",
@@ -2607,6 +2608,10 @@
         "hint": "Verbinde in den Einstellungen ein Modell und versuche es dann erneut.",
         "title": "Praxi braucht zuerst ein Gehirn"
       },
+      "skill_access_not_accepted": {
+        "hint": "Sieh dir das Neue an, setze das Häkchen und versuche es erneut.",
+        "title": "Dieses Update verlangt mehr als vorher"
+      },
       "skill_changed": {
         "hint": "Sieh es dir noch einmal an, bevor du den Skill hinzufügst.",
         "title": "Das Repository hat sich seit der Vorschau geändert"
@@ -2619,9 +2624,17 @@
         "hint": "Entferne den geheimen Schlüssel aus seinen Dateien und füge den Skill dann erneut hinzu.",
         "title": "Der Skill scheint ein Passwort oder einen Schlüssel zu enthalten"
       },
+      "skill_index_invalid": {
+        "hint": "Prüfe die Adresse oder kehre zur Liste zurück, die mit Praxi kommt.",
+        "title": "Diese Skill-Liste ist nicht gültig"
+      },
       "skill_not_found": {
         "hint": "Lade die Liste neu.",
         "title": "Dieser Skill existiert nicht mehr"
+      },
+      "skill_risk_not_accepted": {
+        "hint": "Lies die Funde, setze das Häkchen und versuche es erneut.",
+        "title": "Dieser Skill braucht dein ausdrückliches Okay"
       },
       "skill_source_unreachable": {
         "hint": "Prüfe die Adresse und deine Verbindung und versuche es dann erneut.",
@@ -5217,6 +5230,100 @@
     "unreadBot": "Neue Nachrichten von diesem Bot",
     "usage": "Nutzung"
   },
+  "skillMarket": {
+    "acceptMore": "Ich akzeptiere, dass die neue Version mehr verlangt als die, die ich habe.",
+    "acceptRisk": "Ich habe die Funde gelesen und möchte diesen Skill trotzdem installieren.",
+    "advanced": "Erweitert: andere Skill-Liste verwenden",
+    "advancedHint": "Eine Skill-Liste ist eine Datei im Internet, die installierbare Skills aufführt. Ohne eigene Adresse wird die Liste verwendet, die mit Praxi kommt.",
+    "alreadyIncluded": "Bereits in Praxi enthalten",
+    "alreadyInstalled": "Bereits installiert",
+    "back": "Zurück",
+    "boundary": "Ein Skill gibt einem Bot nur Anweisungen. Alles, was er tut, folgt weiterhin deinen Berechtigungen, und riskante Schritte fragen dich weiterhin zuerst.",
+    "browseEmpty": "Diese Liste enthält noch keine Skills.",
+    "checkUpdate": "Nach Update suchen",
+    "customActive": "Du siehst eine Skill-Liste von {{url}}. Füge nur Skills von Personen hinzu, denen du vertraust.",
+    "diffAdded": "Er verlangt jetzt mehr als vorher",
+    "diffRemoved": "Wird nicht mehr verlangt:",
+    "diffRisk": "Das Risiko ändert sich von {{from}} zu {{to}}.",
+    "diffSame": "Er verlangt nichts Neues.",
+    "diffTitle": "Was sich mit diesem Update ändert",
+    "diffVersion": "Version {{from}} wird zu {{to}}.",
+    "files": "{{count}} Dateien",
+    "files_one": "{{count}} Datei",
+    "installNow": "{{name}} installieren",
+    "installedEmpty": "Aus der Bibliothek ist noch nichts installiert. Öffne „Durchsuchen“, um Skills zu finden.",
+    "installedToast": "{{name}} wurde installiert.",
+    "listFailed": "Die Skill-Liste konnte nicht geladen werden",
+    "loadFailed": "Deine Skills konnten nicht geladen werden",
+    "loading": "Wird geladen …",
+    "moreTitle": "Dieses Update verlangt mehr",
+    "needs": {
+      "active_files": "Enthält Skript- oder Programmdateien (sie werden nur gespeichert, nie ausgeführt)",
+      "credentials": "Erwähnt Passwörter, Schlüssel oder Anmeldedaten",
+      "hidden": "Enthält kodierten oder versteckten Text",
+      "large": "Enthält ungewöhnlich große Dateien",
+      "network": "Erwähnt Webadressen oder Internetzugriff",
+      "none": "Nichts Ungewöhnliches gefunden: reine geschriebene Anleitungen.",
+      "other": "Etwas anderes, das die Sicherheitsprüfung markiert hat",
+      "scripts": "Kann den Bot anweisen, Befehle oder Skripte auszuführen",
+      "steering": "Enthält Formulierungen, die den Bot lenken wollen"
+    },
+    "needsLead": "Von einer Sicherheitsprüfung der Skill-Dateien gefunden. Die Prüfung hilft, kann aber etwas übersehen.",
+    "needsTitle": "Was dieser Skill verlangt",
+    "remove": "Entfernen",
+    "removeAria": "{{name}} entfernen",
+    "removeBody": "Der Skill und seine Dateien werden von diesem Computer gelöscht. Du kannst ihn später erneut installieren.",
+    "removeTitle": "{{name}} entfernen?",
+    "removeUsedBody": "Diese Bots nutzen ihn: {{bots}}. Wenn du ihn entfernst, fehlt er ihnen, bis du ihn erneut installierst.",
+    "removeUsedTitle": "{{name}} wird verwendet",
+    "removed": "{{name}} wurde entfernt.",
+    "review": "Prüfen und installieren",
+    "reviewAria": "{{name}} prüfen und installieren",
+    "reviewSubtitle": "Lies, was dieser Skill verlangt. Ohne deine Bestätigung wird nichts installiert.",
+    "reviewTitle": "{{name}} installieren?",
+    "reviewUpdateTitle": "{{name}} aktualisieren?",
+    "risk": {
+      "high": "Hohes Risiko",
+      "low": "Geringes Risiko",
+      "medium": "Mittleres Risiko"
+    },
+    "riskTitle": "{{risk}}: Die Sicherheitsprüfung hat etwas gefunden",
+    "scanAdvisory": "Ein sauberes Ergebnis beweist nicht, dass ein Skill sicher ist. Installiere nur Skills von Personen, denen du vertraust.",
+    "scanClean": "Die Prüfung hat nichts gefunden, das eine Warnung wert wäre.",
+    "scanTitle": "Sicherheitsprüfung",
+    "search": "Skills durchsuchen",
+    "searchEmpty": "Kein Skill passt zu deiner Suche.",
+    "severity": {
+      "high": "Ernst",
+      "warn": "Prüfen"
+    },
+    "source": {
+      "bundled": "Aus der Liste, die mit Praxi kommt",
+      "git": "Aus dem Repository unter {{host}}",
+      "index": "Aus der Liste unter {{host}}",
+      "local": "Aus einem Ordner auf diesem Computer",
+      "other": "Aus einer unbekannten Quelle"
+    },
+    "state": {
+      "missing": "Dateien fehlen",
+      "modified": "Nach der Installation geändert"
+    },
+    "subtitle": "Skills sind geschriebene Anleitungen, die einem Bot eine Aufgabe beibringen. Füge hinzu, was du brauchst.",
+    "tabBrowse": "Durchsuchen",
+    "tabInstalled": "Installiert",
+    "tickFirst": "Setze oben das Häkchen, um fortzufahren.",
+    "title": "Skill-Bibliothek",
+    "upToDate": "{{name}} ist bereits aktuell.",
+    "updateNow": "{{name}} aktualisieren",
+    "updated": "{{name}} wurde aktualisiert.",
+    "urlBadHost": "Verwende einen Website-Namen. Adressen aus Zahlen oder mit Anmeldedaten darin werden nicht akzeptiert.",
+    "urlLabel": "Adresse der Skill-Liste",
+    "urlNotHttps": "Die Adresse muss mit https:// beginnen.",
+    "urlTrust": "Praxi liest nur die Liste. Es wird nichts installiert, bis du einen Skill prüfst und bestätigst.",
+    "useDefault": "Zurück zur Praxi-Liste",
+    "useList": "Diese Liste verwenden",
+    "version": "Version {{version}}"
+  },
   "stopStatus": {
     "detail": {
       "expiredNone": "Der Hintergrunddienst hatte diesen Stopp nicht mehr gespeichert; keiner der von ihm festgehaltenen Läufe läuft noch.",
@@ -5408,11 +5515,12 @@
     },
     "call": {
       "approvalHint": "Bestätigen oder lehnen Sie auf der Karte im Chat ab. Freigaben sind per Sprache nicht möglich.",
+      "cancel": "Abbrechen",
       "captions": "Untertitel",
       "close": "Schließen",
       "daemonUnavailable": "Der Sprachdienst ist nicht verfügbar. Verbinde den Hintergrunddienst auf diesem Computer erneut. Aktualisiere ihn, falls er Sprache nicht unterstützt.",
       "end": "Anruf beenden",
-      "geminiKeyMissing": "Füge unter Einstellungen → Allgemein → Diktierdienst einen Gemini-API-Schlüssel hinzu und versuche es erneut.",
+      "geminiKeyMissing": "Füge unter Einstellungen → Stimme → Diktierdienst einen Gemini-API-Schlüssel hinzu und versuche es erneut.",
       "holdToTalk": "Zum Sprechen gedrückt halten",
       "interrupt": "Unterbrechen",
       "micMuted": "Mikrofon stummgeschaltet",
@@ -5420,7 +5528,8 @@
       "micTimeout": "Das Mikrofon antwortet nicht. Bestätige die Mikrofonabfrage. Erlaube unter Windows-Einstellungen → Datenschutz und Sicherheit → Mikrofon den Mikrofonzugriff und Desktop-Apps und versuche es erneut.",
       "mute": "Mikrofon stummschalten",
       "noSpeech": "Keine Sprache erkannt. Ich höre weiter zu.",
-      "notConfigured": "Füge unter Einstellungen → Allgemein → Diktierdienst einen Gemini-Schlüssel hinzu und wähle Gemini Live oder richte einen Whisper-kompatiblen Dienst ein.",
+      "notConfigured": "Füge unter Einstellungen → Stimme → Diktierdienst einen Gemini-Schlüssel hinzu und wähle Gemini Live oder richte einen Whisper-kompatiblen Dienst ein.",
+      "openSettings": "Einstellungen öffnen",
       "ownerRequired": "Die Eigentümerautorisierung fehlt. Öffne Praxi-Bot auf diesem Computer, verbinde den lokalen Hintergrunddienst erneut und versuche es noch einmal.",
       "phase": {
         "approval": "Warten auf Ihre Freigabe",
@@ -5435,14 +5544,15 @@
       "replyFailed": "Der Bot konnte nicht antworten. Bitte erneut versuchen.",
       "retry": "Erneut versuchen",
       "runActive": "Ein Bot arbeitet gerade. Warte, bis er fertig ist, oder stoppe ihn im Chat und starte den Sprachchat erneut. Das Mikrofon ist aus.",
-      "serviceRefused": "Der Diktierdienst hat die Anfrage abgelehnt. Prüfe unter Einstellungen → Allgemein → Diktierdienst den Anbieter, API-Schlüssel, das Modell und das Kontingent.",
+      "serviceRefused": "Der Diktierdienst hat die Anfrage abgelehnt. Prüfe unter Einstellungen → Stimme → Diktierdienst den Anbieter, API-Schlüssel, das Modell und das Kontingent.",
       "simulate": "Sprechen simulieren (Mock)",
       "start": "Sprachchat starten",
+      "stepTimeout": "Der Start dauerte zu lange, deshalb wurde der Anruf gestoppt. Prüfe deine Internetverbindung und ob der Hintergrunddienst läuft, und versuche es erneut.",
       "title": "Sprachanruf",
       "transcribeFailed": "Das konnte nicht transkribiert werden. Bitte noch einmal sagen.",
       "unmute": "Mikrofon einschalten",
       "unsupported": "Dieses Fenster kann kein Audio aufnehmen.",
-      "wrongProvider": "Wähle unter Einstellungen → Allgemein → Diktierdienst Gemini Live, um deinen Gemini-Schlüssel zu nutzen, oder richte den ausgewählten Whisper-Dienst ein."
+      "wrongProvider": "Wähle unter Einstellungen → Stimme → Diktierdienst Gemini Live, um deinen Gemini-Schlüssel zu nutzen, oder richte den ausgewählten Whisper-Dienst ein."
     },
     "codeOmitted": "(Code ausgelassen)",
     "description": "Stimme und Tempo für die Vorlesen-Schaltfläche. Nutzt die Sprachausgabe deines Systems.",
@@ -5462,7 +5572,7 @@
     "micBusy": "Das Mikrofon wird von einer anderen App verwendet. Schließe sie und versuche es erneut.",
     "micDenied": "Erlaube Praxi-Bot den Mikrofonzugriff. Aktiviere unter Windows-Einstellungen → Datenschutz und Sicherheit → Mikrofon den Mikrofonzugriff und den Zugriff für Desktop-Apps. Starte Praxi-Bot neu und versuche es erneut.",
     "micMissing": "Es wurde kein Mikrofon gefunden. Schließe eines an und versuche es erneut.",
-    "notConfigured": "Diktieren ist noch nicht eingerichtet. Füge unter Einstellungen > Allgemein einen Transkriptionsdienst hinzu.",
+    "notConfigured": "Diktieren ist noch nicht eingerichtet. Füge unter Einstellungen → Stimme → Diktierdienst einen Transkriptionsdienst hinzu.",
     "online": "online",
     "speak": "Vorlesen",
     "speakAuto": {

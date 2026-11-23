@@ -705,6 +705,29 @@ export class ApiClient {
   listSkills(): Promise<SkillsCatalog> {
     return this.request("GET", "/skills");
   }
+  /** The skill list to browse: the one bundled with the app, or a custom https address. */
+  marketIndex(url?: string): Promise<import("./types").MarketIndex> {
+    return this.request("POST", "/skills/market/index", { body: url ? { url } : {} });
+  }
+  /** Fetch and scan one skill (or an update of an installed one). Nothing is installed. */
+  marketPreview(body: {
+    index_url?: string;
+    name: string;
+    update?: boolean;
+  }): Promise<import("./types").MarketPreviewResponse> {
+    return this.request("POST", "/skills/market/preview", { body });
+  }
+  marketInstall(body: import("./types").MarketInstallInput): Promise<import("./types").MarketInstalled> {
+    return this.request("POST", "/skills/market/install", { body });
+  }
+  marketInstalled(): Promise<import("./types").MarketInstalled[]> {
+    return this.request("GET", "/skills/market/installed");
+  }
+  marketUninstall(name: string, force = false): Promise<import("./types").DeleteSkillResult> {
+    return this.request("DELETE", `/skills/market/installed/${encodeURIComponent(name)}`, {
+      query: force ? { force: "true" } : undefined
+    });
+  }
   getBotSkills(botId: string): Promise<BotSkills> {
     return this.request("GET", `/bots/${encodeURIComponent(botId)}/skills`);
   }

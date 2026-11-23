@@ -60,6 +60,7 @@ import {
 import { humanLine, type ServiceProblem } from "../lib/humanError";
 import { isProcessingRunState } from "../lib/runState";
 import { readRunPlace, writeRunPlace } from "../lib/runLocation";
+import { createStreamBatch } from "./streamBatch";
 
 export type Phase = "connecting" | "ready" | "error";
 
@@ -80,6 +81,7 @@ export interface ComputerEntry {
 
 type Action =
   | { type: "event"; env: GlobalEnvelope }
+  | { type: "events"; envelopes: readonly GlobalEnvelope[] }
   | { type: "answered"; runId: string; callId: string; answer: string }
   | {
       type: "secretAnswered";
@@ -101,6 +103,8 @@ function reducer(state: EventsState, action: Action): EventsState {
   switch (action.type) {
     case "event":
       return applyEvent(state, action.env);
+    case "events":
+      return action.envelopes.reduce(applyEvent, state);
     case "answered":
       return markAnswered(state, action.runId, action.callId, action.answer);
     case "secretAnswered":
@@ -405,16 +409,28 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
         live = false;
       };
     }
-    return subscribeEvents(client, {
+    const batch = createStreamBatch(
+      (envelopes) => dispatch({ type: "events", envelopes }),
+      requestAnimationFrame,
+      cancelAnimationFrame
+    );
+    const unsubscribe = subscribeEvents(client, {
       lastEventId: 0,
       onEvent: (env) => {
-        dispatch({ type: "event", env });
+        batch.push(env);
         for (const l of listeners.current) {
           l(env);
         }
       },
-      onConnection: setEventsConnected
+      onConnection: (connected) => {
+        if (!connected) batch.flush();
+        setEventsConnected(connected);
+      }
     });
+    return () => {
+      unsubscribe();
+      batch.dispose();
+    };
   }, [client, refreshBots, refreshChats, refreshRuns]);
 
   // health indicator + reconciliation with the daemon's own pending lists

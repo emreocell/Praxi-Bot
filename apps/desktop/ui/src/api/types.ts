@@ -457,6 +457,13 @@ export type AvailableSkill = S["AvailableSkillDto"];
 export type OwnSkill = S["OwnSkillDto"];
 export type BotSkills = S["BotSkillsDto"];
 export type PutBotSkillsInput = S["PutBotSkillsInput"];
+export type MarketIndex = S["MarketIndexDto"];
+export type MarketSkill = S["MarketSkillDto"];
+export type MarketPreview = S["MarketPreviewDto"];
+export type MarketPreviewResponse = S["MarketPreviewResponse"];
+export type MarketInstallInput = S["MarketInstallInput"];
+export type MarketInstalled = S["MarketInstalledDto"];
+export type DeleteSkillResult = S["DeleteSkillResult"];
 
 export type CliEngineDto = S["CliEngineDto"];
 export type BotEngineInput = S["BotEngineInput"];

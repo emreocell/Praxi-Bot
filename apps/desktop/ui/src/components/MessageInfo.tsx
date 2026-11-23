@@ -2,6 +2,7 @@ import { Info } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Run, RunUsage } from "../api/types";
+import type { ApiClient } from "../api/client";
 import {
   type InfoRow,
   type MessageSourceKind,
@@ -9,7 +10,6 @@ import {
   replyInfoRows,
   userInfoRows
 } from "../lib/messageInfo";
-import { useDaemon } from "../state/DaemonContext";
 import type { RunState } from "../state/timeline";
 import styles from "./MessageInfo.module.css";
 import { Popover } from "./Popover";
@@ -35,6 +35,7 @@ function replyFacts(run: RunState | undefined, dto: Run | undefined, usage: RunU
  * source for the owner's own message. Keyboard reachable; stronger on hover and focus.
  */
 export function MessageInfo({
+  client,
   side,
   ts,
   runId,
@@ -43,6 +44,7 @@ export function MessageInfo({
   source,
   computer = null
 }: {
+  client: ApiClient | null;
   side: "bot" | "me";
   /** The message's own time. */
   ts: number;
@@ -55,7 +57,6 @@ export function MessageInfo({
   computer?: string | null;
 }) {
   const { t, i18n } = useTranslation();
-  const { client } = useDaemon();
   const [open, setOpen] = useState(false);
   const [usage, setUsage] = useState<RunUsage | null>(null);
   const ref = useRef<HTMLButtonElement | null>(null);
