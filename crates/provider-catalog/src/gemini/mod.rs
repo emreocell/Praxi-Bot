@@ -150,7 +150,7 @@ pub(crate) fn classify(status: u16, headers: &HeaderMap, body: &str) -> Provider
                     .any(|e| e.get("reason").and_then(Value::as_str) == Some("API_KEY_INVALID"))
             })
     }) || message.contains("API key not valid");
-    if status == 400 && bad_key {
+    if matches!(status, 0 | 400) && bad_key {
         return ProviderError::Auth(message);
     }
     match classify_response(

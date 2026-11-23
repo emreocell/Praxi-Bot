@@ -191,10 +191,16 @@ async fn one_attempt_preserves_failure_classes_and_server_retry_delays() {
             (504, "gateway_timeout", FailureClass::Timeout, true),
         ] {
             let server = MockServer::start().await;
+            // A zero delay would let the ordinary streaming entry point retry.
+            let retry_after = if status == 503 {
+                "0"
+            } else {
+                retry_date.as_str()
+            };
             Mock::given(method("POST"))
                 .respond_with(
                     ResponseTemplate::new(status)
-                        .insert_header("Retry-After", retry_date.as_str())
+                        .insert_header("Retry-After", retry_after)
                         .set_body_json(json!({"error":{"type":code,"message":"fixture"}})),
                 )
                 .expect(1)
@@ -204,7 +210,9 @@ async fn one_attempt_preserves_failure_classes_and_server_retry_delays() {
             let error = p.stream_once(request()).await.err().unwrap();
             assert_eq!(error.class(), class, "{adapter:?}: {error}");
             assert_eq!(error.is_retryable(), retryable);
-            if retryable {
+            if status == 503 {
+                assert_eq!(error.retry_after(), Some(Duration::ZERO));
+            } else if retryable {
                 assert!(error.retry_after().unwrap() > Duration::from_secs(540));
             } else {
                 assert!(error.retry_after().is_none());
@@ -243,6 +251,29 @@ async fn broken_stream_cannot_promote_partial_tools_or_hide_protocol_failure() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn gemini_classifies_an_invalid_key_in_a_successful_http_stream() {
+    let server = MockServer::start().await;
+    let error = json!({"error":{
+        "code":400, "status":"INVALID_ARGUMENT", "message":"credential rejected",
+        "details":[{"reason":"API_KEY_INVALID"}]
+    }});
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(format!("data: {error}\n\n"), "text/event-stream"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let p = Adapter::Gemini.build(server.uri(), config());
+    let mut stream = p.stream_once(request()).await.unwrap();
+    assert_eq!(
+        stream.next().await.unwrap().unwrap_err().class(),
+        FailureClass::Auth
+    );
 }
 
 #[tokio::test]

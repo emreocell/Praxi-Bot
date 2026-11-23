@@ -212,13 +212,28 @@ pub(crate) fn classify_response(status: u16, delay: Option<Duration>, body: &str
     {
         ProviderError::Timeout
     } else if matches!(status, 500..=599)
-        || has(&["overloaded_error", "overloaded", "UNAVAILABLE", "INTERNAL"])
+        || has(&[
+            "overloaded_error",
+            "overloaded",
+            "model_overloaded",
+            "server_error",
+            "UNAVAILABLE",
+            "INTERNAL",
+        ])
         || (status == 0 && matches!(lower.as_str(), "overloaded" | "service unavailable"))
     {
         ProviderError::Upstream {
             status: if status >= 500 { status } else { 503 },
             message,
         }
+    } else if status == 0
+        && has(&[
+            "INVALID_ARGUMENT",
+            "FAILED_PRECONDITION",
+            "invalid_request_error",
+        ])
+    {
+        ProviderError::InvalidRequest(message)
     } else if status == 0 {
         ProviderError::Stream("the model provider returned an unrecognized error".into())
     } else {
