@@ -33,6 +33,28 @@ the current supported appearance values. Mock-mode setup and parameter handling 
 above) and compares the result with `scripts/a11y-allowlist.mjs`. See CONTRIBUTING.md for the rules
 of the allow-list.
 
+## Visual regression and wallpaper contrast
+
+`pnpm --dir apps/desktop/ui check:visual` opens 8 mock screens (empty chat, chat with a run, settings, add-server
+step 1, scheduled jobs, approval card, `/` and `@` popovers) in the Obsidian, Cobalt, Raven and Clay themes at
+1280x800 and 640x800 (64 screenshots, English, still sky wallpaper, glass style) and checks two things:
+
+- **Looks the same**: each screenshot is reduced to a 16x16 colour thumbnail and compared with
+  `tests/visual/baselines.json` (thumbnail + perceptual hash per screen, about 70 KB, no PNGs in git).
+  Thresholds are in `scripts/visual-lib.mjs` and are tolerant of font anti-aliasing and the clock in timestamps.
+- **Readable on the wallpaper**: the text is hidden, the page is photographed again and every visible text run
+  is measured against the pixels behind it (WCAG AA: 4.5:1, 3:1 for large text). Failures are listed (never
+  allow-listed); the full list is in `report.json`.
+
+`--only=<text>` filters screens, `--no-contrast` / `--no-compare` skip one half. `VISUAL_OUT=<dir>` keeps the
+screenshots and the report. After an intended design change, rewrite the baselines and commit them:
+
+```sh
+pnpm --dir apps/desktop/ui check:visual:update      # all screens; add -- --only=chat-run for a few
+```
+
+In CI the job `Visual regression` is non-blocking (not part of `ci-result`) and uploads the screenshots.
+
 ## Real-app smoke run
 
 `pnpm --dir apps/desktop/ui smoke` drives the production UI bundle against a real

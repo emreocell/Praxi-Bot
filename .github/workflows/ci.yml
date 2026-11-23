@@ -298,6 +298,45 @@ jobs:
             exit 1
           fi
 
+  # Screenshot comparison and wallpaper text contrast over the mock screens. Non-blocking on purpose
+  # (continue-on-error, not listed in ci-result) until the baselines have proven stable on Linux.
+  visual-regression:
+    name: Visual regression (non-blocking)
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Screenshots and contrast
+        env:
+          VISUAL_OUT: ${{ runner.temp }}/visual
+        run: CHROME_BIN="$(command -v google-chrome || command -v chromium)" pnpm --dir apps/desktop/ui check:visual
+
+      - name: Upload screenshots and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression
+          path: ${{ runner.temp }}/visual/
+          retention-days: 7
+
   desktop-smoke:
     name: Real-app smoke (${{ matrix.os }})
     needs: changes
