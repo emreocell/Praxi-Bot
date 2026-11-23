@@ -8,6 +8,13 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 
 | Sayfa | Ne anlatır |
 | --- | --- |
+| [5 dakikada başlangıç](getting-started.md) | Kur, ücretsiz anahtar al, ilk sohbetini yap, bot nedir öğren. |
+| [Botunu güvende tut](keep-your-bot-safe.md) | İzin seviyeleri, onaylar ve bilgisayarından ne çıkar. |
+| [Bu bilgisayarda mı, sunucuda mı çalışsın](local-or-server.md) | Neden sunucuya ihtiyacın yok ve istersen nasıl eklenir. |
+| [İşleri otomatikleştir](automate.md) | Zamanlanmış işler ve kopyalayabileceğin üç örnek. |
+| [Uygulamalarını bağla](connect-your-apps.md) | Uygulamalar, her iznin anlamı ve kimlerin kullanabileceği. |
+| [Sık görülen sorunları çöz](fix-common-problems.md) | En olası 12 sorun ve sonraki adım. |
+| [Hızlı yanıtlar](quick-faq.md) | İlk sorulan sorulara kısa yanıtlar. |
 | [Ayarlar](settings.md) | Ayarlar sayfaları, arama, güvenlik düzeyleri ve "Önerilene sıfırla". |
 | [Zamanlanmış işler](schedules.md) | Bir botun belirli zamanlarda kendiliğinden çalışması. |
 | [Bot harcama sınırları](bot-spending-limits.md) | Günlük, haftalık ve aylık sınırlar. |

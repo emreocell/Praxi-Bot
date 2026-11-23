@@ -9,6 +9,13 @@ deutsche Seite, wenn es sie gibt.
 
 | Seite | Worum es geht |
 | --- | --- |
+| [In 5 Minuten loslegen](getting-started.md) | Installieren, kostenlosen Schlüssel holen, ersten Chat führen, verstehen was ein Bot ist. |
+| [Halte deinen Bot sicher](keep-your-bot-safe.md) | Die Berechtigungsstufen, Genehmigungen und was deinen Computer verlässt. |
+| [Auf diesem Computer oder auf einem Server](local-or-server.md) | Warum du keinen Server brauchst und wie du einen hinzufügst. |
+| [Dinge automatisieren](automate.md) | Geplante Jobs mit drei Beispielen zum Übernehmen. |
+| [Verbinde deine Apps](connect-your-apps.md) | Apps, was jede Berechtigung bedeutet und wer sie nutzen darf. |
+| [Häufige Probleme lösen](fix-common-problems.md) | Die 12 wahrscheinlichsten Probleme und der nächste Schritt. |
+| [Kurze Antworten](quick-faq.md) | Kurze Antworten auf die Fragen, die zuerst gestellt werden. |
 | [Einstellungen](settings.md) | Die Einstellungsseiten, die Suche, Sicherheitsstufen und „Auf Empfehlung zurücksetzen“. |
 | [Geplante Jobs](schedules.md) | Einen Bot zu bestimmten Zeiten von selbst arbeiten lassen. |
 | [Ausgabenlimits für Bots](bot-spending-limits.md) | Tages-, Wochen- und Monatslimits. |

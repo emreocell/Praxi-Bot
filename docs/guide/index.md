@@ -50,6 +50,20 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 - **`bot proxy` and live-view link measurement.** `bot --remote <ENDPOINT> proxy` opens a loopback tunnel to a paired host for measuring direct vs. relay live-view performance. See [`bot proxy`](cli-reference.md#bot-proxy) and [Measuring the live-view link](../design/live-view-link-measurement.md).
 - **Host operations guide.** Day-to-day Linux host logs, service control, upgrades, backups, and troubleshooting now live in [Host operations](host-operations.md).
 
+## Start here (no technical knowledge needed)
+
+Seven short pages in plain words. Read them in this order:
+
+| Page | What it is |
+| --- | --- |
+| [Getting started in 5 minutes](getting-started.md) | Install, get a free key, have your first chat, and learn what a bot is. |
+| [Keep your bot safe](keep-your-bot-safe.md) | The permission levels, approvals, and what leaves your computer. |
+| [Run it on this computer or on a server](local-or-server.md) | Why you do not need a server, and how to add one if you want. |
+| [Automate things](automate.md) | Scheduled jobs, with three examples you can copy. |
+| [Connect your apps](connect-your-apps.md) | Apps, what each permission means, and who may use them. |
+| [Fix common problems](fix-common-problems.md) | The 12 most likely problems and what to do next. |
+| [Quick answers](quick-faq.md) | Short answers to the questions people ask first. |
+
 ## What is where
 
 | You want to... | Read |

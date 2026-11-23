@@ -1,5 +1,21 @@
 [
   {
+    "doc": "tr/automate.md",
+    "title": "İşleri otomatikleştir",
+    "headings": [
+      "İlk işini oluştur",
+      "Kopyalayabileceğin üç örnek",
+      "1. Günlük özet",
+      "2. Haftalık değerlendirme",
+      "3. Fiyat takibi",
+      "Saati sözlerle söyle",
+      "Bilgisayar kapalıysa",
+      "Şimdi çalıştır, düzenle, duraklat, sil",
+      "Güvenlik"
+    ],
+    "summary": "Aynı listede Gelen kutusu ayıklama ve Yedekleme hatırlatması da var."
+  },
+  {
     "doc": "tr/backup-and-restore.md",
     "title": "Eski şifresiz yedekleri geri yükleme",
     "headings": [],
@@ -38,6 +54,20 @@
     "summary": "Sohbet Bu bilgisayar'ı kullanıyorsa ve sahip anahtarı Botlarım bu bilgisayarı kullanabilsin açıksa,"
   },
   {
+    "doc": "tr/connect-your-apps.md",
+    "title": "Uygulamalarını bağla",
+    "headings": [
+      "Bir uygulama bağla",
+      "Uygulamayı kimler kullanabilir",
+      "Her iznin anlamı",
+      "Riskli adımları yine sen onaylarsın",
+      "Veri uygulamanın servisine gider",
+      "Bir uygulama değiştiğinde",
+      "Durum sözcükleri"
+    ],
+    "summary": "Bazı uygulamalara MCP sunucusu denir. Bu yalnızca teknik bir addır: \"bir bota yeni araçlar veren eklenti\". Bundan fazlasını bilmen gerekmez."
+  },
+  {
     "doc": "tr/faq.md",
     "title": "SSS",
     "headings": [
@@ -66,6 +96,39 @@
     "summary": "Erken geliştirme aşamasında. README'de kararlı bir API ve sürüm olmadığı, bazı şeylerin bozulacağı yazıyor."
   },
   {
+    "doc": "tr/fix-common-problems.md",
+    "title": "Sık görülen sorunları çöz",
+    "headings": [
+      "1. \"Praxi'nin yerel servisi durdu\" ya da \"Praxi yerel servisine ulaşamıyor\"",
+      "2. \"Windows Praxi'nin servisini engelledi\" ya da \"bir Windows bileşeni eksik\"",
+      "3. Bot yanıt vermiyor ya da \"Model yanıt veremedi\"",
+      "4. \"bu anahtarı kabul etmedi\"",
+      "5. \"… servisine ulaşılamadı\" ya da \"Bu çok uzun sürdü\"",
+      "6. \"Bu adıma izin vermedin\"",
+      "7. \"Bot aradığı dosyayı ya da programı bulamadı\" ya da \"… kurulu değil\"",
+      "8. \"Güvenli mod açık\"",
+      "9. \"… yanıt vermedi\" ya da \"Bot hedef bilgisayara ulaşamadı\"",
+      "10. \"Bot limitine ulaşıldı\" ya da \"Bu bot limitine yaklaştı\"",
+      "11. Bir uygulama \"Hata\", \"Oturum açılması gerekiyor\" ya da \"Karantinada\" gösteriyor",
+      "12. Zamanlanmış bir iş çalışmadı ya da \"Bu zamanlama geçerli değil\""
+    ],
+    "summary": "Gördüğün iletiyi bul. Adımları sırayla yap. Aşağıdaki ileti başlıkları, uygulamanın gösterdiği sözlerdir."
+  },
+  {
+    "doc": "tr/getting-started.md",
+    "title": "5 dakikada başlangıç",
+    "headings": [
+      "Bot nedir?",
+      "1. Adım: Kur",
+      "2. Adım: Ücretsiz bir anahtar al",
+      "3. Adım: Ne kadar serbest olacağını seç",
+      "4. Adım: Botunla tanış",
+      "İlk sohbetin",
+      "Sonra nereye?"
+    ],
+    "summary": "Bu sayfa seni hiçbir şeyden ilk sohbetine kadar götürür. Kod yazmayı bilmen gerekmez."
+  },
+  {
     "doc": "tr/glossary.md",
     "title": "Sözlük",
     "headings": [],
@@ -90,6 +153,19 @@
     "summary": "Kılavuzun bu bölümü, en çok bakılan sayfaların sade Türkçe çevirisidir. Henüz çevrilmemiş sayfalar İngilizce"
   },
   {
+    "doc": "tr/keep-your-bot-safe.md",
+    "title": "Botunu güvende tut",
+    "headings": [
+      "Üç seviye",
+      "Onaylar",
+      "Durdur",
+      "Bilgisayarından ne çıkar",
+      "Dışarıdan gelen metin hiçbir zaman emir değildir",
+      "İyi alışkanlıklar"
+    ],
+    "summary": "Botun senin bilgisayarında çalışır, yani kontrol sende kalır. Bu sayfa kuralları sade sözlerle anlatır."
+  },
+  {
     "doc": "tr/linux-host.md",
     "title": "Linux sunucuda 7/24 çalışma (sanal ekran, güncelleme, kaldırma)",
     "headings": [
@@ -101,6 +177,24 @@
       "6. Günlükler"
     ],
     "summary": "Bu sayfa, Praxi'yi gece gündüz açık duran bir Linux sunucuda (örneğin ücretsiz ARM Ubuntu VM) çalıştırmak için kopyala-yapıştır komutlarını verir. Sunucu ekle sihirbazı aynı kurulum betiğini çalıştır…"
+  },
+  {
+    "doc": "tr/local-or-server.md",
+    "title": "Bu bilgisayarda mı, sunucuda mı çalışsın",
+    "headings": [
+      "Bu bilgisayarda (varsayılan)",
+      "Sunucuda (isteğe bağlı)",
+      "Sunucu nasıl eklenir",
+      "Geri dön ya da sunucuyu kaldır",
+      "Sunucu yanıt vermiyorsa"
+    ],
+    "summary": "Botların, Praxi'yi kurduğun bilgisayarda çalışır. Praxi açıkken ve bilgisayarın uyanıkken çalışırlar."
+  },
+  {
+    "doc": "tr/quick-faq.md",
+    "title": "Hızlı yanıtlar",
+    "headings": [],
+    "summary": "İnsanların ilk sorduğu sorulara kısa yanıtlar. Daha uzun teknik sorular için SSS sayfasına bak."
   },
   {
     "doc": "tr/schedules.md",

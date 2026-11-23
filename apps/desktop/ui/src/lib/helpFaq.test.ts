@@ -66,3 +66,14 @@ test("search finds answers by any words, ignores case and accents, and falls bac
   assert.equal(faq.faqFor("fr-FR"), faq.faqFor("en"));
   assert.equal(faq.faqFor("tr-TR")[0].q, tr[0].q);
 });
+
+test("the Help window offers the seven plain-words start pages in order, translated in tr and de", () => {
+  const names = (lang: string) => faq.startPages(lang).map((p) => p.doc.slice(p.doc.lastIndexOf("/") + 1));
+  for (const lang of ["en", "tr", "de"]) {
+    assert.deepEqual(names(lang), [...faq.START_PAGES], `${lang} start pages`);
+    for (const page of faq.startPages(lang)) {
+      assert.ok(existsSync(`${GUIDE}${page.doc}`), `docs/guide/${page.doc} exists`);
+      assert.equal(page.doc.startsWith(`${lang}/`), lang !== "en", `${page.doc} is in ${lang}`);
+    }
+  }
+});

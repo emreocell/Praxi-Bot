@@ -1,5 +1,21 @@
 [
   {
+    "doc": "de/automate.md",
+    "title": "Dinge automatisieren",
+    "headings": [
+      "Deinen ersten Job erstellen",
+      "Drei Beispiele zum Übernehmen",
+      "1. Tagesüberblick",
+      "2. Wochenrückblick",
+      "3. Preisbeobachter",
+      "Die Zeit in Worten sagen",
+      "Wenn der Computer aus war",
+      "Jetzt ausführen, bearbeiten, pausieren, löschen",
+      "Sicherheit"
+    ],
+    "summary": "Ein geplanter Job lässt einen Bot zu den Zeiten, die du wählst, von selbst etwas tun. Zum Beispiel: „Sag mir jeden Morgen, was heute ansteht.“ Du richtest ihn einmal ein. Danach läuft er von allein."
+  },
+  {
     "doc": "de/backup-and-restore.md",
     "title": "Ältere unverschlüsselte Backups wiederherstellen",
     "headings": [],
@@ -38,6 +54,20 @@
     "summary": "Bots können in Apps auf deinem Windows-PC arbeiten, wenn der Chat Dieser Computer nutzt und der"
   },
   {
+    "doc": "de/connect-your-apps.md",
+    "title": "Verbinde deine Apps",
+    "headings": [
+      "Eine App verbinden",
+      "Wer die App nutzen darf",
+      "Was jede Berechtigung bedeutet",
+      "Riskante Schritte genehmigst du weiterhin",
+      "Daten gehen an den Dienst der App",
+      "Wenn sich eine App ändert",
+      "Statuswörter"
+    ],
+    "summary": "Eine App lässt deinen Bot mit einem anderen Dienst arbeiten, zum Beispiel Gmail, Notion, Linear oder deinen Dateien. Ohne Apps kann ein Bot nur chatten und seine Grundwerkzeuge nutzen."
+  },
+  {
     "doc": "de/faq.md",
     "title": "FAQ",
     "headings": [
@@ -66,6 +96,39 @@
     "summary": "Es befindet sich in früher Entwicklung. In der README steht, dass es keine stabile API und keine Releases gibt und"
   },
   {
+    "doc": "de/fix-common-problems.md",
+    "title": "Häufige Probleme lösen",
+    "headings": [
+      "1. „Der lokale Dienst von Praxi wurde gestoppt“ oder „Praxi kann seinen lokalen Dienst nicht erreichen“",
+      "2. „Windows hat den Dienst von Praxi blockiert“ oder „eine Windows-Komponente fehlt“",
+      "3. Der Bot antwortet nicht, oder „Das Modell konnte nicht antworten“",
+      "4. „hat diesen Schlüssel nicht akzeptiert“",
+      "5. „… konnte nicht erreicht werden“ oder „Das hat zu lange gedauert“",
+      "6. „Du hast diesen Schritt nicht erlaubt“",
+      "7. „Der Bot konnte die Datei oder das Programm nicht finden“ oder „… ist nicht installiert“",
+      "8. „Der abgesicherte Modus ist aktiv“",
+      "9. „… hat nicht geantwortet“ oder „Der Bot konnte den Zielcomputer nicht erreichen“",
+      "10. „Bot-Limit erreicht“ oder „Dieser Bot nähert sich seinem Limit“",
+      "11. Eine App zeigt „Fehler“, „Anmeldung erforderlich“ oder „In Quarantäne“",
+      "12. Ein geplanter Job lief nicht, oder „Dieser Zeitplan ist ungültig“"
+    ],
+    "summary": "Suche die Meldung, die du siehst. Führe die Schritte der Reihe nach aus. Die Meldungstitel unten sind die Worte, die die App zeigt."
+  },
+  {
+    "doc": "de/getting-started.md",
+    "title": "In 5 Minuten loslegen",
+    "headings": [
+      "Was ist ein Bot?",
+      "Schritt 1: Installieren",
+      "Schritt 2: Einen kostenlosen Schlüssel holen",
+      "Schritt 3: Wie viel Freiheit?",
+      "Schritt 4: Lerne deinen Bot kennen",
+      "Dein erster Chat",
+      "Wie es weitergeht"
+    ],
+    "summary": "Diese Seite bringt dich von null bis zu deinem ersten Chat. Du musst nicht programmieren können."
+  },
+  {
     "doc": "de/glossary.md",
     "title": "Glossar",
     "headings": [],
@@ -90,6 +153,19 @@
     "summary": "Dieser Teil des Handbuchs enthält die am häufigsten gebrauchten Seiten in einfachem Deutsch. Seiten, die noch"
   },
   {
+    "doc": "de/keep-your-bot-safe.md",
+    "title": "Halte deinen Bot sicher",
+    "headings": [
+      "Die drei Stufen",
+      "Genehmigungen",
+      "Stopp",
+      "Was deinen Computer verlässt",
+      "Text von außen ist nie ein Befehl",
+      "Gute Gewohnheiten"
+    ],
+    "summary": "Dein Bot arbeitet auf deinem Computer, also behältst du die Kontrolle. Diese Seite erklärt die Regeln in einfachen Worten."
+  },
+  {
     "doc": "de/linux-host.md",
     "title": "Linux-Dauerbetrieb (virtuelles Display, Update, Deinstallation)",
     "headings": [
@@ -101,6 +177,24 @@
       "6. Logs"
     ],
     "summary": "Diese Seite enthält die Befehle zum Kopieren und Einfügen, um Praxi auf einem Linux-Server laufen zu lassen, der rund um die Uhr an ist, zum Beispiel auf einer kostenlosen ARM-Ubuntu-VM. Der Assisten…"
+  },
+  {
+    "doc": "de/local-or-server.md",
+    "title": "Auf diesem Computer oder auf einem Server",
+    "headings": [
+      "Auf diesem Computer (Standard)",
+      "Auf einem Server (optional)",
+      "So fügst du einen Server hinzu",
+      "Zurückwechseln oder einen Server entfernen",
+      "Wenn ein Server nicht antwortet"
+    ],
+    "summary": "Deine Bots laufen auf dem Computer, auf dem du Praxi installiert hast. Sie arbeiten, solange Praxi offen und dein Computer wach ist."
+  },
+  {
+    "doc": "de/quick-faq.md",
+    "title": "Kurze Antworten",
+    "headings": [],
+    "summary": "Kurze Antworten auf die Fragen, die Leute zuerst stellen. Für die längeren technischen Fragen siehe die FAQ."
   },
   {
     "doc": "de/schedules.md",

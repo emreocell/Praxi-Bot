@@ -42,6 +42,22 @@
     "summary": "The Apps dialog in the desktop app connects Praxi to external services"
   },
   {
+    "doc": "automate.md",
+    "title": "Automate things",
+    "headings": [
+      "Make your first job",
+      "Three examples you can copy",
+      "1. Daily briefing",
+      "2. Weekly review",
+      "3. Price watcher",
+      "Say the time in words",
+      "If the computer was off",
+      "Run now, edit, pause, delete",
+      "Safety"
+    ],
+    "summary": "A scheduled job lets a bot do something by itself at the times you choose. For example: \"every morning, tell me what is on my plate today\". You set it up once. After that it runs on its own."
+  },
+  {
     "doc": "backup-and-restore.md",
     "title": "Restoring older plaintext backups",
     "headings": [],
@@ -198,6 +214,20 @@
     "summary": "Bots can work in apps on your Windows PC when the chat uses This computer and"
   },
   {
+    "doc": "connect-your-apps.md",
+    "title": "Connect your apps",
+    "headings": [
+      "Connect an app",
+      "Who can use the app",
+      "What each permission means",
+      "You still approve risky steps",
+      "Data goes to the app's service",
+      "When an app changes",
+      "Status words"
+    ],
+    "summary": "An app lets your bot work with another service, such as Gmail, Notion, Linear or your files. Without apps, a bot can only chat and use its basic tools."
+  },
+  {
     "doc": "decision-pool.md",
     "title": "Optional decision pool",
     "headings": [
@@ -269,6 +299,39 @@
     "summary": "It is in early development. The README says there is no stable API and no"
   },
   {
+    "doc": "fix-common-problems.md",
+    "title": "Fix common problems",
+    "headings": [
+      "1. \"Praxi's local service stopped\" or \"Praxi cannot reach its local service\"",
+      "2. \"Windows blocked Praxi's service\" or \"a Windows component is missing\"",
+      "3. The bot does not answer, or \"The model could not answer\"",
+      "4. \"did not accept this key\"",
+      "5. \"Could not reach …\" or \"That took too long\"",
+      "6. \"You did not allow that step\"",
+      "7. \"The bot could not find the file or program\", or \"… is not installed\"",
+      "8. \"Safe mode is on\"",
+      "9. \"… did not answer\" or \"The bot could not reach the target computer\"",
+      "10. \"Bot limit reached\" or \"This bot is close to its limit\"",
+      "11. An app shows \"Error\", \"Sign-in required\" or \"Quarantined\"",
+      "12. A scheduled job did not run, or \"That schedule is not valid\""
+    ],
+    "summary": "Find the message you see. Do the steps in order. The message titles below are the words the app shows."
+  },
+  {
+    "doc": "getting-started.md",
+    "title": "Getting started in 5 minutes",
+    "headings": [
+      "What is a bot?",
+      "Step 1: Install",
+      "Step 2: Get a free key",
+      "Step 3: Choose how much freedom",
+      "Step 4: Meet your bot",
+      "Your first chat",
+      "Where to go next"
+    ],
+    "summary": "This page takes you from nothing to your first chat. You do not need to know how to code."
+  },
+  {
     "doc": "glossary.md",
     "title": "Glossary",
     "headings": [],
@@ -310,6 +373,7 @@
     "title": "Praxi user guide",
     "headings": [
       "What changed recently",
+      "Start here (no technical knowledge needed)",
       "What is where",
       "The pieces",
       "Conventions in this guide"
@@ -342,6 +406,19 @@
       "Environment variables"
     ],
     "summary": "There are two ways to get Praxi: the Windows installer (no terminal needed) or"
+  },
+  {
+    "doc": "keep-your-bot-safe.md",
+    "title": "Keep your bot safe",
+    "headings": [
+      "The three levels",
+      "Approvals",
+      "Stop",
+      "What leaves your computer",
+      "Text from the outside is never an order",
+      "Good habits"
+    ],
+    "summary": "Your bot works on your computer, so you stay in charge. This page explains the rules in plain words."
   },
   {
     "doc": "keyboard-shortcuts.md",
@@ -388,6 +465,18 @@
       "Evals"
     ],
     "summary": "Each model invocation now records a purpose. This includes executor requests,"
+  },
+  {
+    "doc": "local-or-server.md",
+    "title": "Run it on this computer or on a server",
+    "headings": [
+      "On this computer (the default)",
+      "On a server (optional)",
+      "How to add a server",
+      "Go back or remove a server",
+      "If a server does not answer"
+    ],
+    "summary": "Your bots run on the computer where you installed Praxi. They work while Praxi is open and your computer is awake."
   },
   {
     "doc": "mcp-server.md",
@@ -456,6 +545,12 @@
       "Custom OpenAI-compatible providers"
     ],
     "summary": "A provider is a service (or local program) that runs a language model for"
+  },
+  {
+    "doc": "quick-faq.md",
+    "title": "Quick answers",
+    "headings": [],
+    "summary": "Short answers to the questions people ask first. For the longer technical questions, see the FAQ."
   },
   {
     "doc": "release-linux.md",

@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { DEFAULT_STOP_HOTKEY } from "../config/product";
-import { DOCS_INDEX_URL, docUrl, faqFor, guideFor, guideUrl, searchFaq, searchGuide } from "../lib/helpFaq";
+import { DOCS_INDEX_URL, docUrl, faqFor, guideFor, guideUrl, searchFaq, searchGuide, startPages } from "../lib/helpFaq";
 import { openExternal } from "../lib/externalLink";
 import { resolveKeys, SHORTCUT_GROUPS, SHORTCUTS, slashShortcuts } from "../lib/shortcuts";
 import { DiagnosticInfo } from "./DiagnosticInfo";
@@ -32,7 +32,11 @@ export function HelpModal({
   const [query, setQuery] = useState("");
   const ctx = { stopHotkey: stopHotkey || DEFAULT_STOP_HOTKEY, sendWith };
   const items = useMemo(() => searchFaq(faqFor(i18n.language), query), [i18n.language, query]);
-  const guidePages = useMemo(() => searchGuide(guideFor(i18n.language), query), [i18n.language, query]);
+  const searching = query.trim() !== "";
+  const guidePages = useMemo(
+    () => (searching ? searchGuide(guideFor(i18n.language), query) : startPages(i18n.language)),
+    [i18n.language, query, searching]
+  );
   return (
     <Modal open={open} onClose={onClose} label={t("help.center.title")} size="md">
       <div className={styles.root} data-testid="help-center">
@@ -70,8 +74,8 @@ export function HelpModal({
           </ul>
         )}
         {guidePages.length > 0 ? (
-          <section className={styles.guide} aria-label={t("help.center.guideTitle")} data-testid="help-guide-results">
-            <h3 className={styles.groupTitle}>{t("help.center.guideTitle")}</h3>
+          <section className={styles.guide} aria-label={t(searching ? "help.center.guideTitle" : "help.center.startTitle")} data-testid="help-guide-results">
+            <h3 className={styles.groupTitle}>{t(searching ? "help.center.guideTitle" : "help.center.startTitle")}</h3>
             <ul className={styles.list}>
               {guidePages.map((page) => (
                 <li key={page.doc}>
@@ -83,7 +87,7 @@ export function HelpModal({
                 </li>
               ))}
             </ul>
-            {i18n.language.slice(0, 2).toLowerCase() !== "en" ? (
+            {i18n.language.slice(0, 2).toLowerCase() !== "en" && guidePages.some((page) => !page.doc.includes("/")) ? (
               <p className={styles.guideNote}>{t("help.center.guideNote")}</p>
             ) : null}
           </section>

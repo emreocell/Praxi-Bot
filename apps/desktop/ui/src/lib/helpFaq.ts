@@ -63,6 +63,23 @@ export function guideFor(language: string): readonly GuideEntry[] {
 
 export { searchGuide };
 
+/** The plain-words pages shown in the Help window before anyone types: read them in this order. */
+export const START_PAGES: readonly string[] = [
+  "getting-started.md",
+  "keep-your-bot-safe.md",
+  "local-or-server.md",
+  "automate.md",
+  "connect-your-apps.md",
+  "fix-common-problems.md",
+  "quick-faq.md"
+];
+
+/** The start pages in the user's language (English for a page that is not translated yet). */
+export function startPages(language: string): GuideEntry[] {
+  const pages = guideFor(language);
+  return START_PAGES.flatMap((name) => pages.filter((p) => p.doc.slice(p.doc.lastIndexOf("/") + 1) === name));
+}
+
 export function guideUrl(entry: GuideEntry): string {
   return `${DOCS_BASE_URL}${entry.doc}`;
 }
