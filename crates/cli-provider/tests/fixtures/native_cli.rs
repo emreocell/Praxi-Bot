@@ -171,6 +171,12 @@ fn codex(args: &[String]) {
         "approvalPolicy":thread["params"]["approvalPolicy"]}}));
     let turn = read(&mut stdin);
     log("prompt", &turn["params"]["input"].to_string());
+    if std::env::var("FAKE_MODE").as_deref() == Ok("usage-then-cut") {
+        emit(&json!({"method":"thread/tokenUsage/updated","params":{
+            "tokenUsage":{"total":{"inputTokens":12,"outputTokens":4}}
+        }}));
+        return;
+    }
     emit(
         &json!({"jsonrpc":"2.0","method":"item/reasoning/summaryTextDelta","params":{"delta":"PRIVATE_THINKING"}}),
     );

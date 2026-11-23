@@ -48,8 +48,8 @@ impl UsageAcc {
     /// Counts are cumulative: later events overwrite earlier ones.
     fn absorb(&mut self, u: &Value) {
         let get = |k: &str| u.get(k).and_then(Value::as_u64);
-        self.seen = true;
         if let Some(n) = get("input_tokens") {
+            self.seen = true;
             self.input = n;
         }
         if let Some(n) = get("cache_read_input_tokens") {
@@ -59,6 +59,7 @@ impl UsageAcc {
             self.cache_write = Some(n);
         }
         if let Some(n) = get("output_tokens") {
+            self.seen = true;
             self.output = n;
         }
     }

@@ -360,7 +360,7 @@ mod tests {
         let e = GeminiEmbedder::new("k", "m").with_base_url(server.uri());
         let texts: Vec<String> = (0..150).map(|i| i.to_string()).collect();
         let err = e.embed(&texts, EmbedTask::Document).await.unwrap_err();
-        assert!(err.to_string().contains("500"));
+        assert_eq!(err.class(), Some(FailureClass::Overloaded));
         // Stops at the first failing chunk.
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }

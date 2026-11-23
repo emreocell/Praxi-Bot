@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{fmt::Write as _, time::Duration};
 
 use futures::StreamExt;
 use provider_catalog::{
@@ -57,18 +57,19 @@ impl Adapter {
         build_chat_provider(&entry, config, None).unwrap()
     }
 
-    fn usage_and_error(self) -> String {
+    fn usage_and_error(self, counts: Option<(u64, u64)>) -> String {
+        let (input, output) = counts.unzip();
         let (usage, error) = match self {
             Self::OpenAi | Self::LlamaServer => (
-                json!({"usage":{"prompt_tokens":19,"completion_tokens":2}}),
+                json!({"usage":{"prompt_tokens":input,"completion_tokens":output}}),
                 json!({"error":{"code":"rate_limit_exceeded","message":"slow down"}}),
             ),
             Self::Anthropic => (
-                json!({"type":"message_start","message":{"usage":{"input_tokens":19,"output_tokens":2}}}),
+                json!({"type":"message_start","message":{"usage":{"input_tokens":input,"output_tokens":output}}}),
                 json!({"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}),
             ),
             Self::Gemini => (
-                json!({"usageMetadata":{"promptTokenCount":19,"candidatesTokenCount":2}}),
+                json!({"usageMetadata":{"promptTokenCount":input,"candidatesTokenCount":output}}),
                 json!({"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"slow down"}}),
             ),
         };
@@ -88,10 +89,11 @@ impl Adapter {
                 "name":"write","args":{"path":"report.txt"}
             }}]}}]})],
         };
-        frames
-            .into_iter()
-            .map(|frame| format!("data: {frame}\n\n"))
-            .collect()
+        let mut body = String::new();
+        for frame in frames {
+            writeln!(body, "data: {frame}\n").unwrap();
+        }
+        body
     }
 
     fn text_frame(self) -> String {
@@ -133,7 +135,7 @@ async fn adapters_preserve_usage_on_stream_errors_and_classify_the_failure() {
         Mock::given(method("POST"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .set_body_raw(adapter.usage_and_error(), "text/event-stream"),
+                    .set_body_raw(adapter.usage_and_error(Some((19, 2))), "text/event-stream"),
             )
             .expect(1)
             .mount(&server)
@@ -148,6 +150,32 @@ async fn adapters_preserve_usage_on_stream_errors_and_classify_the_failure() {
             matches!(chunks.as_slice(), [Ok(ChatChunk::Usage(u)), Err(e)]
                 if u.prompt_tokens == 19 && u.completion_tokens == 2
                     && e.class() == FailureClass::RateLimit),
+            "{adapter:?}: {chunks:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn missing_usage_does_not_become_a_zero_cost_report() {
+    for adapter in Adapter::ALL {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(adapter.usage_and_error(None), "text/event-stream"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let p = adapter.build(server.uri(), config());
+        let chunks = p
+            .stream_once(request())
+            .await
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
+        assert!(
+            matches!(chunks.as_slice(), [Err(error)] if error.class() == FailureClass::RateLimit),
             "{adapter:?}: {chunks:?}"
         );
     }

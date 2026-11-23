@@ -243,12 +243,6 @@ fn main() {
         assert_eq!(turn["method"], "turn/start");
         log("stdin", &turn.to_string());
         emit(json!({"id":3,"result":{}}));
-        if mode == "usage-then-cut" {
-            emit(json!({"method":"thread/tokenUsage/updated","params":{
-                "tokenUsage":{"last":{"inputTokens":12,"outputTokens":4}}
-            }}));
-            return;
-        }
         if let Some(method) = mode.strip_prefix("bad-method:") {
             if method.contains("Delta") || method.contains("patchUpdated") {
                 emit(json!({"method": method, "params": {}}));

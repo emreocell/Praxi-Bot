@@ -83,10 +83,9 @@ impl EventDecoder for Decoder {
                 "promptTokenCount",
                 "candidatesTokenCount",
                 "thoughtsTokenCount",
-                "cachedContentTokenCount",
             ]
             .iter()
-            .any(|key| u.get(key).is_some())
+            .any(|key| u.get(key).and_then(Value::as_u64).is_some())
         {
             self.usage = Some(parse_usage(u)?);
         }

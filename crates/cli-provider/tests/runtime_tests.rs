@@ -316,17 +316,15 @@ async fn quota_and_unbounded_lines_are_non_retryable() {
 
 #[tokio::test]
 async fn usage_reported_before_an_unfinished_turn_reaches_the_host() {
-    for engine in [Engine::Claude, Engine::Codex] {
-        let (_dir, cli) = fixture(engine, "usage-then-cut", false);
-        let host = Host::new(true);
-        let error = cli
-            .run_turn(turn(), host.clone(), CancellationToken::new())
-            .await
-            .unwrap_err();
-        assert_eq!(error, CliError::Protocol, "{engine:?}");
-        assert_eq!(*host.usage.lock(), [(12, 4)], "{engine:?}");
-        assert_eq!(host.calls.load(Ordering::SeqCst), 0);
-    }
+    let (_dir, cli) = fixture(Engine::Claude, "usage-then-cut", false);
+    let host = Host::new(true);
+    let error = cli
+        .run_turn(turn(), host.clone(), CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error, CliError::Protocol);
+    assert_eq!(*host.usage.lock(), [(12, 4)]);
+    assert_eq!(host.calls.load(Ordering::SeqCst), 0);
 }
 #[tokio::test]
 async fn cancellation_and_future_drop_reap_child() {

@@ -137,18 +137,20 @@ fn parse_finish(s: &str) -> FinishReason {
 }
 
 fn parse_usage(u: &Value) -> Option<Usage> {
-    if !u.is_object() {
+    let get = |k: &str| u.get(k).and_then(Value::as_u64);
+    let prompt = get("prompt_tokens");
+    let completion = get("completion_tokens");
+    if prompt.is_none() && completion.is_none() {
         return None;
     }
-    let get = |k: &str| u.get(k).and_then(Value::as_u64);
     let cached = u
         .pointer("/prompt_tokens_details/cached_tokens")
         .and_then(Value::as_u64)
         // DeepSeek reports cache hits at the top level.
         .or_else(|| get("prompt_cache_hit_tokens"));
     Some(Usage {
-        prompt_tokens: get("prompt_tokens").unwrap_or(0),
-        completion_tokens: get("completion_tokens").unwrap_or(0),
+        prompt_tokens: prompt.unwrap_or(0),
+        completion_tokens: completion.unwrap_or(0),
         cached_tokens: cached,
         cache_write_tokens: None,
     })
