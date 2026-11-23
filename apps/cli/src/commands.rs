@@ -151,6 +151,7 @@ pub fn providers_add(
     key: Option<&SecretValue>,
     model: Option<&str>,
     test: bool,
+    json_out: bool,
     out: &mut dyn FnMut(&str),
 ) -> Result<ProviderSettings> {
     if test {
@@ -160,16 +161,39 @@ pub fn providers_add(
                 "provider connection test failed: {e}; verify your API key and network, or pass `--no-test` to save anyway"
             )
         })?;
-        out("connection OK");
     }
     let (settings, cfg) = configure_provider(env, choice, key, model)?;
     let default = cfg.effective_default().map(|d| d.id.clone());
-    out(&format!(
-        "added {} (global default: {})",
-        settings.id,
-        default.as_deref().unwrap_or("-")
-    ));
+    if json_out {
+        out(&provider_json(&settings, default.as_deref(), test).to_string());
+    } else {
+        if test {
+            out("connection OK");
+        }
+        out(&format!(
+            "added {} (global default: {})",
+            settings.id,
+            default.as_deref().unwrap_or("-")
+        ));
+    }
     Ok(settings)
+}
+
+/// One provider after `add`, without its secret value.
+fn provider_json(
+    settings: &ProviderSettings,
+    default: Option<&str>,
+    tested: bool,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": settings.id,
+        "default": default == Some(settings.id.as_str()),
+        "enabled": settings.enabled,
+        "kind": if settings.cli.is_some() { "cli" } else { "api" },
+        "model": settings.default_model,
+        "key": settings.key.as_ref().map(|key| key.name().to_owned()),
+        "tested": tested,
+    })
 }
 
 /// The entry to use for an already configured provider.
@@ -196,6 +220,7 @@ pub fn entry_of(settings: &ProviderSettings, env: &SetupEnv<'_>) -> Result<Provi
 pub fn providers_test(
     env: &SetupEnv<'_>,
     id: Option<&str>,
+    json_out: bool,
     out: &mut dyn FnMut(&str),
 ) -> Result<()> {
     let cfg = ProviderConfig::load(&config_path(env.data_dir))?;
@@ -216,12 +241,21 @@ pub fn providers_test(
         .build()?;
     let model = settings.model_ref();
     let report = rt.block_on(test_connection(&*provider, model.as_ref()))?;
-    out(&format!(
-        "{}: OK ({} models listed)",
-        settings.id,
-        report.models.len()
-    ));
+    if json_out {
+        out(&provider_test_json(&settings.id, &report.models).to_string());
+    } else {
+        out(&format!(
+            "{}: OK ({} models listed)",
+            settings.id,
+            report.models.len()
+        ));
+    }
     Ok(())
+}
+
+/// A successful `providers test`; `models` are the provider's listed ids.
+fn provider_test_json(id: &str, models: &[String]) -> serde_json::Value {
+    serde_json::json!({"id": id, "ok": true, "models": models})
 }
 
 /// `bot providers detect-local`: one JSON array of the local model servers found on loopback.
@@ -245,6 +279,7 @@ pub fn providers_default(
     data_dir: &std::path::Path,
     id: &str,
     model: Option<&str>,
+    json_out: bool,
     out: &mut dyn FnMut(&str),
 ) -> Result<()> {
     let path = config_path(data_dir);
@@ -259,7 +294,11 @@ pub fn providers_default(
         cfg.set_model(id, m)?;
     }
     cfg.save(&path)?;
-    out(&format!("global default provider: {id}"));
+    if json_out {
+        out(&serde_json::json!({"default": id, "model": model}).to_string());
+    } else {
+        out(&format!("global default provider: {id}"));
+    }
     Ok(())
 }
 
@@ -316,6 +355,20 @@ mod tests {
         let mut keys: Vec<_> = v[0].as_object().unwrap().keys().cloned().collect();
         keys.sort();
         assert_eq!(keys, ["default", "enabled", "id", "key", "kind", "model"]);
+
+        let mut added = ProviderSettings::new("a", 1);
+        added.default_model = Some("m1".into());
+        assert_eq!(
+            provider_json(&added, Some("a"), true),
+            serde_json::json!({
+                "id": "a", "default": true, "enabled": true, "kind": "api",
+                "model": "m1", "key": null, "tested": true,
+            })
+        );
+        assert_eq!(
+            provider_test_json("a", &["m1".into(), "m2".into()]),
+            serde_json::json!({"id": "a", "ok": true, "models": ["m1", "m2"]})
+        );
     }
 
     #[test]
@@ -328,11 +381,16 @@ mod tests {
         cfg.save(&path).unwrap();
         let lines = collect(|o| providers_list(d.path(), o));
         assert!(lines[0].starts_with('*') && lines[0].contains(" a "));
-        collect(|o| providers_default(d.path(), "b", Some("mm"), o));
+        collect(|o| providers_default(d.path(), "b", Some("mm"), false, o));
         let lines = collect(|o| providers_list(d.path(), o));
         assert!(lines[1].starts_with('*') && lines[1].contains("mm"));
+        let lines = collect(|o| providers_default(d.path(), "b", Some("mm"), true, o));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&lines[0]).unwrap(),
+            serde_json::json!({"default": "b", "model": "mm"})
+        );
         let mut sink = |_: &str| {};
-        assert!(providers_default(d.path(), "zzz", None, &mut sink).is_err());
+        assert!(providers_default(d.path(), "zzz", None, false, &mut sink).is_err());
     }
 
     #[test]

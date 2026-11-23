@@ -71,19 +71,54 @@ fn setup_stores_the_token_without_printing_it_and_disable_keeps_it() {
     let store = MemoryStore::new();
     assert!(!telegram_configured(&store).unwrap());
     let mut said = Vec::new();
-    telegram_setup(&store, dir.path(), &SecretValue::new(TOKEN), &mut |l| {
-        said.push(l.to_owned());
-    })
+    telegram_setup(
+        &store,
+        dir.path(),
+        &SecretValue::new(TOKEN),
+        false,
+        &mut |l| {
+            said.push(l.to_owned());
+        },
+    )
     .unwrap();
     assert!(telegram_configured(&store).unwrap());
     assert!(telegram_enabled(dir.path()));
     assert!(said.iter().all(|l| !l.contains(TOKEN)), "{said:?}");
     assert!(
-        telegram_setup(&store, dir.path(), &SecretValue::new("  "), &mut |_| {}).is_err(),
+        telegram_setup(
+            &store,
+            dir.path(),
+            &SecretValue::new("  "),
+            false,
+            &mut |_| {}
+        )
+        .is_err(),
         "an empty token is refused"
     );
 
-    telegram_disable(dir.path(), &mut |_| {}).unwrap();
+    let mut json_out = Vec::new();
+    telegram_setup(
+        &store,
+        dir.path(),
+        &SecretValue::new(TOKEN),
+        true,
+        &mut |line| json_out.push(line.to_owned()),
+    )
+    .unwrap();
+    let setup: serde_json::Value = serde_json::from_str(&json_out[0]).unwrap();
+    assert_eq!(setup["channel"], "telegram");
+    assert_eq!(setup["configured"], true);
+    assert_eq!(setup["enabled"], true);
+    assert_eq!(setup["restart_required"], true);
+    assert!(!json_out[0].contains(TOKEN));
+
+    let mut json_out = Vec::new();
+    telegram_disable(dir.path(), true, &mut |line| json_out.push(line.to_owned())).unwrap();
+    let disabled: serde_json::Value = serde_json::from_str(&json_out[0]).unwrap();
+    assert_eq!(
+        disabled,
+        json!({"channel": "telegram", "enabled": false, "restart_required": true})
+    );
     assert!(!telegram_enabled(dir.path()));
     assert!(telegram_configured(&store).unwrap(), "the token stays");
 }

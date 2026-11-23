@@ -267,9 +267,9 @@ Manage the e-mail accounts of the running daemon (see [email](email.md)). Change
 | --- | --- |
 | `bot providers list` | List configured providers (`*` = global default). `--json`: array of `{id, default, enabled, kind: "api"\|"cli", model, key}` (`key` is the secret's name, never its value) |
 | `bot providers detect-local` | Look for a local model server (Ollama, LM Studio, llama.cpp) on loopback and print what it found as JSON. Contacts only `127.0.0.1` |
-| `bot providers add <ID>` | Add or update a provider. Built-in catalog IDs: `anthropic`, `deepseek`, `gemini`, `gemini-openai-compat`, `lmstudio`, `ollama`, `openrouter`. Options: `--base-url <URL>` (custom OpenAI-compatible provider), `--key-env <VAR>`, `--model <MODEL>`, `--no-test` |
-| `bot providers test [ID]` | Test a provider's connection (the default provider when omitted) |
-| `bot providers default <ID>` | Set the global default provider. Option: `--model <MODEL>` |
+| `bot providers add <ID>` | Add or update a provider. Built-in catalog IDs: `anthropic`, `deepseek`, `gemini`, `gemini-openai-compat`, `lmstudio`, `ollama`, `openrouter`. Options: `--base-url <URL>` (custom OpenAI-compatible provider), `--key-env <VAR>`, `--model <MODEL>`, `--no-test`; `--json` prints `{id, default, enabled, kind, model, key, tested}` and never the key |
+| `bot providers test [ID]` | Test a provider's connection (the default provider when omitted); `--json` prints `{id, ok, models}` |
+| `bot providers default <ID>` | Set the global default provider. Option: `--model <MODEL>`; `--json` prints `{default, model}` |
 
 ### `bot catalog`
 
@@ -295,10 +295,10 @@ default; `--live` is the only network call and is opt-in.
 
 | Subcommand | Meaning |
 | --- | --- |
-| `setup [--token-env <VAR>]` | Store the BotFather token (hidden prompt) and enable the channel |
+| `setup [--token-env <VAR>]` | Store the BotFather token (hidden prompt) and enable the channel; `--json` prints `{channel, configured, enabled, restart_required}` |
 | `pair` | Print a one-time 6-digit pairing code (valid 10 minutes) from the running daemon |
 | `status` | Show whether the channel is configured, running, and how many users are paired |
-| `disable` | Turn the channel off (the token stays stored) |
+| `disable` | Turn the channel off (the token stays stored); `--json` prints `{channel, enabled, restart_required}` |
 
 ### `bot completions <SHELL>`
 

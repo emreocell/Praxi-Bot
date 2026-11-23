@@ -86,12 +86,21 @@ pub fn telegram_setup(
     store: &dyn SecretStore,
     data_dir: &Path,
     token: &SecretValue,
+    json_out: bool,
     out: &mut dyn FnMut(&str),
 ) -> Result<()> {
     store_bot_token(store, token.expose())?;
     set_telegram_enabled(data_dir, true)?;
-    out("Telegram bot token stored; the channel is enabled.");
-    out("Restart `bot serve`, then run `bot channels telegram pair`.");
+    if json_out {
+        out(&serde_json::json!({
+            "channel": "telegram", "configured": true, "enabled": true,
+            "restart_required": true,
+        })
+        .to_string());
+    } else {
+        out("Telegram bot token stored; the channel is enabled.");
+        out("Restart `bot serve`, then run `bot channels telegram pair`.");
+    }
     Ok(())
 }
 
@@ -99,9 +108,16 @@ pub fn telegram_setup(
 ///
 /// # Errors
 /// The settings file cannot be written.
-pub fn telegram_disable(data_dir: &Path, out: &mut dyn FnMut(&str)) -> Result<()> {
+pub fn telegram_disable(data_dir: &Path, json_out: bool, out: &mut dyn FnMut(&str)) -> Result<()> {
     set_telegram_enabled(data_dir, false)?;
-    out("Telegram channel disabled (the token stays stored); restart `bot serve` to stop it.");
+    if json_out {
+        out(&serde_json::json!({
+            "channel": "telegram", "enabled": false, "restart_required": true,
+        })
+        .to_string());
+    } else {
+        out("Telegram channel disabled (the token stays stored); restart `bot serve` to stop it.");
+    }
     Ok(())
 }
 

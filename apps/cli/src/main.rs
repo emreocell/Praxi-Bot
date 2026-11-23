@@ -838,7 +838,7 @@ fn run() -> Result<()> {
                 ChannelsCmd::Telegram {
                     action: TelegramCmd::Disable,
                 },
-        } => return channels::telegram_disable(&data_dir, &mut say),
+        } => return channels::telegram_disable(&data_dir, cli.json, &mut say),
         _ => {}
     }
 
@@ -858,7 +858,15 @@ fn run() -> Result<()> {
         } => return commands::providers_list(&data_dir, &mut say),
         Command::Providers {
             action: ProvidersCmd::Default { id, model },
-        } => return commands::providers_default(&data_dir, id, model.as_deref(), &mut say),
+        } => {
+            return commands::providers_default(
+                &data_dir,
+                id,
+                model.as_deref(),
+                cli.json,
+                &mut say,
+            );
+        }
         _ => {}
     }
 
@@ -982,11 +990,14 @@ fn run() -> Result<()> {
                     key.as_ref(),
                     model.as_deref(),
                     !no_test,
+                    cli.json,
                     &mut say,
                 )
                 .map(|_| ())
             }
-            ProvidersCmd::Test { id } => commands::providers_test(&env, id.as_deref(), &mut say),
+            ProvidersCmd::Test { id } => {
+                commands::providers_test(&env, id.as_deref(), cli.json, &mut say)
+            }
             ProvidersCmd::DetectLocal => commands::providers_detect_local(&mut say),
             ProvidersCmd::List | ProvidersCmd::Default { .. } => Ok(()),
         },
@@ -1215,7 +1226,7 @@ fn run_telegram(
                 token_env.as_deref(),
                 "Telegram bot token (from @BotFather; input hidden)",
             )?;
-            channels::telegram_setup(store, data_dir, &token, say)
+            channels::telegram_setup(store, data_dir, &token, cli.json, say)
         }
         TelegramCmd::Status => {
             let configured = channels::telegram_configured(store)?;
