@@ -85,11 +85,15 @@ test("setNeedsCount and setTrayLabels resolve without error in browser fallback"
   await shell.setTrayLabels({
     toggle: "Toggle",
     needs: "Needs",
+    pauseAll: "Pause all",
     stopAll: "Stop All",
     quit: "Quit",
     tooltip: "Praxi",
-    tooltipNeeds: "Praxi (needs)"
+    tooltipNeeds: "Praxi (needs)",
+    stillRunningTitle: "Still running",
+    stillRunningBody: "In the tray"
   });
+  await shell.setKeepInTray(true, false);
 });
 
 test("onShellEvent returns a no-op unsubscribe function and never invokes handler", () => {

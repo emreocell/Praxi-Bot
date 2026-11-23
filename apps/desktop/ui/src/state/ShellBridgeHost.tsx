@@ -18,8 +18,10 @@ import {
   onShellEvent,
   SHELL_EVENT_NOTIFICATION_ACTION,
   SHELL_EVENT_NOTIFICATION_ACTIVATED,
+  SHELL_EVENT_TRAY_NOTICE_SHOWN,
   SHELL_EVENT_TRAY_OPEN_NEEDS,
   SHELL_EVENT_TRAY_STOP_ALL,
+  setKeepInTray,
   setNeedsCount,
   setTrayLabels,
   showNotification,
@@ -37,6 +39,8 @@ export interface ShellBridgeSettings extends NotifyPrefs {
   notifyPrivate: boolean;
   quietHours: QuietHours;
   mutedBotIds: string[];
+  keepInTray: boolean;
+  trayNoticeSeen: boolean;
 }
 
 /**
@@ -47,11 +51,13 @@ export interface ShellBridgeSettings extends NotifyPrefs {
 export function ShellBridgeHost({
   settings,
   onOpenChat,
-  onOpenNeeds
+  onOpenNeeds,
+  onTrayNoticeShown
 }: {
   settings: ShellBridgeSettings;
   onOpenChat: (chatId: string) => void;
   onOpenNeeds: () => void;
+  onTrayNoticeShown: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const { bots, needs, onDaemonEvent, refreshRuns } = useDaemon();
@@ -66,6 +72,8 @@ export function ShellBridgeHost({
   openChatRef.current = onOpenChat;
   const openNeedsRef = useRef(onOpenNeeds);
   openNeedsRef.current = onOpenNeeds;
+  const trayNoticeRef = useRef(onTrayNoticeShown);
+  trayNoticeRef.current = onTrayNoticeShown;
   const needsRef = useRef(needs);
   needsRef.current = needs;
   // The same decision path as the approval card (owner key for a standing choice included).
@@ -187,12 +195,22 @@ export function ShellBridgeHost({
     void setTrayLabels({
       toggle: t("tray.toggle"),
       needs: t("tray.needs"),
+      pauseAll: t("tray.pauseAll"),
       stopAll: t("tray.stopAll"),
       quit: t("tray.quit"),
       tooltip: t("tray.tooltip"),
-      tooltipNeeds: t("tray.tooltipNeeds")
+      tooltipNeeds: t("tray.tooltipNeeds"),
+      stillRunningTitle: t("tray.stillRunningTitle"),
+      stillRunningBody: t("tray.stillRunningBody")
     }).catch(() => {});
   }, [t, language]);
+
+  // The shell decides what closing the window does: tell it the user's choice.
+  useEffect(() => {
+    void setKeepInTray(settings.keepInTray, settings.trayNoticeSeen).catch(
+      () => {}
+    );
+  }, [settings.keepInTray, settings.trayNoticeSeen]);
 
   // 3. tray / notification clicks
   useEffect(() => {
@@ -240,6 +258,9 @@ export function ShellBridgeHost({
           })
           .catch(() => {});
       }),
+      onShellEvent<null>(SHELL_EVENT_TRAY_NOTICE_SHOWN, () =>
+        trayNoticeRef.current()
+      ),
       onShellEvent<null>(SHELL_EVENT_TRAY_OPEN_NEEDS, () =>
         openNeedsRef.current()
       ),
