@@ -1717,6 +1717,11 @@
         "failed": "Couldn't look at a page",
         "running": "Looking at a page"
       },
+      "calculate": {
+        "done": "Calculated",
+        "failed": "Couldn't calculate",
+        "running": "Calculating"
+      },
       "desktop_key": {
         "done": "Pressed keys on the computer",
         "failed": "Didn't press keys",
@@ -1901,6 +1906,11 @@
         "done": "Wrote a skill",
         "failed": "Didn't write a skill",
         "running": "Writing a skill"
+      },
+      "time_now": {
+        "done": "Checked the date and time",
+        "failed": "Couldn't check the date and time",
+        "running": "Checking the date and time"
       },
       "todo": {
         "done": "Updated the plan",

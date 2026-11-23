@@ -1717,6 +1717,11 @@
         "failed": "Sayfaya bakılamadı",
         "running": "Sayfaya bakılıyor"
       },
+      "calculate": {
+        "done": "Hesaplandı",
+        "failed": "Hesaplanamadı",
+        "running": "Hesaplanıyor"
+      },
       "desktop_key": {
         "done": "Bilgisayarda tuşa basıldı",
         "failed": "Bilgisayarda tuşa basılmadı",
@@ -1901,6 +1906,11 @@
         "done": "Beceri yazıldı",
         "failed": "Beceri yazılmadı",
         "running": "Beceri yazılıyor"
+      },
+      "time_now": {
+        "done": "Tarih ve saat kontrol edildi",
+        "failed": "Tarih ve saat kontrol edilemedi",
+        "running": "Tarih ve saat kontrol ediliyor"
       },
       "todo": {
         "done": "Plan güncellendi",

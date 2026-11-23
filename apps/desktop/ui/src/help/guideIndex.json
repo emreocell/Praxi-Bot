@@ -18,7 +18,9 @@
   {
     "doc": "agent-tools.md",
     "title": "Notes",
-    "headings": [],
+    "headings": [
+      "Clock and calculator"
+    ],
     "summary": "Every bot has a small built-in scratchpad between runs: a plan for a long task, a checklist, facts it will need tomorrow. Tools: notes_read (list notes, read one, or search) and notes_write (replace,…"
   },
   {
