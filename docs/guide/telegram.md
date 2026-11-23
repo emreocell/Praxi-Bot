@@ -46,9 +46,10 @@ daemon messages are not translated.
   the desktop app does not pass it to the daemon yet.)
 - Only the button labels change with the language. What a button does, the
   information on the card and what is masked stay the same.
-- Before a chat is paired it has no language, so `/pair` errors and the
-  refusal sent to accounts that are not paired are in English. The reply to a
-  successful `/pair` already uses the chat's new language.
+- Before a chat is paired it has no language, so `/pair` errors are in English.
+  The reply to a successful `/pair` already uses the chat's new language.
+- The refusal sent to accounts that are not paired is **English on purpose**:
+  the channel knows nothing about a stranger's language and does not guess.
 - Text that comes from elsewhere keeps its own language: bot names, error
   details reported by the daemon, the daemon's status value and transcribed
   voice notes.

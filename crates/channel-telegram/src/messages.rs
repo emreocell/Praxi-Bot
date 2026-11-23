@@ -128,6 +128,9 @@ pub(crate) enum Message<'a> {
     CouldNotProcess {
         id: i64,
     },
+    RunError {
+        message: &'a str,
+    },
 }
 
 /// Turkish object form of an attachment label from `TgMedia::label` ("photo" ->
@@ -275,6 +278,8 @@ impl<'a> Message<'a> {
             (Self::RunFinished, true) => "✅ Çalışma bitti.".into(),
             (Self::CouldNotProcess { id }, false) => format!("Could not process message {id}.").into(),
             (Self::CouldNotProcess { id }, true) => format!("{id} numaralı mesaj işlenemedi.").into(),
+            (Self::RunError { message }, false) => format!("⚠️ Error: {message}").into(),
+            (Self::RunError { message }, true) => format!("⚠️ Hata: {message}").into(),
             (Self::LanguageSet, false) => "This chat now uses English.".into(),
             (Self::LanguageSet, true) => "Bu sohbet artık Türkçe.".into(),
             (Self::LanguageUsage { current }, false) => {
@@ -327,6 +332,180 @@ mod tests {
         );
         assert_eq!(Language::for_new_pairing(Some("de"), None), Language::EN);
         assert_eq!(Language::for_new_pairing(None, None), Language::EN);
+    }
+
+    /// The text each message must show exactly once in every language. The match has
+    /// no wildcard, so a new message does not compile until it is listed here.
+    fn arguments(message: Message<'_>) -> Vec<String> {
+        match message {
+            Message::BotNotFound { query } => vec![query.into()],
+            Message::ApproveForTask { program } => vec![program.into()],
+            Message::ApprovalHeading { tool, .. }
+            | Message::ApprovalMasked { tool }
+            | Message::ApprovalDetailsUnavailable { tool }
+            | Message::ApprovalTooLarge { tool }
+            | Message::ApprovalDesktopOnly { tool } => vec![tool.into()],
+            Message::BotSwitched { name, id } => vec![name.into(), id.into()],
+            Message::RunStoppedId { run } => vec![run.into()],
+            Message::Status {
+                status,
+                version,
+                uptime_secs,
+                pending,
+                bot,
+                run,
+            } => {
+                let mut parts = vec![
+                    status.into(),
+                    version.into(),
+                    uptime_secs.to_string(),
+                    pending.to_string(),
+                ];
+                parts.extend(bot.map(Into::into));
+                parts.extend(run.map(Into::into));
+                parts
+            }
+            Message::Unsupported { label } => vec![label.into()],
+            Message::SubagentFailed { error } | Message::RunFailed { error } => {
+                vec![error.into()]
+            }
+            Message::CouldNotProcess { id } => vec![id.to_string()],
+            Message::RunError { message } => vec![message.into()],
+            Message::NoBots
+            | Message::AvailableBots
+            | Message::InputTooLong
+            | Message::NoActiveRun
+            | Message::RunStopped
+            | Message::UnknownOrExpiredRequest
+            | Message::OnceOnly
+            | Message::ApproveOnce
+            | Message::Always
+            | Message::Deny
+            | Message::Approved
+            | Message::Denied
+            | Message::Answered
+            | Message::ApprovalIncomplete
+            | Message::LanguageSet
+            | Message::LanguageUsage { .. }
+            | Message::VoiceUnavailable
+            | Message::VoiceTooLong
+            | Message::VoiceFailed
+            | Message::VoiceEmpty
+            | Message::PairUsage
+            | Message::Paired
+            | Message::AlreadyPaired
+            | Message::PairExpired
+            | Message::PairInvalid
+            | Message::UseUsage
+            | Message::NoBotsOnDaemon
+            | Message::Queued
+            | Message::TooManyRuns
+            | Message::StreamLost
+            | Message::RunFinished => Vec::new(),
+        }
+    }
+
+    /// One sample of every message, with distinctive argument values.
+    fn every_message() -> Vec<Message<'static>> {
+        let tool = "TOOL_x7";
+        let status = |bot, run| Message::Status {
+            status: "STATUS_x7",
+            version: "VERSION_x7",
+            uptime_secs: 918_273,
+            pending: 646_464,
+            bot,
+            run,
+        };
+        vec![
+            Message::NoBots,
+            Message::AvailableBots,
+            Message::BotNotFound { query: "QUERY_x7" },
+            Message::InputTooLong,
+            Message::NoActiveRun,
+            Message::RunStopped,
+            Message::UnknownOrExpiredRequest,
+            Message::OnceOnly,
+            Message::ApproveOnce,
+            Message::ApproveForTask {
+                program: "PROGRAM_x7",
+            },
+            Message::Always,
+            Message::Deny,
+            Message::Approved,
+            Message::Denied,
+            Message::Answered,
+            Message::ApprovalHeading {
+                tool,
+                subagent: false,
+            },
+            Message::ApprovalHeading {
+                tool,
+                subagent: true,
+            },
+            Message::ApprovalMasked { tool },
+            Message::ApprovalDetailsUnavailable { tool },
+            Message::ApprovalTooLarge { tool },
+            Message::ApprovalIncomplete,
+            Message::ApprovalDesktopOnly { tool },
+            Message::LanguageSet,
+            Message::LanguageUsage {
+                current: Language::EN,
+            },
+            Message::LanguageUsage {
+                current: Language::TR,
+            },
+            Message::VoiceUnavailable,
+            Message::VoiceTooLong,
+            Message::VoiceFailed,
+            Message::VoiceEmpty,
+            Message::PairUsage,
+            Message::Paired,
+            Message::AlreadyPaired,
+            Message::PairExpired,
+            Message::PairInvalid,
+            Message::UseUsage,
+            Message::BotSwitched {
+                name: "NAME_x7",
+                id: "ID_x7",
+            },
+            Message::RunStoppedId { run: "RUN_x7" },
+            status(Some("BOT_x7"), Some("RUNID_x7")),
+            status(None, None),
+            Message::NoBotsOnDaemon,
+            Message::Unsupported { label: "LABEL_x7" },
+            Message::Queued,
+            Message::TooManyRuns,
+            Message::StreamLost,
+            Message::SubagentFailed { error: "ERROR_x7" },
+            Message::RunFailed { error: "ERROR_x7" },
+            Message::RunFinished,
+            Message::CouldNotProcess { id: 737_373 },
+            Message::RunError {
+                message: "MESSAGE_x7",
+            },
+        ]
+    }
+
+    // Every message has both languages (the render match has no wildcard, so a missing
+    // arm does not compile), each language shows every argument exactly once, and the
+    // Turkish text is not a copy of the English one.
+    #[test]
+    fn every_message_is_translated_with_the_same_arguments() {
+        for message in every_message() {
+            let english = message.render(Language::EN);
+            let turkish = message.render(Language::TR);
+            assert!(!english.trim().is_empty(), "{message:?}");
+            assert_ne!(english, turkish, "{message:?} is not translated");
+            for argument in arguments(message) {
+                for text in [&english, &turkish] {
+                    assert_eq!(
+                        text.matches(argument.as_str()).count(),
+                        1,
+                        "{message:?}: {argument:?} in {text:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -394,6 +573,7 @@ mod tests {
                 Message::CouldNotProcess { id: 42 },
                 "Could not process message 42.",
             ),
+            (Message::RunError { message: "boom" }, "⚠️ Error: boom"),
         ] {
             assert_eq!(message.english(), english);
         }

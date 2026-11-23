@@ -48,11 +48,34 @@ All paths are under `apps/desktop/ui/src/`.
   `apps/cli/src/presets.rs`); a new CLI language is a separate, larger change.
 - The natural-language schedule parser understands English and Turkish phrases
   (`crates/scheduler/src/nl.rs`).
-- The Telegram channel's own texts are an English/Turkish catalog in
-  `crates/channel-telegram/src/messages.rs`, and `/lang` accepts only `en` and `tr`. A new Telegram
-  language needs a new `Language` value, a text for every message, and tests; keep each message's
-  arguments and the security meaning of approval texts exactly as in English.
+- The Telegram channel's own texts are a Rust catalog; see [The Telegram message catalog](#the-telegram-message-catalog)
+  below.
 - The user guide in `docs/guide/` is English, with Turkish and German pages in `docs/guide/tr/` and `docs/guide/de/`; see
   [Translating the user guide](translating-the-guide.md).
 
 Tell us in the pull request which of these you did or did not do.
+
+## The Telegram message catalog
+
+The texts the Telegram channel writes itself (command replies, approval-card headings and buttons,
+callback answers, pairing replies and run notices) live in `crates/channel-telegram/src/messages.rs`,
+in English and Turkish. Each paired chat has its own language (`/lang en`, `/lang tr`; see
+[the Telegram guide](../guide/telegram.md#language)). Text that comes from elsewhere is never put in
+the catalog: bot names, daemon errors, tool output, voice transcripts, and anything that could hold
+a secret.
+
+- **A message** is a variant of `Message`. Values are typed fields (`BotSwitched { name, id }`), not
+  format strings, so a translation cannot drop or rename a placeholder by accident.
+- **Every language** is an arm of the `match` in `Message::render`. It has no wildcard, so a message
+  without a Turkish text does not compile.
+- **The tests** in the same file check that every message is translated, that the Turkish text is not
+  a copy of the English one, and that each argument appears exactly once in every language. When you
+  add a message, add it to `every_message()` and `arguments()` in the tests. `arguments()` has no
+  wildcard either, so the compiler reminds you.
+- **The English text** of existing messages is pinned by tests; change it only on purpose.
+- **Approval texts** must keep their security meaning in every language: what will happen, what is
+  hidden, and that the decision may have to be made in the desktop app. Do not soften a warning.
+
+Adding a third Telegram language is a larger change: `Language` is currently a two-way choice, so
+it would become an enum with a code for `/lang`, and every arm in `render` gets a new text. Run
+`cargo test -p channel-telegram` and `cargo clippy -p channel-telegram --all-targets -- -D warnings`.

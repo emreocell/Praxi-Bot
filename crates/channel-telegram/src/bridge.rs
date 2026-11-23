@@ -2280,7 +2280,10 @@ impl TelegramChannel {
                 self.send_redacted(chat_id, &text, markup.as_ref()).await?;
             }
             Event::Error(e) => {
-                let text = format!("⚠️ Error: {}", e.message);
+                let text = Message::RunError {
+                    message: &e.message,
+                }
+                .render(self.language(chat_id));
                 self.send_redacted(chat_id, &text, None).await?;
             }
             Event::SubagentStarted(s) => {
