@@ -14,11 +14,14 @@
 LangString PraxiStopFailed 1033 "Praxi could not stop. Close Praxi and any Praxi command windows, then try again. Your data has not been removed."
 LangString PraxiStopFailed 1055 "Praxi durdurulamadı. Praxi'yi ve açık Praxi komut pencerelerini kapatıp yeniden deneyin. Verileriniz silinmedi."
 LangString PraxiStopFailed 1031 "Praxi konnte nicht beendet werden. Schließen Sie Praxi und alle Praxi-Konsolenfenster und versuchen Sie es erneut. Ihre Daten wurden nicht gelöscht."
+LangString PraxiRepairFirst 1033 "Praxi's shutdown helper is missing. Run the installer to repair Praxi, then uninstall it. Your data has not been removed."
+LangString PraxiRepairFirst 1055 "Praxi'nin kapatma yardımcısı eksik. Yükleyiciyi çalıştırarak Praxi'yi onarın, ardından kaldırmayı yeniden deneyin. Verileriniz silinmedi."
+LangString PraxiRepairFirst 1031 "Die Komponente zum Beenden von Praxi fehlt. Reparieren Sie Praxi mit dem Installationsprogramm und deinstallieren Sie es anschließend. Ihre Daten wurden nicht gelöscht."
 
 !macro PRAXI_STOP_INSTALLATION HELPER
   ; The helper matches full executable paths and uses owner-only native stop events.
   ; It waits for graceful shutdown, then process handles/jobs bound the fallback.
-  ${If} ${FileExists} "$INSTDIR\bot-desktop.exe"
+  ${If} ${FileExists} "${HELPER}"
     nsExec::ExecToStack '"${HELPER}" --stop-for-uninstall "$INSTDIR"'
     Pop $R0
     Pop $R1
@@ -27,17 +30,22 @@ LangString PraxiStopFailed 1031 "Praxi konnte nicht beendet werden. Schließen S
       MessageBox MB_OK|MB_ICONEXCLAMATION "$(PraxiStopFailed)" /SD IDOK
       Abort
     ${EndIf}
+  ${Else}
+    MessageBox MB_OK|MB_ICONEXCLAMATION "$(PraxiRepairFirst)" /SD IDOK
+    Abort
   ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
   ; Run this version's helper; old versions may ignore the flag and open the UI.
   ; MAINBINARYSRCPATH is provided by Tauri's installer template.
-  InitPluginsDir
-  SetOutPath "$PLUGINSDIR"
-  File /oname=praxi-lifecycle.exe "${MAINBINARYSRCPATH}"
-  !insertmacro PRAXI_STOP_INSTALLATION "$PLUGINSDIR\praxi-lifecycle.exe"
-  SetOutPath "$INSTDIR"
+  ${If} ${FileExists} "$INSTDIR\bot-desktop.exe"
+    InitPluginsDir
+    SetOutPath "$PLUGINSDIR"
+    File /oname=praxi-lifecycle.exe "${MAINBINARYSRCPATH}"
+    !insertmacro PRAXI_STOP_INSTALLATION "$PLUGINSDIR\praxi-lifecycle.exe"
+    SetOutPath "$INSTDIR"
+  ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL

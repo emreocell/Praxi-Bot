@@ -85,6 +85,8 @@ still owns the default data folder, removal is refused instead of deleting live
 data or terminating that unrelated installation. A matching CLI process without
 the daemon stop event (for example, a running backup) also blocks removal rather
 than being forcibly interrupted.
+If the installed shutdown helper is missing, uninstall asks the owner to repair
+the installation first and aborts before removing files or data.
 
 User data is retained by default. The existing post-uninstall data deletion runs
 only when Tauri's **Delete application data** checkbox is checked and this is not
