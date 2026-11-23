@@ -445,11 +445,11 @@ The timeline for a finished run can be saved as text (Markdown), a web page
 (HTML), or a JSON file. Saving a report downloads a local file; it does not
 send the run anywhere.
 
-#### JSON format, version 1
+#### JSON format, version 2
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "outcome": "done",
   "duration_ms": 1400,
   "steps": [
@@ -460,6 +460,20 @@ send the run anywhere.
       "duration_ms": 250,
       "outcome": "done",
       "depends_on": null
+    }
+  ],
+  "approval_events": [
+    {
+      "step_id": "step-1",
+      "kind": "waiting_for_approval",
+      "offset_ms": null,
+      "outcome": null
+    },
+    {
+      "step_id": "step-1",
+      "kind": "tool_outcome",
+      "offset_ms": 350,
+      "outcome": "done"
     }
   ]
 }
@@ -478,6 +492,15 @@ send the run anywhere.
 - `depends_on` is reserved for a list of export-local step IDs when a dependency
   is known, or `null` when unknown. The current timeline does not retain causal
   links, so the field is `null`; it is not an assertion of no dependencies.
+- Version 2 adds `approval_events`, an array grouped by the export-local
+  `step_id`. A recorded pending card gives `waiting_for_approval`; a retained
+  decision gives `approval_recorded` with `approved` or `denied`; a completed
+  gated call gives `tool_outcome` with `done` or `error`. The waiting outcome is
+  `null`. Event times are offsets in milliseconds, or `null` if not recorded.
+  The timeline folds updates into one step, so completion can replace an
+  approved state. A missing event means there is no retained evidence for that
+  event in this export, not that it did not happen. Expiry is not a denial.
+  Version 1 has the same run and step fields but no `approval_events`.
 
 JSON excludes free text and internal IDs, including bot names, prompts, tool
 arguments and results, attachment URLs, and error messages. Use the text or web

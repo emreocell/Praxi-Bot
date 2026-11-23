@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { DaemonEvent } from "../api/types.ts";
 import { buildRunReport, renderHtml, renderMarkdown, scrubText, type ReportText } from "./runReport.ts";
 import { renderRunReportJson } from "./runReportJson.ts";
-import type { RunState } from "../state/timeline.ts";
+import { applyEvent, EMPTY_EVENTS, type RunState } from "../state/timeline.ts";
 
 const t = (key: string, v?: Record<string, unknown>) => `${key}${v ? JSON.stringify(v) : ""}`;
 const text: ReportText = {
@@ -88,10 +89,10 @@ test("exported report never contains private data (canary)", () => {
   assert.equal(report.steps.length, 5);
 });
 
-test("JSON schema v1 exposes only the documented run and step fields", () => {
+test("JSON schema v2 exposes only the documented run, step and approval-event fields", () => {
   const json = renderRunReportJson(run());
   assert.deepEqual(JSON.parse(json), {
-    schema_version: 1,
+    schema_version: 2,
     outcome: "failed",
     duration_ms: 4000,
     steps: [
@@ -100,6 +101,10 @@ test("JSON schema v1 exposes only the documented run and step fields", () => {
       { id: "step-3", kind: "tool", offset_ms: 200, duration_ms: null, outcome: "denied", depends_on: null },
       { id: "step-4", kind: "question", offset_ms: 300, duration_ms: null, outcome: "answered", depends_on: null },
       { id: "step-5", kind: "secret", offset_ms: 400, duration_ms: null, outcome: "stored", depends_on: null },
+    ],
+    approval_events: [
+      { step_id: "step-3", kind: "waiting_for_approval", offset_ms: null, outcome: null },
+      { step_id: "step-3", kind: "approval_recorded", offset_ms: null, outcome: "denied" },
     ]
   });
   for (const canary of [...Object.values(PRIVATE), KEY, "hunter2canary"]) {
@@ -117,14 +122,60 @@ test("JSON leaves unrecorded timing and dependencies unknown", () => {
     }]
   }));
   assert.deepEqual(JSON.parse(json), {
-    schema_version: 1,
+    schema_version: 2,
     outcome: "unfinished",
     duration_ms: null,
     steps: [{
       id: "step-1", kind: "tool", offset_ms: null, duration_ms: null,
       outcome: "awaiting_approval", depends_on: null,
-    }]
+    }],
+    approval_events: [
+      { step_id: "step-1", kind: "waiting_for_approval", offset_ms: null, outcome: null },
+    ]
   });
+});
+
+const runId = "PRIVATE-RUN-ID";
+const tool = { run_id: runId, call_id: "PRIVATE-CALL-ID", tool_name: "fs_write", input: { path: PRIVATE.input } };
+const started: DaemonEvent = { type: "run_started", run_id: runId, chat_id: "PRIVATE-CHAT-ID", bot_id: "PRIVATE-BOT-ID" };
+const requested: DaemonEvent = { type: "tool_call_requested", ...tool };
+const waiting: DaemonEvent = { type: "approval_needed", ...tool, summary: "PRIVATE-APPROVAL-SUMMARY" };
+const approved: DaemonEvent = { type: "tool_call_approved", run_id: runId, call_id: tool.call_id, approved_by: "PRIVATE-APPROVER" };
+
+function exportRecordedEvents(events: DaemonEvent[]) {
+  const state = events.reduce(
+    (state, event, i) => applyEvent(state, { v: 1, seq: i + 1, gseq: i + 1, ts_ms: 1000 + i * 100, event }),
+    EMPTY_EVENTS
+  );
+  const json = renderRunReportJson(state.runs[runId]);
+  assert.ok(!json.includes("PRIVATE-"));
+  return JSON.parse(json).approval_events;
+}
+
+test("JSON separates observed waiting and decisions, without reconstructing approval after completion", () => {
+  const pending = { step_id: "step-1", kind: "waiting_for_approval", offset_ms: null, outcome: null };
+  const decision = { step_id: "step-1", kind: "approval_recorded", offset_ms: null, outcome: "approved" };
+  assert.deepEqual(exportRecordedEvents([started, requested, waiting, approved]), [pending, decision]);
+  assert.deepEqual(exportRecordedEvents([started, requested, approved]), [decision]);
+  assert.deepEqual(exportRecordedEvents([started, requested, waiting, approved, {
+    type: "tool_call_completed", run_id: runId, call_id: tool.call_id, error: "PRIVATE-ERROR",
+    output_preview: PRIVATE.output,
+  }]), [pending, { step_id: "step-1", kind: "tool_outcome", offset_ms: 400, outcome: "error" }]);
+});
+
+test("JSON distinguishes a recorded denial from expiry or an ungated outcome", () => {
+  const pending = { step_id: "step-1", kind: "waiting_for_approval", offset_ms: null, outcome: null };
+  const denied: DaemonEvent = {
+    type: "tool_call_denied", run_id: runId, call_id: tool.call_id, denied_by: "PRIVATE-DENIER", reason: "PRIVATE-REASON"
+  };
+  assert.deepEqual(exportRecordedEvents([started, requested, waiting, denied]), [
+    pending,
+    { step_id: "step-1", kind: "approval_recorded", offset_ms: 300, outcome: "denied" },
+  ]);
+  assert.deepEqual(exportRecordedEvents([started, requested, waiting, { ...denied, reason: "expired" }]), [pending]);
+  assert.deepEqual(exportRecordedEvents([started, requested, {
+    type: "tool_call_completed", run_id: runId, call_id: tool.call_id, error: null
+  }]), []);
 });
 
 test("stopped and unfinished runs still produce a report", () => {
