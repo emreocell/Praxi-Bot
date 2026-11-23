@@ -168,7 +168,7 @@ jobs:
         run: |
           status=0
           cargo nextest run --workspace --no-fail-fast --profile ci || status=$?
-          cargo test --workspace --doc || status=$?
+          cargo test --workspace --doc --no-fail-fast || status=$?
           exit "$status"
 
       - name: Verify explicit-artifact dependency features
