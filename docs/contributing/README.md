@@ -17,6 +17,7 @@ Start here, then pick the page for what you want to do. The top-level
 - [Adding a language to the desktop app](adding-a-language.md)
 - [Translation glossary](translation-glossary.md)
 - [Translating the user guide](translating-the-guide.md)
+- [The documentation website](docs-site.md): preview it locally and how it is published
 
 ## Evaluations and safety
 

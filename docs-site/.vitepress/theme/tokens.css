@@ -1,0 +1,33 @@
+/* Colours taken from the desktop app's default (Obsidian) theme in packages/ui/tokens.css,
+   plus a light counterpart. This file is the only place with raw colour values. */
+:root {
+  --praxi-bg: #ffffff;
+  --praxi-bg-alt: #f6f6f9;
+  --praxi-bg-elv: #ececf2;
+  --praxi-text: #1b1c22;
+  --praxi-text-2: #4a4b55;
+  --praxi-text-3: #6b6c76;
+  --praxi-accent: #4f52c7;
+  --praxi-accent-hover: #3f42b0;
+  --praxi-accent-soft: #e4e5fb;
+  --praxi-border: #dcdce4;
+  --praxi-code-bg: #f3f3f8;
+  --praxi-on-accent: #ffffff;
+  --praxi-radius: 12px;
+  --praxi-line: 1px;
+}
+
+.dark {
+  --praxi-bg: #111217;
+  --praxi-bg-alt: #191a1f;
+  --praxi-bg-elv: #24252a;
+  --praxi-text: #ecedf1;
+  --praxi-text-2: #c3c4c8;
+  --praxi-text-3: #999a9e;
+  --praxi-accent: #b6b8fa;
+  --praxi-accent-hover: #bdbffb;
+  --praxi-accent-soft: #23243b;
+  --praxi-border: #2a2b31;
+  --praxi-code-bg: #15161b;
+  --praxi-on-accent: #111111;
+}

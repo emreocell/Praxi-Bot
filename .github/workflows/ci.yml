@@ -47,7 +47,7 @@ jobs:
           git diff --name-only HEAD^1 HEAD > changed.txt
           echo "Changed files:"; cat changed.txt
           # Documentation and repository metadata only (generated docs/api stays "code").
-          docs_only='^(docs/.*|[^/]+\.md|LICENSE|NOTICE|\.github/(ISSUE_TEMPLATE/.*|CODEOWNERS|labeler\.yml|pull_request_template\.md|workflows/(labeler|installer|linux-release|linux-scripts)\.yml))$'
+          docs_only='^((docs|docs-site)/.*|[^/]+\.md|LICENSE|NOTICE|\.github/(ISSUE_TEMPLATE/.*|CODEOWNERS|labeler\.yml|pull_request_template\.md|workflows/(docs-site|labeler|installer|linux-release|linux-scripts)\.yml))$'
           # Desktop UI sources. No Rust crate reads them: apps/desktop/build.rs only creates an
           # empty ui/dist when it is missing, and the UI job below covers these files (the
           # generated API schema is checked against docs/api/openapi.json, which stays "code").
