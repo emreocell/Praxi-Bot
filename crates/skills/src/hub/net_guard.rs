@@ -118,6 +118,26 @@ fn split_https_host(url: &str) -> Result<(String, u16), HubError> {
 /// [`HubError::Source`] when the URL is not an https named host, the lookup
 /// fails, or any address is non-public.
 pub fn check_public_https(url: &str, resolver: &dyn Resolver) -> Result<Target, HubError> {
+    let all = resolve_public(url, resolver)?;
+    Ok(Target {
+        host: all.host,
+        port: all.port,
+        ip: all.ips[0],
+    })
+}
+
+/// A host whose every resolved address passed the public-address check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitTarget {
+    /// Host name from the URL.
+    pub host: String,
+    /// Port (443 by default).
+    pub port: u16,
+    /// All validated public addresses (never empty).
+    pub ips: Vec<IpAddr>,
+}
+
+fn resolve_public(url: &str, resolver: &dyn Resolver) -> Result<GitTarget, HubError> {
     let (host, port) = split_https_host(url)?;
     let ips = resolver.resolve(&host, port)?;
     if ips.is_empty() || ips.iter().any(|ip| is_blocked_ip(*ip)) {
@@ -125,20 +145,16 @@ pub fn check_public_https(url: &str, resolver: &dyn Resolver) -> Result<Target, 
             "`{host}` does not resolve to a public address"
         )));
     }
-    Ok(Target {
-        host,
-        port,
-        ip: ips[0],
-    })
+    Ok(GitTarget { host, port, ips })
 }
 
 /// Index `git` URL for the in-app flow: https only (no ssh), public host.
 ///
 /// # Errors
 /// [`HubError::Source`] describing the problem.
-pub fn check_index_git_url(url: &str, resolver: &dyn Resolver) -> Result<(), HubError> {
+pub fn check_index_git_url(url: &str, resolver: &dyn Resolver) -> Result<GitTarget, HubError> {
     super::source::validate_git_url(url)?;
-    check_public_https(url, resolver).map(|_| ())
+    resolve_public(url, resolver)
 }
 
 /// One HTTP response without redirects followed.
@@ -401,7 +417,10 @@ mod tests {
 
     #[test]
     fn index_git_url_must_be_public_https() {
-        assert!(check_index_git_url("https://good.example.com/r.git", &dns()).is_ok());
+        let ok = check_index_git_url("https://good.example.com/r.git", &dns()).unwrap();
+        assert_eq!(ok.host, "good.example.com");
+        assert_eq!(ok.port, 443);
+        assert_eq!(ok.ips.len(), 1);
         assert!(check_index_git_url("https://10.0.0.1/r.git", &dns()).is_err());
         assert!(check_index_git_url("https://evil.example.com/r.git", &dns()).is_err());
         assert!(check_index_git_url("ssh://git@good.example.com/r.git", &dns()).is_err());

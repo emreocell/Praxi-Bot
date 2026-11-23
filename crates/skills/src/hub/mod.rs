@@ -501,7 +501,7 @@ impl SkillHub {
             }
             InstallSource::Git { url, rev, subdir } => {
                 let (root, pin) =
-                    self.clone_repo(url, rev.as_deref(), subdir.as_deref(), staging)?;
+                    self.clone_repo(url, rev.as_deref(), subdir.as_deref(), staging, None)?;
                 let spec = SourceSpec::Git {
                     url: url.clone(),
                     rev: rev.clone(),
@@ -525,14 +525,19 @@ impl SkillHub {
                     HubError::Source(format!("index entry `{name}` is missing a commit pin"))
                 })?;
                 source::validate_commit_pin(&want)?;
-                if let Some(resolver) = &self.index_resolver {
-                    net_guard::check_index_git_url(&entry.git, resolver.as_ref())?;
-                }
+                let checked = match &self.index_resolver {
+                    Some(resolver) => Some(net_guard::check_index_git_url(
+                        &entry.git,
+                        resolver.as_ref(),
+                    )?),
+                    None => None,
+                };
                 let (root, pin) = self.clone_repo(
                     &entry.git,
                     Some(want.as_str()),
                     entry.subdir.as_deref(),
                     staging,
+                    checked.as_ref(),
                 )?;
                 if !pin.commit.eq_ignore_ascii_case(&want) {
                     return Err(HubError::Source(format!(
@@ -555,6 +560,7 @@ impl SkillHub {
         rev: Option<&str>,
         subdir: Option<&str>,
         staging: &Path,
+        pinned: Option<&net_guard::GitTarget>,
     ) -> Result<(PathBuf, GitPin), HubError> {
         source::validate_git_url(url)?;
         if let Some(r) = rev {
@@ -565,7 +571,10 @@ impl SkillHub {
         }
         let repo = staging.join("repo");
         fs::create_dir_all(&repo).map_err(|e| io_err("create dir", &repo, &e))?;
-        let commit = self.git.checkout(url, rev, &repo)?;
+        let commit = match pinned {
+            Some(target) => self.git.checkout_pinned(url, rev, &repo, target)?,
+            None => self.git.checkout(url, rev, &repo)?,
+        };
         let root = subdir.map_or_else(|| repo.clone(), |s| repo.join(s));
         if !root.is_dir() {
             return Err(HubError::InvalidSkill(format!(
