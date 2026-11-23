@@ -95,10 +95,10 @@ export function StartupProblem({ startup, raw }: { startup: StartupDiagnostics; 
           <p className={styles.logTitle}>{h.title}</p>
           {lines.length > 0 ? <pre className={styles.log} data-testid="startup-log">{lines.join("\n")}</pre> : null}
           <div className={styles.actions}>
-            <Button variant="secondary" onClick={() => void restartDaemon()}>
+            <Button variant="secondary" onClick={() => void restartDaemon(undefined, "owner-startup-screen")}>
               {t("errors.startupPanel.restart")}
             </Button>
-            <Button variant="secondary" onClick={() => void restartDaemon(true)} title={t("safeMode.startup.hint")}>
+            <Button variant="secondary" onClick={() => void restartDaemon(true, "owner-safe-start")} title={t("safeMode.startup.hint")}>
               <ShieldAlert aria-hidden="true" /> {t("safeMode.startup.button")}
             </Button>
             <Button variant="secondary" onClick={() => void openLogFolder().catch(() => undefined)}>
@@ -127,10 +127,10 @@ export function StartupProblem({ startup, raw }: { startup: StartupDiagnostics; 
         <Button variant="secondary" onClick={retry}>
           <RotateCw aria-hidden="true" /> {t("errors.startupPanel.retry")}
         </Button>
-        <Button variant="primary" onClick={() => void restartDaemon()}>
+        <Button variant="primary" onClick={() => void restartDaemon(undefined, "owner-startup-screen")}>
           {t("errors.startupPanel.restart")}
         </Button>
-        <Button variant="secondary" onClick={() => void restartDaemon(true)} title={t("safeMode.startup.hint")}>
+        <Button variant="secondary" onClick={() => void restartDaemon(true, "owner-safe-start")} title={t("safeMode.startup.hint")}>
           <ShieldAlert aria-hidden="true" /> {t("safeMode.startup.button")}
         </Button>
         {copyButton}

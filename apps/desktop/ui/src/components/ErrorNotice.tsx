@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { useDaemon } from "../state/DaemonContext";
+import { useServiceState } from "../state/ServiceState";
 import { type ErrorAction, type HumanError, humanError } from "../lib/humanError";
 import styles from "./ErrorNotice.module.css";
 
@@ -25,6 +26,7 @@ export function ErrorNotice({
 }) {
   const { t } = useTranslation();
   const { restartDaemon } = useDaemon();
+  const serviceBlocked = useServiceState().blocked;
   const [copied, setCopied] = useState(false);
   const h: HumanError =
     error && typeof error === "object" && "title" in error && "hint" in error && "details" in error
@@ -32,7 +34,9 @@ export function ErrorNotice({
       : humanError(error);
   // Without a handler the only built-in action is restarting the local service.
   const handle =
-    onAction ?? ((a: ErrorAction) => (a === "restartService" ? void restartDaemon() : undefined));
+    onAction ?? ((a: ErrorAction) => (a === "restartService" ? void restartDaemon(undefined, "retry-error-notice") : undefined));
+  // "Cannot reach the service" while the app banner already says so: one notice, not two.
+  if (h.code === "network" && serviceBlocked) return null;
   const label: Record<ErrorAction, string> = {
     retry: t("errors.retry"),
     reload: t("errors.reload"),

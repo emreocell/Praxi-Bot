@@ -28,12 +28,12 @@ test("the owner can leave or enter only a service the app started", () => {
 test("banner shows only in safe mode and its button restarts normally; entry points ask for safe", () => {
   const banner = readFileSync(new URL("../components/SafeModeBanner.tsx", import.meta.url), "utf8");
   assert.match(banner, /if \(!view\.active\) \{\s*return null;/);
-  assert.match(banner, /restartDaemon\(false\)/);
+  assert.match(banner, /restartDaemon\(false,/);
   assert.match(banner, /data-testid="safe-mode-banner"/);
   const startup = readFileSync(new URL("../components/StartupProblem.tsx", import.meta.url), "utf8");
-  assert.match(startup, /restartDaemon\(true\)/);
+  assert.match(startup, /restartDaemon\(true,/);
   const card = readFileSync(new URL("../views/settings/SafeModeCard.tsx", import.meta.url), "utf8");
-  assert.match(card, /restartDaemon\(!view\.active\)/);
+  assert.match(card, /restartDaemon\(!view\.active,/);
   const app = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
   assert.match(app, /<SafeModeBanner \/>/);
 });

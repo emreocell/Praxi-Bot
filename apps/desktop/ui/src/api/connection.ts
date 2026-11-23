@@ -16,11 +16,14 @@ export interface Connection {
 /**
  * Ask the Tauri shell to find or start `bot serve` and return its URL + token.
  *
+ * `reason` (restart only) is written to the app log; a `retry...` reason is merged with a restart
+ * that happened a few seconds ago.
+ *
  * Outside Tauri (plain `vite` in a browser, dev only) the connection comes from
  * `?daemon=<url>&token=<token>[&fake=1]` so the UI can be exercised against a daemon
  * started by hand.
  */
-export async function connectDaemon(restart = false, safe?: boolean): Promise<Connection> {
+export async function connectDaemon(restart = false, safe?: boolean, reason?: string): Promise<Connection> {
   if (isMockMode()) {
     // Review state: the daemon cannot be reached (`?mock=1&screen=offline`).
     if (new URLSearchParams(window.location.search).get("screen") === "offline") {
@@ -36,7 +39,7 @@ export async function connectDaemon(restart = false, safe?: boolean): Promise<Co
     };
   }
   if (isTauriRuntime()) {
-    return invoke<Connection>(restart ? "daemon_restart" : "daemon_connect", restart ? { safe } : undefined);
+    return invoke<Connection>(restart ? "daemon_restart" : "daemon_connect", restart ? { safe, reason } : undefined);
   }
   if (import.meta.env.DEV) {
     const q = new URLSearchParams(window.location.search);

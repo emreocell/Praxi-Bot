@@ -307,7 +307,7 @@ export function ProvidersSection() {
                   variant="secondary"
                   onClick={() => {
                     setNeedsRestart(false);
-                    void restartDaemon();
+                    void restartDaemon(undefined, "providers-reload");
                   }}
                 >
                   {t("settings.providers.restart")}

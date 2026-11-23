@@ -2877,8 +2877,8 @@
       "title": "The model could not answer"
     },
     "network": {
-      "hint": "It may still be starting. Praxi will try again by itself; you can also restart the service.",
-      "title": "Praxi cannot reach its local service"
+      "hint": "Nothing you typed is lost. Praxi keeps trying; press the button again when the notice at the top is gone.",
+      "title": "The local service is not answering right now"
     },
     "noInputBackend": {
       "hint": "The host has no keyboard and mouse access for this screen (for example a server without a desktop session). You can watch it, but not take it over.",
@@ -4562,6 +4562,23 @@
     },
     "title": "Your servers",
     "updateHelp": "Servers added with the app can be updated here. For any other server, Update server shows the exact commands to run on it."
+  },
+  "service": {
+    "copied": "Diagnostic info copied.",
+    "copy": "Copy diagnostic info",
+    "copyFailed": "Could not copy. Try again.",
+    "failed": {
+      "hint": "Praxi's background service stopped answering. Your unsaved input is kept. Restart the service below; if it keeps failing, copy the diagnostic info and send it to support.",
+      "title": "The local service did not come back"
+    },
+    "reconnecting": {
+      "hint": "This usually takes a few seconds. Buttons that need the service wait; your input is kept.",
+      "title": "Reconnecting to the local service…"
+    },
+    "starting": {
+      "hint": "Praxi is getting ready. This can take a moment after an update or restart.",
+      "title": "Starting the local service…"
+    }
   },
   "settings": {
     "accent": {

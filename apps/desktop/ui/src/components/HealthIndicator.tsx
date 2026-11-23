@@ -40,7 +40,11 @@ export function HealthIndicator() {
       })
     : (error ? humanService(serviceProblem ?? "down").title : label);
 
-  const mode = healthStripMode(level, Boolean(conn?.fake_provider));
+  // A service that is down or starting is the banner's job (one notice, after a quiet period).
+  const serviceDown = phase !== "ready" || !health;
+  const mode = serviceDown
+    ? conn?.fake_provider ? "tag" : "hidden"
+    : healthStripMode(level, Boolean(conn?.fake_provider));
   if (mode === "hidden") return null;
   if (mode === "tag") {
     return (
@@ -62,7 +66,7 @@ export function HealthIndicator() {
         <Button
           size="sm"
           variant="ghost"
-          onClick={() => (phase === "error" ? retry() : void restartDaemon())}
+          onClick={() => (phase === "error" ? retry() : void restartDaemon(undefined, "retry-health-chip"))}
         >
           {t("health.retry")}
         </Button>

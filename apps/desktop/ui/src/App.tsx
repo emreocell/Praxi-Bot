@@ -51,6 +51,8 @@ import { useMcp } from "./state/useMcp";
 import { AccountMenu, type AccountAction } from "./components/AccountMenu";
 import { Popover } from "./components/Popover";
 import { HealthIndicator } from "./components/HealthIndicator";
+import { ServiceBanner } from "./components/ServiceBanner";
+import { ServiceStateProvider } from "./state/ServiceState";
 import { HelpModal } from "./components/HelpModal";
 import { WhatsNewModal } from "./components/WhatsNewModal";
 import { notesFor, whatsNewAction, type WhatsNewFile } from "./lib/whatsNew";
@@ -1018,6 +1020,7 @@ function AppShell() {
           </div>
         </div>
         {activeComputerId === LOCAL_COMPUTER ? <HealthIndicator /> : null}
+        <ServiceBanner />
         <SafeModeBanner />
         <HostStateBanner />
         <ShellBridgeHost
@@ -1075,7 +1078,7 @@ function AppShell() {
                     <p className={styles.emptyStateDescription}>{t("errors.retrying", { seconds: retryInSeconds })}</p>
                   ) : null}
                   <div className={styles.optionRow}>
-                    <Button variant="primary" onClick={() => void restartDaemon()}>
+                    <Button variant="primary" onClick={() => void restartDaemon(undefined, "owner-offline-screen")}>
                       {t("errors.restartService")}
                     </Button>
                     <Button variant="secondary" onClick={retry}>
@@ -1323,6 +1326,7 @@ export function App() {
   return (
     <ToastProvider>
       <DaemonProvider>
+        <ServiceStateProvider>
         <ServerTerminalProvider>
           <ComputerRequestModal />
           <ComputerScope>
@@ -1333,6 +1337,7 @@ export function App() {
             </LeaveGuardProvider>
           </ComputerScope>
         </ServerTerminalProvider>
+        </ServiceStateProvider>
       </DaemonProvider>
     </ToastProvider>
   );

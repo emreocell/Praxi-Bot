@@ -28,7 +28,7 @@ export function SafeModeCard() {
             variant="secondary"
             disabled={busy}
             data-testid="safe-mode-toggle"
-            onClick={() => void restartDaemon(!view.active)}
+            onClick={() => void restartDaemon(!view.active, "safe-mode-switch")}
           >
             {view.active ? t("safeMode.banner.leave") : t("safeMode.settings.enter")}
           </Button>

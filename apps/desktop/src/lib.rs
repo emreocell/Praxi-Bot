@@ -769,9 +769,10 @@ async fn daemon_restart(
     window: Window,
     daemon: State<'_, Arc<DaemonHandle>>,
     safe: Option<bool>,
+    reason: Option<String>,
 ) -> Result<Connection, String> {
     require_window(&window, MAIN_ONLY)?;
-    daemon::restart(&daemon, safe).await
+    daemon::restart(&daemon, safe, reason.as_deref().unwrap_or("")).await
 }
 
 /// How far the local service got when it does not come up: stage, exit code, last log lines.

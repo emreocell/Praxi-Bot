@@ -67,6 +67,8 @@ pub struct DaemonHandle {
     tail: Arc<Mutex<VecDeque<String>>>,
     /// Set by the stderr pump when the child's stderr reached end of file.
     pump_done: Mutex<Option<Arc<AtomicBool>>>,
+    /// When this app last spawned the daemon (see [`restart_is_redundant`]).
+    last_spawn: Mutex<Option<Instant>>,
 }
 
 /// How far the start of the daemon got; the UI words it (`humanStartup`).
@@ -647,6 +649,12 @@ fn spawn_tracked(handle: &DaemonHandle, data: &Path, fake: bool) -> Result<(), S
     *handle.log_offset.lock() = offset;
     *handle.child.lock() = Some(child);
     *handle.fake.lock() = fake;
+    *handle.last_spawn.lock() = Some(Instant::now());
+    append_log(
+        data,
+        "app",
+        &format!("daemon spawned (fake provider: {fake})"),
+    );
     Ok(())
 }
 
@@ -722,8 +730,39 @@ pub async fn connect(handle: &DaemonHandle) -> Result<Connection, String> {
 ///
 /// # Errors
 /// Same as [`connect`].
-pub async fn restart(handle: &DaemonHandle, safe: Option<bool>) -> Result<Connection, String> {
+pub async fn restart(
+    handle: &DaemonHandle,
+    safe: Option<bool>,
+    reason: &str,
+) -> Result<Connection, String> {
     let _one_at_a_time = handle.connecting.lock().await;
+    let data = data_dir()?;
+    let reason = clean_reason(reason);
+    let age = handle.last_spawn.lock().map(|t| t.elapsed());
+    let mode_change = safe.is_some_and(|s| s != *handle.safe.lock());
+    // Only "retry..." requests (a button pressed while the service is coming back) may be
+    // merged; a providers reload or a mode switch always restarts.
+    if reason.starts_with("retry")
+        && restart_is_redundant(age, mode_change)
+        && handle.started_by_app()
+    {
+        let url = base_url()?;
+        if healthy(&url).await {
+            // Another restart (or the start-up) brought the service up moments ago and it
+            // answers: killing it again would only cause a second gap.
+            append_log(
+                &data,
+                "app",
+                &format!("restart skipped (service just started), reason: {reason}"),
+            );
+            return connect_locked(handle).await;
+        }
+    }
+    append_log(
+        &data,
+        "app",
+        &format!("restart requested, reason: {reason}, safe mode: {safe:?}"),
+    );
     handle.stop();
     // `None` keeps the current mode (a provider reload must not leave safe mode);
     // only the owner's explicit choice in the app changes it.
@@ -732,6 +771,30 @@ pub async fn restart(handle: &DaemonHandle, safe: Option<bool>) -> Result<Connec
     }
     tokio::time::sleep(Duration::from_millis(300)).await;
     connect_locked(handle).await
+}
+
+/// A restart asked within this long after the app spawned the service, while it answers, is a
+/// duplicate (two buttons, a retry racing the banner) and is skipped.
+const RESTART_COALESCE: Duration = Duration::from_secs(5);
+
+/// Whether a restart request adds nothing: the service was spawned moments ago and the request
+/// does not change the mode (an owner's safe-mode switch must always be honoured).
+fn restart_is_redundant(since_spawn: Option<Duration>, mode_change: bool) -> bool {
+    !mode_change && since_spawn.is_some_and(|age| age < RESTART_COALESCE)
+}
+
+/// The reason of a restart as one short log token (it comes from the UI: never trust its shape).
+fn clean_reason(reason: &str) -> String {
+    let t: String = reason
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ' '))
+        .take(60)
+        .collect();
+    if t.trim().is_empty() {
+        "unspecified".to_owned()
+    } else {
+        t
+    }
 }
 
 /// [`connect`] with the `connecting` lock already held by the caller.
@@ -1280,6 +1343,28 @@ mod tests {
         assert_eq!(format_utc(0), "1970-01-01T00:00:00Z");
         assert_eq!(format_utc(1_700_000_000), "2023-11-14T22:13:20Z");
         assert_eq!(format_utc(1_709_164_800), "2024-02-29T00:00:00Z");
+    }
+
+    #[test]
+    fn a_second_restart_right_after_a_spawn_is_redundant_unless_the_mode_changes() {
+        let fresh = Some(Duration::from_secs(1));
+        assert!(restart_is_redundant(fresh, false));
+        assert!(!restart_is_redundant(fresh, true));
+        assert!(!restart_is_redundant(Some(Duration::from_secs(30)), false));
+        assert!(!restart_is_redundant(None, false));
+    }
+
+    #[test]
+    fn restart_reasons_are_short_plain_log_tokens() {
+        assert_eq!(clean_reason(""), "unspecified");
+        assert_eq!(
+            clean_reason(
+                "banner
+FAKE log line"
+            ),
+            "bannerFAKE log line"
+        );
+        assert_eq!(clean_reason(&"a".repeat(500)).len(), 60);
     }
 
     #[test]

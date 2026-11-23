@@ -1,5 +1,6 @@
 import { CircleCheck, ExternalLink, LoaderCircle, PlugZap, TriangleAlert } from "lucide-react";
 import { useState } from "react";
+import { useServiceState } from "../state/ServiceState";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import {
@@ -76,6 +77,7 @@ export function ConnectionTestButton({
   onResult?: (report: ConnectionReportLike) => void;
 }) {
   const { t } = useTranslation();
+  const serviceBlocked = useServiceState().blocked;
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<ConnectionReportLike | null>(null);
   const start = async () => {
@@ -96,7 +98,7 @@ export function ConnectionTestButton({
       <Button
         size="sm"
         variant="secondary"
-        disabled={busy || disabled}
+        disabled={busy || disabled || serviceBlocked}
         data-testid={testId ?? "connection-test"}
         onClick={() => void start()}
       >

@@ -28,7 +28,7 @@ export function SafeModeBanner() {
           size="sm"
           variant="secondary"
           disabled={phase === "connecting"}
-          onClick={() => void restartDaemon(false)}
+          onClick={() => void restartDaemon(false, "safe-mode-off")}
         >
           {t("safeMode.banner.leave")}
         </Button>

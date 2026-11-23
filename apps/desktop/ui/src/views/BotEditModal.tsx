@@ -61,6 +61,7 @@ import { type BotSkillsState, useSkillsDraft } from "../state/useBotSkills";
 import { useCustomText } from "../state/useCustomText";
 import styles from "./BotEditModal.module.css";
 import { humanLine } from "../lib/humanError";
+import { useServiceState } from "../state/ServiceState";
 import { saveTextFile } from "../lib/profileShare";
 import { HomeHint } from "../components/HomeHint";
 
@@ -189,6 +190,17 @@ function BotEditDialog({
   const [section, setSection] = useState<BotEditorSection>(initialSection ?? "identity");
   const [skillsDraft, setSkillsDraft] = useSkillsDraft(skills.data);
   const [saving, setSaving] = useState(false);
+  // While the local service is down only Save / Export wait; the typed input stays as it is.
+  const serviceBlocked = useServiceState().blocked;
+  const wasBlocked = useRef(false);
+  useEffect(() => {
+    if (serviceBlocked) {
+      wasBlocked.current = true;
+    } else if (wasBlocked.current) {
+      wasBlocked.current = false;
+      setError(null); // the "service not answering" line is stale once it is back
+    }
+  }, [serviceBlocked]);
   const [error, setError] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -559,7 +571,7 @@ function BotEditDialog({
         >
           <Button
             variant="ghost"
-            disabled={saving || deleting || exporting || dirty}
+            disabled={saving || deleting || exporting || dirty || serviceBlocked}
             title={dirty ? t("profileShare.exportSaveFirst") : t("profileShare.exportHint")}
             data-testid="bot-edit-export"
             onClick={() => void exportProfile()}
@@ -571,7 +583,7 @@ function BotEditDialog({
           </Button>
           <Button
             variant="primary"
-            disabled={saving || deleting || !dirty}
+            disabled={saving || deleting || !dirty || serviceBlocked}
             data-testid="bot-edit-save"
             onClick={() => void save()}
           >

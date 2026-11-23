@@ -2877,8 +2877,8 @@
       "title": "Model yanıt veremedi"
     },
     "network": {
-      "hint": "Servis hâlâ açılıyor olabilir. Praxi kendiliğinden yeniden dener; servisi yeniden de başlatabilirsin.",
-      "title": "Praxi yerel servisine ulaşamıyor"
+      "hint": "Yazdığın hiçbir şey kaybolmaz. Praxi denemeye devam eder; üstteki uyarı kalkınca düğmeye yeniden bas.",
+      "title": "Yerel servis şu an yanıt vermiyor"
     },
     "noInputBackend": {
       "hint": "Sunucuda bu ekran için klavye ve fare erişimi yok (örneğin masaüstü oturumu olmayan bir sunucu). İzleyebilirsin ama devralamazsın.",
@@ -4562,6 +4562,23 @@
     },
     "title": "Sunucuların",
     "updateHelp": "Uygulamayla eklenen sunucular burada güncellenebilir. Diğer sunucular için Sunucuyu güncelle, üzerinde çalıştıracağın komutları gösterir."
+  },
+  "service": {
+    "copied": "Tanılama bilgisi kopyalandı.",
+    "copy": "Tanılama bilgisini kopyala",
+    "copyFailed": "Kopyalanamadı. Yeniden dene.",
+    "failed": {
+      "hint": "Praxi'nin arka plan servisi yanıt vermeyi bıraktı. Kaydedilmemiş girdin korunuyor. Aşağıdan servisi yeniden başlat; sürekli başarısız olursa tanılama bilgisini kopyalayıp desteğe gönder.",
+      "title": "Yerel servis geri gelmedi"
+    },
+    "reconnecting": {
+      "hint": "Bu genelde birkaç saniye sürer. Servis gereken düğmeler bekler; girdin korunur.",
+      "title": "Yerel servise yeniden bağlanılıyor…"
+    },
+    "starting": {
+      "hint": "Praxi hazırlanıyor. Güncelleme veya yeniden başlatmadan sonra biraz sürebilir.",
+      "title": "Yerel servis başlatılıyor…"
+    }
   },
   "settings": {
     "accent": {

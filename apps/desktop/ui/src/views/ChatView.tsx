@@ -1745,7 +1745,7 @@ export function ChatView({
             compact
             error={sendFailure}
             busy={sending}
-            onAction={(a) => (a === "restartService" ? void restartDaemon() : void send())}
+            onAction={(a) => (a === "restartService" ? void restartDaemon(undefined, "retry-chat-notice") : void send())}
           />
         ) : null}
         {secretKinds ? (
