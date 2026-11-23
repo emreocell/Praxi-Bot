@@ -340,6 +340,9 @@ impl DaemonClient for HttpDaemonClient {
         let body = json!({
             "audio_base64": base64::engine::general_purpose::STANDARD.encode(audio),
             "mime": mime,
+            // The provider may change between the GET above and this POST: have the daemon
+            // refuse instead of uploading the note.
+            "local_only": true,
         });
         let out = self
             .request(Method::POST, "/v1/voice/transcribe", Some(body))

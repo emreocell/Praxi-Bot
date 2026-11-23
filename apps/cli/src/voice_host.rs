@@ -347,8 +347,12 @@ impl VoiceControl for VoiceHost {
         audio: Vec<u8>,
         mime: String,
         language: Option<String>,
+        local_only: bool,
     ) -> Result<TranscribeOutput, VoiceControlError> {
         let file = self.load();
+        if local_only && file.stt_provider != VoiceProvider::LocalVoice {
+            return Err(VoiceControlError::NotConfigured);
+        }
         if file.stt_provider == VoiceProvider::LocalVoice {
             return self
                 .transcribe_local(audio, &mime, language, &file.local_model)
@@ -583,7 +587,7 @@ mod tests {
         // Nothing is installed: an honest, actionable error instead of a silent fallback to a
         // cloud service (the audio must never leave the machine in this mode).
         let err = host
-            .transcribe(vec![0; 64], "audio/pcm".into(), None)
+            .transcribe(vec![0; 64], "audio/pcm".into(), None, false)
             .await
             .unwrap_err();
         let VoiceControlError::Invalid(m) = err else {
@@ -613,7 +617,7 @@ mod tests {
         assert_eq!(dto.stt_provider, VoiceProvider::GeminiLive);
         assert!(!dto.gemini_key_set);
         let err = host
-            .transcribe(vec![0; 64], "audio/pcm".into(), None)
+            .transcribe(vec![0; 64], "audio/pcm".into(), None, false)
             .await
             .unwrap_err();
         assert_eq!(err, VoiceControlError::NotConfigured);

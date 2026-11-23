@@ -171,6 +171,7 @@ async fn a_command_rule_is_the_exact_command_and_a_compound_command_is_once_only
     };
     let details = card.details.clone().unwrap();
     assert_eq!(details["once_only"], true);
+    assert_eq!(details["risk"], "high", "a shell command is desktop-only");
     assert!(details.get("memory").is_none());
     assert!(matches!(
         lp.approve(card.call_id, ApprovalScope::Always, env.user),

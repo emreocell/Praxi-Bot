@@ -98,7 +98,9 @@ fn setup_with(prepare: impl FnOnce(&std::path::Path)) -> T {
     setup_with_config(prepare, LoopConfig::default())
 }
 
-fn setup_with_config(prepare: impl FnOnce(&std::path::Path), config: LoopConfig) -> T {
+fn setup_with_config(prepare: impl FnOnce(&std::path::Path), mut config: LoopConfig) -> T {
+    // These API fixtures script tool names directly.
+    config.legacy_tool_surface = true;
     let dir = tempfile::tempdir().unwrap();
     prepare(dir.path());
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
@@ -1670,6 +1672,7 @@ fn setup_desktop() -> (T, Arc<crate::fake::FakeDesktop>) {
         LoopConfig {
             global_policy: permission_engine::Policy::full(),
             discovery_threshold: 1000,
+            legacy_tool_surface: true,
             ..LoopConfig::default()
         },
     )

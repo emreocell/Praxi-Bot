@@ -1312,6 +1312,12 @@ fn api_routes() -> Router<AppState> {
         )
         .route("/v1/chats/search", get(chat_history::search))
         .route("/v1/chats/{id}/export", get(chat_history::export))
+        .route(
+            "/v1/chats/import",
+            post(chat_history::import).layer(axum::extract::DefaultBodyLimit::max(
+                chat_history::MAX_IMPORT_BYTES,
+            )),
+        )
         .route("/v1/chats", get(r::list_chats).post(r::create_chat))
         .route(
             "/v1/chats/{id}",

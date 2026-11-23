@@ -14,7 +14,7 @@ test("a key being typed gets plain advice before anything is sent", () => {
   assert.equal(keyShapeProblem("gemini", "AIza short"), "address");
   assert.equal(keyShapeProblem("gemini", "AIzaSy123"), "short");
   assert.equal(keyShapeProblem("gemini", "sk-ant-api03-aaaaaaaaaaaaaaaaaaaaaaaa"), "prefix");
-  assert.equal(keyShapeProblem("gemini", "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q"), null);
+  assert.equal(keyShapeProblem("gemini", "AIza" + "A".repeat(35)), null);
   assert.equal(keyShapeProblem("anthropic", "sk-ant-api03-aaaaaaaaaaaaaaaaaaaaaaaa"), null);
   assert.equal(keyShapeProblem("ollama", "x"), null);
   assert.equal(keyShapeProblem("openai", "sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaa"), null);

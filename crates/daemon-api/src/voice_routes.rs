@@ -109,7 +109,7 @@ pub(crate) async fn transcribe(
     }
     Ok(Json(
         control
-            .transcribe(audio, input.mime, input.language)
+            .transcribe(audio, input.mime, input.language, input.local_only)
             .await?,
     ))
 }

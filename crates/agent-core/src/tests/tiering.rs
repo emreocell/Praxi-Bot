@@ -397,6 +397,47 @@ async fn unsupported_and_two_malformed_provider_responses_escalate_without_downg
 }
 
 #[tokio::test]
+async fn later_fallback_models_do_not_get_the_full_deferred_surface() {
+    let tools: Vec<_> = (0..45)
+        .map(|i| Arc::new(tool(&format!("catalog_{i:02}"), Effect::Read, "record")))
+        .collect();
+    let mut config = cfg(Policy::full());
+    config.legacy_tool_surface = false;
+    let (env, fake, lp) = rig(
+        vec![
+            Reply::Fail("unsupported"),
+            Reply::Fail("unsupported"),
+            text("done"),
+        ],
+        &tools.iter().collect::<Vec<_>>(),
+        "fallback = [\"fake/c\"]
+",
+        config,
+    );
+    let run = lp.run_turn(env.chat, "hello").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(models(&fake), vec!["fake/light", "fake/m", "fake/c"]);
+    let names = |i: usize| -> Vec<String> {
+        fake.request(i)
+            .tools
+            .iter()
+            .map(|t| {
+                t["function"]["name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+            .collect()
+    };
+    let has_search = |i: usize| names(i).iter().any(|n| n == agent_router::TOOL_SEARCH);
+    assert!(has_search(1), "the standard attempt gets the full surface");
+    assert!(
+        !has_search(2),
+        "a later fallback keeps the light direct surface"
+    );
+}
+
+#[tokio::test]
 async fn repeat_warning_and_fourth_step_each_escalate_with_enabled_light() {
     for repeat in [true, false] {
         let read = Arc::new(tool("t.read", Effect::Read, "denied"));

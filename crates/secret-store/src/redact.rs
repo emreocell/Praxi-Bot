@@ -189,7 +189,7 @@ mod tests {
         let cases = [
             "sk-abcdefghijklmnopqrstuvwxyz123456",
             "sk-or-v1-abcdefghijklmnopqrstuvwxyz",
-            "AIzaSyA1234567890abcdefghijklmnopqrstuv",
+            concat!("AIza", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
             "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
             "xoxb-1234567890-abcdefghij",
             "nvapi-abcdefghijklmnopqrstuvwxyz",

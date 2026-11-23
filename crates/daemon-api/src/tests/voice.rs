@@ -45,6 +45,7 @@ impl VoiceControl for FakeVoice {
         audio: Vec<u8>,
         _mime: String,
         _language: Option<String>,
+        _local_only: bool,
     ) -> Result<TranscribeOutput, VoiceControlError> {
         *self.last_audio_len.lock() = audio.len();
         if self.key.lock().is_none() {

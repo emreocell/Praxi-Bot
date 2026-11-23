@@ -114,6 +114,7 @@ impl BotPreset {
             "skill_*",
             "workflow_*",
             "notes_*",
+            "memory_*",
         ];
         match self {
             // `mcp:*` only makes MCP tools reachable: every MCP tool is
@@ -248,6 +249,13 @@ pub fn bot_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_bot_presets_include_memory_under_their_permission_policy() {
+        for preset in BotPreset::ALL {
+            assert!(preset.tool_allow().contains(&"memory_*"), "{}", preset.id());
+        }
+    }
 
     #[test]
     fn all_presets_leave_optional_model_tiering_disabled() {

@@ -146,6 +146,9 @@ pub struct TranscribeInput {
     /// Optional ISO-639-1 language hint (`en`, `tr`, `de`).
     #[serde(default)]
     pub language: Option<String>,
+    /// Refuse (409) unless the configured provider is on-device: the audio is never uploaded.
+    #[serde(default)]
+    pub local_only: bool,
 }
 
 /// Result of `POST /v1/voice/transcribe`.
@@ -189,6 +192,7 @@ pub trait VoiceControl: Send + Sync {
         audio: Vec<u8>,
         mime: String,
         language: Option<String>,
+        local_only: bool,
     ) -> Result<TranscribeOutput, VoiceControlError>;
 
     /// On-device speech models and their install state. The default says "not available".

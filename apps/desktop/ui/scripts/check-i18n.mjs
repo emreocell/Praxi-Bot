@@ -15,6 +15,21 @@ const SAME_AS_ENGLISH_VALUES = new Set([
   "OpenAI, OpenRouter, DeepSeek", "Composio", "AgentMail", "Telegram", "Node.js", "uv",
   "HTTP", "TLS", "STARTTLS", "IMAP", "SMTP", "SearXNG URL",
 ]);
+// Words that really are the same in a given language (cognates and loan words everyone uses).
+// Kept per language so a word that is a cognate in German is still flagged in Turkish.
+const SAME_AS_ENGLISH_BY_LOCALE = {
+  de: new Set([
+    "Apps", "Computer", "Updates", "Port", "Name", "Version", "Neutral", "Warm", "Text", "Bots", "Bot",
+    "Browser", "Transport", "Aurora", "Lava", "Limits", "Skills", "Avatar", "Desktop", "Remote", "Shell",
+    "System", "Chats", "Chat", "Details", "Plan", "Terminal", "Global", "Tokens", "Limit", "Pause",
+    "Websites", "Auto", "Online", "Offline", "online", "offline", "OK", "Problem", "Frost", "Neon",
+    "Obsidian", "Rose", "Sand", "Gemini Live", "Cron", "Stdio", "min", "s", "LIVE", "Tokens", "Agent", "Relay", "Server", "fps", "ms", "B", "Enter",
+  ]),
+  tr: new Set([
+    "Port", "Stdio", "Aurora", "Avatar", "Model", "Plan", "Terminal", "Bot", "Cron", "Limit", "Neon",
+    "Gemini Live", "Enter", "B", "model",
+  ]),
+};
 // Groups of keys whose values are names by design.
 const SAME_AS_ENGLISH_KEY_PREFIXES = [
   "settings.language.", // each language's own name, the same in every locale on purpose
@@ -29,8 +44,16 @@ const hasNoWords = (value) => !/\p{L}/u.test(value.replace(/\{\{[^}]*\}\}/g, "")
 // combinations count, so a bare "Tab" or "Enter" (often a word some locales translate) still warns.
 const KEY_CAP = String.raw`(?:Ctrl|Alt|Shift|Cmd|Esc|Enter|Tab|[A-Z0-9]|[,./])`;
 const isShortcut = (value) => new RegExp(`^${KEY_CAP}(?:[+ ]${KEY_CAP})+$`).test(value);
-const mayMatchEnglish = (key, value) =>
+// "Bots: {{names}}", "{{count}} B", "Terminal - {{name}}": every word is an allowed same-as-English word.
+const onlyAllowedWords = (value, locale) => {
+  const allowed = SAME_AS_ENGLISH_BY_LOCALE[locale];
+  const words = value.replace(/\{\{[^}]*\}\}/g, " ").match(/\p{L}+/gu) ?? [];
+  return !!allowed && words.length > 0 && words.every((w) => allowed.has(w));
+};
+const mayMatchEnglish = (key, value, locale) =>
+  onlyAllowedWords(value, locale) ||
   SAME_AS_ENGLISH_VALUES.has(value) ||
+  SAME_AS_ENGLISH_BY_LOCALE[locale]?.has(value) ||
   SAME_AS_ENGLISH_KEY_PREFIXES.some((prefix) => key.startsWith(prefix)) ||
   isExamplePlaceholder(key) ||
   hasNoWords(value) ||
@@ -65,7 +88,7 @@ for (const file of localeFiles) {
   const keys = new Set(values.keys());
   // Report-only: likely untranslated strings. Never counted in `bad`.
   const same = [...values].filter(
-    ([key, value]) => typeof value === "string" && value === enValues.get(key) && !mayMatchEnglish(key, value)
+    ([key, value]) => typeof value === "string" && value === enValues.get(key) && !mayMatchEnglish(key, value, locale)
   );
   console.warn(`${locale}: ${same.length} values identical to English`);
   for (const [key, value] of same) console.warn(`warn ${locale}: ${key} = ${JSON.stringify(value)}`);

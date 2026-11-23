@@ -173,13 +173,33 @@ fn size_mb(spec: &ModelSpec) -> u32 {
     u32::try_from(total.div_ceil(1_000_000)).unwrap_or(u32::MAX)
 }
 
-/// Every file present with the exact size that was verified against its sha256 on download.
+/// Every file present with the expected size AND sha256 (re-hashed: size alone is not trusted).
 #[must_use]
 pub fn is_installed(data_dir: &Path, spec: &ModelSpec) -> bool {
     let dir = model_dir(data_dir, spec);
-    spec.files.iter().all(|f| {
-        std::fs::metadata(dir.join(f.name)).is_ok_and(|m| m.is_file() && m.len() == f.bytes)
-    })
+    spec.files
+        .iter()
+        .all(|f| file_matches(&dir.join(f.name), f))
+}
+
+fn file_matches(path: &Path, f: &FileSpec) -> bool {
+    use std::io::Read as _;
+    if !std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() == f.bytes) {
+        return false;
+    }
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => hasher.update(&buf[..n]),
+            Err(_) => return false,
+        }
+    }
+    hex(&hasher.finalize()) == f.sha256
 }
 
 /// Where a file of an installed model lives.
@@ -331,8 +351,12 @@ async fn download_model(
     let dir = model_dir(data_dir, spec);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create the model folder: {e}"))?;
     for f in spec.files {
-        if std::fs::metadata(dir.join(f.name)).is_ok_and(|m| m.len() == f.bytes) {
+        if file_matches(&dir.join(f.name), f) {
             continue;
+        }
+        let free = fs4::available_space(&dir).unwrap_or(u64::MAX);
+        if free < f.bytes.saturating_add(256 * 1024 * 1024) {
+            return Err("not enough free disk space for the speech model".into());
         }
         download_file(http, f, &dir.join(f.name)).await?;
     }
@@ -604,6 +628,26 @@ mod tests {
         let st = LocalVoice::new(dir.path()).status();
         assert!(st.models.iter().all(|m| !m.installed));
         assert!(st.models.iter().any(|m| m.id == DEFAULT_MODEL));
+    }
+
+    #[test]
+    fn same_size_but_tampered_file_is_not_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("m.bin");
+        std::fs::write(&path, b"abcd").unwrap();
+        let mut h = Sha256::new();
+        h.update(b"abcd");
+        let sha = hex(&h.finalize());
+        let sha: &'static str = Box::leak(sha.into_boxed_str());
+        let spec = FileSpec {
+            name: "m.bin",
+            url: "https://huggingface.co/x",
+            bytes: 4,
+            sha256: sha,
+        };
+        assert!(file_matches(&path, &spec));
+        std::fs::write(&path, b"abce").unwrap();
+        assert!(!file_matches(&path, &spec));
     }
 
     #[test]

@@ -773,6 +773,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/chats/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import one version-1 chat export as a new chat. Every message is stored as
+         *     untrusted history with origin `imported`; tool steps and approvals are
+         *     counted but never executed or written to their tables.
+         */
+        post: operations["import_chat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/chats/search": {
         parameters: {
             query?: never;
@@ -4193,6 +4214,29 @@ export interface components {
             steps: components["schemas"]["ExportStep"][];
             title: string;
         };
+        /**
+         * @description A version-1 export file. The chat and message ids are ignored; a new chat
+         *     and new message ids are created on import.
+         */
+        ChatImport: {
+            approvals?: components["schemas"]["ImportRow"][];
+            /** Format: int32 */
+            format_version: number;
+            messages: components["schemas"]["ImportMessage"][];
+            steps?: components["schemas"]["ImportRow"][];
+            title?: string;
+        };
+        ChatImportReport: {
+            /** Format: int32 */
+            approvals_ignored: number;
+            /** Format: uuid */
+            chat_id: string;
+            /** Format: int32 */
+            messages: number;
+            /** Format: int32 */
+            steps_ignored: number;
+            title: string;
+        };
         /** @description One diagnostic result. */
         Check: {
             /** @description What was found. */
@@ -5152,6 +5196,8 @@ export interface components {
             role: string;
             /** Format: uuid */
             run_id?: string | null;
+            /** @description Recorded origin (`owner`, `telegram`, `imported`, ...), when known. */
+            source?: string | null;
         };
         /** @description An exported profile file. */
         ExportOutput: {
@@ -5784,6 +5830,11 @@ export interface components {
             /** @description Tool patterns removed. */
             tools_exclude: string[];
         };
+        /**
+         * @description A tool step or approval row. Kept only for its count; it is never stored
+         *     in the run or approval tables.
+         */
+        ImportRow: Record<string, never>;
         /** @description Run metadata only: no error text, no spawn parameters, no computer identity. */
         ImportRun: {
             /** Format: uuid */
@@ -6732,8 +6783,8 @@ export interface components {
              */
             run_id?: string | null;
             /**
-             * @description Where a user message came from (`owner` = this app, `telegram`, `peer`,
-             *     `local_api`); absent for older messages and for replies.
+             * @description Where the message came from (`owner` = this app, `telegram`, `peer`,
+             *     `local_api`, `imported`); absent for older messages and most replies.
              */
             source?: string | null;
             /**
@@ -8214,6 +8265,8 @@ export interface components {
             audio_base64: string;
             /** @description Optional ISO-639-1 language hint (`en`, `tr`, `de`). */
             language?: string | null;
+            /** @description Refuse (409) unless the configured provider is on-device: the audio is never uploaded. */
+            local_only?: boolean;
             /** @description MIME type of the recording, e.g. `audio/webm` (Whisper) or `audio/pcm` (Gemini Live: 16-bit LE, 16 kHz, mono). */
             mime: string;
         };
@@ -10607,6 +10660,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    import_chat: {
+        parameters: {
+            query: {
+                /** @description Bot that will own the new chat. */
+                bot_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatImport"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatImportReport"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             404: {
