@@ -12,7 +12,7 @@ use cli_provider::runtime::{
 use permission_engine::Decision;
 use protocol::{Event, ToolCallId, event::MessageDelta};
 use provider_catalog::{
-    ChatRequest, MessageRole, ProviderConfig, Usage,
+    ChatRequest, FailureClass, MessageRole, ProviderConfig, ProviderError, Usage,
     config::{CliEngine as ConfigEngine, config_path},
 };
 use serde_json::{Value, json};
@@ -206,6 +206,7 @@ struct RecordingHost {
     text: parking_lot::Mutex<String>,
     /// Bytes of CLI text so far, read by the limit watcher while the turn runs.
     progress: Option<Arc<std::sync::atomic::AtomicUsize>>,
+    usage: Option<Arc<parking_lot::Mutex<Option<Usage>>>>,
 }
 #[async_trait]
 impl TurnHost for RecordingHost {
@@ -217,6 +218,11 @@ impl TurnHost for RecordingHost {
         }
         drop(all);
         self.inner.text(text);
+    }
+    fn usage_snapshot(&self, usage: &cli_provider::runtime::TurnUsage) {
+        if let Some(sink) = &self.usage {
+            *sink.lock() = Some(provider_usage(usage));
+        }
     }
     async fn call(&self, name: &str, input: Value) -> ToolReply {
         self.inner.call(name, input).await
@@ -271,7 +277,9 @@ impl TurnExecutor {
         specs: &[ToolSpec],
         cancel: &CancellationToken,
     ) -> Result<ModelOut, ExecError> {
-        self.exec_cli_watched(run, req, specs, cancel, None).await
+        self.exec_cli_watched(run, req, specs, cancel, None, None)
+            .await
+            .map_err(xe)
     }
 
     /// [`Self::exec_cli`] that publishes the CLI's text length in `progress`.
@@ -283,37 +291,39 @@ impl TurnExecutor {
         specs: &[ToolSpec],
         cancel: &CancellationToken,
         progress: Option<Arc<std::sync::atomic::AtomicUsize>>,
-    ) -> Result<ModelOut, ExecError> {
+        usage_sink: Option<Arc<parking_lot::Mutex<Option<Usage>>>>,
+    ) -> Result<ModelOut, ProviderError> {
         // Safe mode: a coding CLI runs its own shell and files, outside our gate.
         if self.sh.cfg.safe_mode {
-            return Err(xe(
+            return Err(cli_invalid(
                 "CLI executors are unavailable in safe mode; pick an API model or restart normally",
             ));
         }
         // Central boundary covers primary models, fallbacks and child roles.
         // Native CLI tools cannot honor the per-call external-agent gate.
-        if self.sh.ctx(run)?.initiator == protocol::InitiatorKind::ExternalAgent {
-            return Err(xe(
+        let ctx = self.sh.ctx(run).map_err(cli_invalid)?;
+        if ctx.initiator == protocol::InitiatorKind::ExternalAgent {
+            return Err(cli_invalid(
                 "native CLI sessions are not available to external agents",
             ));
         }
-        if self.sh.ctx(run)?.initiator == protocol::InitiatorKind::ExternalSchedule {
-            return Err(xe(
+        if ctx.initiator == protocol::InitiatorKind::ExternalSchedule {
+            return Err(cli_invalid(
                 "CLI executors are unavailable for externally supplied schedules",
             ));
         }
-        let cfg = ProviderConfig::load(&config_path(self.sh.storage.data_dir())).map_err(xe)?;
+        let cfg =
+            ProviderConfig::load(&config_path(self.sh.storage.data_dir())).map_err(cli_invalid)?;
         let id = req.model.provider().unwrap_or(&req.model.0);
         let settings = cfg
             .get(id)
             .filter(|p| p.enabled)
-            .ok_or_else(|| xe("CLI provider is not configured"))?;
+            .ok_or_else(|| cli_invalid("CLI provider is not configured"))?;
         let cli = settings
             .cli
             .as_ref()
-            .ok_or_else(|| xe("CLI provider is not configured"))?;
+            .ok_or_else(|| cli_invalid("CLI provider is not configured"))?;
         let (cfg_engine, command) = cli.parts();
-        let ctx = self.sh.ctx(run).map_err(xe)?;
         let engine_settings = ctx.profile.engine.clone();
         let native = engine_settings.mode == cli_provider::EngineMode::NativeTools;
         let host = Arc::new(RecordingHost {
@@ -325,6 +335,7 @@ impl TurnExecutor {
             },
             text: parking_lot::Mutex::new(String::new()),
             progress,
+            usage: usage_sink,
         });
         let mut system = String::new();
         let mut prompt = String::new();
@@ -356,20 +367,22 @@ impl TurnExecutor {
             })
             .cloned()
             .collect();
-        let model = cli_model_arg(&req.model).map_err(xe)?;
+        let model = cli_model_arg(&req.model).map_err(cli_invalid)?;
         let usage = if native {
             let driver = cli_provider::Driver::from_id(cfg_engine.as_str())
-                .ok_or_else(|| xe("this CLI has no native-tools driver"))?;
-            let nt = self.native_turn(
-                &engine_settings,
-                driver,
-                Turn {
-                    prompt,
-                    system,
-                    model,
-                    tools,
-                },
-            )?;
+                .ok_or_else(|| cli_invalid("this CLI has no native-tools driver"))?;
+            let nt = self
+                .native_turn(
+                    &engine_settings,
+                    driver,
+                    Turn {
+                        prompt,
+                        system,
+                        model,
+                        tools,
+                    },
+                )
+                .map_err(cli_invalid)?;
             let token = cancel.child_token();
             let key = uuid::Uuid::now_v7();
             self.sh
@@ -378,6 +391,11 @@ impl TurnExecutor {
                 .entry(ctx.bot_id)
                 .or_default()
                 .push((key, token.clone()));
+            let _registration = NativeRunRegistration {
+                sh: &self.sh,
+                bot: ctx.bot_id,
+                key,
+            };
             // Coding turns outlast a chat completion and wait on approval cards.
             let result = tokio::time::timeout(
                 self.sh.cfg.guards.model_timeout.max(NATIVE_TURN_TIMEOUT),
@@ -390,18 +408,15 @@ impl TurnExecutor {
                 ),
             )
             .await;
-            if let Some(list) = self.sh.native_runs.lock().get_mut(&ctx.bot_id) {
-                list.retain(|(k, _)| *k != key);
-            }
             result
-                .map_err(|_| xe("CLI turn timed out"))?
-                .map_err(|e| cli_exec_error_for(driver.display_name(), driver.id(), &e))?
+                .unwrap_or(Err(CliError::Timeout))
+                .map_err(|e| cli_provider_error(driver.display_name(), driver.id(), &e))?
         } else {
             let engine = match cfg_engine {
                 ConfigEngine::Claude => Engine::Claude,
                 ConfigEngine::Codex => Engine::Codex,
                 other => {
-                    return Err(xe(format!(
+                    return Err(cli_invalid(format!(
                         "{name} only works with its own tools. Allow that in this bot's engine settings. (engine_needs_native)",
                         name = cli_provider::Driver::from_id(other.as_str())
                             .map_or(other.as_str(), cli_provider::Driver::display_name)
@@ -427,19 +442,17 @@ impl TurnExecutor {
                 ),
             )
             .await
-            .map_err(|_| xe("CLI turn timed out"))?
-            .map_err(|e| cli_exec_error(engine, &e))?
+            .unwrap_or(Err(CliError::Timeout))
+            .map_err(|e| {
+                let (name, command) = cli_engine_name(engine);
+                cli_provider_error(name, command, &e)
+            })?
         };
         let executed = std::mem::take(&mut *host.inner.executed.lock());
         Ok(ModelOut {
             text: self.sh.redact(host.text.lock().clone()),
             model: req.model.0.clone(),
-            usage: usage.reported.then_some(Usage {
-                prompt_tokens: usage.input,
-                completion_tokens: usage.output,
-                cached_tokens: usage.cached,
-                cache_write_tokens: None,
-            }),
+            usage: usage.reported.then(|| provider_usage(&usage)),
             finish: "Stop".into(),
             executed,
             ..ModelOut::default()
@@ -447,12 +460,68 @@ impl TurnExecutor {
     }
 }
 
-fn cli_exec_error(engine: Engine, err: &CliError) -> ExecError {
-    let (name, cmd) = match engine {
+struct NativeRunRegistration<'a> {
+    sh: &'a Shared,
+    bot: protocol::BotId,
+    key: uuid::Uuid,
+}
+
+impl Drop for NativeRunRegistration<'_> {
+    fn drop(&mut self) {
+        if let Some(list) = self.sh.native_runs.lock().get_mut(&self.bot) {
+            list.retain(|(key, _)| *key != self.key);
+        }
+    }
+}
+
+fn provider_usage(usage: &cli_provider::runtime::TurnUsage) -> Usage {
+    Usage {
+        prompt_tokens: usage.input,
+        completion_tokens: usage.output,
+        cached_tokens: usage.cached,
+        cache_write_tokens: None,
+    }
+}
+
+fn cli_invalid(error: impl std::fmt::Display) -> ProviderError {
+    ProviderError::InvalidRequest(error.to_string())
+}
+
+const fn cli_engine_name(engine: Engine) -> (&'static str, &'static str) {
+    match engine {
         Engine::Claude => ("Claude Code", "claude"),
         Engine::Codex => ("Codex CLI", "codex"),
-    };
+    }
+}
+
+#[cfg(test)]
+fn cli_exec_error(engine: Engine, err: &CliError) -> ExecError {
+    let (name, cmd) = cli_engine_name(engine);
     cli_exec_error_for(name, cmd, err)
+}
+
+fn cli_provider_error(name: &str, command: &str, error: &CliError) -> ProviderError {
+    let class = match error {
+        CliError::SignedOut => FailureClass::Auth,
+        CliError::Quota => FailureClass::Quota,
+        CliError::Overloaded => FailureClass::Overloaded,
+        CliError::ContextTooLong => FailureClass::ContextTooLong,
+        CliError::ContentFiltered => FailureClass::ContentFiltered,
+        CliError::Io | CliError::Network => FailureClass::Network,
+        CliError::Timeout => FailureClass::Timeout,
+        CliError::Protocol => FailureClass::Protocol,
+        CliError::Cancelled => FailureClass::Cancelled,
+        CliError::NotInstalled
+        | CliError::ShimRefused
+        | CliError::NativeToolsOpen
+        | CliError::CodexUnconfinable
+        | CliError::BinaryChanged
+        | CliError::WorkspaceUnavailable => FailureClass::Configuration,
+    };
+    ProviderError::CliTurn {
+        class,
+        message: cli_exec_error_for(name, command, error).0,
+    }
 }
 
 fn cli_exec_error_for(name: &str, cmd: &str, err: &CliError) -> ExecError {
@@ -477,6 +546,11 @@ fn cli_exec_error_for(name: &str, cmd: &str, err: &CliError) -> ExecError {
         CliError::Quota => format!(
             "{name} subscription usage limit reached. Wait for your quota to reset or switch providers. ({code})"
         ),
+        CliError::Overloaded => "The model provider is busy. Try again later.".into(),
+        CliError::ContextTooLong => "The conversation is too long for this model. Start a shorter conversation or choose a model that can handle more text.".into(),
+        CliError::ContentFiltered => "The model blocked the response because of its content rules.".into(),
+        CliError::Network => format!("{name} could not connect to the model provider."),
+        CliError::Timeout => format!("{name} stopped responding or took too long."),
         CliError::Io => format!(
             "Could not communicate with {name}. Verify `{cmd}` runs in a terminal and try again. ({code})"
         ),

@@ -9,6 +9,7 @@ use std::fmt;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use provider_catalog::FailureClass;
 use serde_json::{Value, json};
 
 use super::BackendError;
@@ -25,6 +26,7 @@ const MAX_BATCH: usize = 100;
 fn http() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
+        .retry(reqwest::retry::never())
         .build()
         .unwrap_or_default()
 }
@@ -41,14 +43,28 @@ async fn post(
         .json(body)
         .send()
         .await
-        .map_err(|e| BackendError::new(format!("request failed: {}", e.without_url())))?;
-    let status = resp.status();
-    if !status.is_success() {
-        return Err(BackendError::new(format!("HTTP {status}")));
+        .map_err(|e| {
+            BackendError::provider(if e.is_timeout() {
+                FailureClass::Timeout
+            } else if e.is_builder() {
+                FailureClass::InvalidRequest
+            } else {
+                FailureClass::Network
+            })
+        })?;
+    if !resp.status().is_success() {
+        let error = provider_catalog::gemini::response_error(resp).await;
+        return Err(BackendError::provider(error.class()));
     }
-    resp.json()
-        .await
-        .map_err(|e| BackendError::new(format!("bad response body: {}", e.without_url())))
+    resp.json().await.map_err(|e| {
+        BackendError::provider(if e.is_timeout() {
+            FailureClass::Timeout
+        } else if e.is_decode() {
+            FailureClass::Protocol
+        } else {
+            FailureClass::Network
+        })
+    })
 }
 
 /// Gemini embeddings (`batchEmbedContents`).
@@ -249,17 +265,26 @@ impl Classifier for GeminiClassifier {
         });
         let url = format!("{}/models/{}:generateContent", self.base_url, self.model);
         let v = post(&self.client, &url, &self.api_key, &body).await?;
+        let blocked = v.pointer("/promptFeedback/blockReason").is_some()
+            || matches!(
+                v.pointer("/candidates/0/finishReason")
+                    .and_then(Value::as_str),
+                Some("SAFETY" | "RECITATION" | "BLOCKLIST" | "PROHIBITED_CONTENT" | "SPII")
+            );
+        if blocked {
+            return Err(BackendError::provider(FailureClass::ContentFiltered));
+        }
         let parts = v
             .pointer("/candidates/0/content/parts")
             .and_then(Value::as_array)
-            .ok_or_else(|| BackendError::new("response has no candidate text"))?;
+            .ok_or_else(|| BackendError::provider(FailureClass::Protocol))?;
         let text: String = parts
             .iter()
             .filter(|p| p.get("thought").and_then(Value::as_bool) != Some(true))
             .filter_map(|p| p.get("text").and_then(Value::as_str))
             .collect();
         if text.is_empty() {
-            return Err(BackendError::new("empty candidate text"));
+            return Err(BackendError::provider(FailureClass::Protocol));
         }
         Ok(text)
     }

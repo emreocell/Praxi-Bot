@@ -1844,7 +1844,9 @@ async fn human_runs_wait_for_approvals_beyond_the_schedule_timeout() {
 
 #[test]
 fn retryable_classification() {
-    use crate::exec::is_retryable;
+    fn is_retryable(e: &ProviderError) -> bool {
+        e.is_retryable()
+    }
     assert!(is_retryable(&ProviderError::Timeout));
     assert!(is_retryable(&ProviderError::RateLimited {
         retry_after: None
@@ -1962,6 +1964,29 @@ async fn invalid_request_on_the_primary_stops_the_chain() {
     let run = lp.run_turn(env.chat, "hi").unwrap();
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
     assert_eq!(fake.n_requests(), 1, "no retry and no fallback");
+}
+
+#[tokio::test]
+async fn permanent_failure_on_a_fallback_stops_the_rest_of_the_chain() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        Reply::Fail("upstream"),
+        Reply::Fail("auth"),
+        text("never"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.model_retry.max_attempts = 1;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile("fallback = [\"fake/b\", \"fake/c\"]\n"),
+        config,
+    );
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
+    assert_eq!(fake.n_requests(), 2);
 }
 
 #[tokio::test]
@@ -5533,7 +5558,14 @@ async fn retry_after_beyond_budget_is_one_request_and_surfaces_rate_limited() {
     config.model_retry.initial_backoff_ms = 500;
     config.model_retry.multiplier = 2;
     config.model_retry.max_backoff_ms = 8_000;
-    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile("fallback = [\"fake/same-provider\"]\n"),
+        config,
+    );
     let run = lp.run_turn(env.chat, "hi").unwrap();
     let state = tokio::time::timeout(Duration::from_secs(3), lp.wait(run))
         .await

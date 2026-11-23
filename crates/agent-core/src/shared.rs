@@ -578,6 +578,14 @@ impl ChatProvider for RedactingProvider {
     async fn list_models(&self) -> Result<Vec<String>, provider_catalog::ProviderError> {
         self.inner.list_models().await
     }
+
+    async fn stream_once(
+        &self,
+        mut req: provider_catalog::ChatRequest,
+    ) -> Result<provider_catalog::ChatStream, provider_catalog::ProviderError> {
+        redact_request(&self.redactor, &mut req);
+        self.inner.stream_once(req).await
+    }
 }
 
 /// Mask secrets in every message and tool-call argument of `req`.

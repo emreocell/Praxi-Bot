@@ -192,6 +192,12 @@ fn main() {
             json!({"type":"stream_event","event":{"delta":{"type":"thinking_delta","thinking":"PRIVATE_THINKING"}}}),
         );
         emit(json!({"type":"stream_event","event":{"delta":{"type":"text_delta","text":"hello"}}}));
+        if mode == "usage-then-cut" {
+            emit(json!({"type":"stream_event","event":{
+                "type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":4}}
+            }}));
+            return;
+        }
         let m = &v["mcpServers"]["praxi"];
         (
             m["url"].as_str().unwrap().to_owned(),
@@ -237,6 +243,12 @@ fn main() {
         assert_eq!(turn["method"], "turn/start");
         log("stdin", &turn.to_string());
         emit(json!({"id":3,"result":{}}));
+        if mode == "usage-then-cut" {
+            emit(json!({"method":"thread/tokenUsage/updated","params":{
+                "tokenUsage":{"last":{"inputTokens":12,"outputTokens":4}}
+            }}));
+            return;
+        }
         if let Some(method) = mode.strip_prefix("bad-method:") {
             if method.contains("Delta") || method.contains("patchUpdated") {
                 emit(json!({"method": method, "params": {}}));

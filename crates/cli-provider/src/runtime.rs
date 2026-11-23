@@ -7,6 +7,7 @@ use std::{
     net::SocketAddr,
     process::Stdio,
     sync::{Arc, OnceLock},
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -51,6 +52,16 @@ pub enum CliError {
     Cancelled,
     #[error("quota_exceeded (subscription; non-retryable)")]
     Quota,
+    #[error("the model provider is busy")]
+    Overloaded,
+    #[error("the conversation is too long for the model")]
+    ContextTooLong,
+    #[error("the model blocked the response")]
+    ContentFiltered,
+    #[error("the CLI could not connect to the model provider")]
+    Network,
+    #[error("the CLI stopped responding")]
+    Timeout,
     #[error("cli_protocol_error")]
     Protocol,
     #[error("cli_io_error")]
@@ -77,6 +88,11 @@ impl CliError {
             Self::NativeToolsOpen => "native_tools_open",
             Self::Cancelled => "cancelled",
             Self::Quota => "quota_exceeded",
+            Self::Overloaded => "provider_overloaded",
+            Self::ContextTooLong => "context_too_long",
+            Self::ContentFiltered => "content_filtered",
+            Self::Network => "provider_network_error",
+            Self::Timeout => "provider_timeout",
             Self::Protocol => "cli_protocol_error",
             Self::Io => "cli_io_error",
             Self::CodexUnconfinable => "codex_unconfinable",
@@ -118,6 +134,8 @@ pub struct NativePermission {
 #[async_trait]
 pub trait TurnHost: Send + Sync + 'static {
     fn text(&self, text: &str);
+    /// Most recent cumulative usage reported for this turn, including on failure.
+    fn usage_snapshot(&self, _usage: &TurnUsage) {}
     async fn call(&self, name: &str, input: Value) -> ToolReply;
     async fn approve(&self, name: &str, input: Value) -> bool;
     /// Answer a permission request for the CLI's own tool: `true` allows it.
@@ -206,9 +224,44 @@ struct Bridge {
     #[cfg(windows)]
     job: crate::detect::SharedJob,
     listen: Arc<OnceLock<SocketAddr>>,
+    active_tools: tokio::sync::watch::Sender<usize>,
+}
+
+struct ActiveTool<'a>(&'a tokio::sync::watch::Sender<usize>);
+
+impl Drop for ActiveTool<'_> {
+    fn drop(&mut self) {
+        self.0.send_modify(|count| *count -= 1);
+    }
+}
+
+const STREAM_IDLE: Duration = Duration::from_secs(120);
+
+/// The CLI can go quiet while a tool or approval in our MCP bridge is pending.
+/// Keep the same read alive and give the CLI a fresh window when it can resume.
+async fn with_idle_deadline<T>(
+    active: &tokio::sync::watch::Sender<usize>,
+    idle: Duration,
+    read: impl Future<Output = Result<T, CliError>>,
+) -> Result<T, CliError> {
+    let mut activity = active.subscribe();
+    tokio::pin!(read);
+    loop {
+        let waiting_for_tool = *activity.borrow_and_update() > 0;
+        tokio::select! {
+            result = &mut read => return result,
+            _ = activity.changed() => {}
+            () = tokio::time::sleep(idle), if !waiting_for_tool => return Err(CliError::Timeout),
+        }
+    }
 }
 
 impl Bridge {
+    fn active_tool(&self) -> ActiveTool<'_> {
+        self.active_tools.send_modify(|count| *count += 1);
+        ActiveTool(&self.active_tools)
+    }
+
     fn resolve(&self, wire: &str) -> Option<&str> {
         let wire = wire.strip_prefix("mcp__praxi__").unwrap_or(wire);
         self.tools
@@ -232,6 +285,7 @@ impl Bridge {
                 json!({"tools":tools})
             }
             "tools/call" if self.native && req["params"]["name"].as_str() == Some("approve") => {
+                let _active = self.active_tool();
                 let args = &req["params"]["arguments"];
                 let tool = args["tool_name"].as_str().unwrap_or("tool").to_owned();
                 let input = args["input"].clone();
@@ -256,6 +310,7 @@ impl Bridge {
             }
             "tools/call" => {
                 if let Some(name) = req["params"]["name"].as_str().and_then(|n| self.resolve(n)) {
+                    let _active = self.active_tool();
                     tokio::select! {
                         () = self.stop.cancelled() => ToolReply {text:"turn ended".into(), is_error:true}.wire(),
                         r = self.host.call(name, req["params"]["arguments"].clone()) => r.wire(),
@@ -768,6 +823,7 @@ async fn session(
         #[cfg(windows)]
         job: job.clone(),
         listen: Arc::new(OnceLock::new()),
+        active_tools: tokio::sync::watch::Sender::new(0),
     };
     let server = BridgeServer::open(bridge.clone()).await?;
     if stop.is_cancelled() {
@@ -905,9 +961,7 @@ async fn session(
             let mut combined = Vec::with_capacity(ring.len());
             combined.extend_from_slice(head);
             combined.extend_from_slice(tail);
-            if is_signed_out_text(&String::from_utf8_lossy(&combined)) {
-                return Err(CliError::SignedOut);
-            }
+            return Err(classify_child_error(&String::from_utf8_lossy(&combined)));
         } else {
             abort_handle.abort();
         }
@@ -944,29 +998,26 @@ async fn protocol(
     loop {
         // A hard allocation cap applies even when a child never writes LF.
         let mut bytes = Vec::new();
-        let n = (&mut reader)
-            .take(1024 * 1024 + 1)
-            .read_until(b'\n', &mut bytes)
-            .await?;
-        if n == 0 || n > 1024 * 1024 {
+        let n = with_idle_deadline(&bridge.active_tools, STREAM_IDLE, async {
+            Ok((&mut reader)
+                .take(1024 * 1024 + 1)
+                .read_until(b'\n', &mut bytes)
+                .await?)
+        })
+        .await?;
+        if n > 1024 * 1024 || !bytes.ends_with(b"\n") {
             return Err(CliError::Protocol);
         }
         let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
-            if is_signed_out_text(&String::from_utf8_lossy(&bytes)) {
-                return Err(CliError::SignedOut);
-            }
-            return Err(CliError::Protocol);
+            return Err(classify_child_error(&String::from_utf8_lossy(&bytes)));
         };
+        record_usage(&v, &mut usage, host);
         if v.get("error").is_some() || v["is_error"] == true || v["method"] == "error" {
             return Err(child_error(&v));
         }
         let done = match engine {
-            Engine::Claude => claude_frame(&v, bridge, host, &mut usage, &mut partial)?,
-            Engine::Codex => {
-                codex
-                    .frame(&v, turn, bridge, server, stdin, &mut usage)
-                    .await?
-            }
+            Engine::Claude => claude_frame(&v, bridge, host, &mut partial)?,
+            Engine::Codex => codex.frame(&v, turn, bridge, server, stdin).await?,
         };
         if done {
             return Ok(usage);
@@ -994,14 +1045,45 @@ fn is_signed_out_text(text: &str) -> bool {
     .any(|s| lower.contains(s))
 }
 fn child_error(v: &Value) -> CliError {
-    let text = v.to_string().to_ascii_lowercase();
-    if is_signed_out_text(&text) {
-        CliError::SignedOut
-    } else if ["quota", "rate_limit", "rate limit", "usage limit"]
-        .iter()
-        .any(|s| text.contains(s))
+    classify_child_error(&v.to_string())
+}
+
+fn classify_child_error(raw: &str) -> CliError {
+    let text = raw.to_ascii_lowercase();
+    let has = |markers: &[&str]| markers.iter().any(|marker| text.contains(marker));
+    if is_signed_out_text(&text)
+        || has(&["invalid_api_key", "401 unauthorized", "permission_error"])
     {
+        CliError::SignedOut
+    } else if has(&[
+        "quota",
+        "rate_limit",
+        "rate limit",
+        "usage limit",
+        "resource_exhausted",
+    ]) {
         CliError::Quota
+    } else if has(&[
+        "context_length_exceeded",
+        "context_window_exceeded",
+        "context window",
+        "prompt is too long",
+        "prompt too long",
+    ]) {
+        CliError::ContextTooLong
+    } else if has(&["content_filter", "content policy", "safety filter"]) {
+        CliError::ContentFiltered
+    } else if has(&["overloaded", "service unavailable", "model is busy"]) {
+        CliError::Overloaded
+    } else if has(&["etimedout", "timed out", "deadline_exceeded"]) {
+        CliError::Timeout
+    } else if has(&[
+        "econnreset",
+        "econnrefused",
+        "network error",
+        "connection refused",
+    ]) {
+        CliError::Network
     } else {
         CliError::Protocol
     }
@@ -1011,7 +1093,6 @@ fn claude_frame(
     v: &Value,
     bridge: &Bridge,
     host: &dyn TurnHost,
-    usage: &mut TurnUsage,
     partial: &mut bool,
 ) -> Result<bool, CliError> {
     match v["type"].as_str().unwrap_or("") {
@@ -1058,7 +1139,6 @@ fn claude_frame(
             {
                 return Err(child_error(v));
             }
-            read_usage(&v["usage"], usage);
             return Ok(true);
         }
         // Claude Code announces itself (`init`), reports status and rate limits and echoes tool
@@ -1096,7 +1176,6 @@ impl CodexState {
         bridge: &Bridge,
         server: &BridgeServer,
         stdin: &mut tokio::process::ChildStdin,
-        usage: &mut TurnUsage,
     ) -> Result<bool, CliError> {
         if v["id"] == 1 && v.get("result").is_some() {
             if self.initialized {
@@ -1163,9 +1242,7 @@ impl CodexState {
                         bridge.host.text(t);
                     }
                 }
-                "thread/tokenUsage/updated" => {
-                    read_usage(&v["params"]["tokenUsage"]["last"], usage);
-                }
+                "thread/tokenUsage/updated" => {}
                 "turn/completed" => {
                     if self.thread.is_none() || v["params"]["turn"]["status"] != "completed" {
                         return Err(child_error(v));
@@ -1215,27 +1292,100 @@ fn validate_tool(bridge: &Bridge, block: &Value) -> Result<(), CliError> {
     }
     Ok(())
 }
-fn read_usage(v: &Value, usage: &mut TurnUsage) {
-    if !v.is_object() {
+fn record_usage(frame: &Value, usage: &mut TurnUsage, host: &dyn TurnHost) {
+    let snapshot = match frame["type"].as_str() {
+        Some("result") => frame.get("usage"),
+        Some("assistant") => frame.pointer("/message/usage"),
+        Some("stream_event") => frame
+            .pointer("/event/message/usage")
+            .or_else(|| frame.pointer("/event/usage")),
+        _ if frame["method"] == "thread/tokenUsage/updated" => frame
+            .pointer("/params/tokenUsage/total")
+            .or_else(|| frame.pointer("/params/tokenUsage/last")),
+        _ => None,
+    };
+    let Some(v) = snapshot.filter(|v| v.is_object()) else {
         return;
-    }
-    usage.reported = v.get("input_tokens").is_some() || v.get("inputTokens").is_some();
-    usage.input = v["input_tokens"]
+    };
+    if let Some(input) = v["input_tokens"]
         .as_u64()
         .or_else(|| v["inputTokens"].as_u64())
-        .unwrap_or(0);
-    usage.output = v["output_tokens"]
+    {
+        usage.reported = true;
+        usage.input = input;
+    }
+    if let Some(output) = v["output_tokens"]
         .as_u64()
         .or_else(|| v["outputTokens"].as_u64())
-        .unwrap_or(0);
-    usage.cached = v["cache_read_input_tokens"]
+    {
+        usage.output = output;
+    }
+    if let Some(cached) = v["cache_read_input_tokens"]
         .as_u64()
-        .or_else(|| v["cachedInputTokens"].as_u64());
+        .or_else(|| v["cachedInputTokens"].as_u64())
+    {
+        usage.cached = Some(cached);
+    }
+    if usage.reported {
+        host.usage_snapshot(usage);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_failure_frames_map_to_safe_error_classes() {
+        for (frame, expected) in [
+            (
+                json!({"type":"result","is_error":true,"result":"invalid_api_key"}),
+                CliError::SignedOut,
+            ),
+            (
+                json!({"method":"turn/completed","params":{"turn":{"error":{"message":"usage limit"}}}}),
+                CliError::Quota,
+            ),
+            (
+                json!({"id":3,"error":{"message":"model is busy"}}),
+                CliError::Overloaded,
+            ),
+            (
+                json!({"id":3,"error":{"message":"context_length_exceeded"}}),
+                CliError::ContextTooLong,
+            ),
+            (
+                json!({"id":3,"error":{"message":"content_filter"}}),
+                CliError::ContentFiltered,
+            ),
+            (
+                json!({"id":3,"error":{"message":"ECONNRESET"}}),
+                CliError::Network,
+            ),
+            (
+                json!({"id":3,"error":{"message":"ETIMEDOUT"}}),
+                CliError::Timeout,
+            ),
+            (
+                json!({"id":3,"error":{"message":"unknown response"}}),
+                CliError::Protocol,
+            ),
+        ] {
+            assert_eq!(child_error(&frame), expected, "{frame}");
+        }
+    }
+
+    #[tokio::test]
+    async fn silent_cli_read_has_a_deadline() {
+        let bridge = bridge();
+        let result = with_idle_deadline::<()>(
+            &bridge.active_tools,
+            Duration::from_millis(5),
+            std::future::pending(),
+        )
+        .await;
+        assert_eq!(result, Err(CliError::Timeout));
+    }
 
     #[tokio::test]
     async fn writing_to_an_exited_cli_is_a_protocol_error_not_io() {
@@ -1457,6 +1607,7 @@ mod tests {
             #[cfg(windows)]
             job: crate::detect::SharedJob::new(),
             listen: Arc::new(OnceLock::new()),
+            active_tools: tokio::sync::watch::Sender::new(0),
         }
     }
     fn http_post(url: &str, auth: Option<&str>, body: &str) -> String {

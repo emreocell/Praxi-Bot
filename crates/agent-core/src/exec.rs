@@ -19,7 +19,10 @@ use protocol::event::{
     ToolCallDenied, ToolCallRequested,
 };
 use protocol::{Event, RunId, ToolCallId};
-use provider_catalog::{ChatChunk, ChatRequest, Message, MessageRole, ModelRef, ProviderError};
+use provider_catalog::{
+    CHAT_STREAM_IDLE, ChatChunk, ChatRequest, FinishReason, Message, MessageRole, ModelRef,
+    ProviderError, jittered_backoff,
+};
 use serde_json::{Value, json};
 use storage::{Run, RunStep};
 use task_runtime::{ExecError, RetryPolicy, StepExecutor, StepSpec, StepStatus};
@@ -779,11 +782,9 @@ impl TurnExecutor {
             call.tier(tier_active.then_some(crate::tiering::STANDARD));
             let mut out = self
                 .exec_cli_limited(&mut call, run, &req, &specs, cancel)
-                .await?;
+                .await
+                .map_err(xe)?;
             out.metadata = metadata;
-            if let Some(usage) = &out.usage {
-                call.usage(usage);
-            }
             let mut output = serde_json::to_value(out).map_err(xe)?;
             if tier_active {
                 output["tier"] = json!(crate::tiering::STANDARD);
@@ -802,7 +803,25 @@ impl TurnExecutor {
         // Capability misses across the chain, and whether any other error occurred.
         let mut misses: Vec<(String, String)> = Vec::new();
         let mut other_failure = false;
-        for (i, name) in models.iter().enumerate() {
+        let mut cooldowns =
+            std::collections::HashMap::<String, (tokio::time::Instant, Duration)>::new();
+        let mut last_model = &primary;
+        for (i, &name) in models.iter().enumerate() {
+            req.model = ModelRef(name.clone());
+            let provider_id = self
+                .sh
+                .providers
+                .read()
+                .pick(&req.model)
+                .ok()
+                .map(|p| p.id().to_owned());
+            if provider_id
+                .as_ref()
+                .and_then(|id| cooldowns.get(id))
+                .is_some_and(|(started, delay)| started.elapsed() < *delay)
+            {
+                continue;
+            }
             if let Some(prev) = &last_err {
                 if tier_light && i == 1 {
                     let reason = match prev {
@@ -816,13 +835,12 @@ impl TurnExecutor {
                     &ctx,
                     Event::ModelFallback(ModelFallback {
                         run_id: run.id,
-                        from: models[i - 1].clone(),
-                        to: (*name).clone(),
+                        from: last_model.clone(),
+                        to: name.clone(),
                         reason: prev.to_string(),
                     }),
                 );
             }
-            req.model = ModelRef((*name).clone());
             let alternative;
             let offered = if deferred && guard_reason.is_none() && name.starts_with("cli:") {
                 let mut cli_specs = self.sh.model_specs(&ctx.profile, ctx.bot_id, &hints.tools);
@@ -869,19 +887,16 @@ impl TurnExecutor {
                     break;
                 }
                 Err(e) => {
-                    // A retryable failure of the primary justifies switching, and
-                    // so does `Unsupported`: the next model may have the capability.
-                    // `is_retryable` stays false for it, so the same model is not
-                    // tried again. A generic `InvalidRequest` or an unmatched
-                    // `Api` 400 still stops the chain on the primary.
                     if let ProviderError::Unsupported { capability } = &e {
-                        misses.push(((*name).clone(), capability.clone()));
+                        misses.push((name.clone(), capability.clone()));
                     } else {
                         other_failure = true;
                     }
-                    let hard = i == 0
-                        && !is_retryable(&e)
-                        && !matches!(e, ProviderError::Unsupported { .. });
+                    if let (Some(provider_id), Some(delay)) = (provider_id, e.retry_after()) {
+                        cooldowns.insert(provider_id, (tokio::time::Instant::now(), delay));
+                    }
+                    let hard = name.starts_with("cli:") || !e.can_fallback();
+                    last_model = name;
                     last_err = Some(e);
                     if hard {
                         break;
@@ -1035,15 +1050,7 @@ impl TurnExecutor {
         ((!block.is_empty()).then_some(block), note)
     }
 
-    /// One model, up to `model_retry.max_attempts` attempts inside one shared
-    /// sleep budget; non-retryable errors (bad credentials, bad request, 4xx)
-    /// fail immediately.
-    ///
-    /// The budget is the sum of the outer backoffs. A `Retry-After` that fits
-    /// is waited out and counts against that budget; one that does not is
-    /// returned as-is. Each `stream` call starts the provider catalog's
-    /// `send_with_retry` with a fresh counter, so refusing the extra attempt
-    /// is what keeps that inner budget from being reset.
+    /// Retry one HTTP model within its attempt, sleep and overall call budget.
     async fn call_with_retries(
         &self,
         ctx: &RunCtx,
@@ -1056,52 +1063,45 @@ impl TurnExecutor {
         let policy = self.sh.cfg.model_retry;
         let attempts = policy.max_attempts.max(1);
         let budget = retry_time_budget(policy);
+        let started = tokio::time::Instant::now();
         let mut slept = Duration::ZERO;
         let mut attempt = 1;
         let mut malformed_retried = false;
         let light = self.light_model(ctx) == Some(req.model.0.as_str());
         loop {
-            match self
+            let error = match self
                 .stream_once(ctx, run, req.clone(), specs, purpose, tier)
                 .await
             {
                 Ok(out) => return Ok(out),
-                // A garbled tool call is retried once, not `attempts` times.
-                Err(e @ ProviderError::MalformedToolCall(_)) if malformed_retried => {
-                    return Err(e);
-                }
-                Err(ProviderError::MalformedToolCall(_)) if light => {
-                    // A malformed provider response gets exactly one repair
-                    // attempt in light mode, then the executor takes over.
-                    malformed_retried = true;
-                }
-                Err(e @ ProviderError::MalformedToolCall(_)) if attempt < attempts => {
-                    let delay = policy.backoff(attempt);
-                    if !sleep_if_affordable(&mut slept, budget, delay).await {
-                        return Err(e);
-                    }
-                    malformed_retried = true;
-                    attempt += 1;
-                }
-                // Honour Retry-After. Sleeping a shorter outer backoff and
-                // calling `stream` again would ignore the server and hand the
-                // inner retry loop a new full budget.
-                Err(ProviderError::RateLimited { retry_after }) if attempt < attempts => {
-                    let delay = retry_after.unwrap_or_else(|| policy.backoff(attempt));
-                    if !sleep_if_affordable(&mut slept, budget, delay).await {
-                        return Err(ProviderError::RateLimited { retry_after });
-                    }
-                    attempt += 1;
-                }
-                Err(e) if attempt < attempts && is_retryable(&e) => {
-                    let delay = policy.backoff(attempt);
-                    if !sleep_if_affordable(&mut slept, budget, delay).await {
-                        return Err(e);
-                    }
-                    attempt += 1;
-                }
-                Err(e) => return Err(e),
+                Err(error) => error,
+            };
+            let malformed = matches!(error, ProviderError::MalformedToolCall(_));
+            let light_repair = malformed && light && !malformed_retried;
+            if req.model.0.starts_with("cli:")
+                || !error.is_retryable()
+                || (malformed && malformed_retried)
+                || (attempt >= attempts && !light_repair)
+            {
+                return Err(error);
             }
+            let delay = error
+                .retry_after()
+                .unwrap_or_else(|| jittered_backoff(policy.backoff(attempt)));
+            let sleep_budget = if light_repair {
+                budget.max(policy.backoff(attempt))
+            } else {
+                budget
+            };
+            if slept.saturating_add(delay) > sleep_budget
+                || started.elapsed().saturating_add(delay) >= self.sh.cfg.guards.model_timeout
+            {
+                return Err(error);
+            }
+            tokio::time::sleep(delay).await;
+            slept += delay;
+            malformed_retried |= malformed;
+            attempt += 1;
         }
     }
 
@@ -1125,14 +1125,9 @@ impl TurnExecutor {
             )
             .map_err(ProviderError::InvalidRequest)?;
             call.tier(tier);
-            let out = self
+            return self
                 .exec_cli_limited(&mut call, run, &req, specs, &CancellationToken::new())
-                .await
-                .map_err(|e| ProviderError::InvalidRequest(e.0))?;
-            if let Some(usage) = &out.usage {
-                call.usage(usage);
-            }
-            return Ok(out);
+                .await;
         }
         let model = req.model.clone();
         let provider = self.sh.providers.read().pick(&model)?;
@@ -1154,7 +1149,8 @@ impl TurnExecutor {
                 Some((wire["function"]["name"].as_str()?.to_owned(), &spec.name))
             })
             .collect();
-        let mut stream = provider.stream(req).await?;
+        let mut stream = provider.stream_once(req).await?;
+        let idle = CHAT_STREAM_IDLE.min(self.sh.cfg.guards.model_timeout);
         let mut out = ModelOut {
             model: model.0,
             ..ModelOut::default()
@@ -1163,8 +1159,12 @@ impl TurnExecutor {
         // (a provider may send either or both; the larger one is the size).
         let mut tool_bytes = 0usize;
         let mut tool_bytes_done = 0usize;
-        while let Some(chunk) = stream.next().await {
-            match chunk? {
+        loop {
+            let chunk = tokio::time::timeout(idle, stream.next())
+                .await
+                .map_err(|_| ProviderError::Timeout)?
+                .ok_or(ProviderError::Interrupted("no completion was received"))??;
+            match chunk {
                 ChatChunk::TextDelta(t) => {
                     self.sh.emit(
                         ctx,
@@ -1191,8 +1191,13 @@ impl TurnExecutor {
                     out.usage = Some(u);
                 }
                 ChatChunk::Done { finish_reason } => {
+                    if finish_reason == FinishReason::ContentFilter {
+                        return Err(ProviderError::ContentFilter(
+                            "the model blocked the response".into(),
+                        ));
+                    }
                     out.finish = format!("{finish_reason:?}");
-                    break;
+                    return Ok(out);
                 }
                 // Tool-call arguments are output too: a huge one must hit the cap.
                 ChatChunk::ToolCallDelta {
@@ -1204,7 +1209,6 @@ impl TurnExecutor {
                 }
             }
         }
-        Ok(out)
     }
 
     /// Run a CLI session under the bot limits: the session is cancelled as soon
@@ -1217,10 +1221,17 @@ impl TurnExecutor {
         req: &ChatRequest,
         specs: &[ToolSpec],
         cancel: &CancellationToken,
-    ) -> Result<ModelOut, ExecError> {
+    ) -> Result<ModelOut, ProviderError> {
         let progress = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let stop = cancel.child_token();
-        let session = self.exec_cli_watched(run, req, specs, &stop, Some(progress.clone()));
+        let session = self.exec_cli_watched(
+            run,
+            req,
+            specs,
+            &stop,
+            Some(progress.clone()),
+            Some(call.cli_usage_sink()),
+        );
         tokio::pin!(session);
         let mut tick = tokio::time::interval(std::time::Duration::from_millis(250));
         loop {
@@ -1236,7 +1247,7 @@ impl TurnExecutor {
                             &mut session,
                         )
                         .await;
-                        return Err(xe(limit));
+                        return Err(ProviderError::InvalidRequest(limit));
                     }
                 }
             }
@@ -2025,10 +2036,7 @@ fn unsupported_chain_message(misses: &[(String, String)]) -> String {
     )
 }
 
-/// Total time `call_with_retries` may spend *sleeping*, shared across every
-/// outer attempt. Each `stream` call starts the provider catalog's
-/// `send_with_retry` with a fresh counter, so a wait that does not fit is
-/// not started and that inner budget is not reset.
+/// Maximum cumulative retry sleep for one model before applying jitter.
 fn retry_time_budget(policy: RetryPolicy) -> Duration {
     let mut total = Duration::ZERO;
     let mut attempt = 1u32;
@@ -2038,39 +2046,6 @@ fn retry_time_budget(policy: RetryPolicy) -> Duration {
         attempt += 1;
     }
     total
-}
-
-/// Sleep `delay` when it still fits in the remaining sleep budget.
-///
-/// The time spent inside the provider call itself is not charged: the budget
-/// is the sum of the backoffs the outer policy already allowed.
-async fn sleep_if_affordable(slept: &mut Duration, budget: Duration, delay: Duration) -> bool {
-    if slept.saturating_add(delay) > budget {
-        return false;
-    }
-    tokio::time::sleep(delay).await;
-    *slept = slept.saturating_add(delay);
-    true
-}
-
-/// Whether a provider failure is worth retrying (transient) as opposed to a
-/// credential / request problem that would fail again.
-///
-/// [`ProviderError::Unsupported`] is not retryable: the same model fails the
-/// same way. The fallback chain, not this function, tries the next model.
-pub(crate) fn is_retryable(e: &ProviderError) -> bool {
-    match e {
-        ProviderError::RateLimited { .. }
-        | ProviderError::Upstream { .. }
-        | ProviderError::Timeout
-        | ProviderError::Connection(_)
-        | ProviderError::Stream(_)
-        // The OpenAI-compatible path has no internal retry; `call_with_retries`
-        // allows this one only once.
-        | ProviderError::MalformedToolCall(_) => true,
-        ProviderError::Api { status, .. } => matches!(*status, 408 | 429) || *status >= 500,
-        _ => false,
-    }
 }
 
 fn render_output(out: &ToolOutput) -> String {

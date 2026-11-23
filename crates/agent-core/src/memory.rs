@@ -5,12 +5,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use memory_store::{
     Candidate, Decision, ExtractionContext, Memory, MemoryError, MemoryModel, Pipeline, prompts,
 };
 use protocol::{BotId, ChatId, InitiatorKind, PermissionCategory, UserId};
-use provider_catalog::{ChatChunk, ChatRequest, Message, MessageRole, ModelRef};
+use provider_catalog::{ChatRequest, Message, MessageRole, ModelRef};
 use serde_json::Value;
 use storage::Run;
 use uuid::Uuid;
@@ -44,20 +43,9 @@ impl LoopMemoryModel {
             crate::CallPurpose::Memory,
         )
         .map_err(MemoryError::Model)?;
-        let mut stream = provider
-            .stream(req)
+        crate::router::collect_model_text(provider.as_ref(), req, &mut call)
             .await
-            .map_err(|e| MemoryError::Model(e.to_string()))?;
-        let mut out = String::new();
-        while let Some(chunk) = stream.next().await {
-            match chunk.map_err(|e| MemoryError::Model(e.to_string()))? {
-                ChatChunk::TextDelta(t) => out.push_str(&t),
-                ChatChunk::Usage(u) => call.usage(&u),
-                ChatChunk::Done { .. } => break,
-                _ => {}
-            }
-        }
-        Ok(out)
+            .map_err(|e| MemoryError::Model(e.to_string()))
     }
 }
 
