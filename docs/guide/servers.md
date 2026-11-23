@@ -54,4 +54,4 @@ Computer menu, **Your servers**, lists every server with its state. **Remove** f
 ## Limits today
 
 - Installing Praxi for you needs a published release; until then the server must already run Praxi.
-- There is no clock-sync check yet, and no one-click update; update from the server's terminal.
+- There is no clock-sync check yet, and no one-click update; update from the server's terminal with `sudo bash ./install-linux.sh --update` (see [Linux always-on host](linux-host.md); your data is kept).

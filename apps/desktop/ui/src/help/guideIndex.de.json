@@ -90,6 +90,19 @@
     "summary": "Dieser Teil des Handbuchs enthält die am häufigsten gebrauchten Seiten in einfachem Deutsch. Seiten, die noch"
   },
   {
+    "doc": "de/linux-host.md",
+    "title": "Linux-Dauerbetrieb (virtuelles Display, Update, Deinstallation)",
+    "headings": [
+      "1. Erst Vorschau, dann installieren",
+      "2. Was installiert wird",
+      "3. Alles prüfen",
+      "4. Update (Daten bleiben erhalten)",
+      "5. Deinstallieren",
+      "6. Logs"
+    ],
+    "summary": "Diese Seite enthält die Befehle zum Kopieren und Einfügen, um Praxi auf einem Linux-Server laufen zu lassen, der rund um die Uhr an ist, zum Beispiel auf einer kostenlosen ARM-Ubuntu-VM. Der Assisten…"
+  },
+  {
     "doc": "de/schedules.md",
     "title": "Geplante Jobs, einfach erklärt",
     "headings": [

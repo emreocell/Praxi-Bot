@@ -58,6 +58,7 @@ Notable additions in the `0.1.0` desktop, CLI, and evaluation surface:
 | Windows installer details, upgrade, uninstall | [Installing on Windows](install-windows.md) |
 | Set up an always-on Linux host (VPS / VM) | [Running on a remote host](remote-host.md) |
 | Run the always-on host in Docker | [Running Praxi in Docker](docker-host.md) |
+| Copy-paste commands for a Linux always-on host: virtual display, update, uninstall | [Linux always-on host](linux-host.md) |
 | Run the always-on Linux host: logs, restart, upgrade, backup | [Host operations](host-operations.md) |
 | Add a server so bots run around the clock (guided, no jargon) | [Adding a server](servers.md) |
 | Understand what a host does when it is demoted or hears another active host | [Host leadership limits](host-leadership.md) |

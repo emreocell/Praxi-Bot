@@ -78,7 +78,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         check_daemon(env.data_dir, env.port),
         env.browser_error.as_ref().map_or_else(
             || check_browser(env.browser.as_deref()),
-            |e| Check::fail("browser", "browser", e, "install a non-snap browser or set BOT_BROWSER_PATH; use `sudo praxi doctor` for service-context validation"),
+            |e| Check::fail("browser", "browser", e, FIX_BROWSER),
         ),
         check_mcp(env.data_dir),
         check_secret_request(env.data_dir),
@@ -97,7 +97,10 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         core::check_cli_accounts(detected),
         core::check_peer_link(env.data_dir, &core::LinkRuntime::Unknown),
         core::check_desktop_automation(std::env::consts::OS, env.desktop.as_ref()),
-        core::check_clock(std::time::SystemTime::now(), core::newest_mtime(env.data_dir)),
+        core::check_clock(
+            std::time::SystemTime::now(),
+            core::newest_mtime(env.data_dir),
+        ),
     ];
     if let Some(url) = env.time_url {
         checks.push(core::check_clock_skew(
@@ -232,6 +235,11 @@ struct HostDisplayFacts<'a> {
 
 /// `Ok(detail)` when the desktop and the browser are usable, otherwise
 /// `Err((what is missing, how to fix it))` naming the first real cause.
+/// Exact commands for the two most common Linux-host problems; the Add a
+/// server wizard and docs/guide/linux-host.md use the same wording.
+const FIX_DISPLAY: &str = "run `sudo systemctl restart praxi-xvfb` and `sudo systemctl status praxi-xvfb`; if the unit is missing: `sudo ./install-linux.sh --update --with-desktop`";
+const FIX_BROWSER: &str = "run `sudo ./install-linux.sh --update --with-desktop` (installs a non-snap Chromium), or set BOT_BROWSER_PATH; then `sudo praxi doctor`";
+
 fn diagnose_host_display(
     f: &HostDisplayFacts<'_>,
 ) -> std::result::Result<String, (String, String)> {
@@ -256,19 +264,19 @@ fn diagnose_host_display(
                 "display {} does not answer{xauth}",
                 f.display.unwrap_or_default().trim()
             ),
-            "check `systemctl status praxi-xvfb` and that the daemon user can read its XAUTHORITY file".into(),
+            format!("{FIX_DISPLAY}; the daemon user must be able to read its XAUTHORITY file"),
         ));
     }
     if let Some(e) = f.browser_error {
         return Err((
             format!("display is reachable but the browser is unusable: {e}"),
-            "install a non-snap Chrome/Chromium (e.g. /opt/praxi-browser/chrome) or set BOT_BROWSER_PATH".into(),
+            FIX_BROWSER.into(),
         ));
     }
     match f.browser {
         None => Err((
             "display is reachable but no browser was found".into(),
-            "install a non-snap Chrome/Chromium (e.g. /opt/praxi-browser/chrome) or set BOT_BROWSER_PATH".into(),
+            FIX_BROWSER.into(),
         )),
         Some(p) => Ok(format!(
             "display {} reachable, browser {}; see browser launch check",
@@ -410,7 +418,7 @@ fn diagnose_desktop_backend(f: &DesktopFacts<'_>) -> std::result::Result<String,
     if let Some(err) = f.x_error {
         return Err((
             err.to_string(),
-            "check `systemctl status praxi-xvfb` and run `sudo praxi doctor` so the probe shares the Xvfb namespace"
+            "run `sudo systemctl restart praxi-xvfb` and then `sudo praxi doctor` so the probe shares the Xvfb namespace"
                 .into(),
         ));
     }
@@ -707,7 +715,7 @@ fn check_browser(found: Option<&Path>) -> Check {
                     ID,
                     N,
                     "snap browser is unsupported under the hardened service",
-                    "install non-snap Chrome/Chromium or set BOT_BROWSER_PATH",
+                    FIX_BROWSER,
                 );
             }
             let result = tokio::runtime::Builder::new_current_thread()
@@ -740,19 +748,14 @@ fn check_browser(found: Option<&Path>) -> Check {
                         p.display()
                     ),
                 ),
-                Err(e) => Check::fail(
-                    ID,
-                    N,
-                    format!("{}: {e}", p.display()),
-                    "install a non-snap browser or set BOT_BROWSER_PATH; on systemd use `sudo praxi doctor` to probe with the service user, environment and hardening",
-                ),
+                Err(e) => Check::fail(ID, N, format!("{}: {e}", p.display()), FIX_BROWSER),
             }
         }
         None => Check::warn(
             ID,
             N,
             "no usable non-snap browser found (snap-only installs are unsupported)",
-            "install a non-snap Chrome/Chromium or set BOT_BROWSER_PATH",
+            FIX_BROWSER,
         ),
     }
 }
@@ -1091,6 +1094,29 @@ mod tests {
         })
         .unwrap_err();
         assert!(d.contains("no browser"), "{d}");
+    }
+
+    #[test]
+    fn display_and_browser_hints_are_copy_paste_commands() {
+        let base = HostDisplayFacts {
+            display: Some(":99"),
+            xauthority: Some("/x"),
+            xauthority_readable: true,
+            reachable: false,
+            browser: None,
+            browser_error: None,
+        };
+        let (_, hint) = diagnose_host_display(&base).unwrap_err();
+        assert!(hint.contains("sudo systemctl restart praxi-xvfb"), "{hint}");
+        let (_, hint) = diagnose_host_display(&HostDisplayFacts {
+            reachable: true,
+            ..base
+        })
+        .unwrap_err();
+        assert!(
+            hint.contains("install-linux.sh --update --with-desktop"),
+            "{hint}"
+        );
     }
 
     #[test]

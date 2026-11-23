@@ -90,6 +90,19 @@
     "summary": "Kılavuzun bu bölümü, en çok bakılan sayfaların sade Türkçe çevirisidir. Henüz çevrilmemiş sayfalar İngilizce"
   },
   {
+    "doc": "tr/linux-host.md",
+    "title": "Linux sunucuda 7/24 çalışma (sanal ekran, güncelleme, kaldırma)",
+    "headings": [
+      "1. Önce önizle, sonra kur",
+      "2. Neler kurulur",
+      "3. Her şeyi denetle",
+      "4. Güncelle (verilerin korunur)",
+      "5. Kaldır",
+      "6. Günlükler"
+    ],
+    "summary": "Bu sayfa, Praxi'yi gece gündüz açık duran bir Linux sunucuda (örneğin ücretsiz ARM Ubuntu VM) çalıştırmak için kopyala-yapıştır komutlarını verir. Sunucu ekle sihirbazı aynı kurulum betiğini çalıştır…"
+  },
+  {
     "doc": "tr/schedules.md",
     "title": "Zamanlanmış işler, sade anlatımla",
     "headings": [

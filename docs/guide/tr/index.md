@@ -17,4 +17,5 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 | [Bilgisayar kullanımı](computer-use.md) | Botların kendi Windows bilgisayarında uygulama kullanması. |
 | [Eski yedekleri geri yükleme](backup-and-restore.md) | Eski, şifresiz yedekler. |
 | [SSS](faq.md) | Sık sorulan sorular. |
+| [Linux sunucuda 7/24 çalışma](linux-host.md) | Sanal ekran, güncelleme ve kaldırma için komutlar. |
 | [Sözlük](glossary.md) | Temel terimler. |
