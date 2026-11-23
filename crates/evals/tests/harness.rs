@@ -164,8 +164,15 @@ fn recent_feature_corpus_covers_security_boundaries() {
                 case.expected_fail.is_none(),
                 "recent cases must exercise working gates"
             );
+            // Real notes tools have no fake run counter; their side effect is
+            // observed by reading the store back and asserting what it does and
+            // does not contain.
+            let reads_store_back = case.notes
+                && case.expect.requests.iter().any(|r| {
+                    !r.tool_messages_contain.is_empty() && !r.tool_messages_not_contain.is_empty()
+                });
             assert!(
-                !case.expect.tool_runs.is_empty(),
+                !case.expect.tool_runs.is_empty() || reads_store_back,
                 "{} needs a side-effect assertion",
                 case.name
             );

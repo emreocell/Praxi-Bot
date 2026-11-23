@@ -18,7 +18,7 @@ script:
     args: {}
 expect:
   state: failed
-  model_calls: 0
+  model_calls: 1
   tool_runs:
     paid_action: 0
   error:

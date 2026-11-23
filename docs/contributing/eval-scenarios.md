@@ -73,8 +73,11 @@ Redaction cases scan model requests, events, audit rows, stored messages, and
 data files. They protect inputs to diagnostics/report exports; they do not run
 the desktop UI's HTML/Markdown export renderer.
 
-Definition pinning is not yet on `main`: the proposed
-[pinning ADR](../design/mcp-tool-pinning-adr.md) points to open PR #633. A
-changed-definition/re-approval scenario needs that implementation before it can
-be added honestly. These fixtures do not claim pinning coverage and introduce
-no expected-failure exemptions.
+Definition pinning is covered by `mcp-changed-description-held-back`
+(merged with the pinning work in #633); the `safe-recent-*` cases add no
+expected-failure exemptions.
+
+Two things worth knowing when writing cases: a bot's permission preset gates
+*calls* and does not hide tools, so use `[tools] exclude` in `profile_toml` to
+test discoverability; and a refused spending admission still records one model
+step, so assert `model_calls: 1` together with `tool_runs: 0` rather than `0`.

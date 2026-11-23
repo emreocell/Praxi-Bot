@@ -1,19 +1,24 @@
 name: safe-recent-computer-human-driving
-description: A real desktop tool cannot dispatch an action while the human drives.
+description: While the human drives, observation is paused and no approved input reaches the computer.
 policy: full
 desktop:
   human_driving: true
-user: Open the editor while I use the computer.
+user: Press return in the editor while I use the computer.
 script:
 - tool_calls:
+  - id: c0
+    tool: desktop_get_state
+    args: {}
+- tool_calls:
   - id: c1
-    tool: desktop_launch
+    tool: desktop_key
     args:
-      executable: notepad.exe
+      keys:
+      - Return
 - text: The human has control.
 reactions:
 - 'on': approval_needed
-  tool: desktop_launch
+  tool: desktop_key
   do: approve
 expect:
   tool_runs:
