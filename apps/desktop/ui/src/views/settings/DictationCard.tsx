@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { VoiceConfig, VoiceConfigInput } from "../../api/types";
@@ -7,6 +7,8 @@ import formStyles from "../../components/Form.module.css";
 import { SettingRow } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { humanLine } from "../../lib/humanError";
+import { takePendingFocus } from "../../lib/settingsLink";
+import { rememberVoiceConfig } from "../../lib/voiceCall/readiness";
 import { sttKeyInput, type SttProvider } from "../../lib/voiceAudio";
 import { useDaemon } from "../../state/DaemonContext";
 import { LocalVoicePanel } from "./LocalVoicePanel";
@@ -25,14 +27,17 @@ export function DictationCard() {
   const [drafts, setDrafts] = useState<Partial<Record<SttProvider, string>>>({});
   const [busy, setBusy] = useState(false);
 
+  const keyInput = useRef<HTMLInputElement | null>(null);
+
   const apply = useCallback((c: VoiceConfig) => {
+    rememberVoiceConfig(client?.baseUrl, c);
     setConfig(c);
     setProvider(c.stt_provider);
     setUrl(c.stt_base_url);
     setModel(c.stt_model);
     setGeminiModel(c.gemini_model);
     setLocalModel(c.local_model);
-  }, []);
+  }, [client]);
   useEffect(() => {
     client?.getVoice().then(apply).catch(() => undefined);
   }, [client, apply]);
@@ -65,6 +70,15 @@ export function DictationCard() {
       setBusy(false);
     }
   };
+
+  // "Open settings" on the call card lands here with the key field focused.
+  const loaded = config !== null;
+  useEffect(() => {
+    if (loaded && takePendingFocus("voice-key")) {
+      keyInput.current?.focus();
+      keyInput.current?.scrollIntoView?.({ block: "center" });
+    }
+  }, [loaded]);
 
   if (!config) {
     return null;
@@ -113,6 +127,8 @@ export function DictationCard() {
       )}
       {local ? null : (
       <input
+        ref={keyInput}
+        data-settings-field="voice-key"
         className={formStyles.input}
         type="password"
         autoComplete="off"

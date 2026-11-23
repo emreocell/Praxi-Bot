@@ -27,6 +27,7 @@ export type CallNoticeKey =
   | "voice.call.daemonUnavailable"
   | "voice.call.serviceRefused"
   | "voice.call.micTimeout"
+  | "voice.call.stepTimeout"
   | "voice.micDenied"
   | "voice.micMissing"
   | "voice.micBusy"

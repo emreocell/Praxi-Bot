@@ -1,8 +1,12 @@
 import { Captions, Hand, Mic, MicOff, PhoneOff, Sparkles, Square } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button, type BotAvatarState } from "ui";
 import { isMockMode } from "../../api/mockMode";
+import { openSettingsTarget, VOICE_KEY_TARGET } from "../../lib/settingsLink";
+import { noticeNeedsSettings } from "../../lib/voiceCall/readiness";
+import { Modal } from "../Modal";
 import type { CallPhase } from "../../lib/voiceCall/callMachine";
 import styles from "./VoiceCallPanel.module.css";
 import type { VoiceCall } from "./useVoiceCall";
@@ -29,10 +33,21 @@ export function VoiceCallPanel({ call, bot }: { call: VoiceCall; bot: Identity }
   const { state } = call;
   const panel = useRef<HTMLDivElement>(null);
   const live = state.phase !== "idle" && state.phase !== "failed";
+  const opener = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
 
-  // Focus moves into the call when it opens so the keyboard works at once.
+  // Focus moves into the call when it opens so the keyboard works at once; when the call is gone
+  // it returns to the control that opened it (the call button).
   useEffect(() => {
-    if (state.phase === "starting" || state.phase === "failed") {
+    const open = state.phase !== "idle";
+    if (open && !wasOpen.current) {
+      opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+    if (!open && wasOpen.current && opener.current?.isConnected) {
+      opener.current.focus({ preventScroll: true });
+    }
+    wasOpen.current = open;
+    if (state.phase === "starting") {
       panel.current?.focus();
     }
   }, [state.phase]);
@@ -41,6 +56,44 @@ export function VoiceCallPanel({ call, bot }: { call: VoiceCall; bot: Identity }
     return null;
   }
   const failed = state.phase === "failed";
+  // Needs the owner to act (e.g. add a key): a centered dialog above everything, with a trap,
+  // Escape, and focus return. Live call states dock bottom-right but live outside the app
+  // layers (<body>), so no side panel or composer can cover them.
+  if (failed) {
+    const goSettings = noticeNeedsSettings(state.notice);
+    return (
+      <Modal open onClose={call.end} label={t("voice.call.title")} size="sm">
+        <div className={styles.card} data-testid="voice-call" data-phase="failed">
+          <BotAvatar bot={bot} size="lg" state="error" decorative />
+          <p className={styles.status} role="status" data-testid="voice-call-status">
+            {t("voice.call.phase.failed")}
+          </p>
+          {state.notice ? <p className={`${styles.notice} ${styles.noticeError}`} role="alert">{t(state.notice)}</p> : null}
+          <div className={styles.controls}>
+            {goSettings ? (
+              <Button
+                variant="primary"
+                data-autofocus
+                data-testid="voice-call-open-settings"
+                onClick={() => {
+                  call.end();
+                  openSettingsTarget(VOICE_KEY_TARGET);
+                }}
+              >
+                {t("voice.call.openSettings")}
+              </Button>
+            ) : null}
+            <Button variant={goSettings ? "secondary" : "primary"} data-autofocus={goSettings ? undefined : true} onClick={() => call.start({ fresh: true })} data-testid="voice-call-retry">
+              {t("voice.call.retry")}
+            </Button>
+            <Button variant="ghost" onClick={call.end} data-testid="voice-call-close">
+              {t("voice.call.close")}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
   const status = t(`voice.call.phase.${state.phase}`, { name: bot.name });
   const talkKey = (down: boolean) => (e: React.KeyboardEvent) => {
     if ((e.key === " " || e.key === "Enter") && !e.repeat) {
@@ -53,7 +106,7 @@ export function VoiceCallPanel({ call, bot }: { call: VoiceCall; bot: Identity }
     }
   };
 
-  return (
+  return createPortal(
     <div
       ref={panel}
       className={styles.panel}
@@ -78,7 +131,7 @@ export function VoiceCallPanel({ call, bot }: { call: VoiceCall; bot: Identity }
       ) : null}
       <div className={styles.stage} style={{ ["--level" as string]: call.level.toFixed(2) }}>
         <span
-          className={`${styles.ring} ${state.phase === "listening" && !state.muted ? "" : styles.ringIdle} ${failed ? styles.ringError : ""} ${state.phase === "approval" ? styles.ringWait : ""}`}
+          className={`${styles.ring} ${state.phase === "listening" && !state.muted ? "" : styles.ringIdle} ${state.phase === "approval" ? styles.ringWait : ""}`}
           aria-hidden="true"
         />
         <BotAvatar bot={bot} size="lg" state={AVATAR[state.phase]} live={state.phase === "listening" || state.phase === "speaking"} decorative />
@@ -87,7 +140,7 @@ export function VoiceCallPanel({ call, bot }: { call: VoiceCall; bot: Identity }
         {state.phase === "listening" && state.heard ? t("voice.call.phase.hearing") : status}
       </p>
       {state.notice ? (
-        <p className={`${styles.notice} ${failed ? styles.noticeError : ""}`} role={failed ? "alert" : undefined}>
+        <p className={styles.notice}>
           {t(state.notice)}
         </p>
       ) : null}
@@ -114,16 +167,7 @@ export function VoiceCallPanel({ call, bot }: { call: VoiceCall; bot: Identity }
         </Button>
       ) : null}
       <div className={styles.controls}>
-        {failed ? (
-          <>
-            <Button variant="primary" onClick={call.start} data-testid="voice-call-retry">
-              {t("voice.call.retry")}
-            </Button>
-            <Button variant="ghost" onClick={call.end}>
-              {t("voice.call.close")}
-            </Button>
-          </>
-        ) : (
+        {(
           <>
             <Button
               variant="ghost"
@@ -172,11 +216,12 @@ export function VoiceCallPanel({ call, bot }: { call: VoiceCall; bot: Identity }
             ) : null}
             <Button variant="danger" size="sm" onClick={call.end} data-testid="voice-call-end">
               <PhoneOff aria-hidden="true" />
-              {t("voice.call.end")}
+              {t(state.phase === "starting" ? "voice.call.cancel" : "voice.call.end")}
             </Button>
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
