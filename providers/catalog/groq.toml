@@ -3,6 +3,7 @@
 #   https://console.groq.com/docs/openai
 #   https://console.groq.com/docs/models
 #   https://console.groq.com/docs/rate-limits
+#   https://console.groq.com/docs/deprecations
 # Auth: HTTP Bearer token from GROQ_API_KEY (`Authorization: Bearer <key>`).
 # Rate limits: enforced per model across RPM, RPD, TPM and TPD and vary by
 # organization tier (entry Free/Developer tiers typically cap around 30 RPM and
@@ -24,16 +25,11 @@ json_mode = true
 strip_system_role = false
 
 [[models]]
-id = "llama-3.3-70b-versatile"
-context_window = 131072
-max_output_tokens = 32768
-
-[[models]]
-id = "llama-3.1-8b-instant"
-context_window = 131072
-max_output_tokens = 131072
-
-[[models]]
 id = "openai/gpt-oss-120b"
+context_window = 131072
+max_output_tokens = 65536
+
+[[models]]
+id = "openai/gpt-oss-20b"
 context_window = 131072
 max_output_tokens = 65536
