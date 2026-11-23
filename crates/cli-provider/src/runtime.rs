@@ -962,9 +962,8 @@ async fn session(
             combined.extend_from_slice(head);
             combined.extend_from_slice(tail);
             return Err(classify_child_error(&String::from_utf8_lossy(&combined)));
-        } else {
-            abort_handle.abort();
         }
+        abort_handle.abort();
         return result;
     }
     stderr_task.abort();
