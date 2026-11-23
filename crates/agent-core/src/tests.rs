@@ -330,6 +330,7 @@ pub(crate) fn profile(extra: &str) -> BotProfile {
 
 pub(crate) fn cfg(policy: Policy) -> LoopConfig {
     LoopConfig {
+        legacy_tool_surface: true,
         global_policy: policy,
         model_retry: RetryPolicy {
             max_attempts: 1,
@@ -3102,6 +3103,56 @@ async fn discovery_prompt_policy_matches_execution_for_each_initiator_and_keeps_
             shell_visible
         );
     }
+}
+
+#[tokio::test]
+async fn an_over_budget_catalog_loads_typed_tools_in_a_stable_run_local_order() {
+    let env = setup();
+    let mut tools: Vec<_> = (0..45)
+        .map(|i| Arc::new(tool(&format!("catalog_{i:02}"), Effect::Read, "record")))
+        .collect();
+    tools.push(Arc::new(tool("fs_read", Effect::Read, "file")));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "tool_describe", json!({"name": "catalog_44"}))]),
+        calls(&[("c2", "catalog_44", json!({}))]),
+        text("found the record"),
+        text("new run"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.legacy_tool_surface = false;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &tools.iter().collect::<Vec<_>>(),
+        profile(""),
+        config,
+    );
+    let run = lp.run_turn(env.chat, "read the catalog record").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let initial = fake.request(0).tools;
+    let activated = fake.request(1).tools;
+    assert_eq!(initial.len(), 3);
+    assert_eq!(activated[..initial.len()], initial);
+    assert_eq!(activated[3]["function"]["name"], "catalog_44");
+    assert_eq!(
+        activated[3]["function"]["parameters"],
+        json!({"type": "object"})
+    );
+    assert_eq!(fake.request(2).tools, activated);
+    assert_eq!(tools[44].count.load(Ordering::Relaxed), 1);
+
+    let stored = env.storage.get_run(run).unwrap().unwrap();
+    let ctx = lp.sh.ctx(&stored).unwrap();
+    let names: Vec<_> = tools[..45].iter().map(|t| t.spec.name.as_str()).collect();
+    assert!(lp.sh.deferred_specs(&ctx, &names, false).len() <= crate::DEFAULT_DIRECT_TOOL_LIMIT);
+    let direct = lp.sh.deferred_specs(&ctx, &names, true);
+    assert_eq!(direct.len(), 1);
+    assert_eq!(direct[0].name, "fs_read");
+
+    let run = lp.run_turn(env.chat, "start another turn").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(fake.request(3).tools, initial);
 }
 
 #[tokio::test]

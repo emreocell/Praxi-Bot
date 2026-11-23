@@ -42,7 +42,14 @@ const STEP_TOOLS: &str = "tools";
 const MIN_LIFT_CHARS: usize = 3;
 
 /// Tools that never belong in a workflow, with or without a registry.
-const SKIPPED: &[&str] = &["todo_write", "ask_user", "find_tool", "get_tool_details"];
+const SKIPPED: &[&str] = &[
+    "todo_write",
+    "ask_user",
+    "find_tool",
+    "get_tool_details",
+    "tool_search",
+    "tool_describe",
+];
 
 /// Read-only built-ins (used when no registry is available to ask).
 const KNOWN_READS: &[&str] = &[

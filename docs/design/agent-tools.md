@@ -35,15 +35,10 @@ re-implemented.
 
 ## Direct tool budget
 
-The agent shows its built-in tools directly only up to
-`DEFAULT_DISCOVERY_THRESHOLD` (40); above that it switches to discovery
-(`find_tool` / `use_tool`). The built-in set was at 38, and a CLI test
-(`the_agent_has_subagent_and_skill_tools_and_a_skills_dir`) pins that limit. So
-this change adds exactly two tools. Notes are therefore `notes_read` (no
-argument lists, `name` reads, `query` searches) and `notes_write` (`mode`
-replace, append or delete). `time_now` and `calculate` were implemented and
-measured but removed again for this reason; they are good candidates once
-low-value tools are folded or the discovery surface can pin pure tools.
+The original change fit the last two slots of the 40-tool direct budget.
+Notes use `notes_read` (no argument lists, `name` reads, `query` searches) and
+`notes_write` (`mode` replace, append or delete). The installed catalog can now
+grow independently of the request budget through [deferred tool loading](tool-discovery.md).
 
 ## Safety design of the new tools
 

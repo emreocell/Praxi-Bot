@@ -244,6 +244,7 @@ impl TurnExecutor {
         &self,
         ctx: &RunCtx,
         hints: &[String],
+        offered: Option<&[String]>,
         calls: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> Option<&'static str> {
         for (name, args) in calls {
@@ -254,10 +255,7 @@ impl TurnExecutor {
             }) else {
                 continue;
             };
-            let Some(r) = self
-                .sh
-                .resolve_call(&ctx.profile, ctx.bot_id, name, &input, hints)
-            else {
+            let Some(r) = self.sh.resolve_offered(ctx, name, &input, hints, offered) else {
                 continue;
             };
             let Some(spec) = r.spec else {

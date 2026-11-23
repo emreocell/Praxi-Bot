@@ -1515,6 +1515,7 @@
       "prev": "Previous match"
     },
     "imported": "Imported",
+    "importedNote": "Imported chat note: {{steps}} tool step(s) and {{approvals}} approval(s) were listed in the file but were not imported or executed.",
     "jumpToLatest": "Jump to latest",
     "longMessage": {
       "less": "Show less",

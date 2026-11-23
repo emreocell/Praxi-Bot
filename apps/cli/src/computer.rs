@@ -933,6 +933,9 @@ mod tests {
             Providers::single(Arc::new(FakeProvider)),
             LoopConfig {
                 global_policy: Policy::full(),
+                // The scripted provider calls desktop tools directly; this
+                // test covers the PC peer plumbing, not tool discovery.
+                legacy_tool_surface: true,
                 ..LoopConfig::default()
             },
         )

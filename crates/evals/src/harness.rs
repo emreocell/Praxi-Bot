@@ -59,6 +59,8 @@ pub struct TurnConfig {
 /// Optional extras of a turn; the default is a plain human turn with fake tools only.
 #[derive(Default)]
 pub struct TurnExtras {
+    /// Use the deferred catalog surface for this turn.
+    pub deferred_tools: bool,
     /// Masks secrets in tool output and events, as the daemon's vault redactor does.
     pub redactor: Option<agent_core::SharedRedactor>,
     /// Register the real built-in tools; relative `fs_*` paths resolve against this
@@ -326,6 +328,7 @@ pub async fn run_turn_ext(cfg: TurnConfig, extras: TurnExtras) -> Result<TurnTra
     let storage = Arc::new(Storage::open(dir.path())?);
     let (user, bot, chat) = seed(&storage)?;
     let mut loop_cfg = build_config(&cfg);
+    loop_cfg.legacy_tool_surface = !extras.deferred_tools;
     loop_cfg.redactor.clone_from(&extras.redactor);
     let mut lp = AgentLoop::new(
         Arc::clone(&storage),

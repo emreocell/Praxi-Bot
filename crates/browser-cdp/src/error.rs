@@ -66,7 +66,10 @@ impl fmt::Display for Error {
             Self::Json(m) => write!(f, "json error: {m}"),
             Self::BrowserNotFound => write!(f, "no Chrome or Edge installation found"),
             Self::Launch(m) => write!(f, "browser launch failed: {m}"),
-            Self::UnknownRef(r) => write!(f, "unknown or stale element ref '{r}'"),
+            Self::UnknownRef(r) => write!(
+                f,
+                "unknown or stale element ref '{r}': the page changed since it was read. Call browser_snapshot and use a ref from the new result"
+            ),
             Self::Element(m) => write!(f, "element error: {m}"),
             Self::Js(m) => write!(f, "javascript error: {m}"),
             Self::Navigation(m) => write!(f, "navigation failed: {m}"),

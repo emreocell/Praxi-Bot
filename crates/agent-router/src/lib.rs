@@ -23,3 +23,7 @@ pub use surface::{
     DEFAULT_DISCOVERY_THRESHOLD, FIND_TOOL, GET_TOOL_DETAILS, SurfaceMode, ToolSurface,
     ToolVisibility, USE_TOOL,
 };
+pub use surface::{
+    TOOL_DESCRIBE, TOOL_SEARCH, discovery_name, discovery_schema, discovery_summary,
+    provider_tool_name,
+};

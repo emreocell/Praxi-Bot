@@ -866,7 +866,14 @@ impl Shared {
     /// [`tool_registry::Tool::egress_for`] (knowledge search with a remote
     /// embedding provider); that can only add egress, never remove it.
     pub(crate) fn content_class(&self, ctx: &RunCtx, name: &str, input: &Value) -> ContentClass {
-        if self.is_host_status_call(ctx, name, input) {
+        // Discovery has no private read or egress. Its returned metadata is
+        // classified separately as output exposure.
+        if self.is_host_status_call(ctx, name, input)
+            || matches!(
+                name,
+                agent_router::TOOL_SEARCH | agent_router::TOOL_DESCRIBE
+            )
+        {
             return ContentClass::none();
         }
         let Some(tool) = self.tools.get(name) else {

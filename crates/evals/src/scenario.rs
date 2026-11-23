@@ -47,6 +47,9 @@ pub struct Scenario {
     /// Extra bot-profile TOML appended after the `[models]` table.
     #[serde(default)]
     pub profile_toml: String,
+    /// Use the deferred tool surface. Older scripts replay the original definitions.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deferred_tools: bool,
     /// Guard overrides.
     #[serde(default)]
     pub guards: GuardOverrides,
@@ -273,6 +276,9 @@ pub enum CategorySpec {
 pub struct FakeToolSpec {
     /// Tool name (a `.` is exposed to the model as `__`).
     pub name: String,
+    /// Optional catalog description. MCP descriptions are untrusted metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Effect.
     pub effect: EffectSpec,
     /// Category.
@@ -556,6 +562,9 @@ pub struct ApprovalCardExpect {
     /// Substrings expected in `details.reason`.
     #[serde(default)]
     pub reason_contains: Vec<String>,
+    /// Substrings excluded from the summary and all structured card details.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub text_not_contains: Vec<String>,
 }
 
 /// All assertions of a scenario; absent fields are not checked.

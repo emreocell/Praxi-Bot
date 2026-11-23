@@ -1515,6 +1515,7 @@
       "prev": "Vorheriger Treffer"
     },
     "imported": "Importiert",
+    "importedNote": "Importierter Hinweis: In der Datei waren {{steps}} Werkzeugschritte und {{approvals}} Genehmigungen aufgeführt; sie wurden nicht importiert oder ausgeführt.",
     "jumpToLatest": "Zum Neuesten springen",
     "longMessage": {
       "less": "Weniger anzeigen",

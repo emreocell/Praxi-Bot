@@ -1515,6 +1515,7 @@
       "prev": "Önceki eşleşme"
     },
     "imported": "İçe aktarıldı",
+    "importedNote": "İçe aktarılan not: dosyada {{steps}} araç adımı ve {{approvals}} onay listelenmişti; içe aktarılmadı ve çalıştırılmadı.",
     "jumpToLatest": "En sona git",
     "longMessage": {
       "less": "Daha az göster",

@@ -250,9 +250,7 @@ pub(crate) async fn import(
     Ok(Json(report))
 }
 
-fn import_doc(s: &AppState, bot_id: Uuid, doc: ChatImport) -> Result<ChatImportReport, ApiError> {
-    s.agent().refresh_external_redactor();
-    let bot = s.bot_of_user(BotId(bot_id))?;
+fn validate_import(doc: &ChatImport) -> Result<(), ApiError> {
     if doc.format_version != 1 {
         return Err(ApiError::bad_request(
             "unsupported chat export format_version; this build imports version 1",
@@ -284,6 +282,13 @@ fn import_doc(s: &AppState, bot_id: Uuid, doc: ChatImport) -> Result<ChatImportR
             message.role
         )));
     }
+    Ok(())
+}
+
+fn import_doc(s: &AppState, bot_id: Uuid, doc: ChatImport) -> Result<ChatImportReport, ApiError> {
+    s.agent().refresh_external_redactor();
+    let bot = s.bot_of_user(BotId(bot_id))?;
+    validate_import(&doc)?;
 
     let now = storage::now_ms();
     let title = safe_text(s, doc.title.trim());
@@ -311,8 +316,11 @@ fn import_doc(s: &AppState, bot_id: Uuid, doc: ChatImport) -> Result<ChatImportR
                 run_id: None,
                 role: message.role,
                 content: safe_text(s, &message.content),
-                // Keep the file's order; a later import must not land before it.
-                created_at_ms: now.saturating_add(i64::try_from(index).unwrap_or(i64::MAX)),
+                // Keep the file's order while never placing an imported row
+                // after the import instant: [now-N, now-1].
+                created_at_ms: now.saturating_sub(
+                    i64::try_from(message_count.saturating_sub(index)).unwrap_or(i64::MAX),
+                ),
                 exposure_untrusted: true,
                 exposure_private: false,
                 exposure_sources: vec!["imported chat".to_owned()],
@@ -334,7 +342,7 @@ fn import_doc(s: &AppState, bot_id: Uuid, doc: ChatImport) -> Result<ChatImportR
                 run_id: None,
                 role: agent_core::control_note::IMPORTED_ROLE.to_owned(),
                 content: note,
-                created_at_ms: now.saturating_add(i64::try_from(rows.len()).unwrap_or(i64::MAX)),
+                created_at_ms: now,
                 exposure_untrusted: true,
                 exposure_private: false,
                 exposure_sources: vec!["imported chat".to_owned()],
@@ -397,15 +405,29 @@ fn export_response(s: &AppState, cid: Uuid, q: &ExportQuery) -> Result<Response,
         return Err(ApiError::bad_request("format must be markdown or json"));
     }
     let chat = s.chat_of_user(ChatId(cid))?;
+    // Scan a little past the exportable limits so inert rows (for example the
+    // imported-chat note) do not count as exported messages.
     let (messages, omitted) = s.storage().list_messages_bounded(
         chat.id,
         None,
-        MAX_EXPORT_MESSAGES,
-        MAX_EXPORT_TEXT_BYTES,
+        MAX_EXPORT_MESSAGES + 32,
+        MAX_EXPORT_TEXT_BYTES + 4096,
     )?;
+    let messages: Vec<_> = messages
+        .into_iter()
+        .filter(|m| m.user_id == s.user_id() && matches!(m.role.as_str(), "user" | "assistant"))
+        .collect();
+    let text_bytes = messages.iter().try_fold(0usize, |total, message| {
+        total.checked_add(message.content.len())
+    });
     let steps = s.storage().chat_step_summaries(s.user_id(), chat.id)?;
     let approvals = s.storage().chat_approval_summaries(s.user_id(), chat.id)?;
-    if omitted || steps.len() > MAX_EXPORT_ROWS || approvals.len() > MAX_EXPORT_ROWS {
+    if omitted
+        || messages.len() > MAX_EXPORT_MESSAGES
+        || text_bytes.is_none_or(|bytes| bytes > MAX_EXPORT_TEXT_BYTES)
+        || steps.len() > MAX_EXPORT_ROWS
+        || approvals.len() > MAX_EXPORT_ROWS
+    {
         return Err(ApiError::bad_request("chat exceeds export limits"));
     }
     let mut doc = ChatExport {
@@ -432,40 +454,8 @@ fn export_response(s: &AppState, cid: Uuid, q: &ExportQuery) -> Result<Response,
             })
             .collect(),
     };
-    for m in messages {
-        if m.user_id != s.user_id() || !matches!(m.role.as_str(), "user" | "assistant") {
-            continue;
-        }
-        let (text, ids) = agent_core::attachments::split_marker(&m.content);
-        let attachments = if m.exposure_private {
-            Vec::new()
-        } else {
-            ids.into_iter()
-                .take(agent_core::attachments::MAX_PER_MESSAGE)
-                .filter_map(|id| {
-                    agent_core::attachments::meta(s.storage().data_dir(), chat.id, id).ok()
-                })
-                .map(|a| agent_core::attachments::clean_name(&safe_text(s, &a.name)))
-                .collect()
-        };
-        let source = s
-            .storage()
-            .message_source(m.id)
-            .ok()
-            .filter(|source| !source.is_empty());
-        doc.messages.push(ExportMessage {
-            id: m.id,
-            run_id: m.run_id.map(|r| r.0),
-            role: m.role,
-            created_at_ms: m.created_at_ms,
-            content: if m.exposure_private {
-                "[REDACTED]".into()
-            } else {
-                safe_text(s, text)
-            },
-            source,
-            attachments,
-        });
+    for message in messages {
+        doc.messages.push(export_message(s, chat.id, message));
     }
     let (body, mime, extension) = if format == "json" {
         (
@@ -493,6 +483,43 @@ fn export_response(s: &AppState, cid: Uuid, q: &ExportQuery) -> Result<Response,
         .into_response())
 }
 
+fn export_message(s: &AppState, chat: ChatId, m: storage::Message) -> ExportMessage {
+    let source = s.storage().message_source(m.id);
+    // A failed lookup is treated as imported: never interpret untrusted text
+    // as local attachment metadata.
+    let imported = source
+        .as_ref()
+        .map_or(true, |source| source.starts_with("imported"));
+    let source = source.ok().filter(|source| !source.is_empty());
+    let (text, ids) = if imported {
+        (m.content.as_str(), Vec::new())
+    } else {
+        agent_core::attachments::split_marker(&m.content)
+    };
+    let attachments = if m.exposure_private || imported {
+        Vec::new()
+    } else {
+        ids.into_iter()
+            .take(agent_core::attachments::MAX_PER_MESSAGE)
+            .filter_map(|id| agent_core::attachments::meta(s.storage().data_dir(), chat, id).ok())
+            .map(|a| agent_core::attachments::clean_name(&safe_text(s, &a.name)))
+            .collect()
+    };
+    ExportMessage {
+        id: m.id,
+        run_id: m.run_id.map(|r| r.0),
+        role: m.role,
+        created_at_ms: m.created_at_ms,
+        content: if m.exposure_private {
+            "[REDACTED]".into()
+        } else {
+            safe_text(s, text)
+        },
+        source,
+        attachments,
+    }
+}
+
 // Keep CPU/SQLite/file reads off the async executor and bound concurrent work.
 async fn history_work<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
@@ -500,7 +527,7 @@ async fn history_work<T: Send + 'static>(
     static READERS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
         std::sync::OnceLock::new();
     let permit = READERS
-        .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)))
+        .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(4)))
         .clone()
         .try_acquire_owned()
         .map_err(|_| ApiError::unavailable("history reads busy; retry shortly"))?;
