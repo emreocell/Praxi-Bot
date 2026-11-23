@@ -1,5 +1,14 @@
-# cargo-nextest configuration. Pull request checks use `cargo test`; this file only
-# defines the profile for the scheduled test report (.github/workflows/test-report.yml).
+# cargo-nextest configuration: the `ci` profile runs the pull request tests
+# (.github/workflows/ci.yml), the `ci-report` profile the scheduled test report
+# (.github/workflows/test-report.yml).
+
+[profile.ci]
+# No retries: a flaky test must turn the pull request check red, as with `cargo test`.
+retries = 0
+fail-fast = false
+# Report tests running longer than 60 s; never kill them (the step has its own limit).
+slow-timeout = { period = "60s" }
+failure-output = "immediate-final"
 
 [profile.ci-report]
 # A test that fails and then passes on a retry is reported as flaky.

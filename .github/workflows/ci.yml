@@ -124,6 +124,12 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install cargo-nextest
+        if: matrix.suite != 'embeddings'
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-nextest@0.9.152
+
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
@@ -152,10 +158,18 @@ jobs:
         run: cargo clippy -p remote-api --all-targets -- -D warnings
 
       # Run even when clippy failed so one gate cannot hide another's evidence.
+      # nextest runs every test in its own process and schedules them across all
+      # binaries at once (no retries: see the `ci` profile in .config/nextest.toml).
+      # It does not run doctests, so `cargo test --doc` follows; both always run.
       - name: Run tests
         if: (success() || failure()) && matrix.suite != 'embeddings'
         timeout-minutes: ${{ matrix.os == 'windows-latest' && 65 || 35 }}
-        run: cargo test --workspace --no-fail-fast
+        shell: bash
+        run: |
+          status=0
+          cargo nextest run --workspace --no-fail-fast --profile ci || status=$?
+          cargo test --workspace --doc || status=$?
+          exit "$status"
 
       - name: Verify explicit-artifact dependency features
         if: (success() || failure()) && matrix.suite != 'workspace'
