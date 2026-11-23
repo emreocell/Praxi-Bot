@@ -171,8 +171,14 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/v1/mcp/servers/{}"),
     ("POST", "/v1/mcp/servers/{}/reconnect"),
     ("POST", "/v1/mcp/servers/{}/approve-tool-changes"),
-    // Starts the configured server process, like a reconnect.
+    // Connection tests spend the stored keys (provider, channel, web, voice, e-mail)
+    // and, for MCP, start the configured server process like a reconnect.
+    ("POST", "/v1/connection-test/provider"),
     ("POST", "/v1/connection-test/mcp"),
+    ("POST", "/v1/connection-test/channel"),
+    ("POST", "/v1/connection-test/web"),
+    ("POST", "/v1/connection-test/voice"),
+    ("POST", "/v1/connection-test/email"),
     ("POST", "/v1/mcp/servers/{}/auth/start"),
     ("POST", "/v1/mcp/servers/{}/auth/callback"),
     ("POST", "/v1/mcp/servers/{}/auth/cancel"),
@@ -267,11 +273,6 @@ pub const TOKEN_OK_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/email/accounts/{}/test"),
     ("POST", "/v1/email/test"),
     ("POST", "/v1/web/search/test"),
-    ("POST", "/v1/connection-test/provider"),
-    ("POST", "/v1/connection-test/channel"),
-    ("POST", "/v1/connection-test/web"),
-    ("POST", "/v1/connection-test/voice"),
-    ("POST", "/v1/connection-test/email"),
     ("POST", "/v1/voice/transcribe"),
     ("POST", "/v1/webhooks/{}"),
     ("POST", "/v1/mcp-server/call"),

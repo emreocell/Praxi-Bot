@@ -163,3 +163,42 @@ async fn provider_ok_wrong_endpoint_and_no_network() {
     .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
 }
+
+/// Connection tests spend stored keys: the daemon token alone and every paired
+/// peer are refused; only the owner key runs them.
+#[tokio::test]
+async fn connection_tests_are_owner_only_for_token_and_peers() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let t = app_with("http://127.0.0.1:9");
+    let path = "/v1/connection-test/provider";
+    let body = || Some(json!({"id": "fake"}));
+
+    let r = super::call_token_only(&t, Method::POST, path, body()).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.json()["error"]["code"], "owner_key_required");
+
+    for role in [crate::PeerRole::Phone, crate::PeerRole::Desktop] {
+        let mut req = Request::builder()
+            .method(Method::POST)
+            .uri(path)
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"id": "fake"}).to_string()))
+            .unwrap();
+        req.extensions_mut().insert(crate::PeerIdentity {
+            key: format!("peer-{role:?}"),
+            role,
+        });
+        let status = crate::peer_router(t.state.clone())
+            .oneshot(req)
+            .await
+            .unwrap()
+            .status();
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role:?}");
+    }
+
+    let r = call(&t, Method::POST, path, body()).await;
+    assert_ne!(r.status, StatusCode::FORBIDDEN, "{}", r.json());
+}

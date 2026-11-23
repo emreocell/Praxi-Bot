@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use provider_catalog::ProviderError;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -321,8 +321,10 @@ where
               (status = 429, body = ErrorBody, description = "too many tests running")))]
 pub(crate) async fn test_provider(
     State(s): State<AppState>,
+    headers: HeaderMap,
     ApiJson(input): ApiJson<ProviderTestInput>,
 ) -> Result<Json<ConnectionTestReport>, ApiError> {
+    s.require_owner(&headers)?;
     check_name("id", &input.id)?;
     let _permit = s.connection_test_permit().ok_or_else(too_many)?;
     let started = Instant::now();
@@ -392,8 +394,10 @@ async fn one_token(
               (status = 503, body = ErrorBody, description = "MCP management is not available")))]
 pub(crate) async fn test_mcp(
     State(s): State<AppState>,
+    headers: HeaderMap,
     ApiJson(input): ApiJson<McpTestInput>,
 ) -> Result<Json<ConnectionTestReport>, ApiError> {
+    s.require_owner(&headers)?;
     check_name("name", &input.name)?;
     let host = s
         .mcp()
@@ -476,8 +480,10 @@ pub(crate) async fn test_mcp(
               (status = 404, body = ErrorBody, description = "no such channel"), (status = 429, body = ErrorBody)))]
 pub(crate) async fn test_channel(
     State(s): State<AppState>,
+    headers: HeaderMap,
     ApiJson(input): ApiJson<ChannelTestInput>,
 ) -> Result<Json<ConnectionTestReport>, ApiError> {
+    s.require_owner(&headers)?;
     check_name("id", &input.id)?;
     let channel = s
         .channels()
@@ -508,7 +514,9 @@ pub(crate) async fn test_channel(
               (status = 503, body = ErrorBody, description = "web search management is not available")))]
 pub(crate) async fn test_web(
     State(s): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<ConnectionTestReport>, ApiError> {
+    s.require_owner(&headers)?;
     let control = s.web().ok_or_else(|| {
         ApiError::unavailable("web search management is not available in this daemon")
     })?;
@@ -570,8 +578,10 @@ fn first_http_status(text: &str) -> Option<u16> {
               (status = 503, body = ErrorBody, description = "dictation is not available")))]
 pub(crate) async fn test_voice(
     State(s): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<ConnectionTestReport>, ApiError> {
     use crate::voice::{VoiceControlError, VoiceProvider};
+    s.require_owner(&headers)?;
     let control = s
         .voice()
         .ok_or_else(|| ApiError::unavailable("dictation is not available in this daemon"))?;
@@ -637,8 +647,10 @@ fn silent_wav() -> Vec<u8> {
               (status = 503, body = ErrorBody, description = "e-mail management is not available")))]
 pub(crate) async fn test_email(
     State(s): State<AppState>,
+    headers: HeaderMap,
     ApiJson(input): ApiJson<EmailTestInput>,
 ) -> Result<Json<ConnectionTestReport>, ApiError> {
+    s.require_owner(&headers)?;
     check_name("name", &input.name)?;
     let control = s.email().ok_or_else(|| {
         ApiError::unavailable("e-mail management is not available in this daemon")
@@ -653,13 +665,11 @@ pub(crate) async fn test_email(
                 } else {
                     r.imap
                 });
-                ConnectionTestReport::failed(
-                    "email",
-                    email_outcome(main),
-                    None,
-                    None,
-                    format!("imap: {:?}, smtp: {:?}, api: {:?}", r.imap, r.smtp, r.api),
-                )
+                let details = format!("imap: {:?}, smtp: {:?}, api: {:?}", r.imap, r.smtp, r.api);
+                match email_outcome(main) {
+                    ConnectionOutcome::Ok => ConnectionTestReport::ok("email", details),
+                    outcome => ConnectionTestReport::failed("email", outcome, None, None, details),
+                }
             }
             Err(e) => ConnectionTestReport::failed(
                 "email",
