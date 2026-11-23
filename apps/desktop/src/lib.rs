@@ -7,6 +7,7 @@ pub mod daemon;
 pub mod listener;
 mod microphone;
 pub mod shell;
+pub mod update;
 pub mod widget_visibility;
 pub mod window_gate;
 
@@ -1075,12 +1076,15 @@ fn setup_dev_menu(app: &tauri::App, control: ControlHandle) {
 ///
 /// Panics if the Tauri application fails to initialize or run.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[allow(clippy::too_many_lines)] // one flat builder chain: plugins, state, setup, handlers
 pub fn run() {
     let control = ControlHandle::new(Duration::from_millis(DEFAULT_PRE_ACTION_HIGHLIGHT_MS));
     let control_for_setup = control.clone();
     let daemon_handle = Arc::new(DaemonHandle::default());
     let daemon_for_exit = Arc::clone(&daemon_handle);
     let daemon_for_setup = Arc::clone(&daemon_handle);
+
+    let (update_plugin, update_runtime) = update::init();
 
     let builder = tauri::Builder::default();
     // A second launch (Start menu, autostart plus a manual start, deep link)
@@ -1093,6 +1097,8 @@ pub fn run() {
     let app = builder
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(update_plugin)
+        .manage(update_runtime)
         .manage(shell::TrayState::default())
         .manage(control)
         .manage(SharedWidgetVisibility::default())
@@ -1110,6 +1116,7 @@ pub fn run() {
             // the OS from its first frame; the daemon starts in parallel.
             spawn_startup_work(&app_handle, Arc::clone(&daemon_for_setup));
             spawn_global_hotkey_listener(control_for_setup.clone());
+            update::spawn_startup_watch(&app_handle);
             setup_dev_menu(app, control_for_setup.clone());
             if let Err(e) = shell::setup_tray(&app_handle) {
                 eprintln!("bot-desktop: tray icon unavailable: {e}");
@@ -1176,6 +1183,10 @@ pub fn run() {
             shell::notify_take_actions,
             shell::set_needs_count,
             shell::set_tray_labels,
+            update::update_status,
+            update::update_check,
+            update::update_install,
+            update::update_rollback,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -1441,6 +1452,10 @@ mod acl_tests {
         ("notify_take_actions", "MAIN_ONLY"),
         ("set_needs_count", "MAIN_ONLY"),
         ("set_tray_labels", "MAIN_ONLY"),
+        ("update_status", "MAIN_ONLY"),
+        ("update_check", "MAIN_ONLY"),
+        ("update_install", "MAIN_ONLY"),
+        ("update_rollback", "MAIN_ONLY"),
     ];
 
     /// Read-only commands with no side effect beyond returning state; the

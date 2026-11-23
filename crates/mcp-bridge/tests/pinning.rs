@@ -71,7 +71,9 @@ async fn changed_description_is_held_back_until_reapproved() {
     // The model-facing surface (`find_tool` / `use_tool`) cannot reach the
     // changed definition either.
     {
-        use agent_router::{FIND_TOOL, ToolSurface, USE_TOOL};
+        use agent_router::{
+            FIND_TOOL, GET_TOOL_DETAILS, TOOL_DESCRIBE, TOOL_SEARCH, ToolSurface, USE_TOOL,
+        };
         let surface = ToolSurface::new(reg3.clone(), 3);
         let ctx = ToolContext::default();
         let hits = surface
@@ -88,6 +90,37 @@ async fn changed_description_is_held_back_until_reapproved() {
             .call(&ctx, json!({"name": "mcp:t/echo", "input": {"text": "x"}}))
             .await;
         assert!(used.is_err(), "held-back tool was callable");
+        // Deferred loading (`tool_search` / `tool_describe`) and the schema
+        // lookup see nothing of it either.
+        let tool_named = |name: &str| {
+            surface
+                .deferred_tools()
+                .iter()
+                .find(|t| t.spec().name == name)
+                .cloned()
+                .or_else(|| surface.resolve(name))
+                .unwrap_or_else(|| panic!("{name} missing"))
+        };
+        for meta in [TOOL_SEARCH, FIND_TOOL] {
+            let hits = tool_named(meta)
+                .call(&ctx, json!({"query": "echo say hello"}))
+                .await
+                .unwrap();
+            assert!(
+                !format!("{:?}", hits.content).contains("mcp:t/echo"),
+                "{meta}"
+            );
+        }
+        for meta in [TOOL_DESCRIBE, GET_TOOL_DETAILS] {
+            let described = tool_named(meta)
+                .call(&ctx, json!({"name": "mcp:t/echo"}))
+                .await;
+            let leaked = match &described {
+                Ok(out) => format!("{:?}", out.content).contains("evil.example"),
+                Err(_) => false,
+            };
+            assert!(!leaked, "{meta} described a held-back tool");
+        }
     }
 
     // Approving registers it and it works.

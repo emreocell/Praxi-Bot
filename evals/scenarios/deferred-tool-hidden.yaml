@@ -1,0 +1,31 @@
+name: deferred-tool-hidden
+description: "A bot cannot find, activate, or call a tool excluded from its profile."
+deferred_tools: true
+policy: full
+profile_toml: |
+  [tools]
+  allow = ["catalog_*"]
+  exclude = ["catalog_private"]
+tools:
+  - { name: catalog_public, effect: read, description: "Catalog public records." }
+  - { name: catalog_private, effect: read, description: "Catalog private records." }
+user: "Look for the catalog tools."
+script:
+  - tool_calls: [{ id: c1, tool: tool_search, args: { query: catalog } }]
+  - tool_calls: [{ id: c2, tool: tool_describe, args: { name: catalog_private } }]
+  - tool_calls: [{ id: c3, tool: catalog_private, args: {} }]
+  - text: "Only the public catalog is available."
+expect:
+  state: succeeded
+  tool_runs: { catalog_private: 0 }
+  no_approval_tools: [catalog_private, tool_describe]
+  requests:
+    - request: 0
+      tools_offered: [tool_search, tool_describe]
+      tools_not_offered: [catalog_public, catalog_private]
+    - request: 1
+      tool_messages_contain: [catalog_public]
+      tool_messages_not_contain: [catalog_private]
+    - request: 2
+      tool_messages_contain: ["unknown tool; search with tool_search"]
+      tools_not_offered: [catalog_private]

@@ -30,6 +30,19 @@ pub fn secrets_list(store: &dyn SecretStore, out: &mut dyn FnMut(&str)) -> Resul
     Ok(())
 }
 
+/// `bot secrets list --json`: a JSON array of secret names (never values).
+///
+/// # Errors
+/// Store errors.
+pub fn secrets_list_json(store: &dyn SecretStore) -> Result<serde_json::Value> {
+    let names: Vec<_> = store
+        .list_names()?
+        .into_iter()
+        .filter(|n| !secret_store::is_host_credential(n))
+        .collect();
+    Ok(serde_json::json!(names))
+}
+
 /// `bot secrets set`: the value comes from the environment or a hidden prompt,
 /// never from argv.
 ///
@@ -100,6 +113,32 @@ pub fn providers_list(data_dir: &std::path::Path, out: &mut dyn FnMut(&str)) -> 
         }
     }
     Ok(())
+}
+
+/// `bot providers list --json`: one object per provider
+/// (`id`, `default`, `enabled`, `kind` = `api` | `cli`, `model`, `key` = the
+/// secret's *name*, never its value; `null` for CLI providers).
+///
+/// # Errors
+/// Unreadable provider config.
+pub fn providers_list_json(data_dir: &std::path::Path) -> Result<serde_json::Value> {
+    let cfg = ProviderConfig::load(&config_path(data_dir))?;
+    let default_id = cfg.effective_default().map(|d| d.id.clone());
+    let rows: Vec<_> = cfg
+        .providers
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "id": p.id,
+                "default": default_id.as_deref() == Some(p.id.as_str()),
+                "enabled": p.enabled,
+                "kind": if p.cli.is_some() { "cli" } else { "api" },
+                "model": p.default_model,
+                "key": if p.cli.is_some() { None } else { p.key.as_ref().map(|k| k.name().to_owned()) },
+            })
+        })
+        .collect();
+    Ok(serde_json::Value::Array(rows))
 }
 
 /// `bot providers add`.
@@ -244,6 +283,39 @@ mod tests {
         secrets_delete(&s, "a.b").unwrap();
         assert!(secrets_delete(&s, "a.b").is_err());
         assert_eq!(collect(|o| secrets_list(&s, o)), ["(no secrets stored)"]);
+    }
+
+    #[test]
+    fn json_shapes_of_secrets_and_providers_list() {
+        let s = MemoryStore::new();
+        secrets_set(&s, "a.b", &SecretValue::new("topsecretvalue")).unwrap();
+        let v = secrets_list_json(&s).unwrap();
+        assert_eq!(v, serde_json::json!(["a.b"]));
+        assert!(!v.to_string().contains("topsecretvalue"));
+
+        let d = tempfile::tempdir().unwrap();
+        let mut cfg = ProviderConfig::default();
+        let mut a = ProviderSettings::new("a", 1);
+        a.default_model = Some("m1".into());
+        cfg.upsert(a);
+        let mut cli = ProviderSettings::new("cli:claude", 2);
+        cli.cli = Some(provider_catalog::config::CliSettings::Cli {
+            engine: provider_catalog::config::CliEngine::Claude,
+            command: "claude".into(),
+        });
+        cfg.upsert(cli);
+        cfg.save(&config_path(d.path())).unwrap();
+        let v = providers_list_json(d.path()).unwrap();
+        assert_eq!(v[0]["id"], "a");
+        assert_eq!(v[0]["default"], true);
+        assert_eq!(v[0]["kind"], "api");
+        assert_eq!(v[0]["model"], "m1");
+        assert_eq!(v[1]["kind"], "cli");
+        assert_eq!(v[1]["default"], false);
+        assert!(v[1]["key"].is_null() && v[1]["model"].is_null());
+        let mut keys: Vec<_> = v[0].as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["default", "enabled", "id", "key", "kind", "model"]);
     }
 
     #[test]

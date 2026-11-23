@@ -1,18 +1,19 @@
 import { type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { bareBrandColor, brandIcon } from "../lib/brandIcons";
+import { formatDateTime } from "../lib/messageTime";
 import { type AccountQuota, quotaTone, RING_RADIUS, ringDash, visibleQuotas } from "../lib/quota";
 import { useQuotas } from "../state/useQuotas";
 import { BrandIcon } from "./BrandIcon";
 import styles from "./QuotaRings.module.css";
 
 function Ring({ quota }: { quota: AccountQuota }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const brand = brandIcon(quota.brand);
   const tone = quotaTone(quota.remainingPct);
   const arc = tone === "low" ? "var(--color-danger)" : bareBrandColor(brand.color);
   const reset = quota.resetsAtMs
-    ? t("quota.resets", { when: new Date(quota.resetsAtMs).toLocaleString() })
+    ? t("quota.resets", { when: formatDateTime(quota.resetsAtMs, i18n.language) })
     : undefined;
   return (
     <li

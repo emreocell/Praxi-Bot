@@ -72,11 +72,11 @@ export async function recordingToPcm16k(blob: Blob): Promise<Uint8Array> {
 /** The `transcribe` request body for the active provider: the recording as is, or PCM for Gemini Live. */
 export async function transcribePayload(
   blob: Blob,
-  provider: "whisper" | "gemini_live" | undefined,
+  provider: "whisper" | "gemini_live" | "local_voice" | undefined,
   options: { mock?: boolean } = {}
 ): Promise<{ audio_base64: string; mime: string }> {
   // The mock call's placeholder blob is not decodable audio; the mock daemon never reads it.
-  if (provider === "gemini_live" && !options.mock) {
+  if ((provider === "gemini_live" || provider === "local_voice") && !options.mock) {
     return { audio_base64: bytesToBase64(await recordingToPcm16k(blob)), mime: "audio/pcm" };
   }
   const type = blob.type || "audio/webm";

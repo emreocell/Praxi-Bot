@@ -289,6 +289,9 @@ fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> 
     if check_path == "/v1/profile-share" || check_path.starts_with("/v1/profile-share/") {
         return Some("bot profile files are handled by the owner on this host only");
     }
+    if check_path == "/v1/data-usage" || check_path.starts_with("/v1/data-usage/") {
+        return Some("data folder sizes and Clear cache are a host-local owner action");
+    }
     if check_path == "/v1/trusted-folders" {
         return Some("trusted folders are a host-local owner setting");
     }
@@ -634,6 +637,19 @@ mod tests {
             }
         }
         assert!(host_local_denial(&Method::PUT, "/v1/bots/abc").is_none());
+    }
+
+    #[test]
+    fn peers_never_read_data_usage_or_clear_the_cache() {
+        // Role-independent: host_local_denial runs before any role check.
+        for path in ["/v1/data-usage", "/v1/data-usage/clear-cache"] {
+            for method in [Method::GET, Method::POST, Method::DELETE] {
+                assert!(
+                    host_local_denial(&method, path).is_some(),
+                    "{method} {path}"
+                );
+            }
+        }
     }
 
     #[test]

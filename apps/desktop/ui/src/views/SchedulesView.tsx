@@ -1,3 +1,4 @@
+import { formatRunPreview } from "../lib/scheduleTime";
 import {
   ArrowUpRight,
   CalendarCheck,
@@ -226,7 +227,7 @@ export function SchedulesView({
             <div
               className={styles.filterGroup}
               role="group"
-              aria-label={t("schedules.title")}
+              aria-label={t("schedules.viewLabel")}
             >
               <Button
                 size="sm"
@@ -257,6 +258,7 @@ export function SchedulesView({
               size="sm"
               variant="primary"
               disabled={bots.length === 0}
+              title={bots.length === 0 ? t("schedules.newNeedsBot") : undefined}
               onClick={() => setEditing("new")}
             >
               <Plus />
@@ -301,6 +303,17 @@ export function SchedulesView({
                 ? t("schedules.empty.noBots")
                 : t("schedules.empty.hint")}
             </p>
+            {bots.length > 0 ? (
+              <Button
+                size="sm"
+                variant="primary"
+                data-testid="schedules-empty-new"
+                onClick={() => setEditing("new")}
+              >
+                <Plus />
+                {t("schedules.new")}
+              </Button>
+            ) : null}
           </Card>
         ) : viewMode === "calendar" ? (
           <ScheduleCalendar
@@ -1116,13 +1129,7 @@ function ScheduleForm({
     parsePayload(editing.payload).kind !== "agent_prompt";
   const selectedTz = draft.tz ?? LOCAL_TZ;
 
-  const fmt = (ms: number, tz?: string) =>
-    new Date(ms).toLocaleString(i18n.language, {
-      dateStyle: "medium",
-      timeStyle: "short",
-      weekday: "short",
-      ...(tz ? { timeZone: tz } : {})
-    });
+  const fmt = (ms: number, tz?: string) => formatRunPreview(ms, i18n.language, tz);
 
   const simpleSpecNow =
     draft.kind === "simple" &&
@@ -1253,6 +1260,14 @@ function ScheduleForm({
       ? (editing.next_runs_ms ?? [])
       : (activePreview?.next_runs_ms ?? []);
 
+  // The form opens above the list: bring it into view and put the keyboard on its title.
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
+  useEffect(() => {
+    const el = titleRef.current;
+    el?.scrollIntoView?.({ block: "nearest" });
+    el?.focus({ preventScroll: true });
+  }, []);
+
   return (
     <Card padding="md" className={styles.form}>
       <form
@@ -1263,7 +1278,9 @@ function ScheduleForm({
           void submit();
         }}
       >
-        <h2 className={styles.formTitle}>{heading}</h2>
+        <h2 className={styles.formTitle} ref={titleRef} tabIndex={-1}>
+          {heading}
+        </h2>
 
         {!editing ? (
           <div className={formStyles.field}>

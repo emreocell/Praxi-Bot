@@ -34,6 +34,17 @@ dictation and voice calls:
   is never shown again. The daemon, not the app window, talks to Google, one short
   connection per utterance. Only the transcript is used: the answer still comes from the
   bot model you chose, and the Live model's own reply is ignored.
+- **On this computer (offline)**: Whisper plus Silero voice detection run inside Praxi-Bot, so your
+  speech never leaves the machine. Pick a model (small is the most accurate, also for Turkish and
+  German) and press **Download**: the files come once from huggingface.co / github.com, are checked
+  against a fixed checksum and saved under `<data dir>/models/voice/`. The licence (MIT for all
+  offered models) is shown before you download. Needs a build with the `local-voice` cargo feature
+  (`cargo build -p cli --features local-voice`); other builds say so instead of failing silently.
+  When this provider is on, **Telegram voice notes** from paired users are transcribed on this computer
+  too (up to 2 minutes), the text is echoed back as "🎤 ..." and then handled like typed text. Slash
+  commands and approvals still need typed text or the buttons. With any other provider, voice notes are
+  never sent to a cloud service; the bot just says it cannot read them. Read-aloud still uses your
+  operating system's voices; on-device read-aloud is not part of this version.
 
 Audio leaves your machine only while you dictate or are in a call, and only to the service
 you configured. Free-tier keys are subject to Google's own limits and terms.

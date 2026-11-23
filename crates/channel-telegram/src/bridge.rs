@@ -59,8 +59,14 @@ const QUEUED_TTL: Duration = Duration::from_secs(30 * 60);
 /// Minimum interval between daemon lookups for a queued message's run.
 const QUEUED_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Longest voice note transcribed (seconds).
+const MAX_VOICE_SECS: u32 = 120;
 /// Longest incoming text forwarded to the daemon (Telegram itself caps at 4096).
 const MAX_INCOMING_CHARS: usize = 8192;
+
+/// How long an approval card in this chat stays answerable. After this the
+/// buttons stop working; the desktop app can still decide.
+const APPROVAL_CARD_TTL_MS: i64 = 10 * 60 * 1000;
 
 /// Maximum number of outstanding approval/question tokens remembered.
 const MAX_PENDING_PROMPTS: usize = 1024;
@@ -365,7 +371,7 @@ struct Inner {
     clock_offset_ms: std::sync::atomic::AtomicI64,
     /// Approval requests this bridge sent: `call_id` -> Telegram chat that received the buttons.
     /// A callback is only honoured for an entry issued to the pressing chat (anti-forgery).
-    pending_approvals: Mutex<HashMap<ToolCallId, i64>>,
+    pending_approvals: Mutex<HashMap<ToolCallId, (i64, i64)>>,
     /// Approvals that carry details: only "approve once" may be pressed for
     /// them, whatever callback data arrives (the daemon refuses a grant too).
     once_only_approvals: Mutex<HashSet<ToolCallId>>,
@@ -1053,8 +1059,41 @@ impl TelegramChannel {
         // A tool that attaches details (a schedule) must be shown in
         // full before anyone can approve it here; if that is not
         // possible, approval is left to the desktop app.
+        // Buttons only for low-risk asks. Anything else (or an event that does not
+        // say) is decided in the desktop app, and the card says so.
+        let low_risk = a
+            .details
+            .as_ref()
+            .and_then(|d| d.get("risk"))
+            .and_then(serde_json::Value::as_str)
+            == Some("low");
+        if !low_risk {
+            let _ = self
+                .send_redacted(
+                    chat_id,
+                    &Message::ApprovalDesktopOnly { tool }.render(language),
+                    None,
+                )
+                .await;
+            return Ok(());
+        }
         let (body, offer) = match &a.details {
             None => (format!("{heading}\n{}", a.summary), true),
+            // A plain low-risk ask carries only daemon facts: the summary is the card.
+            Some(d)
+                if ["kind", "egress", "computer_target"]
+                    .iter()
+                    .all(|k| d.get(k).is_none()) =>
+            {
+                (
+                    format!(
+                        "{heading}
+{}",
+                        a.summary
+                    ),
+                    true,
+                )
+            }
             Some(d) => match protocol::approval_text::describe_details(d) {
                 Some(full) => {
                     let shown = format!("{heading}\n{full}");
@@ -1099,7 +1138,7 @@ impl TelegramChannel {
                 if pending.len() >= MAX_PENDING_PROMPTS {
                     pending.clear();
                 }
-                pending.insert(a.call_id, chat_id);
+                pending.insert(a.call_id, (chat_id, self.inbox_now_ms()));
             }
             if a.details.is_some() {
                 let mut once = self.inner.once_only_approvals.lock();
@@ -1186,7 +1225,9 @@ impl TelegramChannel {
             if self.inner.pairing.should_send_refusal(user_id) {
                 // Best effort: a failing refusal (blocked bot, 429) is never fatal.
                 match msg.kind {
-                    IncomingKind::Text(_) | IncomingKind::Unsupported(_) => {
+                    IncomingKind::Text(_)
+                    | IncomingKind::Unsupported(_)
+                    | IncomingKind::Voice { .. } => {
                         let _ = self
                             .send_redacted(chat_id, UNPAIRED_REFUSAL_TEXT, None)
                             .await;
@@ -1206,6 +1247,13 @@ impl TelegramChannel {
         match msg.kind {
             IncomingKind::Text(text) => {
                 self.handle_paired_text(chat_id, &text, msg.update_id).await
+            }
+            IncomingKind::Voice {
+                file_id,
+                duration_secs,
+            } => {
+                self.handle_voice(chat_id, &file_id, duration_secs, msg.update_id)
+                    .await
             }
             IncomingKind::Unsupported(label) => {
                 self.send_redacted(
@@ -1280,6 +1328,66 @@ impl TelegramChannel {
             PairAttempt::RateLimited => {}
         }
         Ok(())
+    }
+
+    /// A paired user's voice note: transcribed on this computer, shown back so a mishearing is
+    /// visible, then handled exactly like typed text (approvals still need the buttons).
+    async fn handle_voice(
+        &self,
+        chat_id: i64,
+        file_id: &str,
+        duration_secs: u32,
+        update_id: i64,
+    ) -> Result<()> {
+        let lang = self.language(chat_id);
+        let say = |m: Message<'static>| {
+            let text = m.render(lang).into_owned();
+            async move { self.send_redacted(chat_id, &text, None).await }
+        };
+        if duration_secs > MAX_VOICE_SECS {
+            say(Message::VoiceTooLong).await?;
+            return Ok(());
+        }
+        let audio = match self.inner.bot_api.download_voice(file_id).await {
+            Ok(a) => a,
+            Err(e) => {
+                self.report_error(&e);
+                say(Message::VoiceFailed).await?;
+                return Ok(());
+            }
+        };
+        let text = match self
+            .inner
+            .api_client
+            .transcribe_voice(audio, "audio/ogg")
+            .await
+        {
+            Ok(Some(t)) => t,
+            Ok(None) => {
+                say(Message::VoiceUnavailable).await?;
+                return Ok(());
+            }
+            Err(e) => {
+                self.report_error(&e);
+                say(Message::VoiceFailed).await?;
+                return Ok(());
+            }
+        };
+        let text = text.trim();
+        if text.is_empty() {
+            say(Message::VoiceEmpty).await?;
+            return Ok(());
+        }
+        // What was heard, so the owner can correct a mistake before anything happens.
+        self.send_redacted(chat_id, &format!("🎤 {text}"), None)
+            .await?;
+        // A spoken sentence is never a slash command (/stop, /use ...): those must be typed.
+        let text = if text.starts_with('/') {
+            format!("🎤 {text}")
+        } else {
+            text.to_owned()
+        };
+        self.handle_paired_text(chat_id, &text, update_id).await
     }
 
     async fn handle_paired_text(&self, chat_id: i64, text: &str, update_id: i64) -> Result<()> {
@@ -1836,6 +1944,7 @@ impl TelegramChannel {
         first_err.map_or(Ok(()), Err)
     }
 
+    #[allow(clippy::too_many_lines)] // approval and question buttons share one entry point
     async fn handle_callback(
         &self,
         chat_id: i64,
@@ -1845,9 +1954,21 @@ impl TelegramChannel {
     ) -> Result<()> {
         let language = self.language(chat_id);
         if let Some((call_id, decision, scope)) = parse_approval_callback(data) {
-            // Only approvals this bridge issued to *this* chat may be decided from it.
-            let allowed = { self.inner.pending_approvals.lock().get(&call_id) == Some(&chat_id) };
-            if !allowed {
+            // Only approvals this bridge issued to *this* chat may be decided from it, and
+            // only once: the entry is taken here, before anything else runs, so a second
+            // press (or a replayed callback) finds nothing. A card also expires.
+            let claimed = self.inner.pending_approvals.lock().remove(&call_id);
+            let fresh = claimed.is_some_and(|(chat, issued)| {
+                chat == chat_id && self.inbox_now_ms().saturating_sub(issued) < APPROVAL_CARD_TTL_MS
+            });
+            if !fresh {
+                // Someone else's chat must not burn the owner's card.
+                if let Some(entry) = claimed.filter(|(chat, _)| *chat != chat_id) {
+                    self.inner.pending_approvals.lock().insert(call_id, entry);
+                } else {
+                    self.inner.once_only_approvals.lock().remove(&call_id);
+                    self.inner.run_control_approvals.lock().remove(&call_id);
+                }
                 self.inner
                     .bot_api
                     .answer_callback_query(
@@ -1857,6 +1978,7 @@ impl TelegramChannel {
                     .await?;
                 return Ok(());
             }
+            let entry = claimed.unwrap_or_default();
             // A card with details is approved once, never as a standing grant.
             let once_only = self.inner.once_only_approvals.lock().contains(&call_id);
             let run_control_ok = scope == crate::daemon_client::ApprovalScope::RunControl
@@ -1870,6 +1992,8 @@ impl TelegramChannel {
                     .bot_api
                     .answer_callback_query(query_id, Some(&Message::OnceOnly.render(language)))
                     .await?;
+                // A refused press does not use the card up.
+                self.inner.pending_approvals.lock().insert(call_id, entry);
                 return Ok(());
             }
             if let Err(e) = self
@@ -1879,11 +2003,10 @@ impl TelegramChannel {
                 .await
             {
                 // Let the user retry the button.
-                self.inner.pending_approvals.lock().insert(call_id, chat_id);
+                self.inner.pending_approvals.lock().insert(call_id, entry);
                 return Err(e);
             }
             self.inner.inbox.delivered(update_id, None)?;
-            self.inner.pending_approvals.lock().remove(&call_id);
             self.inner.once_only_approvals.lock().remove(&call_id);
             self.inner.run_control_approvals.lock().remove(&call_id);
             let ack = match decision {

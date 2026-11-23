@@ -31,6 +31,7 @@ import { useDaemon } from "../../state/DaemonContext";
 import { notifyProvidersChanged } from "../../state/useProviders";
 import styles from "./DiagnosticsCard.module.css";
 import { humanLine } from "../../lib/humanError";
+import { formatClock } from "../../lib/messageTime";
 
 const TONE_ICON = {
   ok: CircleCheck,
@@ -52,7 +53,7 @@ function errorText(e: unknown): string {
  * changes nothing; a repair runs only when the user presses its button.
  */
 export function DiagnosticsCard() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const toast = useToast();
   const { client } = useDaemon();
   const [state, dispatch] = useReducer(diagnosticsReducer, INITIAL_DIAGNOSTICS);
@@ -169,7 +170,7 @@ export function DiagnosticsCard() {
           </h3>
           <span className={styles.summarySub}>
             {checkedAt
-              ? t("settingsModal.diagnostics.checkedAt", { time: checkedAt.toLocaleTimeString() })
+              ? t("settingsModal.diagnostics.checkedAt", { time: formatClock(checkedAt.getTime(), i18n.language, true) })
               : t("settingsModal.diagnostics.description")}
           </span>
         </div>

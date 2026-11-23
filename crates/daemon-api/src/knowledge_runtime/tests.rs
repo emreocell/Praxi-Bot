@@ -41,6 +41,7 @@ impl Host {
             Providers::single(Arc::new(crate::fake::FakeProvider)),
             LoopConfig {
                 redactor: Some(redactor),
+                legacy_tool_surface: true,
                 ..LoopConfig::default()
             },
         )

@@ -40,6 +40,9 @@ mod update;
 mod view_targets;
 mod voice_gemini;
 mod voice_host;
+mod voice_local;
+#[cfg(feature = "local-voice")]
+mod voice_local_engine;
 mod web_host;
 mod wizard;
 mod workflow;
@@ -780,7 +783,7 @@ fn run() -> Result<()> {
     // Daemon commands (no secret store needed, except `serve` with real providers).
     match command {
         Command::Skills { action } => {
-            return skills_cmd::run(&data_dir, action, &mut std::io::stdout());
+            return skills_cmd::run(&data_dir, action, cli.json, &mut std::io::stdout());
         }
         Command::Import {
             action: import_cmd::ImportCmd::Detect,
@@ -843,6 +846,15 @@ fn run() -> Result<()> {
     match command {
         Command::Providers {
             action: ProvidersCmd::List,
+        } if cli.json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&commands::providers_list_json(&data_dir)?)?
+            );
+            return Ok(());
+        }
+        Command::Providers {
+            action: ProvidersCmd::List,
         } => return commands::providers_list(&data_dir, &mut say),
         Command::Providers {
             action: ProvidersCmd::Default { id, model },
@@ -883,6 +895,13 @@ fn run() -> Result<()> {
             action: ChannelsCmd::Telegram { action },
         } => run_telegram(&cli, &data_dir, store, action, &mut say),
         Command::Secrets { action } => match action {
+            SecretsCmd::List if cli.json => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&commands::secrets_list_json(store)?)?
+                );
+                Ok(())
+            }
             SecretsCmd::List => commands::secrets_list(store, &mut say),
             SecretsCmd::Set { name, value_env } => {
                 let v = read_value(value_env.as_deref(), &format!("Value for {name}"))?;

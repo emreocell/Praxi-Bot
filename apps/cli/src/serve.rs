@@ -369,6 +369,9 @@ fn build_agent_with_skills(
             knowledge_decider: Some(Arc::new(agent_core::HeuristicKnowledgeDecider::new(
                 Arc::clone(storage),
             ))),
+            // Unit tests drive the daemon with scripted providers that call
+            // tools directly; discovery is covered in agent-core and evals.
+            legacy_tool_surface: cfg!(test),
             ..LoopConfig::default()
         },
     )
@@ -1987,11 +1990,6 @@ host = "smtp.example.com"
         for want in ["spawn_subagent", "skill_list", "skill_read", "skill_write"] {
             assert!(names.iter().any(|n| n == want), "{want} in {names:?}");
         }
-        assert!(
-            names.len() <= LoopConfig::default().discovery_threshold,
-            "{} built-in tools exceed the direct limit",
-            names.len()
-        );
         assert!(names.iter().any(|n| n == "workflow_run"), "{names:?}");
         let idx = load_skills(dir.path());
         assert!(idx.write_dir().is_none());

@@ -2091,6 +2091,46 @@ impl Shared {
         })
     }
 
+    /// Resolve against the definitions this request actually advertised, then
+    /// recheck the live registry and the bot's visibility.
+    pub(crate) fn resolve_offered(
+        &self,
+        ctx: &RunCtx,
+        name: &str,
+        input: &Value,
+        hints: &[String],
+        offered: Option<&[String]>,
+    ) -> Option<Resolved> {
+        let Some(offered) = offered else {
+            return self.resolve_call(&ctx.profile, ctx.bot_id, name, input, hints);
+        };
+        if self.cfg.safe_mode || !offered.iter().any(|n| n == name) {
+            return None;
+        }
+        let tool = if matches!(
+            name,
+            agent_router::TOOL_SEARCH | agent_router::TOOL_DESCRIBE
+        ) {
+            self.surface
+                .deferred_tools()
+                .iter()
+                .find(|t| t.spec().name == name)
+                .cloned()?
+        } else {
+            let tool = self.tools.get(name)?;
+            if !self.spec_visible(&ctx.profile, ctx.bot_id, tool.spec()) {
+                return None;
+            }
+            tool
+        };
+        Some(Resolved {
+            spec: Some(tool.spec().clone()),
+            tool,
+            input: input.clone(),
+            name: name.to_owned(),
+        })
+    }
+
     /// Tool specs the bot may see, sorted by name (stable prompts cache better).
     pub fn visible_specs(&self, profile: &BotProfile, bot: BotId) -> Vec<ToolSpec> {
         let mut specs: Vec<ToolSpec> = self
@@ -2109,7 +2149,8 @@ impl Shared {
     /// filtered registry, independent of per-turn router hints. Unchanged
     /// registry and policy inputs produce identical bytes across turns.
     pub(crate) fn discovery_block(&self, ctx: &RunCtx, specs: &[ToolSpec]) -> Option<String> {
-        if !specs.iter().any(|s| s.name == agent_router::FIND_TOOL) {
+        let deferred = specs.iter().any(|s| s.name == agent_router::TOOL_SEARCH);
+        if !deferred && !specs.iter().any(|s| s.name == agent_router::FIND_TOOL) {
             return None;
         }
         let visible = self.visible_specs(&ctx.profile, ctx.bot_id);
@@ -2122,6 +2163,7 @@ impl Shared {
                 })
                 .map(|s| s.name.as_str()),
             own_screen,
+            deferred,
         )
     }
 
@@ -2130,7 +2172,12 @@ impl Shared {
     /// tools the bot may use (all of them in discovery mode, where `specs`
     /// holds only the meta tools), so it is stable across a run's model calls.
     pub(crate) fn tool_guidance_block(&self, ctx: &RunCtx, specs: &[ToolSpec]) -> Option<String> {
-        let families = if specs.iter().any(|s| s.name == agent_router::FIND_TOOL) {
+        let families = if specs.iter().any(|s| {
+            matches!(
+                s.name.as_str(),
+                agent_router::FIND_TOOL | agent_router::TOOL_SEARCH
+            )
+        }) {
             let visible = self.visible_specs(&ctx.profile, ctx.bot_id);
             crate::tool_guidance::Families::of(
                 visible
@@ -2335,6 +2382,9 @@ pub(crate) struct ModelOut {
     /// External tool descriptions and schemas that were part of this request.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub metadata: Vec<crate::taint::ExecFact>,
+    /// Canonical names actually requested from this model. Legacy rows omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offered_tools: Option<Vec<String>>,
 }
 
 /// One call inside a persisted tool step's input.
@@ -2369,6 +2419,9 @@ pub(crate) struct ResultRec {
     /// written before the field existed; the ledger classifies those itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<crate::ledger::Outcome>,
+    /// A validated, successful run-local schema activation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activated_tool: Option<String>,
 }
 
 pub(crate) const STEP_USER: &str = "user_message";

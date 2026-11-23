@@ -14,7 +14,7 @@
   },
   "addServer": {
     "advanced": "Advanced",
-    "agentHint": "Praxi will use the keys already loaded in your SSH agent. Passwords are not supported.",
+    "agentHint": "Praxi will use the keys your computer has already loaded for signing in to servers (the SSH agent). Passwords are not supported.",
     "answerFailed": "The answer did not reach the setup. Close this window and start again.",
     "auth": "Sign-in",
     "auth_agent": "SSH agent",
@@ -195,7 +195,7 @@
     },
     "host": "Server address",
     "hostHint": "Example: 203.0.113.7 or myserver.example.com",
-    "hostKeyBody": "This is the first time this computer connects to {{host}}. Compare this fingerprint with the one in your provider's console if it shows one.",
+    "hostKeyBody": "This is the first time this computer connects to {{host}}. The fingerprint below is a code that identifies the server. Compare it with the one in your provider's console if it shows one.",
     "hostKeyNo": "No, stop",
     "hostKeyTitle": "Is this your server?",
     "hostKeyYes": "Yes, trust this server",
@@ -209,7 +209,7 @@
     },
     "keyFile": "Private key file",
     "keyHint": "Only the path is used. Praxi never copies or stores the key itself.",
-    "lead": "Connect a server you rent. No ticket to copy.",
+    "lead": "Connect a server you rent. Praxi does the setup for you.",
     "logEmpty": "Nothing to show yet.",
     "manual": "I have a pairing ticket instead",
     "noDaemon": "The local Praxi service is not running. Restart the app and try again.",
@@ -258,7 +258,7 @@
       "userInvalid": "Use letters, numbers, dots, dashes or underscores only."
     },
     "progress": "Setup progress",
-    "releaseNote": "Praxi can add a server that already runs Praxi. Installing it for you needs a published release, which does not exist yet.",
+    "releaseNote": "For now the server must already have Praxi on it. Installing Praxi on a blank server for you is not available yet.",
     "retry": "Try again",
     "retryResume": "Try again from here",
     "sayHello": "Say hello to your bot",
@@ -454,6 +454,8 @@
       "all": "All themes",
       "description": "Colors for the whole app. Surfaces, lines and muted text are derived from two colors.",
       "system": "Follow system",
+      "systemDark": "Dark theme while the system is dark",
+      "systemLight": "Light theme while the system is light",
       "title": "Theme"
     },
     "themes": {
@@ -791,7 +793,8 @@
     "dangerTitle": "Danger zone",
     "delete": "Delete bot",
     "deleteBlocked": "This bot still has chats ({{count}}), so it cannot be deleted. Only a bot without chats or runs can be removed.",
-    "deleteBlockedRuns": "This bot still has {{count}} retained run(s), so it cannot be deleted. Only a bot without chats or runs can be removed.",
+    "deleteBlockedRuns": "This bot still has {{count}} retained runs, so it cannot be deleted. Only a bot without chats or runs can be removed.",
+    "deleteBlockedRuns_one": "This bot still has {{count}} retained run, so it cannot be deleted. Only a bot without chats or runs can be removed.",
     "deleteConfirmBody": "The bot, its access to apps and its e-mail accounts will be removed. This cannot be undone. A bot that still has chats or runs cannot be deleted: in that case nothing is removed and you will see why.",
     "deleteConfirmTitle": "Delete {{name}}?",
     "deleteHint": "Removes the bot, its access to apps and its e-mail accounts. Only possible while it has no chats or runs. This cannot be undone.",
@@ -1033,7 +1036,7 @@
       "soft_usd": "Warn at (USD)"
     },
     "hint": "A warning only notifies you at 80% and 100%. A stop ends the run before the model is called. Models with an unknown price count usage only. Schedules and channel messages follow the same limits.",
-    "invalid": "Enter a positive amount (money from 0.01, usage as whole numbers) or leave the field empty.",
+    "invalid": "Enter a positive amount (money from 0.01, usage as whole numbers) with digits only, no thousands separator (write 10000, not 10.000), or leave the field empty.",
     "order": "The warning level must not be above the stop level.",
     "period": {
       "daily": "Per day",
@@ -1046,6 +1049,7 @@
     "saving": "Saving…",
     "unlimited": "No limit",
     "unreported": "{{count}} calls reported no usage and are counted by a cautious estimate.",
+    "unreported_one": "{{count}} call reported no usage and is counted by a cautious estimate.",
     "used": "Used {{usd}} and {{amount}} of text usage. Resets {{when}}."
   },
   "botPanel": {
@@ -1197,7 +1201,8 @@
       "searchPlaceholder": "Filter skills by name or description…",
       "summaryAll": "Uses all shared skills ({{count}})",
       "summaryLearned": "(+{{count}} learned)",
-      "summaryMissing": "{{count}} assigned skill unavailable on disk",
+      "summaryMissing": "{{count}} assigned skills unavailable on disk",
+      "summaryMissing_one": "{{count}} assigned skill unavailable on disk",
       "summarySelected": "{{count}} of {{total}} shared skills",
       "tooMany": "Only {{max}} skills can be assigned. Pick fewer skills, or use \"All shared skills\"."
     },
@@ -1521,6 +1526,8 @@
       "placeholder": "Find in chat…",
       "prev": "Previous match"
     },
+    "imported": "Imported",
+    "importedNote": "Imported chat note: {{steps}} tool step(s) and {{approvals}} approval(s) were listed in the file but were not imported or executed.",
     "jumpToLatest": "Jump to latest",
     "longMessage": {
       "less": "Show less",
@@ -3015,6 +3022,20 @@
   "help": {
     "center": {
       "allDocs": "Open the full guide",
+      "diag": {
+        "copied": "Diagnostic info copied.",
+        "copy": "Copy",
+        "copyFailed": "Could not copy. Select the text above and copy it by hand.",
+        "failed": "Could not collect the information",
+        "intro": "Having a problem? Show what would be copied, read it, then paste it into a bug report. Keys, passwords, e-mail addresses and your user folder are masked, and no messages are included. Nothing is sent anywhere.",
+        "loading": "Collecting the information…",
+        "offline": "Not connected to the background service yet.",
+        "previewLabel": "Diagnostic info preview",
+        "previewNote": "This exact text is what Copy puts on your clipboard:",
+        "refresh": "Refresh",
+        "show": "Show what will be copied",
+        "title": "Copy diagnostic info"
+      },
       "guideNote": "Guide pages are in English for now.",
       "guideTitle": "In the full guide",
       "intro": "Short answers to the questions people ask first. Type a word to search.",
@@ -3229,8 +3250,10 @@
     "emailUnavailable": "Email discovery is unavailable: {{error}}",
     "embed": "Build or resume semantic index",
     "embeddingRemaining": "{{count}} chunks remaining",
+    "embeddingRemaining_one": "{{count}} chunk remaining",
     "embeddingRetry": "Retry after {{time}}",
     "embeddingSkipped": "{{count}} chunks skipped",
+    "embeddingSkipped_one": "{{count}} chunk skipped",
     "embeddingStatus": {
       "awaiting_consent": "Source permission required",
       "cancelled": "Embedding paused",
@@ -3246,6 +3269,7 @@
     "html": "The saved content is HTML",
     "importHint": "Imported sources start disabled. Select and save the embedding provider again, then authorize sources and retrieval queries separately.",
     "indexed": "Processed {{count}} documents.",
+    "indexed_one": "Processed {{count}} document.",
     "kind": "Source type",
     "kinds": {
       "conversation": "Past conversation",
@@ -3295,6 +3319,7 @@
     "select": "Choose…",
     "settings": "Retrieval settings",
     "skippedFiles": "{{count}} files skipped",
+    "skippedFiles_one": "{{count}} file skipped",
     "title": "Knowledge and shared brain",
     "url": "Saved page URL"
   },
@@ -3480,6 +3505,7 @@
     "copied": "Copied",
     "copy": "Copy command",
     "cores": "{{count}} processor threads",
+    "cores_one": "{{count}} processor thread",
     "disk": "{{size}} free disk",
     "fitFast": "runs well",
     "fitSlow": "runs, but slowly",
@@ -3546,6 +3572,7 @@
     "previewRun": "Preview recall",
     "previewTitle": "What the bot will see (recall preview)",
     "previewTokens": "{{count}} memories recalled · ~{{used}} / {{budget}} tokens",
+    "previewTokens_one": "{{count}} memory recalled · ~{{used}} / {{budget}} tokens",
     "saveEdit": "Save memory",
     "scope": "Scope",
     "scopeShared": "Shared across all bots",
@@ -3577,6 +3604,7 @@
     "sources": {
       "api": "local API",
       "app": "this app",
+      "imported": "imported file",
       "peer": "another computer",
       "telegram": "Telegram",
       "unknown": "unknown"
@@ -3650,7 +3678,7 @@
   },
   "newBot": {
     "advanced": "Advanced settings",
-    "autonomy": "Autonomy",
+    "autonomy": "How much it may do alone",
     "autonomyCustom": "Using the {{preset}} permission preset.",
     "autonomyHints": {
       "ask": "Reads files, checks the screen, and searches the web without asking; asks before any change, send, page fetch, click, or command.",
@@ -4064,7 +4092,7 @@
       "confirmParsed": "Check this is what you meant, then press Create.",
       "create": "Create",
       "cron": "Cron expression",
-      "cronHint": "Five fields, optionally followed by a timezone.",
+      "cronHint": "For people who know cron: five fields, for example 0 9 * * 1-5 means 9:00 on weekdays. A timezone may follow.",
       "customHint": "Describe it in your own words, for example \"every Monday at 8\".",
       "date": "On which day?",
       "editTitle": "Edit scheduled task",
@@ -4146,6 +4174,7 @@
     "movedTo": "Moved to {{name}}: it runs there and is frozen on this computer.",
     "never": "Never",
     "new": "New schedule",
+    "newNeedsBot": "Create a bot first, then you can schedule something for it.",
     "nextRun": "Next run",
     "nextRuns": "Next 5 runs",
     "nextRunsEmpty": "No upcoming runs.",
@@ -4188,9 +4217,13 @@
       "cron": "Cron: {{cron}}",
       "every": {
         "days": "Every {{count}} days",
+        "days_one": "Every day",
         "hours": "Every {{count}} hours",
+        "hours_one": "Every hour",
         "minutes": "Every {{count}} minutes",
-        "seconds": "Every {{count}} seconds"
+        "minutes_one": "Every minute",
+        "seconds": "Every {{count}} seconds",
+        "seconds_one": "Every second"
       },
       "unknown": "Custom schedule"
     },
@@ -4202,6 +4235,7 @@
     "subtitle": "Things your bots do on a timer: every morning, every hour, or once.",
     "title": "Scheduled tasks",
     "viewCalendar": "Calendar",
+    "viewLabel": "Show as",
     "viewList": "List",
     "when": "When"
   },
@@ -4281,7 +4315,7 @@
   },
   "servers": {
     "add": "Add a server",
-    "checkNow": "Check now",
+    "checkNow": "Switch to it",
     "empty": "No server yet. This is fine: your bots run on this computer.",
     "lead": "Servers keep your bots running when this computer is off.",
     "remove": "Remove",
@@ -4575,6 +4609,40 @@
         }
       }
     },
+    "data": {
+      "category": {
+        "backups": "Backups",
+        "caches": "Temporary files",
+        "chats": "Chats and files",
+        "knowledge": "Knowledge",
+        "memory": "Memory",
+        "other": "Everything else"
+      },
+      "categoryHint": {
+        "backups": "Safety copies made before the app updates its data.",
+        "caches": "Files the app can rebuild.",
+        "chats": "Your conversations, attachments and screenshots.",
+        "knowledge": "Sources your bots read and their browser profiles.",
+        "memory": "What your bots remember.",
+        "other": "Settings, logs and the rest."
+      },
+      "clear": {
+        "button": "Clear {{size}}",
+        "confirm": "Clear",
+        "confirmKeeps": "Your chats, memory, knowledge, backups, settings and saved keys are not touched.",
+        "confirmRemoves": "This removes the saved list of available models and old tool output files. The app rebuilds them when needed.",
+        "confirmTitle": "Clear temporary files?",
+        "description": "Frees space without touching your chats, memory or keys.",
+        "done": "Freed {{size}}.",
+        "nothing": "Nothing to clear",
+        "title": "Clear temporary files"
+      },
+      "description": "See where disk space goes and remove temporary files.",
+      "loading": "Measuring...",
+      "title": "Data and disk space",
+      "total": "Total",
+      "totalHint": "Everything the app keeps on this computer."
+    },
     "diagnostics": {
       "allGood": "Everything looks fine",
       "checkedAt": "Last checked at {{time}}",
@@ -4624,7 +4692,8 @@
       "notOnPlatform": "Not available on this platform.",
       "offline": "The local service is not running. Restart it to run diagnostics.",
       "privacy": "Diagnostics only read your settings. A repair runs only when you click its button.",
-      "problems": "{{count}} item needs attention",
+      "problems": "{{count}} items need attention",
+      "problems_one": "{{count}} item needs attention",
       "problems_other": "{{count}} items need attention",
       "repair": {
         "create_data_dir": "Create folder",
@@ -4633,7 +4702,7 @@
       },
       "repairDone": "Repair finished",
       "repairFailed": "The repair did not succeed",
-      "reportCopied": "Support report copied. Keys, tokens, e-mail addresses and your user folder are masked.",
+      "reportCopied": "Support report copied. Keys, passwords, e-mail addresses and your user folder are masked.",
       "reportFailed": "Could not create the support report",
       "rerun": "Run again",
       "running": "Running diagnostics…",
@@ -4949,16 +5018,41 @@
     "title": "Settings",
     "updates": {
       "appVersion": "Desktop app",
+      "available": "Version {{version}} is available.",
+      "check": {
+        "action": "Check for updates",
+        "description": "Looks for a newer version and shows what is new. Nothing is installed until you choose to.",
+        "title": "Check for updates",
+        "working": "Checking…"
+      },
       "daemon": "Daemon",
       "daemonDescription": "Local bot serve process.",
       "description": "App and daemon versions.",
       "devBuild": "Dev build",
-      "how": {
-        "description": "Releases are distributed separately; check the project docs for upgrade steps.",
-        "title": "How updates work"
+      "errors": {
+        "busy": "An update is already in progress.",
+        "failed": "The update did not work. Nothing was changed. Please try again later.",
+        "network": "Could not reach the update server. Check your internet connection and try again.",
+        "no_rollback": "No earlier version is available to go back to.",
+        "not_configured": "Updates are not set up in this build.",
+        "nothing_to_install": "Please check for updates first.",
+        "signature": "The update could not be verified as genuine, so it was NOT installed. Nothing was changed."
+      },
+      "install": {
+        "action": "Update now",
+        "hint": "The update is checked for authenticity before it is installed. Praxi-Bot restarts when it is done.",
+        "working": "Updating…"
+      },
+      "notConfigured": "This build of Praxi-Bot has no update service set up, so it cannot update itself. Download the newest version from the project page instead.",
+      "rollback": {
+        "action": "Go back to the previous version",
+        "description": "Version {{version}} did not start properly. You can go back to the last version that worked.",
+        "title": "Something went wrong with the update",
+        "working": "Going back…"
       },
       "title": "Updates",
-      "unknown": "Unknown"
+      "unknown": "Unknown",
+      "upToDate": "You have the latest version."
     },
     "webSearch": {
       "backends": {
@@ -4998,6 +5092,7 @@
       "test": "Test",
       "testFailed": "Search probe failed ({{ms}} ms): {{error}}",
       "testOk": "{{backend}} answered ({{count}} results in {{ms}} ms)",
+      "testOk_one": "{{backend}} answered ({{count}} result in {{ms}} ms)",
       "testQueryLabel": "Test search query",
       "testTitle": "Connectivity test",
       "testing": "Testing…",
@@ -5023,6 +5118,7 @@
     "newBot": "New bot",
     "notifications": "Notifications",
     "notificationsCount": "{{count}} unread notifications",
+    "notificationsCount_one": "{{count}} unread notification",
     "reorderBot": "Reorder {{name}} (arrow keys move it up or down)",
     "reorderHint": "Drag the row, or focus this handle and press the up/down arrow",
     "reorderMoved": "{{name}} moved to position {{pos}}",
@@ -5167,7 +5263,8 @@
       "save": "Set limit",
       "spent": "Spent this month",
       "title": "Monthly spending limit",
-      "unpriced": "{{count}} calls this month had no known price and are not counted."
+      "unpriced": "{{count}} calls this month had no known price and are not counted.",
+      "unpriced_one": "{{count}} call this month had no known price and is not counted."
     },
     "loading": "Loading usage…",
     "model": "Model",
@@ -5205,8 +5302,10 @@
       "title": "Daily trend"
     },
     "unknown": "Unknown",
-    "unknownCostNotice": "{{count}} call(s) had unknown pricing and are excluded from the cost total.",
-    "unknownUsageNotice": "{{count}} call(s) reported no token usage data and are counted separately."
+    "unknownCostNotice": "{{count}} calls had unknown pricing and are excluded from the cost total.",
+    "unknownCostNotice_one": "{{count}} call had unknown pricing and is excluded from the cost total.",
+    "unknownUsageNotice": "{{count}} calls reported no token usage data and are counted separately.",
+    "unknownUsageNotice_one": "{{count}} call reported no token usage data and is counted separately."
   },
   "voice": {
     "auto": "Automatic (matches the app language)",
@@ -5258,6 +5357,17 @@
     "description": "Reply voice and speed for the read-aloud button. Uses your system's speech engine.",
     "dictate": "Dictate",
     "dictateStop": "Stop and transcribe",
+    "local": {
+      "details": "Download about {{size}} MB from {{host}} (checked against a fixed checksum). Licence: {{license}}.",
+      "download": "Download ({{size}} MB)",
+      "downloading": "Downloading... you can keep using the app.",
+      "installed": "Speech model downloaded",
+      "licenseLink": "Read the licence",
+      "model": "Speech model",
+      "notInstalled": "Not downloaded yet. Dictation needs this download once.",
+      "ready": "Ready: dictation works without the internet.",
+      "unavailable": "This version of Praxi-Bot was built without offline voice."
+    },
     "micBusy": "The microphone is in use by another app. Close it and try again.",
     "micDenied": "Allow microphone access for Praxi-Bot. In Windows Settings → Privacy & security → Microphone, enable Microphone access and Let desktop apps access your microphone. Then restart Praxi-Bot and retry.",
     "micMissing": "No microphone was found. Connect one and try again.",
@@ -5278,10 +5388,12 @@
       "geminiPrivacy": "With Gemini Live your speech goes to Google, through the background service, only while you dictate or are in a voice call. The key stays in the secret store. Only the transcript is used; the model's own answer is ignored.",
       "key": "API key",
       "keyStored": "Key stored (type to replace)",
+      "localPrivacy": "Your speech is turned into text on this computer and never leaves it. After a one-time model download no internet is needed.",
       "model": "Model",
       "privacy": "A recording is sent only when you press the microphone, and only to this address. The key stays in the secret store.",
       "provider": "Provider",
       "providerGemini": "Gemini Live",
+      "providerLocal": "On this computer (offline)",
       "providerWhisper": "Whisper-compatible (OpenAI / local)",
       "save": "Save",
       "saved": "Dictation settings saved",
@@ -5305,7 +5417,8 @@
     "idleStep": "No active bot run.",
     "pause": "Pause",
     "pausedStep": "Run paused — waiting to resume.",
-    "refusedBadge": "{{count}} bot action refused",
+    "refusedBadge": "{{count}} bot actions refused",
+    "refusedBadge_one": "{{count}} bot action refused",
     "refusedBadge_other": "{{count}} bot actions refused",
     "resume": "Resume",
     "status": {

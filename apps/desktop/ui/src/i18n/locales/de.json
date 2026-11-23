@@ -14,7 +14,7 @@
   },
   "addServer": {
     "advanced": "Erweitert",
-    "agentHint": "Praxi verwendet die Schlüssel, die bereits in deinem SSH-Agent geladen sind. Passwörter werden nicht unterstützt.",
+    "agentHint": "Praxi verwendet die Schlüssel, die dein Computer schon für die Server-Anmeldung geladen hat (SSH-Agent). Passwörter werden nicht unterstützt.",
     "answerFailed": "Die Antwort hat die Einrichtung nicht erreicht. Schließe dieses Fenster und beginne von vorn.",
     "auth": "Anmeldung",
     "auth_agent": "SSH-Agent",
@@ -195,7 +195,7 @@
     },
     "host": "Serveradresse",
     "hostHint": "Beispiel: 203.0.113.7 oder meinserver.example.com",
-    "hostKeyBody": "Dieser Computer verbindet sich zum ersten Mal mit {{host}}. Vergleiche diesen Fingerabdruck mit dem in der Konsole deines Anbieters, falls dort einer angezeigt wird.",
+    "hostKeyBody": "Dieser Computer verbindet sich zum ersten Mal mit {{host}}. Der Fingerabdruck unten ist ein Code, der den Server eindeutig kennzeichnet. Vergleiche ihn mit dem in der Konsole deines Anbieters, falls dort einer angezeigt wird.",
     "hostKeyNo": "Nein, stoppen",
     "hostKeyTitle": "Ist das dein Server?",
     "hostKeyYes": "Ja, diesem Server vertrauen",
@@ -209,7 +209,7 @@
     },
     "keyFile": "Private Schlüsseldatei",
     "keyHint": "Nur der Pfad wird verwendet. Praxi kopiert oder speichert den Schlüssel selbst nie.",
-    "lead": "Verbinde einen Server, den du mietest. Kein Ticket zu kopieren.",
+    "lead": "Verbinde einen Server, den du mietest. Praxi übernimmt die Einrichtung.",
     "logEmpty": "Noch nichts zu zeigen.",
     "manual": "Ich habe stattdessen ein Kopplungsticket",
     "noDaemon": "Der lokale Praxi-Dienst läuft nicht. Starte die App neu und versuche es erneut.",
@@ -258,7 +258,7 @@
       "userInvalid": "Nutze nur Buchstaben, Zahlen, Punkte, Bindestriche oder Unterstriche."
     },
     "progress": "Einrichtungsfortschritt",
-    "releaseNote": "Praxi kann einen Server hinzufügen, auf dem Praxi schon läuft. Die Installation für dich braucht eine veröffentlichte Version, die es noch nicht gibt.",
+    "releaseNote": "Auf dem Server muss Praxi vorerst schon installiert sein. Praxi für dich auf einem leeren Server zu installieren ist noch nicht möglich.",
     "retry": "Erneut versuchen",
     "retryResume": "Ab hier erneut versuchen",
     "sayHello": "Sag deinem Bot Hallo",
@@ -454,6 +454,8 @@
       "all": "Alle Designs",
       "description": "Farben für die gesamte App. Flächen, Linien und gedämpfter Text werden aus zwei Farben abgeleitet.",
       "system": "System folgen",
+      "systemDark": "Dunkles Design, solange das System dunkel ist",
+      "systemLight": "Helles Design, solange das System hell ist",
       "title": "Design"
     },
     "themes": {
@@ -642,7 +644,7 @@
       "intro": "Füge von Hand einen Stdio- oder HTTP-MCP-Server hinzu.",
       "name": "Servername",
       "stdio": "Stdio",
-      "transport": "Transport",
+      "transport": "Übertragung",
       "url": "Server-URL"
     },
     "disconnect": "Trennen",
@@ -792,6 +794,7 @@
     "delete": "Bot löschen",
     "deleteBlocked": "Dieser Bot hat noch Chats ({{count}}) und kann daher nicht gelöscht werden. Nur ein Bot ohne Chats oder Läufe kann entfernt werden.",
     "deleteBlockedRuns": "Dieser Bot hat noch gespeicherte Läufe ({{count}}) und kann daher nicht gelöscht werden. Nur ein Bot ohne Chats oder Läufe kann entfernt werden.",
+    "deleteBlockedRuns_one": "Dieser Bot hat noch einen gespeicherten Lauf ({{count}}) und kann daher nicht gelöscht werden. Nur ein Bot ohne Chats oder Läufe kann entfernt werden.",
     "deleteConfirmBody": "Der Bot, sein Zugriff auf Apps und seine E-Mail-Konten werden entfernt. Dies kann nicht rückgängig gemacht werden. Ein Bot, der noch Chats oder Läufe hat, kann nicht gelöscht werden: In diesem Fall wird nichts entfernt, und du siehst den Grund.",
     "deleteConfirmTitle": "{{name}} löschen?",
     "deleteHint": "Entfernt den Bot, seinen Zugriff auf Apps und seine E-Mail-Konten. Nur möglich, solange er keine Chats oder Läufe hat. Dies kann nicht rückgängig gemacht werden.",
@@ -849,7 +852,7 @@
     "target": {
       "auto": "Automatisch",
       "browser": "Browser",
-      "host": "Host",
+      "host": "Server",
       "off": "Aus",
       "pc": "Dieser Computer",
       "server": "Gekoppelter Server (nur Browser)"
@@ -887,7 +890,7 @@
         "text": "Die CLI fragt, bevor sie etwas ändert. Jede Frage erscheint als Genehmigungskarte."
       },
       "auto": {
-        "name": "Auto",
+        "name": "Automatisch",
         "text": "Der automatische Prüfer der CLI entscheidet, was sicher ist. Nur dort, wo die CLI einen hat."
       },
       "full": {
@@ -946,7 +949,7 @@
     "computer": "Computer",
     "editTitle": "Bot bearbeiten",
     "engine": {
-      "title": "Engine"
+      "title": "Motor"
     },
     "executorRequired": "Das Ausführungsmodell ist erforderlich.",
     "files": {
@@ -974,7 +977,7 @@
     "name": "Name",
     "nameRequired": "Ein Name ist erforderlich.",
     "permissions": "Berechtigungen",
-    "persona": "Persona",
+    "persona": "Persönlichkeit",
     "personaPlaceholder": "Wie soll sich dieser Bot verhalten? (Systemanweisung)",
     "preset": {
       "approve-destructive": {
@@ -1033,19 +1036,20 @@
       "soft_usd": "Warnen bei (USD)"
     },
     "hint": "Eine Warnung benachrichtigt dich nur bei 80 % und 100 %. Ein Stopp beendet den Lauf, bevor das Modell aufgerufen wird. Bei Modellen mit unbekanntem Preis zählt nur die Nutzung. Zeitpläne und Kanalnachrichten folgen denselben Limits.",
-    "invalid": "Gib einen positiven Betrag ein (Geld ab 0,01, Nutzung als ganze Zahl) oder lass das Feld leer.",
+    "invalid": "Gib einen positiven Betrag ein (Geld ab 0,01, Nutzung als ganze Zahl), nur Ziffern und ohne Tausendertrennzeichen (10000 statt 10.000), oder lass das Feld leer.",
     "order": "Die Warnschwelle darf nicht über der Stoppschwelle liegen.",
     "period": {
       "daily": "Pro Tag",
       "monthly": "Pro Monat",
       "weekly": "Pro Woche"
     },
-    "remote": "Limits lassen sich nur auf diesem Computer ändern, nicht auf einem entfernten Host.",
+    "remote": "Limits lassen sich nur auf diesem Computer ändern, nicht auf einem entfernten Server.",
     "save": "Limits speichern",
     "saved": "Limits gespeichert.",
     "saving": "Wird gespeichert…",
     "unlimited": "Kein Limit",
     "unreported": "{{count}} Aufrufe meldeten keine Nutzung und werden mit einer vorsichtigen Schätzung gezählt.",
+    "unreported_one": "{{count}} Aufruf meldete keine Nutzung und wird mit einer vorsichtigen Schätzung gezählt.",
     "used": "{{usd}} und {{amount}} Textbausteine verbraucht. Zurückgesetzt am {{when}}."
   },
   "botPanel": {
@@ -1198,6 +1202,7 @@
       "summaryAll": "Nutzt alle geteilten Skills ({{count}})",
       "summaryLearned": "(+{{count}} gelernt)",
       "summaryMissing": "Auf dem Datenträger fehlende Skills: {{count}}",
+      "summaryMissing_one": "Auf dem Datenträger fehlender Skill: {{count}}",
       "summarySelected": "{{count}} von {{total}} geteilten Skills",
       "tooMany": "Es können nur {{max}} Skills zugewiesen werden. Wähle weniger Skills oder verwende „Alle geteilten Skills“."
     },
@@ -1521,6 +1526,8 @@
       "placeholder": "Im Chat suchen …",
       "prev": "Vorheriger Treffer"
     },
+    "imported": "Importiert",
+    "importedNote": "Importierter Hinweis: In der Datei waren {{steps}} Werkzeugschritte und {{approvals}} Genehmigungen aufgeführt; sie wurden nicht importiert oder ausgeführt.",
     "jumpToLatest": "Zum Neuesten springen",
     "longMessage": {
       "less": "Weniger anzeigen",
@@ -1931,8 +1938,8 @@
       },
       "summary": "Zusammenfassung",
       "task": "Aufgabe",
-      "title": "Subagent",
-      "toggle": "Subagent: {{task}}"
+      "title": "Unteragent",
+      "toggle": "Unteragent: {{task}}"
     },
     "timelineLabel": "Unterhaltung",
     "todo": {
@@ -1956,7 +1963,7 @@
         "requested": "Angefordert",
         "running": "Läuft"
       },
-      "subagent": "Subagent"
+      "subagent": "Unteragent"
     },
     "working": "Arbeitet …",
     "yesterdayLabel": "Gestern"
@@ -2093,7 +2100,7 @@
   },
   "computerPicker": {
     "add": "Server hinzufügen …",
-    "host": "Host",
+    "host": "Server",
     "label": "Computer: {{name}}",
     "link": {
       "connected": "Verbunden",
@@ -2220,7 +2227,7 @@
         "text": "{{cli}} fragt, bevor es etwas ändert. Jede Frage erscheint als Genehmigungskarte."
       },
       "auto": {
-        "name": "Auto",
+        "name": "Automatisch",
         "text": "Der automatische Prüfer von {{cli}} entscheidet, was sicher ist."
       },
       "full": {
@@ -2365,7 +2372,7 @@
         "title": "Dieser Computer ist nicht erreichbar"
       },
       "host_not_permitted": {
-        "hint": "Der Computer ist online, erlaubt das Terminal aber nur für den gekoppelten Desktop seines Besitzers. Koppel diesen Computer am Host erneut und versuche es dann wieder.",
+        "hint": "Der Computer ist online, erlaubt das Terminal aber nur für den gekoppelten Desktop seines Besitzers. Koppel diesen Computer am Server erneut und versuche es dann wieder.",
         "title": "Dieser Computer hat das Terminal nicht erlaubt"
       },
       "host_outdated": {
@@ -3015,6 +3022,20 @@
   "help": {
     "center": {
       "allDocs": "Ganze Anleitung öffnen",
+      "diag": {
+        "copied": "Diagnoseinfos kopiert.",
+        "copy": "Kopieren",
+        "copyFailed": "Kopieren nicht möglich. Markieren Sie den Text oben und kopieren Sie ihn von Hand.",
+        "failed": "Die Informationen konnten nicht gesammelt werden",
+        "intro": "Gibt es ein Problem? Lassen Sie sich anzeigen, was kopiert würde, lesen Sie es und fügen Sie es dann in eine Fehlermeldung ein. Schlüssel, Passwörter, E-Mail-Adressen und Ihr Benutzerordner sind unkenntlich gemacht, Nachrichten sind nicht enthalten. Es wird nichts gesendet.",
+        "loading": "Informationen werden gesammelt …",
+        "offline": "Noch nicht mit dem Hintergrunddienst verbunden.",
+        "previewLabel": "Vorschau der Diagnoseinfos",
+        "previewNote": "Genau dieser Text landet mit „Kopieren“ in Ihrer Zwischenablage:",
+        "refresh": "Aktualisieren",
+        "show": "Anzeigen, was kopiert wird",
+        "title": "Diagnoseinfos kopieren"
+      },
       "guideNote": "Die Handbuchseiten sind vorerst auf Englisch.",
       "guideTitle": "Im vollständigen Handbuch",
       "intro": "Kurze Antworten auf die Fragen, die am häufigsten zuerst kommen. Tippe ein Wort, um zu suchen.",
@@ -3033,7 +3054,7 @@
     "group": {
       "composer": "Chat-Eingabe",
       "dialogs": "Dialoge",
-      "global": "Global",
+      "global": "Allgemein",
       "slash": "Slash-Befehle (im Eingabefeld / tippen)"
     },
     "intro": "Praktische Kürzel, solange die App geöffnet ist.",
@@ -3229,8 +3250,10 @@
     "emailUnavailable": "Die E-Mail-Erkennung ist nicht verfügbar: {{error}}",
     "embed": "Semantischen Index aufbauen oder fortsetzen",
     "embeddingRemaining": "{{count}} Chunks übrig",
+    "embeddingRemaining_one": "{{count}} Chunk übrig",
     "embeddingRetry": "Erneut versuchen nach {{time}}",
     "embeddingSkipped": "{{count}} Chunks übersprungen",
+    "embeddingSkipped_one": "{{count}} Chunk übersprungen",
     "embeddingStatus": {
       "awaiting_consent": "Quellenberechtigung erforderlich",
       "cancelled": "Embedding pausiert",
@@ -3246,6 +3269,7 @@
     "html": "Der gespeicherte Inhalt ist HTML",
     "importHint": "Importierte Quellen starten deaktiviert. Wähle den Embedding-Anbieter erneut aus und speichere ihn, und autorisiere dann Quellen und Abrufanfragen getrennt.",
     "indexed": "{{count}} Dokumente verarbeitet.",
+    "indexed_one": "{{count}} Dokument verarbeitet.",
     "kind": "Quellentyp",
     "kinds": {
       "conversation": "Frühere Unterhaltung",
@@ -3295,6 +3319,7 @@
     "select": "Wählen …",
     "settings": "Abrufeinstellungen",
     "skippedFiles": "{{count}} Dateien übersprungen",
+    "skippedFiles_one": "{{count}} Datei übersprungen",
     "title": "Wissen und gemeinsames Gehirn",
     "url": "URL der gespeicherten Seite"
   },
@@ -3338,7 +3363,7 @@
     "focusTrapHint": "Umschalt+Esc verlässt den Bildschirm-Tastaturfokus zur Schaltfläche „Ich bin fertig“.",
     "globalPauseNotice": "Das Übernehmen der Kontrolle oder das Pausieren gilt global für alle Bots.",
     "handBackAction": "Zurückgeben",
-    "hostLabel": "Host: {{host}}",
+    "hostLabel": "Server: {{host}}",
     "interactive": "Interaktiv",
     "kind": {
       "browser": "Browser",
@@ -3480,6 +3505,7 @@
     "copied": "Kopiert",
     "copy": "Befehl kopieren",
     "cores": "{{count}} Prozessor-Threads",
+    "cores_one": "{{count}} Prozessor-Thread",
     "disk": "{{size}} freier Speicherplatz",
     "fitFast": "läuft gut",
     "fitSlow": "läuft, aber langsam",
@@ -3546,6 +3572,7 @@
     "previewRun": "Abruf testen",
     "previewTitle": "Was der Bot sieht (Abrufvorschau)",
     "previewTokens": "{{count}} Erinnerungen abgerufen · ~{{used}} / {{budget}} Tokens",
+    "previewTokens_one": "{{count}} Erinnerung abgerufen · ~{{used}} / {{budget}} Tokens",
     "saveEdit": "Erinnerung speichern",
     "scope": "Bereich",
     "scopeShared": "Für alle Bots gemeinsam",
@@ -3577,6 +3604,7 @@
     "sources": {
       "api": "lokale API",
       "app": "diese App",
+      "imported": "importierte Datei",
       "peer": "ein anderer Computer",
       "telegram": "Telegram",
       "unknown": "unbekannt"
@@ -3650,7 +3678,7 @@
   },
   "newBot": {
     "advanced": "Erweiterte Einstellungen",
-    "autonomy": "Autonomie",
+    "autonomy": "Wie viel er allein darf",
     "autonomyCustom": "Verwendet die Berechtigungsvorlage {{preset}}.",
     "autonomyHints": {
       "ask": "Liest Dateien, prüft den Bildschirm und durchsucht das Web ohne Nachfrage; fragt vor jeder Änderung, jedem Senden, Seitenabruf, Klick oder Befehl.",
@@ -3946,20 +3974,20 @@
       "temporary": "Deine Bots laufen auf diesem Computer"
     },
     "stopAll": "Alles beenden, was auf {{name}} läuft",
-    "stopBody": "Die gerade auf {{name}} laufenden {{count}} Durchläufe werden beendet. Bereits erledigte Arbeit bleibt erhalten.",
-    "stopBody_one": "Der gerade auf {{name}} laufende Durchlauf ({{count}}) wird beendet. Bereits erledigte Arbeit bleibt erhalten.",
-    "stopConfirm": "{{count}} Durchläufe beenden",
-    "stopConfirm_one": "{{count}} Durchlauf beenden",
-    "stopFailed": "{{name}} ist nicht erreichbar, die Durchläufe konnten nicht beendet werden.",
-    "stopHint": "Gerade laufen {{count}} Durchläufe",
-    "stopHint_one": "Gerade läuft {{count}} Durchlauf",
+    "stopBody": "Die gerade auf {{name}} laufenden {{count}} Läufe werden beendet. Bereits erledigte Arbeit bleibt erhalten.",
+    "stopBody_one": "Der gerade auf {{name}} laufende Lauf ({{count}}) wird beendet. Bereits erledigte Arbeit bleibt erhalten.",
+    "stopConfirm": "{{count}} Läufe beenden",
+    "stopConfirm_one": "{{count}} Lauf beenden",
+    "stopFailed": "{{name}} ist nicht erreichbar, die Läufe konnten nicht beendet werden.",
+    "stopHint": "Gerade laufen {{count}} Läufe",
+    "stopHint_one": "Gerade läuft {{count}} Lauf",
     "stopIdle": "Gerade läuft nichts",
     "stopNone": "Auf {{name}} lief nichts.",
     "stopTitle": "Alles auf {{name}} beenden?",
-    "stopped": "{{count}} Durchläufe auf {{name}} beendet.",
-    "stopped_one": "{{count}} Durchlauf auf {{name}} beendet.",
-    "switchBody": "Auf {{from}} laufen noch {{count}} Durchläufe. Nichts wird beendet: Sie laufen dort weiter, und du kannst jederzeit zurückwechseln.",
-    "switchBody_one": "Auf {{from}} läuft noch {{count}} Durchlauf. Nichts wird beendet: Er läuft dort weiter, und du kannst jederzeit zurückwechseln.",
+    "stopped": "{{count}} Läufe auf {{name}} beendet.",
+    "stopped_one": "{{count}} Lauf auf {{name}} beendet.",
+    "switchBody": "Auf {{from}} laufen noch {{count}} Läufe. Nichts wird beendet: Sie laufen dort weiter, und du kannst jederzeit zurückwechseln.",
+    "switchBody_one": "Auf {{from}} läuft noch {{count}} Lauf. Nichts wird beendet: Er läuft dort weiter, und du kannst jederzeit zurückwechseln.",
     "switchConfirm": "Zu {{to}} wechseln",
     "switchTitle": "Zu {{to}} wechseln?",
     "thisComputer": "Dieser Computer",
@@ -4064,7 +4092,7 @@
       "confirmParsed": "Prüfe, ob das gemeint war, und drücke dann Erstellen.",
       "create": "Erstellen",
       "cron": "Cron-Ausdruck",
-      "cronHint": "Fünf Felder, optional gefolgt von einer Zeitzone.",
+      "cronHint": "Für alle, die Cron kennen: fünf Felder, zum Beispiel 0 9 * * 1-5 bedeutet werktags 9:00 Uhr. Danach kann eine Zeitzone folgen.",
       "customHint": "Beschreibe es mit eigenen Worten, zum Beispiel „jeden Montag um 8“.",
       "date": "An welchem Tag?",
       "editTitle": "Geplante Aufgabe bearbeiten",
@@ -4115,7 +4143,7 @@
       "parsedAs": "Verstanden als: {{what}}",
       "payloadKept": "Dieser Zeitplan führt einen Workflow oder ein Werkzeug aus; dieser Teil bleibt unverändert.",
       "preview": "Vorschau",
-      "prompt": "Prompt",
+      "prompt": "Anweisung",
       "promptHint": "Was der Bot jedes Mal tun soll.",
       "save": "Speichern",
       "simpleProblem": {
@@ -4146,6 +4174,7 @@
     "movedTo": "Auf {{name}} verschoben: Er läuft dort und ist auf diesem Computer eingefroren.",
     "never": "Nie",
     "new": "Neuer Zeitplan",
+    "newNeedsBot": "Erstelle zuerst einen Bot, dann kannst du etwas für ihn planen.",
     "nextRun": "Nächster Lauf",
     "nextRuns": "Nächste 5 Läufe",
     "nextRunsEmpty": "Keine bevorstehenden Läufe.",
@@ -4188,9 +4217,13 @@
       "cron": "Cron: {{cron}}",
       "every": {
         "days": "Alle {{count}} Tage",
+        "days_one": "Jeden Tag",
         "hours": "Alle {{count}} Stunden",
+        "hours_one": "Jede Stunde",
         "minutes": "Alle {{count}} Minuten",
-        "seconds": "Alle {{count}} Sekunden"
+        "minutes_one": "Jede Minute",
+        "seconds": "Alle {{count}} Sekunden",
+        "seconds_one": "Jede Sekunde"
       },
       "unknown": "Benutzerdefinierter Zeitplan"
     },
@@ -4202,6 +4235,7 @@
     "subtitle": "Dinge, die deine Bots nach Zeitplan tun: jeden Morgen, jede Stunde oder einmalig.",
     "title": "Geplante Aufgaben",
     "viewCalendar": "Kalender",
+    "viewLabel": "Ansicht",
     "viewList": "Liste",
     "when": "Wann"
   },
@@ -4281,7 +4315,7 @@
   },
   "servers": {
     "add": "Server hinzufügen",
-    "checkNow": "Jetzt prüfen",
+    "checkNow": "Zu diesem Server wechseln",
     "empty": "Noch kein Server. Das ist in Ordnung: Deine Bots laufen auf diesem Computer.",
     "lead": "Server halten deine Bots am Laufen, wenn dieser Computer aus ist.",
     "remove": "Entfernen",
@@ -4462,7 +4496,7 @@
       "to": "Bis"
     },
     "route": {
-      "title": "Routing"
+      "title": "Weiterleitung"
     },
     "subtitle": "Passe Designmodus, Akzentfarbe, Hintergrundmedien und Oberflächensprache an.",
     "theme": {
@@ -4575,6 +4609,40 @@
         }
       }
     },
+    "data": {
+      "category": {
+        "backups": "Sicherungen",
+        "caches": "Temporäre Dateien",
+        "chats": "Chats und Dateien",
+        "knowledge": "Wissen",
+        "memory": "Gedächtnis",
+        "other": "Alles andere"
+      },
+      "categoryHint": {
+        "backups": "Sicherheitskopien, die vor Updates der App-Daten angelegt werden.",
+        "caches": "Dateien, die die App neu erzeugen kann.",
+        "chats": "Deine Unterhaltungen, Anhänge und Screenshots.",
+        "knowledge": "Quellen, die deine Bots lesen, und ihre Browserprofile.",
+        "memory": "Woran sich deine Bots erinnern.",
+        "other": "Einstellungen, Protokolle und der Rest."
+      },
+      "clear": {
+        "button": "{{size}} löschen",
+        "confirm": "Loeschen",
+        "confirmKeeps": "Deine Chats, dein Gedächtnis, dein Wissen, deine Sicherungen, Einstellungen und gespeicherten Schlüssel bleiben unberührt.",
+        "confirmRemoves": "Das entfernt die gespeicherte Liste verfügbarer Modelle und alte Ausgabedateien von Werkzeugen. Die App erzeugt sie bei Bedarf neu.",
+        "confirmTitle": "Temporäre Dateien löschen?",
+        "description": "Schafft Platz, ohne deine Chats, dein Gedächtnis oder deine Schlüssel anzufassen.",
+        "done": "{{size}} freigegeben.",
+        "nothing": "Nichts zu löschen",
+        "title": "Temporäre Dateien löschen"
+      },
+      "description": "Sieh, wohin der Speicherplatz geht, und entferne temporäre Dateien.",
+      "loading": "Wird gemessen...",
+      "title": "Daten und Speicherplatz",
+      "total": "Gesamt",
+      "totalHint": "Alles, was die App auf diesem Computer speichert."
+    },
     "diagnostics": {
       "allGood": "Alles sieht gut aus",
       "checkedAt": "Zuletzt geprüft um {{time}}",
@@ -4585,7 +4653,7 @@
         "cli_accounts": "Coding-CLI-Konten",
         "clock": "Uhr",
         "config": "Datei mit Anbietereinstellungen",
-        "daemon": "Daemon",
+        "daemon": "Hintergrunddienst",
         "data_dir": "Datenordner",
         "desktop_automation": "Desktop-Automatisierung",
         "disk_space": "Speicherplatz",
@@ -4624,7 +4692,8 @@
       "notOnPlatform": "Auf dieser Plattform nicht verfügbar.",
       "offline": "Der lokale Dienst läuft nicht. Starte ihn neu, um die Diagnose auszuführen.",
       "privacy": "Die Diagnose liest nur deine Einstellungen. Eine Reparatur läuft nur, wenn du auf ihre Schaltfläche klickst.",
-      "problems": "{{count}} Punkt braucht Aufmerksamkeit",
+      "problems": "{{count}} Punkte brauchen Aufmerksamkeit",
+      "problems_one": "{{count}} Punkt braucht Aufmerksamkeit",
       "problems_other": "{{count}} Punkte brauchen Aufmerksamkeit",
       "repair": {
         "create_data_dir": "Ordner erstellen",
@@ -4633,7 +4702,7 @@
       },
       "repairDone": "Reparatur abgeschlossen",
       "repairFailed": "Die Reparatur war nicht erfolgreich",
-      "reportCopied": "Support-Bericht kopiert. Schlüssel, Tokens, E-Mail-Adressen und dein Benutzerordner sind maskiert.",
+      "reportCopied": "Support-Bericht kopiert. Schlüssel, Passwörter, E-Mail-Adressen und dein Benutzerordner sind maskiert.",
       "reportFailed": "Der Support-Bericht konnte nicht erstellt werden",
       "rerun": "Erneut ausführen",
       "running": "Diagnose läuft …",
@@ -4949,16 +5018,41 @@
     "title": "Einstellungen",
     "updates": {
       "appVersion": "Desktop-App",
-      "daemon": "Daemon",
+      "available": "Version {{version}} ist verfügbar.",
+      "check": {
+        "action": "Nach Updates suchen",
+        "description": "Sucht nach einer neueren Version und zeigt, was neu ist. Es wird nichts installiert, bevor Sie es wollen.",
+        "title": "Nach Updates suchen",
+        "working": "Suche läuft…"
+      },
+      "daemon": "Hintergrunddienst",
       "daemonDescription": "Lokaler bot-serve-Prozess.",
       "description": "App- und Daemon-Versionen.",
       "devBuild": "Entwicklungs-Build",
-      "how": {
-        "description": "Releases werden separat verteilt; die Schritte zum Upgrade findest du in der Projektdokumentation.",
-        "title": "So funktionieren Updates"
+      "errors": {
+        "busy": "Ein Update läuft bereits.",
+        "failed": "Das Update hat nicht funktioniert. Es wurde nichts verändert. Bitte versuchen Sie es später erneut.",
+        "network": "Der Update-Server ist nicht erreichbar. Prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.",
+        "no_rollback": "Es gibt keine frühere Version, zu der Sie zurückkehren können.",
+        "not_configured": "Updates sind in dieser Version nicht eingerichtet.",
+        "nothing_to_install": "Bitte suchen Sie zuerst nach Updates.",
+        "signature": "Das Update konnte nicht als echt bestätigt werden und wurde deshalb NICHT installiert. Es wurde nichts verändert."
+      },
+      "install": {
+        "action": "Jetzt aktualisieren",
+        "hint": "Das Update wird vor der Installation auf Echtheit geprüft. Praxi-Bot startet danach neu.",
+        "working": "Wird aktualisiert…"
+      },
+      "notConfigured": "Diese Version von Praxi-Bot hat keinen Update-Dienst und kann sich nicht selbst aktualisieren. Laden Sie die neueste Version von der Projektseite herunter.",
+      "rollback": {
+        "action": "Zur vorherigen Version zurückkehren",
+        "description": "Version {{version}} ist nicht richtig gestartet. Sie können zur letzten funktionierenden Version zurückkehren.",
+        "title": "Beim Update ist etwas schiefgelaufen",
+        "working": "Kehrt zurück…"
       },
       "title": "Updates",
-      "unknown": "Unbekannt"
+      "unknown": "Unbekannt",
+      "upToDate": "Sie haben die neueste Version."
     },
     "webSearch": {
       "backends": {
@@ -4998,6 +5092,7 @@
       "test": "Testen",
       "testFailed": "Such-Test fehlgeschlagen ({{ms}} ms): {{error}}",
       "testOk": "{{backend}} hat geantwortet ({{count}} Ergebnisse in {{ms}} ms)",
+      "testOk_one": "{{backend}} hat geantwortet ({{count}} Ergebnis in {{ms}} ms)",
       "testQueryLabel": "Test-Suchanfrage",
       "testTitle": "Verbindungstest",
       "testing": "Wird getestet …",
@@ -5023,6 +5118,7 @@
     "newBot": "Neuer Bot",
     "notifications": "Benachrichtigungen",
     "notificationsCount": "{{count}} ungelesene Benachrichtigungen",
+    "notificationsCount_one": "{{count}} ungelesene Benachrichtigung",
     "reorderBot": "{{name}} neu anordnen (Pfeiltasten verschieben nach oben oder unten)",
     "reorderHint": "Zeile ziehen oder diesen Griff fokussieren und die Pfeiltaste nach oben/unten drücken",
     "reorderMoved": "{{name}} wurde auf Position {{pos}} verschoben",
@@ -5167,14 +5263,15 @@
       "save": "Limit setzen",
       "spent": "Diesen Monat ausgegeben",
       "title": "Monatliches Ausgabenlimit",
-      "unpriced": "{{count}} Aufrufe diesen Monat hatten keinen bekannten Preis und wurden nicht mitgezählt."
+      "unpriced": "{{count}} Aufrufe diesen Monat hatten keinen bekannten Preis und wurden nicht mitgezählt.",
+      "unpriced_one": "{{count}} Aufruf diesen Monat hatte keinen bekannten Preis und wurde nicht mitgezählt."
     },
     "loading": "Nutzung wird geladen…",
     "model": "Modell",
     "modelCalls": "Modellaufrufe",
     "noUsageShort": "{{count}} ohne Daten",
     "partialCostShort": "+ {{count}} unbekannt",
-    "prompt": "Prompt",
+    "prompt": "Anweisung",
     "range": "Zeitraum",
     "ranges": {
       "all": "Gesamte Zeit",
@@ -5205,8 +5302,10 @@
       "title": "Tagesverlauf"
     },
     "unknown": "Unbekannt",
-    "unknownCostNotice": "{{count}} Aufruf(e) hatten keinen bekannten Preis und sind nicht in den Gesamtkosten enthalten.",
-    "unknownUsageNotice": "{{count}} Aufruf(e) haben keine Token-Daten gemeldet und werden getrennt gezählt."
+    "unknownCostNotice": "{{count}} Aufrufe hatten keinen bekannten Preis und sind nicht in den Gesamtkosten enthalten.",
+    "unknownCostNotice_one": "{{count}} Aufruf hatte keinen bekannten Preis und ist nicht in den Gesamtkosten enthalten.",
+    "unknownUsageNotice": "{{count}} Aufrufe haben keine Token-Daten gemeldet und werden getrennt gezählt.",
+    "unknownUsageNotice_one": "{{count}} Aufruf hat keine Token-Daten gemeldet und wird getrennt gezählt."
   },
   "voice": {
     "auto": "Automatisch (passend zur App-Sprache)",
@@ -5258,6 +5357,17 @@
     "description": "Stimme und Tempo für die Vorlesen-Schaltfläche. Nutzt die Sprachausgabe deines Systems.",
     "dictate": "Diktieren",
     "dictateStop": "Stoppen und transkribieren",
+    "local": {
+      "details": "Download von etwa {{size}} MB von {{host}} (wird mit einer festen Prüfsumme kontrolliert). Lizenz: {{license}}.",
+      "download": "Herunterladen ({{size}} MB)",
+      "downloading": "Wird heruntergeladen ... du kannst die App weiter benutzen.",
+      "installed": "Sprachmodell heruntergeladen",
+      "licenseLink": "Lizenz lesen",
+      "model": "Sprachmodell",
+      "notInstalled": "Noch nicht heruntergeladen. Zum Diktieren wird dieser Download einmal benötigt.",
+      "ready": "Bereit: Diktieren funktioniert ohne Internet.",
+      "unavailable": "Diese Version von Praxi-Bot wurde ohne Offline-Sprache gebaut."
+    },
     "micBusy": "Das Mikrofon wird von einer anderen App verwendet. Schließe sie und versuche es erneut.",
     "micDenied": "Erlaube Praxi-Bot den Mikrofonzugriff. Aktiviere unter Windows-Einstellungen → Datenschutz und Sicherheit → Mikrofon den Mikrofonzugriff und den Zugriff für Desktop-Apps. Starte Praxi-Bot neu und versuche es erneut.",
     "micMissing": "Es wurde kein Mikrofon gefunden. Schließe eines an und versuche es erneut.",
@@ -5278,10 +5388,12 @@
       "geminiPrivacy": "Mit Gemini Live geht deine Sprache über den Hintergrunddienst an Google, nur während du diktierst oder im Sprachgespräch bist. Der Schlüssel bleibt im Schlüsselspeicher. Nur das Transkript wird verwendet; die eigene Antwort des Modells wird ignoriert.",
       "key": "API-Schlüssel",
       "keyStored": "Schlüssel gespeichert (zum Ersetzen eintippen)",
+      "localPrivacy": "Deine Sprache wird auf diesem Computer in Text umgewandelt und verlässt ihn nie. Nach dem einmaligen Modell-Download ist kein Internet nötig.",
       "model": "Modell",
       "privacy": "Eine Aufnahme wird nur gesendet, wenn du das Mikrofon drückst, und nur an diese Adresse. Der Schlüssel bleibt im Schlüsselspeicher.",
       "provider": "Anbieter",
       "providerGemini": "Gemini Live",
+      "providerLocal": "Auf diesem Computer (offline)",
       "providerWhisper": "Whisper-kompatibel (OpenAI / lokal)",
       "save": "Speichern",
       "saved": "Diktiereinstellungen gespeichert",
@@ -5305,7 +5417,8 @@
     "idleStep": "Kein aktiver Bot-Lauf.",
     "pause": "Pause",
     "pausedStep": "Lauf pausiert – wartet auf Fortsetzung.",
-    "refusedBadge": "{{count}} Bot-Aktion abgelehnt",
+    "refusedBadge": "{{count}} Bot-Aktionen abgelehnt",
+    "refusedBadge_one": "{{count}} Bot-Aktion abgelehnt",
     "refusedBadge_other": "{{count}} Bot-Aktionen abgelehnt",
     "resume": "Fortsetzen",
     "status": {

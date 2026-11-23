@@ -6,6 +6,7 @@ your own machines: a local daemon, a desktop app, and an optional always-on Linu
 quickly and small, focused changes are the easiest to review and land. Pull requests of every
 size are welcome: fixes, improvements and new features, from first-timers and regulars alike.
 
+- **New to the codebase?** Read the [architecture tour](docs/contributing/architecture.md); all contributor docs are indexed in [docs/contributing/README.md](docs/contributing/README.md).
 - **Never opened a PR here?** Follow [docs/contributing/FIRST_PR.md](docs/contributing/FIRST_PR.md): a 10-minute path from clone to pull request.
 
 - **Looking for something to work on?** Start with the issues labelled

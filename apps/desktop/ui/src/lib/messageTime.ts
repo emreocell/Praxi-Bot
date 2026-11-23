@@ -50,6 +50,16 @@ export function formatStamp(ts: number, lang: string): string {
   }).format(ts);
 }
 
+/** Local date and time without seconds, for sentences: "17 Nov 2026, 21:20" (tr and de on 24 h). */
+export function formatDateTime(ts: number, lang: string): string {
+  return new Intl.DateTimeFormat(clockLocale(lang), {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    ...clockOptions(lang, false)
+  }).format(ts);
+}
+
 export interface MessageTimeLabel {
   /** What shows by default (HH:mm, or HH:mm:ss in seconds mode). */
   text: string;

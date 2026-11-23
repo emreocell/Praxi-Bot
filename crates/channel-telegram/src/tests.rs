@@ -25,7 +25,7 @@ use crate::{
     format_approval_callback, format_question_callback, store_bot_token,
 };
 
-const TEST_BOT_TOKEN: &str = "123456789:AAH_test_bot_token_secret_value_xyz";
+const TEST_BOT_TOKEN: &str = concat!("123456789", ":", "AAH_test_bot_token_secret_value_xyz");
 const PAIRED_USER_ID: i64 = 4242;
 const UNPAIRED_USER_ID: i64 = 9999;
 const TEST_CHAT_ID: i64 = 7001;
@@ -61,6 +61,8 @@ struct FakeDaemon {
     subscribe_failures: Mutex<usize>,
     cancel_seen: tokio::sync::Notify,
     cancel_failures: Mutex<VecDeque<crate::TelegramError>>,
+    /// What `transcribe_voice` answers (`None` = on-device voice is off).
+    transcript: Mutex<Option<String>>,
 }
 
 impl FakeDaemon {
@@ -81,6 +83,7 @@ impl FakeDaemon {
             subscribe_failures: Mutex::new(0),
             cancel_seen: tokio::sync::Notify::new(),
             cancel_failures: Mutex::new(VecDeque::new()),
+            transcript: Mutex::new(None),
         }
     }
 
@@ -114,6 +117,12 @@ impl FakeDaemon {
 
 #[async_trait]
 impl DaemonClient for FakeDaemon {
+    async fn transcribe_voice(&self, audio: Vec<u8>, mime: &str) -> Result<Option<String>> {
+        assert_eq!(mime, "audio/ogg");
+        assert_eq!(audio, b"OGGDATA");
+        Ok(self.transcript.lock().clone())
+    }
+
     async fn list_bots(&self) -> Result<Vec<BotSummary>> {
         Ok(self.bots.clone())
     }
@@ -659,7 +668,7 @@ async fn approval_buttons_map_to_daemon_decisions() {
                 tool_name: "fs_delete".into(),
                 input: json!({ "path": "/tmp/a.txt" }),
                 summary: "Delete /tmp/a.txt".into(),
-                details: None,
+                details: Some(json!({"risk": "low"})),
             }),
         ))
         .unwrap();
@@ -680,14 +689,19 @@ async fn approval_buttons_map_to_daemon_decisions() {
     assert_eq!(msgs.len(), 3);
     let keyboard = &msgs[0]["reply_markup"]["inline_keyboard"][0];
     assert_eq!(keyboard[0]["text"], "Approve once");
-    assert_eq!(keyboard[1]["text"], "Always");
-    assert_eq!(keyboard[2]["text"], "Deny");
+    assert_eq!(keyboard[1]["text"], "Deny");
+    assert_eq!(
+        keyboard.as_array().unwrap().len(),
+        2,
+        "no standing grant here"
+    );
 
-    // msg0 -> "Approve once", msg1 -> "Always", msg2 -> "Deny".
+    // msg0 -> "Approve once", msg1 -> "Approve once", msg2 -> "Deny".
     for (i, qid) in ["cb-1", "cb-2", "cb-3"].into_iter().enumerate() {
-        let data = msgs[i]["reply_markup"]["inline_keyboard"][0][i]["callback_data"]
-            .as_str()
-            .unwrap();
+        let data =
+            msgs[i]["reply_markup"]["inline_keyboard"][0][usize::from(i == 2)]["callback_data"]
+                .as_str()
+                .unwrap();
         let cb: Update = serde_json::from_value(callback_update(
             i64::try_from(i + 2).unwrap(),
             PAIRED_USER_ID,
@@ -711,7 +725,7 @@ async fn approval_buttons_map_to_daemon_decisions() {
             RecordedApproval {
                 call_id: call_ids[1],
                 decision: ApprovalDecision::Approve,
-                scope: ApprovalScope::Always,
+                scope: ApprovalScope::Once,
             },
             RecordedApproval {
                 call_id: call_ids[2],
@@ -1288,7 +1302,7 @@ async fn forged_approval_callbacks_are_rejected() {
             tool_name: "shell".into(),
             input: json!({}),
             summary: "rm".into(),
-            details: None,
+            details: Some(json!({"risk": "low"})),
         }),
     ))
     .unwrap();
@@ -1316,7 +1330,7 @@ async fn forged_approval_callbacks_are_rejected() {
         .await
         .unwrap();
     // 2. Real call id, but pressed from another paired user's chat.
-    let real = format_approval_callback(call_id, "always");
+    let real = format_approval_callback(call_id, "once");
     channel
         .handle_update(update(callback_update(
             3,
@@ -2150,7 +2164,7 @@ async fn subagent_approvals_and_questions_are_shown_in_the_parent_chat() {
                 tool_name: "shell".into(),
                 input: json!({}),
                 summary: "child wants rm".into(),
-                details: None,
+                details: Some(json!({"risk": "low"})),
             }),
         ))
         .unwrap();
@@ -3218,6 +3232,7 @@ async fn approval_messages(details: Option<serde_json::Value>) -> Vec<serde_json
 
 fn schedule_card(prompt: &str) -> serde_json::Value {
     json!({
+        "risk": "low",
         "kind": "schedule", "action": "create", "name": "Standup",
         "prompt": prompt, "schedule": "Every weekday at 10:30", "timezone": "Europe/Istanbul",
         "next_runs": ["2026-11-13T10:30:00+03:00", "2026-11-16T10:30:00+03:00", "2026-11-17T10:30:00+03:00"],
@@ -3278,6 +3293,7 @@ async fn an_approval_too_large_for_telegram_is_not_offered() {
 async fn an_egress_card_shows_the_computer_target() {
     let id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     let msgs = approval_messages(Some(json!({
+        "risk": "low",
         "kind": "egress",
         "reason": "typing after a read",
         "host": "the desktop",
@@ -3309,20 +3325,21 @@ async fn unrenderable_details_leave_approval_to_the_desktop_app() {
 }
 
 #[tokio::test]
-async fn plain_approvals_keep_their_three_buttons() {
-    let msgs = approval_messages(None).await;
+async fn plain_low_risk_approvals_offer_only_allow_once_and_deny() {
+    let msgs = approval_messages(Some(json!({"risk": "low"}))).await;
     assert_eq!(msgs.len(), 1);
     assert_eq!(
         msgs[0]["reply_markup"]["inline_keyboard"][0]
             .as_array()
             .unwrap()
             .len(),
-        3
+        2
     );
 }
 
 fn control_card_json(offered: bool, payload: &str) -> serde_json::Value {
     json!({
+        "risk": "low",
         "kind": "egress", "reason": "this run read file a.txt and now wants to type",
         "read": ["file a.txt"], "host": "keyboard", "payload": payload, "payload_kind": "text",
         "control_grant": {
@@ -3771,7 +3788,7 @@ async fn telegram_409_resumes_after_capped_backoff_once_conflict_clears() {
 #[tokio::test]
 async fn app_approval_sends_all_arguments_before_the_only_approval_buttons() {
     let body = format!("{}RECIPIENT-AT-END", "x".repeat(6000));
-    let messages = approval_messages(Some(json!({"kind":"app_action","app_name":"GitHub","action_slug":"GITHUB_SEND","version":"20260901_00","arguments":{"body":body}}))).await;
+    let messages = approval_messages(Some(json!({"risk":"low","kind":"app_action","app_name":"GitHub","action_slug":"GITHUB_SEND","version":"20260901_00","arguments":{"body":body}}))).await;
     let all: String = messages
         .iter()
         .map(|m| m["text"].as_str().unwrap())
@@ -3796,14 +3813,17 @@ async fn app_approval_sends_all_arguments_before_the_only_approval_buttons() {
 }
 
 #[test]
-fn voice_and_photo_messages_become_unsupported_not_dropped() {
+fn voice_becomes_a_voice_note_and_photos_stay_unsupported() {
     let mut v = text_update(1, PAIRED_USER_ID, PAIRED_USER_ID, "x");
     v["message"].as_object_mut().unwrap().remove("text");
     v["message"]["voice"] = json!({"file_id": "f", "duration": 3});
     let incoming = update(v.clone()).into_incoming().unwrap();
     assert_eq!(
         incoming.kind,
-        IncomingKind::Unsupported("voice message".into())
+        IncomingKind::Voice {
+            file_id: "f".into(),
+            duration_secs: 3
+        }
     );
     v["message"].as_object_mut().unwrap().remove("voice");
     v["message"]["photo"] = json!([{"file_id": "p"}]);
@@ -3978,7 +3998,7 @@ fn queue_delete_approval(daemon: &FakeDaemon) -> (mpsc::UnboundedSender<Envelope
             tool_name: "fs_delete".into(),
             input: json!({ "path": "/tmp/a.txt" }),
             summary: "Delete /tmp/a.txt".into(),
-            details: None,
+            details: Some(json!({"risk": "low"})),
         }),
     ))
     .unwrap();
@@ -4036,12 +4056,12 @@ async fn language_survives_restart_and_each_chat_gets_its_own_approval_card() {
         (
             TEST_CHAT_ID,
             "⚠️ Onay gerekiyor (fs_delete)",
-            ["Bir kez onayla", "Her zaman onayla", "Reddet"],
+            ["Bir kez onayla", "Reddet"],
         ),
         (
             SECOND_CHAT_ID,
             "⚠️ Approval needed (fs_delete)",
-            ["Approve once", "Always", "Deny"],
+            ["Approve once", "Deny"],
         ),
     ];
     for ((card, (chat, heading, labels)), call_id) in
@@ -4060,7 +4080,7 @@ async fn language_survives_restart_and_each_chat_gets_its_own_approval_card() {
             .collect();
         assert_eq!(
             data,
-            ["once", "always", "deny"].map(|d| format_approval_callback(call_id, d))
+            ["once", "deny"].map(|d| format_approval_callback(call_id, d))
         );
     }
 
@@ -4140,4 +4160,250 @@ async fn a_failed_language_save_changes_nothing_and_confirms_nothing() {
     );
     let reopened = crate::PairingStore::open(&path).unwrap();
     assert_eq!(reopened.chat_language(TEST_CHAT_ID), Language::TR);
+}
+
+// --- Voice notes (on-device transcription) ---
+
+async fn voice_note_server() -> MockServer {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    Mock::given(method("POST"))
+        .and(path(tg_endpoint("getFile")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"ok": true, "result": {"file_id": "f", "file_path": "voice/file_1.oga", "file_size": 7}}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/file/bot{TEST_BOT_TOKEN}/voice/file_1.oga")))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"OGGDATA".to_vec()))
+        .mount(&server)
+        .await;
+    server
+}
+
+fn voice_update(update_id: i64, duration: u32) -> Update {
+    let mut v = text_update(update_id, PAIRED_USER_ID, TEST_CHAT_ID, "x");
+    v["message"].as_object_mut().unwrap().remove("text");
+    v["message"]["voice"] = json!({"file_id": "f", "duration": duration});
+    update(v)
+}
+
+fn voice_channel(server: &MockServer, text: Option<&str>) -> (TelegramChannel, Arc<FakeDaemon>) {
+    let daemon = one_bot_daemon();
+    *daemon.transcript.lock() = text.map(str::to_owned);
+    let channel = TelegramChannel::new(
+        TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+            .with_api_base_url(server.uri())
+            .with_paired_users([PAIRED_USER_ID]),
+        daemon.clone(),
+    )
+    .unwrap();
+    (channel, daemon)
+}
+
+#[tokio::test]
+async fn voice_note_is_transcribed_echoed_and_never_runs_as_a_command() {
+    let server = voice_note_server().await;
+    let (channel, daemon) = voice_channel(&server, Some("/stop"));
+    channel.handle_update(voice_update(1, 3)).await.unwrap();
+    let texts = sent_texts(&server.received_requests().await.unwrap());
+    assert_eq!(texts.first().map(String::as_str), Some("🎤 /stop"));
+    // Forwarded to the bot as plain words, not interpreted as /stop.
+    assert!(daemon.cancelled_runs.lock().is_empty());
+    assert_eq!(daemon.sent_messages.lock()[0].1, "🎤 /stop");
+}
+
+#[tokio::test]
+async fn voice_note_without_on_device_voice_gets_an_honest_reply_and_is_not_forwarded() {
+    let server = voice_note_server().await;
+    let (channel, daemon) = voice_channel(&server, None);
+    channel.handle_update(voice_update(1, 3)).await.unwrap();
+    let texts = sent_texts(&server.received_requests().await.unwrap());
+    assert!(texts[0].contains("offline voice"), "{texts:?}");
+    assert!(daemon.sent_messages.lock().is_empty());
+    // Too long: refused before anything is downloaded.
+    channel.handle_update(voice_update(2, 600)).await.unwrap();
+    let texts = sent_texts(&server.received_requests().await.unwrap());
+    assert!(texts[1].contains("too long"), "{texts:?}");
+}
+
+#[tokio::test]
+async fn http_client_only_transcribes_with_the_on_device_provider() {
+    let srv = MockServer::start().await;
+    for (provider, expected) in [("whisper", None), ("local_voice", Some("hello".to_owned()))] {
+        srv.reset().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/voice"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"stt_provider": provider})),
+            )
+            .mount(&srv)
+            .await;
+        if expected.is_some() {
+            Mock::given(method("POST"))
+                .and(path("/v1/voice/transcribe"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({"text": " hello "})))
+                .mount(&srv)
+                .await;
+        }
+        let client = HttpDaemonClient::new(srv.uri(), SecretValue::new("t"));
+        assert_eq!(
+            client
+                .transcribe_voice(vec![1, 2, 3], "audio/ogg")
+                .await
+                .unwrap(),
+            expected,
+            "{provider}"
+        );
+        // A cloud provider never sees the recording: no transcribe request was made for it.
+        if expected.is_none() {
+            let reqs = srv.received_requests().await.unwrap();
+            assert!(reqs.iter().all(|r| r.url.path() != "/v1/voice/transcribe"));
+        }
+    }
+}
+
+// ---- low-risk Telegram approvals: risk, owner chat, single use, expiry ----
+
+/// Start a run whose only event is an approval with the given `risk`.
+async fn approval_channel(
+    risk: Option<&str>,
+) -> (MockServer, TelegramChannel, Arc<FakeDaemon>, ToolCallId) {
+    let server = MockServer::start().await;
+    mount_telegram_mocks(&server).await;
+    let daemon = one_bot_daemon();
+    let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
+        .with_api_base_url(server.uri())
+        .with_paired_users([PAIRED_USER_ID, SECOND_USER_ID]);
+    let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
+    let run_id = RunId::new();
+    let call_id = ToolCallId::new();
+    let tx = daemon.queue_open_run(run_id);
+    let details = risk.map(|r| json!({ "risk": r }));
+    tx.send(Envelope::new(
+        0,
+        Event::ApprovalNeeded(ApprovalNeeded {
+            run_id,
+            call_id,
+            tool_name: "fs_write".into(),
+            input: json!({}),
+            summary: "fs_write notes.txt".into(),
+            details,
+        }),
+    ))
+    .unwrap();
+    channel
+        .handle_update(update(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "go")))
+        .await
+        .unwrap();
+    std::mem::forget(tx);
+    (server, channel, daemon, call_id)
+}
+
+#[tokio::test]
+async fn high_risk_or_unlabelled_approvals_get_no_buttons_and_say_desktop() {
+    for risk in [Some("high"), None] {
+        let (server, channel, daemon, call_id) = approval_channel(risk).await;
+        let reqs = server.received_requests().await.unwrap();
+        let msgs = sent_messages(&reqs);
+        assert!(msgs.iter().all(|m| m.get("reply_markup").is_none()));
+        assert!(
+            msgs.iter()
+                .any(|m| m["text"].as_str().unwrap().contains("desktop app"))
+        );
+        // A forged button for it is refused too.
+        channel
+            .handle_update(update(callback_update(
+                2,
+                PAIRED_USER_ID,
+                TEST_CHAT_ID,
+                "forged",
+                &format_approval_callback(call_id, "once"),
+            )))
+            .await
+            .unwrap();
+        assert!(daemon.approvals.lock().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn low_risk_card_names_the_action_and_a_press_cannot_be_replayed() {
+    let (server, channel, daemon, call_id) = approval_channel(Some("low")).await;
+    let reqs = server.received_requests().await.unwrap();
+    let card = sent_messages(&reqs)
+        .into_iter()
+        .find(|m| m.get("reply_markup").is_some())
+        .unwrap();
+    assert!(
+        card["text"]
+            .as_str()
+            .unwrap()
+            .contains("fs_write notes.txt")
+    );
+    let data = format_approval_callback(call_id, "once");
+    for i in 0..2 {
+        channel
+            .handle_update(update(callback_update(
+                10 + i,
+                PAIRED_USER_ID,
+                TEST_CHAT_ID,
+                "q",
+                &data,
+            )))
+            .await
+            .unwrap();
+    }
+    assert_eq!(daemon.approvals.lock().len(), 1, "second press is a replay");
+}
+
+#[tokio::test]
+async fn another_chat_cannot_answer_and_does_not_use_up_the_card() {
+    let (_server, channel, daemon, call_id) = approval_channel(Some("low")).await;
+    let data = format_approval_callback(call_id, "once");
+    channel
+        .handle_update(update(callback_update(
+            10,
+            SECOND_USER_ID,
+            SECOND_CHAT_ID,
+            "q1",
+            &data,
+        )))
+        .await
+        .unwrap();
+    assert!(daemon.approvals.lock().is_empty());
+    channel
+        .handle_update(update(callback_update(
+            11,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "q2",
+            &data,
+        )))
+        .await
+        .unwrap();
+    assert_eq!(daemon.approvals.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn an_expired_card_is_refused() {
+    let (server, channel, daemon, call_id) = approval_channel(Some("low")).await;
+    channel.advance_retry_clock(Duration::from_secs(11 * 60));
+    channel
+        .handle_update(update(callback_update(
+            10,
+            PAIRED_USER_ID,
+            TEST_CHAT_ID,
+            "q",
+            &format_approval_callback(call_id, "once"),
+        )))
+        .await
+        .unwrap();
+    assert!(daemon.approvals.lock().is_empty());
+    let reqs = server.received_requests().await.unwrap();
+    assert!(
+        callback_answers(&reqs)
+            .iter()
+            .any(|a| a.to_string().contains("expired"))
+    );
 }

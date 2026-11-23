@@ -70,6 +70,22 @@ notice and this permission notice shall be included in all copies or substantial
 the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 ```
 
+## sherpa-onnx (Apache-2.0) and on-device speech models
+
+`apps/cli/src/voice_local_engine.rs` (cargo feature `local-voice`) uses the official `sherpa-onnx` crate and
+adapts the Silero-VAD and Whisper calls from its Rust examples
+(`rust-api-examples/examples/silero_vad_remove_silence.rs`, Copyright (c) 2026 Xiaomi Corporation, and
+`whisper.rs`, Copyright (c) 2026 Yujie Wu; <https://github.com/k2-fsa/sherpa-onnx>), licensed under the
+Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0). Changes: the two stages are chained,
+the recogniser is cached, segments are capped at 25 s. Voice notes are decoded with the pure-Rust
+`opus-decoder` (MIT OR Apache-2.0) and `ogg` (BSD-3-Clause) crates.
+
+Model weights are downloaded on demand (never bundled) and their licence is shown before the download:
+OpenAI Whisper (MIT, <https://github.com/openai/whisper>), converted to ONNX by the sherpa-onnx project;
+Silero VAD (MIT, <https://github.com/snakers4/silero-vad>). Piper (GPL-3.0) is deliberately not used, and
+NVIDIA Parakeet (CC-BY-4.0, attribution required) is not offered; if it is added later its attribution
+belongs here and in the model picker.
+
 ## browser-harness (MIT)
 
 The "click at the box-model center" interaction approach in `crates/browser-cdp/src/actions.rs`
@@ -102,6 +118,19 @@ These brand logos are trademarks of their respective owners, used only to
 identify integrations and model providers. No endorsement is implied. The
 original geometric Praxi-Bot placeholders are project artwork, with no
 OpenMausBot branding, names or character artwork copied.
+
+## MCP Bundles manifest format and MCP Registry API (Apache-2.0 / MIT)
+
+`crates/mcp-bridge/src/mcpb.rs` reads `.mcpb` bundles following the manifest
+specification v0.3 of [modelcontextprotocol/mcpb](https://github.com/modelcontextprotocol/mcpb),
+and `crates/mcp-bridge/src/registry.rs` reads the public API and `server.json`
+format of the [official MCP Registry](https://github.com/modelcontextprotocol/registry).
+Both upstream repositories state "Apache-2.0 for new code, MIT for older
+contributions" in their `LICENSE` files (Copyright the Anthropic, PBC and the
+Model Context Protocol a Series of LF Projects, LLC contributors; see each
+repository's `LICENSE` for the exact text). Praxi's modules are independent
+Rust implementations of the published formats; no upstream source code was
+copied, only the documented field names and semantics are used.
 
 ## Hermes Agent starter skills (MIT)
 

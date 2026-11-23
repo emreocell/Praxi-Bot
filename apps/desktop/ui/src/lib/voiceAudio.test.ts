@@ -25,3 +25,9 @@ test("the mock call works with the Gemini provider (no audio decoding)", async (
   assert.equal(out.mime, "audio/webm");
   await assert.rejects(transcribePayload(new Blob(["mock"]), "gemini_live"));
 });
+
+test("on-device voice also gets 16 kHz PCM, never the raw recording", async () => {
+  const out = await transcribePayload(new Blob(["mock"], { type: "audio/webm" }), "local_voice", { mock: true });
+  assert.equal(out.mime, "audio/webm");
+  await assert.rejects(transcribePayload(new Blob(["mock"]), "local_voice"));
+});

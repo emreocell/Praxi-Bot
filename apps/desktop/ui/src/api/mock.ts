@@ -789,6 +789,7 @@ export class MockApiClient extends ApiClient {
   readonly secrets = new Map<string, number>();
   readonly doctorChecks: DoctorCheck[] = structuredClone(DOCTOR_CHECKS);
   spendLimit: number | null = null;
+  mockCacheBytes = 18 * 1024 * 1024;
   readonly botLimits = new Map<string, BotSpendLimits["limits"]>();
   /** Repairs run so far (tests). */
   readonly repairs: string[] = [];
@@ -1303,6 +1304,14 @@ export class MockApiClient extends ApiClient {
               { id: "mock-message-m2", chat_id: CHAT_ID, content: tr ? "İyiyim, teşekkürler! Size yardımcı olmak için hazırım." : "Doing well, thanks! Ready to help.", role: "assistant", bot_id: NOVA, created_at_ms: NOW + 6000 } as Message
             );
           }
+          if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "imported") {
+            // Review screen: an imported conversation and its inert tool note.
+            seeded.push(
+              { id: "mock-message-i1", chat_id: CHAT_ID, content: tr ? "Dünkü notları buraya taşıyalım." : "Let's move yesterday's notes here.", role: "user", created_at_ms: NOW + 5000 } as Message,
+              { id: "mock-message-i2", chat_id: CHAT_ID, content: tr ? "Notlar içe aktarıldı; araç adımları çalıştırılmadı." : "Notes imported; tool steps were not run.", role: "assistant", source: "imported", created_at_ms: NOW + 6000 } as Message,
+              { id: "mock-message-i3", chat_id: CHAT_ID, content: tr ? "İçe aktarılan not: 2 araç adımı ve 1 onay dosyada listelenmişti; içe aktarılmadı ve çalıştırılmadı." : "Imported chat note: 2 tool step(s) and 1 approval(s) were listed in the file but were not imported or executed.", role: "imported_note", created_at_ms: NOW + 7000 } as Message
+            );
+          }
           this.messages.set(seg[1], seeded);
           return ok(seeded);
         }
@@ -1505,6 +1514,23 @@ export class MockApiClient extends ApiClient {
         const days = Number.isFinite(rawDays) && rawDays > 0 ? Math.min(rawDays, 90) : 30;
         const tz = typeof opts.query?.tz === "string" && opts.query.tz ? opts.query.tz : "UTC";
         return ok({ ...USAGE, daily: mockDailySeries(days), time_zone: tz });
+      }
+      case "GET /data-usage":
+      case "POST /data-usage/clear-cache": {
+        if (method === "POST") {
+          const freed = this.mockCacheBytes;
+          this.mockCacheBytes = 0;
+          return ok({ freed_bytes: freed });
+        }
+        const MB = 1024 * 1024;
+        const categories = [
+          { id: "chats", bytes: 48 * MB }, { id: "memory", bytes: 2 * MB }, { id: "knowledge", bytes: 130 * MB },
+          { id: "backups", bytes: 12 * MB }, { id: "caches", bytes: 20 * MB + this.mockCacheBytes },
+          { id: "other", bytes: MB }
+        ];
+        return ok({
+          total_bytes: categories.reduce((n, c) => n + c.bytes, 0), categories, clearable_bytes: this.mockCacheBytes
+        });
       }
       case "GET /spend-limit":
       case "PUT /spend-limit": {
@@ -1764,6 +1790,17 @@ export class MockApiClient extends ApiClient {
       case "PUT /control":
       case "POST /control":
         return ok(this.control(method, seg, opts.body));
+      case "GET /voice/local":
+        return ok(this.localVoice);
+      case "POST /voice/local/install":
+        this.localVoice = {
+          ...this.localVoice,
+          vad_installed: true,
+          models: this.localVoice.models.map((m) =>
+            m.id === (opts.body as { model?: string } | undefined)?.model ? { ...m, installed: true } : m
+          )
+        };
+        return ok(this.localVoice);
       case "GET /voice":
       case "PUT /voice":
         return ok(this.voiceConfig(opts.body));
@@ -2028,7 +2065,29 @@ export class MockApiClient extends ApiClient {
     stt_key_set: false,
     stt_provider: "whisper",
     gemini_model: "gemini-3.5-transcribe-live",
-    gemini_key_set: false
+    gemini_key_set: false,
+    local_model: "whisper-small"
+  };
+
+  private localVoice = {
+    available: true,
+    vad_installed: false,
+    installing: null as string | null,
+    last_error: null as string | null,
+    models: [
+      ["whisper-tiny", "Whisper tiny (fast, rough)", 104],
+      ["whisper-base", "Whisper base (balanced)", 161],
+      ["whisper-small", "Whisper small (most accurate)", 376]
+    ].map(([id, label, size_mb]) => ({
+      id: id as string,
+      label: label as string,
+      description: "Speech model that runs on this computer.",
+      size_mb: size_mb as number,
+      license: "MIT",
+      license_url: "https://github.com/openai/whisper/blob/main/LICENSE",
+      source_host: "huggingface.co",
+      installed: false
+    }))
   };
 
   private voiceConfig(body: unknown): unknown {
@@ -2039,12 +2098,14 @@ export class MockApiClient extends ApiClient {
       clear_stt_key?: boolean;
       stt_provider?: string;
       gemini_model?: string;
+      local_model?: string;
       gemini_key?: string;
       clear_gemini_key?: boolean;
     };
     this.voice = {
       stt_provider: b.stt_provider || this.voice.stt_provider,
       gemini_model: b.gemini_model || this.voice.gemini_model,
+      local_model: b.local_model || this.voice.local_model,
       gemini_key_set: b.clear_gemini_key ? false : b.gemini_key ? true : this.voice.gemini_key_set,
       stt_base_url: b.stt_base_url || this.voice.stt_base_url,
       stt_model: b.stt_model || this.voice.stt_model,

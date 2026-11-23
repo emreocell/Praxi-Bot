@@ -773,6 +773,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/chats/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import one version-1 chat export as a new chat. Every message is stored as
+         *     untrusted history with origin `imported`; tool steps and approvals are
+         *     counted but never executed or written to their tables.
+         */
+        post: operations["import_chat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/chats/search": {
         parameters: {
             query?: never;
@@ -1243,6 +1264,43 @@ export interface paths {
          *     overlay highlight) or `refuse` it.
          */
         post: operations["decide_control"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/data-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How much space each kind of data uses (owner only). Reads folder metadata, never contents. */
+        get: operations["get_data_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/data-usage/clear-cache": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove regenerable caches only (owner only). Never touches chats, memory, knowledge,
+         *     backups, secrets or settings.
+         */
+        post: operations["post_clear_cache"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3512,6 +3570,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/voice/local": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** On-device speech models: what can be installed, licences and install state. */
+        get: operations["get_local_voice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/voice/local/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Download one on-device speech model (owner only; checksum-verified, returns at once). */
+        post: operations["install_local_voice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/voice/transcribe": {
         parameters: {
             query?: never;
@@ -4179,6 +4271,29 @@ export interface components {
             steps: components["schemas"]["ExportStep"][];
             title: string;
         };
+        /**
+         * @description A version-1 export file. The chat and message ids are ignored; a new chat
+         *     and new message ids are created on import.
+         */
+        ChatImport: {
+            approvals?: components["schemas"]["ImportRow"][];
+            /** Format: int32 */
+            format_version: number;
+            messages: components["schemas"]["ImportMessage"][];
+            steps?: components["schemas"]["ImportRow"][];
+            title?: string;
+        };
+        ChatImportReport: {
+            /** Format: int32 */
+            approvals_ignored: number;
+            /** Format: uuid */
+            chat_id: string;
+            /** Format: int32 */
+            messages: number;
+            /** Format: int32 */
+            steps_ignored: number;
+            title: string;
+        };
         /** @description One diagnostic result. */
         Check: {
             /** @description What was found. */
@@ -4228,6 +4343,11 @@ export interface components {
         };
         /** @enum {string} */
         CheckpointLocationDto: "daemon_local";
+        /** @description Result of "Clear cache". */
+        ClearCacheDto: {
+            /** Format: int64 */
+            freed_bytes: number;
+        };
         /**
          * @description Authentication status reported by a CLI provider (`GET /v1/providers/detected`).
          * @enum {string}
@@ -4781,6 +4901,27 @@ export interface components {
             /** @description Calendar day in `time_zone` (`YYYY-MM-DD`). */
             day: string;
         };
+        /** @description One slice of the data folder. */
+        DataCategoryDto: {
+            /**
+             * Format: int64
+             * @description Bytes used on disk by this category.
+             */
+            bytes: number;
+            /** @description `chats`, `memory`, `knowledge`, `backups`, `caches` or `other`. */
+            id: string;
+        };
+        /** @description Data folder sizes. */
+        DataUsageDto: {
+            categories: components["schemas"]["DataCategoryDto"][];
+            /**
+             * Format: int64
+             * @description Bytes "Clear cache" would free right now.
+             */
+            clearable_bytes: number;
+            /** Format: int64 */
+            total_bytes: number;
+        };
         /** @description `POST /v1/approvals/{call_id}`. */
         DecideApproval: {
             /** @description Approve or deny. */
@@ -5138,6 +5279,8 @@ export interface components {
             role: string;
             /** Format: uuid */
             run_id?: string | null;
+            /** @description Recorded origin (`owner`, `telegram`, `imported`, ...), when known. */
+            source?: string | null;
         };
         /** @description An exported profile file. */
         ExportOutput: {
@@ -5770,6 +5913,11 @@ export interface components {
             /** @description Tool patterns removed. */
             tools_exclude: string[];
         };
+        /**
+         * @description A tool step or approval row. Kept only for its count; it is never stored
+         *     in the run or approval tables.
+         */
+        ImportRow: Record<string, never>;
         /** @description Run metadata only: no error text, no spawn parameters, no computer identity. */
         ImportRun: {
             /** Format: uuid */
@@ -6160,6 +6308,46 @@ export interface components {
             installed_models: string[];
             /** @description The server answered on its loopback port. */
             running: boolean;
+        };
+        /** @description Body of `POST /v1/voice/local/install`. */
+        LocalVoiceInstallInput: {
+            /** @description A model id from `GET /v1/voice/local`. */
+            model: string;
+        };
+        /** @description One downloadable on-device speech model (`GET /v1/voice/local`). */
+        LocalVoiceModelDto: {
+            /** @description One plain sentence: what it is good for. */
+            description: string;
+            /** @description Stable id, e.g. `whisper-small`. */
+            id: string;
+            /** @description `true` when every file is on disk and its checksum was verified. */
+            installed: boolean;
+            /** @description Short name for a picker. */
+            label: string;
+            /** @description Licence of the model weights (SPDX-style), shown before the download. */
+            license: string;
+            /** @description Where the licence text lives. */
+            license_url: string;
+            /**
+             * Format: int32
+             * @description Download size in megabytes.
+             */
+            size_mb: number;
+            /** @description Where the files are downloaded from (host only). */
+            source_host: string;
+        };
+        /** @description On-device speech state (`GET /v1/voice/local`). */
+        LocalVoiceStatusDto: {
+            /** @description `false` when this daemon was built without the `local-voice` feature. */
+            available: boolean;
+            /** @description Id of the model being downloaded right now, if any. */
+            installing?: string | null;
+            /** @description Plain-language reason the last download failed, if it did. */
+            last_error?: string | null;
+            /** @description Models the owner can install. */
+            models: components["schemas"]["LocalVoiceModelDto"][];
+            /** @description Whether the voice-activity model (end-of-speech detection) is installed. */
+            vad_installed: boolean;
         };
         /**
          * @description How a model is expected to run here.
@@ -6720,8 +6908,8 @@ export interface components {
              */
             run_id?: string | null;
             /**
-             * @description Where a user message came from (`owner` = this app, `telegram`, `peer`,
-             *     `local_api`); absent for older messages and for replies.
+             * @description Where the message came from (`owner` = this app, `telegram`, `peer`,
+             *     `local_api`, `imported`); absent for older messages and most replies.
              */
             source?: string | null;
             /**
@@ -8202,6 +8390,8 @@ export interface components {
             audio_base64: string;
             /** @description Optional ISO-639-1 language hint (`en`, `tr`, `de`). */
             language?: string | null;
+            /** @description Refuse (409) unless the configured provider is on-device: the audio is never uploaded. */
+            local_only?: boolean;
             /** @description MIME type of the recording, e.g. `audio/webm` (Whisper) or `audio/pcm` (Gemini Live: 16-bit LE, 16 kHz, mono). */
             mime: string;
         };
@@ -8336,6 +8526,8 @@ export interface components {
             gemini_key_set: boolean;
             /** @description Gemini Live model used for transcription (e.g. `gemini-3.5-transcribe-live`). */
             gemini_model: string;
+            /** @description Id of the on-device speech model used when the provider is `local_voice`. */
+            local_model: string;
             /** @description Base URL of the OpenAI-compatible transcription service (without `/audio/transcriptions`). */
             stt_base_url: string;
             /** @description Whether an API key is stored (never returned). */
@@ -8355,6 +8547,8 @@ export interface components {
             gemini_key?: string | null;
             /** @description Gemini Live model name. */
             gemini_model?: string | null;
+            /** @description Id of an on-device speech model from `GET /v1/voice/local`. */
+            local_model?: string | null;
             /** @description `https://...`, or `http://` for a loopback server only. */
             stt_base_url?: string | null;
             /** @description API key (**write-only**: stored in the secret store, never returned or logged). */
@@ -8367,7 +8561,7 @@ export interface components {
          * @description Which service turns speech into text.
          * @enum {string}
          */
-        VoiceProvider: "whisper" | "gemini_live";
+        VoiceProvider: "whisper" | "gemini_live" | "local_voice";
         /**
          * @description Current web search configuration (`GET /v1/web/search`): non-secret fields
          *     only.
@@ -10603,6 +10797,56 @@ export interface operations {
             };
         };
     };
+    import_chat: {
+        parameters: {
+            query: {
+                /** @description Bot that will own the new chat. */
+                bot_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatImport"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatImportReport"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     search: {
         parameters: {
             query?: never;
@@ -11625,6 +11869,60 @@ export interface operations {
             };
             /** @description unknown, answered or timed-out request */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_data_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataUsageDto"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_clear_cache: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClearCacheDto"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16604,6 +16902,75 @@ export interface operations {
                 };
             };
             /** @description invalid config */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description voice is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_local_voice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalVoiceStatusDto"];
+                };
+            };
+            /** @description voice is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    install_local_voice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalVoiceInstallInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalVoiceStatusDto"];
+                };
+            };
+            /** @description unknown model or not available */
             422: {
                 headers: {
                     [name: string]: unknown;

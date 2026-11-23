@@ -399,6 +399,7 @@ impl Inbox {
                     incoming.kind,
                     IncomingKind::Text(_)
                         | IncomingKind::Unsupported(_)
+                        | IncomingKind::Voice { .. }
                         | IncomingKind::Callback { .. }
                 )
                 .then_some(incoming.chat.0)

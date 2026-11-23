@@ -98,7 +98,9 @@ fn setup_with(prepare: impl FnOnce(&std::path::Path)) -> T {
     setup_with_config(prepare, LoopConfig::default())
 }
 
-fn setup_with_config(prepare: impl FnOnce(&std::path::Path), config: LoopConfig) -> T {
+fn setup_with_config(prepare: impl FnOnce(&std::path::Path), mut config: LoopConfig) -> T {
+    // These API fixtures script tool names directly.
+    config.legacy_tool_surface = true;
     let dir = tempfile::tempdir().unwrap();
     prepare(dir.path());
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
@@ -1670,6 +1672,7 @@ fn setup_desktop() -> (T, Arc<crate::fake::FakeDesktop>) {
         LoopConfig {
             global_policy: permission_engine::Policy::full(),
             discovery_threshold: 1000,
+            legacy_tool_surface: true,
             ..LoopConfig::default()
         },
     )
@@ -4644,6 +4647,32 @@ async fn only_the_owner_changes_a_bots_file_access_mode() {
 
 fn toml_to_json_profile(bot: &Resp) -> String {
     bot.json()["config"].to_string()
+}
+
+#[tokio::test]
+async fn data_usage_and_clear_cache_are_owner_only_and_spare_user_data() {
+    let t = setup();
+    let cache = t._dir.path().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("cli-models.json"), "{}").unwrap();
+    std::fs::write(t._dir.path().join("memory.db"), "keep me").unwrap();
+
+    for (m, p) in [
+        (Method::GET, "/v1/data-usage"),
+        (Method::POST, "/v1/data-usage/clear-cache"),
+    ] {
+        let r = call_token_only(&t, m, p, None).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{p}");
+    }
+    assert!(cache.join("cli-models.json").exists());
+
+    let g = call(&t, Method::GET, "/v1/data-usage", None).await.json();
+    assert_eq!(g["clearable_bytes"], 2, "{g}");
+    let r = call(&t, Method::POST, "/v1/data-usage/clear-cache", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["freed_bytes"], 2);
+    assert!(!cache.join("cli-models.json").exists());
+    assert!(t._dir.path().join("memory.db").exists());
 }
 
 #[tokio::test]

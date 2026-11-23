@@ -131,6 +131,8 @@ import type {
   TerminalInfo,
   TerminalOutput,
   SpendLimit,
+  DataUsage,
+  ClearCacheResult,
   BotSpendLimits,
   UsageSummary,
   ViewHeartbeat,
@@ -138,6 +140,7 @@ import type {
   TranscribeOutput,
   VoiceConfig,
   VoiceConfigInput,
+  LocalVoiceStatus,
   WebSearchConfig,
   WebSearchConfigInput,
   WebSearchTestInput,
@@ -930,6 +933,15 @@ export class ApiClient {
     return this.request("POST", `/schedules/${id}/occurrences/${dueMs}/retry`);
   }
 
+  /** Data folder size per category (owner only; folder metadata, never contents). */
+  getDataUsage(): Promise<DataUsage> {
+    return this.request("GET", "/data-usage");
+  }
+  /** Remove regenerable caches only (owner only). */
+  clearCache(): Promise<ClearCacheResult> {
+    return this.request("POST", "/data-usage/clear-cache");
+  }
+
   /** Monthly spending limit and month-to-date spend. */
   getSpendLimit(): Promise<SpendLimit> {
     return this.request("GET", "/spend-limit");
@@ -1393,6 +1405,16 @@ export class ApiClient {
 
   updateVoice(input: VoiceConfigInput): Promise<VoiceConfig> {
     return this.request("PUT", "/voice", { body: input });
+  }
+
+  /** On-device speech models: licences, sizes and install state. */
+  getLocalVoice(): Promise<LocalVoiceStatus> {
+    return this.request("GET", "/voice/local");
+  }
+
+  /** Start downloading an on-device speech model (checksum-verified; poll `getLocalVoice`). */
+  installLocalVoice(model: string): Promise<LocalVoiceStatus> {
+    return this.request("POST", "/voice/local/install", { body: { model } });
   }
 
   /** Dictation: the recording goes to the service the owner configured. */

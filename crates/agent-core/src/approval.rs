@@ -866,7 +866,14 @@ impl Shared {
     /// [`tool_registry::Tool::egress_for`] (knowledge search with a remote
     /// embedding provider); that can only add egress, never remove it.
     pub(crate) fn content_class(&self, ctx: &RunCtx, name: &str, input: &Value) -> ContentClass {
-        if self.is_host_status_call(ctx, name, input) {
+        // Discovery has no private read or egress. Its returned metadata is
+        // classified separately as output exposure.
+        if self.is_host_status_call(ctx, name, input)
+            || matches!(
+                name,
+                agent_router::TOOL_SEARCH | agent_router::TOOL_DESCRIBE
+            )
+        {
             return ContentClass::none();
         }
         let Some(tool) = self.tools.get(name) else {
@@ -1626,6 +1633,16 @@ impl Shared {
             obj.insert("once_only".into(), json!(once_only));
             obj.insert("run_grant".into(), json!(run_tool));
             obj.insert("always_offered".into(), json!(always_offered));
+            // Channels that cannot show the whole card (Telegram) offer buttons for "low" only;
+            // a missing value counts as "high". Low: an ordinary policy ask, never destructive,
+            // never on the owner's PC or browser, never for an external caller.
+            let low_risk = why == "policy"
+                && effect != Effect::Destructive
+                && ctx.initiator == InitiatorKind::Human
+                && !class.in_owner_browser
+                && !name.starts_with(builtin_tools::pc::PC_PREFIX)
+                && !obj.contains_key("computer_target");
+            obj.insert("risk".into(), json!(if low_risk { "low" } else { "high" }));
             if class.in_owner_browser {
                 obj.insert("browser_action".into(), json!(true));
             }

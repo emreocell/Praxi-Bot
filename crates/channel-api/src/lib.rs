@@ -91,6 +91,13 @@ pub enum IncomingKind<M = String> {
     /// An attachment this channel cannot read yet (voice, photo, file ...); the
     /// payload is its human label.
     Unsupported(String),
+    /// A voice note the adapter can download (Ogg Opus), so the host may transcribe it.
+    Voice {
+        /// Opaque adapter id of the recording.
+        file_id: String,
+        /// Length announced by the service, in seconds.
+        duration_secs: u32,
+    },
     /// An inline button callback press.
     Callback {
         /// Opaque callback id used to acknowledge the interaction.

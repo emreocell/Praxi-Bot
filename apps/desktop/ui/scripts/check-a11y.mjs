@@ -42,12 +42,23 @@ const screens = [
   { name: 'first-run-wizard', query: 'screen=onboarding' },
   { name: 'first-run-freedom', query: 'screen=onboarding&frstep=freedom' },
   { name: 'first-run-bot', query: 'screen=onboarding&frstep=bot' },
+  // Views opened by a few clicks/keys (act: click a selector, type into one, or press a key).
+  { name: 'settings-search', expect: '[data-autofocus]', query: 'screen=settings&section=general', act: [{ type: ['[data-autofocus]', 'theme'] }] },
+  { name: 'settings-search-empty', query: 'screen=settings&section=general', act: [{ type: ['[data-autofocus]', 'zzzqqq'] }] },
+  { name: 'help-dialog', expect: '[data-testid=help-center]', query: 'screen=home', act: [{ press: 'Shift+?' }] },
+  { name: 'run-location-popover', expect: '[data-testid=home-status]', query: 'screen=home&menu=1' },
+  { name: 'add-server-wizard', expect: '[data-testid=add-server-live]', query: 'screen=home&menu=1', act: [{ click: '[data-testid=computer-add]' }] },
+  { name: 'add-server-choose', query: 'screen=home&menu=1', act: [{ click: '[data-testid=computer-add]' }, { click: '[data-testid=add-server-next]', optional: true }] },
+  { name: 'schedule-builder', expect: 'form', query: 'screen=schedules', act: [{ click: '[data-testid=schedules-empty-new], [data-testid=schedules-new]', optional: true }, { clickText: /new schedule/i, optional: true }] },
+  { name: 'run-timeline', expect: '[role=dialog]', query: 'screen=changes', act: [{ click: '[data-testid=run-timeline]' }] },
+  { name: 'command-popover', expect: '[role=listbox]', query: 'screen=chat', act: [{ type: ['textarea', '/'] }] },
+  { name: 'mention-popover', expect: '[role=listbox]', query: 'screen=chat', act: [{ type: ['textarea', '@'] }] },
   ...SETTINGS.map((s) => ({ name: `settings-${s}`, query: `screen=settings&section=${s}` }))
 ];
 // Two themes (one light, one dark) in English, plus two other locales (text differs, structure does not).
 const themes = ['clay', 'obsidian'];
 const cases = [];
-for (const s of screens) for (const theme of themes) cases.push({ name: `${s.name}/${theme}/en`, query: `${s.query}&theme=${theme}&lang=en` });
+for (const s of screens) for (const theme of themes) cases.push({ name: `${s.name}/${theme}/en`, query: `${s.query}&theme=${theme}&lang=en`, act: s.act, expect: s.expect });
 cases.push({ name: 'home/clay/tr', query: 'screen=home&theme=clay&lang=tr' }, { name: 'settings-general/clay/de', query: 'screen=settings&section=general&theme=clay&lang=de' });
 const selected = only ? cases.filter((c) => c.name.includes(only)) : cases;
 
@@ -90,9 +101,19 @@ try {
       await page.goto(`http://127.0.0.1:${port}/?mock=1&rt=ignore&${c.query}`, { waitUntil: 'load' });
       await page.waitForSelector('#root > *', { timeout: 15000 });
       await page.waitForTimeout(500); // mock data and entry transitions settle
+      for (const a of c.act ?? []) {
+        try {
+          if (a.press) await page.keyboard.press(a.press);
+          else if (a.type) await page.locator(a.type[0]).first().fill(a.type[1], { timeout: 5000 });
+          else if (a.clickText) await page.getByRole('button', { name: a.clickText }).first().click({ timeout: 5000 });
+          else await page.locator(a.click).first().click({ timeout: 5000 });
+        } catch (err) { if (!a.optional) throw err; }
+        await page.waitForTimeout(400);
+      }
+      if (c.expect) await page.waitForSelector(c.expect, { timeout: 5000 }); // the view under test really opened
       await page.evaluate(axeSource);
       const result = await page.evaluate(() => globalThis.axe.run(globalThis.document, {
-        runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'] },
+        runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'] },
         resultTypes: ['violations']
       }));
       for (const v of result.violations) {
@@ -115,6 +136,85 @@ try {
     }
   }));
   if (budgetHit) { process.stdout.write(`BUDGET exhausted after ${next} cases\n`); failed = true; }
+
+  // Keyboard pass: Tab through the new views in four themes; every stop must show a focus indicator.
+  const ringThemes = ['clay', 'obsidian', 'contrast-dark', 'contrast-light'];
+  const ringScreens = screens.filter((s) => s.expect && (!only || s.name.includes(only)));
+  const ringProblems = new Map();
+  const combos = ringScreens.flatMap((sc) => ringThemes.map((theme) => ({ sc, theme })));
+  let nextCombo = 0;
+  const ringWorker = async () => { while (nextCombo < combos.length) {
+    const { sc, theme } = combos[nextCombo++];
+    const page = await context.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${port}/?mock=1&rt=ignore&${sc.query}&theme=${theme}&lang=en`, { waitUntil: 'load' });
+      await page.waitForSelector('#root > *', { timeout: 15000 });
+      await page.waitForTimeout(400);
+      for (const a of sc.act ?? []) {
+        try {
+          if (a.press) await page.keyboard.press(a.press);
+          else if (a.type) await page.locator(a.type[0]).first().fill(a.type[1], { timeout: 5000 });
+          else if (a.clickText) await page.getByRole('button', { name: a.clickText }).first().click({ timeout: 5000 });
+          else await page.locator(a.click).first().click({ timeout: 5000 });
+        } catch { /* optional step */ }
+        await page.waitForTimeout(300);
+      }
+      const seen = new Set();
+      for (let i = 0; i < 45; i++) {
+        await page.keyboard.press('Tab');
+        const info = await page.evaluate(() => {
+          const el = globalThis.document.activeElement;
+          if (!el || el === globalThis.document.body) return null;
+          const cs = globalThis.getComputedStyle(el);
+          const r = el.getBoundingClientRect();
+          const outline = cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0;
+          const shadow = cs.boxShadow && cs.boxShadow !== 'none';
+          // The indicator may sit on a wrapper or a child (focus-within / :focus-visible .preview): compare styles with and without focus.
+          const group = [el, ...Array.from(el.querySelectorAll('*')).slice(0, 12)];
+          for (let p = el.parentElement, n = 0; p && n < 3; p = p.parentElement, n++) group.push(p);
+          const sig = () => group.map((g) => { const c = globalThis.getComputedStyle(g); return `${c.outlineStyle}${c.outlineWidth}${c.boxShadow}${c.borderColor}${c.backgroundColor}`; }).join('|');
+          const on = sig(); el.blur(); const off = sig(); el.focus({ focusVisible: true });
+          const name = el.getAttribute('data-testid') || el.getAttribute('aria-label') || (el.textContent || '').trim().slice(0, 30) || el.tagName;
+          return { key: `${el.tagName.toLowerCase()}[${name}]`, ring: outline || shadow || on !== off, w: r.width, h: r.height, inline: cs.display === 'inline' };
+        });
+        if (!info) continue;
+        if (seen.has(info.key)) break; // looped back
+        seen.add(info.key);
+        if (!info.ring) { const k = `ring ${sc.name} ${info.key}`; ringProblems.set(k, [...(ringProblems.get(k) ?? []), theme]); }
+      }
+    } catch (err) { process.stdout.write(`FAIL ring ${sc.name}/${theme}: ${err.message.split('\n')[0]}\n`); failed = true; }
+    finally { await page.close(); }
+  } };
+  await Promise.all(Array.from({ length: 4 }, ringWorker));
+  for (const [k, t] of ringProblems) { process.stdout.write(`NO FOCUS RING: ${k} (${t.join(', ')})\n`); failed = true; }
+
+  // Focus return: Escape on a dialog/popover puts focus back on the control that opened it.
+  const returnChecks = [
+    { name: 'run location popover', query: 'screen=home', open: async (pg) => { await pg.locator('[data-testid=computer-picker]').focus(); await pg.keyboard.press('Enter'); }, within: '[data-testid=home-status]', back: '[data-testid=computer-picker]' },
+    { name: 'help dialog', query: 'screen=home', open: async (pg) => { await pg.locator('[data-testid=computer-picker]').focus(); await pg.keyboard.press('Shift+?'); }, within: '[data-testid=help-center]', back: '[data-testid=computer-picker]' },
+    { name: 'add server wizard', query: 'screen=home&menu=1', open: async (pg) => { await pg.locator('[data-testid=computer-add]').first().click(); }, within: '[data-testid=add-server]', back: '[data-testid=computer-picker]' }
+  ];
+  for (const rc of returnChecks) {
+    if (only && !rc.name.includes(only)) continue;
+    const page = await context.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${port}/?mock=1&rt=ignore&${rc.query}&theme=clay&lang=en`, { waitUntil: 'load' });
+      await page.waitForSelector('#root > *', { timeout: 15000 });
+      await page.waitForTimeout(500);
+      await rc.open(page);
+      await page.waitForSelector(rc.within, { timeout: 5000 });
+      await page.waitForTimeout(300);
+      const inside = await page.evaluate((sel) => !!globalThis.document.querySelector(sel)?.contains(globalThis.document.activeElement) || !!globalThis.document.activeElement?.closest('[role=dialog]'), rc.within);
+      if (!inside) { process.stdout.write(`FOCUS NOT MOVED INTO ${rc.name}\n`); failed = true; }
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(500);
+      const gone = await page.locator(rc.within).count();
+      const ok = await page.evaluate((sel) => { const a = globalThis.document.activeElement; return !!a && a !== globalThis.document.body && (!sel || a.matches(sel)); }, rc.back);
+      if (gone) { process.stdout.write(`ESC DID NOT CLOSE ${rc.name}\n`); failed = true; }
+      else if (!ok) { process.stdout.write(`FOCUS NOT RETURNED after ${rc.name}\n`); failed = true; }
+    } catch (err) { process.stdout.write(`FAIL focus-return ${rc.name}: ${err.message.split('\n')[0]}\n`); failed = true; }
+    finally { await page.close(); }
+  }
 
   const matches = (entry, v) => entry.rule === v.rule && v.selector.includes(entry.selector)
     && (!entry.screens || [...v.screens].some((s) => entry.screens.some((n) => s.startsWith(`${n}/`))));

@@ -72,6 +72,8 @@ export type ModelUsage = S["ModelUsage"];
 export type ProviderUsage = S["ProviderUsage"];
 export type DailyUsage = S["DailyUsage"];
 export type SpendLimit = S["SpendLimitDto"];
+export type DataUsage = S["DataUsageDto"];
+export type ClearCacheResult = S["ClearCacheDto"];
 export type BotSpendLimits = S["BotSpendLimitsDto"];
 export type UsageTotals = S["UsageTotals"];
 export type EffectivePolicy = S["EffectivePolicyDto"];
@@ -421,6 +423,7 @@ export type EmailSendTestResponse = S["EmailSendTestResponse"];
 
 export type VoiceConfig = S["VoiceConfigDto"];
 export type VoiceConfigInput = S["VoiceConfigInput"];
+export type LocalVoiceStatus = S["LocalVoiceStatusDto"];
 export type TranscribeInput = S["TranscribeInput"];
 export type TranscribeOutput = S["TranscribeOutput"];
 

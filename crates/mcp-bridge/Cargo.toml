@@ -38,15 +38,16 @@ rmcp = { version = "3.9", default-features = false, features = [
     "reqwest-native-tls",
 ] }
 secret-store.workspace = true
+sha2 = "0.10"
 serde.workspace = true
 serde_json.workspace = true
-sha2 = "0.10"
 thiserror.workspace = true
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
 toml.workspace = true
 tool-registry = { path = "../tool-registry", version = "0.1.0" }
 tracing = "0.1"
 url.workspace = true
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 agent-router = { path = "../agent-router", version = "0.1.0" }

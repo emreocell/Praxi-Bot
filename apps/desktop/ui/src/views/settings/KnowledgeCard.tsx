@@ -9,13 +9,14 @@ import { MAX_EMBEDDING_DIMENSIONS, parsePositiveInt } from "../../lib/embeddingI
 import form from "../../components/Form.module.css";
 import styles from "./KnowledgeCard.module.css";
 import { humanLine } from "../../lib/humanError";
+import { formatClock, formatDateTime } from "../../lib/messageTime";
 
 const KINDS: KnowledgeSourceKind[] = ["file", "folder", "saved_web", "conversation", "email", "note", "shared_brain"];
 const message = (error: unknown) => humanLine(error);
 
 /** Bot-scoped source selection and separate document/query egress consent. */
 export function KnowledgeCard() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { client, bots } = useDaemon();
   const { dto: providers } = useProviders();
   const [bot, setBot] = useState("");
@@ -124,7 +125,7 @@ export function KnowledgeCard() {
           {embeddingProgress[source.id] ? <p role="status" className={form.hint}>
             {t(`knowledge.embeddingStatus.${embeddingProgress[source.id].status}`)} · {t("knowledge.embeddingRemaining", { count: embeddingProgress[source.id].remaining_chunks })}
             {embeddingProgress[source.id].skipped_chunks ? <> · {t("knowledge.embeddingSkipped", { count: embeddingProgress[source.id].skipped_chunks })}</> : null}
-            {embeddingProgress[source.id].next_attempt_ms ? <> · {t("knowledge.embeddingRetry", { time: new Date(embeddingProgress[source.id].next_attempt_ms!).toLocaleString() })}</> : null}
+            {embeddingProgress[source.id].next_attempt_ms ? <> · {t("knowledge.embeddingRetry", { time: formatDateTime(embeddingProgress[source.id].next_attempt_ms!, i18n.language) })}</> : null}
           </p> : null}
           <div className={styles.actions}>
             {source.requires_path_selection ? <Button size="sm" variant="secondary" disabled={busy} onClick={() => { setRebinding(source); setBindingPath(""); }}>{t("knowledge.reselect")}</Button> : <Button size="sm" variant="secondary" disabled={busy} onClick={() => void change(source, source.enabled ? "disable" : "enable")}>{t(source.enabled ? "knowledge.disable" : "knowledge.reauthorize")}</Button>}
@@ -178,7 +179,7 @@ export function KnowledgeCard() {
         <code className={styles.locator}>{grant.provider_id} · {grant.model}</code>
         <code className={styles.locator}>{grant.endpoint_identity}</code>
         <code className={styles.locator}>{grant.profile_fingerprint}</code>
-        <p className={form.hint}>{t("knowledge.approvalExpiry", { time: new Date(grant.expires_at_ms).toLocaleTimeString() })}</p>
+        <p className={form.hint}>{t("knowledge.approvalExpiry", { time: formatClock(grant.expires_at_ms, i18n.language, true) })}</p>
         <div className={styles.actions}>
           <Button disabled={busy} onClick={() => void act(async () => { await client!.confirmKnowledgeEmbeddingApproval(activeBot, grant.id); setGrant(null); })}>{t(grant.target.kind === "documents" ? "knowledge.confirmConsent" : "knowledge.confirmQuery")}</Button>
           <Button variant="secondary" disabled={busy} onClick={() => setGrant(null)}>{t("common.cancel")}</Button>
@@ -193,7 +194,7 @@ export function KnowledgeCard() {
           {kind === "saved_web" ? <><label className={form.field}>{t("knowledge.url")}<input className={form.input} type="url" value={url} onChange={(e) => setUrl(e.target.value)} /></label><label><input type="checkbox" checked={html} onChange={(e) => setHtml(e.target.checked)} /> {t("knowledge.html")}</label><p className={form.hint}>{t("knowledge.savedWebHint")}</p></> : null}
           {kind === "saved_web" || kind === "note" ? <label className={form.field}>{t("knowledge.content")}<textarea className={form.textarea} value={content} onChange={(e) => setContent(e.target.value)} /></label> : null}
           {kind === "conversation" ? <label className={form.field}>{t("knowledge.conversation")}<select className={form.select} value={chatId} onChange={(e) => setChatId(e.target.value)}><option value="">{t("knowledge.select")}</option>{chats.map((chat) => <option key={chat.id} value={chat.id}>{chat.title}</option>)}</select></label> : null}
-          {kind === "email" ? <><p className={form.hint}>{t("knowledge.emailHint")}</p>{emailError ? <p role="status" className={form.error}>{t("knowledge.emailUnavailable", { error: emailError })}</p> : null}<label className={form.field}>{t("knowledge.emailCapture")}<select className={form.select} value={captureId} disabled={Boolean(emailError)} onChange={(e) => setCaptureId(e.target.value)}><option value="">{t("knowledge.select")}</option>{captures.map((capture) => <option key={capture.tool_call_id} value={capture.tool_call_id}>{capture.account} · {new Date(capture.created_ms).toLocaleString()}</option>)}</select></label></> : null}
+          {kind === "email" ? <><p className={form.hint}>{t("knowledge.emailHint")}</p>{emailError ? <p role="status" className={form.error}>{t("knowledge.emailUnavailable", { error: emailError })}</p> : null}<label className={form.field}>{t("knowledge.emailCapture")}<select className={form.select} value={captureId} disabled={Boolean(emailError)} onChange={(e) => setCaptureId(e.target.value)}><option value="">{t("knowledge.select")}</option>{captures.map((capture) => <option key={capture.tool_call_id} value={capture.tool_call_id}>{capture.account} · {formatDateTime(capture.created_ms, i18n.language)}</option>)}</select></label></> : null}
           {kind === "shared_brain" ? <p className={form.hint}>{t("knowledge.brainHint")}</p> : null}
           <Button disabled={busy || (kind !== "shared_brain" && !label.trim())} onClick={() => void add()}>{t("knowledge.add")}</Button>
         </div>

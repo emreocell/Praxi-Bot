@@ -80,6 +80,7 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     // Full history reads and portable transcripts expose sensitive conversation data.
     ("GET", "/v1/chats/search"),
     ("GET", "/v1/chats/{}/export"),
+    ("POST", "/v1/chats/import"),
     // approvals and questions: a token must not approve its own tool calls
     ("POST", "/v1/approvals/{}"),
     ("POST", "/v1/questions/{}"),
@@ -106,6 +107,9 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/v1/spend-limit"),
     // per-bot spending limits: a bot or token holder must not lift its own cap
     ("PUT", "/v1/bots/{}/spend-limits"),
+    // data folder sizes and Clear cache: the owner's own housekeeping, not a token holder's
+    ("GET", "/v1/data-usage"),
+    ("POST", "/v1/data-usage/clear-cache"),
     // bulk usage CSV export: bot names, models and spend history belong to the owner
     ("GET", "/v1/usage/export"),
     ("POST", "/v1/trusted-folders"),
@@ -192,6 +196,8 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/email/accounts/{}/send-test"),
     ("PUT", "/v1/web/search"),
     ("PUT", "/v1/voice"),
+    // downloads hundreds of MB onto the owner's disk
+    ("POST", "/v1/voice/local/install"),
     ("PUT", "/v1/composio/key"),
     ("DELETE", "/v1/composio/key"),
     ("POST", "/v1/composio/login"),

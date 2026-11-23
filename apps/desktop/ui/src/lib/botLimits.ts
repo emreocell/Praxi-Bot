@@ -1,4 +1,5 @@
 import type { BotSpendLimits } from "../api/types.ts";
+import { parseCountText, parseUsdText } from "./limitInput.ts";
 
 export type LimitPeriod = "daily" | "weekly" | "monthly";
 export type LimitField = "soft_usd" | "hard_usd" | "soft_tokens" | "hard_tokens";
@@ -53,18 +54,16 @@ export function draftFromLimits(l: BotSpendLimits["limits"]): LimitsDraft {
 type Parsed = number | null | "invalid";
 
 function parseField(field: LimitField, raw: string): Parsed {
-  const s = raw.trim();
-  if (s === "") {
+  if (raw.trim() === "") {
     return null;
   }
-  const v = Number(s.replace(",", "."));
-  if (!Number.isFinite(v)) {
-    return "invalid";
-  }
+  // Strict readers: "10.000" is rejected, never read as ten (see limitInput.ts).
   if (field.endsWith("usd")) {
-    return v >= MIN_USD && v <= MAX_USD ? v : "invalid";
+    const v = parseUsdText(raw);
+    return v !== null && v >= MIN_USD && v <= MAX_USD ? v : "invalid";
   }
-  return Number.isInteger(v) && v >= 1 && v <= MAX_TOKENS ? v : "invalid";
+  const v = parseCountText(raw);
+  return v !== null && v >= 1 && v <= MAX_TOKENS ? v : "invalid";
 }
 
 export type LimitsResult =

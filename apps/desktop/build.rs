@@ -42,6 +42,16 @@ fn main() {
         }
     }
 
+    // Integration tests link the Tauri runtime; on Windows their exe needs the
+    // common-controls v6 manifest to start (bins get it from tauri-build).
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
+        && let Ok(dir) = env::var("CARGO_MANIFEST_DIR")
+    {
+        println!("cargo:rerun-if-changed=windows-test.manifest");
+        println!("cargo:rustc-link-arg-tests=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg-tests=/MANIFESTINPUT:{dir}/windows-test.manifest");
+    }
+
     // Every custom command needs an explicit `allow-<command>` permission in a
     // capability; without the app manifest they would be callable from every
     // window.

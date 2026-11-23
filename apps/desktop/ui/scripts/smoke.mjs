@@ -119,7 +119,7 @@ const waitFor = async (what, fn, ms = 60000) => {
 const CONTROL = { mode: 'idle', runGeneration: 0, bot: null, currentStep: null, stopHotkey: 'Ctrl+Alt+Esc', activeTarget: null, lastClick: null, refusedActionsCount: 0, stateRev: 1, stopSeq: 0 };
 const MODELS = ['stub-small', 'stub-large', 'stub-mini'];
 const stubLog = [];
-function scripted(messages) {
+function scripted(messages, tools = []) {
   // The loop adds a user-role action ledger after a tool call. The fixture
   // still follows the original user turn and replies with the tool result.
   const contentText = (content) => typeof content === 'string' ? content
@@ -133,9 +133,23 @@ function scripted(messages) {
   // `slow:<ms>`: the model starts answering and then stalls (Stop cases hold the provider request open).
   const slow = /^slow:(\d+)/.exec(text.trim());
   if (slow) return { slow: Number(slow[1]) };
-  const toolReplies = messages.slice(userIndex + 1).filter((m) => m.role === 'tool');
-  const done = toolReplies.length;
-  if (calls && done < calls.length) return { call: { name: calls[done][0], args: calls[done][1], id: `call_${done + 1}` } };
+  const after = messages.slice(userIndex + 1);
+  const toolReplies = after.filter((m) => m.role === 'tool');
+  // Deferred tool surface: a tool that is not offered yet is loaded with
+  // tool_describe first, like a real model would, then called.
+  const callNames = new Map(after.filter((m) => m.role === 'assistant')
+    .flatMap((m) => m.tool_calls ?? []).map((c) => [c.id, c.function?.name]));
+  const isDescribe = (m) => callNames.get(m.tool_call_id) === 'tool_describe';
+  const done = toolReplies.filter((m) => !isDescribe(m)).length;
+  const offered = new Set(tools.map((t) => t.function?.name));
+  if (calls && done < calls.length) {
+    const [name, args] = calls[done];
+    const lastReply = toolReplies.at(-1);
+    if (!offered.has(name) && offered.has('tool_describe') && !(lastReply && isDescribe(lastReply))) {
+      return { call: { name: 'tool_describe', args: JSON.stringify({ name }), id: `call_d${toolReplies.length + 1}` } };
+    }
+    return { call: { name, args, id: `call_${done + 1}` } };
+  }
   const last = toolReplies.at(-1);
   if (last) return { text: `tool said: ${String(last.content).slice(0, 200)}` };
   return { text: `echo: ${text.replace(/\s+/g, ' ').trim().slice(0, 300)}` };
@@ -160,7 +174,7 @@ function startStub(port) {
       }
       if (req.method === 'POST' && path.endsWith('/chat/completions')) {
         const payload = JSON.parse(body || '{}');
-        const out = scripted(payload.messages ?? []);
+        const out = scripted(payload.messages ?? [], payload.tools ?? []);
         const chunk = (delta, finish = null) => `data: ${JSON.stringify({ id: 'stub', object: 'chat.completion.chunk', model: payload.model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
         if (payload.stream === false) {
           res.setHeader('content-type', 'application/json');

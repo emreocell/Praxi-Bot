@@ -62,6 +62,7 @@ mod secret_request_routes;
 pub mod trusted_folders;
 pub use peer::{PeerIdentity, PeerRole, peer_router};
 mod bot_limits_routes;
+mod data_routes;
 mod routes;
 mod schedule;
 mod schedule_tools;
@@ -1312,6 +1313,12 @@ fn api_routes() -> Router<AppState> {
         )
         .route("/v1/chats/search", get(chat_history::search))
         .route("/v1/chats/{id}/export", get(chat_history::export))
+        .route(
+            "/v1/chats/import",
+            post(chat_history::import).layer(axum::extract::DefaultBodyLimit::max(
+                chat_history::MAX_IMPORT_BYTES,
+            )),
+        )
         .route("/v1/chats", get(r::list_chats).post(r::create_chat))
         .route(
             "/v1/chats/{id}",
@@ -1387,6 +1394,11 @@ fn api_routes() -> Router<AppState> {
             post(cli_engines::decide),
         )
         .route("/v1/providers/reload", post(r::reload_providers))
+        .route("/v1/data-usage", get(data_routes::get_data_usage))
+        .route(
+            "/v1/data-usage/clear-cache",
+            post(data_routes::post_clear_cache),
+        )
         .route("/v1/doctor", get(doctor_routes::get_doctor))
         .route("/v1/doctor/report", get(doctor_routes::report))
         .route("/v1/doctor/repair/{id}", post(doctor_routes::repair))
@@ -1514,6 +1526,8 @@ fn api_routes() -> Router<AppState> {
             get(spend_routes::get_spend_limit).put(spend_routes::put_spend_limit),
         )
         .route("/v1/voice", get(vo::get_voice).put(vo::update_voice))
+        .route("/v1/voice/local", get(vo::get_local_voice))
+        .route("/v1/voice/local/install", post(vo::install_local_voice))
         .route(
             "/v1/voice/transcribe",
             post(vo::transcribe).layer(axum::extract::DefaultBodyLimit::max(vo::MAX_BODY_BYTES)),

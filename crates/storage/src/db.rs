@@ -845,6 +845,49 @@ impl Storage {
         Ok(())
     }
 
+    /// Insert a chat and its messages, each with its recorded origin, atomically.
+    ///
+    /// # Errors
+    /// Fails on SQLite errors, including a duplicate id or an unknown bot/chat/run.
+    pub fn insert_chat_with_messages(
+        &self,
+        chat: &Chat,
+        messages: &[(Message, &str)],
+    ) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO chats (id, user_id, bot_id, title, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                chat.id.to_string(),
+                chat.user_id.to_string(),
+                chat.bot_id.to_string(),
+                chat.title,
+                chat.created_at_ms,
+            ],
+        )?;
+        for (message, source) in messages {
+            tx.execute(
+                "INSERT INTO messages (id, user_id, chat_id, run_id, role, content, created_at_ms, exposure_untrusted, exposure_private, exposure_sources, source) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    message.id.to_string(),
+                    message.user_id.to_string(),
+                    message.chat_id.to_string(),
+                    message.run_id.map(|r| r.to_string()),
+                    message.role,
+                    message.content,
+                    message.created_at_ms,
+                    i64::from(message.exposure_untrusted),
+                    i64::from(message.exposure_private),
+                    serde_json::to_string(&message.exposure_sources)?,
+                    source,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Fetch a message.
     ///
     /// # Errors

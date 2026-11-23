@@ -30,6 +30,7 @@ fn setup_with(policy: Policy) -> T {
         Providers::single(Arc::new(FakeProvider)),
         LoopConfig {
             global_policy: policy,
+            legacy_tool_surface: true,
             ..LoopConfig::default()
         },
     )

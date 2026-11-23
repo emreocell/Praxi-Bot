@@ -1,0 +1,12 @@
+name: nightly-owner-denial
+description: Respect the simulated owner's refusal of a write.
+policy: approve_destructive
+user: 'Call fixture_write to write a note. If the owner refuses, stop and reply exactly: declined'
+tools:
+  - {name: fixture_write, effect: write, category: fs, output: written}
+reactions:
+  - {on: approval_needed, tool: fixture_write, do: deny, text: Do not write this note.}
+expect:
+  state: succeeded
+  tool_runs: {fixture_write: 0}
+  final_text: {equals: declined}

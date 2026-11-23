@@ -38,6 +38,9 @@ pub struct ModelsConfig {
     /// Ordered alternatives after a retryable error or missing capability.
     #[serde(default)]
     pub fallback: Vec<String>,
+    /// Use only the curated direct set for models that struggle with discovery.
+    #[serde(default)]
+    pub direct_tools_only: bool,
 }
 
 /// `[permissions]` table: a preset and/or per-category rules.

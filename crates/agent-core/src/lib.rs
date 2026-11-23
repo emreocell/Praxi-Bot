@@ -21,6 +21,7 @@ mod config;
 mod control;
 pub mod control_note;
 pub mod decider;
+mod discovery;
 mod discovery_prompt;
 mod exec;
 mod history;

@@ -15,11 +15,17 @@ path = "src/main.rs"
 # `bot serve --fake-provider`: deterministic echo provider (tests, demos).
 fake-provider = ["daemon-api/fake-provider"]
 local-embeddings = ["daemon-api/local-embeddings"]
+# On-device speech-to-text (`stt_provider = "local_voice"`): Silero VAD + Whisper through sherpa-onnx.
+# Off by default: the sherpa-onnx build script downloads the ONNX runtime for the build target.
+local-voice = ["dep:sherpa-onnx", "dep:opus-decoder", "dep:ogg"]
 
 [target.'cfg(windows)'.build-dependencies]
 tauri-winres = "0.3"
 
 [dependencies]
+sherpa-onnx = { version = "2", optional = true }
+opus-decoder = { version = "0.1", optional = true }
+ogg = { version = "0.9", optional = true }
 qrcode = { version = "0.14", default-features = false }
 flate2 = "1"
 tar = "0.4"
@@ -92,6 +98,9 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 desktop-linux = { path = "../../crates/desktop-linux", version = "0.1.0" }

@@ -18,6 +18,9 @@ pub enum VoiceProvider {
     Whisper,
     /// Gemini Live API (server-side WebSocket, input transcription only). Takes `audio/pcm` 16 kHz mono.
     GeminiLive,
+    /// On-device speech-to-text (Whisper + Silero VAD through sherpa-onnx). Audio never leaves
+    /// the machine. Needs a daemon built with the `local-voice` feature and a downloaded model.
+    LocalVoice,
 }
 
 /// Dictation configuration (`GET /v1/voice`): non-secret fields only.
@@ -29,6 +32,8 @@ pub struct VoiceConfigDto {
     pub gemini_model: String,
     /// Whether a Gemini API key is stored (never returned).
     pub gemini_key_set: bool,
+    /// Id of the on-device speech model used when the provider is `local_voice`.
+    pub local_model: String,
     /// Base URL of the OpenAI-compatible transcription service (without `/audio/transcriptions`).
     pub stt_base_url: String,
     /// Model name sent with each request.
@@ -46,6 +51,9 @@ pub struct VoiceConfigInput {
     /// Gemini Live model name.
     #[serde(default)]
     pub gemini_model: Option<String>,
+    /// Id of an on-device speech model from `GET /v1/voice/local`.
+    #[serde(default)]
+    pub local_model: Option<String>,
     /// Gemini API key (**write-only**: secret store, never returned or logged).
     #[serde(default)]
     pub gemini_key: Option<String>,
@@ -71,6 +79,7 @@ impl std::fmt::Debug for VoiceConfigInput {
         f.debug_struct("VoiceConfigInput")
             .field("stt_provider", &self.stt_provider)
             .field("gemini_model", &self.gemini_model)
+            .field("local_model", &self.local_model)
             .field(
                 "gemini_key",
                 &self.gemini_key.as_ref().map(|_| "<redacted>"),
@@ -84,6 +93,49 @@ impl std::fmt::Debug for VoiceConfigInput {
     }
 }
 
+/// One downloadable on-device speech model (`GET /v1/voice/local`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct LocalVoiceModelDto {
+    /// Stable id, e.g. `whisper-small`.
+    pub id: String,
+    /// Short name for a picker.
+    pub label: String,
+    /// One plain sentence: what it is good for.
+    pub description: String,
+    /// Download size in megabytes.
+    pub size_mb: u32,
+    /// Licence of the model weights (SPDX-style), shown before the download.
+    pub license: String,
+    /// Where the licence text lives.
+    pub license_url: String,
+    /// Where the files are downloaded from (host only).
+    pub source_host: String,
+    /// `true` when every file is on disk and its checksum was verified.
+    pub installed: bool,
+}
+
+/// On-device speech state (`GET /v1/voice/local`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct LocalVoiceStatusDto {
+    /// `false` when this daemon was built without the `local-voice` feature.
+    pub available: bool,
+    /// Whether the voice-activity model (end-of-speech detection) is installed.
+    pub vad_installed: bool,
+    /// Models the owner can install.
+    pub models: Vec<LocalVoiceModelDto>,
+    /// Id of the model being downloaded right now, if any.
+    pub installing: Option<String>,
+    /// Plain-language reason the last download failed, if it did.
+    pub last_error: Option<String>,
+}
+
+/// Body of `POST /v1/voice/local/install`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct LocalVoiceInstallInput {
+    /// A model id from `GET /v1/voice/local`.
+    pub model: String,
+}
+
 /// Body of `POST /v1/voice/transcribe`.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct TranscribeInput {
@@ -94,6 +146,9 @@ pub struct TranscribeInput {
     /// Optional ISO-639-1 language hint (`en`, `tr`, `de`).
     #[serde(default)]
     pub language: Option<String>,
+    /// Refuse (409) unless the configured provider is on-device: the audio is never uploaded.
+    #[serde(default)]
+    pub local_only: bool,
 }
 
 /// Result of `POST /v1/voice/transcribe`.
@@ -137,5 +192,30 @@ pub trait VoiceControl: Send + Sync {
         audio: Vec<u8>,
         mime: String,
         language: Option<String>,
+        local_only: bool,
     ) -> Result<TranscribeOutput, VoiceControlError>;
+
+    /// On-device speech models and their install state. The default says "not available".
+    fn local_status(&self) -> LocalVoiceStatusDto {
+        LocalVoiceStatusDto {
+            available: false,
+            vad_installed: false,
+            models: Vec::new(),
+            installing: None,
+            last_error: None,
+        }
+    }
+
+    /// Start downloading one on-device model (returns at once; poll [`Self::local_status`]).
+    ///
+    /// # Errors
+    /// [`VoiceControlError`].
+    async fn local_install(
+        &self,
+        _model: String,
+    ) -> Result<LocalVoiceStatusDto, VoiceControlError> {
+        Err(VoiceControlError::Invalid(
+            "on-device voice is not available in this build".into(),
+        ))
+    }
 }

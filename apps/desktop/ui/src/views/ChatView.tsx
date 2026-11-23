@@ -176,7 +176,8 @@ type Entry =
   | { kind: "unread"; key: string; ts: number }
   | { kind: "user"; key: string; ts: number; msgId: string; text: string; source?: string | null; attachments?: Message["attachments"] }
   | { kind: "superseded"; key: string; ts: number; group: SupersededGroup }
-  | { kind: "assistant"; key: string; ts: number; text: string; live: boolean; botId?: string | null; runId?: string | null }
+  | { kind: "assistant"; key: string; ts: number; text: string; live: boolean; botId?: string | null; runId?: string | null; source?: string | null }
+  | { kind: "imported_note"; key: string; ts: number; text: string }
   | { kind: "item"; key: string; ts: number; item: TimelineItem; runId: string }
   | { kind: "chain"; key: string; ts: number; chain: Chain; runId: string }
   | { kind: "runError"; key: string; ts: number; message: string }
@@ -195,6 +196,12 @@ type RememberState = "idle" | "busy" | "saved" | "hidden";
 function SlashIcon({ name }: { name: string }) {
   const Icon = SLASH_ICONS[name] ?? Search;
   return <Icon />;
+}
+
+/** Counts from the daemon's fixed import note, `null` for any other text. */
+function importedNoteCounts(text: string): { steps: string; approvals: string } | null {
+  const match = /^Imported chat note: (\d+) tool step\(s\) and (\d+) approval\(s\) were listed in the file but were not imported or executed\.$/.exec(text);
+  return match ? { steps: match[1], approvals: match[2] } : null;
 }
 
 function canOfferRemember(run: RunState): boolean {
@@ -498,7 +505,15 @@ export function ChatView({
           text: m.content,
           live: false,
           botId: m.bot_id,
-          runId: m.run_id
+          runId: m.run_id,
+          source: m.source
+        });
+      } else if (m.role === "imported_note") {
+        out.push({
+          kind: "imported_note",
+          key: `m-${m.id}`,
+          ts: m.created_at_ms,
+          text: m.content
         });
       }
     }
@@ -1517,6 +1532,9 @@ export function ChatView({
                 return (
                   <div key={e.key} id={e.key} tabIndex={-1} className={styles.assistantRow} data-message-row="assistant">
                     <div className={styles.assistantBubble}>
+                      {e.source?.startsWith("imported") ? (
+                        <span className={styles.importedBadge}>{t("chat.imported")}</span>
+                      ) : null}
                       {lead ? guestName(guestBot(e.botId)) : null}
                       <Markdown text={e.text} />
                     </div>
@@ -1526,10 +1544,18 @@ export function ChatView({
                     >
                       <CopyButton text={e.text} />
                       <SpeakButton id={e.key} text={e.text} botId={e.botId ?? chat?.bot_id} />
-                      <MessageInfo side="bot" ts={e.ts} runId={e.runId} run={e.runId ? events.runs[e.runId] : undefined} runDto={runs.find((r) => r.id === e.runId)} />
+                      <MessageInfo side="bot" ts={e.ts} source={e.source} runId={e.runId} run={e.runId ? events.runs[e.runId] : undefined} runDto={runs.find((r) => r.id === e.runId)} />
                     </MessageActions>
                   </div>
                 );
+              case "imported_note": {
+                const counts = importedNoteCounts(e.text);
+                return (
+                  <div key={e.key} className={styles.importedNote} data-message-row="imported_note">
+                    {counts ? t("chat.importedNote", counts) : e.text}
+                  </div>
+                );
+              }
               case "runStopped":
                 return (
                   <div key={e.key} className={styles.runStopped} data-testid="run-stopped">
