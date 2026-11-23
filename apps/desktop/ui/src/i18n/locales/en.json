@@ -828,6 +828,17 @@
       "label": "Tools bots may use",
       "restricted": "Some tools are limited by a custom allow-list; edit it in the server settings."
     },
+    "trust": {
+      "badgeAsks": "Always asks",
+      "badgeTrusted": "Labels trusted",
+      "explain": "A server labels each tool as read-only or not. If you answer No, every action asks first. If you answer Yes, only tools it marks read-only run without asking; anything that changes or deletes still asks. You can change this later in the app's settings.",
+      "learn": "Learn more",
+      "no": "No, ask me for every action",
+      "question": "Do you trust this server to describe its own tools honestly?",
+      "savedNo": "{{name}}: every action asks again.",
+      "savedYes": "{{name}}: its read-only tools now run without asking.",
+      "yes": "Yes, let its read-only tools run without asking"
+    },
     "usedBy": "Used by"
   },
   "backdrop": {

@@ -669,7 +669,7 @@ function serverFromConfig(c: McpServerConfig, category = "other"): McpServer {
     error: null,
     tool_count: 8,
     category: c.category ?? category,
-    trust_hints: false,
+    trust_hints: c.trust_hints ?? false,
     public_content: c.public_content ?? false,
     local_only: c.local_only ?? false,
     bots: c.bots ?? null
@@ -2416,6 +2416,7 @@ export class MockApiClient extends ApiClient {
     const merged: McpServer = {
       ...prev,
       ...(typeof patch.enabled === "boolean" ? { enabled: patch.enabled } : {}),
+      ...(typeof patch.trust_hints === "boolean" ? { trust_hints: patch.trust_hints } : {}),
       ...(typeof patch.category === "string" ? { category: patch.category } : {}),
       ...(typeof patch.command === "string" ? { command: patch.command } : {}),
       ...(typeof patch.url === "string" ? { url: patch.url } : {}),

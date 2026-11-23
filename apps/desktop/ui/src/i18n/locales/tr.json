@@ -828,6 +828,17 @@
       "label": "Botların kullanabileceği araçlar",
       "restricted": "Bazı araçlar özel bir izin listesiyle sınırlı; sunucu ayarlarından düzenle."
     },
+    "trust": {
+      "badgeAsks": "Hep sorar",
+      "badgeTrusted": "Etiketlere güveniliyor",
+      "explain": "Bir sunucu her aracı salt okunur olarak işaretleyebilir ya da işaretlemeyebilir. Hayır derseniz her işlem önce size sorar. Evet derseniz yalnızca salt okunur işaretli araçlar sormadan çalışır; bir şeyi değiştiren veya silen her işlem yine sorar. Bunu sonra uygulamanın ayarlarından değiştirebilirsiniz.",
+      "learn": "Daha fazla bilgi",
+      "no": "Hayır, her işlem için bana sor",
+      "question": "Bu sunucunun kendi araçlarını dürüstçe tarif ettiğine güveniyor musunuz?",
+      "savedNo": "{{name}}: her işlem yeniden size sorar.",
+      "savedYes": "{{name}}: salt okunur araçları artık sormadan çalışır.",
+      "yes": "Evet, yalnızca okuyan araçları sormadan çalışsın"
+    },
     "usedBy": "Kullananlar"
   },
   "backdrop": {

@@ -828,6 +828,17 @@
       "label": "Werkzeuge, die Bots nutzen dürfen",
       "restricted": "Einige Werkzeuge sind durch eine eigene Erlaubnisliste eingeschränkt; bearbeite sie in den Servereinstellungen."
     },
+    "trust": {
+      "badgeAsks": "Fragt immer",
+      "badgeTrusted": "Kennzeichnungen vertraut",
+      "explain": "Ein Server kennzeichnet jedes Werkzeug als schreibgeschützt oder nicht. Bei „Nein“ fragt jede Aktion zuerst nach. Bei „Ja“ laufen nur als schreibgeschützt gekennzeichnete Werkzeuge ohne Nachfrage; alles, was etwas ändert oder löscht, fragt weiterhin nach. Sie können das später in den Einstellungen der App ändern.",
+      "learn": "Mehr erfahren",
+      "no": "Nein, bei jeder Aktion nachfragen",
+      "question": "Vertrauen Sie diesem Server, seine eigenen Werkzeuge ehrlich zu beschreiben?",
+      "savedNo": "{{name}}: Jede Aktion fragt wieder nach.",
+      "savedYes": "{{name}}: Die lesenden Werkzeuge laufen jetzt ohne Nachfrage.",
+      "yes": "Ja, nur lesende Werkzeuge ohne Nachfrage ausführen"
+    },
     "usedBy": "Genutzt von"
   },
   "backdrop": {
