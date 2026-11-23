@@ -275,8 +275,12 @@ impl PairingStore {
             synced
         };
         if let Err(error) = synced {
-            // Only an I/O error text, never state contents or secrets.
-            eprintln!("telegram: state saved, but syncing its directory failed: {error}");
+            // Only an I/O error text, never state contents or secrets. `writeln!` and not
+            // `eprintln!`, which panics if stderr fails: the caller must still adopt the state.
+            let _ = writeln!(
+                std::io::stderr(),
+                "telegram: state saved, but syncing its directory failed: {error}"
+            );
         }
         Ok(())
     }
