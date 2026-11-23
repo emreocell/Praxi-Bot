@@ -37,6 +37,10 @@ jobs:
         shell: pwsh
         run: python scripts/installer/generate_installer_assets.py --check
 
+      - name: Forbid killing processes by image name in the installer
+        shell: pwsh
+        run: python -B scripts/installer/check_no_taskkill_by_name.py
+
       - name: Check tagged release version
         if: github.ref_type == 'tag'
         shell: pwsh

@@ -10,10 +10,40 @@
 
 !include "FileFunc.nsh"
 
+; Stop ONLY the Praxi-Bot processes that run from $INSTDIR (never by image name: an unrelated
+; bot.exe of another program or of another user session must not be touched). A helper script is
+; written to $TEMP (works in installer and uninstaller, no non-ASCII/quoting issues because the
+; install dir is passed as one quoted argument). Steps: CloseMainWindow (graceful quit), wait up
+; to 10 s, then force-kill (with child tree) only the pids whose ExecutablePath is under $INSTDIR.
+; Does nothing when the app is not running.
+!macro PRAXI_STOP_OUR_PROCESSES
+  Push $0
+  Push $1
+  GetTempFileName $0
+  Delete "$0"
+  StrCpy $0 "$0.ps1"
+  FileOpen $1 "$0" w
+  FileWrite $1 "param([string]$$Dir)$\r$\n"
+  FileWrite $1 "$$ErrorActionPreference='SilentlyContinue'$\r$\n"
+  FileWrite $1 "$$Dir=$$Dir.Trim().Trim([char]34).TrimEnd('\')$\r$\n"
+  FileWrite $1 "if(-not $$Dir){exit 0}$\r$\n"
+  FileWrite $1 "$$t=@((Join-Path $$Dir 'bot-desktop.exe'),(Join-Path $$Dir 'bot.exe'))$\r$\n"
+  FileWrite $1 "function Ours{@(Get-CimInstance Win32_Process|Where-Object{$$_.ExecutablePath -and ($$t -contains $$_.ExecutablePath)})}$\r$\n"
+  FileWrite $1 "Ours|ForEach-Object{(Get-Process -Id $$_.ProcessId).CloseMainWindow()|Out-Null}$\r$\n"
+  FileWrite $1 "for($$i=0;$$i -lt 20 -and (Ours).Count -gt 0;$$i++){Start-Sleep -Milliseconds 500}$\r$\n"
+  FileWrite $1 "Ours|ForEach-Object{& ($$env:SystemRoot+'\System32\taskkill.exe') /PID $$_.ProcessId /T /F|Out-Null}$\r$\n"
+  FileWrite $1 "exit 0$\r$\n"
+  FileClose $1
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$0" -Dir "$INSTDIR"'
+  Pop $1
+  Delete "$0"
+  Pop $1
+  Pop $0
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
-  ; Stop any running per-user Praxi-Bot desktop or daemon process before replacing binaries
-  nsExec::ExecToLog 'taskkill /F /IM "bot-desktop.exe"'
-  nsExec::ExecToLog 'taskkill /F /IM "bot.exe"'
+  ; Stop the Praxi-Bot desktop/daemon processes running from $INSTDIR before replacing binaries
+  !insertmacro PRAXI_STOP_OUR_PROCESSES
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
@@ -31,8 +61,7 @@
 
 !macro NSIS_HOOK_PREUNINSTALL
   ; Stop running desktop shell and bundled daemon before uninstalling
-  nsExec::ExecToLog 'taskkill /F /IM "bot-desktop.exe"'
-  nsExec::ExecToLog 'taskkill /F /IM "bot.exe"'
+  !insertmacro PRAXI_STOP_OUR_PROCESSES
 
   ; Always clean up the per-user autostart registry entry on uninstall
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Praxi-Bot"
