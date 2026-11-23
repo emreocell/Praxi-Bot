@@ -30,6 +30,7 @@ pub mod meta;
 pub mod notes;
 pub mod pc;
 pub mod provenance;
+pub mod pure_tools;
 pub mod schedule;
 pub mod script;
 pub mod secret_request;
@@ -73,6 +74,7 @@ pub use files::{try_with_exclusive_file_access, with_checkpoint_access, workspac
 pub use fill_secret::{SECRETS_LIST, secrets_list_tool};
 pub use meta::{META_TOOL_NAMES, QUESTION_CARD_KIND, TODO_LIST_KIND, TodoItem, TodoStatus};
 pub use notes::NOTES_TOOL_NAMES;
+pub use pure_tools::PURE_TOOL_NAMES;
 pub use schedule::{
     PreviousSchedule, SCHEDULE_TOOL_NAMES, ScheduleCaller, ScheduleChange, ScheduleHost,
     SchedulePreview, ScheduleRequest, ScheduleView,
@@ -279,6 +281,7 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
     ));
     all.extend(meta::tools());
     all.extend(notes::tools(&cfg.data_dir));
+    all.extend(pure_tools::tools());
     if let Some(backend) = cfg.knowledge {
         all.push(knowledge::tool(backend));
     }
@@ -546,6 +549,8 @@ mod tests {
             ("todo_write", W, Me),
             ("notes_read", R, Fs),
             ("notes_write", W, Fs),
+            ("time_now", R, Me),
+            ("calculate", R, Me),
         ]
     }
 
@@ -1118,7 +1123,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 37 + 6 + 2);
+        assert_eq!(added, 37 + 6 + 2 + 2);
 
         // Verification of email tools and their effects
         let send_tool = reg

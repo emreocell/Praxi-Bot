@@ -1,3 +1,4 @@
+import { wordDiff, type DiffPart } from "../lib/textDiff.ts";
 import { Check, ChevronDown, Search, Server, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { upsertApp } from "../lib/composioApps";
@@ -7,6 +8,7 @@ import { BrandIcon } from "../components/BrandIcon";
 import { brandIcon } from "../lib/brandIcons";
 import { botView } from "../lib/botProfile";
 import { McpToolList } from "./McpToolList.tsx";
+import { ApiError } from "../api/client";
 import type { McpAuthState, McpCatalogEntry, McpServer } from "../api/types";
 import formStyles from "../components/Form.module.css";
 import { BotAccessPicker } from "../components/BotAccessPicker";
@@ -64,6 +66,73 @@ const MAX_FACES = 4;
  */
 
 /** The failure of one server: what to do first, then the full message and what the server printed. */
+function DiffText({ parts }: { parts: DiffPart[] }) {
+  return (
+    <p className={styles.diffText}>
+      {parts.map((p, i) => (
+        <span
+          key={i}
+          className={p.kind === "added" ? styles.diffAdded : p.kind === "removed" ? styles.diffRemoved : undefined}
+        >
+          {p.text}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+/** A tool the server changed after approval: off until the owner re-approves. */
+function McpChangedTools({
+  server,
+  title,
+  busy,
+  onApprove
+}: {
+  server: McpServer;
+  title: string;
+  busy: boolean;
+  onApprove: (tool: string, hash: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.changedList}>
+      {(server.changed_tools ?? []).map((c) => {
+        // The server's text is untrusted: it is only ever rendered as text.
+        const diff = wordDiff(c.before, c.after);
+        return (
+          <section
+            key={c.tool}
+            className={styles.changedCard}
+            role="alert"
+            data-testid={`mcp-changed-${server.name}-${c.tool}`}
+          >
+            <b>{t("apps.changed.title")}</b>
+            <p className={styles.errorHint}>
+              {t(c.new_tool ? "apps.changed.newIntro" : "apps.changed.intro", { name: title, tool: c.tool })}
+            </p>
+            <span className={styles.panelLabel}>{t("apps.changed.before")}</span>
+            <DiffText parts={diff.before} />
+            <span className={styles.panelLabel}>{t("apps.changed.after")}</span>
+            <DiffText parts={diff.after} />
+            {c.schema_changed ? <p className={styles.errorHint}>{t("apps.changed.schema")}</p> : null}
+            {c.other_changed ? <p className={styles.errorHint}>{t("apps.changed.other")}</p> : null}
+            <p className={styles.errorHint}>{t("apps.changed.advice")}</p>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              data-testid={`mcp-approve-${server.name}-${c.tool}`}
+              onClick={() => onApprove(c.tool, c.hash)}
+            >
+              {t("apps.changed.approve")}
+            </Button>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function McpErrorBlock({
   server,
   busy,
@@ -148,6 +217,7 @@ function ConnectedCell({
   busy,
   signingIn,
   onReconnect,
+  onApproveChange,
   onSignIn,
   onCancelSignIn,
   onPasteRedirect,
@@ -165,6 +235,7 @@ function ConnectedCell({
   onChooseFolder: (folder: string) => void;
   signingIn: boolean;
   onReconnect: () => void;
+  onApproveChange: (tool: string, hash: string) => void;
   onSignIn: () => void;
   onCancelSignIn: () => void;
   onPasteRedirect: (url: string) => void;
@@ -269,6 +340,14 @@ function ConnectedCell({
       </div>
       {server.error && !signingIn && !needsSignIn ? (
         <McpErrorBlock server={server} busy={busy} onChooseFolder={onChooseFolder} onReconnect={onReconnect} />
+      ) : null}
+      {(server.changed_tools ?? []).length > 0 ? (
+        <McpChangedTools
+          server={server}
+          title={title ?? (known.known ? known.name : server.name)}
+          busy={busy}
+          onApprove={onApproveChange}
+        />
       ) : null}
       {open ? (
         <div className={styles.panel} id={panelId}>
@@ -924,6 +1003,22 @@ export function AppsModal({
       onReconnect={() =>
         void run(s.name, async () => {
           await client?.reconnectMcpServer(s.name);
+          await reload();
+        })
+      }
+      onApproveChange={(tool, hash) =>
+        void run(s.name, async () => {
+          try {
+            await client?.approveMcpToolChanges(s.name, tool, hash);
+          } catch (error) {
+            // The server changed the definition again after the card was painted:
+            // nothing was approved. Reload so the owner reviews the new text.
+            if (error instanceof ApiError && error.code === "mcp_tool_changed_again") {
+              await reload();
+            }
+            throw error;
+          }
+          toast.show(t("apps.changed.toast", { name: s.name, tool }), "success");
           await reload();
         })
       }

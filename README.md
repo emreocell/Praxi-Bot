@@ -16,7 +16,7 @@
 [![Good first issues](https://img.shields.io/github/issues/emreocell/Praxi-Bot/good%20first%20issue?label=good%20first%20issues&color=7057ff)](https://github.com/emreocell/Praxi-Bot/labels/good%20first%20issue)
 [![Stars](https://img.shields.io/github/stars/emreocell/Praxi-Bot)](https://github.com/emreocell/Praxi-Bot/stargazers)
 
-[Install](#install) · [How it works](#how-it-works) · [Screenshots](#screenshots) · [Security](#security-model) · [Docs](#documentation) · [Contribute](#contribute-in-10-minutes)
+[Quickstart](#quickstart) · [Why it is different](#why-it-is-different) · [How it works](#how-it-works) · [Screenshots](#screenshots) · [Security](#security-model) · [Docs](#documentation) · [Contribute](#contribute-in-10-minutes)
 
 </div>
 
@@ -33,11 +33,33 @@
 
 <p align="center"><sub>Ask, watch the steps, approve or deny. Demo data shown.</sub></p>
 
-> **Project status: alpha.** The latest pre-release is `v0.1.0-alpha.2` (the first was `v0.1.0-alpha.1`). There is no stable API and things change quickly. Expect breaking changes, and run `bot backup create <file>` (encrypted, see [docs/guide/backup.md](docs/guide/backup.md)) before updating. Only the latest pre-release is supported (see [SECURITY.md](SECURITY.md)).
+> **Project status: alpha.** The latest pre-release is `v0.1.0-alpha.3`. There is no stable API and things change quickly. Expect breaking changes, and run `bot backup create <file>` (encrypted, see [docs/guide/backup.md](docs/guide/backup.md)) before updating. Only the latest pre-release is supported (see [SECURITY.md](SECURITY.md)).
 
-## What it does
+## What it is
 
-Praxi runs a local daemon (Rust, tokio and axum) on your machine. You chat with *bots* from a desktop app (Windows), the `bot` command line or Telegram. A bot can read and edit files, run commands, drive a browser and operate desktop apps, always through a permission engine that checks every call in code.
+Praxi-Bot is an AI agent that runs on your own computer, not in someone else's cloud. You create *bots*, give each one a model and a permission level, and chat with them from a desktop app (Windows), the `bot` command line or Telegram. A bot can read and edit files, run commands, drive a browser and operate desktop apps. A local daemon (Rust) checks every one of those actions against your permissions before it happens.
+
+## Why it is different
+
+- **Local-first.** The daemon listens on `127.0.0.1` only and opens no inbound port. There is no Praxi account and no telemetry by design. Your chats, bots and settings stay in a folder on your machine, and API keys go to the OS keychain (or an encrypted file).
+- **A permission model the AI cannot talk its way past.** Permissions are decided by code, not by the model. Reads are free, and by default anything that changes something asks you first. Money actions and a list of catastrophic shell commands always ask, even in the most permissive preset.
+- **Untrusted content stays data.** Web pages, emails and tool output from MCP servers are treated as data, never as instructions. After a run has read untrusted or private content, anything that could send data off your machine asks first (the egress gate), even with a standing approval. A hermetic prompt-injection evaluation pack runs in CI ([`evals/`](evals/README.md)).
+- **You pick the engine.** Cloud APIs, local models or a coding CLI you already have installed, per bot.
+
+## What works today
+
+Everything below is merged on `main`; the latest pre-release may lag behind it.
+
+- **Chat and approvals** in the desktop app, the CLI and Telegram, with Allow once / This chat / Always / Deny cards and a stop key ([guide](docs/guide/chatting-and-approvals.md)).
+- **Tools:** files, shell, browser (Chromium over DevTools), desktop control (Windows; Linux under X11), web research, email, calendar, Home Assistant, Composio apps and MCP servers. Approved MCP tool descriptions are pinned and a changed description is held back ([guide](docs/guide/mcp-servers.md)).
+- **Bots and profiles** with per-bot models, permission presets and spending limits ([guide](docs/guide/bots-and-profiles.md)).
+- **Schedules** in cron, interval or plain English / Turkish ([guide](docs/guide/scheduled-tasks.md)) and multi-step **workflows** ([guide](docs/guide/workflows.md)).
+- **Skills and apps** you can add or write yourself ([skills](docs/guide/skills.md), [apps](docs/guide/apps.md)).
+- **Voice:** hands-free call mode in the desktop chat ([guide](docs/guide/voice-call.md)).
+- **An always-on Linux host** with a virtual display, so bots keep working when your computer is off ([guide](docs/guide/linux-host.md)).
+- **Encrypted backup and restore** ([guide](docs/guide/backup.md)).
+- **Desktop app in English, Turkish and German**, with themes and backdrops.
+- **Experimental:** node-agents (`bot-node`) and controlling a paired PC.
 
 <picture>
   <source media="(prefers-color-scheme: dark) and (max-width: 680px)" srcset="docs/assets/readme/features-dark-mobile.svg">
@@ -55,7 +77,7 @@ Praxi runs a local daemon (Rust, tokio and axum) on your machine. You chat with 
   <img src="docs/assets/readme/steps-light.svg" alt="Three steps: install and pick a model, create a bot, then chat, approve and schedule" width="100%">
 </picture>
 
-1. **Install and pick a model.** Run the Windows installer and follow the setup wizard. Gemini has a free tier, and the key stays in your OS keychain.
+1. **Install and pick a model.** Run the Windows installer and follow the setup wizard (English, Turkish or German). Gemini has a free tier, and the key stays in your OS keychain.
 2. **Create a bot.** Name it, pick its models and a permission preset. By default reads are free and every change asks first.
 3. **Chat, approve, schedule.** Watch it work in the app or on Telegram, approve or deny each action, then put the job on a schedule.
 
@@ -136,26 +158,29 @@ An agent that can use your computer is powerful, and a web page or document can 
 
 The shell is as dangerous as a terminal, the never-list is a safety net rather than a sandbox, and the Windows installer is not code-signed yet. Read the [limits](docs/guide/security.md#what-it-does-not-protect-you-from) before you trust it with anything important.
 
-## Install
+## Quickstart
 
-**Windows (installer).** Download the setup `.exe` from the [latest pre-release](https://github.com/emreocell/Praxi-Bot/releases). It is a per-user NSIS installer (no administrator rights) that installs the desktop app and the daemon under `%LOCALAPPDATA%\Programs\Praxi-Bot`. Until builds are signed, Windows SmartScreen may show *"Windows protected your PC"*: choose **More info**, then **Run anyway**. Details, upgrade and uninstall: [Installing on Windows](docs/guide/install-windows.md).
+Pick your platform. Both take three steps.
 
-<details>
-<summary>What happens on first launch</summary>
+### Windows (desktop app)
 
-The app starts the bundled daemon and opens a five-step wizard (skip it at any step, re-run it from **Settings, First-run setup wizard**):
+1. **Install.** Download the setup `.exe` from the [latest pre-release](https://github.com/emreocell/Praxi-Bot/releases). It is a per-user installer (no administrator rights). Until builds are signed, Windows SmartScreen may show *"Windows protected your PC"*: choose **More info**, then **Run anyway**.
+2. **Set up.** The first launch opens a short wizard: language, provider (Gemini has a free API tier, no credit card), a safe permission preset and your first bot. Your key goes straight to Windows Credential Manager.
+3. **Chat.** Send a request, watch the steps, and approve or deny each change. Details, upgrade and uninstall: [Installing on Windows](docs/guide/install-windows.md) and [Install and first run](docs/guide/install.md).
 
-1. **Welcome:** language (English or Turkish) and theme (Light, Dark, System).
-2. **Provider:** Google Gemini (free API tier, no credit card), Anthropic, an OpenAI-compatible service or local Ollama. The key goes straight to Windows Credential Manager and is never shown again. **Test connection** checks it.
-3. **Safety:** default permission preset, **Approve destructive** unless you change it.
-4. **First bot:** name, avatar and colour, and model roles pre-filled from your provider.
-5. **Try it live:** send a sample request and approve or deny a real permission card.
+### Linux (always-on host)
 
-Autostart at sign-in is off unless you enable it in Settings (or pass `/AUTOSTART=1` to the installer). Uninstalling keeps your chats, bots and settings unless you tick **Delete application data**. More in [Install and first run](docs/guide/install.md).
+Run these on the server over SSH, after downloading and verifying `install-linux.sh` as described in [Running Praxi on a remote host](docs/guide/remote-host.md). Replace `v0.1.0` with the release you want.
 
-</details>
+1. **Preview.** `bash ./install-linux.sh --dry-run --headless --version v0.1.0` changes nothing and needs no `sudo`.
+2. **Install.** `sudo bash ./install-linux.sh --headless --version v0.1.0` installs the host (`127.0.0.1` only, no open port) with a virtual display and a browser.
+3. **Check.** `sudo praxi doctor` tests the setup and prints the exact fix for each problem. More in [Linux always-on host](docs/guide/linux-host.md).
 
-**Build from source** (Rust 1.89+, Node 24+, pnpm 10+, a C toolchain; MSVC build tools on Windows):
+The desktop app and its installer are Windows only today. On Linux, the daemon and CLI run as the host.
+
+### Build from source
+
+Needs Rust 1.89+, Node 24+, pnpm 10+ and a C toolchain (MSVC build tools on Windows):
 
 ```sh
 cargo build -p cli                                          # the daemon and CLI: target/debug/bot
@@ -163,22 +188,26 @@ cargo build -p cli                                          # the daemon and CLI
 PRAXIBOT_FAKE_PROVIDER=1 pnpm dev:desktop                   # desktop app with a fake provider, no API key
 ```
 
-To package the Windows installer yourself, see [Building the Windows installer yourself](docs/guide/install.md#building-the-windows-installer-yourself). An optional always-on Linux host is covered in [Running Praxi on a remote host](docs/guide/remote-host.md). The [CLI reference](docs/guide/cli-reference.md) lists every command.
+The [CLI reference](docs/guide/cli-reference.md) lists every command. To package the Windows installer yourself, see [Building the Windows installer yourself](docs/guide/install.md#building-the-windows-installer-yourself).
 
-## Providers and channels
+## Supported engines, providers and channels
 
-- **Models:** Google Gemini (free tier), Anthropic, OpenRouter, DeepSeek, Ollama, LM Studio, and any OpenAI-compatible server. Locally installed coding CLIs can also act as engines; support differs per CLI ([details](docs/guide/cli-engines.md)). See [Providers and models](docs/guide/providers-and-models.md).
-- **Channels:** the desktop app, the `bot` CLI and [Telegram](docs/guide/telegram.md) (`bot channels telegram setup` / `pair`; see also [docs/telegram.md](docs/telegram.md)). Telegram is the only messaging app so far.
-- **Tools:** files, shell, browser, desktop, scripts, web, email, MCP servers, calendar, Home Assistant and Composio apps.
+| Kind | What | Notes |
+| --- | --- | --- |
+| Cloud model APIs | Google Gemini, Anthropic, OpenRouter, DeepSeek, any OpenAI-compatible server | Gemini has a free tier. See [Providers and models](docs/guide/providers-and-models.md). |
+| Local models | Ollama, LM Studio | Runs on your hardware. |
+| Coding CLIs | Claude Code, Codex, Gemini CLI, Antigravity, OpenCode, Cursor | Detected if installed. Support differs per CLI: some run as the bot's brain, others are detection only ([details](docs/guide/cli-engines.md)). |
+| Channels | Desktop app, `bot` CLI, [Telegram](docs/guide/telegram.md) | Telegram is the only messaging app so far. |
+| Tools | Files, shell, browser, desktop, scripts, web, email, MCP servers, calendar, Home Assistant, Composio apps | Every call goes through the permission engine. |
 
-## Project status
+## Status and roadmap
 
-- **Alpha.** No stable API; run `bot backup create <file>` (encrypted, see [docs/guide/backup.md](docs/guide/backup.md)) before updating.
+- **Alpha.** No stable API; back up before updating (`bot backup create <file>`).
 - **Platforms.** The CLI and daemon build on Windows, Linux and macOS. Desktop control works on Windows and on Linux under X11 or Xvfb; the macOS backend is a stub and Wayland sessions are refused. The desktop app and installer are Windows only.
-- **Experimental:** node-agents (`bot-node`) and controlling a paired PC.
-- **Planned, not shipped:** recording a workflow by demonstration, a long-term memory the daemon enables, a plugin API, more messaging channels, and voice, image or video generation.
+- **Not signed yet.** The Windows installer is not code-signed ([#203](https://github.com/emreocell/Praxi-Bot/issues/203)).
+- **Planned, not shipped:** recording a workflow by demonstration, a plugin API ([#213](https://github.com/emreocell/Praxi-Bot/issues/213)), more messaging channels, a mobile companion ([#208](https://github.com/emreocell/Praxi-Bot/issues/208)), Linux and macOS desktop bundles ([#175](https://github.com/emreocell/Praxi-Bot/issues/175)).
 
-The [roadmap](docs/ROADMAP.md) has the horizons (no dates, no promises), and the [FAQ](docs/guide/faq.md) answers the common questions.
+The [roadmap](docs/ROADMAP.md) has the horizons (no dates, no promises). Open work is tracked in [issues](https://github.com/emreocell/Praxi-Bot/issues): look for the labels [`help wanted`](https://github.com/emreocell/Praxi-Bot/labels/help%20wanted) and [`good first issue`](https://github.com/emreocell/Praxi-Bot/labels/good%20first%20issue). The [FAQ](docs/guide/faq.md) answers common questions.
 
 ## Documentation
 
@@ -192,14 +221,13 @@ The [roadmap](docs/ROADMAP.md) has the horizons (no dates, no promises), and the
 
 ## Contribute in 10 minutes
 
-Praxi-Bot is built in the open and outside pull requests are welcome, from a typo fix to a feature.
+Outside pull requests are welcome, from a typo fix to a feature.
 
-1. **Pick something small.** Browse the [`good first issue`](https://github.com/emreocell/Praxi-Bot/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) issues or the [starter issues](docs/contributing/starter-issues.md). Issues #316 to #324 are fresh starters and are open right now.
-2. **Claim it.** Comment "I would like to take this" before you start so nobody duplicates the work. A typo or docs fix needs no issue: edit the file in GitHub's web editor.
-3. **Take a quick look without Rust.** Run `pnpm install --frozen-lockfile`, then `pnpm --dir apps/desktop/ui dev` and open `http://localhost:1420/?mock=1`. Mock mode serves canned data, so you see the whole UI with no daemon, no Tauri and no API key.
-4. **Follow the 10-minute path** in [docs/contributing/FIRST_PR.md](docs/contributing/FIRST_PR.md), then read [CONTRIBUTING.md](CONTRIBUTING.md) for build, test and PR conventions. For the chat screen, approvals and permissions, and host flows, discuss in an issue first.
-
-Please follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+1. **Pick something small:** an issue labelled [`good first issue`](https://github.com/emreocell/Praxi-Bot/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22), or see the [starter issues](docs/contributing/starter-issues.md). Comment that you are taking it. Typo and docs fixes need no issue.
+2. **See the UI without Rust:** `pnpm install --frozen-lockfile`, then `pnpm --dir apps/desktop/ui dev` and open `http://localhost:1420/?mock=1` (canned data, no daemon or API key).
+3. **Follow** [docs/contributing/FIRST_PR.md](docs/contributing/FIRST_PR.md) from clone to pull request.
+4. **Read** [CONTRIBUTING.md](CONTRIBUTING.md) for the build, CI gates and review expectations. For approvals and permissions, the chat screen and host flows, discuss in an issue first.
+5. **Be kind and be careful:** follow the [Code of Conduct](CODE_OF_CONDUCT.md) and report vulnerabilities privately ([SECURITY.md](SECURITY.md)).
 
 ### Contributors
 
@@ -207,10 +235,10 @@ Please follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report vulnerabilit
   <img src="https://contrib.rocks/image?repo=emreocell/Praxi-Bot" alt="Contributors to Praxi-Bot" />
 </a>
 
-A further batch of small tasks, written up so they can be opened as issues, is in [docs/GOOD_FIRST_ISSUES.md](docs/GOOD_FIRST_ISSUES.md). Wait until one is an issue, then comment there before you start.
+More small tasks, written up so they can be opened as issues, are in [docs/GOOD_FIRST_ISSUES.md](docs/GOOD_FIRST_ISSUES.md). Wait until one is an issue, then comment there before you start.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Apache-2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE) and, for bundled third-party code, [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 <p align="center"><sub>README artwork is generated by <a href="scripts/readme-assets/README.md"><code>node scripts/readme-assets/build.mjs</code></a>. Screenshots use demo data.</sub></p>

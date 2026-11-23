@@ -2324,6 +2324,10 @@ export class MockApiClient extends ApiClient {
     if (action === "tools") {
       return MCP_TOOLS;
     }
+    if (action === "approve-tool-changes") {
+      this.servers[idx] = { ...this.servers[idx], changed_tools: [] };
+      return this.servers[idx];
+    }
     if (action === "reconnect") {
       this.servers[idx] = { ...this.servers[idx], status: "connected", error: null };
       return this.servers[idx];

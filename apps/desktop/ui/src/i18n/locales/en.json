@@ -539,6 +539,18 @@
       "search": "Search"
     },
     "categoriesLabel": "Categories",
+    "changed": {
+      "advice": "Only turn it back on if you trust this app and the new wording looks right.",
+      "after": "What it says now",
+      "approve": "Trust the new version",
+      "before": "What you approved",
+      "intro": "{{name}} changed how it describes “{{tool}}”. The tool is switched off, and Praxi cannot use it, until you decide.",
+      "newIntro": "{{name}} offers a tool, “{{tool}}”, that you never approved. It is switched off, and Praxi cannot use it, until you decide.",
+      "other": "Something you cannot see in the text changed too (for example hidden characters).",
+      "schema": "The inputs this tool accepts changed too.",
+      "title": "A tool changed after you approved it",
+      "toast": "{{name}}: new version of “{{tool}}” approved"
+    },
     "close": "Close",
     "component": {
       "confirm": "Praxi will run this command to install {{name}}:",
@@ -1705,6 +1717,11 @@
         "failed": "Couldn't look at a page",
         "running": "Looking at a page"
       },
+      "calculate": {
+        "done": "Calculated",
+        "failed": "Couldn't calculate",
+        "running": "Calculating"
+      },
       "desktop_key": {
         "done": "Pressed keys on the computer",
         "failed": "Didn't press keys",
@@ -1889,6 +1906,11 @@
         "done": "Wrote a skill",
         "failed": "Didn't write a skill",
         "running": "Writing a skill"
+      },
+      "time_now": {
+        "done": "Checked the date and time",
+        "failed": "Couldn't check the date and time",
+        "running": "Checking the date and time"
       },
       "todo": {
         "done": "Updated the plan",
@@ -2446,6 +2468,10 @@
       "mcp_rate_limit": {
         "hint": "Wait a moment and try again.",
         "title": "That app is being asked too often"
+      },
+      "mcp_tool_changed_again": {
+        "hint": "Reload the card and read the new wording before you decide. Nothing was approved.",
+        "title": "The app changed this tool again"
       },
       "message_not_editable": {
         "hint": "Only your own latest message can be edited or regenerated, and only once the bot has finished.",

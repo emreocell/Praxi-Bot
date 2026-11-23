@@ -437,6 +437,7 @@ make_sandboxed_script() {
     -e "s|/usr/local/bin|@SB_L@|g" \
     -e "s|/etc/os-release|@SB_O@|g" \
     -e "s|/etc/apparmor.d|@SB_A@|g" \
+    -e "s|/etc/systemd/journald.conf.d|@SB_J@|g" \
     -e "s|@SB_B@|${SANDBOX}/opt/praxi-browser|g" \
     -e "s|@SB_P@|${SANDBOX}/opt/praxi|g" \
     -e "s|@SB_D@|${SANDBOX}/var/lib/praxi|g" \
@@ -445,6 +446,7 @@ make_sandboxed_script() {
     -e "s|@SB_L@|${SANDBOX}/usr/local/bin|g" \
     -e "s|@SB_O@|${SANDBOX}/etc/os-release|g" \
     -e "s|@SB_A@|${SANDBOX}/etc/apparmor.d|g" \
+    -e "s|@SB_J@|${SANDBOX}/etc/systemd/journald.conf.d|g" \
     "${src}" > "${dst}"
   chmod +x "${dst}"
 }
@@ -1143,6 +1145,30 @@ assert_file_not_contains "${NODE_FILE}" "Slice=praxi.slice"
 assert_file_not_contains "${ENV_FILE}" "DISPLAY="
 assert_file_not_contains "${ENV_FILE}" "XAUTHORITY="
 pass "--without-desktop removes Xvfb, desktop session, praxi.slice, and Slice= cleanly"
+
+# 10b. Always-on host polish: restart limits, log cap, dry-run, --update, uninstall cleanup
+run_timed bash "${SB_INSTALL}" --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
+  --headless --skip-packages --no-start > "${TMP_ROOT}/headless.log" 2>&1
+assert_file_contains "${SVC_FILE}" "Restart=on-failure"
+assert_file_contains "${SVC_FILE}" "StartLimitBurst=10"
+assert_file_contains "${SVC_FILE}" "NoNewPrivileges=true"
+assert_file_contains "${SVC_FILE}" "/bot serve --host"
+JOURNALD_FILE="${SANDBOX}/etc/systemd/journald.conf.d/50-praxi.conf"
+assert_file_contains "${JOURNALD_FILE}" "SystemMaxUse=500M"
+assert_file_contains "${JOURNALD_FILE}" "MaxRetentionSec=1month"
+assert_file_contains "${XVFB_FILE}" "-screen 0 1920x1080x24"
+run_timed bash "${SB_INSTALL}" --dry-run --headless --screen 1280x720x24 > "${TMP_ROOT}/dry-install.log" 2>&1
+assert_file_contains "${TMP_ROOT}/dry-install.log" "Xvfb :99 screen 1280x720x24"
+assert_file_contains "${TMP_ROOT}/dry-install.log" "nothing was changed"
+if run_timed bash "${SB_INSTALL}" --update --uninstall > "${TMP_ROOT}/update-uninstall.log" 2>&1; then
+  fail "--update with --uninstall should fail"
+fi
+run_timed bash "${SB_INSTALL}" --update --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
+  --skip-packages --no-start > "${TMP_ROOT}/update.log" 2>&1
+assert_file_contains "${TMP_ROOT}/update.log" "updating in place"
+run_timed bash "${SB_INSTALL}" --uninstall > "${TMP_ROOT}/uninstall.log" 2>&1
+[[ ! -f "${JOURNALD_FILE}" ]] || fail "--uninstall left the journald drop-in"
+pass "host polish: restart limits, journald cap, dry-run, --update, uninstall cleanup"
 
 # 11. systemd-analyze verify check on remaining service unit when available
 if command -v systemd-analyze >/dev/null 2>&1; then

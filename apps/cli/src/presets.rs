@@ -114,6 +114,8 @@ impl BotPreset {
             "skill_*",
             "workflow_*",
             "notes_*",
+            "time_now",
+            "calculate",
             "memory_*",
         ];
         match self {

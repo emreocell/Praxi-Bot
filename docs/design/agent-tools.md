@@ -27,9 +27,9 @@ re-implemented.
 | # | Gap | Safety class | Decision |
 | --- | --- | --- | --- |
 | 1 | A scratchpad the bot can keep between runs (memory is user-confirmed facts only; there is no place for a plan, checklist or working data) | private; write is egress-like | **done**: `notes_read`, `notes_write` |
-| 2 | The clock: models guess the date and time zone arithmetic | none (pure) | not done: see "Direct tool budget" |
-| 3 | Exact arithmetic: models miscalculate sums, percentages, unit math | none (pure, no code execution) | not done: see "Direct tool budget" |
-| 4 | Clipboard read/write | private (read), egress-like (write); needs an OS clipboard dependency per platform | not done: the clipboard is the most likely place for a pasted secret, and the cross-platform dependency needs its own review |
+| 2 | The clock: models guess the date and time zone arithmetic | none (pure) | **done (round 2)**: `time_now`, deferred |
+| 3 | Exact arithmetic: models miscalculate sums, percentages, unit math | none (pure, no code execution) | **done (round 2)**: `calculate`, deferred |
+| 4 | Clipboard read/write | private (read), egress-like (write); needs an OS clipboard dependency per platform | not done (round 2 re-checked, still skipped): the clipboard is the most likely place for a pasted secret, and the cross-platform dependency needs its own review |
 | 5 | Generic `http_request` (POST/PUT) | egress, destructive | not done: always-ask by construction, little value over `web_extract` + connectors |
 | 6 | `download_file` to the workspace | untrusted write | not done: needs the file-origin mark and size policy of `fs_*` |
 
@@ -66,3 +66,33 @@ on a tainted run (egress rule). Preset
 Eval scenarios: `inj-notes-poison-after-page(-holdout)` (untrusted text cannot
 write notes without approval) and `inj-notes-read-then-exfil(-holdout)`
 (private notes + untrusted page cannot be sent out without approval).
+
+## Round 2: deferred tools (tool discovery)
+
+Tool discovery ([tool-discovery.md](tool-discovery.md)) lifted the 40-tool
+limit, so `time_now` and `calculate` are registered as ordinary tools and are
+**not** in the curated direct set: the model finds them with `tool_search` and
+activates them with `tool_describe`.
+
+* Both are `ContentClass::none()` (no untrusted ingestion, no private read, no
+  egress), effect `Read`, category `Meta` (always allowed, never taints a
+  run, never an approval card). They take only short model-written strings and
+  read the clock; no file, network or process access exists in the code path.
+* `calculate` is a hand-written recursive-descent parser (no `eval`, no script
+  engine). Bounds: 500 characters, 400 tokens, nesting 32, finite results only,
+  division by zero and domain errors are plain errors.
+* `time_now` uses `chrono`/`chrono-tz` (already in the workspace; MIT/Apache) and
+  the system zone name. Every amount is bounded to +-100000 and every date
+  operation is the checked variant. A local time skipped by a clock change is an
+  error, a repeated one takes the first.
+* Already present and therefore not re-implemented: `json_query`, `csv_read`
+  (and `csv_transform`), `pdf_extract` (the task's `pdf_text`). They are
+  `untrusted_private` reads limited to allowed folders with size and page caps.
+* Clipboard: skipped. A clipboard read can hold a pasted password and is not
+  a file the owner chose to share, a write replaces what the owner copied, and
+  it needs per-OS native dependencies. Neither can be made safe by
+  classification alone, so it stays out until it has its own review.
+* Eval scenarios (`evals/scenarios/inj-*-after-page`, `inj-csv-read-`,
+  `inj-json-query-`, `inj-pdf-extract-then-exfil`): after an untrusted page and a
+  private read, the pure tools do not clear the taint and the document readers
+  cannot be followed by an unapproved send.

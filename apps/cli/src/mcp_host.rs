@@ -16,8 +16,8 @@ use async_trait::async_trait;
 use daemon_api::mcp::{
     McpAuthStart, McpAuthState, McpCatalogEntryDto, McpCatalogInstallDto,
     McpErrorKind as ErrorKindDto, McpFolderDto, McpOAuthConfig, McpRequiredSecretDto,
-    McpServerChanged, McpServerDto, McpServerInput, McpStatus, McpToolDto, McpTransportInput,
-    McpTransportKind, McpTransportObject,
+    McpServerChanged, McpServerDto, McpServerInput, McpStatus, McpToolChangeDto, McpToolDto,
+    McpTransportInput, McpTransportKind, McpTransportObject,
 };
 use daemon_api::{McpControl, McpControlError};
 use mcp_bridge::{
@@ -161,8 +161,13 @@ impl McpHost {
             // Do not start configurations whose canonical form could not be saved.
             loaded.clear();
         }
-        let mut manager =
-            McpManager::with_policy(registry.clone(), policy).with_path_guard(guard.clone());
+        // Approved tool fingerprints live next to `mcp.toml`; a tool whose
+        // definition changes later stays off until the owner approves it.
+        let mut manager = McpManager::with_policy(registry.clone(), policy)
+            .with_path_guard(guard.clone())
+            .with_pin_store(Arc::new(mcp_bridge::FilePinStore::open(
+                data_dir.join("mcp-tool-pins.json"),
+            )));
         if let Some(s) = secrets {
             manager = manager.with_secret_store(s);
         }
@@ -221,6 +226,7 @@ impl McpHost {
                 h.connect_registered(&id, generation, handle, false).await;
             });
         }
+        Self::forward_change_events(&host);
         let weak = Arc::downgrade(&host);
         *host.poller.lock() = Some(tokio::spawn(poll(weak)));
         host
@@ -269,6 +275,33 @@ impl McpHost {
             // No subscriber is not an error.
             let _ = self.events.send(McpServerChanged::new(name, status));
         }
+    }
+
+    /// A server that swaps a held-back definition while a card is on screen
+    /// must make the UI reload it, although its status stays `connected`.
+    fn forward_change_events(host: &Arc<Self>) {
+        let mut changes = host.manager.subscribe_changes();
+        let weak = Arc::downgrade(host);
+        tokio::spawn(async move {
+            loop {
+                match changes.recv().await {
+                    Ok(id) => {
+                        let Some(host) = weak.upgrade() else {
+                            return;
+                        };
+                        host.notify_changed(&id);
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        });
+    }
+
+    /// Tell clients to reload `name` even though its status did not move.
+    fn notify_changed(&self, name: &str) {
+        let status = self.status_of(name);
+        let _ = self.events.send(McpServerChanged::new(name, status));
     }
 
     fn forget(&self, name: &str) {
@@ -347,6 +380,24 @@ impl McpHost {
             browser: cfg.browser,
             is_browser: cfg.is_browser(),
             bots: cfg.bots.clone(),
+            changed_tools: snap
+                .as_ref()
+                .map(|s| {
+                    s.changed_tools
+                        .iter()
+                        .map(|c| McpToolChangeDto {
+                            tool: c.tool.clone(),
+                            before: c.before.clone(),
+                            after: c.after.clone(),
+                            description_changed: c.description_changed,
+                            schema_changed: c.schema_changed,
+                            other_changed: c.other_changed,
+                            new_tool: c.new_tool,
+                            hash: c.hash.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 
@@ -566,6 +617,7 @@ fn map_err(e: McpError) -> McpControlError {
     match e {
         McpError::Config(m) => McpControlError::Invalid(m),
         McpError::UnknownServer(n) => McpControlError::NotFound(format!("mcp server {n}")),
+        e @ McpError::ToolChangedAgain { .. } => McpControlError::ToolChangedAgain(e.to_string()),
         other => McpControlError::Internal(other.to_string()),
     }
 }
@@ -1117,6 +1169,10 @@ impl McpControl for McpHost {
                 }
                 return Ok(self.dto(&cfg));
             }
+            if prev.transport != cfg.transport {
+                // A different program or address is a different server.
+                self.manager.forget_tool_pins(name);
+            }
             let old = match self.manager.detach_server(name) {
                 Ok(handle) => Some(handle),
                 Err(McpError::UnknownServer(_)) => None,
@@ -1201,6 +1257,7 @@ impl McpControl for McpHost {
             self.persist(|m| {
                 m.remove(name);
             })?;
+            self.manager.forget_tool_pins(name);
             let old = match self.manager.detach_server(name) {
                 Ok(handle) => Some(handle),
                 Err(McpError::UnknownServer(_)) => None,
@@ -1237,6 +1294,33 @@ impl McpControl for McpHost {
         self.connect_registered(name, generation, handle, reenable)
             .await;
         Ok(self.dto(&self.config_of(name).unwrap_or(fallback)))
+    }
+
+    async fn approve_tool_changes(
+        &self,
+        name: &str,
+        tool: &str,
+        hash: &str,
+    ) -> Result<McpServerDto, McpControlError> {
+        let cfg = {
+            let _op = self.ops.lock().await;
+            self.check_writable()?;
+            self.config_of(name)?
+        };
+        if cfg.enabled {
+            // A failed reconnect is not an error here: it shows in the status.
+            match self.manager.approve_tool_changes(name, tool, hash).await {
+                Ok(_) | Err(McpError::UnknownServer(_)) => {}
+                Err(error @ McpError::ToolChangedAgain { .. }) => {
+                    // The card on screen is stale: make every client reload it.
+                    self.notify_changed(name);
+                    return Err(map_err(error));
+                }
+                Err(error) => eprintln!("warning: re-approving MCP tools failed: {error}"),
+            }
+            self.announce(name);
+        }
+        Ok(self.dto(&self.config_of(name).unwrap_or(cfg)))
     }
 
     fn tools(&self, name: &str) -> Result<Vec<McpToolDto>, McpControlError> {

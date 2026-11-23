@@ -57,6 +57,7 @@ mod manager;
 pub mod mcpb;
 pub mod oauth;
 pub mod oauth_net;
+mod pins;
 pub mod registry;
 mod roots;
 pub mod runtime;
@@ -72,6 +73,7 @@ pub use config::{McpConfigStore, McpServerConfig, McpTransport, OAuthConfig, Tom
 pub use diagnostics::ExternalRedactor;
 pub use error::{McpError, McpErrorKind, Result, runtime_install_hint};
 pub use manager::{Backoff, McpManager, McpPolicy, McpServerHandle, ServerSnapshot, ServerStatus};
+pub use pins::{FilePinStore, MemoryPinStore, PinStore, ToolChange, ToolPin};
 pub use roots::{
     FS_SERVER_PACKAGE, PathGuard, canonicalize_filesystem_args, filesystem_roots, root_problem,
 };

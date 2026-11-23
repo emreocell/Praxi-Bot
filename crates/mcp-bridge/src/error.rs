@@ -72,6 +72,14 @@ pub enum McpError {
     /// No server with this id is registered.
     #[error("unknown MCP server `{0}`")]
     UnknownServer(String),
+    /// The tool definition offered now is not the one the owner approved.
+    #[error("MCP server `{server}` changed tool `{tool}` again; review the new definition")]
+    ToolChangedAgain {
+        /// Server id.
+        server: String,
+        /// Tool name.
+        tool: String,
+    },
 }
 
 /// Coarse class of a failure, for UIs that show a localized "what to do" hint.

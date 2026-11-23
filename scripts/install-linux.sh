@@ -44,6 +44,9 @@
 #   --screen <WxHxD>     Xvfb screen (default: 1920x1080x24)
 #   --skip-packages      Do not install OS packages (you provide curl, tar, libdbus, libssl, ...)
 #   --no-start           Install and enable, but do not start the services
+#   --headless           Always-on server preset: --host-mode --with-desktop (Xvfb 1920x1080x24)
+#   --update             Update an existing install in place; keeps data, config, display and mode
+#   --dry-run            Print what would be done and change nothing (no root, any OS)
 #   --uninstall          Remove the services and /opt/praxi (keeps data and the praxi user)
 #   --purge              With --uninstall: also delete /var/lib/praxi, /etc/praxi and the praxi user
 #   -h, --help           Show this help
@@ -94,6 +97,9 @@ SKIP_PACKAGES=0
 NO_START=0
 UNINSTALL=0
 PURGE=0
+UPDATE=0
+DRY_RUN=0
+JOURNALD_DIR="/etc/systemd/journald.conf.d"
 
 log() { printf '[praxi-install] %s\n' "$*"; }
 warn() { printf '[praxi-install] warning: %s\n' "$*" >&2; }
@@ -152,6 +158,9 @@ Options:
   --screen <WxHxD>     Xvfb screen (default: 1920x1080x24)
   --skip-packages      Do not install OS packages (you provide curl, tar, libdbus, libssl, ...)
   --no-start           Install and enable, but do not start the services
+  --headless           Always-on server preset: --host-mode --with-desktop (Xvfb 1920x1080x24)
+  --update             Update an existing install in place; keeps data, config, display and mode
+  --dry-run            Print what would be done and change nothing (no root, any OS)
   --uninstall          Remove the services and /opt/praxi (keeps data and the praxi user)
   --purge              With --uninstall: also delete /var/lib/praxi, /etc/praxi and the praxi user
   -h, --help           Show this help
@@ -230,6 +239,9 @@ while [[ $# -gt 0 ]]; do
     --screen) need_arg "$@"; SCREEN_SPEC="$2"; SCREEN_SET=1; shift 2 ;;
     --skip-packages) SKIP_PACKAGES=1; shift ;;
     --no-start) NO_START=1; shift ;;
+    --headless) HOST_MODE=1; WITH_DESKTOP=1; shift ;;
+    --update) UPDATE=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --purge) PURGE=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -237,7 +249,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "${VERIFY_ONLY}" -eq 0 ]]; then
+if [[ "${VERIFY_ONLY}" -eq 0 && "${DRY_RUN}" -eq 0 ]]; then
   [[ "$(uname -s)" == "Linux" ]] || die "installation only supports Linux (use --verify-only elsewhere)"
   [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "run as root (use sudo), or pass --verify-only"
   command -v systemctl >/dev/null 2>&1 || die "systemd is required"
@@ -247,12 +259,39 @@ fi
 [[ "${DISPLAY_NUM}" =~ ^:[0-9]+$ ]] || die "invalid --display (expected :N)"
 [[ "${SCREEN_SPEC}" =~ ^[0-9]+x[0-9]+x[0-9]+$ ]] || die "invalid --screen (expected WxHxD)"
 [[ "${PURGE}" -eq 0 || "${UNINSTALL}" -eq 1 ]] || die "--purge only makes sense with --uninstall"
+[[ "${UPDATE}" -eq 0 || "${UNINSTALL}" -eq 0 ]] || die "--update cannot be combined with --uninstall"
+[[ "${UPDATE}" -eq 0 || "${VERIFY_ONLY}" -eq 0 ]] || die "--update cannot be combined with --verify-only"
 [[ "${WITH_DESKTOP}" -eq 0 || "${WITHOUT_DESKTOP}" -eq 0 ]] || die "--with-desktop/--with-desktop-session and --without-desktop cannot be used together"
 [[ "${WITH_DESKTOP_SESSION}" -eq 0 || "${WITHOUT_DESKTOP_SESSION}" -eq 0 ]] || die "--with-desktop-session and --without-desktop-session cannot be used together"
 [[ "${WITH_SESSION_APPS}" -eq 0 || "${WITHOUT_SESSION_APPS}" -eq 0 ]] || die "--with-session-apps and --without-session-apps cannot be used together"
 [[ "${WITHOUT_DESKTOP_SESSION}" -eq 0 || "${WITH_SESSION_APPS}" -eq 0 ]] || die "--with-session-apps cannot be combined with --without-desktop-session"
 [[ "${WITHOUT_DESKTOP}" -eq 0 || "${DISPLAY_SET}" -eq 0 ]] || die "--display cannot be combined with --without-desktop"
 [[ "${WITHOUT_DESKTOP}" -eq 0 || "${SCREEN_SET}" -eq 0 ]] || die "--screen cannot be combined with --without-desktop"
+
+# ---------------------------------------------------------------- dry run
+if [[ "${DRY_RUN}" -eq 1 ]]; then
+  if [[ "${UNINSTALL}" -eq 1 ]]; then
+    log "[dry-run] would stop and remove praxi.service, praxi-node.service, praxi-desktop.service, praxi-xvfb.service, ${SLICE_NAME}"
+    log "[dry-run] would remove ${PREFIX}, ${JOURNALD_DIR}/50-praxi.conf and the praxi command wrappers"
+    if [[ "${PURGE}" -eq 1 ]]; then
+      log "[dry-run] would DELETE ${DATA_DIR}, ${CONF_DIR} and the ${SVC_USER} user (--purge)"
+    else
+      log "[dry-run] would KEEP ${DATA_DIR}, ${CONF_DIR} and the ${SVC_USER} user"
+    fi
+  else
+    if [[ "${UPDATE}" -eq 1 ]]; then
+      log "[dry-run] update: would replace ${PREFIX} and keep ${DATA_DIR}, ${CONF_DIR}, display and host mode"
+    else
+      log "[dry-run] install: version=${VERSION} port=127.0.0.1:${PORT} host_mode=${HOST_MODE}"
+    fi
+    if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
+      log "[dry-run] virtual display: Xvfb ${DISPLAY_NUM} screen ${SCREEN_SPEC} (praxi-xvfb.service)"
+    fi
+    log "[dry-run] would write ${UNIT_DIR}/praxi.service (Restart=on-failure, sandboxed) and ${JOURNALD_DIR}/50-praxi.conf (log size cap)"
+  fi
+  log "[dry-run] nothing was changed"
+  exit 0
+fi
 
 # ---------------------------------------------------------------- uninstall
 if [[ "${UNINSTALL}" -eq 1 ]]; then
@@ -264,6 +303,10 @@ if [[ "${UNINSTALL}" -eq 1 ]]; then
   rm -rf "${UNIT_DIR:?}/praxi.service.d" "${UNIT_DIR:?}/praxi-node.service.d" \
     "${UNIT_DIR:?}/praxi-desktop.service.d" "${UNIT_DIR:?}/praxi-xvfb.service.d"
   systemctl daemon-reload
+  if [[ -f "${JOURNALD_DIR}/50-praxi.conf" ]]; then
+    rm -f "${JOURNALD_DIR:?}/50-praxi.conf"
+    systemctl restart systemd-journald >/dev/null 2>&1 || true
+  fi
   rm -rf "${PREFIX:?}"
   rm -f /usr/local/bin/praxi /usr/local/bin/praxi-node
   if [[ "${PURGE}" -eq 1 ]]; then
@@ -277,6 +320,11 @@ if [[ "${UNINSTALL}" -eq 1 ]]; then
   log "uninstalled"
   exit 0
 fi
+
+if [[ "${UPDATE}" -eq 1 && ! -f "${UNIT_DIR}/praxi.service" ]]; then
+  die "nothing to update: praxi.service is not installed here. Run the installer without --update (add --headless on an always-on server)"
+fi
+[[ "${UPDATE}" -eq 0 ]] || log "updating in place: ${DATA_DIR} and ${CONF_DIR} are kept"
 
 # Updates keep an existing virtual display and desktop session unless explicitly
 # disabled. A bare-Xvfb host keeps bare Xvfb unless --with-desktop-session is passed.
@@ -1132,6 +1180,8 @@ cat > "${UNIT_DIR}/praxi.service" <<UNIT
 Description=Praxi-Bot daemon (bot ${SERVE_ARGS}, 127.0.0.1 only)
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=10
 
 [Service]
 Type=simple
@@ -1172,6 +1222,17 @@ ${HARDENING}
 [Install]
 WantedBy=multi-user.target
 UNIT
+
+# Logs go to journald; cap their size so a small VM disk never fills up.
+install -d -m 0755 "${JOURNALD_DIR}"
+cat > "${JOURNALD_DIR}/50-praxi.conf" <<'JOURNALD'
+# Written by the Praxi installer; removed by install-linux.sh --uninstall.
+[Journal]
+SystemMaxUse=500M
+SystemMaxFileSize=50M
+MaxRetentionSec=1month
+JOURNALD
+systemctl restart systemd-journald >/dev/null 2>&1 || true
 
 # Only desktop.conf belongs to the installer. Other drop-ins (for example a
 # Chromium relaxation; see docs/guide/remote-host.md) are left in place.
@@ -1880,7 +1941,7 @@ Praxi-Bot is installed.
   Data:     ${DATA_DIR}
   Env:      ${ENV_FILE} (mode 0640; daemon, contains the secret-store passphrase)
             ${NODE_ENV_FILE} (mode 0640; node-agent, no BOT_SECRETS_PASSPHRASE)
-  Logs:     journalctl -u praxi -f
+  Logs:     journalctl -u praxi -f   (rotated by journald: max 500M, 1 month)
   CLI:      praxi <command>        (wrapper for 'bot' running as the ${SVC_USER} user)
 
 Next steps:
@@ -1897,7 +1958,9 @@ Next steps:
   5. Update later by re-running this script. Existing praxi-xvfb/praxi-desktop
      units and DISPLAY stay in place; pass --without-desktop-session to remove
      only the Xfce session, or --without-desktop to remove both.
-     Remove the install with: install-linux.sh --uninstall
+     Update with: install-linux.sh --update --version <tag> (keeps all data).
+     Preview any command first with --dry-run. Remove the install with:
+     install-linux.sh --uninstall
 
 See docs/guide/remote-host.md for firewall notes (Oracle Cloud) and security guidance.
 EOF

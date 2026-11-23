@@ -143,6 +143,47 @@ pub struct McpServerDto {
     pub is_browser: bool,
     /// Bots that may use the server; `null` = all bots.
     pub bots: Option<Vec<String>>,
+    /// Tools the server changed after the owner approved them. They are
+    /// switched off (the model never sees them) until re-approved with
+    /// `POST /v1/mcp/servers/{name}/approve-tool-changes`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_tools: Vec<McpToolChangeDto>,
+}
+
+/// One tool whose description or schema changed after approval.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpToolChangeDto {
+    /// Tool name on the server.
+    pub tool: String,
+    /// The approved description.
+    pub before: String,
+    /// The description the server offers now (untrusted text: show it as text).
+    pub after: String,
+    /// The visible description text differs.
+    pub description_changed: bool,
+    /// The input schema differs.
+    pub schema_changed: bool,
+    /// Something not visible in the text differs (hidden characters, title,
+    /// annotations).
+    pub other_changed: bool,
+    /// The tool is new on a server that already had approved tools (or the
+    /// approvals could not be read); `before` is empty.
+    #[serde(default)]
+    pub new_tool: bool,
+    /// Hash of the definition shown here; the approval must quote it.
+    pub hash: String,
+}
+
+/// Body of `POST /v1/mcp/servers/{name}/approve-tool-changes`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpApproveChangesInput {
+    /// The tool to approve.
+    pub tool: String,
+    /// `hash` of the changed definition the owner was shown. If the server
+    /// offers something else now the request fails with `409
+    /// mcp_tool_changed_again`.
+    pub hash: String,
 }
 
 /// Detailed transport of an MCP server body (the `McpServerConfig` shape).
@@ -467,6 +508,9 @@ pub enum McpControlError {
     Invalid(String),
     /// The config could not be saved, or another internal failure (`500`).
     Internal(String),
+    /// The tool definition changed again since the owner was shown it (`409`,
+    /// `mcp_tool_changed_again`).
+    ToolChangedAgain(String),
 }
 
 /// OAuth configuration contains no credential values.
@@ -583,6 +627,21 @@ pub trait McpControl: Send + Sync {
     /// # Errors
     /// [`McpControlError`].
     async fn reconnect(&self, name: &str) -> Result<McpServerDto, McpControlError>;
+    /// Approve the definition of `tool` with `hash` (the one shown to the
+    /// owner) and switch the tool on.
+    ///
+    /// # Errors
+    /// [`McpControlError`].
+    async fn approve_tool_changes(
+        &self,
+        _name: &str,
+        _tool: &str,
+        _hash: &str,
+    ) -> Result<McpServerDto, McpControlError> {
+        Err(McpControlError::Internal(
+            "tool approval is not supported by this host".into(),
+        ))
+    }
     /// Remove a deleted bot's id from every server's `bots` list (an atomic
     /// remove-id, never a list written back from a snapshot).  A list that
     /// becomes empty stays an explicit empty list ("no bot"); it never turns

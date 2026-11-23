@@ -36,6 +36,11 @@
 .cellTitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cellSub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .errorBlock { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); min-width: var(--space-0); padding: var(--space-0) var(--space-2) var(--space-3) calc(var(--space-2) + var(--space-6) + var(--space-3)); font-size: var(--font-size-xs); }
+.changedList { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-0) var(--space-2) var(--space-3) calc(var(--space-2) + var(--space-6) + var(--space-3)); font-size: var(--font-size-xs); }
+.changedCard { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); min-width: var(--space-0); padding: var(--space-2) var(--space-3); border: var(--size-border) solid var(--color-danger); border-radius: var(--radius-md); }
+.diffText { margin: var(--space-0); max-width: 100%; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--color-text); line-height: var(--line-height-normal); }
+.diffAdded { font-weight: var(--font-weight-semibold); text-decoration: underline; }
+.diffRemoved { text-decoration: line-through; color: var(--color-text-muted); }
 .errorHint { margin: var(--space-0); color: var(--color-text); line-height: var(--line-height-normal); }
 .errorText { margin: var(--space-0); max-width: 100%; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; color: var(--color-danger); line-height: var(--line-height-normal); }
 .errorToggle { padding: var(--space-0); border: 0; background: none; font: inherit; color: var(--color-text-muted); text-decoration: underline; cursor: pointer; }

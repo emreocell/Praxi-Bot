@@ -18,7 +18,9 @@
   {
     "doc": "agent-tools.md",
     "title": "Notes",
-    "headings": [],
+    "headings": [
+      "Clock and calculator"
+    ],
     "summary": "Every bot has a small built-in scratchpad between runs: a plan for a long task, a checklist, facts it will need tomorrow. Tools: notes_read (list notes, read one, or search) and notes_write (replace,…"
   },
   {
@@ -365,6 +367,19 @@
       "Corpus limits and validation"
     ],
     "summary": "Knowledge search works locally without an embedding provider. Remote embeddings"
+  },
+  {
+    "doc": "linux-host.md",
+    "title": "Linux always-on host (virtual display, update, uninstall)",
+    "headings": [
+      "1. Preview, then install",
+      "2. What gets installed",
+      "3. Check everything",
+      "4. Update (keeps your data)",
+      "5. Uninstall",
+      "6. Logs"
+    ],
+    "summary": "This page is the short, copy-paste version of running Praxi on a Linux server that stays on around the clock, for example a free ARM Ubuntu VM. The Add a server wizard runs the same installer and sho…"
   },
   {
     "doc": "llm-call-ledger.md",

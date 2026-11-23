@@ -33,6 +33,7 @@ pub mod live_view;
 pub mod page;
 pub mod proxy;
 pub mod snapshot;
+pub mod web_url;
 
 pub use actions::{
     ActionResult, FieldTarget, FrameIdentity, KeySpec, ScreenshotOptions, ScreenshotTarget,
@@ -57,3 +58,4 @@ pub use live_view::{
 pub use page::{DialogAction, DialogInfo, DialogOptions, Page};
 pub use proxy::FilterProxy;
 pub use snapshot::{RefEntry, RefMap, SnapNode, Snapshot, SnapshotOptions, build_snapshot};
+pub use web_url::{is_public_web_url, popup_url_allowed};

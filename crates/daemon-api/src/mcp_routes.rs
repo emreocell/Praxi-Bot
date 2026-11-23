@@ -9,8 +9,8 @@ use axum::{Extension, Json};
 use crate::AppState;
 use crate::error::{ApiError, ErrorBody};
 use crate::mcp::{
-    McpCatalogEntryDto, McpControl, McpControlError, McpServerDto, McpServerInput, McpToolDto,
-    SetSecret,
+    McpApproveChangesInput, McpCatalogEntryDto, McpControl, McpControlError, McpServerDto,
+    McpServerInput, McpToolDto, SetSecret,
 };
 use crate::routes::ApiJson;
 
@@ -26,6 +26,9 @@ impl From<McpControlError> for ApiError {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "bad_mcp_config", m)
             }
             McpControlError::Internal(m) => Self::internal(m),
+            McpControlError::ToolChangedAgain(m) => {
+                Self::new(StatusCode::CONFLICT, "mcp_tool_changed_again", m)
+            }
         }
     }
 }
@@ -238,6 +241,31 @@ pub(crate) async fn reconnect_mcp_server(
     let host = mcp(&s)?;
     audited(&s, &actor, "mcp.server_reconnect", &name, async {
         Ok(Json(host.reconnect(&name).await?))
+    })
+    .await
+}
+
+/// Approve the tools a server changed after the owner approved them, so they
+/// are switched on again. Owner only.
+#[utoipa::path(post, path = "/v1/mcp/servers/{name}/approve-tool-changes", tag = "mcp",
+    security(("bearer" = [])),
+    params(("name" = String, Path, description = "Server name")),
+    request_body = McpApproveChangesInput,
+    responses((status = 200, body = McpServerDto), (status = 404, body = ErrorBody),
+              (status = 409, body = ErrorBody, description = "The tool changed again since it was shown (`mcp_tool_changed_again`)"),
+              (status = 503, body = ErrorBody, description = "MCP management is not available")))]
+pub(crate) async fn approve_mcp_tool_changes(
+    State(s): State<AppState>,
+    actor: MaybeActor,
+    Path(name): Path<String>,
+    ApiJson(body): ApiJson<McpApproveChangesInput>,
+) -> Result<Json<McpServerDto>, ApiError> {
+    let host = mcp(&s)?;
+    audited(&s, &actor, "mcp.tool_changes_approved", &name, async {
+        Ok(Json(
+            host.approve_tool_changes(&name, &body.tool, &body.hash)
+                .await?,
+        ))
     })
     .await
 }

@@ -170,6 +170,7 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/v1/mcp/servers/{}"),
     ("DELETE", "/v1/mcp/servers/{}"),
     ("POST", "/v1/mcp/servers/{}/reconnect"),
+    ("POST", "/v1/mcp/servers/{}/approve-tool-changes"),
     ("POST", "/v1/mcp/servers/{}/auth/start"),
     ("POST", "/v1/mcp/servers/{}/auth/callback"),
     ("POST", "/v1/mcp/servers/{}/auth/cancel"),

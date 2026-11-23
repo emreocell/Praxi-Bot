@@ -18,4 +18,5 @@ deutsche Seite, wenn es sie gibt.
 | [Computersteuerung](computer-use.md) | Bots benutzen Apps auf deinem eigenen Windows-PC. |
 | [Alte Backups wiederherstellen](backup-and-restore.md) | Ältere, unverschlüsselte Backups. |
 | [FAQ](faq.md) | Häufige Fragen. |
+| [Linux-Dauerbetrieb](linux-host.md) | Befehle für virtuelles Display, Update und Deinstallation. |
 | [Glossar](glossary.md) | Die wichtigsten Begriffe. |

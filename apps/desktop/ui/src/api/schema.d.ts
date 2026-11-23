@@ -2295,6 +2295,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mcp/servers/{name}/approve-tool-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve the tools a server changed after the owner approved them, so they
+         *     are switched on again. Owner only.
+         */
+        post: operations["approve_mcp_tool_changes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mcp/servers/{name}/auth/callback": {
         parameters: {
             query?: never;
@@ -6361,6 +6381,17 @@ export interface components {
             scope: string;
             version: string;
         };
+        /** @description Body of `POST /v1/mcp/servers/{name}/approve-tool-changes`. */
+        McpApproveChangesInput: {
+            /**
+             * @description `hash` of the changed definition the owner was shown. If the server
+             *     offers something else now the request fails with `409
+             *     mcp_tool_changed_again`.
+             */
+            hash: string;
+            /** @description The tool to approve. */
+            tool: string;
+        };
         /** @description Body of `POST /v1/mcp/servers/{name}/auth/callback`. */
         McpAuthCallback: {
             /** @description The full address the browser was redirected to (`http://127.0.0.1:<port>/callback?...`). */
@@ -6505,6 +6536,12 @@ export interface components {
             browser?: boolean;
             /** @description Permission category of every tool of the server. */
             category: string;
+            /**
+             * @description Tools the server changed after the owner approved them. They are
+             *     switched off (the model never sees them) until re-approved with
+             *     `POST /v1/mcp/servers/{name}/approve-tool-changes`.
+             */
+            changed_tools?: components["schemas"]["McpToolChangeDto"][];
             /** @description Executable (stdio). */
             command?: string | null;
             /** @description Working directory (stdio). */
@@ -6702,6 +6739,31 @@ export interface components {
             /** Format: uuid */
             id: string;
             scopes: components["schemas"]["McpScope"][];
+        };
+        /** @description One tool whose description or schema changed after approval. */
+        McpToolChangeDto: {
+            /** @description The description the server offers now (untrusted text: show it as text). */
+            after: string;
+            /** @description The approved description. */
+            before: string;
+            /** @description The visible description text differs. */
+            description_changed: boolean;
+            /** @description Hash of the definition shown here; the approval must quote it. */
+            hash: string;
+            /**
+             * @description The tool is new on a server that already had approved tools (or the
+             *     approvals could not be read); `before` is empty.
+             */
+            new_tool?: boolean;
+            /**
+             * @description Something not visible in the text differs (hidden characters, title,
+             *     annotations).
+             */
+            other_changed: boolean;
+            /** @description The input schema differs. */
+            schema_changed: boolean;
+            /** @description Tool name on the server. */
+            tool: string;
         };
         /** @description A tool of an MCP server (`GET /v1/mcp/servers/{name}/tools`). */
         McpToolDto: {
@@ -14026,6 +14088,58 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description MCP management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    approve_mcp_tool_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Server name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpApproveChangesInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The tool changed again since it was shown (`mcp_tool_changed_again`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
