@@ -218,7 +218,7 @@ pub fn stop_installation(directory: &Path) -> io::Result<()> {
                     let path = String::from_utf16_lossy(&path[..len as usize]);
                     if expected
                         .iter()
-                        .any(|p| p.to_string_lossy().eq_ignore_ascii_case(&path))
+                        .any(|p| crate::owner::same_file(p, Path::new(&path)))
                         && same_user(handle(&process))
                     {
                         let name = event_name(entry.th32ProcessID);

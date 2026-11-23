@@ -34,8 +34,40 @@ impl Endpoint {
     pub fn publish(self, data: &Path) -> io::Result<()> {
         let tmp = data.join(format!("{ENDPOINT_FILE}.tmp"));
         std::fs::write(&tmp, serde_json::to_vec(&self)?)?;
+        protect_file(&tmp)?;
         std::fs::rename(tmp, data.join(ENDPOINT_FILE))
     }
+}
+
+/// Owner-only access for lock/discovery files (Windows DACL; a no-op elsewhere,
+/// where the data directory's own mode applies).
+fn protect_file(path: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    return crate::windows::owner_only_file(path);
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+/// Open the lock file WITHOUT delete sharing on Windows, so no process can unlink
+/// or rename it while anyone holds it (a replaced lock file would split the lock).
+/// # Errors
+/// The file cannot be opened.
+pub fn open_lock_file(data: &Path, create: bool) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .create(create)
+        .truncate(false);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(0x1 | 0x2); // FILE_SHARE_READ | FILE_SHARE_WRITE
+    }
+    options.open(data.join(LOCK_FILE))
 }
 
 /// Acquire exclusive ownership before opening databases, reading secrets or spawning children.
@@ -43,12 +75,8 @@ impl Endpoint {
 /// Another daemon/restore owns the directory, or the directory is unwritable.
 pub fn acquire(data: &Path) -> io::Result<File> {
     std::fs::create_dir_all(data)?;
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(data.join(LOCK_FILE))?;
+    let file = open_lock_file(data, true)?;
+    protect_file(&data.join(LOCK_FILE))?;
     file.try_lock().map_err(|e| {
         io::Error::other(format!(
             "Praxi is already using this data folder, or a restore is in progress ({e})"
@@ -66,11 +94,7 @@ pub fn acquire(data: &Path) -> io::Result<File> {
 /// Discovery only while a daemon/restore actually holds the lock. A stale PID never wins.
 #[must_use]
 pub fn discover(data: &Path) -> Option<Endpoint> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(data.join(LOCK_FILE))
-        .ok()?;
+    let file = open_lock_file(data, false).ok()?;
     match file.try_lock() {
         Err(std::fs::TryLockError::WouldBlock) => {}
         Ok(()) | Err(std::fs::TryLockError::Error(_)) => return None,

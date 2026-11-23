@@ -22,11 +22,7 @@ fn main() {
             // A daemon reused from another installation is deliberately not killed.
             // Refuse uninstall/data removal while that data directory remains owned.
             if let Some(data) = storage::data_dir() {
-                match std::fs::OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open(data.join(process_guard::lifecycle::LOCK_FILE))
-                {
+                match process_guard::lifecycle::open_lock_file(&data, false) {
                     Ok(file) => file.try_lock().map_err(std::io::Error::other)?,
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                     Err(e) => return Err(e),

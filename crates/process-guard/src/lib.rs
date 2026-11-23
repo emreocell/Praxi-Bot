@@ -31,6 +31,7 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 
 pub mod lifecycle;
+pub mod owner;
 
 #[cfg(windows)]
 pub mod supervision;

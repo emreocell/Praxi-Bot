@@ -1332,17 +1332,32 @@ fn make_client(cli: &Cli, data_dir: &std::path::Path) -> Result<Client> {
             client::fail(client::exit::AUTH, msg)
         })?,
     };
-    let base = cli.url.clone().unwrap_or_else(|| {
-        if let Some(endpoint) = process_guard::lifecycle::discover(data_dir)
-            && (cli.port == daemon_api::DEFAULT_PORT || cli.port == endpoint.requested_port)
-        {
-            return endpoint.url();
-        }
-        format!("http://127.0.0.1:{}", cli.port)
-    });
+    let base = match &cli.url {
+        Some(url) => url.clone(),
+        None => recorded_daemon_url(cli.port, data_dir)?,
+    };
     // The owner key of this data dir: present when the daemon is a terminal
     // `bot serve` or a host, absent for a daemon the app started (memory only).
     Ok(Client::new(&base, token).with_owner_key(daemon_api::read_owner_key(data_dir).ok()))
+}
+
+/// The daemon URL from the discovery record. The record is plain data, so the pid
+/// behind it must own the socket and run THIS binary before the token goes anywhere;
+/// otherwise fail closed (never fall back to a port that might be the squatter's).
+fn recorded_daemon_url(port: u16, data_dir: &std::path::Path) -> Result<String> {
+    let expected: Vec<std::path::PathBuf> = std::env::current_exe().into_iter().collect();
+    match process_guard::owner::discover_trusted(data_dir, &expected) {
+        Ok(Some(endpoint))
+            if port == daemon_api::DEFAULT_PORT || port == endpoint.requested_port =>
+        {
+            Ok(endpoint.url())
+        }
+        Ok(_) => Ok(format!("http://127.0.0.1:{port}")),
+        Err(_) => Err(client::fail(
+            client::exit::AUTH,
+            process_guard::owner::FOREIGN_PORT_MESSAGE,
+        )),
+    }
 }
 
 fn current_thread_runtime() -> Result<tokio::runtime::Runtime> {

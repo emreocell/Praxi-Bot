@@ -784,6 +784,19 @@ fn loopback_port(url: &str) -> Option<u16> {
         .flatten()
 }
 
+/// Binaries that may be this install's daemon: the resolved sidecar and `bot[.exe]`
+/// next to the app.
+fn trusted_images() -> Vec<std::path::PathBuf> {
+    let mut images = vec![std::path::PathBuf::from(bot_binary())];
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+    {
+        images.push(dir.join(if cfg!(windows) { "bot.exe" } else { "bot" }));
+    }
+    images
+}
+
 /// Identity gate run before the bearer token is handed out.  The health probe
 /// is unauthenticated, so an answer only proves "something listens".  The
 /// owning process of the socket must be the child this app spawned (exact PID),
@@ -802,11 +815,18 @@ async fn check_listener(handle: &DaemonHandle, url: &str, after_spawn: bool) -> 
                  refusing to send the API token"
             ));
         }
-        None => data_dir()
-            .ok()
-            .and_then(|data| process_guard::lifecycle::discover(&data))
-            .filter(|endpoint| endpoint.port == port)
-            .map_or(Expect::SameUser, |endpoint| Expect::Recorded(endpoint.pid)),
+        None => {
+            // The record is plain data any same-user process can rewrite: its pid must
+            // own the socket and run this install's bot binary before the token is sent.
+            let recorded = match data_dir() {
+                Ok(data) => process_guard::owner::discover_trusted(&data, &trusted_images()),
+                Err(_) => Ok(None),
+            }
+            .map_err(|_| process_guard::owner::FOREIGN_PORT_MESSAGE.to_owned())?;
+            recorded
+                .filter(|endpoint| endpoint.port == port)
+                .map_or(Expect::SameUser, |endpoint| Expect::Recorded(endpoint.pid))
+        }
     };
     tokio::task::spawn_blocking(move || listener::verify(port, expect))
         .await
