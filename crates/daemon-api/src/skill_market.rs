@@ -62,6 +62,7 @@ pub(crate) fn market_hub(state: &AppState) -> SkillHub {
         Box::new(MarketFetcher),
         Box::new(GitCli),
     )
+    .with_public_index_git(Box::new(skills::hub::net_guard::SystemResolver))
 }
 
 /// Which index to read. Empty means the bundled one.
@@ -346,8 +347,11 @@ fn preview_dto(state: &AppState, hub: &SkillHub, p: &Preview, update: bool) -> M
     let redact = |text: &str| state.agent().redact_external_text(text.to_owned());
     let needs = needs_of(&p.report);
     let installed = update.then(|| installed_summary(hub, &p.name)).flatten();
+    // An update whose installed state cannot be read (failed lockfile read) cannot be compared:
+    // fail closed and ask for the extra confirmation.
+    let unknown_before = update && installed.is_none();
     let (added, removed, more) = installed.as_ref().map_or_else(
-        || (Vec::new(), Vec::new(), false),
+        || (Vec::new(), Vec::new(), unknown_before),
         |old| {
             let before: BTreeSet<&String> = old.needs.iter().collect();
             let after: BTreeSet<&String> = needs.iter().collect();

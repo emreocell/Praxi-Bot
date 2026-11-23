@@ -17,10 +17,6 @@ use super::HubError;
 /// Largest index document accepted.
 pub const MAX_INDEX_BYTES: usize = 1024 * 1024;
 
-/// Redirects followed when downloading an index. Kept small so a hostile
-/// server cannot bounce the client around indefinitely.
-const MAX_REDIRS: &str = "5";
-
 /// What to install.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallSource {
@@ -57,30 +53,6 @@ pub trait Fetcher: Send + Sync {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CurlFetcher;
 
-fn curl_command_args(url: &str) -> Vec<String> {
-    // `--max-filesize` is intentionally absent: curl ignores it for chunked
-    // responses and for responses without `Content-Length`, and `output()`
-    // would buffer the body before a length check could run.
-    vec![
-        "--fail".to_string(),
-        "--silent".to_string(),
-        "--show-error".to_string(),
-        "--location".to_string(),
-        "--proto".to_string(),
-        "=https".to_string(),
-        "--proto-redir".to_string(),
-        "=https".to_string(),
-        "--max-time".to_string(),
-        "30".to_string(),
-        "--max-redirs".to_string(),
-        MAX_REDIRS.to_string(),
-        "--output".to_string(),
-        "-".to_string(),
-        "--".to_string(),
-        url.to_string(),
-    ]
-}
-
 /// Read `reader` until EOF. Stop and return an error once more than `max`
 /// bytes have been seen, without pulling the rest of the stream.
 ///
@@ -104,7 +76,7 @@ pub(super) fn read_capped<R: Read>(mut reader: R, max: usize) -> Result<Vec<u8>,
     Ok(buf)
 }
 
-fn drain_capped(mut reader: impl Read, max: usize) -> Vec<u8> {
+pub(super) fn drain_capped(mut reader: impl Read, max: usize) -> Vec<u8> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     loop {
@@ -124,37 +96,11 @@ fn drain_capped(mut reader: impl Read, max: usize) -> Vec<u8> {
 
 impl Fetcher for CurlFetcher {
     fn get(&self, url: &str) -> Result<Vec<u8>, HubError> {
-        let mut child = Command::new("curl")
-            .args(curl_command_args(url))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| HubError::Source(format!("cannot run curl: {e}")))?;
-        let stderr = child.stderr.take();
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| HubError::Source("curl stdout missing".into()))?;
-        let err_thread = std::thread::spawn(move || {
-            stderr.map_or_else(Vec::new, |pipe| drain_capped(pipe, 64 * 1024))
-        });
-        let body = read_capped(stdout, MAX_INDEX_BYTES);
-        if body.is_err() {
-            let _ = child.kill();
-        }
-        let status = child
-            .wait()
-            .map_err(|e| HubError::Source(format!("curl wait: {e}")))?;
-        let stderr_buf = err_thread.join().unwrap_or_default();
-        let body = body?;
-        if !status.success() {
-            return Err(HubError::Source(format!(
-                "curl failed: {}",
-                String::from_utf8_lossy(&stderr_buf).trim()
-            )));
-        }
-        Ok(body)
+        super::net_guard::guarded_get(
+            url,
+            &super::net_guard::SystemResolver,
+            &super::net_guard::CurlTransport,
+        )
     }
 }
 
@@ -819,9 +765,7 @@ mod tests {
     use std::path::Path;
     use std::process::Command;
 
-    use super::{
-        MAX_INDEX_BYTES, curl_command_args, git, read_capped, validate_commit_pin, validate_git_url,
-    };
+    use super::{MAX_INDEX_BYTES, git, read_capped, validate_commit_pin, validate_git_url};
 
     #[test]
     fn rejects_local_file_http_git_and_unc_urls() {
@@ -902,20 +846,6 @@ mod tests {
         };
         let body = read_capped(&mut exact, 250).unwrap();
         assert_eq!(body.len(), 250);
-    }
-
-    #[test]
-    fn curl_index_fetch_limits_redirects_without_max_filesize() {
-        let args = curl_command_args("https://example.com/index.json");
-        assert!(args.windows(2).any(|pair| pair == ["--max-redirs", "5"]));
-        assert!(args.windows(2).any(|pair| pair == ["--proto", "=https"]));
-        assert!(
-            args.windows(2)
-                .any(|pair| pair == ["--proto-redir", "=https"])
-        );
-        assert!(!args.iter().any(|arg| arg == "--max-filesize"));
-        let split = args.iter().position(|arg| arg == "--").unwrap();
-        assert_eq!(args[split + 1], "https://example.com/index.json");
     }
 
     fn raw_git(dir: &Path, args: &[&str]) {

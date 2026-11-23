@@ -35,6 +35,7 @@
 
 pub mod index_check;
 pub mod lock;
+pub mod net_guard;
 pub mod scan;
 pub mod source;
 pub(crate) mod util;
@@ -200,6 +201,8 @@ pub struct SkillHub {
     paths: HubPaths,
     fetcher: Box<dyn Fetcher>,
     git: Box<dyn GitBackend>,
+    /// When set, index `git` URLs must be public https hosts.
+    index_resolver: Option<Box<dyn net_guard::Resolver>>,
     guard: Mutex<()>,
 }
 
@@ -229,8 +232,17 @@ impl SkillHub {
             paths,
             fetcher,
             git,
+            index_resolver: None,
             guard: Mutex::new(()),
         }
+    }
+
+    /// Require every index-listed `git` URL to be https on a named host whose
+    /// addresses are all public (no `ssh://`). Used by the in-app flow.
+    #[must_use]
+    pub fn with_public_index_git(mut self, resolver: Box<dyn net_guard::Resolver>) -> Self {
+        self.index_resolver = Some(resolver);
+        self
     }
 
     /// Paths in use.
@@ -513,6 +525,9 @@ impl SkillHub {
                     HubError::Source(format!("index entry `{name}` is missing a commit pin"))
                 })?;
                 source::validate_commit_pin(&want)?;
+                if let Some(resolver) = &self.index_resolver {
+                    net_guard::check_index_git_url(&entry.git, resolver.as_ref())?;
+                }
                 let (root, pin) = self.clone_repo(
                     &entry.git,
                     Some(want.as_str()),
