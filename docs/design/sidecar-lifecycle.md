@@ -54,7 +54,10 @@ not used as evidence that startup finished. Restarts wait for actual process exi
 Before releasing the sidecar's private stdin handshake, the desktop assigns it
 to a Windows job with `KILL_ON_JOB_CLOSE`, without either breakaway flag. The owner
 key is sent over that pipe only, never argv, logs, an environment variable or a
-file. The pipe stays open: a stop line or EOF requests normal daemon shutdown.
+file. The desktop also passes `--desktop-control-stdin`: its pipe stays open,
+and a stop line or EOF requests normal daemon shutdown. Ordinary
+`--owner-key-stdin` callers retain the one-line key handoff and may close stdin
+without requesting shutdown (including the existing real-app smoke launcher).
 The daemon also contains itself and future children in its own kill-on-close job
 before loading secrets/tools. The OS owns that job handle until process exit,
 including a standalone CLI daemon's crash. Job handles are not inheritable.

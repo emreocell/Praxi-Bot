@@ -618,7 +618,7 @@ fn spawn_daemon(handle: &DaemonHandle, data_dir: &Path, fake: bool) -> Result<Ch
     let mut cmd = bot_command();
     cmd.arg("serve").arg("--port").arg(port().to_string());
     cmd.arg("--shutdown-grace").arg("3");
-    cmd.arg("--owner-key-stdin");
+    cmd.arg("--owner-key-stdin").arg("--desktop-control-stdin");
     if *handle.safe.lock() {
         cmd.arg("--safe");
     }

@@ -216,6 +216,9 @@ enum Command {
         /// The desktop app uses this so the key never appears in argv, a file, or the environment.
         #[arg(long)]
         owner_key_stdin: bool,
+        /// Keep stdin open after the key for desktop stop/EOF lifecycle control.
+        #[arg(long, hide = true, requires = "owner_key_stdin")]
+        desktop_control_stdin: bool,
         /// Safe mode (also `BOT_SAFE_MODE=1`): chat works without tools; tools, schedules,
         /// channels, MCP servers, apps, memory work and peer networking stay off.
         ///
@@ -1200,19 +1203,25 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         let mut line = String::new();
         std::io::stdin().read_line(&mut line)?;
         let key = line.trim().to_owned();
-        if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(
-                "Praxi could not establish a secure connection to the desktop app. Restart Praxi."
-                    .into(),
-            );
+        if key.len() < 32 {
+            return Err("Praxi could not read a valid owner key from standard input.".into());
         }
-        let pipe_stop = stop_tx.clone();
-        std::thread::spawn(move || {
-            let mut line = String::new();
-            // EOF also means the owning app exited. No secret is written back to the pipe.
-            let _ = std::io::stdin().read_line(&mut line);
-            let _ = pipe_stop.send(true);
-        });
+        if matches!(
+            command,
+            Command::Serve {
+                desktop_control_stdin: true,
+                ..
+            }
+        ) {
+            let pipe_stop = stop_tx.clone();
+            std::thread::spawn(move || {
+                let mut line = String::new();
+                // EOF means the owning app exited only for the persistent control protocol.
+                // Ordinary --owner-key-stdin callers may close stdin after their one-line key.
+                let _ = std::io::stdin().read_line(&mut line);
+                let _ = pipe_stop.send(true);
+            });
+        }
         Some(key)
     } else {
         None

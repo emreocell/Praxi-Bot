@@ -116,7 +116,17 @@ fn start_daemon_on(
     }
     let mut daemon = Daemon(command.spawn().expect("start bot serve"));
     if let Some(stdin) = daemon.0.stdin.as_mut() {
-        writeln!(stdin, "{}", "a".repeat(64)).unwrap();
+        let key = if extra.contains(&"--desktop-control-stdin") {
+            "a".repeat(64)
+        } else {
+            // Existing callers may use any opaque key of at least 32 bytes.
+            "one-line-owner-key-smoke-fixture-123456".to_owned()
+        };
+        writeln!(stdin, "{key}").unwrap();
+    }
+    if !extra.contains(&"--desktop-control-stdin") {
+        // The one-line protocol remains valid when its caller immediately closes stdin.
+        drop(daemon.0.stdin.take());
     }
 
     // The daemon announces its (free) port on stdout; keep draining so it never blocks.
@@ -158,7 +168,12 @@ fn desktop_sidecar_falls_back_discovers_and_stops_through_its_private_pipe() {
     let data = tempfile::tempdir().unwrap();
     let (mut daemon, addr, _, reader) = start_daemon_on(
         data.path(),
-        &["--owner-key-stdin", "--shutdown-grace", "1"],
+        &[
+            "--owner-key-stdin",
+            "--desktop-control-stdin",
+            "--shutdown-grace",
+            "1",
+        ],
         requested,
     );
     assert_ne!(addr.port(), requested);
@@ -195,6 +210,26 @@ fn desktop_sidecar_falls_back_discovers_and_stops_through_its_private_pipe() {
     assert!(status.success(), "{status:?}");
     assert!(reader.join().unwrap().contains("stopped;"));
     assert!(process_guard::lifecycle::discover(data.path()).is_none());
+}
+
+#[test]
+fn one_line_owner_key_handoff_does_not_make_eof_a_stop_request() {
+    let data = tempfile::tempdir().unwrap();
+    let (daemon, addr, deadline, reader) = start_daemon_with(data.path(), &["--owner-key-stdin"]);
+    loop {
+        if get(addr, "/v1/health", None).is_ok() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "daemon stopped when the key pipe closed"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // A complete protected request after EOF guards the smoke launcher's original contract.
+    let token = std::fs::read_to_string(data.path().join("api-token")).unwrap();
+    assert_eq!(get(addr, "/v1/bots", Some(token.trim())).unwrap().0, 200);
+    stop_cleanly(daemon, addr, reader);
 }
 
 /// Stop the daemon and check it ends (and releases the port).
