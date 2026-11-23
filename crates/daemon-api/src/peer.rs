@@ -253,6 +253,7 @@ pub fn peer_router(state: AppState) -> Router {
             crate::live_view::audit_ingress,
         ))
         .layer(axum::middleware::from_fn_with_state(state.clone(), guard))
+        .layer(axum::middleware::from_fn(crate::logs::request_log))
         .with_state(state)
 }
 
@@ -283,6 +284,9 @@ fn normalize_deny_path(path: &str) -> String {
 /// Why `method path` is refused to every paired peer role, if it is: the
 /// host-local provider management, MCP management and diagnostics endpoints.
 fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> {
+    if under(check_path, "/v1/logs") {
+        return Some("recent logs are available only to the local owner");
+    }
     if under(check_path, "/v1/connection-test") {
         return Some("connection tests spend this host's stored keys and are an owner action");
     }

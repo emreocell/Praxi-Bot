@@ -862,7 +862,7 @@ pub(crate) async fn forget_bot_links(s: &AppState, bot: &Bot) {
     if let Ok(store) = s.schedule_store()
         && let Err(e) = store.delete_by_bot(bot.id)
     {
-        eprintln!("daemon-api: warning: could not remove schedules of deleted bot: {e:?}");
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: warning: could not remove schedules of deleted bot: {e:?}");
     }
     // The bot's id must not linger in any MCP server's `bots` list.  Ids are
     // never reused, so a failure here cannot widen access; it is retried by
@@ -877,7 +877,7 @@ pub(crate) async fn forget_bot_links(s: &AppState, bot: &Bot) {
     if let Some(email) = s.email()
         && let Err(e) = email.forget_bot(&bot.id.to_string()).await
     {
-        eprintln!("daemon-api: warning: could not remove e-mail accounts of deleted bot: {e:?}");
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: warning: could not remove e-mail accounts of deleted bot: {e:?}");
     }
 }
 

@@ -135,12 +135,12 @@ impl McpHost {
         if !path.exists()
             && let Err(e) = std::fs::write(&path, FILE_HEADER)
         {
-            eprintln!("warning: cannot create {}: {e}", path.display());
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: cannot create {}: {e}", path.display());
         }
         let (mut loaded, mut broken) = match store.load() {
             Ok(l) => (l, None),
             Err(e) => {
-                eprintln!("warning: {e}; MCP servers are not started");
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {e}; MCP servers are not started");
                 (Vec::new(), Some(e.to_string()))
             }
         };
@@ -180,7 +180,7 @@ impl McpHost {
             manager = manager.with_secret_registrar(register);
         }
         let catalog = mcp_bridge::builtin_catalog().unwrap_or_else(|e| {
-            eprintln!("warning: {e}");
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {e}");
             Vec::new()
         });
         // Register synchronously before returning the host. Background futures
@@ -190,7 +190,7 @@ impl McpHost {
             .filter_map(|cfg| match manager.register_server(cfg.clone()) {
                 Ok(handle) => Some((cfg.id.clone(), cfg.enabled, handle)),
                 Err(error) => {
-                    eprintln!("warning: MCP server {} not registered: {error}", cfg.id);
+                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: MCP server {} not registered: {error}", cfg.id);
                     None
                 }
             })
@@ -475,7 +475,7 @@ impl McpHost {
             handle.connect().await
         };
         if let Err(error) = result {
-            eprintln!("warning: MCP server {id} not started: {error}");
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: MCP server {id} not started: {error}");
             // The child's own explanation (already secret-redacted).
             for line in error_stderr_tail(&self.manager.stderr_tail(id))
                 .iter()
@@ -483,7 +483,7 @@ impl McpHost {
                 .take(5)
                 .rev()
             {
-                eprintln!("warning: MCP server {id} stderr: {line}");
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: MCP server {id} stderr: {line}");
             }
         }
         self.finish_connect(id, generation);
@@ -1316,7 +1316,9 @@ impl McpControl for McpHost {
                     self.notify_changed(name);
                     return Err(map_err(error));
                 }
-                Err(error) => eprintln!("warning: re-approving MCP tools failed: {error}"),
+                Err(error) => {
+                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: re-approving MCP tools failed: {error}")
+                }
             }
             self.announce(name);
         }

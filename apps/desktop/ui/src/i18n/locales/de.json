@@ -3768,6 +3768,32 @@
     "unknown": "Die Hardware dieses Computers konnte nicht gelesen werden, daher gibt es keine Empfehlung. Beginne mit einem kleinen Modell (etwa 4B) und gehe höher, wenn es gut läuft.",
     "unknownValue": "unbekannt"
   },
+  "logs": {
+    "bundleNote": "Öffne jede Datei, um den genauen Inhalt zu prüfen. Die ZIP-Datei enthält nur diese vier Dateien. Alle aktuellen Protokolle werden aufgenommen, auch durch Suche oder Stufenfilter ausgeblendete Einträge. Chats und Geheimnisse sind ausgeschlossen.",
+    "bundlePreview": "Dateien im Supportpaket",
+    "copied": "Bereinigte Protokolle kopiert.",
+    "copy": "Angezeigte Protokolle kopieren",
+    "copyFailed": "Protokolle konnten nicht kopiert werden. Prüfe den Zugriff auf die Zwischenablage.",
+    "empty": "Keine passenden Protokolleinträge. Ältere Einträge wurden möglicherweise bereits ersetzt.",
+    "failed": "Diagnosedaten konnten nicht gelesen werden. Versuche es erneut, sobald der Dienst verbunden ist.",
+    "level": "Stufe",
+    "levels": {
+      "all": "Alle Stufen",
+      "debug": "Fehlersuchdetails",
+      "error": "Fehler",
+      "info": "Informationen",
+      "trace": "Ablaufdetails",
+      "warn": "Warnungen"
+    },
+    "loading": "Diagnosedaten werden gelesen…",
+    "prepare": "Supportpaket ansehen",
+    "privacy": "Nur Betriebsereignisse. Nachrichten, Zugangsdaten, E-Mail-Adressen und persönliche Dateipfade werden ausgeschlossen. Es wird nichts automatisch gesendet.",
+    "refresh": "Aktualisieren",
+    "save": "Supportpaket speichern",
+    "saveFailed": "Das Paket konnte nicht gespeichert werden. Versuche es erneut.",
+    "search": "Protokolle durchsuchen",
+    "title": "Letzte Protokolle anzeigen"
+  },
   "main": {
     "clearSelection": "Zurück zur Übersicht",
     "daemonConnectingDescription": "Verbindung zum mitgelieferten Praxi-Bot-Hintergrunddienst auf diesem Computer wird hergestellt.",
@@ -5206,6 +5232,10 @@
       "general": {
         "description": "Dein Name, die Sprache und wie das Senden von Nachrichten funktioniert.",
         "name": "Allgemein"
+      },
+      "help": {
+        "description": "Prüfe aktuelle Ereignisse und erstelle einen bereinigten Supportbericht.",
+        "name": "Hilfe"
       },
       "models": {
         "description": "Mit welcher KI deine Bots denken und woran sie sich erinnern können.",

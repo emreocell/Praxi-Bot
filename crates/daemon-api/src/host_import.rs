@@ -310,7 +310,7 @@ impl AppState {
                     "host.import.computer_normalised",
                     &serde_json::json!({"bot": id, "from": old, "to": "auto"}),
                 );
-                eprintln!(
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
                     "migration: moved bot {id} now runs on this host's own computer (was {old:?})"
                 );
             }

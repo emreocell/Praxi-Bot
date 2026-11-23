@@ -536,7 +536,7 @@ impl LeaderControl {
                                 // Persistence can fail after the safe demotion is
                                 // already in memory. Do not abort startup for that.
                                 if let Err(error) = self.observe(&device.id, info).await {
-                                    eprintln!(
+                                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
                                         "host leadership: startup peer check failed; continuing in the current ownership state: {error}"
                                     );
                                 }

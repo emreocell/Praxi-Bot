@@ -37,6 +37,7 @@ mod host_admin;
 mod host_slice;
 mod knowledge;
 mod knowledge_brain;
+mod logs;
 mod mcp;
 mod memory;
 mod model_catalog;

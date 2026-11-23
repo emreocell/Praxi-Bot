@@ -47,6 +47,7 @@ mod knowledge_settings;
 pub mod live_view;
 mod local_install;
 mod local_models;
+mod logs;
 pub mod mcp;
 mod mcp_routes;
 pub mod mcp_server;
@@ -420,7 +421,7 @@ impl AppState {
             Err(e) => {
                 // Fail closed: a damaged limit file must not silently turn the
                 // limit off. Paid calls stay blocked until the owner sets it again.
-                eprintln!(
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
                     "daemon-api: WARNING: {e}; paid model calls are blocked until the monthly spending limit is set again on the Usage page"
                 );
                 agent.set_spend_limit(Some(spend_routes::FAIL_CLOSED_LIMIT_USD));
@@ -439,7 +440,7 @@ impl AppState {
                 agent.set_global_policy(permission_engine::Policy::read_only());
                 agent.set_policy_locked(true);
                 let msg = format!("{e}; all tool actions are denied until a policy is saved");
-                eprintln!("daemon-api: WARNING: {msg}");
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: WARNING: {msg}");
                 Some(msg)
             }
         };
@@ -1130,6 +1131,7 @@ pub fn router(state: AppState) -> Router {
             state.clone(),
             auth::guard,
         ))
+        .layer(axum::middleware::from_fn(logs::request_log))
         .with_state(state)
 }
 
@@ -1463,6 +1465,7 @@ fn api_routes() -> Router<AppState> {
             post(data_routes::post_clear_cache),
         )
         .route("/v1/doctor", get(doctor_routes::get_doctor))
+        .route("/v1/logs/recent", get(logs::recent))
         .route("/v1/doctor/report", get(doctor_routes::report))
         .route("/v1/doctor/repair/{id}", post(doctor_routes::repair))
         .route(
@@ -1712,7 +1715,7 @@ async fn serve_with_startup_timeout(
         };
         tokio::spawn(async move {
             let began = std::time::Instant::now();
-            eprintln!("startup: leader components starting in background");
+            support_logs::tracing::info!(target: "praxi_support", phase = "leader_starting");
             let abort = work.abort_handle();
             tokio::select! {
                 () = cancel.cancelled() => abort.abort(),
@@ -1722,24 +1725,24 @@ async fn serve_with_startup_timeout(
                         Err(_) => {
                             abort.abort();
                             leader.set_degraded(host::StartupReason::TimedOut);
-                            eprintln!("warning: leader startup timed out ({elapsed} ms)");
+                            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: leader startup timed out ({elapsed} ms)");
                         }
                         Ok(Err(e)) => {
                             leader.set_degraded(host::StartupReason::TaskPanicked);
-                            eprintln!("warning: leader startup task failed: {e}");
+                            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: leader startup task failed: {e}");
                         }
                         Ok(Ok(Ok(()))) if leader.components_allowed() => {
                             leader.set_startup(host::StartupPhase::Ready, None);
-                            eprintln!("startup: leader components started in background (+{elapsed} ms)");
+                            support_logs::tracing::info!(target: "praxi_support", phase = "leader_ready", elapsed_ms = u64::try_from(elapsed).unwrap_or(u64::MAX));
                         }
                         Ok(Ok(Ok(()))) => {
                             leader.set_startup(host::StartupPhase::Ready, None);
-                            eprintln!("startup: leader components idle ({elapsed} ms)");
+                            support_logs::tracing::info!(target: "praxi_support", phase = "leader_idle", elapsed_ms = u64::try_from(elapsed).unwrap_or(u64::MAX));
                         }
                         Ok(Ok(Err(e))) => {
                             // Fixed text: the error itself may carry a path.
                             leader.set_degraded(host::StartupReason::from_error(&e));
-                            eprintln!("warning: leader components failed to start ({elapsed} ms): {e}");
+                            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: leader components failed to start ({elapsed} ms): {e}");
                         }
                     }
                 }
@@ -1764,7 +1767,7 @@ async fn serve_with_startup_timeout(
             shutdown.await;
             stopping.shutdown_token().cancel();
             if let Err(e) = startup.await {
-                eprintln!("warning: leader startup task failed: {e}");
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: leader startup task failed: {e}");
             }
             stopping.stop_components().await;
         })

@@ -173,15 +173,40 @@ fn now_stamp() -> String {
     )
 }
 
+fn ensure_logging(data_dir: &Path) {
+    static LOGGING: std::sync::Once = std::sync::Once::new();
+    LOGGING.call_once(|| {
+        if support_logs::init(data_dir, "sidecar").is_err() {
+            eprintln!("Sidecar diagnostics could not open the log folder.");
+        }
+    });
+}
+
 /// One timestamped line appended to `desktop-daemon.log` (errors are ignored: a log must never stop the app).
 fn append_log(data_dir: &Path, who: &str, line: &str) {
     use std::io::Write;
+    ensure_logging(data_dir);
+    // Never retain arbitrary child stderr, UI restart reasons or OS errors.
+    let safe = support_logs::safe_stderr(line);
+    if who == "app" {
+        let phase = if line.starts_with("starting") {
+            "spawning"
+        } else if line.starts_with("started") || line.starts_with("daemon spawned") {
+            "spawning"
+        } else if line.starts_with("restart") {
+            "stopping"
+        } else {
+            "failed"
+        };
+        support_logs::tracing::info!(target: "praxi_support", phase);
+    }
+    rotate_log(data_dir);
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(log_path(data_dir))
     {
-        let _ = writeln!(f, "{} [{who}] {line}", now_stamp());
+        let _ = writeln!(f, "{} [{who}] {safe}", now_stamp());
     }
 }
 
@@ -212,11 +237,13 @@ fn pump_stderr(
                 Ok(_) => {}
             }
             let text = String::from_utf8_lossy(&raw);
-            let line: String = text.trim_end().chars().take(2000).collect();
+            let line = support_logs::safe_stderr(text.trim_end());
             if line.is_empty() {
                 continue;
             }
-            append_log(&data_dir, "bot", &line);
+            if line.contains(NO_PROVIDER_MARKER) || !line.starts_with('{') {
+                append_log(&data_dir, "bot", &line);
+            }
             let mut t = tail.lock();
             if t.len() >= TAIL_LINES {
                 t.pop_front();
@@ -703,6 +730,8 @@ async fn check_listener(handle: &DaemonHandle, url: &str, after_spawn: bool) -> 
 
 fn connection(handle: &DaemonHandle, url: String, data: &Path) -> Result<Connection, String> {
     let token = read_token(data)?;
+    ensure_logging(data);
+    support_logs::tracing::info!(target: "praxi_support", phase = "ready");
     Ok(Connection {
         base_url: url,
         token,
@@ -737,7 +766,18 @@ pub async fn restart(
 ) -> Result<Connection, String> {
     let _one_at_a_time = handle.connecting.lock().await;
     let data = data_dir()?;
+    ensure_logging(&data);
     let reason = clean_reason(reason);
+    let log_reason = if reason.starts_with("retry") {
+        "retry"
+    } else if safe.is_some() {
+        "safe_mode"
+    } else if reason.contains("provider") {
+        "providers_changed"
+    } else {
+        "owner_request"
+    };
+    support_logs::tracing::info!(target: "praxi_support", phase = "stopping", reason = log_reason);
     let age = handle.last_spawn.lock().map(|t| t.elapsed());
     let mode_change = safe.is_some_and(|s| s != *handle.safe.lock());
     // Only "retry..." requests (a button pressed while the service is coming back) may be
@@ -748,6 +788,7 @@ pub async fn restart(
     {
         let url = base_url()?;
         if healthy(&url).await {
+            support_logs::tracing::info!(target: "praxi_support", reason = "restart_skipped");
             // Another restart (or the start-up) brought the service up moments ago and it
             // answers: killing it again would only cause a second gap.
             append_log(
@@ -867,6 +908,8 @@ async fn connect_locked(handle: &DaemonHandle) -> Result<Connection, String> {
 
 /// Record that the child ended with `code` and word it.
 fn exited(handle: &DaemonHandle, data: &Path, code: Option<i32>) -> String {
+    let log_exit = code.map_or_else(|| "unknown".to_owned(), |c| c.to_string());
+    support_logs::tracing::warn!(target: "praxi_support", phase = "failed", reason = "child_exited", exit_code = log_exit.as_str());
     let tail: Vec<String> = handle.tail.lock().iter().cloned().collect();
     let clash = looks_like_port_clash(&tail.join("\n"));
     let shown = code.map_or_else(|| "unknown".to_owned(), |c| c.to_string());
@@ -1007,7 +1050,7 @@ fn read_tail(path: &Path, n: usize) -> Vec<String> {
     let lines: Vec<&str> = text.lines().collect();
     lines[lines.len().saturating_sub(n)..]
         .iter()
-        .map(|l| l.chars().take(2000).collect())
+        .map(|l| support_logs::safe_stderr(l))
         .collect()
 }
 

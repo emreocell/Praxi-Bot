@@ -252,6 +252,7 @@
     "doc": "de/troubleshooting.md",
     "title": "Fehlerbehebung (technisch)",
     "headings": [
+      "Aktuelle Protokolle und ein Supportpaket",
       "Diagnose (Einstellungen → Diagnose, bot doctor)",
       "Der Dauerbetriebs-Host",
       "daemon not reachable at http://127.0.0.1:47821 (Exit-Code 3)",

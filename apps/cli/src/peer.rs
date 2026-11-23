@@ -64,7 +64,7 @@ pub async fn start_server(
         Arc::new(remote_api::ApiProtocol::new(state)),
     ));
     let net = PeerNetwork::start(cfg, handler).await?;
-    eprintln!("peer endpoint: {}", net.id());
+    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "peer endpoint: {}", net.id());
     Ok(Some(net))
 }
 

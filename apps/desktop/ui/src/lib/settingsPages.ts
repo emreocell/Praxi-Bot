@@ -3,7 +3,7 @@ import { foldText } from "./searchText.ts";
 import type { SettingsSectionId } from "../views/settings/types.ts";
 
 /**
- * The settings, as a non-programmer sees them: ten plainly named pages.  The cards keep their
+ * The settings, as a non-programmer sees them: plainly named pages.  The cards keep their
  * old technical `section`; this module decides which page each card is shown on.
  */
 export const SETTINGS_PAGES = [
@@ -16,6 +16,7 @@ export const SETTINGS_PAGES = [
   "notifications",
   "voice",
   "data",
+  "help",
   "advanced"
 ] as const;
 export type SettingsPageId = (typeof SETTINGS_PAGES)[number];
@@ -80,6 +81,7 @@ export const CARD_META: Record<string, CardMeta> = {
   usage: { page: "data" },
 
   diagnostics: { page: "advanced" },
+  logs: { page: "help" },
   version: { page: "advanced" }
 };
 
@@ -116,7 +118,7 @@ export const SETTINGS_PAGE_GROUPS: ReadonlyArray<{
 }> = [
   { id: "you", pages: ["general", "appearance", "notifications", "voice"] },
   { id: "bots", pages: ["models", "where", "apps", "safety"] },
-  { id: "app", pages: ["data", "advanced"] }
+  { id: "app", pages: ["data", "help", "advanced"] }
 ];
 
 // ---------------------------------------------------------------- simple / advanced

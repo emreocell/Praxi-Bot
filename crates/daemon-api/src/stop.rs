@@ -276,7 +276,7 @@ fn audit_first(
     match write_audit(s, actor, action, meta) {
         Ok(()) => Ok(true),
         Err(e) if actor.local => {
-            eprintln!("runs.stop: audit write failed, stopping anyway: {e:?}");
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "runs.stop: audit write failed, stopping anyway: {e:?}");
             Ok(false)
         }
         Err(e) => Err(e),

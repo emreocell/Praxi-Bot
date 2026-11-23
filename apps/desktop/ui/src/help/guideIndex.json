@@ -174,6 +174,7 @@
       "Commands",
       "bot setup",
       "bot serve",
+      "bot logs",
       "bot doctor",
       "bot backup create | verify | restore",
       "bot restore",
@@ -718,6 +719,7 @@
     "doc": "troubleshooting.md",
     "title": "Troubleshooting",
     "headings": [
+      "Recent logs and a support bundle",
       "Diagnostics (Settings → Diagnostics, bot doctor)",
       "Start-up check (desktop app)",
       "The always-on host",

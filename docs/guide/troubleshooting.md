@@ -3,6 +3,33 @@
 Start with `bot status`. It checks that the daemon is up and that your token is
 accepted, and shows how many approvals are waiting.
 
+## Recent logs and a support bundle
+
+Open **Settings → Help → View recent logs** (also available in Help). Search or
+choose a level, then **Copy shown logs** to copy exactly the redacted entries on
+screen. **Preview support bundle** prepares four files: `versions.json`,
+`diagnostics.json` (service readiness and safe-mode flags), `recent-logs.jsonl`
+and the redacted `doctor.md`. Open each preview before **Save support bundle**.
+The ZIP saves exactly those contents, including all recent logs regardless of
+search filters. It contains no chats or credentials and is never uploaded automatically.
+If report redaction cannot be completed, no bundle is offered.
+
+In a terminal, `bot logs --since 15m --level warn` shows warnings from the last
+15 minutes; `bot logs --follow` waits for new records (Ctrl-C to stop). `--since`
+also accepts `2h`, `1d`, or a UTC Unix millisecond timestamp. This reads local
+files and works while the service is stopped; use the service's data directory.
+An empty result may mean the filter matched nothing or older entries rotated out.
+
+Files live in `<data dir>/logs`: five files of at most 2 MiB each per daemon or
+sidecar, retaining at most 500 entries in the viewer. `RUST_LOG` controls tracing
+(default `info`); even `trace` excludes request bodies, headers, credentials and
+personal paths. Failed HTTP requests include a route template, status, error
+code and generated request ID; startup phases and restart reasons are recorded.
+On Linux systemd hosts the same structured stderr reaches the journal; use
+`journalctl -u praxi.service --since '15 minutes ago'` (or your installed unit name).
+`GET /v1/logs/recent?level=warn&since=<milliseconds>` requires both the API token
+and the local owner key. Every paired peer is denied.
+
 ## Diagnostics (Settings → Diagnostics, `bot doctor`)
 
 **Reporting a bug:** open Help and use *Copy diagnostic info*. It first shows exactly

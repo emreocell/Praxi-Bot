@@ -2,6 +2,36 @@
 
 Beginne mit `bot status`. Der Befehl zeigt, ob der Hintergrunddienst (Daemon) läuft, ob dein Token akzeptiert wird und wie viele Genehmigungen auf dich warten. Wenn du kein Terminal benutzt, schau zuerst in die einfach geschriebene Seite [Häufige Probleme lösen](fix-common-problems.md).
 
+## Aktuelle Protokolle und ein Supportpaket
+
+Öffne **Einstellungen → Hilfe → Letzte Protokolle anzeigen** (auch in der Hilfe
+verfügbar). Suche oder wähle eine Stufe. **Angezeigte Protokolle kopieren** kopiert
+genau die bereinigten Einträge auf dem Bildschirm. **Supportpaket ansehen**
+bereitet vier Dateien vor: `versions.json`, `diagnostics.json` (Dienstbereitschaft
+und sicherer Modus), `recent-logs.jsonl` und die bereinigte `doctor.md`. Öffne jede
+Vorschau vor **Supportpaket speichern**. Die ZIP-Datei speichert genau diese Inhalte,
+einschließlich aller aktuellen Protokolle unabhängig vom Suchfilter. Chats und
+Zugangsdaten sind ausgeschlossen. Es wird nichts automatisch hochgeladen. Ist die
+Bereinigung nicht möglich, wird kein Paket angeboten.
+
+Im Terminal zeigt `bot logs --since 15m --level warn` die Warnungen der letzten
+15 Minuten. `bot logs --follow` wartet auf neue Einträge (mit Strg-C beenden).
+`--since` akzeptiert auch `2h`, `1d` oder einen UTC-Unix-Zeitstempel in Millisekunden.
+Die lokalen Dateien lassen sich auch bei gestopptem Dienst lesen; verwende seinen
+Datenordner. Ein leeres Ergebnis kann bedeuten, dass der Filter nichts gefunden
+hat oder ältere Einträge bereits ersetzt wurden.
+
+Unter `<Datenordner>/logs` liegen je Daemon und Sidecar höchstens fünf Dateien mit
+je 2 MiB. Die Anzeige liest maximal 500 aktuelle Einträge. `RUST_LOG` steuert die
+Tracing-Stufe (Standard `info`); auch `trace` schließt Anfrageinhalte, Header,
+Zugangsdaten und persönliche Pfade aus. Fehlgeschlagene HTTP-Anfragen enthalten
+eine Routenvorlage, Status, Fehlercode und eine erzeugte Anfrage-ID. Startphasen
+und Neustartgründe werden ebenfalls erfasst. Auf Linux-systemd-Hosts gelangt
+dieselbe strukturierte Ausgabe ins Journal: `journalctl -u praxi.service --since
+'15 minutes ago'` (verwende den Namen deiner installierten Unit).
+`GET /v1/logs/recent?level=warn&since=<Millisekunden>` braucht sowohl das API-Token
+als auch den lokalen Eigentümerschlüssel. Gekoppelte Geräte werden immer abgewiesen.
+
 ## Diagnose (Einstellungen → Diagnose, `bot doctor`)
 
 **Einen Fehler melden:** Öffne die Hilfe und nutze *Diagnoseinfos kopieren*. Zuerst wird genau der Text angezeigt, der kopiert würde (Versionen, Plattform, Prüfergebnisse; Schlüssel, Passwörter, E-Mail-Adressen und dein Benutzerordner sind unkenntlich gemacht, Nachrichten sind nicht enthalten). Kopiert wird erst, wenn du auf *Kopieren* drückst. Es wird nichts irgendwohin gesendet.
