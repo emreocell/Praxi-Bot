@@ -12,6 +12,10 @@ pub const MAIN_ONLY: &[&str] = &["main"];
 /// The windows that show the Stop control (main window and floating widget).
 pub const MAIN_AND_WIDGET: &[&str] = &["main", "widget"];
 
+/// The Quick ask window: it may read the daemon connection, hide itself and hand a chat to the
+/// main window, nothing else.
+pub const QUICK_ASK_ONLY: &[&str] = &["quick-ask"];
+
 /// Whether `label` is one of `allowed` (exact match; no patterns here, the
 /// capability files already use globs for the dynamically labelled overlays).
 #[must_use]

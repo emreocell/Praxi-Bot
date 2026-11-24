@@ -93,7 +93,12 @@ function commandsFor(label: string): string[] {
 }
 
 /** In the manifest, but no UI code calls them, so no window is granted them. */
-const UNGRANTED = ["autostart_supported", "get_monitors_geometry", "is_human_driving", "overlay_clear", "overlay_show_target"];
+const UNGRANTED = [
+  "autostart_supported", "get_monitors_geometry", "is_human_driving", "overlay_clear", "overlay_show_target",
+  "quick_ask_connect", "quick_ask_hide", "quick_ask_open_in_app"
+];
+/** The only commands the Quick ask window may call (and only it). */
+const quickAskCommands = ["quick_ask_connect", "quick_ask_hide", "quick_ask_open_in_app"];
 
 const widgetCommands = [
   "dismiss_stop_widget",
@@ -118,15 +123,17 @@ test("per-window custom command table", () => {
   assert.deepEqual(commandsFor("main"), manifestCommands.filter((c) => !UNGRANTED.includes(c)).sort());
   assert.ok(commandsFor("main").includes("finish_bot_run") && commandsFor("main").includes("ack_stop"));
   assert.deepEqual(commandsFor("widget"), widgetCommands);
+  assert.deepEqual(commandsFor("quick-ask"), quickAskCommands);
   assert.deepEqual(commandsFor("overlay-0"), ["get_control_state"]);
   assert.deepEqual(commandsFor("overlay-7"), ["get_control_state"]);
   assert.deepEqual(commandsFor("unknown-window"), []);
 });
 
 test("widget and overlays cannot call the run, daemon, provider or OS commands", () => {
-  for (const label of ["widget", "overlay-0"]) {
+  for (const label of ["widget", "overlay-0", "quick-ask"]) {
     const allowed = commandsFor(label);
     for (const command of [
+      "quick_ask_configure", "owner_key", "providers_cli",
       "start_bot_run", "finish_bot_run", "ack_stop", "begin_action", "providers_cli", "get_autostart", "set_autostart",
       "daemon_connect", "daemon_restart", "simulate_bot_run", "set_stop_hotkey", "notify_show", "notify_take_actions",
       "set_needs_count", "set_tray_labels", "set_keep_in_tray"
@@ -214,6 +221,12 @@ test("every command any UI file invokes is granted to the main window (the widge
   assert.ok(invoked.size >= 15, "invoke() call sites could not be found");
   for (const [command, files] of invoked) {
     assert.ok(manifestCommands.includes(command), `${command} (${files.join(", ")}) is not in the app manifest`);
+    if (quickAskCommands.includes(command)) {
+      // Granted to the Quick ask window only, and only invoked from its own bridge file.
+      assert.ok(files.every((f) => f.endsWith("/quickask/bridge.ts")), `${command} must be invoked from quickask/bridge.ts only`);
+      assert.ok(commandsFor("quick-ask").includes(command) && !commandsFor("main").includes(command), command);
+      continue;
+    }
     if (UNGRANTED.includes(command)) {
       // A wrapper exists (overlay/events.ts) but nothing may call it: otherwise the grant is missing.
       const wrapper = [...commandsByWrapper()].find(([, c]) => c === command)?.[0];

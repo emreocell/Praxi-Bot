@@ -4226,6 +4226,31 @@
     "remove": "Remove this queued message",
     "sendNow": "Send now"
   },
+  "quickAsk": {
+    "bot": "Bot",
+    "clipboardEmpty": "Nothing usable on the clipboard.",
+    "clipboardOff": "Your clipboard is not used unless you press this.",
+    "close": "Close",
+    "failed": "That did not work. Please try again.",
+    "hints": "Enter sends · Esc closes",
+    "includeClipboard": "Include clipboard",
+    "needsYou": "This needs your approval. Open it in the app to decide.",
+    "noBots": "No bots yet. Create one in the app first.",
+    "noService": "Praxi-Bot is not ready yet: {{reason}}",
+    "openInApp": "Open in app",
+    "placeholder": "Ask something and press Enter",
+    "problem": {
+      "in_use": "Another program already uses this shortcut. Pick another.",
+      "invalid": "This shortcut is not valid. Example: Ctrl+Alt+Space.",
+      "needs_modifier": "Add Ctrl or Alt to the shortcut, otherwise it would block normal typing.",
+      "reserved": "Windows and most apps already use this shortcut. Pick another.",
+      "same_as_stop": "This is already your Stop shortcut. Pick another.",
+      "shift_only": "Shift alone is not enough. Add Ctrl or Alt."
+    },
+    "send": "Send",
+    "thinking": "Thinking…",
+    "title": "Quick ask"
+  },
   "quota": {
     "remaining": "{{label}}: {{pct}}% left",
     "resets": "Resets {{when}}",
@@ -4782,6 +4807,12 @@
       "restartManual": "Restart the background service yourself so it picks up the change (it was not started by this app).",
       "test": "Test connection",
       "title": "Model providers"
+    },
+    "quickAsk": {
+      "description": "Off by default. When on, a keyboard shortcut works from any program and opens a small box where you type a question and press Enter. Each question starts a new chat with the bot you pick.",
+      "hotkey": "Quick ask shortcut keys",
+      "privacy": "The clipboard and your screen are never read unless you press \"Include clipboard\" in the box.",
+      "title": "Quick ask shortcut"
     },
     "quiet": {
       "allowUrgent": "Still notify when a bot is blocked on me",

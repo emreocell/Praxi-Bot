@@ -4226,6 +4226,31 @@
     "remove": "Sıradaki mesajı kaldır",
     "sendNow": "Şimdi gönder"
   },
+  "quickAsk": {
+    "bot": "Bot",
+    "clipboardEmpty": "Panoda kullanılabilir bir şey yok.",
+    "clipboardOff": "Buna basmazsan panon kullanılmaz.",
+    "close": "Kapat",
+    "failed": "Olmadı. Lütfen tekrar dene.",
+    "hints": "Enter gönderir · Esc kapatır",
+    "includeClipboard": "Panoyu ekle",
+    "needsYou": "Bunun için onayın gerekiyor. Karar vermek için uygulamada aç.",
+    "noBots": "Henüz bot yok. Önce uygulamada bir tane oluştur.",
+    "noService": "Praxi-Bot henüz hazır değil: {{reason}}",
+    "openInApp": "Uygulamada aç",
+    "placeholder": "Bir şey sor ve Enter'a bas",
+    "problem": {
+      "in_use": "Başka bir program bu kısayolu zaten kullanıyor. Başka bir tane seç.",
+      "invalid": "Bu kısayol geçerli değil. Örnek: Ctrl+Alt+Space.",
+      "needs_modifier": "Kısayola Ctrl veya Alt ekle; yoksa normal yazmayı engeller.",
+      "reserved": "Windows ve çoğu uygulama bu kısayolu zaten kullanıyor. Başka bir tane seç.",
+      "same_as_stop": "Bu zaten Durdur kısayolun. Başka bir tane seç.",
+      "shift_only": "Tek başına Shift yetmez. Ctrl veya Alt ekle."
+    },
+    "send": "Gönder",
+    "thinking": "Düşünüyor…",
+    "title": "Hızlı sor"
+  },
   "quota": {
     "remaining": "{{label}}: %{{pct}} kaldı",
     "resets": "Yenilenme: {{when}}",
@@ -4782,6 +4807,12 @@
       "restartManual": "Değişikliğin geçerli olması için arka plan servisini kendin yeniden başlat (bu uygulama başlatmadı).",
       "test": "Bağlantıyı test et",
       "title": "Model sağlayıcıları"
+    },
+    "quickAsk": {
+      "description": "Varsayılan olarak kapalı. Açıkken, herhangi bir programdan bir klavye kısayoluyla küçük bir kutu açılır; soruyu yazıp Enter'a basarsın. Her soru, seçtiğin botla yeni bir sohbet başlatır.",
+      "hotkey": "Hızlı sor kısayol tuşları",
+      "privacy": "Kutudaki \"Panoyu ekle\"ye basmadıkça pano ve ekranın asla okunmaz.",
+      "title": "Hızlı sor kısayolu"
     },
     "quiet": {
       "allowUrgent": "Bir bot beni beklerken yine de bildir",

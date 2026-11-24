@@ -4226,6 +4226,31 @@
     "remove": "Diese Nachricht aus der Warteschlange entfernen",
     "sendNow": "Jetzt senden"
   },
+  "quickAsk": {
+    "bot": "Bot",
+    "clipboardEmpty": "In der Zwischenablage ist nichts Brauchbares.",
+    "clipboardOff": "Deine Zwischenablage wird nur genutzt, wenn du hier klickst.",
+    "close": "Schließen",
+    "failed": "Das hat nicht geklappt. Bitte versuche es noch einmal.",
+    "hints": "Enter sendet · Esc schließt",
+    "includeClipboard": "Zwischenablage einbeziehen",
+    "needsYou": "Dafür brauchst du die Freigabe. Öffne es in der App, um zu entscheiden.",
+    "noBots": "Noch keine Bots. Lege zuerst in der App einen an.",
+    "noService": "Praxi-Bot ist noch nicht bereit: {{reason}}",
+    "openInApp": "In der App öffnen",
+    "placeholder": "Frag etwas und drücke Enter",
+    "problem": {
+      "in_use": "Ein anderes Programm nutzt dieses Kürzel bereits. Wähle ein anderes.",
+      "invalid": "Dieses Tastenkürzel ist ungültig. Beispiel: Ctrl+Alt+Space.",
+      "needs_modifier": "Füge Ctrl oder Alt hinzu, sonst würde normales Tippen blockiert.",
+      "reserved": "Windows und die meisten Apps nutzen dieses Kürzel bereits. Wähle ein anderes.",
+      "same_as_stop": "Das ist bereits dein Stopp-Kürzel. Wähle ein anderes.",
+      "shift_only": "Shift allein reicht nicht. Füge Ctrl oder Alt hinzu."
+    },
+    "send": "Senden",
+    "thinking": "Denkt nach…",
+    "title": "Schnell fragen"
+  },
   "quota": {
     "remaining": "{{label}}: {{pct}} % übrig",
     "resets": "Wird zurückgesetzt {{when}}",
@@ -4782,6 +4807,12 @@
       "restartManual": "Starte den Hintergrunddienst selbst neu, damit er die Änderung übernimmt (er wurde nicht von dieser App gestartet).",
       "test": "Verbindung testen",
       "title": "Modellanbieter"
+    },
+    "quickAsk": {
+      "description": "Standardmäßig aus. Wenn aktiv, öffnet ein Tastenkürzel in jedem Programm ein kleines Feld, in dem du eine Frage eintippst und Enter drückst. Jede Frage startet einen neuen Chat mit dem gewählten Bot.",
+      "hotkey": "Tasten für „Schnell fragen“",
+      "privacy": "Zwischenablage und Bildschirm werden nie gelesen, außer du klickst im Feld auf „Zwischenablage einbeziehen“.",
+      "title": "Kürzel für „Schnell fragen“"
     },
     "quiet": {
       "allowUrgent": "Trotzdem melden, wenn ein Bot auf mich wartet",
