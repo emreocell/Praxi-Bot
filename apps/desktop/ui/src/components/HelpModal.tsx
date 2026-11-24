@@ -6,6 +6,7 @@ import { DEFAULT_STOP_HOTKEY } from "../config/product";
 import { DOCS_INDEX_URL, docUrl, faqFor, guideFor, guideUrl, searchFaq, searchGuide, startPages } from "../lib/helpFaq";
 import { openExternal } from "../lib/externalLink";
 import { resolveKeys, SHORTCUT_GROUPS, SHORTCUTS, slashShortcuts } from "../lib/shortcuts";
+import { demoData } from "../demo/demoData";
 import { DiagnosticInfo } from "./DiagnosticInfo";
 import { Modal } from "./Modal";
 import styles from "./HelpModal.module.css";
@@ -20,13 +21,16 @@ export function HelpModal({
   onClose,
   stopHotkey,
   sendWith,
-  onSetup
+  onSetup,
+  onDemo
 }: {
   open: boolean;
   onClose: () => void;
   stopHotkey: string;
   sendWith: "enter" | "ctrl-enter";
   onSetup: () => void;
+  /** Opens the offline demo (always available from Help, even with a model connected). */
+  onDemo?: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const [query, setQuery] = useState("");
@@ -115,6 +119,11 @@ export function HelpModal({
             {t("help.center.allDocs")}
             <ExternalLink aria-hidden="true" />
           </Button>
+          {onDemo ? (
+            <Button variant="secondary" size="sm" onClick={onDemo} title={demoData(i18n.language).ui.helpHint} data-testid="help-demo">
+              {demoData(i18n.language).ui.help}
+            </Button>
+          ) : null}
           <Button variant="secondary" size="sm" onClick={onSetup}>
             {t("main.runSetupWizard")}
           </Button>

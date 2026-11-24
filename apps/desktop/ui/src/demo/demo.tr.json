@@ -1,0 +1,63 @@
+{
+  "summarise": {
+    "title": "Bu metni özetle",
+    "hint": "Bir botun metni nasıl okuyup kısalttığını gör.",
+    "userText": "Bu metni özetle: \"Ekibimiz Pazartesi toplandı. Yeni fiyat sayfasını Cuma günü yayına almaya karar verdik; metni Anna yazacak, rakamları Tom kontrol edecek. O zamana kadar eski sayfa açık kalacak.\"",
+    "steps": ["Yapıştırdığın metin okunuyor", "Kararlar ve sorumlular bulunuyor", "Kısa bir özet yazılıyor"],
+    "approval": {
+      "title": "Özet bir dosyaya kaydedilsin mi?",
+      "detail": "Kaydedilecek yer: Belgeler/ozet.txt (yeni bir dosya)",
+      "note": "Bu bir örnek. Gerçek bir bot bir şeyi kaydetmeden, göndermeden ya da silmeden önce böyle sorar."
+    },
+    "answer": "Kısa hâli şöyle:\n\n- Yeni fiyat sayfası **Cuma** günü yayında.\n- Metni **Anna** yazıyor, rakamları **Tom** kontrol ediyor.\n- Eski sayfa o zamana kadar açık kalıyor.",
+    "denied": "Sorun değil, hiçbir şey kaydetmedim. Kısa hâli şöyle:\n\n- Yeni fiyat sayfası **Cuma** günü yayında.\n- Metni **Anna** yazıyor, rakamları **Tom** kontrol ediyor."
+  },
+  "plan": {
+    "title": "Haftamı planla",
+    "hint": "Bir botun dağınık bir listeyi nasıl plana çevirdiğini gör.",
+    "userText": "Haftamı planla: Salı günü diş hekimi, Perşembe günü teslim edilecek bir rapor ve haftada üç kez spor yapmak istiyorum.",
+    "steps": ["Sabit tarihlere bakılıyor", "İşler günlere yayılıyor", "Dinlenme zamanı ekleniyor"],
+    "approval": {
+      "title": "Bunlar takvimine eklensin mi?",
+      "detail": "Eklenecek: 5 etkinlik, Takvim",
+      "note": "Bu bir örnek. Gerçek bir bot takvimini değiştirmeden önce böyle sorar."
+    },
+    "answer": "Haftan için sakin bir plan:\n\n- **Pzt:** rapora başla, kısa bir koşu\n- **Sal:** diş hekimi, hafif iş\n- **Çar:** taslağı bitir, spor\n- **Per:** raporu düzelt ve gönder\n- **Cum:** yürüyüş, sonra boş zaman",
+    "denied": "Tamam, takvimine dokunmadım. Haftan için sakin bir plan:\n\n- **Pzt:** rapora başla, kısa bir koşu\n- **Sal:** diş hekimi\n- **Çar:** taslağı bitir, spor\n- **Per:** raporu gönder"
+  },
+  "explain": {
+    "title": "Bir dosyayı açıkla",
+    "hint": "Bir botun bir şeyi sade sözlerle nasıl anlattığını gör.",
+    "userText": "Bu dosyayı bana açıkla: butce.csv",
+    "steps": ["Dosyayı açmak için izin isteniyor", "Sütunlar ve birkaç satır okunuyor", "Sade sözlerle açıklanıyor"],
+    "approval": {
+      "title": "butce.csv okunsun mu?",
+      "detail": "Okunacak: Belgeler/butce.csv (yalnızca okunur, hiçbir şey değişmez)",
+      "note": "Bu bir örnek. Gerçek bir bot dosyalarını açmadan önce sorar, karar senindir."
+    },
+    "answer": "Bu dosya basit bir bütçe tablosu:\n\n- Her **satır** bir harcama.\n- Sütunlar **tarih**, **kategori** ve **tutar**.\n- En büyük kategori kira, sonra yemek.",
+    "denied": "Tamam, dosyayı açmadım. O olmadan şunu söyleyebilirim: .csv düz bir tablodur, her satır bir kayıttır, sütunlar virgülle ayrılır."
+  },
+  "ui": {
+    "label": "Demo: gerçek yanıtlar için bir model bağla",
+    "title": "Hemen dene",
+    "intro": "Anahtar gerekmez. Bu demo uydurmadır ve yalnızca ekranında çalışır.",
+    "stop": "Durdur",
+    "stopped": "Durduruldu. Sen bir düğmeye basana kadar başka bir şey olmaz. Gerçek bir bot da hemen böyle durur.",
+    "restart": "Tekrar oynat",
+    "close": "Kapat",
+    "allow": "İzin ver (örnek)",
+    "deny": "İzin verme",
+    "approvalHeading": "Onay örneği",
+    "stepsHeading": "Botun yaptıkları",
+    "answerHeading": "Yanıt",
+    "tryAnother": "Başka bir örnek dene",
+    "running": "Demo bot çalışıyor…",
+    "offlineNote": "Hiçbir şey gönderilmedi, kaydedilmedi ya da açılmadı: bu demo çevrimdışı çalışır.",
+    "connectTitle": "Gerçek yanıtlar için bir model bağla",
+    "connectBody": "Ücretsiz seçenekler: ücretsiz bir Gemini anahtarı (birkaç dakika, kart gerekmez), bilgisayarın yeterince güçlüyse kendi bilgisayarında çalışan bir model (kurulum seninkinin yetip yetmediğini gösterir) ya da zaten kullandığın başka bir sağlayıcı.",
+    "connect": "Model bağla",
+    "help": "Demo",
+    "helpHint": "Bir botun ne yaptığını, onayın neye benzediğini ve nasıl durdurulacağını gör."
+  }
+}

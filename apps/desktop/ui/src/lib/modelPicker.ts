@@ -1,5 +1,6 @@
 import type { CliEngineDto, ProvidersDto } from "../api/types.ts";
 import { modelDisplayName } from "./modelName.ts";
+import { isPlaceholderModel, isPlaceholderProvider } from "./placeholderModel.ts";
 import { isCliProvider } from "./providerView.ts";
 import { matchesQuery } from "./searchText.ts";
 
@@ -37,7 +38,7 @@ export function modelGroups(
   const includeCli = options?.includeCli ?? true;
   const groups = new Map<string, Set<string>>();
   for (const p of dto?.configured ?? []) {
-    if (!p.enabled) {
+    if (!p.enabled || isPlaceholderProvider(p.id)) {
       continue;
     }
     const cli = isCliProvider(p.id, dto);
@@ -45,12 +46,12 @@ export function modelGroups(
       continue;
     }
     const set = groups.get(p.id) ?? new Set<string>();
-    if (p.default_model && (p.model_details === undefined
+    if (p.default_model && !isPlaceholderModel(p.default_model) && (p.model_details === undefined
       || p.model_details.some((m) => m.id === p.default_model))) {
       set.add(p.default_model);
     }
     for (const m of p.models) {
-      set.add(m);
+      if (!isPlaceholderModel(m)) set.add(m);
     }
     if (cli && set.size === 0) {
       set.add("default");
@@ -58,7 +59,7 @@ export function modelGroups(
     groups.set(p.id, set);
   }
   const cur = current?.trim();
-  if (cur) {
+  if (cur && !isPlaceholderModel(cur)) {
     const i = cur.indexOf("/");
     const provider = i < 0 ? "" : cur.slice(0, i);
     const model = i < 0 ? cur : cur.slice(i + 1);
@@ -95,6 +96,11 @@ export function modelGroups(
         || a.model.localeCompare(b.model)
       )
     }));
+}
+
+/** True when at least one real model can be chosen: the placeholder alone means "nothing connected yet". */
+export function hasConnectedModel(dto: ProvidersDto | null): boolean {
+  return modelGroups(dto).some((g) => g.models.length > 0);
 }
 
 /** Keep the options whose provider or model matches `query`; drop empty groups. */

@@ -3884,6 +3884,10 @@
       "unsupported": "Not supported here"
     },
     "connect": "Connect {{name}}",
+    "connectAction": "Connect a model",
+    "connectBody": "Praxi needs an AI model to answer. Add one with an API key or sign in with a coding CLI; it takes about a minute.",
+    "connectModel": "Connect a model",
+    "connectTitle": "Connect a model to start chatting",
     "empty": "No matching models.",
     "engineError": "Could not connect this CLI.",
     "hint": {

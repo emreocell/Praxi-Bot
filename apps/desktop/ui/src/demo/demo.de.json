@@ -1,0 +1,63 @@
+{
+  "summarise": {
+    "title": "Diesen Text zusammenfassen",
+    "hint": "Sieh, wie ein Bot einen Text liest und kürzt.",
+    "userText": "Fasse diesen Text zusammen: \"Unser Team hat sich am Montag getroffen. Wir haben beschlossen, die neue Preisseite am Freitag zu veröffentlichen. Anna schreibt den Text, Tom prüft die Zahlen. Bis dahin bleibt die alte Seite online.\"",
+    "steps": ["Der eingefügte Text wird gelesen", "Beschlüsse und Zuständige werden gesucht", "Eine kurze Zusammenfassung wird geschrieben"],
+    "approval": {
+      "title": "Zusammenfassung in einer Datei speichern?",
+      "detail": "Speichern unter: Dokumente/zusammenfassung.txt (neue Datei)",
+      "note": "Das ist ein Beispiel. Ein echter Bot fragt so, bevor er etwas speichert, sendet oder löscht."
+    },
+    "answer": "Die Kurzfassung:\n\n- Die neue Preisseite geht am **Freitag** online.\n- **Anna** schreibt den Text, **Tom** prüft die Zahlen.\n- Bis dahin bleibt die alte Seite online.",
+    "denied": "Kein Problem, ich habe nichts gespeichert. Die Kurzfassung:\n\n- Die neue Preisseite geht am **Freitag** online.\n- **Anna** schreibt den Text, **Tom** prüft die Zahlen."
+  },
+  "plan": {
+    "title": "Meine Woche planen",
+    "hint": "Sieh, wie ein Bot aus einer losen Liste einen Plan macht.",
+    "userText": "Plane meine Woche: Zahnarzt am Dienstag, ein Bericht bis Donnerstag, und ich möchte dreimal Sport machen.",
+    "steps": ["Die festen Termine werden angesehen", "Die Arbeit wird auf die Tage verteilt", "Zeit zum Ausruhen wird eingeplant"],
+    "approval": {
+      "title": "Diese Einträge in deinen Kalender übernehmen?",
+      "detail": "Hinzufügen: 5 Termine, Kalender",
+      "note": "Das ist ein Beispiel. Ein echter Bot fragt so, bevor er deinen Kalender ändert."
+    },
+    "answer": "Ein ruhiger Plan für deine Woche:\n\n- **Mo:** Bericht beginnen, kurzer Lauf\n- **Di:** Zahnarzt, leichte Arbeit\n- **Mi:** Entwurf fertig, Sport\n- **Do:** Bericht überarbeiten und senden\n- **Fr:** Spaziergang, dann frei",
+    "denied": "Okay, dein Kalender bleibt unberührt. Ein ruhiger Plan für deine Woche:\n\n- **Mo:** Bericht beginnen, kurzer Lauf\n- **Di:** Zahnarzt\n- **Mi:** Entwurf fertig, Sport\n- **Do:** Bericht senden"
+  },
+  "explain": {
+    "title": "Eine Datei erklären",
+    "hint": "Sieh, wie ein Bot etwas in einfachen Worten erklärt.",
+    "userText": "Erkläre mir diese Datei: budget.csv",
+    "steps": ["Es wird um Erlaubnis gebeten, die Datei zu öffnen", "Spalten und ein paar Zeilen werden gelesen", "Es wird in einfachen Worten erklärt"],
+    "approval": {
+      "title": "budget.csv lesen?",
+      "detail": "Lesen: Dokumente/budget.csv (nur lesen, nichts wird geändert)",
+      "note": "Das ist ein Beispiel. Ein echter Bot fragt, bevor er deine Dateien öffnet. Du entscheidest."
+    },
+    "answer": "Diese Datei ist eine einfache Budgettabelle:\n\n- Jede **Zeile** ist eine Ausgabe.\n- Die Spalten sind **Datum**, **Kategorie** und **Betrag**.\n- Die größte Kategorie ist Miete, danach Essen.",
+    "denied": "Okay, ich habe die Datei nicht geöffnet. Ohne sie kann ich nur sagen: Eine .csv-Datei ist eine einfache Tabelle, eine Zeile pro Eintrag, Spalten durch Kommas getrennt."
+  },
+  "ui": {
+    "label": "Demo: Verbinde ein Modell, um echte Antworten zu bekommen",
+    "title": "Gleich ausprobieren",
+    "intro": "Kein Schlüssel nötig. Diese Demo ist erfunden und läuft nur auf deinem Bildschirm.",
+    "stop": "Stopp",
+    "stopped": "Gestoppt. Es passiert nichts mehr, bis du eine Taste drückst. Ein echter Bot hält genauso sofort an.",
+    "restart": "Nochmal abspielen",
+    "close": "Schließen",
+    "allow": "Erlauben (Beispiel)",
+    "deny": "Nicht erlauben",
+    "approvalHeading": "Beispiel für eine Freigabe",
+    "stepsHeading": "Was der Bot tut",
+    "answerHeading": "Antwort",
+    "tryAnother": "Anderes Beispiel ausprobieren",
+    "running": "Der Demo-Bot arbeitet…",
+    "offlineNote": "Nichts wurde gesendet, gespeichert oder geöffnet: Diese Demo läuft offline.",
+    "connectTitle": "Verbinde ein Modell für echte Antworten",
+    "connectBody": "Kostenlose Möglichkeiten: ein kostenloser Gemini-Schlüssel (wenige Minuten, keine Karte), ein Modell auf deinem eigenen Computer, wenn er leistungsstark genug ist (die Einrichtung zeigt, ob deiner es ist), oder ein anderer Anbieter, den du schon nutzt.",
+    "connect": "Modell verbinden",
+    "help": "Demo",
+    "helpHint": "Sieh, was ein Bot tut, wie eine Freigabe aussieht und wie man ihn stoppt."
+  }
+}

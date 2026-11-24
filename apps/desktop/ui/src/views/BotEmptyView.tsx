@@ -2,6 +2,8 @@ import { Ghost, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, type BotIdentity, Button } from "ui";
 import { FIRST_PROMPT_KEYS } from "../lib/firstRun";
+import { DemoCards } from "../demo/DemoCards";
+import type { DemoTaskId } from "../demo/demoEngine";
 import styles from "./BotEmptyView.module.css";
 
 /**
@@ -16,7 +18,8 @@ export function BotEmptyView({
   onSuggest,
   firstBot,
   onGoFirst,
-  onCreateBot
+  onCreateBot,
+  onDemo
 }: {
   bot: BotIdentity | undefined;
   busy: boolean;
@@ -28,6 +31,8 @@ export function BotEmptyView({
   firstBot?: { id: string; name: string };
   onGoFirst?: (botId: string) => void;
   onCreateBot?: () => void;
+  /** Set only while no real model is connected: the sample cards then start the offline demo. */
+  onDemo?: (task: DemoTaskId) => void;
 }) {
   const { t } = useTranslation();
   if (!bot) {
@@ -70,7 +75,8 @@ export function BotEmptyView({
           <Plus aria-hidden="true" />
           {t("bots.newChat")}
         </Button>
-        {onSuggest ? (
+        {onDemo ? <DemoCards onPick={onDemo} heading testId="bot-empty-demo" /> : null}
+        {onSuggest && !onDemo ? (
           <section className={styles.suggest} aria-label={t("botEmpty.suggestionsTitle")}>
             <h2 className={styles.suggestTitle}>{t("botEmpty.suggestionsTitle")}</h2>
             <div className={styles.suggestList}>
