@@ -1,0 +1,8 @@
+[
+  { "id": "model", "title": "Connect a model", "body": "The model is the brain behind your bot. Pick a free one or paste a key.", "action": "Connect a model" },
+  { "id": "message", "title": "Send your first message", "body": "Ask for something small, like a summary of a web page or a short email draft.", "action": "Start a chat" },
+  { "id": "approval", "title": "Try an approval", "body": "Ask the bot to create a file. It will stop and ask you first; you decide.", "action": "Start a chat" },
+  { "id": "app", "title": "Add an app", "body": "Apps let the bot work with things like your calendar or notes.", "action": "Open Apps" },
+  { "id": "schedule", "title": "Schedule a job", "body": "Have the bot do something on its own, like a summary every morning.", "action": "Open Schedules" },
+  { "id": "server", "title": "Add a server (optional)", "body": "A server lets your bots keep working while this computer is off.", "action": "Open Computers" }
+]

@@ -13,22 +13,16 @@ import "./global.css";
 import "./i18n";
 import { isTauriRuntime } from "./overlay/events";
 import { OverlayWindow } from "./overlay/OverlayWindow";
+import { QuickAskWindow } from "./quickask/QuickAskWindow";
 import { WidgetWindow } from "./overlay/WidgetWindow";
 import { paintSavedAppearanceEarly } from "./state/useApplyAppearance";
 
-// The owner key of this app's daemon (main window only; the overlay and widget windows get none).
-// Requested once and kept in memory; every call to THIS computer's daemon carries it.
-let ownerKey: Promise<string | null> | null = null;
-if (isTauriRuntime()) {
-  ApiClient.ownerKeyProvider = () => (ownerKey ??= invoke<string>("owner_key").catch(() => null));
-}
-
-type WindowKind = "main" | "overlay" | "widget";
+type WindowKind = "main" | "overlay" | "widget" | "quick-ask";
 
 function resolveWindowKind(): WindowKind {
   if (typeof window !== "undefined") {
     const queryKind = new URLSearchParams(window.location.search).get("window");
-    if (queryKind === "overlay" || queryKind === "widget") {
+    if (queryKind === "overlay" || queryKind === "widget" || queryKind === "quick-ask") {
       return queryKind;
     }
     if (window.location.hash === "#overlay") {
@@ -46,6 +40,9 @@ function resolveWindowKind(): WindowKind {
         if (label === "widget") {
           return "widget";
         }
+        if (label === "quick-ask") {
+          return "quick-ask";
+        }
       } catch {
         // Fall back to main window
       }
@@ -56,6 +53,13 @@ function resolveWindowKind(): WindowKind {
 
 const windowKind = resolveWindowKind();
 document.documentElement.dataset.windowKind = windowKind;
+
+// The owner key of this app's daemon (main window only; the overlay, widget and Quick ask windows
+// get none). Requested once and kept in memory; every call to THIS computer's daemon carries it.
+let ownerKey: Promise<string | null> | null = null;
+if (isTauriRuntime() && windowKind === "main") {
+  ApiClient.ownerKeyProvider = () => (ownerKey ??= invoke<string>("owner_key").catch(() => null));
+}
 
 paintSavedAppearanceEarly(windowKind !== "main");
 
@@ -110,6 +114,8 @@ if (showAvatarGallery) {
         <OverlayWindow />
       ) : windowKind === "widget" ? (
         <WidgetWindow />
+      ) : windowKind === "quick-ask" ? (
+        <QuickAskWindow />
       ) : (
         <App />
       )}

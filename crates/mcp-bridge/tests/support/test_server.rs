@@ -196,6 +196,15 @@ impl ServerHandler for TestServer {
             tool("crash", "Terminates the server process", false),
             tool("env_keys", "List the environment variable names", true),
         ];
+        // `MCP_TEST_ECHO_ANNOTATIONS` replaces `echo`'s annotations: `none` for
+        // no annotations object, otherwise the JSON of one (`{"openWorldHint":true}`).
+        if let Ok(raw) = std::env::var("MCP_TEST_ECHO_ANNOTATIONS") {
+            tools[0].annotations = if raw == "none" {
+                None
+            } else {
+                Some(serde_json::from_str(&raw).expect("MCP_TEST_ECHO_ANNOTATIONS is JSON"))
+            };
+        }
         if std::env::var("MCP_TEST_MODE").as_deref() == Ok("secret-diagnostics") {
             let secret = std::env::var("API_KEY").unwrap();
             let notification = serde_json::from_value(json!({

@@ -15,6 +15,7 @@ import { humanLine } from "../lib/humanError";
 
 export type PaletteScreen =
   | "home"
+  | "myBots"
   | "needs"
   | "schedules"
   | "usage"
@@ -22,6 +23,7 @@ export type PaletteScreen =
 
 const SCREENS: readonly PaletteScreen[] = [
   "home",
+  "myBots",
   "needs",
   "schedules",
   "usage",

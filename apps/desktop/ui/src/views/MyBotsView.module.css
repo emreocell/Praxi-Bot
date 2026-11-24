@@ -1,0 +1,84 @@
+.pane {
+  flex: 1;
+  min-width: var(--space-0);
+  overflow-y: auto;
+  padding: var(--space-6);
+}
+
+.container {
+  max-width: var(--size-content-max);
+  margin: var(--space-0) auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  container-type: inline-size;
+  container-name: my-bots;
+}
+
+.header, .actions, .identity, .cardActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.header { justify-content: space-between; }
+.header h1 { margin: var(--space-0); font-size: var(--font-size-xl); }
+.header p, .empty p { color: var(--color-text-secondary); }
+
+.toolbar {
+  display: flex;
+  align-items: end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--font-size-sm);
+  min-width: var(--space-0);
+  max-width: 100%;
+}
+
+.search { flex: 1; }
+.count, .footnote { margin: var(--space-0); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.notice { color: var(--color-warning); }
+
+.grid, .list {
+  list-style: none;
+  padding: var(--space-0);
+  margin: var(--space-0);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--size-widget-width)), 1fr)); }
+.grid > li, .list > li { min-width: var(--space-0); }
+.card { height: 100%; display: flex; flex-direction: column; gap: var(--space-3); }
+.identity { flex-wrap: nowrap; }
+.name { flex: 1; min-width: var(--space-0); overflow-wrap: anywhere; }
+.name h2, .empty h2 { margin: var(--space-0); font-size: var(--font-size-md); }
+.name > span { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.status { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.status[data-status="running"] { color: var(--color-success); }
+.status[data-status="approval"], .status[data-status="paused"] { color: var(--color-warning); }
+.facts { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-0); }
+.facts > div { flex: 1; min-width: var(--space-0); overflow-wrap: anywhere; }
+.facts dt { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.facts dd { margin: var(--space-1) var(--space-0) var(--space-0); font-size: var(--font-size-sm); }
+.progress { width: 100%; height: var(--space-1); accent-color: var(--color-accent); }
+.cardActions { margin-top: auto; }
+.empty { text-align: center; }
+
+.list .card { gap: var(--space-2); }
+.list .facts { justify-content: space-between; }
+.list .facts > div { flex: initial; }
+
+/* stylelint-disable-next-line unit-disallowed-list -- collapse compact rows when the content is narrow */
+@container my-bots (width >= 40em) {
+  .list .card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; }
+  .list .progress, .list .cardActions { grid-column: 1 / -1; }
+  .list .cardActions { margin-top: var(--space-0); }
+}

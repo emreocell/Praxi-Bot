@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Card } from "ui";
-import type { DailyUsage } from "../api/types";
+import type { DailyUsage, SpendLimit } from "../api/types";
+import { GRANULARITIES, groupDaily, limitOverlay, type Granularity } from "../lib/costInsights";
 import {
   buildDailyBars,
   formatTokenCount,
@@ -24,20 +25,33 @@ const METRICS: readonly TrendMetric[] = ["tokens", "calls", "cost"];
 export interface UsageTrendChartProps {
   daily: readonly DailyUsage[];
   timeZone?: string;
+  /** Monthly limit and month forecast; draws the limit lines on the cost chart when a limit is set. */
+  spend?: SpendLimit | null;
 }
 
 /** Inline-SVG daily bar chart using theme tokens, plus an accessible table behind it. */
-export function UsageTrendChart({ daily, timeZone }: UsageTrendChartProps) {
+export function UsageTrendChart({ daily, timeZone, spend }: UsageTrendChartProps) {
   const { t, i18n } = useTranslation();
-  const [metric, setMetric] = useState<TrendMetric>("tokens");
+  const [metric, setMetric] = useState<TrendMetric>("cost");
+  const [granularity, setGranularity] = useState<Granularity>("day");
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const nf = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language]);
   const unknownLabel = t("usage.unknown");
+  const usd = (v: number) => formatUsageCost(v, i18n.language, unknownLabel);
 
-  const model = useMemo(
-    () => buildDailyBars(daily, metric, PLOT_W, PLOT_H),
-    [daily, metric]
+  const columns = useMemo(() => groupDaily(daily, granularity), [daily, granularity]);
+  const overlay = useMemo(
+    () =>
+      metric === "cost" && columns.length > 0
+        ? limitOverlay(spend, granularity, columns[columns.length - 1].day)
+        : null,
+    [spend, granularity, metric, columns]
   );
+  const model = useMemo(
+    () => buildDailyBars(columns, metric, PLOT_W, PLOT_H, overlay?.limit ?? 0),
+    [columns, metric, overlay]
+  );
+  const yOf = (value: number) => PAD_TOP + PLOT_H - (model.max > 0 ? (value / model.max) * PLOT_H : 0);
 
   if (daily.length === 0) {
     return null;
@@ -49,7 +63,7 @@ export function UsageTrendChart({ daily, timeZone }: UsageTrendChartProps) {
       : null;
 
   const ariaSummary = t("usage.trend.ariaLabel", {
-    days: daily.length,
+    days: columns.length,
     metric: t(`usage.trend.metrics.${metric}`)
   });
 
@@ -64,7 +78,7 @@ export function UsageTrendChart({ daily, timeZone }: UsageTrendChartProps) {
     return t("usage.trend.dayReadout", {
       day: shortDayLabel(bar.day, i18n.language),
       calls: nf.format(bar.calls),
-      tokens: tokensText,
+      amount: tokensText,
       cost: costText
     });
   };
@@ -79,6 +93,26 @@ export function UsageTrendChart({ daily, timeZone }: UsageTrendChartProps) {
               {t("usage.trend.timeZone", { tz: timeZone })}
             </span>
           ) : null}
+        </div>
+        <div
+          className={styles.metricGroup}
+          role="group"
+          aria-label={t("usage.trend.granularity")}
+        >
+          {GRANULARITIES.map((g) => (
+            <Button
+              key={g}
+              size="sm"
+              variant="secondary"
+              active={granularity === g}
+              onClick={() => {
+                setGranularity(g);
+                setActiveIndex(null);
+              }}
+            >
+              {t(`usage.trend.granularities.${g}`)}
+            </Button>
+          ))}
         </div>
         <div
           className={styles.metricGroup}
@@ -132,6 +166,27 @@ export function UsageTrendChart({ daily, timeZone }: UsageTrendChartProps) {
             y1={PAD_TOP + PLOT_H}
             y2={PAD_TOP + PLOT_H}
           />
+
+          {overlay ? (
+            <>
+              <line
+                className={styles.limitLine}
+                data-testid="usage-limit-line"
+                x1={0}
+                x2={PLOT_W}
+                y1={yOf(overlay.limit)}
+                y2={yOf(overlay.limit)}
+              />
+              <line
+                className={styles.alertLine}
+                data-testid="usage-alert-line"
+                x1={0}
+                x2={PLOT_W}
+                y1={yOf(overlay.alert)}
+                y2={yOf(overlay.alert)}
+              />
+            </>
+          ) : null}
 
           {model.bars.map((bar, index) => {
             const isActive = activeIndex === index;
@@ -205,13 +260,37 @@ export function UsageTrendChart({ daily, timeZone }: UsageTrendChartProps) {
         </svg>
       </div>
 
+      {overlay ? (
+        <p className={styles.legend} data-testid="usage-limit-legend">
+          <span className={styles.limitKey} aria-hidden="true" />
+          {t("usage.trend.limitKey", { amount: usd(overlay.limit) })}
+          <span className={styles.alertKey} aria-hidden="true" />
+          {t("usage.trend.alertKey", { amount: usd(overlay.alert) })}
+          {overlay.prorated ? ` ${t("usage.trend.prorated")}` : ""}
+        </p>
+      ) : null}
+
+      {spend ? (
+        <p className={styles.forecast} data-testid="usage-forecast">
+          {spend.forecast_usd === null || spend.forecast_usd === undefined
+            ? t("usage.trend.forecastNone")
+            : t("usage.trend.forecast", {
+                spent: usd(spend.spent_usd),
+                forecast: usd(spend.forecast_usd)
+              })}
+          {spend.unpriced_calls > 0
+            ? ` ${t("usage.trend.forecastPartial", { count: spend.unpriced_calls })}`
+            : ""}
+        </p>
+      ) : null}
+
       <details className={styles.details}>
         <summary className={styles.summary}>{t("usage.trend.showTable")}</summary>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead>
               <tr>
-                <th scope="col">{t("usage.day")}</th>
+                <th scope="col">{t(`usage.trend.granularities.${granularity}`)}</th>
                 <th scope="col" className={styles.num}>
                   {t("usage.calls")}
                 </th>
@@ -224,7 +303,7 @@ export function UsageTrendChart({ daily, timeZone }: UsageTrendChartProps) {
               </tr>
             </thead>
             <tbody>
-              {[...daily].reverse().map((d) => {
+              {[...columns].reverse().map((d) => {
                 const unknownTokens = isAllUnknownUsage(d);
                 return (
                   <tr key={d.day}>

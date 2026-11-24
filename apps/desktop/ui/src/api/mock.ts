@@ -645,6 +645,34 @@ const USAGE: UsageSummary = {
     }
   ],
   daily: mockDailySeries(30),
+  top_runs: [
+    {
+      run_id: "run-top-1",
+      bot_id: ATLAS,
+      chat_id: "chat-atlas-1",
+      created_at_ms: Date.now() - 2 * 86_400_000,
+      model_calls: 38,
+      prompt_tokens: 210_000,
+      completion_tokens: 31_000,
+      cached_tokens: 90_000,
+      cost_usd: 0.62,
+      calls_without_usage: 0,
+      calls_without_cost: 0
+    },
+    {
+      run_id: "run-top-2",
+      bot_id: NOVA,
+      chat_id: null,
+      created_at_ms: Date.now() - 5 * 86_400_000,
+      model_calls: 12,
+      prompt_tokens: 80_000,
+      completion_tokens: 9_000,
+      cached_tokens: 0,
+      cost_usd: null,
+      calls_without_usage: 0,
+      calls_without_cost: 12
+    }
+  ],
   calls_without_usage: 2,
   calls_without_cost: 31,
   time_zone: "UTC"
@@ -673,7 +701,7 @@ function serverFromConfig(c: McpServerConfig, category = "other"): McpServer {
     error: null,
     tool_count: 8,
     category: c.category ?? category,
-    trust_hints: false,
+    trust_hints: c.trust_hints ?? false,
     public_content: c.public_content ?? false,
     local_only: c.local_only ?? false,
     bots: c.bots ?? null
@@ -2485,6 +2513,7 @@ export class MockApiClient extends ApiClient {
     const merged: McpServer = {
       ...prev,
       ...(typeof patch.enabled === "boolean" ? { enabled: patch.enabled } : {}),
+      ...(typeof patch.trust_hints === "boolean" ? { trust_hints: patch.trust_hints } : {}),
       ...(typeof patch.category === "string" ? { category: patch.category } : {}),
       ...(typeof patch.command === "string" ? { command: patch.command } : {}),
       ...(typeof patch.url === "string" ? { url: patch.url } : {}),

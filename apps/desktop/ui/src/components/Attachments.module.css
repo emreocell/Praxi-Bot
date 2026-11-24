@@ -5,6 +5,18 @@
   margin: 0 0 var(--space-2);
   padding: 0;
   list-style: none;
+  max-height: calc(var(--space-16) * 3);
+  overflow-y: auto;
+}
+
+.chips:focus-visible,
+.notice summary:focus-visible {
+  outline: var(--size-border) solid var(--color-focus);
+  outline-offset: var(--space-1);
+}
+
+.notice summary {
+  cursor: pointer;
 }
 
 .chip,
@@ -23,6 +35,30 @@
 
 .chip[data-state="failed"] {
   border-color: var(--color-danger);
+}
+
+.notice {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.details {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.chip {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.chip .name {
+  max-width: 100%;
 }
 
 .chip svg,
@@ -52,6 +88,7 @@
 .meta {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
 }
 
 .remove {
@@ -61,6 +98,22 @@
   background: none;
   color: var(--color-text-muted);
   cursor: pointer;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--size-control-md);
+  min-height: var(--size-control-md);
+  border-radius: var(--radius-sm);
+}
+
+.remove:focus-visible {
+  outline: var(--size-border) solid var(--color-focus);
+  outline-offset: var(--space-1);
+}
+
+.remove:disabled {
+  cursor: default;
+  color: var(--color-text-muted);
 }
 
 .remove:hover {

@@ -29,6 +29,7 @@ if (!chromePath) { process.stdout.write('check:a11y needs Chrome (set CHROME_BIN
 const SETTINGS = ['general', 'appearance', 'ai', 'computer', 'mail', 'usage', 'diagnostics', 'updates'];
 const screens = [
   { name: 'home', query: 'screen=home' },
+  { name: 'my-bots', query: 'screen=myBots', expect: '[data-testid=my-bots]' },
   { name: 'chat', query: 'screen=bot' },
   { name: 'chat-right-panel', query: 'screen=bot&panel=1' },
   { name: 'chat-approval', query: 'screen=approval' },

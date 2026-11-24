@@ -1,0 +1,12 @@
+{
+  "identifier": "quick-ask",
+  "description": "The Quick ask window: get the daemon connection, hide itself, hand a chat to the main window, and listen for its own show event. No core defaults, no plugins, no owner key.",
+  "windows": ["quick-ask"],
+  "permissions": [
+    "allow-quick-ask-connect",
+    "allow-quick-ask-hide",
+    "allow-quick-ask-open-in-app",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

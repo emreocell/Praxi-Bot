@@ -1,0 +1,8 @@
+[
+  { "id": "model", "title": "Bir model bağla", "body": "Model, botunun beynidir. Ücretsiz bir tane seç ya da bir anahtar yapıştır.", "action": "Model bağla" },
+  { "id": "message", "title": "İlk mesajını gönder", "body": "Küçük bir şey iste: bir web sayfasının özeti ya da kısa bir e-posta taslağı gibi.", "action": "Sohbet başlat" },
+  { "id": "approval", "title": "Bir onayı dene", "body": "Bottan bir dosya oluşturmasını iste. Önce durup sana soracak; kararı sen verirsin.", "action": "Sohbet başlat" },
+  { "id": "app", "title": "Bir uygulama ekle", "body": "Uygulamalar, botun takvimin ya da notların gibi şeylerle çalışmasını sağlar.", "action": "Uygulamaları aç" },
+  { "id": "schedule", "title": "Bir iş zamanla", "body": "Botun kendi kendine bir iş yapsın: örneğin her sabah bir özet.", "action": "Zamanlamaları aç" },
+  { "id": "server", "title": "Bir sunucu ekle (isteğe bağlı)", "body": "Sunucu, bu bilgisayar kapalıyken de botlarının çalışmaya devam etmesini sağlar.", "action": "Bilgisayarları aç" }
+]
