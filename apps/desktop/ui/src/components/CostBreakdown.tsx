@@ -15,12 +15,12 @@ export interface CostBreakdownProps {
 
 type Metric = "cost" | "tokens";
 
-function Bars({ title, id, rows, metric }: { title: string; id: string; rows: ReturnType<typeof shareRows>; metric: Metric }) {
+function Bars({ title, rows, metric }: { title: string; rows: ReturnType<typeof shareRows>; metric: Metric }) {
   const { t, i18n } = useTranslation();
   const unknown = t("usage.unknown");
   return (
-    <section aria-labelledby={id} className={styles.group}>
-      <h3 id={id} className={styles.groupTitle}>
+    <div className={styles.group}>
+      <h3 className={styles.groupTitle}>
         {title}
       </h3>
       <ul className={styles.list}>
@@ -45,7 +45,7 @@ function Bars({ title, id, rows, metric }: { title: string; id: string; rows: Re
           );
         })}
       </ul>
-    </section>
+    </div>
   );
 }
 
@@ -83,8 +83,8 @@ export function CostBreakdown({ byBot, byModel, botName }: CostBreakdownProps) {
         </div>
       </div>
       <div className={styles.groups}>
-        {botRows.length > 0 ? <Bars id="usage-ins-bot" title={t("usage.byBot")} rows={botRows} metric={metric} /> : null}
-        {modelRows.length > 0 ? <Bars id="usage-ins-model" title={t("usage.byModel")} rows={modelRows} metric={metric} /> : null}
+        {botRows.length > 0 ? <Bars title={t("usage.byBot")} rows={botRows} metric={metric} /> : null}
+        {modelRows.length > 0 ? <Bars title={t("usage.byModel")} rows={modelRows} metric={metric} /> : null}
       </div>
       {anyUnknownCost ? <p className={styles.note}>{t("usage.insights.unknownPriceNote")}</p> : null}
     </Card>
