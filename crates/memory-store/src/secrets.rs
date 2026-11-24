@@ -87,7 +87,10 @@ fn is_identifier_hash(text: &str, start: usize, end: usize) -> bool {
         return false;
     }
     let before = tail(&text[..start], 48);
-    identifier_context().is_match(before) && !credential_context().is_match(before)
+    let after: String = text[end..].chars().take(48).collect();
+    identifier_context().is_match(before)
+        && !credential_context().is_match(before)
+        && !credential_context().is_match(&after)
 }
 
 /// Spans of `text` matched by an opaque-token pattern and not exempt.
@@ -180,6 +183,7 @@ mod tests {
             "commit 8e51eaf1b2c3d4e5f60718293a4b5c6d7e8f9a0b11",
             // A credential word nearby wins over the naming word.
             "secret hash 8e51eaf1b2c3d4e5f60718293a4b5c6d7e8f9a0b",
+            "sha256: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 api key",
             "api key sha256 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
             // Base64-looking 40+ run, even after a naming word.
             "hash Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3A=",
