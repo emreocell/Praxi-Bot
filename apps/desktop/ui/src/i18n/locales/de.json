@@ -1687,8 +1687,18 @@
       "details": "Details",
       "groupApp": "{{app}} ×{{count}}",
       "groupSame": "{{what}} ×{{count}}",
+      "groupSite": "{{host}} besucht",
       "problems_one": "{{count}} Schritt fehlgeschlagen",
       "problems_other": "{{count}} Schritte fehlgeschlagen",
+      "reason": {
+        "blocked": "Von dir blockiert",
+        "noAnswer": "Keine Antwort rechtzeitig",
+        "other": "Hat nicht geklappt",
+        "stopped": "Vor dem Ende gestoppt",
+        "timeout": "Zeitüberschreitung",
+        "timeoutAfter": "Zeitüberschreitung nach {{seconds}} s"
+      },
+      "showAll": "{{count}} weitere Schritte anzeigen",
       "slow": "Dauert länger als üblich",
       "started": "Gestartet {{start}}",
       "startedFinished": "Gestartet {{start}} · beendet {{end}}",
@@ -1698,6 +1708,8 @@
         "running": "Arbeitet",
         "skipped": "Übersprungen"
       },
+      "stepCount_one": "{{count}} Schritt",
+      "stepCount_other": "{{count}} Schritte",
       "summary": "{{count}} Schritte · {{what}} · {{duration}}",
       "summaryPlain": "{{count}} Schritte · {{duration}}",
       "thought": "Nachgedacht: {{duration}}",

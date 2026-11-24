@@ -5,10 +5,12 @@ import { useTranslation } from "react-i18next";
 import { brandIcon } from "../lib/brandIcons";
 import { formatClock, formatStamp, formatStepDuration, type MessageTimes } from "../lib/messageTime";
 import { type Chain, chainSeconds, type ChainStep } from "../lib/thinkingChain";
-import { buildRows, chainSummary, collapsedRows, type ChainRow } from "../lib/chainRows";
+import { buildRows, capRows, chainSummary, collapsedRows, groupHost, type ChainRow } from "../lib/chainRows";
 import { isInFlight, isOrphanStep, isSlowStep } from "../lib/stepStuck";
 import { showStepDuration, type StepState, stepState } from "../lib/stepState";
 import { humanToolError } from "../lib/humanError";
+import { siteIcon } from "../lib/siteIcon";
+import { stepReason } from "../lib/stepReason";
 import { describeTool, stepPhase } from "../lib/toolLabels";
 import type { ToolItem } from "../state/timeline";
 import { ToolBody } from "./ChatCards";
@@ -92,27 +94,68 @@ function ToolStep({ tool, times, live }: { tool: ToolItem; times: MessageTimes; 
   const state = stepState(tool.status, orphan);
   const phase = orphan ? "failed" : stepPhase(tool.status);
   const text = t(`${label.key}.${phase}`, label.values);
+  const reason = stepReason(tool, orphan);
+  const reasonText = reason
+    ? reason.kind === "timeout"
+      ? reason.seconds
+        ? t("chat.chain.reason.timeoutAfter", { seconds: reason.seconds })
+        : t("chat.chain.reason.timeout")
+      : reason.kind === "other"
+        ? tool.error
+          ? humanToolError(tool.error).title
+          : t("chat.chain.reason.other")
+        : t(`chat.chain.reason.${reason.kind}`)
+    : null;
+  const site = label.chips.find((c) => c.icon === "globe");
+  const icon = site ? siteIcon(site.text) : null;
+  const timeText =
+    ms !== undefined && showStepDuration(ms, state)
+      ? formatStepDuration(ms, i18n.language, {
+          s: t("chat.duration.shortSeconds"),
+          m: t("chat.duration.shortMinutes")
+        })
+      : "";
   return (
     <li
-      className={[styles.step, bad ? styles.stepBad : ""]
-        .filter(Boolean)
-        .join(" ")}
+      className={[styles.step, bad ? styles.stepBad : ""].filter(Boolean).join(" ")}
       data-testid="tool-card"
       data-status={tool.status}
     >
-      <StepIcon icon={label.icon} brand={label.brand} size={17} />
-      <div className={styles.stepMain}>
-        <div className={styles.stepLine}>
-          <StateMark state={state} />
-          <b className={active ? styles.shim : styles.stepLabel}>{text}</b>
-          {bad ? (
-            <span className={styles.stepStatus}>
-              {t(`chat.tool.status.${orphan ? "expired" : tool.status}`)}
+      <div className={styles.stepLine}>
+        <StateMark state={state} />
+        <b className={active ? styles.shim : styles.stepLabel}>{text}</b>
+        {site && icon ? (
+          <span className={styles.site} data-testid="step-site" title={site.text}>
+            <span className={styles.siteMark} aria-hidden="true">
+              {icon.kind === "letter" ? icon.letter : <Globe />}
             </span>
-          ) : null}
-          {slow ? (
-            <span className={styles.stepStatus} data-testid="step-slow">
-              {t("chat.chain.slow")}
+            <span className={styles.siteName}>{site.text}</span>
+          </span>
+        ) : (
+          label.chips.slice(0, 1).map((c, i) => (
+            <span key={i} className={styles.chip}>
+              {c.text}
+            </span>
+          ))
+        )}
+        {reasonText && !open ? (
+          <span className={styles.reason} data-testid="step-error">
+            {reasonText}
+          </span>
+        ) : null}
+        {slow ? (
+          <span className={styles.slow} data-testid="step-slow">
+            {t("chat.chain.slow")}
+          </span>
+        ) : null}
+        <span className={styles.stepEnd}>
+          {clock || timeText ? (
+            <span
+              className={styles.stepTime}
+              title={formatStamp(tool.requestedMs, i18n.language)}
+              data-testid="step-time"
+            >
+              {[clock, timeText].filter(Boolean).join(" · ")}
             </span>
           ) : null}
           <button
@@ -126,44 +169,15 @@ function ToolStep({ tool, times, live }: { tool: ToolItem; times: MessageTimes; 
           >
             <ChevronRight className={open ? styles.moreOpen : undefined} />
           </button>
-          {clock ? (
-            <span
-              className={styles.stepTime}
-              title={formatStamp(tool.requestedMs, i18n.language)}
-              data-testid="step-time"
-            >
-              {clock}
-              {ms !== undefined && showStepDuration(ms, state)
-                ? ` · ${formatStepDuration(ms, i18n.language, {
-                    s: t("chat.duration.shortSeconds"),
-                    m: t("chat.duration.shortMinutes")
-                  })}`
-                : ""}
-            </span>
-          ) : null}
-        </div>
-        {label.chips.length > 0 ? (
-          <div className={styles.chips}>
-            {label.chips.map((c, i) => (
-              <span key={i} className={styles.chip}>
-                {c.icon === "globe" ? <Globe aria-hidden="true" /> : null}
-                {c.text}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        {state === "failed" && tool.error && !open ? (
-          <p className={styles.stepError} data-testid="step-error">
-            {humanToolError(tool.error).title}
-          </p>
-        ) : null}
-        {open ? (
-          <div id={panelId} className={styles.detail}>
-            <span className={styles.rawName}>{tool.name}</span>
-            <ToolBody tool={tool} />
-          </div>
-        ) : null}
+        </span>
       </div>
+      {open ? (
+        <div id={panelId} className={styles.detail}>
+          {reasonText ? <p className={styles.stepError}>{reasonText}</p> : null}
+          <span className={styles.rawName}>{tool.name}</span>
+          <ToolBody tool={tool} />
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -190,9 +204,12 @@ function GroupRow({ tools, sameAction, times, live }: { tools: ToolItem[]; sameA
   const first = tools[0] as ToolItem;
   const label = describeTool(first.name, first.input, brandName);
   const totalMs = tools.reduce((sum, x) => sum + (stepMs(x) ?? 0), 0);
-  const text = sameAction
-    ? t("chat.chain.groupSame", { what: t(`${label.key}.done`, label.values), count: tools.length })
-    : t("chat.chain.groupApp", { app: String(label.values.app ?? label.values.name ?? ""), count: tools.length });
+  const host = groupHost(tools);
+  const text = host
+    ? t("chat.chain.groupSite", { host })
+    : sameAction
+      ? t("chat.chain.groupSame", { what: t(`${label.key}.done`, label.values), count: tools.length })
+      : t("chat.chain.groupApp", { app: String(label.values.app ?? label.values.name ?? ""), count: tools.length });
   const time =
     times === "off"
       ? null
@@ -200,12 +217,23 @@ function GroupRow({ tools, sameAction, times, live }: { tools: ToolItem[]; sameA
           s: t("chat.duration.shortSeconds"),
           m: t("chat.duration.shortMinutes")
         });
+  const icon = host ? siteIcon(host) : null;
   return (
     <li className={styles.step} data-testid="tool-group">
-      <StepIcon icon={label.icon} brand={label.brand} size={17} />
-      <div className={styles.stepMain}>
-        <div className={styles.stepLine}>
-          <b className={styles.stepLabel}>{text}</b>
+      <div className={styles.stepLine}>
+        <span className={styles.groupMark}>
+          {icon ? (
+            <span className={styles.siteMark} aria-hidden="true">
+              {icon.kind === "letter" ? icon.letter : <Globe />}
+            </span>
+          ) : (
+            <StepIcon icon={label.icon} brand={label.brand} size={16} />
+          )}
+        </span>
+        <b className={styles.stepLabel}>{text}</b>
+        <span className={styles.reason}>{counted(t, "chain.stepCount", tools.length)}</span>
+        <span className={styles.stepEnd}>
+          {time ? <span className={styles.stepTime}>{time}</span> : null}
           <button
             type="button"
             className={styles.more}
@@ -217,16 +245,15 @@ function GroupRow({ tools, sameAction, times, live }: { tools: ToolItem[]; sameA
           >
             <ChevronRight className={open ? styles.moreOpen : undefined} />
           </button>
-          {time ? <span className={styles.stepTime}>{time}</span> : null}
-        </div>
-        {open ? (
-          <ol id={panelId} className={styles.steps}>
-            {tools.map((x) => (
-              <ToolStep key={x.key} tool={x} times={times} live={live} />
-            ))}
-          </ol>
-        ) : null}
+        </span>
       </div>
+      {open ? (
+        <ol id={panelId} className={styles.steps}>
+          {tools.map((x) => (
+            <ToolStep key={x.key} tool={x} times={times} live={live} />
+          ))}
+        </ol>
+      ) : null}
     </li>
   );
 }
@@ -256,6 +283,7 @@ export function ThinkingChain({
 }) {
   const { t, i18n } = useTranslation();
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const listId = useId();
   const rows = buildRows(chain.steps);
   const open = userOpen ?? (chain.live && rows.length <= LIVE_OPEN_ROWS);
@@ -278,6 +306,7 @@ export function ThinkingChain({
       : t("chat.chain.thought", {
           duration: formatSpan(t, chainSeconds(chain))
         });
+  const capped = capRows(rows, showAll);
   const folded = open ? null : collapsedRows(rows, chain.live);
   const span =
     times === "off"
@@ -294,6 +323,10 @@ export function ThinkingChain({
       data-testid="thinking-chain"
       data-live={chain.live ? "true" : undefined}
     >
+      {/* One polite announcement when the run ends; the live chain stays silent. */}
+      <span className={styles.srOnly} role="status" aria-live="polite">
+        {chain.live ? "" : title}
+      </span>
       <button
         type="button"
         className={styles.head}
@@ -317,11 +350,18 @@ export function ThinkingChain({
         />
       </button>
       {open ? (
-        <ol id={listId} className={styles.steps}>
-          {rows.map((r) => (
-            <RowView key={r.key} row={r} times={times} live={chain.live} />
-          ))}
-        </ol>
+        <>
+          <ol id={listId} className={styles.steps}>
+            {capped.shown.map((r) => (
+              <RowView key={r.key} row={r} times={times} live={chain.live} />
+            ))}
+          </ol>
+          {capped.hidden > 0 ? (
+            <button type="button" className={styles.showAll} onClick={() => setShowAll(true)}>
+              {t("chat.chain.showAll", { count: capped.hidden })}
+            </button>
+          ) : null}
+        </>
       ) : folded && folded.shown.length > 0 ? (
         <ol id={listId} className={styles.steps} data-testid="chain-folded">
           {folded.shown.map((r) => (

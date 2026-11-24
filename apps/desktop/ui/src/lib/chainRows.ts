@@ -8,7 +8,7 @@
  */
 import type { ToolItem } from "../state/timeline.ts";
 import type { Chain, ChainStep } from "./thinkingChain.ts";
-import { resolveToolCall } from "./toolLabels.ts";
+import { hostOf, resolveToolCall } from "./toolLabels.ts";
 
 export type ChainRow =
   | { kind: "thought"; key: string; step: Extract<ChainStep, { kind: "thought" }> }
@@ -124,4 +124,26 @@ export function chainSummary(chain: Pick<Chain, "steps">): ChainSummary {
     if (n && !names.includes(n)) names.push(n);
   }
   return { steps, names };
+}
+
+/** The one site every call of a group visited, else null ("Browsed webioo.com.tr"). */
+export function groupHost(tools: readonly ToolItem[]): string | null {
+  let host: string | null = null;
+  for (const t of tools) {
+    const input = t.input as Record<string, unknown> | undefined;
+    const url = input && typeof input.url === "string" ? input.url : "";
+    const h = url ? hostOf(url) : null;
+    if (!h || (host !== null && host !== h)) return null;
+    host = h;
+  }
+  return host;
+}
+
+/** A chain longer than this shows only its first rows until the owner asks for the rest. */
+export const ROW_CAP = 40;
+
+/** Keeps long runs (200+ steps) fast: the DOM holds at most `cap` rows until "show all". */
+export function capRows<T>(rows: readonly T[], expanded: boolean, cap = ROW_CAP): { shown: T[]; hidden: number } {
+  if (expanded || rows.length <= cap) return { shown: [...rows], hidden: 0 };
+  return { shown: rows.slice(0, cap), hidden: rows.length - cap };
 }

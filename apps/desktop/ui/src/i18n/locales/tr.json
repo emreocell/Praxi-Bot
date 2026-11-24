@@ -1687,8 +1687,18 @@
       "details": "Ayrıntılar",
       "groupApp": "{{app}} ×{{count}}",
       "groupSame": "{{what}} ×{{count}}",
+      "groupSite": "{{host}} gezildi",
       "problems_one": "{{count}} adım başarısız",
       "problems_other": "{{count}} adım başarısız",
+      "reason": {
+        "blocked": "Senin tarafından engellendi",
+        "noAnswer": "Zamanında yanıt gelmedi",
+        "other": "Çalışmadı",
+        "stopped": "Bitmeden durduruldu",
+        "timeout": "Zaman aşımı",
+        "timeoutAfter": "{{seconds}} sn sonra zaman aşımı"
+      },
+      "showAll": "{{count}} adım daha göster",
       "slow": "Normalden uzun sürüyor",
       "started": "Başlangıç {{start}}",
       "startedFinished": "Başlangıç {{start}} · bitiş {{end}}",
@@ -1698,6 +1708,8 @@
         "running": "Çalışıyor",
         "skipped": "Atlandı"
       },
+      "stepCount_one": "{{count}} adım",
+      "stepCount_other": "{{count}} adım",
       "summary": "{{count}} adım · {{what}} · {{duration}}",
       "summaryPlain": "{{count}} adım · {{duration}}",
       "thought": "{{duration}} düşündü",

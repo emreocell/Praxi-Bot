@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ToolItem } from "../state/timeline.ts";
-import { buildRows, chainSummary, collapsedRows } from "./chainRows.ts";
+import { buildRows, capRows, chainSummary, collapsedRows, groupHost } from "./chainRows.ts";
 import type { ChainStep } from "./thinkingChain.ts";
 
 let n = 0;
@@ -45,4 +45,22 @@ test("a collapsed finished chain shows only failures; a live one also its curren
 test("summary counts steps and names the apps", () => {
   const s = chainSummary({ steps: [step("playwright.a"), step("mcp:playwright/b"), step("web_fetch")] });
   assert.deepEqual(s, { steps: 3, names: ["playwright"] });
+});
+
+test("a group that visited one site is named after it; mixed sites are not", () => {
+  const open = (url: string): ToolItem => ({
+    kind: "tool", key: url, callId: url, name: "browser_open", input: { url }, status: "done", requestedMs: 1, gated: false
+  });
+  assert.equal(groupHost([open("https://www.webioo.com.tr/a"), open("https://webioo.com.tr/b")]), "webioo.com.tr");
+  assert.equal(groupHost([open("https://a.com"), open("https://b.com")]), null);
+  assert.equal(groupHost([{ ...open("https://a.com"), input: null }]), null);
+});
+
+test("a 250-step run renders a capped list until the owner asks for all of it", () => {
+  const rows = Array.from({ length: 250 }, (_, i) => i);
+  const c = capRows(rows, false);
+  assert.equal(c.shown.length, 40);
+  assert.equal(c.hidden, 210);
+  assert.equal(capRows(rows, true).shown.length, 250);
+  assert.equal(capRows(rows.slice(0, 10), false).hidden, 0);
 });
