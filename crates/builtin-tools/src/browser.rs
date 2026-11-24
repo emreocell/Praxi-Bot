@@ -1984,6 +1984,9 @@ impl BrowserTool {
         };
         let i: FillIn = parse(input.clone())?;
         let secrets = self.fill_secrets()?;
+        secrets
+            .check_bot(&name, ctx.bot_id.as_deref())
+            .map_err(|e| refused(&e))?;
         let shared = self.select_shared(ctx)?;
         let target = shared
             .driver
@@ -2639,6 +2642,15 @@ impl BrowserTool {
             return Err(exec_err(
                 "browser is unavailable for this run's computer target",
             ));
+        }
+        // A bot-owned account is typed only by that bot, also with a standing grant.
+        if self.op == Op::Fill
+            && let (Some(secrets), Ok(Source::Secret(name))) =
+                (&self.shared.fill_secrets, source(&input, "text"))
+        {
+            secrets
+                .check_bot(&name, ctx.bot_id.as_deref())
+                .map_err(|e| refused(&e))?;
         }
         let shared = self.select_shared(ctx)?;
         // Recheck the receiving frame after approval. The CDP driver repeats this

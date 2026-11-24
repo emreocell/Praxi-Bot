@@ -20,16 +20,15 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // Questions, todos, schedule lifecycle, a local write, or a listing
         // of the bot's own bookkeeping. A write does not bring content in:
         // the model already had the bytes, and the result is not a private read.
+        // `secrets_list` / `account_list` show names, sites and logins the owner
+        // chose or the bot made: no value and no text a page wrote, so they neither
+        // taint nor leave the machine (tainting would also stop an owner's standing
+        // grant from covering the very fill the list exists for). `account_register`
+        // and `bot_delete` are bookkeeping (no content in); `account_register` always asks.
         "ask_user" | "todo_write" | "schedule_pause" | "schedule_delete" | "fs_write"
-        | "fs_move" | "fs_delete" | "checkpoint_list" | "checkpoint_restore" | "schedule_list" => {
-            ContentClass::none()
-        }
-        // The names and allowed origins the owner chose for typed secrets. No
-        // value and no text a run or a page wrote, so it neither taints nor
-        // leaves the machine. Tainting it would also stop an owner's standing
-        // grant from covering the very fill the list exists for.
-        // Removing bots this bot made is bookkeeping (no content in).
-        "secrets_list" | "secret_request" | "bot_delete" => ContentClass::none(),
+        | "fs_move" | "fs_delete" | "checkpoint_list" | "checkpoint_restore" | "schedule_list"
+        | "secrets_list" | "secret_request" | "bot_delete" | "account_register"
+        | "account_list" => ContentClass::none(),
         // Pure helpers: only the clock and the model's own short text go in.
         "time_now" | "calculate" => ContentClass::declared(false, false, false),
         // Editing reads old content and reports match counts, including no-op edits.

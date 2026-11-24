@@ -123,8 +123,29 @@ pub struct FillSecretInfo {
     pub updated_at_ms: u64,
 }
 
+/// Account facts of a secret a bot registered. Absent on older entries, which
+/// stay usable by every bot.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct AccountMeta {
+    site: String,
+    login_id: String,
+    kind: String,
+    /// Bots that may use it. Empty = none.
+    #[serde(default)]
+    bot_ids: Vec<String>,
+    created_by: String,
+    #[serde(default)]
+    email_account: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    created_at_ms: u64,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Entry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    account: Option<AccountMeta>,
     #[serde(default)]
     origins: Vec<String>,
     #[serde(default)]
@@ -141,6 +162,102 @@ struct Meta {
     secrets: BTreeMap<String, Entry>,
     #[serde(default)]
     grants: Vec<FillGrant>,
+}
+
+/// What the owner and the bot may know about one site account. Never the password.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountInfo {
+    /// Secret name (what `browser_fill` takes as `secret`).
+    pub name: String,
+    /// Canonical origin of the site.
+    pub site: String,
+    /// The login id (not secret).
+    pub login_id: String,
+    /// `password`.
+    pub kind: String,
+    /// `bot` (made by `account_register`) or `owner`.
+    pub created_by: String,
+    /// The mail identity used to open it, if any.
+    pub email_account: Option<String>,
+    /// Bots allowed to use it.
+    pub bot_ids: Vec<String>,
+    /// Short note the bot left.
+    pub note: Option<String>,
+    /// Whether the store holds the password.
+    pub has_value: bool,
+    /// Creation time, ms since the epoch.
+    pub created_at_ms: u64,
+}
+
+/// A new account for [`FillSecrets::register_account`].
+#[derive(Debug, Clone)]
+pub struct NewAccount<'a> {
+    /// Secret name to store under.
+    pub name: &'a str,
+    /// Site origin, such as `https://example.com`.
+    pub site: &'a str,
+    /// The login id the form takes.
+    pub login_id: &'a str,
+    /// Mail identity used to open it.
+    pub email_account: Option<&'a str>,
+    /// The bot that owns the account.
+    pub bot_id: &'a str,
+    /// Short note.
+    pub note: Option<&'a str>,
+    /// Password length (clamped to [`PASSWORD_MIN_LEN`]..=[`PASSWORD_MAX_LEN`]).
+    pub password_len: usize,
+    /// Allow symbols in the password (some sites refuse them).
+    pub symbols: bool,
+}
+
+/// Shortest generated password.
+pub const PASSWORD_MIN_LEN: usize = 12;
+/// Longest generated password.
+pub const PASSWORD_MAX_LEN: usize = 64;
+
+/// One uniformly random index below `n` from the OS CSPRNG (rejection sampling).
+fn random_below(n: usize) -> Result<usize, FillError> {
+    let limit = 65536 - (65536 % n);
+    loop {
+        let mut b = [0u8; 2];
+        getrandom::fill(&mut b).map_err(|_| unavailable("no randomness available"))?;
+        let v = usize::from(u16::from_le_bytes(b));
+        if v < limit {
+            return Ok(v % n);
+        }
+    }
+}
+
+/// A random password from the OS CSPRNG with at least one lower-case letter,
+/// upper-case letter and digit (and one symbol when `symbols`). Look-alike
+/// characters are left out.
+///
+/// # Errors
+/// [`FillError::Unavailable`] when the OS has no randomness.
+pub fn generate_password(len: usize, symbols: bool) -> Result<SecretValue, FillError> {
+    const LOWER: &[u8] = b"abcdefghijkmnopqrstuvwxyz";
+    const UPPER: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const DIGIT: &[u8] = b"23456789";
+    const SYMBOL: &[u8] = b"!#$%&*+-=?@^_";
+    let len = len.clamp(PASSWORD_MIN_LEN, PASSWORD_MAX_LEN);
+    let mut classes: Vec<&[u8]> = vec![LOWER, UPPER, DIGIT];
+    if symbols {
+        classes.push(SYMBOL);
+    }
+    let all: Vec<u8> = classes.iter().flat_map(|c| c.iter().copied()).collect();
+    let mut out: Vec<u8> = Vec::with_capacity(len);
+    for c in &classes {
+        out.push(c[random_below(c.len())?]);
+    }
+    while out.len() < len {
+        out.push(all[random_below(all.len())?]);
+    }
+    // Fisher-Yates, so the guaranteed characters are not always up front.
+    for i in (1..out.len()).rev() {
+        out.swap(i, random_below(i + 1)?);
+    }
+    // Every byte is ASCII.
+    Ok(SecretValue::new(String::from_utf8_lossy(&out).into_owned()))
 }
 
 /// Called with every fill value as it is stored or read, so the production
@@ -542,6 +659,141 @@ impl FillSecrets {
             return Err(e);
         }
         Ok(replaced)
+    }
+
+    /// Create a site account: the DAEMON generates the password, stores it under
+    /// `new.name` limited to `new.site` and to `new.bot_id`, and keeps the login
+    /// facts for the Vault screen. The password is not returned; it goes only
+    /// into the store and the redaction hook.
+    ///
+    /// # Errors
+    /// Invalid name / site, the name already exists ([`FillError::Exists`]), a
+    /// limit, or a backend failure. Nothing is left behind on failure.
+    pub fn register_account(&self, new: &NewAccount<'_>) -> Result<AccountInfo, FillError> {
+        validate_fill_name(new.name)?;
+        let site = canonical_origin(new.site)?;
+        let login = new.login_id.trim();
+        if login.is_empty() || login.len() > 200 || login.chars().any(char::is_control) {
+            return Err(FillError::Invalid(
+                "the login id is 1 to 200 printable characters".into(),
+            ));
+        }
+        if new.bot_id.is_empty() {
+            return Err(FillError::Invalid(
+                "an account belongs to a bot; there is no bot in this call".into(),
+            ));
+        }
+        let password = generate_password(new.password_len, new.symbols)?;
+        let mut meta = self.meta.lock();
+        if meta.secrets.contains_key(new.name) {
+            return Err(FillError::Exists(new.name.to_owned()));
+        }
+        if meta.secrets.len() >= MAX_SECRETS {
+            return Err(FillError::Invalid("too many fill secrets".into()));
+        }
+        let before = meta.clone();
+        self.store
+            .set(&store_key(new.name), password.expose())
+            .map_err(|_| unavailable("the secret store rejected the write"))?;
+        self.registered(password.expose());
+        let now = now_ms();
+        let entry = Entry {
+            account: Some(AccountMeta {
+                site: site.clone(),
+                login_id: login.to_owned(),
+                kind: "password".into(),
+                bot_ids: vec![new.bot_id.to_owned()],
+                created_by: "bot".into(),
+                email_account: new.email_account.map(|e| sanitize_label(e, 120)),
+                note: new.note.map(|n| sanitize_label(n, 200)),
+                created_at_ms: now,
+            }),
+            origins: vec![site],
+            programs: Vec::new(),
+            updated_at_ms: now,
+        };
+        meta.secrets.insert(new.name.to_owned(), entry.clone());
+        if let Err(e) = self.persist(&meta) {
+            *meta = before;
+            let _ = self.store.delete(&store_key(new.name));
+            return Err(e);
+        }
+        let present = self.present_in_store()?;
+        Self::account_info(new.name, &entry, &present)
+            .ok_or_else(|| unavailable("the account was not recorded"))
+    }
+
+    fn account_info(name: &str, e: &Entry, present: &BTreeSet<String>) -> Option<AccountInfo> {
+        let a = e.account.as_ref()?;
+        Some(AccountInfo {
+            name: name.to_owned(),
+            site: a.site.clone(),
+            login_id: a.login_id.clone(),
+            kind: a.kind.clone(),
+            created_by: a.created_by.clone(),
+            email_account: a.email_account.clone(),
+            bot_ids: a.bot_ids.clone(),
+            note: a.note.clone(),
+            has_value: present.contains(&store_key(name)),
+            created_at_ms: a.created_at_ms,
+        })
+    }
+
+    /// Whether `bot` may use the secret. Entries without account facts (the
+    /// owner's own secrets) stay open to every bot as before; an account is open
+    /// only to the bots listed on it, never to a caller without a bot id.
+    fn bot_may_use(e: &Entry, bot: Option<&str>) -> bool {
+        match &e.account {
+            None => true,
+            Some(a) => bot.is_some_and(|b| a.bot_ids.iter().any(|x| x == b)),
+        }
+    }
+
+    /// Refuse use of a bot-scoped account by a bot that does not own it.
+    ///
+    /// # Errors
+    /// [`FillError::NotAllowed`] (names the secret, nothing else).
+    pub fn check_bot(&self, name: &str, bot: Option<&str>) -> Result<(), FillError> {
+        let meta = self.meta.lock();
+        match meta.secrets.get(name) {
+            Some(e) if !Self::bot_may_use(e, bot) => Err(FillError::NotAllowed(format!(
+                "the secret `{}` belongs to another bot",
+                sanitize_label(name, 80)
+            ))),
+            _ => Ok(()),
+        }
+    }
+
+    /// Secrets `bot` may use (what `secrets_list` shows it).
+    ///
+    /// # Errors
+    /// The store cannot be listed.
+    pub fn list_for_bot(&self, bot: Option<&str>) -> Result<Vec<FillSecretInfo>, FillError> {
+        let present = self.present_in_store()?;
+        Ok(self
+            .meta
+            .lock()
+            .secrets
+            .iter()
+            .filter(|(_, e)| Self::bot_may_use(e, bot))
+            .map(|(n, e)| Self::info(n, e, &present))
+            .collect())
+    }
+
+    /// The site accounts `bot` may use (`bot = None`: every account, for the owner).
+    ///
+    /// # Errors
+    /// The store cannot be listed.
+    pub fn accounts(&self, bot: Option<&str>) -> Result<Vec<AccountInfo>, FillError> {
+        let present = self.present_in_store()?;
+        Ok(self
+            .meta
+            .lock()
+            .secrets
+            .iter()
+            .filter(|(_, e)| bot.is_none() || Self::bot_may_use(e, bot))
+            .filter_map(|(n, e)| Self::account_info(n, e, &present))
+            .collect())
     }
 
     /// Every secret with its allow-lists. Never reads a value.
