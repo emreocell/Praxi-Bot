@@ -19,6 +19,7 @@
     "doc": "agent-tools.md",
     "title": "Notes",
     "headings": [
+      "Memory tools",
       "Clock and calculator"
     ],
     "summary": "Every bot has a small built-in scratchpad between runs: a plan for a long task, a checklist, facts it will need tomorrow. Tools: notes_read (list notes, read one, or search) and notes_write (replace,…"
@@ -540,6 +541,19 @@
       "mcp.toml"
     ],
     "summary": "The daemon (bot serve) loads /mcp.toml at startup and runs every"
+  },
+  {
+    "doc": "memory.md",
+    "title": "Memory: what your bots remember",
+    "headings": [
+      "What is remembered",
+      "Where it lives",
+      "See, correct and forget",
+      "Needs your OK",
+      "Switch it off, or ask first",
+      "How notes are found: Basic or Smart"
+    ],
+    "summary": "In another language: Türkçe · Deutsch."
   },
   {
     "doc": "model-catalog.md",

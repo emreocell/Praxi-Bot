@@ -13,9 +13,11 @@ optional ONNX embedder. It does not have a document source catalog or a shipped
 knowledge surface. Its synchronous embedder is mandatory even when only lexical
 retrieval is wanted; a failed query embedding aborts lexical retrieval too.
 
-The normal CLI constructs `LoopConfig` with `memory: None`: today's default adds
-**zero learned-memory tokens and zero memory-extraction calls**. When explicitly
-configured, legacy recall prepends a block to the first **user** message, once
+A loop built with `memory: None` (safe mode, library use) adds
+**zero learned-memory tokens and zero memory-extraction calls**. `bot serve`
+(not in safe mode) opens `memory.db` and configures recall for every bot unless the
+owner sets that bot's memory to Off (per-bot setting, see `docs/guide/memory.md`).
+Legacy recall prepends a block to the first **user** message, once
 per root turn, with an approximate 800-token content budget. It is included again
 in later model calls in that run. Wrappers/escaping are not in that old budget.
 Background extraction adds one model call plus a consolidation call for each
@@ -499,8 +501,8 @@ mock HTTP responses. Real paid provider calls and model downloads are unnecessar
 Token tests report both the lightweight output estimate and real reference BPE
 counts from embedded tokenizer assets. They compare the complete bounded result
 and agent-request overhead against stuffing the **same complete fixture corpus**
-into a prompt. This is an explicit counterfactual benchmark, because production
-currently injects no memory by default. They must not claim that adding retrieval
+into a prompt. This is an explicit counterfactual benchmark: production recall is
+bounded by the per-bot memory budget (default 800 estimated tokens), not by this corpus. They must not claim that adding retrieval
 reduces a zero-token baseline. Actual Gemini/other-provider billing and the
 effect of prompt caching need live measurements outside these hermetic tests.
 

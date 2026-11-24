@@ -675,6 +675,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bots/{id}/memory/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_bot_memory_settings"];
+        put: operations["put_bot_memory_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bots/{id}/skills": {
         parameters: {
             query?: never;
@@ -2681,6 +2697,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/memory/embedding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_embedding"];
+        put: operations["put_embedding"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /v1/memory/pending`: memories waiting for the owner's OK. */
+        get: operations["list_pending"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/memory/{id}": {
         parameters: {
             query?: never;
@@ -2695,6 +2744,38 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["update_memory"];
+        trace?: never;
+    };
+    "/v1/memory/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["approve_memory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/{id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["discard_memory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/memory/{id}/undo": {
@@ -4385,6 +4466,28 @@ export interface components {
             monthly?: components["schemas"]["PeriodLimitDto"];
             /** @description Per local calendar week (Monday start). */
             weekly?: components["schemas"]["PeriodLimitDto"];
+        };
+        /** @description A bot's memory settings as the settings screen shows them. */
+        BotMemorySettingsDto: {
+            /** @description Slider upper bound. */
+            budget_max: number;
+            /** @description Slider lower bound. */
+            budget_min: number;
+            /** @description Recall budget in tokens (the default is 800). */
+            budget_tokens: number;
+            /** @description `on`, `off` or `ask`. */
+            mode: string;
+            /** @description Share profile and episodic facts with the owner's other bots. */
+            share_with_other_bots: boolean;
+        };
+        /** @description Change a bot's memory settings (`PUT /v1/bots/{id}/memory/settings`). */
+        BotMemorySettingsInput: {
+            /** @description Recall budget in tokens; `null` = the default. */
+            budget_tokens?: number | null;
+            /** @description `on`, `off` or `ask`. */
+            mode: string;
+            /** @description Share profile and episodic facts with the owner's other bots. */
+            share_with_other_bots: boolean;
         };
         /**
          * @description `PATCH /v1/bots/{id}`: change only the listed fields of a bot, atomically.
@@ -7496,6 +7599,45 @@ export interface components {
          * @enum {string}
          */
         MemoryBasisDto: "vram" | "unified" | "cpu_ram" | "unknown";
+        /** @description What the settings screen shows about recall quality. */
+        MemoryEmbeddingDto: {
+            /** @description Memories embedded so far (while rebuilding). */
+            done: number;
+            /** @description Short reason when the last switch failed and recall fell back to Basic. */
+            error?: string | null;
+            /** @description Model name in Smart mode; `Basic` otherwise. */
+            label: string;
+            /** @description `basic` (word match) or `smart` (meaning). */
+            mode: string;
+            /** @description Bots that have a knowledge embedding model Smart mode could reuse. */
+            sources: components["schemas"]["MemoryEmbeddingSourceDto"][];
+            /** @description `ready`, `rebuilding`, `waiting` or `failed`. */
+            state: string;
+            /** @description Memories to embed in this rebuild. */
+            total: number;
+        };
+        /** @description Switch recall mode (`PUT /v1/memory/embedding`). */
+        MemoryEmbeddingInput: {
+            /** @description Smart with a remote provider: the owner agrees that memory texts are sent to it. */
+            consent_send_text?: boolean;
+            /**
+             * Format: uuid
+             * @description Smart: the bot whose knowledge embedding settings to reuse.
+             */
+            from_bot?: string | null;
+            /** @description `basic` or `smart`. */
+            mode: string;
+        };
+        /** @description One bot whose knowledge embedding settings can be reused. */
+        MemoryEmbeddingSourceDto: {
+            /** Format: uuid */
+            bot_id: string;
+            bot_name: string;
+            /** @description The model runs on this computer: nothing is sent anywhere. */
+            local: boolean;
+            model: string;
+            provider_id: string;
+        };
         /** @description One stored memory item and its active undo journal state. */
         MemoryItemDto: {
             /**
@@ -7514,6 +7656,8 @@ export interface components {
             kind: components["schemas"]["MemoryKindDto"];
             /** Format: int64 */
             last_used_ms: number;
+            /** @description Held for the owner's OK ("Needs your OK"): not used in answers until approved. */
+            pending: boolean;
             /** Format: uuid */
             source_chat_id?: string | null;
             /** Format: uuid */
@@ -11212,6 +11356,84 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_bot_memory_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotMemorySettingsDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_bot_memory_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotMemorySettingsInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotMemorySettingsDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15754,6 +15976,83 @@ export interface operations {
             };
         };
     };
+    get_embedding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryEmbeddingDto"];
+                };
+            };
+        };
+    };
+    put_embedding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryEmbeddingInput"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryEmbeddingDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_pending: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryItemDto"][];
+                };
+            };
+        };
+    };
     delete_memory: {
         parameters: {
             query?: never;
@@ -15812,6 +16111,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    approve_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryItemDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    discard_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryItemDto"];
                 };
             };
             404: {

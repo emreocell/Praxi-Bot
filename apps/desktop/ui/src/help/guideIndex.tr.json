@@ -218,6 +218,19 @@
     "summary": "Botların, Praxi'yi kurduğun bilgisayarda çalışır. Praxi açıkken ve bilgisayarın uyanıkken çalışırlar."
   },
   {
+    "doc": "tr/memory.md",
+    "title": "Bellek: botların neyi hatırladığı",
+    "headings": [
+      "Neler hatırlanır",
+      "Nerede durur",
+      "Görme, düzeltme ve unutturma",
+      "Onayın gerekiyor",
+      "Kapat ya da önce sor",
+      "Notlar nasıl bulunur: Temel veya Akıllı"
+    ],
+    "summary": "Başka dilde: English · Deutsch."
+  },
+  {
     "doc": "tr/quick-faq.md",
     "title": "Hızlı yanıtlar",
     "headings": [],

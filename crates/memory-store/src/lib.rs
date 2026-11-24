@@ -11,7 +11,9 @@
 //! * [`Pipeline`] runs extraction + consolidation through the [`MemoryModel`]
 //!   trait and enforces the safety rules in code.
 
+mod embedding_mode;
 mod error;
+mod expiry;
 mod manage;
 mod pipeline;
 mod recall;
@@ -19,6 +21,7 @@ mod reembed;
 mod render;
 mod secrets;
 mod sessions;
+mod settings;
 mod store;
 mod types;
 mod vec;
@@ -31,7 +34,9 @@ pub mod tools;
 #[cfg(feature = "fastembed")]
 pub use embed::FastEmbedder;
 pub use embed::{Embedder, HashEmbedder};
+pub use embedding_mode::{BASIC_DIM, EmbedMode, EmbedState, EmbeddingStatus};
 pub use error::{MemoryError, Result};
+pub use expiry::parse_expiry;
 pub use pipeline::{
     Candidate, Decision, ExtractionContext, MemoryModel, Outcome, Pipeline, RejectReason,
     looks_like_question_or_hypothetical,
@@ -40,6 +45,9 @@ pub use recall::{RecallConfig, estimate_tokens, rrf_fuse};
 pub use render::{prepend_to_user_message, render_recall_block};
 pub use secrets::{contains_secret, redact};
 pub use sessions::SessionHit;
+pub use settings::{
+    DEFAULT_BUDGET_TOKENS, MAX_BUDGET_TOKENS, MIN_BUDGET_TOKENS, MemoryMode, MemorySettings,
+};
 pub use store::MemoryStore;
 pub use tools::MEMORY_TOOL_NAMES;
 pub use types::{JournalEntry, JournalOp, Kind, ListFilter, Memory, MemoryPatch, NewMemory, Trust};

@@ -146,10 +146,8 @@ impl MemoryStore {
         )?;
         tx.commit()?;
         // Still holding the connection: no write can slip in with the old model.
-        *self
-            .embedder
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::clone(new);
+        self.set_embedder(Arc::clone(new));
+        self.set_vec_dim(new.dim());
         drop(conn);
         Ok(total)
     }
@@ -185,6 +183,7 @@ mod tests {
                 source_quote: None,
                 source_chat_id: None,
                 source_message_id: None,
+                pending: false,
                 trust: Trust::User,
                 importance: 0.5,
                 valid_until_ms: None,

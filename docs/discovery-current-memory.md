@@ -1,5 +1,13 @@
 # Memory baseline before first-class knowledge retrieval
 
+> **Historical snapshot.** The statements below describe commit `a5a4f51b`. Since then
+> `bot serve` opens `memory.db` and enables recall and background extraction for every
+> bot (not in safe mode), the memory tools (`memory_search`, `session_search`,
+> `memory_save`, `memory_forget`) are registered, and each bot has an owner-only
+> Memory setting (On / Ask before saving / Off), a recall budget and a "Needs your OK"
+> review list for untrusted-origin notes. For what ships today read
+> [the Memory guide](guide/memory.md).
+
 Inspected commit: `a5a4f51bff99a75f566651a64c1ad240b9a0158c`. This records
 source behavior at that commit, rather than capabilities inferred from names or
 design intent. Source references below use paths and baseline line numbers.

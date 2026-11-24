@@ -48,7 +48,7 @@ nav .lang { border: 1px solid var(--color-border-strong); border-radius: 999px; 
 .btn.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-contrast); }
 .btn.primary:hover { background: var(--color-accent-hover); color: var(--color-accent-contrast); }
 
-.card { background: color-mix(in srgb, var(--color-surface-elevated) 70%, transparent); border: 1px solid var(--color-border); border-radius: 20px; padding: 1.5rem; box-shadow: 0 1px 0 color-mix(in srgb, #fff 6%, transparent) inset, 0 20px 40px -24px #000; backdrop-filter: blur(10px); }
+.card { background: color-mix(in srgb, var(--color-surface-elevated) 70%, transparent); border: 1px solid var(--color-border); border-radius: 20px; padding: 1.5rem; box-shadow: 0 1px 0 color-mix(in srgb, var(--color-text) 6%, transparent) inset, 0 20px 40px -24px var(--color-shadow); backdrop-filter: blur(10px); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 1.25rem; margin-bottom: 1rem; }
 .feature img { border-radius: 12px; border: 1px solid var(--color-border); margin-bottom: 1rem; }
 .grid3, .plain { list-style: none; padding: 0; margin: 0 0 1.25rem; }

@@ -56,6 +56,56 @@ impl MemoryStore {
         )
     }
 
+    /// Memories held for the owner's review ("Needs your OK"), newest first.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn list_pending(&self, user: UserId) -> Result<Vec<Memory>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(&format!(
+            "SELECT {COLS} FROM memories WHERE user_id = ?1 AND pending = 1 AND deleted = 0              ORDER BY created_ms DESC, rowid DESC"
+        ))?;
+        let rows = st
+            .query_map(params![user.0.to_string()], row_to_memory)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows.into_iter().map(|(_, m)| m).collect())
+    }
+
+    /// The owner approves a held memory: from now on it can be recalled.  Its
+    /// trust is unchanged, so untrusted-origin text is still shown as data.
+    /// Journaled (undo puts it back on hold).
+    ///
+    /// # Errors
+    /// `NotFound` if it is missing, forgotten, not the user's, or not held.
+    pub fn approve(&self, user: UserId, id: Uuid) -> Result<Memory> {
+        self.require_pending(user, id)?;
+        self.update(
+            user,
+            id,
+            &MemoryPatch {
+                pending: Some(false),
+                ..MemoryPatch::default()
+            },
+            "owner approved",
+        )
+    }
+
+    /// The owner discards a held memory (it is forgotten, journaled).
+    ///
+    /// # Errors
+    /// `NotFound` if it is missing, forgotten, not the user's, or not held.
+    pub fn discard(&self, user: UserId, id: Uuid) -> Result<()> {
+        self.require_pending(user, id)?;
+        self.delete(user, id, "owner discarded")
+    }
+
+    fn require_pending(&self, user: UserId, id: Uuid) -> Result<()> {
+        match self.get(id)? {
+            Some(m) if m.user_id == user && !m.deleted && m.pending => Ok(()),
+            _ => Err(MemoryError::NotFound(format!("held memory {id}"))),
+        }
+    }
+
     /// Journal entries of a user, newest first.
     ///
     /// # Errors

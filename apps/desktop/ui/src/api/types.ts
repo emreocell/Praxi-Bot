@@ -27,6 +27,10 @@ export type CreateMemoryInput = S["CreateMemoryInput"];
 export type UpdateMemoryInput = S["UpdateMemoryInput"];
 export type MemoryPreviewHit = S["MemoryPreviewHitDto"];
 export type MemoryPreview = S["MemoryPreviewDto"];
+export type BotMemorySettings = S["BotMemorySettingsDto"];
+export type BotMemorySettingsInput = S["BotMemorySettingsInput"];
+export type MemoryEmbedding = S["MemoryEmbeddingDto"];
+export type MemoryEmbeddingInput = S["MemoryEmbeddingInput"];
 
 export type Bot = S["BotDto"];
 export type BotInput = S["BotInput"];
