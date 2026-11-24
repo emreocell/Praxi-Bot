@@ -8,8 +8,8 @@ use axum::{
     extract::{Path as ApiPath, Query, State},
 };
 use memory_store::{
-    Kind, ListFilter, Memory, MemoryError, MemoryStore, NewMemory, Trust, estimate_tokens,
-    render_recall_block,
+    Kind, ListFilter, Memory, MemoryError, MemoryMode, MemorySettings, MemoryStore, NewMemory,
+    Trust, estimate_tokens, render_recall_block,
 };
 use protocol::{BotId, UserId};
 use serde::{Deserialize, Serialize};
@@ -91,6 +91,8 @@ pub struct MemoryItemDto {
     pub last_used_ms: i64,
     pub valid_until_ms: Option<i64>,
     pub deleted: bool,
+    /// Held for the owner's OK ("Needs your OK"): not used in answers until approved.
+    pub pending: bool,
     /// Newest active journal entry id that can undo the last change to this memory.
     pub undo_journal_id: Option<i64>,
 }
@@ -197,6 +199,7 @@ fn item_dto(store: &MemoryStore, user: UserId, m: Memory) -> Result<MemoryItemDt
         last_used_ms: m.last_used_ms,
         valid_until_ms: m.valid_until_ms,
         deleted: m.deleted,
+        pending: m.pending,
         undo_journal_id,
     })
 }
@@ -421,8 +424,10 @@ pub(crate) async fn preview_bot_memory(
     }
     let store = s.memory_store()?;
     let user = s.user_id();
-    let budget_tokens = s.agent().memory_recall_budget_tokens();
-    let selected = if query.is_empty() {
+    let settings = MemorySettings::from_bot_config(&bot.config);
+    let budget_tokens = settings.budget(s.agent().memory_recall_budget_tokens());
+    // A bot with memory switched off recalls nothing, so the preview shows nothing.
+    let selected = if query.is_empty() || !settings.enabled() {
         Vec::new()
     } else {
         store
@@ -447,4 +452,208 @@ pub(crate) async fn preview_bot_memory(
         rendered_block,
         hits,
     }))
+}
+
+/// `GET /v1/memory/pending`: memories waiting for the owner's OK.
+#[utoipa::path(
+    get,
+    path = "/v1/memory/pending",
+    tag = "memory",
+    security(("bearer" = [])),
+    responses((status = 200, body = Vec<MemoryItemDto>))
+)]
+pub(crate) async fn list_pending(
+    State(s): State<AppState>,
+) -> Result<Json<Vec<MemoryItemDto>>, ApiError> {
+    let store = s.memory_store()?;
+    let user = s.user_id();
+    let mut out = Vec::new();
+    for m in store.list_pending(user).map_err(map_err)? {
+        out.push(item_dto(&store, user, m)?);
+    }
+    Ok(Json(out))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/memory/{id}/approve",
+    tag = "memory",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = MemoryItemDto), (status = 404, body = ErrorBody))
+)]
+pub(crate) async fn approve_memory(
+    State(s): State<AppState>,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<Json<MemoryItemDto>, ApiError> {
+    let user = s.user_id();
+    s.storage().append_audit(
+        user,
+        None,
+        "user",
+        "memory.approve",
+        &json!({ "memory_id": id }),
+    )?;
+    let store = s.memory_store()?;
+    let approved = store.approve(user, id).map_err(map_err)?;
+    Ok(Json(item_dto(&store, user, approved)?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/memory/{id}/discard",
+    tag = "memory",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = MemoryItemDto), (status = 404, body = ErrorBody))
+)]
+pub(crate) async fn discard_memory(
+    State(s): State<AppState>,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<Json<MemoryItemDto>, ApiError> {
+    let user = s.user_id();
+    s.storage().append_audit(
+        user,
+        None,
+        "user",
+        "memory.discard",
+        &json!({ "memory_id": id }),
+    )?;
+    let store = s.memory_store()?;
+    store.discard(user, id).map_err(map_err)?;
+    let gone = store
+        .get(id)
+        .map_err(map_err)?
+        .filter(|m| m.user_id == user)
+        .ok_or_else(|| ApiError::not_found(format!("memory {id}")))?;
+    Ok(Json(item_dto(&store, user, gone)?))
+}
+
+/// A bot's memory settings as the settings screen shows them.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BotMemorySettingsDto {
+    /// `on`, `off` or `ask`.
+    pub mode: String,
+    /// Recall budget in tokens (the default is 800).
+    pub budget_tokens: usize,
+    /// Slider lower bound.
+    pub budget_min: usize,
+    /// Slider upper bound.
+    pub budget_max: usize,
+    /// Share profile and episodic facts with the owner's other bots.
+    pub share_with_other_bots: bool,
+}
+
+/// Change a bot's memory settings (`PUT /v1/bots/{id}/memory/settings`).
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BotMemorySettingsInput {
+    /// `on`, `off` or `ask`.
+    pub mode: String,
+    /// Recall budget in tokens; `null` = the default.
+    pub budget_tokens: Option<usize>,
+    /// Share profile and episodic facts with the owner's other bots.
+    pub share_with_other_bots: bool,
+}
+
+fn settings_dto(settings: &MemorySettings, default_budget: usize) -> BotMemorySettingsDto {
+    BotMemorySettingsDto {
+        mode: match settings.mode {
+            MemoryMode::On => "on",
+            MemoryMode::Off => "off",
+            MemoryMode::Ask => "ask",
+        }
+        .to_owned(),
+        budget_tokens: settings.budget(default_budget),
+        budget_min: memory_store::MIN_BUDGET_TOKENS,
+        budget_max: memory_store::MAX_BUDGET_TOKENS,
+        share_with_other_bots: settings.share_with_other_bots,
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/bots/{id}/memory/settings",
+    tag = "memory",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = BotMemorySettingsDto), (status = 404, body = ErrorBody))
+)]
+pub(crate) async fn get_bot_memory_settings(
+    State(s): State<AppState>,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<Json<BotMemorySettingsDto>, ApiError> {
+    let bot = s.bot_of_user(BotId(id))?;
+    Ok(Json(settings_dto(
+        &MemorySettings::from_bot_config(&bot.config),
+        s.agent().memory_recall_budget_tokens(),
+    )))
+}
+
+#[utoipa::path(
+    put,
+    path = "/v1/bots/{id}/memory/settings",
+    tag = "memory",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path)),
+    request_body = BotMemorySettingsInput,
+    responses(
+        (status = 200, body = BotMemorySettingsDto),
+        (status = 400, body = ErrorBody),
+        (status = 404, body = ErrorBody),
+        (status = 409, body = ErrorBody)
+    )
+)]
+pub(crate) async fn put_bot_memory_settings(
+    State(s): State<AppState>,
+    ApiPath(id): ApiPath<Uuid>,
+    ApiJson(input): ApiJson<BotMemorySettingsInput>,
+) -> Result<Json<BotMemorySettingsDto>, ApiError> {
+    let bot = s.bot_of_user(BotId(id))?;
+    let mode = match input.mode.as_str() {
+        "on" => MemoryMode::On,
+        "off" => MemoryMode::Off,
+        "ask" => MemoryMode::Ask,
+        _ => return Err(ApiError::bad_request("mode must be on, off or ask")),
+    };
+    let next = MemorySettings {
+        mode,
+        budget_tokens: input.budget_tokens,
+        share_with_other_bots: input.share_with_other_bots,
+    };
+    next.validate().map_err(ApiError::bad_request)?;
+    let (row, version) = s
+        .storage()
+        .get_bot_versioned(bot.id)?
+        .ok_or_else(|| ApiError::not_found("bot"))?;
+    let mut config = row.config.clone();
+    let obj = config
+        .as_object_mut()
+        .ok_or_else(|| ApiError::bad_request("bot config must be an object"))?;
+    obj.insert(
+        "memory".into(),
+        serde_json::to_value(&next).map_err(|_| ApiError::internal("memory settings"))?,
+    );
+    s.storage().append_audit(
+        s.user_id(),
+        None,
+        "user",
+        "memory.settings",
+        &json!({
+            "bot_id": bot.id.0,
+            "mode": input.mode,
+            "budget": input.budget_tokens,
+            "share": input.share_with_other_bots,
+        }),
+    )?;
+    s.storage()
+        .update_bot(bot.id, &row.name, &config, version)
+        .map_err(|_| ApiError::conflict("the bot changed meanwhile; try again"))?;
+    // The next turn reads the new switch from the bot row anyway; dropping the
+    // cached profile also removes (or restores) the memory tools in the tool list.
+    s.agent().forget_profile(bot.id);
+    Ok(Json(settings_dto(
+        &next,
+        s.agent().memory_recall_budget_tokens(),
+    )))
 }

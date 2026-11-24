@@ -1243,6 +1243,19 @@ impl Shared {
         }
     }
 
+    /// The bot's memory settings, read from the bot row on every call (never
+    /// from the profile cache, so the owner's switch takes effect on the next
+    /// turn).  An unknown or unreadable bot fails closed: memory off.
+    pub fn memory_settings(&self, bot_id: BotId) -> memory_store::MemorySettings {
+        match self.storage.get_bot(bot_id) {
+            Ok(Some(bot)) => memory_store::MemorySettings::from_bot_config(&bot.config),
+            _ => memory_store::MemorySettings {
+                mode: memory_store::MemoryMode::Off,
+                ..memory_store::MemorySettings::default()
+            },
+        }
+    }
+
     /// Profile for a bot: explicit registration, else the bot row's JSON config.
     pub fn profile_for(&self, bot_id: BotId) -> Result<Arc<BotProfile>, String> {
         if let Some(p) = self.profiles.read().get(&bot_id) {

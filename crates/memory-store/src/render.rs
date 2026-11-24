@@ -89,6 +89,7 @@ mod tests {
             last_used_ms: 0,
             valid_until_ms: None,
             deleted: false,
+            pending: false,
         }
     }
 

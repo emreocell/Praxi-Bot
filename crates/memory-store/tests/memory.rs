@@ -62,6 +62,8 @@ fn cand(content: &str, quote: Option<&str>) -> Candidate {
         hypothetical: false,
         importance: 0.6,
         untrusted: false,
+        expires: None,
+        valid_until: None,
     }
 }
 
@@ -73,6 +75,8 @@ fn ctx(user: UserId, bot: BotId, excerpt: &str) -> ExtractionContext {
         message_id: Some(Uuid::now_v7()),
         excerpt: excerpt.into(),
         untrusted: false,
+        hold_all: false,
+        share_with_other_bots: true,
     }
 }
 

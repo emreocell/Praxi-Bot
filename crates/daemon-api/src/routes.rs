@@ -250,6 +250,26 @@ fn engine_in_profile() -> ApiError {
     )
 }
 
+/// A JSON patch may not touch the tables only an owner endpoint writes.
+fn owner_tables_unchanged(next: &Value, stored: &Value) -> Result<(), String> {
+    for (table, endpoint) in [("engine", "engine"), ("memory", "memory settings")] {
+        if next.get(table) != stored.get(table) {
+            return Err(format!(
+                "bad_patch:the {table} settings change only through the {endpoint} endpoint"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn memory_in_profile() -> ApiError {
+    ApiError::new(
+        StatusCode::FORBIDDEN,
+        "memory_owner_only",
+        "memory settings can only be changed by the local owner through the memory settings endpoint",
+    )
+}
+
 /// Validate a bot definition; returns `(name, config json)`.
 pub(crate) fn resolve_bot(input: BotInput) -> Result<(String, Value), ApiError> {
     let mut config = match (input.config, input.profile_toml) {
@@ -362,6 +382,11 @@ pub(crate) async fn create_bot(
     let (name, mut config) = resolve_bot(input)?;
     if config.get("engine").is_some() {
         return Err(engine_in_profile());
+    }
+    // Memory on/off/ask, budget and sharing change only through
+    // `PUT /v1/bots/{id}/memory/settings`.
+    if config.get("memory").is_some_and(|m| !m.is_null()) {
+        return Err(memory_in_profile());
     }
     crate::peer::protect_knowledge_config(peer.as_ref().map(|peer| &peer.0), None, &mut config)?;
     // The owner's desktop with host administration acts as the owner here.
@@ -510,6 +535,13 @@ pub(crate) async fn update_bot(
         (Some(sent), stored) if Some(sent) != stored => return Err(engine_in_profile().into()),
         _ => {}
     }
+    // Same for the memory table: an edit keeps the stored one.
+    match (config.get("memory"), bot.config.get("memory")) {
+        (Some(sent), stored) if !sent.is_null() && Some(sent) != stored => {
+            return Err(memory_in_profile().into());
+        }
+        _ => {}
+    }
     {
         let obj = config
             .as_object_mut()
@@ -520,6 +552,14 @@ pub(crate) async fn update_bot(
             }
             None => {
                 obj.remove("engine");
+            }
+        }
+        match bot.config.get("memory") {
+            Some(memory) => {
+                obj.insert("memory".into(), memory.clone());
+            }
+            None => {
+                obj.remove("memory");
             }
         }
     }
@@ -812,12 +852,7 @@ pub(crate) async fn patch_bot(
             .map_err(refused)?;
             // Engine settings (who runs files and shell, and the consent
             // behind them) change only through `PUT /v1/bots/{id}/engine`.
-            if next.get("engine") != config.get("engine") {
-                return Err(
-                    "bad_patch:the engine settings change only through the engine endpoint"
-                        .to_owned(),
-                );
-            }
+            owner_tables_unchanged(&next, config)?;
             serde_json::from_value::<BotProfile>(next.clone())
                 .map_err(|e| format!("bad_profile:invalid bot profile: {e}"))?;
             Ok((new_name.unwrap_or_else(|| name.to_owned()), next))

@@ -1,7 +1,8 @@
 //! `MemoryStore`: connection, schema, CRUD and journaling.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use protocol::{BotId, ChatId, UserId};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -15,12 +16,17 @@ use crate::types::{JournalEntry, JournalOp, Kind, Memory, MemoryPatch, NewMemory
 use crate::vec::{register, to_blob};
 
 /// Embedded migrations; version = index + 1.
-const MIGRATIONS: &[(&str, &str)] =
-    &[("0001_memory", include_str!("../migrations/0001_memory.sql"))];
+const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_memory", include_str!("../migrations/0001_memory.sql")),
+    (
+        "0002_review_and_settings",
+        include_str!("../migrations/0002_review_and_settings.sql"),
+    ),
+];
 
 pub(crate) const COLS: &str = "rowid, id, user_id, bot_id, kind, content, source_quote, \
     source_chat_id, source_message_id, trust, importance, created_ms, last_used_ms, \
-    valid_until_ms, deleted";
+    valid_until_ms, deleted, pending";
 
 /// Current time in Unix milliseconds.
 #[must_use]
@@ -32,7 +38,13 @@ pub(crate) fn now_ms() -> i64 {
 /// an internal mutex.
 pub struct MemoryStore {
     conn: Mutex<Connection>,
-    pub(crate) embedder: Arc<dyn Embedder>,
+    embedder: RwLock<Arc<dyn Embedder>>,
+    /// Dimension of the `memories_vec` table as it exists on disk.
+    vec_dim: AtomicUsize,
+    /// The vector table matches the active embedder and holds every live
+    /// memory.  While false (rebuilding, or a Smart index waiting for its
+    /// embedder after a restart) recall is lexical only.
+    pub(crate) vec_ready: AtomicBool,
     pub(crate) config: RecallConfig,
 }
 
@@ -78,6 +90,7 @@ pub(crate) fn row_to_memory(r: &Row<'_>) -> rusqlite::Result<(i64, Memory)> {
             last_used_ms: r.get(12)?,
             valid_until_ms: r.get(13)?,
             deleted: r.get::<_, i64>(14)? != 0,
+            pending: r.get::<_, i64>(15)? != 0,
         },
     ))
 }
@@ -143,7 +156,17 @@ impl MemoryStore {
                 |r| r.get(0),
             )
             .optional()?;
+        let smart_stored =
+            meta_get(&conn, crate::embedding_mode::KEY_MODE)?.as_deref() == Some("smart");
+        let mut vec_dim = dim;
+        let mut ready = true;
         match stored.and_then(|s| s.parse::<usize>().ok()) {
+            // A Smart index outlives a restart; it waits for its embedder
+            // (lexical-only recall meanwhile) instead of being thrown away.
+            Some(db) if db != dim && smart_stored => {
+                vec_dim = db;
+                ready = false;
+            }
             Some(db) if db != dim => {
                 return Err(MemoryError::DimensionMismatch { db, embedder: dim });
             }
@@ -155,12 +178,18 @@ impl MemoryStore {
                 )?;
             }
         }
+        // A rebuild cut short by a crash leaves a partial index.
+        if meta_get(&conn, crate::embedding_mode::KEY_STATE)?.as_deref() == Some("rebuilding") {
+            ready = false;
+        }
         conn.execute_batch(&format!(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(embedding float[{dim}])"
+            "CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(embedding float[{vec_dim}])"
         ))?;
         Ok(Self {
             conn: Mutex::new(conn),
-            embedder,
+            embedder: RwLock::new(embedder),
+            vec_dim: AtomicUsize::new(vec_dim),
+            vec_ready: AtomicBool::new(ready),
             config: RecallConfig::default(),
         })
     }
@@ -178,20 +207,69 @@ impl MemoryStore {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    pub(crate) fn embedder(&self) -> Arc<dyn Embedder> {
+        Arc::clone(
+            &self
+                .embedder
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+
+    pub(crate) fn set_embedder(&self, embedder: Arc<dyn Embedder>) {
+        *self
+            .embedder
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = embedder;
+    }
+
+    pub(crate) fn vec_dim(&self) -> usize {
+        self.vec_dim.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_vec_dim(&self, dim: usize) {
+        self.vec_dim.store(dim, Ordering::Release);
+    }
+
     pub(crate) fn embed_one(&self, text: &str) -> Result<Vec<f32>> {
-        let mut out = self.embedder.embed(&[text])?;
+        self.embed_with(text, false)
+    }
+
+    /// Embed a search query (asymmetric models use their query recipe).
+    pub(crate) fn embed_query_one(&self, text: &str) -> Result<Vec<f32>> {
+        self.embed_with(text, true)
+    }
+
+    fn embed_with(&self, text: &str, query: bool) -> Result<Vec<f32>> {
+        let embedder = self.embedder();
+        let mut out = if query {
+            embedder.embed_queries(&[text])?
+        } else {
+            embedder.embed(&[text])?
+        };
         let mut v = out
             .pop()
             .ok_or_else(|| MemoryError::Embed("embedder returned no vector".into()))?;
-        if v.len() != self.embedder.dim() {
+        if v.len() != embedder.dim() {
             return Err(MemoryError::Embed(format!(
                 "expected {} dims, got {}",
-                self.embedder.dim(),
+                embedder.dim(),
                 v.len()
             )));
         }
         normalize(&mut v);
         Ok(v)
+    }
+
+    /// Vector for indexing `text`, or `None` when the vector table cannot take
+    /// it right now (the embedder failed or does not match the table).  The
+    /// memory is still stored and findable by words; the missing vector is
+    /// recorded so the next re-embed fills it.
+    pub(crate) fn embed_for_index(&self, text: &str) -> Option<Vec<f32>> {
+        if self.embedder().dim() != self.vec_dim() {
+            return None;
+        }
+        self.embed_one(text).ok()
     }
 
     /// Insert a memory and journal it.
@@ -216,14 +294,15 @@ impl MemoryStore {
             last_used_ms: now,
             valid_until_ms: new.valid_until_ms,
             deleted: false,
+            pending: new.pending,
         };
-        let emb = self.embed_one(&mem.content)?;
+        let emb = self.embed_for_index(&mem.content);
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO memories (id, user_id, bot_id, kind, content, source_quote, \
              source_chat_id, source_message_id, trust, importance, created_ms, last_used_ms, \
-             valid_until_ms, deleted) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0)",
+             valid_until_ms, deleted, pending) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,?14)",
             params![
                 mem.id.to_string(),
                 mem.user_id.0.to_string(),
@@ -238,10 +317,11 @@ impl MemoryStore {
                 mem.created_ms,
                 mem.last_used_ms,
                 mem.valid_until_ms,
+                i64::from(mem.pending),
             ],
         )?;
         let rowid = tx.last_insert_rowid();
-        index(&tx, rowid, &mem.content, &emb)?;
+        index(&tx, rowid, &mem.content, emb.as_deref())?;
         journal_insert(&tx, &mem, JournalOp::Add, None, Some(&mem), reason)?;
         tx.commit()?;
         Ok(mem)
@@ -290,8 +370,7 @@ impl MemoryStore {
         let emb = patch
             .content
             .as_deref()
-            .map(|c| self.embed_one(c.trim()))
-            .transpose()?;
+            .map(|c| self.embed_for_index(c.trim()));
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let (rowid, before) = live_owned(&tx, user_id, id)?;
@@ -320,9 +399,12 @@ impl MemoryStore {
         if let Some(v) = patch.valid_until_ms {
             after.valid_until_ms = v;
         }
+        if let Some(p) = patch.pending {
+            after.pending = p;
+        }
         write_snapshot(&tx, &after)?;
         if let Some(e) = emb {
-            index(&tx, rowid, &after.content, &e)?;
+            index(&tx, rowid, &after.content, e.as_deref())?;
         }
         journal_insert(
             &tx,
@@ -403,8 +485,8 @@ impl MemoryStore {
         if target.deleted {
             unindex(&tx, rowid)?;
         } else {
-            let emb = self.embed_one(&target.content)?;
-            index(&tx, rowid, &target.content, &emb)?;
+            let emb = self.embed_for_index(&target.content);
+            index(&tx, rowid, &target.content, emb.as_deref())?;
         }
         tx.execute(
             "UPDATE memory_journal SET undone = 1 WHERE id = ?1",
@@ -445,7 +527,7 @@ fn write_snapshot(conn: &Connection, m: &Memory) -> Result<()> {
     conn.execute(
         "UPDATE memories SET bot_id=?2, kind=?3, content=?4, source_quote=?5, source_chat_id=?6, \
          source_message_id=?7, trust=?8, importance=?9, last_used_ms=?10, valid_until_ms=?11, \
-         deleted=?12 WHERE id=?1",
+         deleted=?12, pending=?13 WHERE id=?1",
         params![
             m.id.to_string(),
             m.bot_id.map(|b| b.0.to_string()),
@@ -459,21 +541,40 @@ fn write_snapshot(conn: &Connection, m: &Memory) -> Result<()> {
             m.last_used_ms,
             m.valid_until_ms,
             i64::from(m.deleted),
+            i64::from(m.pending),
         ],
     )?;
     Ok(())
 }
 
-/// (Re)index a memory in FTS and the vector table.
-fn index(conn: &Connection, rowid: i64, content: &str, emb: &[f32]) -> Result<()> {
+/// (Re)index a memory in FTS and, when a vector is available, the vector table.
+fn index(conn: &Connection, rowid: i64, content: &str, emb: Option<&[f32]>) -> Result<()> {
     unindex(conn, rowid)?;
     conn.execute(
         "INSERT INTO memories_fts(rowid, content) VALUES (?1, ?2)",
         params![rowid, content],
     )?;
+    if let Some(emb) = emb {
+        conn.execute(
+            "INSERT INTO memories_vec(rowid, embedding) VALUES (?1, ?2)",
+            params![rowid, to_blob(emb)],
+        )?;
+    } else {
+        meta_set(conn, crate::embedding_mode::KEY_DIRTY, "1")?;
+    }
+    Ok(())
+}
+
+pub(crate) fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
+        .optional()?)
+}
+
+pub(crate) fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()> {
     conn.execute(
-        "INSERT INTO memories_vec(rowid, embedding) VALUES (?1, ?2)",
-        params![rowid, to_blob(emb)],
+        "INSERT INTO meta(key, value) VALUES (?1, ?2)          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
     )?;
     Ok(())
 }

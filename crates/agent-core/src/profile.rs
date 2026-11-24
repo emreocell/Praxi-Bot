@@ -184,6 +184,10 @@ struct Raw {
     files: FilesConfig,
     #[serde(default)]
     engine: EngineSettings,
+    /// Read leniently: an unreadable table means the defaults, never a bot that
+    /// fails to load.
+    #[serde(default)]
+    memory: serde_json::Value,
 }
 
 /// A loaded bot profile.
@@ -211,6 +215,8 @@ pub struct BotProfile {
     pub files: FilesConfig,
     /// Engine mode, approval level and workspace of a CLI-backed bot.
     pub engine: EngineSettings,
+    /// Memory on / off / ask, budget and sharing (`[memory]`, owner-only).
+    pub memory: memory_store::MemorySettings,
     allow: GlobSet,
     exclude: GlobSet,
     /// Extra allow-lists a tool must also match (subagent narrowing).
@@ -269,6 +275,9 @@ impl TryFrom<Raw> for BotProfile {
             runtime: r.runtime,
             files: r.files,
             engine: r.engine,
+            memory: memory_store::MemorySettings::from_bot_config(
+                &serde_json::json!({ "memory": r.memory }),
+            ),
         })
     }
 }
@@ -357,8 +366,10 @@ impl BotProfile {
         }
         // Shell commands and scripts cannot be confined to folders, so a
         // "Folder only" bot does not get them (honest sandbox, not a pretence).
-        (self.files.mode != Some(FileAccessMode::Folder)
-            || !(tool_name.starts_with("shell_") || tool_name.starts_with("script_")))
+        // Memory switched off for this bot: its memory tools are not offered.
+        (self.memory.enabled() || !memory_store::MEMORY_TOOL_NAMES.contains(&tool_name))
+            && (self.files.mode != Some(FileAccessMode::Folder)
+                || !(tool_name.starts_with("shell_") || tool_name.starts_with("script_")))
             && (!self.hide_desktop || !tool_name.starts_with("desktop_"))
             && (!self.hide_browser || !tool_name.starts_with("browser_"))
             && (self.tools.allow.is_empty() || self.allow.is_match(tool_name))
