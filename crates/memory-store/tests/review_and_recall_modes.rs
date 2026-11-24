@@ -1,5 +1,5 @@
 //! Owner review ("Needs your OK"), expiry, scope and Basic/Smart recall.
-#![allow(clippy::many_single_char_names)]
+#![allow(clippy::many_single_char_names, clippy::assert_is_empty)]
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

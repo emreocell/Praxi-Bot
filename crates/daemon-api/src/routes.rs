@@ -250,6 +250,18 @@ fn engine_in_profile() -> ApiError {
     )
 }
 
+/// A JSON patch may not touch the tables only an owner endpoint writes.
+fn owner_tables_unchanged(next: &Value, stored: &Value) -> Result<(), String> {
+    for (table, endpoint) in [("engine", "engine"), ("memory", "memory settings")] {
+        if next.get(table) != stored.get(table) {
+            return Err(format!(
+                "bad_patch:the {table} settings change only through the {endpoint} endpoint"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn memory_in_profile() -> ApiError {
     ApiError::new(
         StatusCode::FORBIDDEN,
@@ -840,18 +852,7 @@ pub(crate) async fn patch_bot(
             .map_err(refused)?;
             // Engine settings (who runs files and shell, and the consent
             // behind them) change only through `PUT /v1/bots/{id}/engine`.
-            if next.get("engine") != config.get("engine") {
-                return Err(
-                    "bad_patch:the engine settings change only through the engine endpoint"
-                        .to_owned(),
-                );
-            }
-            if next.get("memory") != config.get("memory") {
-                return Err(
-                    "bad_patch:the memory settings change only through the memory settings endpoint"
-                        .to_owned(),
-                );
-            }
+            owner_tables_unchanged(&next, config)?;
             serde_json::from_value::<BotProfile>(next.clone())
                 .map_err(|e| format!("bad_profile:invalid bot profile: {e}"))?;
             Ok((new_name.unwrap_or_else(|| name.to_owned()), next))

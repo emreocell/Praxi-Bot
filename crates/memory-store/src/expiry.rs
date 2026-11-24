@@ -12,12 +12,12 @@ const DAY_MS: i64 = 86_400_000;
 /// Longest expiry accepted: two years.
 const MAX_AHEAD_MS: i64 = 730 * DAY_MS;
 
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let shifted = if month <= 2 { year - 1 } else { year };
+    let era = shifted.div_euclid(400);
+    let yoe = shifted - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146_097 + doe - 719_468
 }
@@ -62,21 +62,22 @@ fn weekday_of(token: &str) -> Option<i64> {
 }
 
 fn parse_iso(text: &str) -> Option<i64> {
-    let b = text.as_bytes();
-    for start in 0..b.len().saturating_sub(9) {
-        let w = &text.get(start..start + 10)?;
-        let ok = w.char_indices().all(|(i, c)| match i {
+    for start in 0..text.len().saturating_sub(9) {
+        let Some(window) = text.get(start..start + 10) else {
+            continue;
+        };
+        let shaped = window.char_indices().all(|(i, c)| match i {
             4 | 7 => c == '-',
             _ => c.is_ascii_digit(),
         });
-        if !ok {
+        if !shaped {
             continue;
         }
-        let y: i64 = w[0..4].parse().ok()?;
-        let m: i64 = w[5..7].parse().ok()?;
-        let d: i64 = w[8..10].parse().ok()?;
-        if (1970..=2200).contains(&y) && (1..=12).contains(&m) && (1..=31).contains(&d) {
-            return Some(end_of_day(days_from_civil(y, m, d)));
+        let year: i64 = window[0..4].parse().ok()?;
+        let month: i64 = window[5..7].parse().ok()?;
+        let day: i64 = window[8..10].parse().ok()?;
+        if (1970..=2200).contains(&year) && (1..=12).contains(&month) && (1..=31).contains(&day) {
+            return Some(end_of_day(days_from_civil(year, month, day)));
         }
     }
     None

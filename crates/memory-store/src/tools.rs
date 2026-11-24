@@ -864,7 +864,7 @@ mod tests {
         }
     }
 
-    fn extra_bot(env: &Env, memory: Value) -> (BotId, ChatId) {
+    fn extra_bot(env: &Env, memory: &Value) -> (BotId, ChatId) {
         let (bot, chat) = (BotId::new(), ChatId::new());
         let now = now_ms();
         env.storage
@@ -898,7 +898,7 @@ mod tests {
             "quote": "My birthday is March 3, remember it until Friday"});
 
         // Off: every memory tool refuses, nothing is stored.
-        let (off, off_chat) = extra_bot(&env, json!({"mode": "off"}));
+        let (off, off_chat) = extra_bot(&env, &json!({"mode": "off"}));
         let ctx = start_turn(&env, off, off_chat, say);
         for tool in ["memory_save", "memory_search"] {
             let err = find_tool(&tools, tool)
@@ -910,15 +910,16 @@ mod tests {
                 .unwrap_err();
             assert!(err.to_string().contains("switched off"), "{tool}: {err}");
         }
-        assert!(
+        assert_eq!(
             env.store
                 .list(env.user, &ListFilter::default())
                 .unwrap()
-                .is_empty()
+                .len(),
+            0
         );
 
         // Ask: saved but held, so a search by the same bot does not see it.
-        let (ask, ask_chat) = extra_bot(&env, json!({"mode": "ask"}));
+        let (ask, ask_chat) = extra_bot(&env, &json!({"mode": "ask"}));
         let ctx = start_turn(&env, ask, ask_chat, say);
         let out = save.call(&ctx, args.clone()).await.unwrap();
         assert!(text_of(&out).contains("waiting for the owner's OK"));
@@ -935,11 +936,11 @@ mod tests {
         assert!(text_of(&found).contains("No matching memories"));
 
         // Shared (default) saves a profile fact for every bot; isolated keeps it to one.
-        let (shared, shared_chat) = extra_bot(&env, json!({"share_with_other_bots": true}));
+        let (shared, shared_chat) = extra_bot(&env, &json!({"share_with_other_bots": true}));
         save.call(&start_turn(&env, shared, shared_chat, say), args.clone())
             .await
             .unwrap();
-        let (iso, iso_chat) = extra_bot(&env, json!({"share_with_other_bots": false}));
+        let (iso, iso_chat) = extra_bot(&env, &json!({"share_with_other_bots": false}));
         save.call(&start_turn(&env, iso, iso_chat, say), args)
             .await
             .unwrap();

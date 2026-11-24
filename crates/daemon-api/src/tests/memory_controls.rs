@@ -1,5 +1,7 @@
 //! Per-bot memory settings, the "Needs your OK" review list and Basic/Smart recall.
 
+#![allow(clippy::assert_is_empty)]
+
 use super::*;
 use memory_store::{Kind, NewMemory, Trust};
 use protocol::BotId;
@@ -24,6 +26,7 @@ async fn peer_call(t: &T, role: crate::PeerRole, method: Method, path: &str) -> 
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // one ordered scenario: validate, store, preview, profile edit, peers
 async fn memory_settings_are_owner_only_validated_and_survive_profile_edits() {
     let t = setup();
     let (bot, _) = make_chat(&t).await;
@@ -110,7 +113,7 @@ async fn memory_settings_are_owner_only_validated_and_survive_profile_edits() {
     let still = call(&t, Method::GET, &path, None).await.json();
     assert_eq!(still["mode"], "off");
     // Neither can a JSON-patch edit of the bot profile.
-    let patch = call(
+    let json_patch = call(
         &t,
         Method::PATCH,
         &format!("/v1/bots/{bot}"),
@@ -120,7 +123,7 @@ async fn memory_settings_are_owner_only_validated_and_survive_profile_edits() {
         })),
     )
     .await;
-    assert_ne!(patch.status, StatusCode::OK, "{}", patch.json());
+    assert_ne!(json_patch.status, StatusCode::OK, "{}", json_patch.json());
     assert_eq!(
         call(&t, Method::GET, &path, None).await.json()["mode"],
         "off"

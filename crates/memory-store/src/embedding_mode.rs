@@ -167,7 +167,7 @@ impl MemoryStore {
             self.vec_ready.store(true, Ordering::Release);
             return Ok(());
         }
-        match self.rebuild(embedder, EmbedMode::Smart, label) {
+        match self.rebuild(&embedder, EmbedMode::Smart, label) {
             Ok(()) => Ok(()),
             Err(e) => {
                 let _ = self.fall_back_to_basic(&e.to_string());
@@ -182,7 +182,7 @@ impl MemoryStore {
     /// SQLite failure.
     pub fn enable_basic(&self) -> Result<()> {
         self.rebuild(
-            Arc::new(HashEmbedder::new(BASIC_DIM)),
+            &(Arc::new(HashEmbedder::new(BASIC_DIM)) as Arc<dyn Embedder>),
             EmbedMode::Basic,
             "Basic",
         )
@@ -190,7 +190,7 @@ impl MemoryStore {
 
     fn fall_back_to_basic(&self, why: &str) -> Result<()> {
         self.rebuild(
-            Arc::new(HashEmbedder::new(BASIC_DIM)),
+            &(Arc::new(HashEmbedder::new(BASIC_DIM)) as Arc<dyn Embedder>),
             EmbedMode::Basic,
             "Basic",
         )?;
@@ -202,7 +202,7 @@ impl MemoryStore {
         Ok(())
     }
 
-    fn rebuild(&self, embedder: Arc<dyn Embedder>, mode: EmbedMode, label: &str) -> Result<()> {
+    fn rebuild(&self, embedder: &Arc<dyn Embedder>, mode: EmbedMode, label: &str) -> Result<()> {
         let dim = embedder.dim();
         let ids: Vec<(i64, String)> = {
             let mut conn = self.conn();
@@ -227,7 +227,7 @@ impl MemoryStore {
             tx.commit()?;
             // New writes are embedded with the new model from here on.
             self.set_vec_dim(dim);
-            self.set_embedder(Arc::clone(&embedder));
+            self.set_embedder(Arc::clone(embedder));
             self.vec_ready.store(false, Ordering::Release);
             ids
         };
