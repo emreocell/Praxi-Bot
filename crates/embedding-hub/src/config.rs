@@ -95,6 +95,10 @@ pub struct ProviderConfig {
     /// Replace the catalog limits (free key limits).
     #[serde(default)]
     pub limits: Option<Limits>,
+    /// Owner-only: also allow a custom endpoint on the private network.
+    /// Link-local and cloud-metadata addresses are never allowed.
+    #[serde(default)]
+    pub allow_local_network: bool,
 }
 
 fn yes() -> bool {
@@ -195,9 +199,12 @@ impl EmbeddingConfig {
                 return bad("an OpenAI-compatible provider needs an endpoint address");
             }
             if let Some(url) = &p.base_url
-                && provider_catalog::embedding::endpoint_identity(url).is_err()
+                && provider_catalog::embedding::validate_endpoint(url, p.allow_local_network)
+                    .is_err()
             {
-                return bad("the endpoint address must be http(s) without a password or query");
+                return bad(
+                    "the endpoint address must be https (http only for localhost), without a password or query, and not a private, link-local or metadata address",
+                );
             }
             if let Some(name) = &p.key_ref
                 && (name.is_empty() || name.len() > 128 || name.chars().any(char::is_control))

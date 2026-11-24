@@ -5649,6 +5649,8 @@ export interface components {
         };
         /** @description One configured provider. */
         EmbeddingProviderDto: {
+            /** @description Private-network endpoints are allowed for this provider. */
+            allow_local_network: boolean;
             /** @description The owner agreed that text is sent to this provider. */
             allow_remote: boolean;
             /** @description Endpoint, if not the default. */
@@ -5683,6 +5685,11 @@ export interface components {
         };
         /** @description A provider as the owner edits it. */
         EmbeddingProviderInput: {
+            /**
+             * @description Owner-only: also allow a custom endpoint on the private network.
+             *     Link-local and cloud-metadata addresses are never allowed.
+             */
+            allow_local_network?: boolean;
             /** @description The owner agrees that text is sent to this provider. */
             allow_remote?: boolean;
             /** @description New API key (write-only; leave out to keep the stored key). */
@@ -5691,6 +5698,13 @@ export interface components {
             base_url?: string | null;
             /** @description Remove the stored key. */
             clear_key?: boolean;
+            /**
+             * @description A fresh, explicit consent for exactly this destination (provider kind,
+             *     model and endpoint as sent in this request). Consent is only carried over
+             *     from the stored setup when none of those changed; otherwise
+             *     `allow_remote` is ignored unless this is true.
+             */
+            confirm_remote?: boolean;
             /** @description Vector size. */
             dimensions: number;
             /** @description Short id (`a-z`, `0-9`, `-`). */

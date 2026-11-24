@@ -27,6 +27,7 @@ fn provider(id: &str, kind: ProviderType, url: &str, dims: usize) -> ProviderCon
         key_ref: Some("embedding-key".to_owned()),
         allow_remote: true,
         limits: None,
+        allow_local_network: false,
     }
 }
 

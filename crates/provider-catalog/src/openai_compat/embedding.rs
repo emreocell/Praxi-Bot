@@ -14,7 +14,7 @@ impl OpenAiCompatProvider {
         url: String,
         body: Option<Value>,
     ) -> Result<Value, ProviderError> {
-        let client = client(&self.config)?;
+        let client = client(&self.config, &self.entry.base_url)?;
         let mut request = if let Some(body) = body {
             client.post(url).json(&body)
         } else {

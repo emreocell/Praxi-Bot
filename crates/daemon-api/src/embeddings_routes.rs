@@ -109,6 +109,8 @@ pub struct EmbeddingProviderDto {
     pub has_key: bool,
     /// The owner agreed that text is sent to this provider.
     pub allow_remote: bool,
+    /// Private-network endpoints are allowed for this provider.
+    pub allow_local_network: bool,
     /// Limits overridden by the owner.
     pub limits: Option<LimitsDto>,
     /// `ok`, `not_allowed`, `key_missing`, `cooling_down`, `key_rejected`,
@@ -208,6 +210,16 @@ pub struct EmbeddingProviderInput {
     /// The owner agrees that text is sent to this provider.
     #[serde(default)]
     pub allow_remote: bool,
+    /// A fresh, explicit consent for exactly this destination (provider kind,
+    /// model and endpoint as sent in this request). Consent is only carried over
+    /// from the stored setup when none of those changed; otherwise
+    /// `allow_remote` is ignored unless this is true.
+    #[serde(default)]
+    pub confirm_remote: bool,
+    /// Owner-only: also allow a custom endpoint on the private network.
+    /// Link-local and cloud-metadata addresses are never allowed.
+    #[serde(default)]
+    pub allow_local_network: bool,
     /// Replace the limits of the catalog.
     #[serde(default)]
     pub limits: Option<LimitsDto>,
@@ -321,6 +333,7 @@ fn dto(s: &AppState) -> Result<EmbeddingsDto, ApiError> {
                 request_dimensions: p.request_dimensions,
                 has_key: has_key(s, p),
                 allow_remote: p.allow_remote,
+                allow_local_network: p.allow_local_network,
                 limits: p.limits.and_then(limits_dto),
                 state: st.map_or_else(|| "ok".to_owned(), |x| outcome_name(x.state)),
                 retry_in_secs: st.map_or(0, |x| x.retry_in_secs),
@@ -440,6 +453,16 @@ fn resolver(s: &AppState) -> impl Fn(&str) -> Option<String> + '_ {
     }
 }
 
+/// The destination text is sent to: provider kind, model and endpoint.
+fn destination(kind: ProviderType, model: &str, base_url: Option<&str>) -> String {
+    let url = base_url.map_or_else(String::new, |u| {
+        provider_catalog::embedding::endpoint_identity(u)
+            .unwrap_or_else(|_| u.trim().to_owned())
+            .to_ascii_lowercase()
+    });
+    format!("{}|{}|{url}", kind.catalog_name(), model)
+}
+
 /// Save the embedding setup (owner only). Text is only ever sent to a provider
 /// whose `allow_remote` the owner switched on.
 #[utoipa::path(put, path = "/v1/embeddings", tag = "embeddings", security(("bearer" = [])),
@@ -486,15 +509,25 @@ pub(crate) async fn put_embeddings(
             key_ref = Some(name.clone());
             writes.push((name, k));
         }
+        let base_url = p.base_url.clone().filter(|u| !u.trim().is_empty());
+        let new_destination = destination(kind, p.model.trim(), base_url.as_deref());
+        // Consent belongs to one destination. Carry it over only when kind, model
+        // and endpoint are unchanged; anything else needs a fresh tick.
+        let consent_kept = old.provider(&p.id).is_some_and(|o| {
+            o.allow_remote
+                && destination(o.kind, &o.model, o.base_url.as_deref()) == new_destination
+                && o.allow_local_network == p.allow_local_network
+        });
         config.providers.push(ProviderConfig {
             id: p.id.clone(),
             kind,
-            base_url: p.base_url.clone().filter(|u| !u.trim().is_empty()),
+            base_url,
             model: p.model.trim().to_owned(),
             dimensions: p.dimensions,
             request_dimensions: p.request_dimensions,
             key_ref,
-            allow_remote: p.allow_remote && kind.is_remote(),
+            allow_remote: p.allow_remote && kind.is_remote() && (consent_kept || p.confirm_remote),
+            allow_local_network: p.allow_local_network,
             limits: p.limits.map(Into::into),
         });
     }

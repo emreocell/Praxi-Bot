@@ -18154,12 +18154,17 @@
           "request_dimensions",
           "has_key",
           "allow_remote",
+          "allow_local_network",
           "state",
           "retry_in_secs",
           "usage",
           "remote"
         ],
         "properties": {
+          "allow_local_network": {
+            "type": "boolean",
+            "description": "Private-network endpoints are allowed for this provider."
+          },
           "allow_remote": {
             "type": "boolean",
             "description": "The owner agreed that text is sent to this provider."
@@ -18237,6 +18242,10 @@
           "dimensions"
         ],
         "properties": {
+          "allow_local_network": {
+            "type": "boolean",
+            "description": "Owner-only: also allow a custom endpoint on the private network.\nLink-local and cloud-metadata addresses are never allowed."
+          },
           "allow_remote": {
             "type": "boolean",
             "description": "The owner agrees that text is sent to this provider."
@@ -18258,6 +18267,10 @@
           "clear_key": {
             "type": "boolean",
             "description": "Remove the stored key."
+          },
+          "confirm_remote": {
+            "type": "boolean",
+            "description": "A fresh, explicit consent for exactly this destination (provider kind,\nmodel and endpoint as sent in this request). Consent is only carried over\nfrom the stored setup when none of those changed; otherwise\n`allow_remote` is ignored unless this is true."
           },
           "dimensions": {
             "type": "integer",

@@ -56,6 +56,10 @@ pub struct OpenAiCompatConfig {
     /// Idle timeout: maximum wait for response headers and between body
     /// chunks. Long streams are not cut off as long as data keeps flowing.
     pub timeout: Duration,
+    /// Embedding endpoints only: also allow private LAN addresses (the owner
+    /// switched "allow local network" on). Link-local and metadata addresses are
+    /// never allowed.
+    pub allow_local_network: bool,
 }
 
 impl Default for OpenAiCompatConfig {
@@ -68,6 +72,7 @@ impl Default for OpenAiCompatConfig {
             debug_dir: None,
             connect_timeout: Duration::from_secs(10),
             timeout: CHAT_STREAM_IDLE,
+            allow_local_network: false,
         }
     }
 }

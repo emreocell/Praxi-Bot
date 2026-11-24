@@ -377,7 +377,10 @@ impl EmbeddingHub {
             let remote: Option<Arc<dyn EmbeddingProvider>> = if cfg.kind.is_remote() {
                 provider_catalog::build_embedding_provider(
                     &entry_for(cfg),
-                    OpenAiCompatConfig::default(),
+                    OpenAiCompatConfig {
+                        allow_local_network: cfg.allow_local_network,
+                        ..OpenAiCompatConfig::default()
+                    },
                     key.clone(),
                 )
                 .ok()

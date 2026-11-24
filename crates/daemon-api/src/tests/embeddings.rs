@@ -44,7 +44,7 @@ fn setup_hub() -> (T, Arc<secret_store::MemoryStore>) {
 fn provider(allow: bool) -> serde_json::Value {
     json!({
         "id": "gemini-free", "kind": "gemini", "model": "gemini-embedding-001",
-        "dimensions": 768, "allow_remote": allow, "api_key": KEY
+        "dimensions": 768, "allow_remote": allow, "confirm_remote": allow, "api_key": KEY
     })
 }
 
@@ -120,4 +120,76 @@ async fn invalid_setups_and_unconsented_tests_are_refused_in_plain_words() {
     call(&t, Method::PUT, "/v1/embeddings", Some(ok)).await;
     let r = call(&t, Method::POST, "/v1/embeddings/gemini-free/test", None).await;
     assert_eq!(r.json()["outcome"], "not_allowed");
+}
+
+#[tokio::test]
+async fn consent_does_not_follow_a_changed_destination() {
+    let (t, _) = setup_hub();
+    let first = json!({"providers": [provider(true)]});
+    let r = call(&t, Method::PUT, "/v1/embeddings", Some(first)).await;
+    assert_eq!(r.json()["providers"][0]["allow_remote"], true);
+
+    // Same destination re-saved the way the UI does (old flag, no fresh tick): kept.
+    let mut same = provider(true);
+    same["confirm_remote"] = json!(false);
+    same.as_object_mut().unwrap().remove("api_key");
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/embeddings",
+        Some(json!({"providers": [same.clone()]})),
+    )
+    .await;
+    assert_eq!(r.json()["providers"][0]["allow_remote"], true);
+
+    // Another endpoint with the old flag and no fresh tick: consent is dropped.
+    let mut moved = same.clone();
+    moved["kind"] = json!("compatible");
+    moved["base_url"] = json!("https://embeddings.example.com/v1");
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/embeddings",
+        Some(json!({"providers": [moved.clone()]})),
+    )
+    .await;
+    assert_eq!(
+        r.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&r.body)
+    );
+    assert_eq!(r.json()["providers"][0]["allow_remote"], false);
+
+    // A fresh tick for that destination is honoured.
+    moved["confirm_remote"] = json!(true);
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/embeddings",
+        Some(json!({"providers": [moved]})),
+    )
+    .await;
+    assert_eq!(r.json()["providers"][0]["allow_remote"], true);
+}
+
+#[tokio::test]
+async fn metadata_and_lan_endpoints_are_refused() {
+    let (t, _) = setup_hub();
+    for url in [
+        "http://169.254.169.254/v1",
+        "https://10.0.0.5/v1",
+        "http://example.com/v1",
+    ] {
+        let p = json!({"id": "mine", "kind": "compatible", "model": "m", "dimensions": 8,
+            "base_url": url, "allow_remote": true, "confirm_remote": true, "api_key": KEY});
+        let r = call(
+            &t,
+            Method::PUT,
+            "/v1/embeddings",
+            Some(json!({"providers": [p]})),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{url}");
+    }
 }

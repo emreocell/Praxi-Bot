@@ -23,6 +23,7 @@ function asInput(p: EmbeddingProviderRow): EmbeddingProviderInput {
     dimensions: p.dimensions,
     request_dimensions: p.request_dimensions,
     allow_remote: p.allow_remote,
+    allow_local_network: p.allow_local_network,
     limits: p.limits ?? null
   };
 }
@@ -72,6 +73,10 @@ export function HelpersCard() {
   const [reuse, setReuse] = useState(false);
   const [purposes, setPurposes] = useState<string[]>(["router", "memory"]);
   const [consent, setConsent] = useState(false);
+  // Consent is for one destination: changing provider, endpoint or model clears the tick.
+  useEffect(() => {
+    setConsent(false);
+  }, [kind, baseUrl, model]);
 
   const load = useCallback(async () => {
     if (!client) {
@@ -140,6 +145,7 @@ export function HelpersCard() {
       dimensions: Number(dimensions),
       request_dimensions: kind !== "compatible",
       allow_remote: consent,
+      confirm_remote: consent,
       api_key: reuse || !apiKey.trim() ? null : apiKey.trim(),
       reuse_key_from: reuse ? "gemini" : null
     };
@@ -159,7 +165,7 @@ export function HelpersCard() {
   };
 
   const toggleConsent = async (id: string, allow: boolean) => {
-    await save(current().map((p) => (p.id === id ? { ...p, allow_remote: allow } : p)), chains());
+    await save(current().map((p) => (p.id === id ? { ...p, allow_remote: allow, confirm_remote: allow } : p)), chains());
   };
 
   const test = async (id: string) => {
