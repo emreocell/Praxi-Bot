@@ -15,6 +15,7 @@ An unrelated `agent` on PATH cannot hide Cursor's vendor-directory alias.
 | Gemini CLI | `gemini` | Credential-file metadata only; contents never opened | `npm install -g @google/gemini-cli` (**unverified**, copy only) | Detection only; minimum unverified |
 | Antigravity | `agy` | None: no status command (sign-in shows at the first turn) | none known | Runs with its own tools (`agy acp`); models from `agy models` |
 | Qwen Code | `qwen` | Credential-file metadata only (`~/.qwen/oauth_creds.json`); contents never opened | `npm install -g @qwen-code/qwen-code` (**unverified**, copy only) | Runs with its own tools (`qwen --acp`, experimental); minimum unverified |
+| GitHub Copilot CLI | `copilot` | None: no status command (sign-in is `copilot login`, kept in the OS credential store; a GitHub token in the environment is not evidence) | `npm install -g @github/copilot` (**unverified**, copy only) | Runs with its own tools (`copilot --acp`, experimental); minimum unverified |
 | OpenCode | `opencode` | Credential-file metadata only; contents never opened | `npm install -g opencode-ai` (verified local reference) | Detect/install only: inspected CLI has no switch to disable native tools |
 | Cursor | `cursor-agent`; `agent` only inside a `cursor-agent` directory | `status --format json`, then `status` | Windows: `irm 'https://cursor.com/install?win32=true' \| iex`; Unix: `curl https://cursor.com/install -fsS \| bash` (verified local reference) | Detection only; minimum unverified |
 | ChatGPT plan | Same Codex executable | Unknown; no Praxi PKCE flow | Use the Codex row | Detection only |
@@ -139,6 +140,7 @@ a bot to native tools needs a consent too; both are recorded in the audit log.
 | Gemini CLI (`--acp`, experimental) | default | `--approval-mode auto_edit` | runs as Ask | `--yolo` |
 | Antigravity (`agy acp`, experimental) | `default` mode | `accept-edits` mode | `auto` mode; Full: `--dangerously-skip-permissions` |
 | Qwen Code (`--acp`, experimental) | `--approval-mode default` | `--approval-mode auto-edit` | `--approval-mode auto` | `--approval-mode yolo` |
+| GitHub Copilot CLI (`--acp`, experimental) | default | `--allow-tool write` | runs as Ask | requests approved automatically (never `--allow-all-tools`) |
 
 A level a CLI has no mode for runs as Ask, never as something wider. The workspace
 cannot be a drive root, your home folder, Praxi's data folder or a credential or CLI

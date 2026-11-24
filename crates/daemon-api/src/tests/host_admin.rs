@@ -1520,12 +1520,14 @@ async fn only_the_admin_desktop_can_sign_in_and_manual_engines_say_what_to_run()
         .status,
         StatusCode::NOT_FOUND
     );
-    // OpenCode, Cursor, Antigravity and Qwen Code have no flow that can be driven from here.
+    // OpenCode, Cursor, Antigravity, Qwen Code and Copilot CLI have no flow that can be driven
+    // from here.
     for (engine, command) in [
         ("opencode", "opencode auth login"),
         ("cursor", "cursor-agent login"),
         ("agy", "agy"),
         ("qwen", "qwen"),
+        ("copilot", "copilot login"),
     ] {
         let resp = admin_call(
             &r,

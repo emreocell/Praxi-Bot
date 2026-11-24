@@ -28,6 +28,8 @@ const aliases: Record<string, string> = {
   agy: 'antigravity',
   cliagy: 'antigravity',
   cliqwen: 'qwen',
+  copilot: 'githubcopilot',
+  clicopilot: 'githubcopilot',
   cliopencode: 'opencode'
 };
 

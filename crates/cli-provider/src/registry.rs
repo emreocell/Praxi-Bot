@@ -226,6 +226,25 @@ pub const CLI_ENGINES: &[CliEngineSpec] = &[
         login: "qwen",
         docs_url: "https://qwenlm.github.io/qwen-code-docs/",
     },
+    // GitHub Copilot CLI. Runs with its own tools through `copilot --acp`.
+    // Interface read from the npm package 1.0.115 (`--help`, an unauthenticated ACP
+    // `initialize` and `session/new`), not from a signed-in run. Sign-in is `copilot login`
+    // (OS credential store) and has no status command.
+    CliEngineSpec {
+        id: "copilot",
+        display_name: "GitHub Copilot CLI",
+        command: "copilot",
+        aliases: &[],
+        runnable: false,
+        version_args: &["--version"],
+        auth_args: &[],
+        minimum_version: None,
+        install_windows: npm(&["install", "-g", "@github/copilot"], false),
+        install_unix: npm(&["install", "-g", "@github/copilot"], false),
+        models: &["default"],
+        login: "copilot login",
+        docs_url: "https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli",
+    },
 ];
 
 #[must_use]

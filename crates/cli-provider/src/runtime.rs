@@ -1060,6 +1060,8 @@ fn classify_child_error(raw: &str) -> CliError {
         "rate limit",
         "usage limit",
         "resource_exhausted",
+        // Copilot CLI: a used-up plan budget ("premium requests" / AI credits).
+        "premium request",
     ]) {
         CliError::Quota
     } else if has(&[
@@ -1343,6 +1345,10 @@ mod tests {
             ),
             (
                 json!({"method":"turn/completed","params":{"turn":{"error":{"message":"usage limit"}}}}),
+                CliError::Quota,
+            ),
+            (
+                json!({"id":3,"error":{"code":-32000,"message":"You have used all of your premium requests"}}),
                 CliError::Quota,
             ),
             (

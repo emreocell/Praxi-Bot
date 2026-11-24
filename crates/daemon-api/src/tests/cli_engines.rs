@@ -9,12 +9,21 @@ async fn registry_is_authenticated_and_preserves_confinement() {
     assert_eq!(response.status, StatusCode::OK);
     let body = response.json();
     let rows = body.as_array().unwrap();
-    assert_eq!(rows.len(), 6);
+    assert_eq!(rows.len(), 7);
     let qwen = rows.iter().find(|r| r["detected"]["id"] == "qwen").unwrap();
     assert_eq!(qwen["native"]["support"], "experimental");
     assert_eq!(
         qwen["native"]["levels"][0]["native_setting"],
         "--approval-mode default"
+    );
+    let copilot = rows
+        .iter()
+        .find(|r| r["detected"]["id"] == "copilot")
+        .unwrap();
+    assert_eq!(copilot["native"]["support"], "experimental");
+    assert_eq!(
+        copilot["native"]["levels"][0]["native_setting"],
+        "default (asks before edits and commands)"
     );
     let claude = rows
         .iter()

@@ -1772,9 +1772,9 @@ fn canonical_target(path: &Path) -> Result<PathBuf, String> {
     Ok(out)
 }
 
-const CREDENTIAL_DIRS: [&str; 14] = [
-    ".claude", ".codex", ".gemini", ".qwen", ".cursor", ".config", ".local", ".ssh", ".aws",
-    ".gnupg", ".azure", ".kube", ".docker", "gcloud",
+const CREDENTIAL_DIRS: [&str; 15] = [
+    ".claude", ".codex", ".gemini", ".qwen", ".copilot", ".cursor", ".config", ".local", ".ssh",
+    ".aws", ".gnupg", ".azure", ".kube", ".docker", "gcloud",
 ];
 
 /// Folders no server's bot may use as a location: Praxi's own data and the

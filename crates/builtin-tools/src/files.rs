@@ -1185,6 +1185,7 @@ const CREDENTIAL_NAMES: &[&str] = &[
     ".cursor-agent",
     ".opencode",
     ".qwen",
+    ".copilot",
     // Project-level OpenCode config can declare plugins, commands and MCP
     // servers that run code, so it is protected in every workspace on purpose.
     // Likewise `.claude/` (hooks, commands) and `.cursor/` (rules, MCP).
@@ -1351,9 +1352,9 @@ pub fn workspace_refusal(dir: &Path, data_dir: &Path) -> Option<&'static str> {
 
 /// Credential and tool-configuration folders (SSH, cloud, GPG, container, CLI settings).
 /// A workspace may not be one, sit inside one, or contain one under the home folder.
-const CREDENTIAL_DIRS: [&str; 13] = [
-    ".claude", ".codex", ".gemini", ".qwen", ".cursor", ".config", ".local", ".ssh", ".aws",
-    ".gnupg", ".azure", ".kube", ".docker",
+const CREDENTIAL_DIRS: [&str; 14] = [
+    ".claude", ".codex", ".gemini", ".qwen", ".copilot", ".cursor", ".config", ".local", ".ssh",
+    ".aws", ".gnupg", ".azure", ".kube", ".docker",
 ];
 
 fn workspace_refusal_with_home(
@@ -1804,6 +1805,7 @@ const SENSITIVE_SEQUENCES: &[&[&str]] = &[
     &[".codex"],
     &[".gemini"],
     &[".qwen"],
+    &[".copilot"],
     &[".opencode"],
     // Linux keyrings, wallets, browsers
     &[".local", "share", "keyrings"],
@@ -4295,6 +4297,8 @@ mod tests {
             ".gemini/oauth_creds.json",
             ".qwen/oauth_creds.json",
             ".qwen/settings.json",
+            ".copilot/config.json",
+            ".copilot/settings.json",
             ".cursor/mcp.json",
             ".cursor-agent/auth.json",
             "AppData/Roaming/Cursor/User/settings.json",
@@ -6124,6 +6128,7 @@ mod tests {
             ".cursor",
             ".opencode",
             ".qwen",
+            ".copilot",
             ".claude.json.backup",
             "opencode.json",
             "opencode.jsonc",

@@ -45,6 +45,7 @@ not trademark ownership.
 | Gemini: `gemini`, `gemini-cli`, `cli:gemini`, `gemini-openai-compat` | Real mark; raw CLI/compat IDs fell back | SI `googlegemini.svg`; aliases fixed | CC0 1.0 |
 | Antigravity: `agy`, `cli:agy`, `antigravity` | Hand-drawn approximation labelled real | [Official one-colour SVG](https://antigravity.google/assets/image/brand/antigravity-icon__one-color.svg) from [press assets](https://antigravity.google/press) | Vendor compatibility use, below |
 | Qwen Code: `qwen`, `cli:qwen` | Not listed | SI `qwen.svg` | CC0 1.0 |
+| GitHub Copilot CLI: `copilot`, `cli:copilot` | Not listed | SI `githubcopilot.svg`, already bundled | CC0 1.0 |
 | Anthropic: `anthropic` | Real mark | SI `anthropic.svg`, retained | CC0 1.0 |
 | DeepSeek: `deepseek` | Real mark | SI `deepseek.svg`, retained | CC0 1.0 |
 | LM Studio: `lmstudio` | Real mark | SI `lmstudio.svg`, retained | CC0 1.0 |
