@@ -7,6 +7,7 @@ Each directory under `skills/` contains a `SKILL.md` playbook embedded into the 
 - `date-pickers` — Enter dates in text inputs and calendar popups, including format and month navigation pitfalls.
 - `github-basics` — Navigate github.com repositories, issues, pull requests and search efficiently.
 - `linux-file-upload-dialog` — Operate native GTK and Qt file chooser dialogs on Linux after clicking a web upload button.
+- `macos-file-dialogs` — Operate the native macOS Open and Save panels: Go to Folder, the replace prompt, hidden files and verifying the result.
 - `shadow-dom-and-iframes` — Reach elements hidden inside shadow DOM or iframes when browser_snapshot does not list them.
 - `sign-in-forms` — Handle multi-step sign-in flows, SSO redirects, and 2FA prompts safely using stored fill secrets.
 - `web-tables-and-spreadsheets` — Navigate, read, and edit grid cells, paginated tables, and spreadsheet web apps reliably.

@@ -11,6 +11,10 @@ pub(crate) const BUNDLED: &[(&str, &str)] = &[
         include_str!("../../../skills/windows-save-as-dialog/SKILL.md"),
     ),
     (
+        "macos-file-dialogs",
+        include_str!("../../../skills/macos-file-dialogs/SKILL.md"),
+    ),
+    (
         "shadow-dom-and-iframes",
         include_str!("../../../skills/shadow-dom-and-iframes/SKILL.md"),
     ),

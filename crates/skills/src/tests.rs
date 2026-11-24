@@ -198,6 +198,7 @@ fn bundled_skills_all_valid() {
         "linux-file-upload-dialog",
         "web-tables-and-spreadsheets",
         "windows-save-as-dialog",
+        "macos-file-dialogs",
     ] {
         assert!(names.contains(&expected.to_string()), "missing {expected}");
     }
@@ -210,6 +211,7 @@ fn bundled_skills_all_valid() {
                 | "linux-file-upload-dialog"
                 | "web-tables-and-spreadsheets"
                 | "windows-save-as-dialog"
+                | "macos-file-dialogs"
         ) {
             put(tmp.path(), dir_name, content);
             let report = hub::scan_dir(&tmp.path().join(dir_name)).unwrap();
