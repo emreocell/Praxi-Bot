@@ -29,5 +29,15 @@
       "rem",
       "em"
     ]
-  }
+  },
+  "overrides": [
+    {
+      "files": [
+        "site/**/*.css"
+      ],
+      "rules": {
+        "unit-disallowed-list": null
+      }
+    }
+  ]
 }

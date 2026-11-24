@@ -29,5 +29,27 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules
     }
+  },
+  {
+    // Plain Node ESM tooling for the landing page (build scripts, tests, shared modules).
+    files: ["site/**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: {
+        ...globals.node
+      }
+    }
+  },
+  {
+    // The landing page's browser script.
+    files: ["site/src/app.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: {
+        ...globals.browser
+      }
+    }
   }
 );
