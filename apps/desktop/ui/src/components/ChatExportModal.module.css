@@ -37,7 +37,7 @@
 .preview {
   margin: var(--space-0);
   padding: var(--space-3);
-  max-height: 16rem;
+  max-height: 40vh;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
