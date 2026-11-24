@@ -65,7 +65,7 @@ Praxi, küçük evet/hayır ve seçim soruları için Google'ın Decisions model
 kapalıdır**, bir Gemini anahtarı gerektirir ve aynı yerden açılır. Yalnızca tavsiye
 verir: bir karar hiçbir zaman izin veremez veya bir aracı onaylayamaz. Çağrılar,
 diğer model çağrıları gibi LLM çağrı defterinde ve harcama sınırlarında sayılır.
-`decider.toml` dosyasını kendiniz yazdıysanız ([İsteğe bağlı karar havuzu](decision-pool.md))
+`decider.toml` dosyasını kendiniz yazdıysanız (isteğe bağlı karar havuzu)
 Ayarlar ona dokunmaz.
 
 ## Sorunlar

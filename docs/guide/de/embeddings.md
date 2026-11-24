@@ -66,8 +66,8 @@ kleine Ja/Nein- und Auswahlfragen nutzen. Er ist **standardmäßig aus**, brauch
 einen Gemini-Schlüssel und wird an derselben Stelle eingeschaltet. Er berät nur: Eine
 Entscheidung kann nie eine Erlaubnis erteilen oder ein Werkzeug genehmigen. Aufrufe
 zählen wie andere Modellaufrufe im LLM-Aufrufprotokoll und in den Ausgabenlimits.
-Wenn Sie `decider.toml` selbst geschrieben haben ([Optionaler
-Entscheidungspool](decision-pool.md)), lassen die Einstellungen sie in Ruhe.
+Wenn Sie `decider.toml` selbst geschrieben haben (optionaler
+Entscheidungspool), lassen die Einstellungen sie in Ruhe.
 
 ## Probleme
 
