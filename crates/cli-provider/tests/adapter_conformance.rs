@@ -148,11 +148,13 @@ fn setup(driver: Driver, mode: &str) -> (tempfile::TempDir, tempfile::TempDir, P
     (bin, tempfile::tempdir().unwrap(), env)
 }
 
+/// Ask, or Full where the CLI cannot enforce Ask on this platform (`OpenCode`; Kimi Code on
+/// Linux and macOS), so every driver still runs the whole contract.
 fn level(driver: Driver) -> ApprovalLevel {
-    if driver == Driver::OpenCode {
-        ApprovalLevel::Full
-    } else {
+    if cli_provider::level_plan(driver, ApprovalLevel::Ask).enforced {
         ApprovalLevel::Ask
+    } else {
+        ApprovalLevel::Full
     }
 }
 

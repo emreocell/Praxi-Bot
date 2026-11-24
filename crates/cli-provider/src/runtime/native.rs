@@ -719,12 +719,14 @@ impl Run<'_> {
                         .as_str()
                         .ok_or(CliError::Protocol)?;
                     session = Some(id.to_owned());
-                    // Antigravity and Qoder select mode and model after `session/new` (ACP
+                    // Antigravity, Kimi Code and Qoder select mode and model after `session/new` (ACP
                     // `session/set_mode`, `session/set_model`), Kiro V3 its model through
                     // `session/set_config_option`; the prompt waits for each answer.
                     let model = self.nt.turn.model.as_deref();
                     let requests = match self.nt.driver {
-                        Driver::Agy | Driver::Qoder => agy_setup(id, self.plan.acp_mode, model),
+                        Driver::Agy | Driver::Kimi | Driver::Qoder => {
+                            agy_setup(id, self.plan.acp_mode, model)
+                        }
                         Driver::Kiro => kiro_setup(id, model),
                         _ => Vec::new(),
                     };
@@ -756,8 +758,8 @@ impl Run<'_> {
     }
 }
 
-/// Antigravity's per-session setup after `session/new`: the level's mode and the chosen
-/// model (`default` keeps the CLI's own), each acknowledged before the prompt is sent.
+/// Per-session setup after `session/new` (Antigravity, Kimi Code): the level's mode and the
+/// chosen model (`default` keeps the CLI's own), each acknowledged before the prompt is sent.
 fn agy_setup(session: &str, mode: Option<&str>, model: Option<&str>) -> Vec<Value> {
     let mut out = Vec::new();
     if let Some(mode) = mode {
@@ -857,6 +859,28 @@ fn codex_card(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kimi_session_setup_uses_the_modes_kimi_acp_offers() {
+        // `ACP_MODES` of `kimi acp` 2.7.3 (read from the npm package; `session/new` needs a
+        // sign-in, so no live capture).
+        let offered = ["default", "plan", "auto", "yolo"];
+        for level in ApprovalLevel::ALL {
+            let mode = level_plan(Driver::Kimi, level)
+                .acp_mode
+                .expect("mode is always sent");
+            assert!(offered.contains(&mode), "{mode}");
+        }
+        let full = agy_setup(
+            "S",
+            level_plan(Driver::Kimi, ApprovalLevel::Full).acp_mode,
+            Some("kimi-for-coding"),
+        );
+        assert_eq!(full[0]["method"], "session/set_mode");
+        assert_eq!(full[0]["params"]["modeId"], "auto");
+        assert_eq!(full[1]["method"], "session/set_model");
+        assert_eq!(full[1]["params"]["modelId"], "kimi-for-coding");
+    }
 
     #[test]
     fn antigravity_session_setup_matches_its_captured_acp_shapes() {

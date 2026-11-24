@@ -106,6 +106,8 @@ pub enum Driver {
     Kiro,
     /// GitHub Copilot CLI (`copilot --acp`).
     Copilot,
+    /// Kimi Code CLI (`kimi acp`).
+    Kimi,
     /// Qoder CLI (`qodercli --acp`).
     Qoder,
 }
@@ -132,7 +134,7 @@ pub enum Transport {
 }
 
 impl Driver {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Claude,
         Self::Codex,
         Self::Cursor,
@@ -142,10 +144,11 @@ impl Driver {
         Self::Qwen,
         Self::Copilot,
         Self::Kiro,
+        Self::Kimi,
         Self::Qoder,
     ];
 
-    /// Registry id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `qoder`).
+    /// Registry id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `kimi`, `qoder`).
     #[must_use]
     pub const fn id(self) -> &'static str {
         match self {
@@ -158,6 +161,7 @@ impl Driver {
             Self::Qwen => "qwen",
             Self::Kiro => "kiro",
             Self::Copilot => "copilot",
+            Self::Kimi => "kimi",
             Self::Qoder => "qoder",
         }
     }
@@ -179,6 +183,7 @@ impl Driver {
             Self::Qwen => "Qwen Code",
             Self::Kiro => "Kiro CLI",
             Self::Copilot => "GitHub Copilot CLI",
+            Self::Kimi => "Kimi Code CLI",
             Self::Qoder => "Qoder CLI",
         }
     }
@@ -195,6 +200,7 @@ impl Driver {
             | Self::Qwen
             | Self::Copilot
             | Self::Kiro
+            | Self::Kimi
             | Self::Qoder => Transport::Acp,
         }
     }
@@ -210,6 +216,7 @@ impl Driver {
             | Self::Qwen
             | Self::Copilot
             | Self::Kiro
+            | Self::Kimi
             | Self::Qoder => Support::Experimental,
             _ => Support::Verified,
         }
@@ -464,6 +471,42 @@ pub fn level_plan(driver: Driver, level: ApprovalLevel) -> LevelPlan {
                 ..plan(level, level, native)
             }
         }
+        // Kimi Code CLI 2.7.3 (`kimi acp`): the ACP mode is sent with `session/set_mode`
+        // after `session/new`, because a new session otherwise starts in the
+        // `defaultPermissionMode` of `config.toml`. The ACP mode list describes `auto` as
+        // "auto-approve safe operations" and `yolo` as "auto-approve everything", but they
+        // map to the CLI's own permission modes the other way round: `yolo` is "Ask When
+        // Needed" (routine edits and commands run, dangerous commands, sensitive files and
+        // git internals still ask) and `auto` is "Never Ask". So Auto uses `yolo` and Full
+        // uses `auto`. `default` ("Always Ask") approves reads, web search and fetch, and on
+        // Linux and macOS (`git-cwd-write-approve`) also file edits inside a git work tree,
+        // which is wider than Ask: there Ask is refused rather than widened. There is no
+        // mode for edits only, so Accept edits runs as Ask.
+        Driver::Kimi => match level {
+            Ask | AcceptEdits if cfg!(windows) => LevelPlan {
+                acp_mode: Some("default"),
+                ..plan(level, Ask, "mode default (Always Ask)")
+            },
+            Ask | AcceptEdits => LevelPlan {
+                acp_mode: Some("default"),
+                offered: false,
+                enforced: false,
+                ..plan(
+                    level,
+                    Ask,
+                    "not enforceable: Kimi approves edits inside a git repository on Linux and macOS",
+                )
+            },
+            Auto => LevelPlan {
+                acp_mode: Some("yolo"),
+                ..plan(level, Auto, "mode yolo (Ask When Needed)")
+            },
+            Full => LevelPlan {
+                acp_mode: Some("auto"),
+                acp_allow_all: true,
+                ..plan(level, Full, "mode auto (Never Ask)")
+            },
+        },
     }
 }
 
@@ -482,7 +525,9 @@ pub fn acp_args(driver: Driver, plan: &LevelPlan, model: Option<&str>) -> Option
             }
             args.push("acp".into());
         }
-        Driver::OpenCode => args.push("acp".into()),
+        // Kimi: `-m` is a top-level option that `kimi acp` does not take; the model is
+        // chosen with `session/set_model` after `session/new`.
+        Driver::OpenCode | Driver::Kimi => args.push("acp".into()),
         // Qoder: the model is chosen with `session/set_model` after `session/new`, like the
         // mode, so a model the CLI does not list is refused instead of guessed.
         Driver::Qoder => args.push("--acp".into()),
@@ -519,6 +564,11 @@ mod tests {
     #[allow(clippy::too_many_lines)] // One table, one test.
     fn level_mapping_per_cli() {
         use ApprovalLevel::{AcceptEdits, Ask, Auto, Full};
+        const KIMI_ASK: &str = if cfg!(windows) {
+            "mode default (Always Ask)"
+        } else {
+            "not enforceable: Kimi approves edits inside a git repository on Linux and macOS"
+        };
         const KIRO_ARGV: &[&str] = &["acp", "--agent-engine", "v3"];
         // (driver, level) -> (applied level, native setting, ACP argv)
         let cases: &[(Driver, ApprovalLevel, ApprovalLevel, &str, &[&str])] = &[
@@ -696,6 +746,16 @@ mod tests {
             ),
             (Driver::Qoder, Auto, Auto, "mode auto", &["--acp"]),
             (Driver::Qoder, Full, Full, "mode yolo", &["--acp"]),
+            (Driver::Kimi, Ask, Ask, KIMI_ASK, &["acp"]),
+            (Driver::Kimi, AcceptEdits, Ask, KIMI_ASK, &["acp"]),
+            (
+                Driver::Kimi,
+                Auto,
+                Auto,
+                "mode yolo (Ask When Needed)",
+                &["acp"],
+            ),
+            (Driver::Kimi, Full, Full, "mode auto (Never Ask)", &["acp"]),
         ];
         for (driver, level, applied, native, argv) in cases {
             let p = level_plan(*driver, *level);
@@ -769,6 +829,28 @@ mod tests {
         assert_eq!(
             acp_args(Driver::Qoder, &level_plan(Driver::Qoder, Ask), Some("auto")).unwrap(),
             ["--acp"]
+        );
+        // Kimi Code CLI: the mode always goes through `session/set_mode`, and the CLI's
+        // `yolo` ("Ask When Needed") is Auto while its `auto` ("Never Ask") is Full.
+        assert_eq!(Driver::Kimi.support(), Support::Experimental);
+        let kimi: Vec<_> = ApprovalLevel::ALL
+            .into_iter()
+            .map(|l| level_plan(Driver::Kimi, l).acp_mode)
+            .collect();
+        assert_eq!(
+            kimi,
+            [Some("default"), Some("default"), Some("yolo"), Some("auto")]
+        );
+        assert_eq!(level_plan(Driver::Kimi, Ask).enforced, cfg!(windows));
+        assert!(level_plan(Driver::Kimi, Auto).enforced);
+        assert_eq!(
+            acp_args(
+                Driver::Kimi,
+                &level_plan(Driver::Kimi, Ask),
+                Some("kimi-for-coding")
+            )
+            .unwrap(),
+            ["acp"]
         );
         assert_eq!(Driver::OpenCode.support(), Support::Experimental);
         assert!(!level_plan(Driver::OpenCode, Ask).enforced);

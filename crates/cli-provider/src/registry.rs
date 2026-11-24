@@ -271,6 +271,25 @@ pub const CLI_ENGINES: &[CliEngineSpec] = &[
         login: "kiro-cli login",
         docs_url: "https://kiro.dev/docs/cli/",
     },
+    // Kimi Code CLI (Moonshot). Runs with its own tools through `kimi acp`.
+    // Interface read from the npm package 2.7.3 (`--help`, an unauthenticated ACP
+    // `initialize`, and the bundled ACP server), not from a signed-in run. The Python
+    // `kimi-cli` (1.x) is the retired predecessor under the same command name.
+    CliEngineSpec {
+        id: "kimi",
+        display_name: "Kimi Code CLI",
+        command: "kimi",
+        aliases: &[],
+        runnable: false,
+        version_args: &["--version"],
+        auth_args: &[],
+        minimum_version: None,
+        install_windows: npm(&["install", "-g", "@moonshot-ai/kimi-code"], false),
+        install_unix: npm(&["install", "-g", "@moonshot-ai/kimi-code"], false),
+        models: &["default"],
+        login: "kimi login",
+        docs_url: "https://moonshotai.github.io/kimi-code/",
+    },
     // Qoder CLI (Alibaba). Runs with its own tools through `qodercli --acp` (a hidden flag:
     // "Starts the agent in ACP mode"). Interface read from the npm package 1.1.97 (`--help`,
     // `status -o json`, an unauthenticated ACP `initialize` and `session/new`), not from a

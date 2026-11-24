@@ -97,6 +97,8 @@ pub enum CliEngine {
     Qoder,
     /// GitHub Copilot CLI (`copilot --acp`).
     Copilot,
+    /// Kimi Code CLI (`kimi acp`).
+    Kimi,
 }
 
 impl CliEngine {
@@ -114,6 +116,7 @@ impl CliEngine {
             Self::Kiro => "kiro",
             Self::Qoder => "qoder",
             Self::Copilot => "copilot",
+            Self::Kimi => "kimi",
         }
     }
 }
@@ -467,6 +470,7 @@ impl ProviderConfig {
                     CliEngine::Kiro => "cli:kiro",
                     CliEngine::Qoder => "cli:qoder",
                     CliEngine::Copilot => "cli:copilot",
+                    CliEngine::Kimi => "cli:kimi",
                 };
                 if p.id != id
                     || p.key.is_some()

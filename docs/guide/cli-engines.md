@@ -18,6 +18,7 @@ An unrelated `agent` on PATH cannot hide Cursor's vendor-directory alias.
 | Kiro CLI | `kiro-cli` | None: `whoami` exit codes are undocumented; `KIRO_API_KEY` is not evidence | Unix: `curl -fsSL https://cli.kiro.dev/install \| bash` (**unverified**, copy only) | Runs with its own tools (`kiro-cli acp --agent-engine v3`, experimental); minimum unverified |
 | Qoder CLI | `qodercli` | `status -o json` (`logged_in`) | `npm install -g @qoder-ai/qodercli` (**unverified**, copy only) | Runs with its own tools (`qodercli --acp`, experimental); minimum unverified |
 | GitHub Copilot CLI | `copilot` | None: no status command (sign-in is `copilot login`, kept in the OS credential store; a GitHub token in the environment is not evidence) | `npm install -g @github/copilot` (**unverified**, copy only) | Runs with its own tools (`copilot --acp`, experimental); minimum unverified |
+| Kimi Code CLI | `kimi` | Credential-file metadata only (`~/.kimi-code/credentials/kimi-code.json`); contents never opened | `npm install -g @moonshot-ai/kimi-code` (**unverified**, copy only) | Runs with its own tools (`kimi acp`, experimental); minimum unverified. The Python `kimi-cli` 1.x is its retired predecessor |
 | OpenCode | `opencode` | Credential-file metadata only; contents never opened | `npm install -g opencode-ai` (verified local reference) | Detect/install only: inspected CLI has no switch to disable native tools |
 | Cursor | `cursor-agent`; `agent` only inside a `cursor-agent` directory | `status --format json`, then `status` | Windows: `irm 'https://cursor.com/install?win32=true' \| iex`; Unix: `curl https://cursor.com/install -fsS \| bash` (verified local reference) | Detection only; minimum unverified |
 | ChatGPT plan | Same Codex executable | Unknown; no Praxi PKCE flow | Use the Codex row | Detection only |
@@ -145,6 +146,7 @@ a bot to native tools needs a consent too; both are recorded in the audit log.
 | Kiro CLI (`acp`, experimental) | default permissions | runs as Ask | runs as Ask | requests approved automatically |
 | Qoder CLI (`--acp`, experimental) | mode `default` | mode `acceptEdits` | mode `auto` | mode `yolo` |
 | GitHub Copilot CLI (`--acp`, experimental) | default | `--allow-tool write` | runs as Ask | requests approved automatically (never `--allow-all-tools`) |
+| Kimi Code CLI (`kimi acp`, experimental) | Windows: mode `default` (Always Ask). Linux and macOS: not offered, because that mode approves edits inside a git repository | runs as Ask | mode `yolo` (Ask When Needed) | mode `auto` (Never Ask) |
 
 A level a CLI has no mode for runs as Ask, never as something wider. The workspace
 cannot be a drive root, your home folder, Praxi's data folder or a credential or CLI

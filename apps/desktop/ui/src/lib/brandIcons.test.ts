@@ -96,6 +96,8 @@ test('Antigravity uses the official press path rather than an approximation', ()
   for (const name of ['cli:qoder', 'qodercli', 'Qoder CLI']) assert.deepEqual(brandIcon(name), brandIcon('qoder'), name);
   assert.equal(brandIcon('cli:copilot').known, true);
   assert.deepEqual(brandIcon('cli:copilot'), brandIcon('githubcopilot'));
+  assert.equal(brandIcon('cli:kimi').known, true);
+  assert.deepEqual(brandIcon('cli:kimi'), brandIcon('kimi'));
 });
 
 test('unlicensed brand artwork uses an explicit neutral initial and stays offline', () => {

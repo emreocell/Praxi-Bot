@@ -1991,6 +1991,7 @@ pub(crate) fn cli_engine_kind(id: &str) -> Option<provider_catalog::config::CliE
         "kiro" => CliEngine::Kiro,
         "qoder" => CliEngine::Qoder,
         "copilot" => CliEngine::Copilot,
+        "kimi" => CliEngine::Kimi,
         _ => return None,
     })
 }
