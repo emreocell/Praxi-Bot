@@ -92,6 +92,7 @@ Seven short pages in plain words. Read them in this order:
 | Configure bounded advisory decisions | [Optional decision pool](decision-pool.md) |
 | See what each model call in a run was for and what it used | [LLM call ledger](llm-call-ledger.md) |
 | Cap what a bot may spend per day, week or month | [Bot spending limits](bot-spending-limits.md) |
+| See, correct, forget and switch off what your bots remember | [Memory](memory.md) |
 | Use a local coding CLI (Claude Code, Codex, Cursor, ...) as the engine | [Coding CLI engines](cli-engines.md) |
 | Talk to your bots from your phone | [Telegram](telegram.md) |
 | Read, search, draft or send e-mails | [Email integration](email.md) |

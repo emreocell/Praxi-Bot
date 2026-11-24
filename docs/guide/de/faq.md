@@ -65,8 +65,11 @@ Noch nicht (**Geplant**). Heute sind Workflows TOML-Dateien, die du selbst schre
 Weg eines erfolgreichen Laufs zwischen. Siehe [Workflows](../workflows.md).
 
 ### Gibt es ein Langzeitgedächtnis?
-Im Repository gibt es eine Gedächtnisbibliothek (Abruf vor einem Durchgang, Extraktion danach), aber der Daemon
-aktiviert sie noch nicht (**Geplant**). Chats behalten ihren eigenen Verlauf.
+Ja, und es ist standardmäßig an (außer im abgesicherten Modus). Nach einem Durchgang kann der Bot kurze Notizen zu
+dem behalten, was du gesagt hast; vor dem nächsten Durchgang werden die wenigen passenden als Hintergrund vor deine
+Nachricht gesetzt. Notizen aus Webseiten, Dateien oder Werkzeugen warten zuerst auf dein OK. Du kannst das Gedächtnis
+pro Bot ansehen, bearbeiten, vergessen und ausschalten; siehe [Gedächtnis](memory.md). Chats behalten außerdem ihren
+eigenen Verlauf.
 
 ### Kann ich MCP-Server oder Plugins hinzufügen?
 Bei MCP-Servern ja: `bot serve` lädt `mcp.toml` und startet die aktivierten Server, und du kannst sie über

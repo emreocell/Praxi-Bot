@@ -23,7 +23,11 @@ import type {
   MemoryKind,
   CreateMemoryInput,
   UpdateMemoryInput,
-  MemoryPreview
+  MemoryPreview,
+  BotMemorySettings,
+  BotMemorySettingsInput,
+  MemoryEmbedding,
+  MemoryEmbeddingInput
 } from "./types";
 import type {
   RecentLogs,
@@ -311,6 +315,38 @@ export class ApiClient {
 
   undoMemory(id: string): Promise<MemoryItem> {
     return this.request("POST", `/memory/${encodeURIComponent(id)}/undo`);
+  }
+
+  /** Memories held for the owner's OK (not used in answers until approved). */
+  listPendingMemories(): Promise<MemoryItem[]> {
+    return this.request("GET", "/memory/pending");
+  }
+
+  approveMemory(id: string): Promise<MemoryItem> {
+    return this.request("POST", `/memory/${encodeURIComponent(id)}/approve`);
+  }
+
+  discardMemory(id: string): Promise<MemoryItem> {
+    return this.request("POST", `/memory/${encodeURIComponent(id)}/discard`);
+  }
+
+  /** Owner-only: whether and how one bot remembers. */
+  getBotMemorySettings(bot: string): Promise<BotMemorySettings> {
+    return this.request("GET", `/bots/${encodeURIComponent(bot)}/memory/settings`);
+  }
+
+  putBotMemorySettings(bot: string, body: BotMemorySettingsInput): Promise<BotMemorySettings> {
+    return this.request("PUT", `/bots/${encodeURIComponent(bot)}/memory/settings`, { body });
+  }
+
+  /** Basic (word match) or Smart (meaning) recall and the re-index progress. */
+  getMemoryEmbedding(): Promise<MemoryEmbedding> {
+    return this.request("GET", "/memory/embedding");
+  }
+
+  /** Owner-only: switch recall mode; the re-index runs in the background. */
+  putMemoryEmbedding(body: MemoryEmbeddingInput): Promise<MemoryEmbedding> {
+    return this.request("PUT", "/memory/embedding", { body });
   }
 
   previewBotMemory(bot: string, query: string): Promise<MemoryPreview> {

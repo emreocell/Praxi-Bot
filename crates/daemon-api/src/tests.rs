@@ -40,6 +40,7 @@ mod knowledge_brain;
 mod logs;
 mod mcp;
 mod memory;
+mod memory_controls;
 mod model_catalog;
 mod peer_knowledge;
 mod profile_share;
