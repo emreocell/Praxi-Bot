@@ -47,6 +47,7 @@ not trademark ownership.
 | Qwen Code: `qwen`, `cli:qwen` | Not listed | SI `qwen.svg` | CC0 1.0 |
 | Kiro CLI: `kiro`, `cli:kiro`, `kiro-cli` | Not listed | Original neutral terminal-prompt glyph, not the Kiro mark | Absent from SI 16.38.1; no mark redistribution grant verified |
 | GitHub Copilot CLI: `copilot`, `cli:copilot` | Not listed | SI `githubcopilot.svg`, already bundled | CC0 1.0 |
+| Kimi Code CLI: `kimi`, `cli:kimi` | Not listed | SI `kimi.svg` | CC0 1.0 |
 | Anthropic: `anthropic` | Real mark | SI `anthropic.svg`, retained | CC0 1.0 |
 | DeepSeek: `deepseek` | Real mark | SI `deepseek.svg`, retained | CC0 1.0 |
 | LM Studio: `lmstudio` | Real mark | SI `lmstudio.svg`, retained | CC0 1.0 |

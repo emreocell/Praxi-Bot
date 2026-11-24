@@ -1,6 +1,6 @@
-import { siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant, siOpenrouter, siDeepseek, siMistralai, siCursor, siGithubcopilot, siLmstudio, siOpencode, siStripe, siAtlassian, siJira, siConfluence, siTrello, siAsana, siHubspot, siShopify, siDropbox, siZoom, siX, siFacebook, siInstagram, siYoutube, siReddit, siTelegram, siWhatsapp, siSpotify, siAirtable, siClickup, siZendesk, siIntercom, siMailchimp, siCalendly, siDocker, siVercel, siNetlify, siSupabase, siCloudflare, siGooglesheets, siGoogledocs, siGoogleslides, siGooglemeet, siGooglemaps, siGooglephotos, siBitbucket, siDatadog, siPagerduty, siMongodb, siRedis, siMiro, siBox, siEvernote, siPaypal, siSquare, siQuickbooks, siXero, siWordpress, siMedium, siGhost, siSubstack, siZapier, siMake, siN8n, siResend, siMixpanel, siPosthog, siFirebase, siDigitalocean, siQwen } from 'simple-icons';
+import { siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant, siOpenrouter, siDeepseek, siMistralai, siCursor, siGithubcopilot, siLmstudio, siOpencode, siStripe, siAtlassian, siJira, siConfluence, siTrello, siAsana, siHubspot, siShopify, siDropbox, siZoom, siX, siFacebook, siInstagram, siYoutube, siReddit, siTelegram, siWhatsapp, siSpotify, siAirtable, siClickup, siZendesk, siIntercom, siMailchimp, siCalendly, siDocker, siVercel, siNetlify, siSupabase, siCloudflare, siGooglesheets, siGoogledocs, siGoogleslides, siGooglemeet, siGooglemaps, siGooglephotos, siBitbucket, siDatadog, siPagerduty, siMongodb, siRedis, siMiro, siBox, siEvernote, siPaypal, siSquare, siQuickbooks, siXero, siWordpress, siMedium, siGhost, siSubstack, siZapier, siMake, siN8n, siResend, siMixpanel, siPosthog, siFirebase, siDigitalocean, siQwen, siKimi } from 'simple-icons';
 
-const icons = [siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant, siOpenrouter, siDeepseek, siMistralai, siCursor, siGithubcopilot, siLmstudio, siOpencode, siStripe, siAtlassian, siJira, siConfluence, siTrello, siAsana, siHubspot, siShopify, siDropbox, siZoom, siX, siFacebook, siInstagram, siYoutube, siReddit, siTelegram, siWhatsapp, siSpotify, siAirtable, siClickup, siZendesk, siIntercom, siMailchimp, siCalendly, siDocker, siVercel, siNetlify, siSupabase, siCloudflare, siGooglesheets, siGoogledocs, siGoogleslides, siGooglemeet, siGooglemaps, siGooglephotos, siBitbucket, siDatadog, siPagerduty, siMongodb, siRedis, siMiro, siBox, siEvernote, siPaypal, siSquare, siQuickbooks, siXero, siWordpress, siMedium, siGhost, siSubstack, siZapier, siMake, siN8n, siResend, siMixpanel, siPosthog, siFirebase, siDigitalocean, siQwen];
+const icons = [siGithub, siGitlab, siNotion, siGoogledrive, siGooglecalendar, siGmail, siDiscord, siFigma, siLinear, siAnthropic, siGooglegemini, siOllama, siClaude, siPostgresql, siSqlite, siBrave, siPuppeteer, siSentry, siTodoist, siObsidian, siHomeassistant, siOpenrouter, siDeepseek, siMistralai, siCursor, siGithubcopilot, siLmstudio, siOpencode, siStripe, siAtlassian, siJira, siConfluence, siTrello, siAsana, siHubspot, siShopify, siDropbox, siZoom, siX, siFacebook, siInstagram, siYoutube, siReddit, siTelegram, siWhatsapp, siSpotify, siAirtable, siClickup, siZendesk, siIntercom, siMailchimp, siCalendly, siDocker, siVercel, siNetlify, siSupabase, siCloudflare, siGooglesheets, siGoogledocs, siGoogleslides, siGooglemeet, siGooglemaps, siGooglephotos, siBitbucket, siDatadog, siPagerduty, siMongodb, siRedis, siMiro, siBox, siEvernote, siPaypal, siSquare, siQuickbooks, siXero, siWordpress, siMedium, siGhost, siSubstack, siZapier, siMake, siN8n, siResend, siMixpanel, siPosthog, siFirebase, siDigitalocean, siQwen, siKimi];
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const aliases: Record<string, string> = {
   'bravesearch': 'brave',
@@ -32,6 +32,7 @@ const aliases: Record<string, string> = {
   kirocli: 'kiro',
   copilot: 'githubcopilot',
   clicopilot: 'githubcopilot',
+  clikimi: 'kimi',
   cliopencode: 'opencode'
 };
 
@@ -50,7 +51,7 @@ const initials: Record<string, string> = {
 const monochromeBrands = new Set([
   'anthropic', 'claude', 'openai', 'openaicodex', 'googlegemini',
   'cursor', 'opencode', 'antigravity', 'ollama', 'lmstudio',
-  'openrouter', 'deepseek', 'mistralai', 'githubcopilot', 'qwen'
+  'openrouter', 'deepseek', 'mistralai', 'githubcopilot', 'qwen', 'kimi'
 ]);
 
 interface BrandArtwork {

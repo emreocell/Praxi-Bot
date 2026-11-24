@@ -1520,8 +1520,8 @@ async fn only_the_admin_desktop_can_sign_in_and_manual_engines_say_what_to_run()
         .status,
         StatusCode::NOT_FOUND
     );
-    // OpenCode, Cursor, Antigravity, Qwen Code, Copilot CLI and Kiro have no flow that can be driven
-    // from here.
+    // OpenCode, Cursor, Antigravity, Qwen Code, Copilot CLI, Kiro and Kimi Code CLI have no
+    // flow that can be driven from here.
     for (engine, command) in [
         ("opencode", "opencode auth login"),
         ("cursor", "cursor-agent login"),
@@ -1529,6 +1529,7 @@ async fn only_the_admin_desktop_can_sign_in_and_manual_engines_say_what_to_run()
         ("qwen", "qwen"),
         ("kiro", "kiro-cli login"),
         ("copilot", "copilot login"),
+        ("kimi", "kimi login"),
     ] {
         let resp = admin_call(
             &r,

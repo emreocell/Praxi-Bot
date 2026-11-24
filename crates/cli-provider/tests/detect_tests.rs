@@ -32,7 +32,7 @@ async fn test_all_missing() {
 
     let detected = detector.detect(false).await;
     // Gemini CLI is retired: never listed unless it is already installed.
-    assert_eq!(detected.len(), 8);
+    assert_eq!(detected.len(), 9);
     assert!(detected.iter().all(|cli| cli.id != "gemini"));
 
     for cli in &detected {
@@ -312,6 +312,38 @@ async fn kiro_sign_in_stays_unverified() {
 }
 
 #[tokio::test]
+async fn kimi_sign_in_is_credential_file_metadata_only() {
+    let temp = fixture_dir();
+    install_fake(temp.path(), "kimi");
+
+    // An ambient Moonshot key is not a sign-in and is never forwarded.
+    let env = PathEnv::for_test(temp.path().to_path_buf())
+        .with_home(temp.path().join("home"))
+        .with_env_var("MOONSHOT_API_KEY", "kimi_secret_key")
+        .with_env_var("KIMI_API_KEY", "kimi_secret_key");
+    let detected = Detector::with_env(env).detect(true).await;
+    let kimi = detected.iter().find(|c| c.id == "kimi").unwrap();
+    assert!(kimi.installed);
+    assert_eq!(kimi.auth, AuthState::Unknown);
+    assert_eq!(kimi.detail.as_deref(), Some("auth_unverified"));
+    assert!(!format!("{kimi:?}").contains("kimi_secret_key"));
+
+    let credentials = temp
+        .path()
+        .join("home")
+        .join(".kimi-code")
+        .join("credentials");
+    std::fs::create_dir_all(&credentials).unwrap();
+    std::fs::write(credentials.join("kimi-code.json"), "SENTINEL_TOKEN").unwrap();
+    let env = PathEnv::for_test(temp.path().to_path_buf()).with_home(temp.path().join("home"));
+    let detected = Detector::with_env(env).detect(true).await;
+    let kimi = detected.iter().find(|c| c.id == "kimi").unwrap();
+    assert_eq!(kimi.auth, AuthState::Unknown);
+    assert_eq!(kimi.detail.as_deref(), Some("auth_metadata_only"));
+    assert!(!format!("{kimi:?}").contains("SENTINEL_TOKEN"));
+}
+
+#[tokio::test]
 async fn test_timeout_and_overflow() {
     let temp = fixture_dir();
     install_fake(temp.path(), "claude");
@@ -512,6 +544,7 @@ async fn only_installed_claude_is_runnable() {
         "qwen",
         "kiro-cli",
         "copilot",
+        "kimi",
     ] {
         install_fake(temp.path(), name);
     }
@@ -686,6 +719,7 @@ fn cli_engines_catalog_marks_only_claude_runnable() {
         ids,
         [
             "claude", "codex", "cursor", "opencode", "gemini", "agy", "qwen", "copilot", "kiro",
+            "kimi",
         ]
     );
     let claude = cli_provider::engine_spec("claude").expect("claude spec");
@@ -693,7 +727,7 @@ fn cli_engines_catalog_marks_only_claude_runnable() {
     assert_eq!(claude.command, "claude");
 
     for id in [
-        "codex", "cursor", "opencode", "gemini", "agy", "qwen", "copilot", "kiro",
+        "codex", "cursor", "opencode", "gemini", "agy", "qwen", "copilot", "kiro", "kimi",
     ] {
         let spec = cli_provider::engine_spec(id).expect("spec exists");
         assert!(!spec.runnable, "{id} must not be runnable");
