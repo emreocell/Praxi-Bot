@@ -152,7 +152,7 @@ import { AppsModal } from "./views/AppsModal";
 import { NewBotModal } from "./views/NewBotModal";
 import { MyBotsView } from "./views/MyBotsView";
 import { nativePauseAction } from "./lib/myBots";
-import { SettingsModal } from "./views/SettingsModal";
+import { SettingsModal, type SettingsTargetRequest } from "./views/SettingsModal";
 import { OPEN_SETTINGS_EVENT, type SettingsTarget } from "./lib/settingsLink";
 import { OPEN_AI_SETTINGS_EVENT } from "./state/useCliEngineRows";
 import { OPEN_BOT_LIMITS_EVENT } from "./lib/botLimits";
@@ -277,19 +277,28 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   const [settingsOpen, setSettingsOpen] = useState<SettingsSectionId | SettingsPageId | null>(
     null
   );
+  const [settingsTarget, setSettingsTarget] = useState<SettingsTargetRequest | null>(null);
+  const settingsSeq = useRef(0);
+  const openSettings = useCallback((page: SettingsSectionId | SettingsPageId, card?: string, field?: string) => {
+    setSettingsTarget(card ? { page, card, field, seq: ++settingsSeq.current } : null);
+    setSettingsOpen(page);
+  }, []);
   const [appsOpen, setAppsOpen] = useState(false);
-  // The model picker's "Install <CLI>" rows open Settings > AI, where the install flow lives.
+  // The model picker's "Install <CLI>" rows open Settings > AI models, where the install flow lives.
   useEffect(() => {
-    const open = () => setSettingsOpen("ai");
+    const open = () => openSettings("models", "detectedAccounts");
     window.addEventListener(OPEN_AI_SETTINGS_EVENT, open);
     return () => window.removeEventListener(OPEN_AI_SETTINGS_EVENT, open);
-  }, []);
+  }, [openSettings]);
   // A message can point at a place in Settings (e.g. the voice call card's "Open settings").
   useEffect(() => {
-    const open = (e: Event) => setSettingsOpen((e as CustomEvent<SettingsTarget>).detail.page);
+    const open = (e: Event) => {
+      const detail = (e as CustomEvent<SettingsTarget>).detail;
+      openSettings(detail.page, detail.card, detail.field);
+    };
     window.addEventListener(OPEN_SETTINGS_EVENT, open);
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
-  }, []);
+  }, [openSettings]);
   const [newBotOpen, setNewBotOpen] = useState(false);
   // The dialogs of a bot (card 244-C): edit and profile replace the old pages; "add skill" can
   // sit on top of the skills dialog or the edit dialog.
@@ -1342,7 +1351,11 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
       <SettingsModal
         open={settingsOpen !== null}
         initialSection={settingsOpen ?? "general"}
-        onClose={() => setSettingsOpen(null)}
+        initialTarget={settingsTarget}
+        onClose={() => {
+          setSettingsOpen(null);
+          setSettingsTarget(null);
+        }}
         bridge={{
           settings,
           update: updateSettings,

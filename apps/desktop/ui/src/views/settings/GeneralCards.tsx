@@ -56,7 +56,8 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
           placeholder={t("account.defaultName")}
           onChange={(e) => update({ accountName: e.target.value })}
         />
-      </SettingRow>
+      </SettingRow>,
+      { keywords: "account name profile isim ad profil ben konto" }
     ),
     card(
       "language",
@@ -78,7 +79,7 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
           ]}
         />
       </SettingRow>,
-      { keywords: "dil turkce english" }
+      { keywords: "language dil turkce english deutsch sprache" }
     ),
     card(
       "send",
@@ -98,7 +99,7 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
           }))}
         />
       </SettingRow>,
-      { keywords: "enter ctrl gonder send" }
+      { keywords: "enter ctrl gonder send mesaj senden nachricht" }
     ),
     card(
       "times",
@@ -118,7 +119,7 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
           }))}
         />
       </SettingRow>,
-      { keywords: "saat zaman time clock seconds saniye mesaj" }
+      { keywords: "saat zaman time clock seconds saniye mesaj uhrzeit sekunden" }
     ),
     card(
       "speak-replies",
@@ -134,14 +135,14 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
           onChange={(speakReplies) => update({ speakReplies })}
         />
       </SettingRow>,
-      { keywords: "ses voice speak read aloud tts sesli oku vorlesen" }
+      { keywords: "ses voice speak read aloud tts sesli oku vorlesen stimme" }
     ),
     card(
       "voice",
       t("voice.title"),
       t("voice.description"),
       <VoiceSettings settings={settings} update={update} />,
-      { keywords: "ses voice speech tts sesli oku vorlesen stimme" }
+      { keywords: "ses voice speech tts sesli oku speed hiz vorlesen stimme geschwindigkeit" }
     ),
     card(
       "voice-input",
@@ -155,7 +156,7 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
       t("voice.stt.title"),
       t("voice.stt.description"),
       <DictationCard />,
-      { keywords: "dictation dikte ses sesli arama voice call gemini whisper api key anahtar schluessel mikrofon microphone transcribe yazdir diktat sprache anruf" }
+      { keywords: "dictation dikte ses sesli arama voice call gemini whisper api key password anahtar sifre schluessel schlüssel passwort mikrofon microphone transcribe yazdir diktat sprache anruf" }
     ),
     card(
       "autostart",
@@ -174,7 +175,7 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
           <span className={formStyles.error} role="alert">{b.autostartError}</span>
         ) : null}
       </SettingRow>,
-      { keywords: "startup baslangic" }
+      { keywords: "startup autostart login sign in baslangic oturum acilis anmeldung" }
     ),
     card(
       "keepInTray",
@@ -190,14 +191,14 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
           onChange={() => update({ keepInTray: !settings.keepInTray })}
         />
       </SettingRow>,
-      { keywords: "tray taskbar system tray tepsi bildirim alani hintergrund infobereich minimize" }
+      { keywords: "tray taskbar system tray background tepsi arka plan bildirim alani hintergrund infobereich minimize" }
     ),
     card(
       "quickAsk",
       t("settings.quickAsk.title"),
       t("settings.quickAsk.description"),
       <QuickAskCard settings={settings} update={update} />,
-      { keywords: "quick ask hotkey shortcut global schnell fragen kisayol hizli sor overlay" }
+      { keywords: "quick ask hotkey shortcut global schnell fragen kisayol hizli sor overlay tastenkombination" }
     ),
     card(
       "hotkey",
@@ -232,14 +233,14 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
           </Button>
         ))}
       </SettingRow>,
-      { keywords: "shortcut kisayol stop" }
+      { keywords: "shortcut kisayol stop durdur abbrechen tastenkombination" }
     ),
     card(
       "notifications",
       t("settings.notifications.title"),
       t("settings.notifications.description"),
       <NotificationSettings settings={settings} onChange={update} />,
-      { kind: "block", keywords: "bildirim notify" }
+      { kind: "block", keywords: "notifications bildirim notify alert uyari quiet hours digest sessiz saat ozet benachrichtigung ruhezeit" }
     ),
     card(
       "onboarding",
@@ -260,7 +261,7 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
             : t("settings.onboarding.resume")}
         </Button>
       </SettingRow>,
-      { keywords: "setup wizard kurulum" }
+      { keywords: "setup wizard guide onboarding kurulum sihirbaz rehber einrichtung assistent" }
     )
   ];
 }

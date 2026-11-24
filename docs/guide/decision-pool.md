@@ -7,8 +7,7 @@ release prepares the pool but does not invoke it from ordinary turns.
 
 ## Quick switch for Gemini
 
-If you only want the Gemini helper, open **Settings > Models > Helpers
-(optional) > Decision helper** and turn it on. It needs a Gemini key and writes a
+If you only want the Gemini helper, open **Settings > AI models > Smart search & helper > Decision helper** and turn it on. It needs a Gemini key and writes a
 `decider.toml` with one `gemini_decisions` backend for `gemini/gemini-decision-1`
 at 180 requests per minute (90% of the free tier's 200; the free tier also allows
 50,000 tokens per minute and 10,000 requests per day, last checked 2026-11-24).

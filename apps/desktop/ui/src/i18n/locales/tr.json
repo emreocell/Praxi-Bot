@@ -555,7 +555,7 @@
     },
     "photorealAvatars": {
       "description": "Botlar kendi renklerine boyanmış, yumuşak ve fotogerçekçi kil gövdeler kullanır. Daha hafif çizim kil stili için kapatın.",
-      "title": "Fotogerçekçi kil avatarlar"
+      "title": "Gerçekçi avatarlar"
     },
     "style": {
       "blur": "Bulanıklık",
@@ -3621,7 +3621,7 @@
     },
     "test": "Bağlantıyı dene",
     "testOk": "Bağlantı çalışıyor",
-    "title": "Yardımcılar (isteğe bağlı)",
+    "title": "Akıllı arama ve yardımcı",
     "usage": {
       "noLimit": "{{used}} kullanıldı",
       "of": "{{used}} / {{limit}}",
@@ -3879,7 +3879,7 @@
     "settings": "Arama ayarları",
     "skippedFiles": "{{count}} dosya atlandı",
     "skippedFiles_one": "{{count}} dosya atlandı",
-    "title": "Bilgi kaynakları ve ortak beyin",
+    "title": "Bilgi ve dosyalar",
     "url": "Kaydedilmiş sayfanın adresi"
   },
   "liveView": {
@@ -5145,7 +5145,7 @@
       "enable": "Otomatik başlatmayı aç",
       "enabled": "Açık",
       "error": "Windows otomatik başlatma ayarı güncellenemedi.",
-      "title": "Oturum açtığımda Praxi-Bot'u başlat"
+      "title": "Oturum açılışında başlat"
     },
     "background": {
       "blur": "Arka plan bulanıklığı",
@@ -5189,7 +5189,7 @@
     },
     "keepInTray": {
       "description": "Varsayılan olarak kapalıdır: pencereyi kapatmak Praxi-Bot'u kapatır. Açık olduğunda pencereyi kapatmak onu yalnızca gizler ve botların çalışmaya devam eder. Praxi-Bot simgesini tepside (saatin yanında) görürsün; açmak, duraklatmak veya kapatmak için kullan. Bu ilk kez olduğunda bir kez bilgilendirileceksin.",
-      "title": "Pencere kapatılınca tepside çalışmaya devam et"
+      "title": "Sistem tepsisinde çalışmaya devam et"
     },
     "language": {
       "de": "Deutsch",
@@ -5281,7 +5281,7 @@
       "restartHint": "Değişikliğin geçerli olması için arka plan servisini yeniden başlat.",
       "restartManual": "Değişikliğin geçerli olması için arka plan servisini kendin yeniden başlat (bu uygulama başlatmadı).",
       "test": "Bağlantıyı test et",
-      "title": "Model sağlayıcıları"
+      "title": "Özel yapay zekâ sunucuları"
     },
     "quickAsk": {
       "description": "Varsayılan olarak kapalı. Açıkken, herhangi bir programdan bir klavye kısayoluyla küçük bir kutu açılır; soruyu yazıp Enter'a basarsın. Her soru, seçtiğin botla yeni bir sohbet başlatır.",
@@ -5388,7 +5388,7 @@
         "saved": "{{provider}} anahtarı kaydedildi",
         "savedOn": "{{provider}} anahtarı {{name}} üzerine kaydedildi",
         "stored": "Anahtar kayıtlı",
-        "title": "API anahtarıyla ekle",
+        "title": "Erişim anahtarları",
         "unknown": "Bu anahtarın hangi sağlayıcıya ait olduğunu anlayamadık. Aşağıdan birini seç."
       }
     },
@@ -5521,7 +5521,7 @@
         "unsupported": "Kullanılamaz",
         "warn": "Kontrol et"
       },
-      "title": "Tanılama"
+      "title": "Sağlık kontrolü"
     },
     "email": {
       "add": "Posta kutusu ekle",
@@ -5647,7 +5647,7 @@
     "general": {
       "account": {
         "description": "Kenar çubuğundaki hesap menüsünde görünür.",
-        "title": "Hesap adı"
+        "title": "Adın"
       },
       "frame": {
         "description": "Uygulamanın kendi pencere düğmeleri yerine sistem başlık çubuğunu göster.",
@@ -5671,11 +5671,6 @@
         "seconds": "Saniyeyle",
         "title": "Mesaj saatlerini göster"
       }
-    },
-    "groups": {
-      "account": "Hesap",
-      "appearance": "Görünüm",
-      "behavior": "Davranış"
     },
     "learn": {
       "guide": "Rehberde devamını oku",
@@ -5708,13 +5703,8 @@
       }
     },
     "mode": {
-      "advanced": "Gelişmiş",
-      "advancedOn": "Gelişmiş ayarlar gösteriliyor. İstediğin zaman Basit görünüme dönebilirsin.",
-      "hidden": "Uzmanlara yönelik {{count}} ayarı daha göster",
-      "hidden_one": "Uzmanlara yönelik {{count}} ayarı daha göster",
-      "hidden_other": "Uzmanlara yönelik {{count}} ayarı daha göster",
-      "label": "Ne kadar gösterilsin",
-      "simple": "Basit"
+      "moreHint": "İnce ayar için ek seçenekler",
+      "moreOptions": "Diğer seçenekler"
     },
     "navGroups": {
       "app": "Uygulama",
@@ -5723,49 +5713,33 @@
     },
     "noResults": "Eşleşen ayar yok.",
     "pages": {
-      "advanced": {
-        "description": "Sağlık kontrolü, onarım ve sürüm. Çoğu kişinin bu sayfaya hiç ihtiyacı olmaz.",
-        "name": "Gelişmiş"
-      },
       "appearance": {
-        "description": "Renkler, arka plan ve uygulamanın görünüşü.",
+        "description": "Renkler, arka plan ve okunabilirlik.",
         "name": "Görünüm"
       },
       "apps": {
-        "description": "Botlarının kullanabileceği e-posta ve web araması.",
-        "name": "Uygulamalar ve bağlantılar"
-      },
-      "data": {
-        "description": "Botların neyi hatırladığı, neyi bildiği ve ne kadar kullandığın.",
-        "name": "Veriler ve yedek"
+        "description": "Botlarının kullanabileceği web araması ve e-posta.",
+        "name": "Posta ve web"
       },
       "general": {
-        "description": "Adın, dilin ve mesaj gönderme ayarları.",
+        "description": "Adın, dilin, bildirimler ve ses ayarları.",
         "name": "Genel"
       },
-      "help": {
-        "description": "Son olayları incele ve güvenli bir destek raporu hazırla.",
-        "name": "Yardım"
-      },
       "models": {
-        "description": "Botların hangi yapay zekâyla düşündüğü ve neleri hatırlayabildiği.",
-        "name": "Botlar ve modeller"
-      },
-      "notifications": {
-        "description": "Uygulamanın seni ne zaman uyaracağı.",
-        "name": "Bildirimler"
+        "description": "Botlarının düşündüğü modeller ve hatırladıkları.",
+        "name": "Modeller"
       },
       "safety": {
-        "description": "Botların kendi başına neler yapabileceği ve neleri önce sana soracağı.",
-        "name": "Güvenlik ve izinler"
+        "description": "Botların kendi başına yapabilecekleri, güvenilen klasörler ve etkinlik günlüğü.",
+        "name": "Güvenlik"
       },
-      "voice": {
-        "description": "Yanıtları sesli dinle ya da yazmak yerine konuş.",
-        "name": "Ses"
+      "system": {
+        "description": "Kullanım, depolama alanı, güncellemeler ve sağlık kontrolleri.",
+        "name": "Sistem"
       },
       "where": {
-        "description": "Botlarının çalıştığı bilgisayar.",
-        "name": "Botlar nerede çalışır"
+        "description": "Botlarının hangi bilgisayarda çalıştığı.",
+        "name": "Bilgisayarlar"
       }
     },
     "reset": {
@@ -5867,7 +5841,7 @@
         "title": "Güncellemede bir sorun çıktı",
         "working": "Geri dönülüyor…"
       },
-      "title": "Güncellemeler",
+      "title": "Güncellemeler ve sürüm",
       "unknown": "Bilinmiyor",
       "upToDate": "En son sürümü kullanıyorsunuz."
     },
@@ -6371,7 +6345,7 @@
       "close": "Kapat",
       "daemonUnavailable": "Ses hizmeti kullanılamıyor. Bu bilgisayardaki arka plan hizmetine yeniden bağlanıp tekrar deneyin; ses desteği yoksa hizmeti güncelleyin.",
       "end": "Aramayı bitir",
-      "geminiKeyMissing": "Ayarlar → Ses → Sesle yazma servisi bölümünde bir Gemini API anahtarı ekleyin, ardından tekrar deneyin.",
+      "geminiKeyMissing": "Ayarlar → Genel → Sesli dikte bölümünden bir Gemini anahtarı ekle, ardından tekrar dene.",
       "holdToTalk": "Konuşmak için basılı tut",
       "interrupt": "Sözünü kes",
       "micMuted": "Mikrofon susturuldu",
@@ -6379,7 +6353,7 @@
       "micTimeout": "Mikrofon yanıt vermedi. Mikrofon izni istemini onaylayın. Windows Ayarları → Gizlilik ve güvenlik → Mikrofon bölümünde mikrofon erişimine ve masaüstü uygulamalarına izin verip tekrar deneyin.",
       "mute": "Mikrofonu sustur",
       "noSpeech": "Konuşma algılanmadı. Dinlemeye devam ediyorum.",
-      "notConfigured": "Ayarlar → Ses → Sesle yazma servisi bölümünde bir Gemini anahtarı ekleyip Gemini Live sağlayıcısını seçin veya Whisper uyumlu bir hizmet yapılandırın.",
+      "notConfigured": "Ayarlar → Genel → Sesli dikte bölümünden bir Gemini anahtarı ekleyip Gemini Live'ı seç ya da Whisper uyumlu bir hizmet ayarla.",
       "openSettings": "Ayarları aç",
       "ownerRequired": "Sahip yetkilendirmesi eksik. Bu bilgisayarda Praxi-Bot uygulamasını açıp yerel arka plan hizmetine yeniden bağlanın, ardından tekrar deneyin.",
       "phase": {
@@ -6395,7 +6369,7 @@
       "replyFailed": "Bot yanıt veremedi. Lütfen tekrar deneyin.",
       "retry": "Tekrar dene",
       "runActive": "Bir bot çalışıyor. Tamamlanmasını bekleyin veya sohbetten durdurun, ardından sesli sohbeti tekrar başlatın. Mikrofon kapalı.",
-      "serviceRefused": "Dikte hizmeti isteği reddetti. Ayarlar → Ses → Sesle yazma servisi bölümünde sağlayıcıyı, API anahtarını, modeli ve kotayı kontrol edin.",
+      "serviceRefused": "Yazıya dökme hizmeti isteği reddetti. Ayarlar → Genel → Sesli dikte bölümünden seçili hizmeti, anahtarı, modeli ve kotayı kontrol et.",
       "simulate": "Konuşmayı simüle et (sahte)",
       "start": "Sesli sohbeti başlat",
       "stepTimeout": "Başlatma çok uzun sürdüğü için arama durduruldu. İnternet bağlantını ve arka plan servisinin çalıştığını kontrol edip tekrar dene.",
@@ -6403,7 +6377,7 @@
       "transcribeFailed": "Bu yazıya çevrilemedi. Lütfen tekrar söyleyin.",
       "unmute": "Mikrofonu aç",
       "unsupported": "Bu pencere ses kaydedemiyor.",
-      "wrongProvider": "Gemini anahtarınızı kullanmak için Ayarlar → Ses → Sesle yazma servisi bölümünde Gemini Live sağlayıcısını seçin veya seçili Whisper hizmetini yapılandırın."
+      "wrongProvider": "Gemini anahtarını kullanmak için Ayarlar → Genel → Sesli dikte bölümünden Gemini Live'ı seç ya da seçili Whisper hizmetini ayarla."
     },
     "codeOmitted": "(kod atlandı)",
     "description": "Sesli oku düğmesinin sesi ve hızı. Sistemin konuşma motorunu kullanır.",
@@ -6465,7 +6439,7 @@
     "micBusy": "Mikrofon başka bir uygulama tarafından kullanılıyor. Onu kapatıp tekrar dene.",
     "micDenied": "Praxi-Bot için mikrofon erişimine izin verin. Windows Ayarları → Gizlilik ve güvenlik → Mikrofon bölümünde Mikrofon erişimi ve Masaüstü uygulamalarının mikrofonunuza erişmesine izin ver seçeneklerini açın. Ardından Praxi-Bot uygulamasını yeniden başlatıp tekrar deneyin.",
     "micMissing": "Mikrofon bulunamadı. Bir mikrofon bağlayıp tekrar dene.",
-    "notConfigured": "Sesle yazma henüz kurulu değil. Ayarlar → Ses → Sesle yazma servisi bölümünden bir yazıya çevirme servisi ekle.",
+    "notConfigured": "Dikte henüz ayarlanmadı. Ayarlar → Genel → Sesli dikte bölümünden bir yazıya dökme hizmeti ekle.",
     "online": "çevrimiçi",
     "speak": "Sesli oku",
     "speakAuto": {
@@ -6499,7 +6473,7 @@
       "statusOwnKey": "Hazır: ses için kaydedilmiş ayrı bir anahtar kullanılıyor.",
       "statusReusing": "Hazır: bu hizmet için zaten eklediğiniz anahtar kullanılıyor. Anahtar gizli depoda kalır.",
       "statusReusingGemini": "Hazır: zaten eklediğiniz Gemini anahtarı kullanılıyor. Anahtar gizli depoda kalır.",
-      "title": "Sesle yazma servisi",
+      "title": "Sesli dikte",
       "url": "Servis adresi",
       "whereTitle": "Sesiniz nereye gider:"
     },

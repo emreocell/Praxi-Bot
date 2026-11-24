@@ -1,6 +1,6 @@
 # In-app updates and rollback
 
-Settings > Updates can check for a new version, show what is new (in the
+Settings > System > Updates & version can check for a new version, show what is new (in the
 user's language when the release has it), install it with one click and go back
 to the previous version if the new one does not start.
 
@@ -45,7 +45,7 @@ Updates page says so, no request is made, nothing can be installed.
 Just before the installer runs, the app writes `update-state.json` in its data folder.
 Every start of the new version without a healthy run (60 seconds up) is counted:
 
-* 2nd failed start: Settings > Updates shows "Go back to the previous version";
+* 2nd failed start: Settings > System > Updates & version shows "Go back to the previous version";
 * 3rd failed start: the app goes back by itself (the screen may not even load).
 
 Going back downloads the installer named by `rollback.json`, verifies its signature with
