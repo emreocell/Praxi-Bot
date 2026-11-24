@@ -24,7 +24,11 @@ import type {
   MemoryKind,
   CreateMemoryInput,
   UpdateMemoryInput,
-  MemoryPreview
+  MemoryPreview,
+  BotMemorySettings,
+  BotMemorySettingsInput,
+  MemoryEmbedding,
+  MemoryEmbeddingInput
 } from "./types";
 import type {
   RecentLogs,
@@ -327,6 +331,38 @@ export class ApiClient {
   /** Let a forgotten statement be learned again. */
   removeForgottenMemory(id: string): Promise<void> {
     return this.request("DELETE", `/memory/forgotten/${encodeURIComponent(id)}`);
+  }
+
+  /** Memories held for the owner's OK (not used in answers until approved). */
+  listPendingMemories(): Promise<MemoryItem[]> {
+    return this.request("GET", "/memory/pending");
+  }
+
+  approveMemory(id: string): Promise<MemoryItem> {
+    return this.request("POST", `/memory/${encodeURIComponent(id)}/approve`);
+  }
+
+  discardMemory(id: string): Promise<MemoryItem> {
+    return this.request("POST", `/memory/${encodeURIComponent(id)}/discard`);
+  }
+
+  /** Owner-only: whether and how one bot remembers. */
+  getBotMemorySettings(bot: string): Promise<BotMemorySettings> {
+    return this.request("GET", `/bots/${encodeURIComponent(bot)}/memory/settings`);
+  }
+
+  putBotMemorySettings(bot: string, body: BotMemorySettingsInput): Promise<BotMemorySettings> {
+    return this.request("PUT", `/bots/${encodeURIComponent(bot)}/memory/settings`, { body });
+  }
+
+  /** Basic (word match) or Smart (meaning) recall and the re-index progress. */
+  getMemoryEmbedding(): Promise<MemoryEmbedding> {
+    return this.request("GET", "/memory/embedding");
+  }
+
+  /** Owner-only: switch recall mode; the re-index runs in the background. */
+  putMemoryEmbedding(body: MemoryEmbeddingInput): Promise<MemoryEmbedding> {
+    return this.request("PUT", "/memory/embedding", { body });
   }
 
   previewBotMemory(bot: string, query: string): Promise<MemoryPreview> {
@@ -805,8 +841,8 @@ export class ApiClient {
   }
 
   /** Upload one file for the next message of a chat; the daemon sniffs its type and size. */
-  uploadAttachment(chatId: string, file: Blob, name: string): Promise<Attachment> {
-    return this.request("POST", `/chats/${chatId}/attachments`, { raw: file, query: { name } });
+  uploadAttachment(chatId: string, file: Blob, name: string, signal?: AbortSignal): Promise<Attachment> {
+    return this.request("POST", `/chats/${chatId}/attachments`, { raw: file, query: { name }, signal });
   }
   /** The stored original of an attachment (an image to show in the message). */
   attachmentBlob(chatId: string, attachmentId: string): Promise<Blob> {

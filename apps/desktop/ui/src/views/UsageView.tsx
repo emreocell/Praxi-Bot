@@ -3,12 +3,14 @@ import { EmptyState } from "../components/EmptyState";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button, Card } from "ui";
-import type { UsageSummary } from "../api/types";
+import type { SpendLimit, UsageSummary } from "../api/types";
 import formStyles from "../components/Form.module.css";
 import { DailyDigestCard } from "../components/DailyDigestCard";
 import { QuotaBlock } from "../components/QuotaRings";
 import { SpendLimitCard } from "../components/SpendLimitCard";
 import { useToast } from "../components/Toast";
+import { CostBreakdown } from "../components/CostBreakdown";
+import { TopRunsCard } from "../components/TopRunsCard";
 import { UsageTrendChart } from "../components/UsageTrendChart";
 import { botView } from "../lib/botProfile";
 import { humanLine } from "../lib/humanError";
@@ -33,6 +35,7 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
   const { client, bots, events } = useDaemon();
   const [range, setRange] = useState<UsageRange>("month");
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [spend, setSpend] = useState<SpendLimit | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +52,8 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
     try {
       setUsage(await client.usage(usageQueryForRange(range)));
       setError(null);
+      // The limit lines and the month forecast are extras: the page works without them.
+      setSpend(await client.getSpendLimit().catch(() => null));
     } catch (e) {
       setError(humanLine(e));
     } finally {
@@ -87,6 +92,13 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
     }
   };
 
+  const botName = useCallback(
+    (id: string) => {
+      const bot = bots.find((b) => b.id === id);
+      return bot ? botView(bot).name : null;
+    },
+    [bots]
+  );
   const botRows = (usage?.by_bot ?? []).map((u) => {
     const bot = bots.find((b) => b.id === u.bot_id);
     return { usage: u, bot, view: bot ? botView(bot) : null };
@@ -257,7 +269,16 @@ export function UsageView({ embedded = false }: { embedded?: boolean }) {
                 <UsageTrendChart
                   daily={usage.daily ?? []}
                   timeZone={usage.time_zone}
+                  spend={spend}
                 />
+
+                <CostBreakdown
+                  byBot={usage.by_bot}
+                  byModel={usage.by_model ?? []}
+                  botName={botName}
+                />
+
+                <TopRunsCard runs={usage.top_runs ?? []} botName={botName} />
 
                 {modelRows.length > 0 ? (
                   <section className={styles.section} aria-labelledby="usage-by-model-h">

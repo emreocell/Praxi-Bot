@@ -22,7 +22,8 @@
     "check:visual:update": "node scripts/check-visual.mjs --update --no-contrast",
     "smoke": "node scripts/smoke.mjs",
     "test:contrast": "vitest run tests/wallpaper.contrast.spec.ts",
-    "check:chat-ui": "node scripts/check-chat-ui.mjs"
+    "check:chat-ui": "node scripts/check-chat-ui.mjs",
+    "check:attachments": "node scripts/check-attachments.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

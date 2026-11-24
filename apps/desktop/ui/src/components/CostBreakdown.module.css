@@ -1,0 +1,95 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.title {
+  margin: var(--space-0);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.toggle {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--size-preview-height) * 1.5), 1fr));
+  gap: var(--space-4);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: var(--space-0);
+}
+
+.groupTitle {
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.list {
+  list-style: none;
+  margin: var(--space-0);
+  padding: var(--space-0);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(var(--space-0), 1fr) minmax(var(--space-0), 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-xs);
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+.bar {
+  width: 100%;
+  height: var(--space-2);
+}
+
+.track {
+  fill: var(--color-border);
+}
+
+.fill {
+  fill: var(--color-accent);
+}
+
+.value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  text-align: right;
+}
+
+.note {
+  margin: var(--space-0);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}

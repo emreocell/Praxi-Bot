@@ -21,6 +21,7 @@ import {
   SHELL_EVENT_TRAY_NOTICE_SHOWN,
   SHELL_EVENT_TRAY_OPEN_NEEDS,
   SHELL_EVENT_TRAY_STOP_ALL,
+  configureQuickAsk,
   setKeepInTray,
   setNeedsCount,
   setTrayLabels,
@@ -32,6 +33,7 @@ const appName = (server: string): string | null => {
   const b = brandIcon(server);
   return b.known ? b.name : null;
 };
+import { setQuickAskProblem } from "../lib/quickAsk";
 import { useDaemon } from "./DaemonContext";
 import type { RunState } from "./timeline";
 
@@ -41,6 +43,8 @@ export interface ShellBridgeSettings extends NotifyPrefs {
   mutedBotIds: string[];
   keepInTray: boolean;
   trayNoticeSeen: boolean;
+  quickAskEnabled: boolean;
+  quickAskHotkey: string;
 }
 
 /**
@@ -211,6 +215,17 @@ export function ShellBridgeHost({
       () => {}
     );
   }, [settings.keepInTray, settings.trayNoticeSeen]);
+
+  // The global Quick ask hotkey follows the setting; a refusal is shown in Settings in words.
+  useEffect(() => {
+    let current = true;
+    void configureQuickAsk(settings.quickAskEnabled, settings.quickAskHotkey).then((r) => {
+      if (current) setQuickAskProblem(r.ok ? null : r.problem);
+    });
+    return () => {
+      current = false;
+    };
+  }, [settings.quickAskEnabled, settings.quickAskHotkey]);
 
   // 3. tray / notification clicks
   useEffect(() => {

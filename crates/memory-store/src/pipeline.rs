@@ -29,6 +29,15 @@ pub struct Candidate {
     /// Model's flag: derived from web/file/tool content rather than the user.
     #[serde(default)]
     pub untrusted: bool,
+    /// The user's own words that limit the fact in time ("until Friday",
+    /// "this week", "for 3 days"), copied verbatim; read by code, not trusted
+    /// as a date.
+    #[serde(default)]
+    pub expires: Option<String>,
+    /// Optional ISO date (`YYYY-MM-DD`) the model worked out; used only when
+    /// the phrase above and the quote did not give a date.
+    #[serde(default)]
+    pub valid_until: Option<String>,
 }
 
 fn default_importance() -> f32 {
@@ -83,6 +92,11 @@ pub struct ExtractionContext {
     /// The excerpt is (or embeds) web/file/tool content: everything stored
     /// from it is `trust = untrusted`.
     pub untrusted: bool,
+    /// The bot is set to "Ask before saving": everything waits for the owner.
+    pub hold_all: bool,
+    /// Profile and episodic facts are shared with the owner's other bots
+    /// (the bot's "Share what I learn" switch).
+    pub share_with_other_bots: bool,
 }
 
 /// Why a candidate was dropped.
@@ -157,6 +171,8 @@ impl<'a> Pipeline<'a> {
             return Ok(Outcome::Rejected(reason));
         }
         let untrusted = ctx.untrusted || c.untrusted;
+        // Untrusted-origin facts always wait for the owner; "Ask" holds all.
+        let hold = ctx.hold_all || untrusted;
         let content = c.content.trim();
         // A correction holds: a statement the owner forgot is not stored again
         // (only the owner can re-add it).
@@ -174,13 +190,19 @@ impl<'a> Pipeline<'a> {
         match decision {
             Decision::Skip => Ok(Outcome::Skipped),
             Decision::Add => {
-                let mut new =
-                    NewMemory::new(ctx.user_id, scope(ctx.bot_id, c.kind), c.kind, content);
+                let mut new = NewMemory::new(
+                    ctx.user_id,
+                    memory_scope(ctx.bot_id, c.kind, ctx.share_with_other_bots),
+                    c.kind,
+                    content,
+                );
                 new.source_quote.clone_from(&c.quote);
                 new.source_chat_id = Some(ctx.chat_id);
                 new.source_message_id = ctx.message_id;
                 new.trust = trust(untrusted);
                 new.importance = c.importance;
+                new.valid_until_ms = expiry_of(c, storage::now_ms());
+                new.pending = hold;
                 Ok(Outcome::Added(self.store.add(&new, "extracted")?))
             }
             Decision::Update(id) | Decision::Delete(id) => {
@@ -206,7 +228,8 @@ impl<'a> Pipeline<'a> {
                     source_message_id: ctx.message_id,
                     trust: Some(trust(untrusted)),
                     importance: Some(c.importance.max(target.importance)),
-                    valid_until_ms: None,
+                    valid_until_ms: Some(expiry_of(c, storage::now_ms())),
+                    pending: Some(hold),
                 };
                 let updated = self.store.update_if_trust(
                     ctx.user_id,
@@ -229,12 +252,34 @@ fn trust(untrusted: bool) -> Trust {
     }
 }
 
-/// Profile/episodic facts are shared across the user's bots; the rest is
-/// scoped to the bot that learned it.
-fn scope(bot: BotId, kind: Kind) -> Option<BotId> {
+/// When the fact stops being true: the user's own limiting phrase first, then
+/// a limiting phrase in the quote, then the model's ISO date.  All date
+/// arithmetic is in code ([`crate::expiry`]).
+fn expiry_of(c: &Candidate, now: i64) -> Option<i64> {
+    c.expires
+        .as_deref()
+        .and_then(|h| crate::expiry::parse_expiry(h, now))
+        .or_else(|| {
+            c.quote
+                .as_deref()
+                .and_then(|q| crate::expiry::parse_expiry_in_sentence(q, now))
+        })
+        .or_else(|| {
+            c.valid_until
+                .as_deref()
+                .and_then(|v| crate::expiry::parse_expiry(v, now))
+        })
+}
+
+/// THE scope rule, shared by background extraction and the `memory_save` tool:
+/// profile and episodic facts are shared across the owner's bots unless the
+/// owner isolated this bot (`share = false`); everything else belongs to the
+/// bot that learned it.
+#[must_use]
+pub(crate) fn memory_scope(bot: BotId, kind: Kind, share: bool) -> Option<BotId> {
     match kind {
-        Kind::Profile | Kind::Episodic => None,
-        Kind::Bot | Kind::Procedural | Kind::Lesson => Some(bot),
+        Kind::Profile | Kind::Episodic if share => None,
+        _ => Some(bot),
     }
 }
 

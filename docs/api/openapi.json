@@ -2826,6 +2826,126 @@
         ]
       }
     },
+    "/v1/bots/{id}/memory/settings": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "operationId": "get_bot_memory_settings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotMemorySettingsDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "memory"
+        ],
+        "operationId": "put_bot_memory_settings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotMemorySettingsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotMemorySettingsDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/bots/{id}/skills": {
       "get": {
         "tags": [
@@ -9311,6 +9431,84 @@
         ]
       }
     },
+    "/v1/memory/embedding": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "operationId": "get_embedding",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEmbeddingDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "memory"
+        ],
+        "operationId": "put_embedding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryEmbeddingInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryEmbeddingDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/memory/forgotten": {
       "get": {
         "tags": [
@@ -9389,6 +9587,35 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/memory/pending": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "`GET /v1/memory/pending`: memories waiting for the owner's OK.",
+        "operationId": "list_pending",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryItemDto"
+                  }
                 }
               }
             }
@@ -9489,6 +9716,98 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/memory/{id}/approve": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "operationId": "approve_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryItemDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/memory/{id}/discard": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "operationId": "discard_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryItemDto"
                 }
               }
             }
@@ -14984,6 +15303,69 @@
           "weekly": {
             "$ref": "#/components/schemas/PeriodLimitDto",
             "description": "Per local calendar week (Monday start)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BotMemorySettingsDto": {
+        "type": "object",
+        "description": "A bot's memory settings as the settings screen shows them.",
+        "required": [
+          "mode",
+          "budget_tokens",
+          "budget_min",
+          "budget_max",
+          "share_with_other_bots"
+        ],
+        "properties": {
+          "budget_max": {
+            "type": "integer",
+            "description": "Slider upper bound.",
+            "minimum": 0
+          },
+          "budget_min": {
+            "type": "integer",
+            "description": "Slider lower bound.",
+            "minimum": 0
+          },
+          "budget_tokens": {
+            "type": "integer",
+            "description": "Recall budget in tokens (the default is 800).",
+            "minimum": 0
+          },
+          "mode": {
+            "type": "string",
+            "description": "`on`, `off` or `ask`."
+          },
+          "share_with_other_bots": {
+            "type": "boolean",
+            "description": "Share profile and episodic facts with the owner's other bots."
+          }
+        }
+      },
+      "BotMemorySettingsInput": {
+        "type": "object",
+        "description": "Change a bot's memory settings (`PUT /v1/bots/{id}/memory/settings`).",
+        "required": [
+          "mode",
+          "share_with_other_bots"
+        ],
+        "properties": {
+          "budget_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Recall budget in tokens; `null` = the default.",
+            "minimum": 0
+          },
+          "mode": {
+            "type": "string",
+            "description": "`on`, `off` or `ask`."
+          },
+          "share_with_other_bots": {
+            "type": "boolean",
+            "description": "Share profile and episodic facts with the owner's other bots."
           }
         },
         "additionalProperties": false
@@ -22947,6 +23329,112 @@
           "unknown"
         ]
       },
+      "MemoryEmbeddingDto": {
+        "type": "object",
+        "description": "What the settings screen shows about recall quality.",
+        "required": [
+          "mode",
+          "state",
+          "label",
+          "done",
+          "total",
+          "sources"
+        ],
+        "properties": {
+          "done": {
+            "type": "integer",
+            "description": "Memories embedded so far (while rebuilding).",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short reason when the last switch failed and recall fell back to Basic."
+          },
+          "label": {
+            "type": "string",
+            "description": "Model name in Smart mode; `Basic` otherwise."
+          },
+          "mode": {
+            "type": "string",
+            "description": "`basic` (word match) or `smart` (meaning)."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryEmbeddingSourceDto"
+            },
+            "description": "Bots that have a knowledge embedding model Smart mode could reuse."
+          },
+          "state": {
+            "type": "string",
+            "description": "`ready`, `rebuilding`, `waiting` or `failed`."
+          },
+          "total": {
+            "type": "integer",
+            "description": "Memories to embed in this rebuild.",
+            "minimum": 0
+          }
+        }
+      },
+      "MemoryEmbeddingInput": {
+        "type": "object",
+        "description": "Switch recall mode (`PUT /v1/memory/embedding`).",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "consent_send_text": {
+            "type": "boolean",
+            "description": "Smart with a remote provider: the owner agrees that memory texts are sent to it."
+          },
+          "from_bot": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Smart: the bot whose knowledge embedding settings to reuse."
+          },
+          "mode": {
+            "type": "string",
+            "description": "`basic` or `smart`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MemoryEmbeddingSourceDto": {
+        "type": "object",
+        "description": "One bot whose knowledge embedding settings can be reused.",
+        "required": [
+          "bot_id",
+          "bot_name",
+          "model",
+          "provider_id",
+          "local"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bot_name": {
+            "type": "string"
+          },
+          "local": {
+            "type": "boolean",
+            "description": "The model runs on this computer: nothing is sent anywhere."
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          }
+        }
+      },
       "MemoryItemDto": {
         "type": "object",
         "description": "One stored memory item and its active undo journal state.",
@@ -22958,7 +23446,8 @@
           "importance",
           "created_ms",
           "last_used_ms",
-          "deleted"
+          "deleted",
+          "pending"
         ],
         "properties": {
           "bot_id": {
@@ -22993,6 +23482,10 @@
           "last_used_ms": {
             "type": "integer",
             "format": "int64"
+          },
+          "pending": {
+            "type": "boolean",
+            "description": "Held for the owner's OK (\"Needs your OK\"): not used in answers until approved."
           },
           "source_chat_id": {
             "type": [
@@ -26722,6 +27215,60 @@
         },
         "additionalProperties": false
       },
+      "TopRunUsage": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/UsageTotals",
+            "description": "Totals of the run; `cost_usd` is `null` when no call had a known price."
+          },
+          {
+            "type": "object",
+            "required": [
+              "run_id",
+              "bot_id",
+              "created_at_ms"
+            ],
+            "properties": {
+              "bot_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Bot that executed the run."
+              },
+              "calls_without_cost": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Calls of this run whose cost is unknown.",
+                "minimum": 0
+              },
+              "calls_without_usage": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Calls of this run that reported no token usage.",
+                "minimum": 0
+              },
+              "chat_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid",
+                "description": "Chat the run belongs to (lets the UI open it), when it has one."
+              },
+              "created_at_ms": {
+                "type": "integer",
+                "format": "int64",
+                "description": "When the run started (Unix ms)."
+              },
+              "run_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Run id."
+              }
+            }
+          }
+        ],
+        "description": "One run in the \"most expensive runs\" list of `GET /v1/usage`."
+      },
       "TranscribeInput": {
         "type": "object",
         "description": "Body of `POST /v1/voice/transcribe`.",
@@ -26981,6 +27528,13 @@
           "time_zone": {
             "type": "string",
             "description": "IANA time zone used to bucket `daily` (e.g. `Europe/Istanbul` or `UTC`)."
+          },
+          "top_runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopRunUsage"
+            },
+            "description": "The (at most five) most expensive runs in the range: known cost first,\nthen runs of unknown price by tokens."
           },
           "total": {
             "$ref": "#/components/schemas/UsageTotals",

@@ -26,10 +26,26 @@ out keeps its previous value. `bots: null` means every bot.
   `mcp:web/search`.
 - **Filtering:** per server, `tool_allow` and `tool_exclude` glob lists over the
   server-side tool name; the exclude list is applied after the allow list.
-- **`readOnlyHint` is ignored unless you opt in.** Tools are *destructive*
-  (they ask for approval) even when the server marks them read-only. Set
-  `trust_hints = true` on that server only if you trust it to lower its own
-  tools to read-only.
+- **Do you trust a server to label its own tools?** Every MCP tool may carry
+  labels (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`).
+  They are the server's own claims, so they count only if you say you trust
+  that server, once, when you add it (Apps: "Do you trust this server to
+  describe its own tools honestly?", default **No, ask me for every action**).
+  You can change it later in the server's Manage panel; the card shows
+  "Labels trusted" or "Always asks". In `mcp.toml` it is `trust_hints`, default
+  `false`, and every change is written to the audit log.
+  - **No (default):** every tool of the server asks, whatever it claims.
+  - **Yes:** a tool labelled read-only (and not also destructive) runs without
+    asking. Anything else still asks, including a tool with no labels at all,
+    a write that calls itself "non-destructive" (you can still use "allow for
+    this task" on its card) and a tool marked only "idempotent". A tool marked
+    `openWorldHint` (it reaches the web, e-mail or other outside systems) is
+    treated as able to send data out, even if it only reads.
+  - **If a label changes later**, for example a tool that said "destructive"
+    now says "not destructive", the tool is held back until you approve it
+    again, exactly like a changed description. The labels are part of what is
+    pinned.
+  Full table: [MCP annotation policy](../design/mcp-annotations.md).
 - **What the results are.** An MCP result is untrusted. It is also a private
   read unless `public_content = true`, and every tool is treated as able to
   send data off the machine unless `local_only = true`. Those two flags are

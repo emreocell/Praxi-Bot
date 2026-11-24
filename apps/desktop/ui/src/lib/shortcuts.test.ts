@@ -17,6 +17,8 @@ const lookup = (dict: Record<string, unknown>, key: string) =>
  * handler file either to SHORTCUTS (lib/shortcuts.ts) or here with a reason.
  */
 const LOCAL_ONLY: Record<string, string> = {
+  "quickask/QuickAskWindow.tsx": "its own small window: Enter sends and Esc closes, shown in the window's footer hint",
+  "views/settings/QuickAskCard.tsx": "Enter applies the typed shortcut inside that field",
   "lib/composerFocus.ts": "type-to-focus rule: a printable key outside any field focuses the composer (no shortcut)",
   "api/mockLiveView.ts": "mock backend, not a UI shortcut",
   "components/AccountMenu.tsx": "arrow keys inside the account menu (covered by popup menu rows)",
@@ -38,6 +40,7 @@ const LOCAL_ONLY: Record<string, string> = {
   "lib/liveViewLayers.ts": "layer routing for the live view",
   "overlay/events.ts": "stop hotkey formatting (documented as the stop entry)",
   "views/BotEditModal.tsx": "arrow keys on editor section tabs",
+  "views/NotificationHistoryView.tsx": "Up/Down (or j/k) moves between inbox entries; the buttons keep Enter and Space",
   "views/SchedulesView.tsx": "arrow, Home, and End navigation inside the schedule calendar grid",
   "views/SettingsModal.tsx": "arrow, Home, and End navigation across settings section tabs",
   "views/firstrun/BrainStep.tsx": "Enter inside a single field",

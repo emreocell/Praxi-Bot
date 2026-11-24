@@ -6,7 +6,9 @@ import type { ForgottenItem, MemoryItem, MemoryKind, MemoryPreview } from "../..
 import { ConfirmDialog } from "../../components/DialogParts";
 import form from "../../components/Form.module.css";
 import { EmptyState } from "../../components/EmptyState";
+import { BotMemorySettings } from "../../components/BotMemorySettings";
 import { humanLine } from "../../lib/humanError";
+import { MemoryRecallQuality } from "./MemoryRecallQuality";
 import { useDaemon } from "../../state/DaemonContext";
 import styles from "./KnowledgeCard.module.css";
 
@@ -26,6 +28,7 @@ export function MemoryCard() {
   const [items, setItems] = useState<MemoryItem[]>([]);
   const [forgotten, setForgotten] = useState<ForgottenItem[]>([]);
   const [erasing, setErasing] = useState<MemoryItem | null>(null);
+  const [pending, setPending] = useState<MemoryItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -54,9 +57,11 @@ export function MemoryCard() {
       includeDeleted
     });
     const tombstones = await client.listForgottenMemories(activeBot);
+    const held = await client.listPendingMemories();
     if (current !== epoch.current) return;
-    setItems(list);
+    setItems(list.filter((m) => !m.pending));
     setForgotten(tombstones);
+    setPending(held);
   }, [client, activeBot, botOnly, kindFilter, search, includeDeleted]);
 
   useEffect(() => {
@@ -126,6 +131,13 @@ export function MemoryCard() {
       setNotice(t("memory.forgottenRemovedNotice"));
     });
 
+  const review = (item: MemoryItem, ok: boolean) =>
+    act(async () => {
+      if (!client) return;
+      await (ok ? client.approveMemory(item.id) : client.discardMemory(item.id));
+      setNotice(t(ok ? "memory.approvedNotice" : "memory.discardedNotice"));
+    });
+
   const undo = (memoryId: string) =>
     act(async () => {
       if (!client) return;
@@ -168,6 +180,36 @@ export function MemoryCard() {
         <p className={form.hint}>{t("memory.noBot")}</p>
       ) : (
         <>
+          <BotMemorySettings botId={activeBot} />
+          <MemoryRecallQuality />
+          {pending.length > 0 ? (
+            <section className={styles.review} aria-label={t("memory.pendingTitle")} data-testid="memory-pending">
+              <h4>{t("memory.pendingTitle")}</h4>
+              <p className={form.hint}>{t("memory.pendingHint")}</p>
+              <ul className={styles.list}>
+                {pending.map((item) => (
+                  <li key={item.id} className={styles.source} data-testid="memory-pending-item">
+                    <strong>{item.content}</strong>
+                    <span className={form.hint}>
+                      {t(`memory.kinds.${item.kind}`)} · {botName(item.bot_id)} ·{" "}
+                      {t(`memory.trust.${item.trust}`)}
+                    </span>
+                    {item.source_quote ? (
+                      <code className={styles.locator}>“{item.source_quote}”</code>
+                    ) : null}
+                    <div className={styles.actions}>
+                      <Button size="sm" disabled={busy} onClick={() => void review(item, true)}>
+                        {t("memory.approve")}
+                      </Button>
+                      <Button size="sm" variant="secondary" disabled={busy} onClick={() => void review(item, false)}>
+                        {t("memory.discard")}
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
           <div className={form.row}>
             <label className={`${form.field} ${form.grow}`}>
               {t("memory.search")}
@@ -242,6 +284,9 @@ export function MemoryCard() {
                   {t(`memory.trust.${item.trust}`)} ·{" "}
                   {new Date(item.created_ms).toLocaleDateString(i18n.language)}
                   {item.deleted ? ` · ${t("memory.forgottenBadge")}` : ""}
+                  {item.valid_until_ms
+                    ? ` · ${t("memory.expires", { date: new Date(item.valid_until_ms).toLocaleDateString(i18n.language) })}`
+                    : ""}
                 </span>
                 {item.source_quote ? (
                   <code className={styles.locator}>“{item.source_quote}”</code>

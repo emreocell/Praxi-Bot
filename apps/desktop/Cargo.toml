@@ -33,6 +33,7 @@ tauri-plugin-store = "2"
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
 thiserror.workspace = true
 tokio.workspace = true
+tauri-plugin-global-shortcut = "2"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38.2"

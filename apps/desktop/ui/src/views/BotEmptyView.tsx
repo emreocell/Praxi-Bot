@@ -1,4 +1,5 @@
 import { Ghost, Plus } from "lucide-react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, type BotIdentity, Button } from "ui";
 import { FIRST_PROMPT_KEYS } from "../lib/firstRun";
@@ -19,7 +20,8 @@ export function BotEmptyView({
   firstBot,
   onGoFirst,
   onCreateBot,
-  onDemo
+  onDemo,
+  extra
 }: {
   bot: BotIdentity | undefined;
   busy: boolean;
@@ -33,6 +35,8 @@ export function BotEmptyView({
   onCreateBot?: () => void;
   /** Set only while no real model is connected: the sample cards then start the offline demo. */
   onDemo?: (task: DemoTaskId) => void;
+  /** Quiet extra below the actions (the "Getting started" checklist). */
+  extra?: ReactNode;
 }) {
   const { t } = useTranslation();
   if (!bot) {
@@ -100,6 +104,7 @@ export function BotEmptyView({
             {error}
           </p>
         ) : null}
+        {extra}
       </div>
     </div>
   );

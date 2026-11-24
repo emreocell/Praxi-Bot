@@ -7,6 +7,7 @@ pub mod daemon;
 pub mod listener;
 mod microphone;
 pub mod prereq;
+pub mod quick_ask;
 pub mod shell;
 pub mod update;
 pub mod widget_visibility;
@@ -1128,6 +1129,8 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(update_plugin)
+        .plugin(quick_ask::plugin())
+        .manage(quick_ask::QuickAskState::default())
         .manage(update_runtime)
         .manage(shell::TrayState::default())
         .manage(control)
@@ -1170,6 +1173,12 @@ pub fn run() {
                 // Leaving the main window shows the widget (while a run is active); coming
                 // back hides it again, so it never sits on top of the chat or right panel.
                 apply_widget_visibility(window.app_handle());
+            }
+            // Like a menu: the Quick ask window goes away when the user clicks elsewhere.
+            if window.label() == quick_ask::WINDOW_LABEL
+                && matches!(event, WindowEvent::Focused(false))
+            {
+                let _ = window.hide();
             }
             if let WindowEvent::CloseRequested { api, .. } = event
                 && window.label() == "main"
@@ -1225,6 +1234,10 @@ pub fn run() {
             update::update_check,
             update::update_install,
             update::update_rollback,
+            quick_ask::quick_ask_configure,
+            quick_ask::quick_ask_connect,
+            quick_ask::quick_ask_hide,
+            quick_ask::quick_ask_open_in_app,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -1497,6 +1510,10 @@ mod acl_tests {
         ("update_check", "MAIN_ONLY"),
         ("update_install", "MAIN_ONLY"),
         ("update_rollback", "MAIN_ONLY"),
+        ("quick_ask_configure", "MAIN_ONLY"),
+        ("quick_ask_connect", "QUICK_ASK_ONLY"),
+        ("quick_ask_hide", "QUICK_ASK_ONLY"),
+        ("quick_ask_open_in_app", "QUICK_ASK_ONLY"),
     ];
 
     /// Read-only commands with no side effect beyond returning state; the
@@ -1615,6 +1632,9 @@ mod acl_tests {
         "overlay_clear",
         "get_monitors_geometry",
         "autostart_supported",
+        "quick_ask_connect",
+        "quick_ask_hide",
+        "quick_ask_open_in_app",
     ];
 
     #[test]
@@ -1632,6 +1652,14 @@ mod acl_tests {
                     "give_back_control",
                     "stop_bot_run",
                     "dismiss_stop_widget",
+                ]),
+            ),
+            (
+                "quick-ask",
+                set(&[
+                    "quick_ask_connect",
+                    "quick_ask_hide",
+                    "quick_ask_open_in_app",
                 ]),
             ),
             ("overlay-0", set(&["get_control_state"])),
@@ -1672,9 +1700,10 @@ mod acl_tests {
 
     #[test]
     fn widget_and_overlays_cannot_reach_the_sensitive_commands() {
-        for label in ["widget", "overlay-0"] {
+        for label in ["widget", "overlay-0", "quick-ask"] {
             let allowed = commands_for(label);
             for sensitive in [
+                "quick_ask_configure",
                 "start_bot_run",
                 "finish_bot_run",
                 "ack_stop",

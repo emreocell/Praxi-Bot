@@ -201,6 +201,11 @@ pub(crate) async fn extract(sh: Arc<Shared>, ex: Exchange) {
         return;
     };
     let store = Arc::clone(&cfg.store);
+    // The owner's per-bot switch, read now (not when the turn started).
+    let settings = sh.memory_settings(ex.bot_id);
+    if !settings.enabled() {
+        return;
+    }
     let Ok(profile) = sh.profile_for(ex.bot_id) else {
         return;
     };
@@ -223,6 +228,8 @@ pub(crate) async fn extract(sh: Arc<Shared>, ex: Exchange) {
         excerpt: ex.excerpt,
         user_messages: ex.user_messages,
         untrusted: ex.untrusted,
+        hold_all: settings.mode == memory_store::MemoryMode::Ask,
+        share_with_other_bots: settings.share_with_other_bots,
     };
     let _ = Pipeline::new(&store, &model).ingest(&ctx).await;
 }

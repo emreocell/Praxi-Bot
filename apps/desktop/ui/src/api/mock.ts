@@ -52,6 +52,10 @@ import type {
   KnowledgeEmbeddingApproval,
   KnowledgeEmbeddingGrantTarget,
   MemoryItem,
+  BotMemorySettings,
+  BotMemorySettingsInput,
+  MemoryEmbedding,
+  MemoryEmbeddingInput,
   CreateMemoryInput,
   UpdateMemoryInput
 } from "./types.ts";
@@ -641,6 +645,34 @@ const USAGE: UsageSummary = {
     }
   ],
   daily: mockDailySeries(30),
+  top_runs: [
+    {
+      run_id: "run-top-1",
+      bot_id: ATLAS,
+      chat_id: "chat-atlas-1",
+      created_at_ms: Date.now() - 2 * 86_400_000,
+      model_calls: 38,
+      prompt_tokens: 210_000,
+      completion_tokens: 31_000,
+      cached_tokens: 90_000,
+      cost_usd: 0.62,
+      calls_without_usage: 0,
+      calls_without_cost: 0
+    },
+    {
+      run_id: "run-top-2",
+      bot_id: NOVA,
+      chat_id: null,
+      created_at_ms: Date.now() - 5 * 86_400_000,
+      model_calls: 12,
+      prompt_tokens: 80_000,
+      completion_tokens: 9_000,
+      cached_tokens: 0,
+      cost_usd: null,
+      calls_without_usage: 0,
+      calls_without_cost: 12
+    }
+  ],
   calls_without_usage: 2,
   calls_without_cost: 31,
   time_zone: "UTC"
@@ -669,7 +701,7 @@ function serverFromConfig(c: McpServerConfig, category = "other"): McpServer {
     error: null,
     tool_count: 8,
     category: c.category ?? category,
-    trust_hints: false,
+    trust_hints: c.trust_hints ?? false,
     public_content: c.public_content ?? false,
     local_only: c.local_only ?? false,
     bots: c.bots ?? null
@@ -714,6 +746,7 @@ export class MockApiClient extends ApiClient {
       last_used_ms: NOW,
       valid_until_ms: null,
       deleted: false,
+      pending: false,
       undo_journal_id: 1
     },
     {
@@ -730,10 +763,21 @@ export class MockApiClient extends ApiClient {
       last_used_ms: NOW,
       valid_until_ms: null,
       deleted: false,
+      pending: false,
       undo_journal_id: 2
     }
   ];
   private readonly memoryUndoSnapshots = new Map<string, MemoryItem>();
+  private readonly memorySettings = new Map<string, BotMemorySettings>();
+  private memoryEmbedding: MemoryEmbedding = {
+    mode: "basic",
+    state: "ready",
+    label: "Basic",
+    done: 0,
+    total: 0,
+    error: null,
+    sources: []
+  };
   private nextJournalId = 3;
   readonly schedules: import("./types").Schedule[] = structuredClone(SCHEDULES);
   private readonly scheduleHistory = new Map<
@@ -1201,6 +1245,44 @@ export class MockApiClient extends ApiClient {
         hits: visible.map((m, i) => ({ memory: structuredClone(m), score: 1 / (60 + i + 1) }))
       });
     }
+    if (seg[0] === "memory" && seg[1] === "pending" && method === "GET") {
+      return ok(structuredClone(this.memories.filter((m) => m.pending && !m.deleted)));
+    }
+    if (seg[0] === "memory" && seg[1] === "embedding") {
+      if (method === "PUT") {
+        const input = opts.body as MemoryEmbeddingInput;
+        this.memoryEmbedding = {
+          ...this.memoryEmbedding,
+          mode: input.mode === "smart" ? "smart" : "basic",
+          label: input.mode === "smart" ? "mock/embed-v1" : "Basic",
+          state: "ready"
+        };
+      }
+      return ok(structuredClone(this.memoryEmbedding));
+    }
+    if (seg[0] === "bots" && seg[2] === "memory" && seg[3] === "settings") {
+      if (method === "PUT") {
+        const input = opts.body as BotMemorySettingsInput;
+        this.memorySettings.set(seg[1], {
+          mode: input.mode,
+          budget_tokens: input.budget_tokens ?? 800,
+          budget_min: 200,
+          budget_max: 2000,
+          share_with_other_bots: input.share_with_other_bots
+        });
+      }
+      return ok(
+        structuredClone(
+          this.memorySettings.get(seg[1]) ?? {
+            mode: "on",
+            budget_tokens: 800,
+            budget_min: 200,
+            budget_max: 2000,
+            share_with_other_bots: true
+          }
+        )
+      );
+    }
     if (seg[0] === "memory") {
       if (method === "GET" && !seg[1]) {
         const bot = typeof opts.query?.bot === "string" ? opts.query.bot : null;
@@ -1236,6 +1318,7 @@ export class MockApiClient extends ApiClient {
           last_used_ms: Date.now(),
           valid_until_ms: null,
           deleted: false,
+          pending: false,
           undo_journal_id: this.nextJournalId++
         };
         this.memoryUndoSnapshots.set(created.id, { ...created, deleted: true, undo_journal_id: null });
@@ -1266,6 +1349,12 @@ export class MockApiClient extends ApiClient {
         };
         this.memories[idx] = deleted;
         return ok(structuredClone(deleted));
+      }
+      if (method === "POST" && (seg[2] === "approve" || seg[2] === "discard")) {
+        const next: MemoryItem =
+          seg[2] === "approve" ? { ...current, pending: false } : { ...current, pending: false, deleted: true };
+        this.memories[idx] = next;
+        return ok(structuredClone(next));
       }
       if (method === "POST" && seg[2] === "undo") {
         const prev = this.memoryUndoSnapshots.get(current.id);
@@ -2424,6 +2513,7 @@ export class MockApiClient extends ApiClient {
     const merged: McpServer = {
       ...prev,
       ...(typeof patch.enabled === "boolean" ? { enabled: patch.enabled } : {}),
+      ...(typeof patch.trust_hints === "boolean" ? { trust_hints: patch.trust_hints } : {}),
       ...(typeof patch.category === "string" ? { category: patch.category } : {}),
       ...(typeof patch.command === "string" ? { command: patch.command } : {}),
       ...(typeof patch.url === "string" ? { url: patch.url } : {}),

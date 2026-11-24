@@ -52,6 +52,7 @@ pub mod mcp;
 mod mcp_routes;
 pub mod mcp_server;
 pub mod memory;
+mod memory_embed;
 pub mod openapi;
 pub mod owner;
 pub mod pc_access;
@@ -296,6 +297,8 @@ struct Inner {
     schedules: parking_lot::Mutex<Option<Arc<ScheduleStore>>>,
     /// `memory.db`, opened on first use when the loop was not given a store.
     memory: parking_lot::Mutex<Option<Arc<memory_store::MemoryStore>>>,
+    /// A Basic/Smart recall switch (re-index) is running.
+    memory_switch: std::sync::atomic::AtomicBool,
     /// Serialises `PUT /v1/policy` (read-modify-write of memory + `policy.json`).
     policy_lock: parking_lot::Mutex<()>,
     /// Target sets of `POST /v1/runs/stop` (see `stop`).
@@ -486,6 +489,7 @@ impl AppState {
             fill_secrets: OnceLock::new(),
             schedules: parking_lot::Mutex::new(None),
             memory: parking_lot::Mutex::new(None),
+            memory_switch: std::sync::atomic::AtomicBool::new(false),
             policy_lock: parking_lot::Mutex::new(()),
             stops: parking_lot::Mutex::new(stop::StopBook::default()),
             #[cfg(test)]
@@ -804,6 +808,20 @@ impl AppState {
         let store = Arc::new(ScheduleStore::from_storage(self.storage())?);
         *g = Some(Arc::clone(&store));
         Ok(store)
+    }
+
+    /// Claim the single "re-index memory" slot; false when one is running.
+    pub(crate) fn begin_memory_switch(&self) -> bool {
+        !self
+            .0
+            .memory_switch
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+    }
+
+    pub(crate) fn end_memory_switch(&self) {
+        self.0
+            .memory_switch
+            .store(false, std::sync::atomic::Ordering::Release);
     }
 
     /// The personal memory store (`<data dir>/memory.db`), shared with the agent
@@ -1337,6 +1355,17 @@ fn api_routes() -> Router<AppState> {
             "/v1/memory/forgotten/{id}",
             axum::routing::delete(memory::remove_forgotten),
         )
+        .route("/v1/memory/pending", get(memory::list_pending))
+        .route("/v1/memory/{id}/approve", post(memory::approve_memory))
+        .route("/v1/memory/{id}/discard", post(memory::discard_memory))
+        .route(
+            "/v1/memory/embedding",
+            get(memory_embed::get_embedding).put(memory_embed::put_embedding),
+        )
+        .route(
+            "/v1/bots/{id}/memory/settings",
+            get(memory::get_bot_memory_settings).put(memory::put_bot_memory_settings),
+        )
         .route(
             "/v1/bots/{id}/memory/preview",
             get(memory::preview_bot_memory),
@@ -1780,6 +1809,8 @@ async fn serve_with_startup_timeout(
             }
         });
     }
+    // A Smart recall model comes back after a restart (or recall falls back to Basic).
+    memory_embed::restore_smart(&state);
     let stopping = state.clone();
     let served = axum::serve(listener, router(state.clone()))
         .with_graceful_shutdown(async move {

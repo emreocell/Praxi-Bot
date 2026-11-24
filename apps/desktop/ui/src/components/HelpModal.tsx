@@ -1,5 +1,5 @@
 import { ExternalLink, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { DEFAULT_STOP_HOTKEY } from "../config/product";
@@ -23,7 +23,8 @@ export function HelpModal({
   stopHotkey,
   sendWith,
   onSetup,
-  onDemo
+  onDemo,
+  gettingStarted
 }: {
   open: boolean;
   onClose: () => void;
@@ -32,6 +33,8 @@ export function HelpModal({
   onSetup: () => void;
   /** Opens the offline demo (always available from Help, even with a model connected). */
   onDemo?: () => void;
+  /** The "Getting started" checklist (always shown here, even after it was put away). */
+  gettingStarted?: ReactNode;
 }) {
   const { t, i18n } = useTranslation();
   const [query, setQuery] = useState("");
@@ -47,6 +50,7 @@ export function HelpModal({
       <div className={styles.root} data-testid="help-center">
         <h2 className={styles.title}>{t("help.center.title")}</h2>
         <p className={styles.text}>{t("help.center.intro")}</p>
+        {gettingStarted}
         <label className={styles.search}>
           <Search aria-hidden="true" />
           <input

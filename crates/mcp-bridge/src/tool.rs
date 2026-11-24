@@ -21,15 +21,47 @@ pub fn qualified_name(server: &str, tool: &str) -> String {
     format!("mcp:{server}/{tool}")
 }
 
-/// Effect of a remote tool.  Per ADR-0004 the default is `Destructive`.  The
-/// server's `readOnlyHint = true` lowers it to `Read` **only** when the user
-/// opted in with `trust_hints` for that server; otherwise an untrusted server
-/// could skip approval (`read_tools_skip_ask`) by declaring its own tools
-/// read-only.
-pub(crate) fn effect_of(tool: &McpTool, trust_hints: bool) -> Effect {
-    match tool.annotations.as_ref().and_then(|a| a.read_only_hint) {
-        Some(true) if trust_hints => Effect::Read,
-        _ => Effect::Destructive,
+/// What a server's own annotations are allowed to change. See
+/// `docs/design/mcp-annotations.md` for the full table.
+///
+/// Annotations are claims made by the server. They are believed only on a
+/// server the owner marked trusted (`trust_hints`); on any other server, and
+/// for any tool without annotations, the tool keeps the safe default: it asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HintPolicy {
+    /// Effect the permission engine sees.
+    pub effect: Effect,
+    /// A trusted server said the tool reaches an open world (web, e-mail,
+    /// external systems): it counts as able to send data out, even when it is
+    /// read-only and even when the server is marked local-only.
+    pub open_world: bool,
+}
+
+/// Judge one tool's annotations.
+///
+/// * Untrusted server, no annotations, or no usable annotation: `Destructive`
+///   (ADR-0004: a missing hint is the spec default "not read-only, destructive").
+/// * Trusted + `readOnlyHint = true` and not also `destructiveHint = true`:
+///   `Read`. A contradictory claim (read-only *and* destructive) fails closed.
+/// * Trusted + `readOnlyHint = false` + `destructiveHint = false` (a write that
+///   calls itself non-destructive): still `Destructive` for the engine, so it
+///   asks. The "allow for this task" grant applies to every MCP tool and is the
+///   only way to lower the friction; the hint alone never auto-allows a write.
+/// * `idempotentHint` never changes anything: repeating a call that sends a
+///   message or spends money is no safer for being repeatable.
+/// * `openWorldHint = true` (trusted server only) marks the tool as egress.
+///   Its result is already untrusted content for every MCP tool.
+pub(crate) fn hint_policy(tool: &McpTool, trust_hints: bool) -> HintPolicy {
+    let hints = tool.annotations.as_ref().filter(|_| trust_hints);
+    let read_only = hints.and_then(|a| a.read_only_hint) == Some(true)
+        && hints.and_then(|a| a.destructive_hint) != Some(true);
+    HintPolicy {
+        effect: if read_only {
+            Effect::Read
+        } else {
+            Effect::Destructive
+        },
+        open_world: hints.and_then(|a| a.open_world_hint) == Some(true),
     }
 }
 
@@ -99,17 +131,27 @@ pub(crate) fn browser_kind(config: &McpServerConfig, remote_tool: &str) -> Optio
 /// * Code outside the page, or a file move, on such a server: every flag,
 ///   a program start for code, `Destructive`, and the adapter always asks.
 fn class_of(config: &McpServerConfig, tool: &McpTool) -> (ContentClass, Effect) {
-    let effect = effect_of(tool, config.trust_hints);
+    let hints = hint_policy(tool, config.trust_hints);
+    let effect = hints.effect;
     browser_kind(config, &tool.name)
         .and_then(|kind| browser_mcp::rules(kind, config.local_only, effect == Effect::Read))
         .map_or_else(
             || {
                 (
-                    ContentClass::declared(true, !config.public_content, !config.local_only),
+                    ContentClass::declared(
+                        true,
+                        !config.public_content,
+                        !config.local_only || hints.open_world,
+                    ),
                     effect,
                 )
             },
-            |(content, effect, _)| (content, effect),
+            |(mut content, effect, _)| {
+                // A trusted open-world hint widens egress on this branch too:
+                // navigate/evaluate leave the machine even on a local-only server.
+                content.egress |= hints.open_world;
+                (content, effect)
+            },
         )
 }
 
@@ -652,12 +694,119 @@ mod tests {
 
     #[test]
     fn effect_defaults_to_destructive_unless_trusted_read_only_hint() {
+        let effect_of = |t: &McpTool, trust| hint_policy(t, trust).effect;
         for trust in [false, true] {
             assert_eq!(effect_of(&tool(None), trust), Effect::Destructive);
             assert_eq!(effect_of(&tool(Some(false)), trust), Effect::Destructive);
         }
         assert_eq!(effect_of(&tool(Some(true)), false), Effect::Destructive);
         assert_eq!(effect_of(&tool(Some(true)), true), Effect::Read);
+    }
+
+    fn hinted(json: &str) -> McpTool {
+        let mut t = tool(None);
+        t.annotations = Some(serde_json::from_str(json).expect("annotations"));
+        t
+    }
+
+    #[test]
+    fn policy_table_trusted_and_untrusted_servers() {
+        // (annotations, trusted effect, trusted open world)
+        let rows = [
+            ("{}", Effect::Destructive, false),
+            (r#"{"readOnlyHint":true}"#, Effect::Read, false),
+            (
+                r#"{"readOnlyHint":true,"openWorldHint":true}"#,
+                Effect::Read,
+                true,
+            ),
+            // A read-only claim that is also destructive is contradictory: ask.
+            (
+                r#"{"readOnlyHint":true,"destructiveHint":true}"#,
+                Effect::Destructive,
+                false,
+            ),
+            // A "non-destructive" write is still asked about.
+            (
+                r#"{"readOnlyHint":false,"destructiveHint":false}"#,
+                Effect::Destructive,
+                false,
+            ),
+            (r#"{"destructiveHint":false}"#, Effect::Destructive, false),
+            // Idempotent never lowers anything.
+            (
+                r#"{"readOnlyHint":false,"idempotentHint":true}"#,
+                Effect::Destructive,
+                false,
+            ),
+            (
+                r#"{"idempotentHint":true,"openWorldHint":true}"#,
+                Effect::Destructive,
+                true,
+            ),
+        ];
+        for (json, trusted_effect, open_world) in rows {
+            let t = hinted(json);
+            let trusted = hint_policy(&t, true);
+            assert_eq!(
+                (trusted.effect, trusted.open_world),
+                (trusted_effect, open_world),
+                "{json}"
+            );
+            // An untrusted server's hints change nothing at all.
+            let untrusted = hint_policy(&t, false);
+            assert_eq!(
+                (untrusted.effect, untrusted.open_world),
+                (Effect::Destructive, false),
+                "{json}"
+            );
+        }
+        // No annotations at all: ask, trusted or not.
+        for trust in [false, true] {
+            let p = hint_policy(&tool(None), trust);
+            assert_eq!((p.effect, p.open_world), (Effect::Destructive, false));
+        }
+    }
+
+    #[test]
+    fn open_world_makes_a_trusted_read_only_tool_egress_even_on_a_local_server() {
+        let mut cfg = McpServerConfig::stdio("srv", "x", [""; 0]);
+        cfg.local_only = true;
+        cfg.trust_hints = true;
+        let closed = spec_of(&cfg, &hinted(r#"{"readOnlyHint":true}"#));
+        assert_eq!(closed.effect, Effect::Read);
+        assert!(!closed.content.egress);
+        let open = spec_of(
+            &cfg,
+            &hinted(r#"{"readOnlyHint":true,"openWorldHint":true}"#),
+        );
+        assert_eq!(open.effect, Effect::Read);
+        assert!(open.content.egress && open.content.ingests_untrusted);
+        // On an untrusted server the hint is ignored (the tool is not egress
+        // beyond what the owner declared for the server).
+        cfg.trust_hints = false;
+        let ignored = spec_of(
+            &cfg,
+            &hinted(r#"{"readOnlyHint":true,"openWorldHint":true}"#),
+        );
+        assert!(!ignored.content.egress);
+        assert_eq!(ignored.effect, Effect::Destructive);
+    }
+
+    #[test]
+    fn open_world_hint_sets_egress_on_an_in_page_browser_tool_of_a_local_server() {
+        let mut cfg = McpServerConfig::stdio("srv", "x", [""; 0]);
+        cfg.local_only = true;
+        cfg.trust_hints = true;
+        cfg.browser = true;
+        let mut t = hinted(r#"{"readOnlyHint":true,"openWorldHint":true}"#);
+        t.name = "browser_navigate".into();
+        let spec = spec_of(&cfg, &t);
+        assert!(spec.content.egress && spec.content.ingests_untrusted);
+        // Without the hint a local-only server stays non-egress.
+        let mut closed = hinted(r#"{"readOnlyHint":true}"#);
+        closed.name = "browser_navigate".into();
+        assert!(!spec_of(&cfg, &closed).content.egress);
     }
 
     #[test]

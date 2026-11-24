@@ -38,6 +38,7 @@
     "allow-update-status",
     "allow-update-check",
     "allow-update-install",
-    "allow-update-rollback"
+    "allow-update-rollback",
+    "allow-quick-ask-configure"
   ]
 }

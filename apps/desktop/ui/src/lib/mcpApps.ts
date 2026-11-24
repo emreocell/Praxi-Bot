@@ -79,7 +79,8 @@ export function secretStoreName(entryId: string, secretName: string): string {
  */
 export function configFromCatalog(
   entry: McpCatalogEntry,
-  folder?: string
+  folder?: string,
+  trustHints = false
 ): McpServerConfig {
   const { install } = entry;
   const config: McpServerConfig = {
@@ -88,6 +89,11 @@ export function configFromCatalog(
     category: entry.category,
     enabled: true
   };
+  // Believing a server's own labels is the owner's explicit choice at install;
+  // it is written only when chosen, so the stored default stays "no".
+  if (trustHints) {
+    config.trust_hints = true;
+  }
   if (install.transport === "stdio") {
     config.command = install.command;
     config.args = install.args ?? [];
@@ -175,7 +181,8 @@ export async function connectCatalogEntry(
   api: Pick<McpApi, "setSecret" | "createMcpServer">,
   entry: McpCatalogEntry,
   values: Record<string, string>,
-  folder?: string
+  folder?: string,
+  trustHints = false
 ): Promise<McpServer> {
   if (entry.install.folder && !(folder ?? "").trim()) {
     throw new MissingFolderError();
@@ -192,7 +199,7 @@ export async function connectCatalogEntry(
       values[s.name].trim()
     );
   }
-  return api.createMcpServer(configFromCatalog(entry, folder));
+  return api.createMcpServer(configFromCatalog(entry, folder, trustHints));
 }
 
 /** Split a command line into arguments, honouring single and double quotes. */
@@ -246,7 +253,8 @@ const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,47}$/i;
 export function customServerConfig(
   form: CustomServerForm,
   existing: string[] = [],
-  scope: BotScope = { mode: "all" }
+  scope: BotScope = { mode: "all" },
+  trustHints = false
 ): CustomServerResult {
   const name = form.name.trim();
   if (!NAME_RE.test(name) || existing.includes(name)) {
@@ -258,6 +266,9 @@ export function customServerConfig(
     category: "other",
     enabled: true
   };
+  if (trustHints) {
+    config.trust_hints = true;
+  }
   // `bots` is written only when narrowed; omitted = every bot.
   const bots = botsFromScope(scope);
   if (bots !== null) {
