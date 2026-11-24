@@ -36,3 +36,19 @@ test("the mock export never writes raw message text", async () => {
     assert.ok(text.includes("[REDACTED]"), format);
   }
 });
+
+test("the export query carries the format and what to include", async () => {
+  const { exportQuery, clipPreview } = await import("./chatHistory.ts");
+  assert.equal(exportQuery("html", { steps: false, approvals: true }), "format=html&steps=false&approvals=true");
+  assert.equal(exportQuery("json"), "format=json&steps=true&approvals=true");
+  assert.deepEqual(clipPreview("abc", 10), { text: "abc", clipped: false });
+  assert.deepEqual(clipPreview("abcdef", 3), { text: "abc", clipped: true });
+});
+
+test("the mock HTML export escapes text and never carries raw message text", async () => {
+  const { MockApiClient } = await import("../api/mock.ts");
+  const client = new MockApiClient();
+  const chats = await client.listChats();
+  const html = await (await (client as import("./../api/client.ts").ApiClient).exportChat(chats[0].id, "html", { steps: false, approvals: false })).text();
+  assert.ok(html.includes("default-src 'none'") && !html.includes("<script"));
+});

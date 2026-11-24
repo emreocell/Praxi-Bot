@@ -2086,12 +2086,32 @@
     "working": "Working…",
     "yesterdayLabel": "Yesterday"
   },
+  "chatExport": {
+    "approvals": "Approval answers (allowed or denied)",
+    "copied": "Copied as Markdown",
+    "copy": "Copy as Markdown",
+    "copyFailed": "Could not copy. Try saving the file instead.",
+    "format": "File type",
+    "formats": {
+      "html": "Web page (HTML)",
+      "json": "Data file (JSON)",
+      "markdown": "Text (Markdown)"
+    },
+    "include": "Include",
+    "loading": "Preparing the preview…",
+    "menu": "Export chat…",
+    "messages": "Messages",
+    "previewClipped": "The preview shows only the start. The file contains everything.",
+    "previewLabel": "Preview of the exported chat",
+    "privacy": "Passwords, keys, private messages and your user folder are removed before anything is shown or saved. Attached files are not included.",
+    "save": "Save file…",
+    "steps": "Steps the bot took",
+    "title": "Export chat"
+  },
   "chatHistory": {
     "count": "{{count}} matching messages",
     "count_one": "{{count}} matching message",
     "count_other": "{{count}} matching messages",
-    "exportJson": "Export as JSON",
-    "exportMarkdown": "Export as Markdown",
     "more": "More results",
     "noneYet": "No visible matches on this page yet",
     "results": "Message search results",

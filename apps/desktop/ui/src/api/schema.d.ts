@@ -11517,8 +11517,12 @@ export interface operations {
             path: {
                 /** @description Chat id */
                 id: string;
-                /** @description `markdown` (default) or `json`. */
+                /** @description `markdown` (default), `json` or `html` (one self-contained page). */
                 format: string | null;
+                /** @description Include the step list (default true). */
+                steps: boolean | null;
+                /** @description Include the approval answers (default true). */
+                approvals: boolean | null;
             };
             cookie?: never;
         };

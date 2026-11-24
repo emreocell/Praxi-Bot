@@ -924,6 +924,10 @@ export class MockApiClient extends ApiClient {
       .map((m) => ({ ...m, content: "[REDACTED]" }));
     const doc = { format_version: 1, chat_id: chatId, title: chat.title, created_at_ms: chat.created_at_ms,
       messages: messages.map((m) => ({ id: m.id, run_id: m.run_id ?? null, role: m.role, created_at_ms: m.created_at_ms, content: m.content, attachments: [] })), steps: [], approvals: [] };
+    if (format === "html") {
+      const esc = (x: string) => x.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+      return new Blob([`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'"><title>${esc(chat.title)}</title>${messages.map((m) => `<pre>${esc(m.content)}</pre>`).join("")}`], { type: "text/html" });
+    }
     return new Blob([format === "json" ? JSON.stringify(doc, null, 2) : transcriptMarkdown(messages, { title: chat.title, user: "User", bot: "Bot" })],
       { type: format === "json" ? "application/json" : "text/markdown" });
   }

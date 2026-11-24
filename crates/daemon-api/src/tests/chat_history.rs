@@ -114,6 +114,7 @@ async fn search_is_owner_only_scoped_bounded_and_never_matches_secrets() {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn export_redacts_credentials_and_private_content_and_only_summarizes_tools() {
     const CANARY: &str = "history-secret-canary-value";
     let redactor = agent_core::SharedRedactor::default();
@@ -148,7 +149,7 @@ async fn export_redacts_credentials_and_private_content_and_only_summarizes_tool
         .set_messages_superseded(&[old], true)
         .unwrap();
     tool_fixture(&t, &bot, &chat, CANARY);
-    for format in ["json", "markdown"] {
+    for format in ["json", "markdown", "html"] {
         let path = format!("/v1/chats/{chat}/export?format={format}");
         assert_eq!(
             call_token_only(&t, Method::GET, &path, None).await.status,
@@ -190,6 +191,29 @@ async fn export_redacts_credentials_and_private_content_and_only_summarizes_tool
             assert_eq!(r.json()["steps"].as_array().unwrap().len(), 1);
         }
     }
+    // Leaving steps and approvals out removes them from the file.
+    let r = call(
+        &t,
+        Method::GET,
+        &format!("/v1/chats/{chat}/export?format=html&steps=false&approvals=false"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(
+        r.headers["content-type"]
+            .to_str()
+            .unwrap()
+            .starts_with("text/html")
+    );
+    assert!(
+        r.headers["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("default-src 'none'")
+    );
+    let page = String::from_utf8(r.body.clone()).unwrap();
+    assert!(!page.contains("read_file") && !page.contains("Approvals") && !page.contains(CANARY));
     message(&t, &chat, &"x".repeat(2 * 1024 * 1024 + 1), false, "user");
     assert_eq!(
         call(&t, Method::GET, &format!("/v1/chats/{chat}/export"), None)

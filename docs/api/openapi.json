@@ -3732,11 +3732,35 @@
           {
             "name": "format",
             "in": "path",
-            "description": "`markdown` (default) or `json`.",
+            "description": "`markdown` (default), `json` or `html` (one self-contained page).",
             "required": true,
             "schema": {
               "type": [
                 "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "steps",
+            "in": "path",
+            "description": "Include the step list (default true).",
+            "required": true,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "approvals",
+            "in": "path",
+            "description": "Include the approval answers (default true).",
+            "required": true,
+            "schema": {
+              "type": [
+                "boolean",
                 "null"
               ]
             }

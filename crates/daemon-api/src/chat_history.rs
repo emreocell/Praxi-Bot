@@ -142,8 +142,12 @@ fn search_page(s: &AppState, q: &SearchQuery) -> Result<SearchPage, ApiError> {
 
 #[derive(Deserialize, IntoParams)]
 pub(crate) struct ExportQuery {
-    /// `markdown` (default) or `json`.
+    /// `markdown` (default), `json` or `html` (one self-contained page).
     format: Option<String>,
+    /// Include the step list (default true).
+    steps: Option<bool>,
+    /// Include the approval answers (default true).
+    approvals: Option<bool>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -381,6 +385,12 @@ fn safe_text(s: &AppState, text: &str) -> String {
         .redact(&s.agent().redact_external_text(text.to_owned()))
 }
 
+/// Redact for a file that leaves the app: the shared chat redaction plus the
+/// profile (home) folder, which becomes `~` like in run and support reports.
+fn export_text(s: &AppState, text: &str) -> String {
+    crate::doctor::mask_home(&safe_text(s, text), crate::doctor::home_dir().as_deref())
+}
+
 /// Explicitly export one chat. Private messages are represented by redacted stubs.
 /// Refuses rather than silently truncating chats over 1,000 messages, 2 MiB of
 /// message text, 2,000 steps/approvals, or a 4 MiB serialized file.
@@ -401,8 +411,10 @@ pub(crate) async fn export(
 fn export_response(s: &AppState, cid: Uuid, q: &ExportQuery) -> Result<Response, ApiError> {
     s.agent().refresh_external_redactor();
     let format = q.format.as_deref().unwrap_or("markdown");
-    if !matches!(format, "markdown" | "json") {
-        return Err(ApiError::bad_request("format must be markdown or json"));
+    if !matches!(format, "markdown" | "json" | "html") {
+        return Err(ApiError::bad_request(
+            "format must be markdown, json or html",
+        ));
     }
     let chat = s.chat_of_user(ChatId(cid))?;
     // Scan a little past the exportable limits so inert rows (for example the
@@ -420,8 +432,16 @@ fn export_response(s: &AppState, cid: Uuid, q: &ExportQuery) -> Result<Response,
     let text_bytes = messages.iter().try_fold(0usize, |total, message| {
         total.checked_add(message.content.len())
     });
-    let steps = s.storage().chat_step_summaries(s.user_id(), chat.id)?;
-    let approvals = s.storage().chat_approval_summaries(s.user_id(), chat.id)?;
+    let steps = if q.steps.unwrap_or(true) {
+        s.storage().chat_step_summaries(s.user_id(), chat.id)?
+    } else {
+        Vec::new()
+    };
+    let approvals = if q.approvals.unwrap_or(true) {
+        s.storage().chat_approval_summaries(s.user_id(), chat.id)?
+    } else {
+        Vec::new()
+    };
     if omitted
         || messages.len() > MAX_EXPORT_MESSAGES
         || text_bytes.is_none_or(|bytes| bytes > MAX_EXPORT_TEXT_BYTES)
@@ -433,15 +453,15 @@ fn export_response(s: &AppState, cid: Uuid, q: &ExportQuery) -> Result<Response,
     let mut doc = ChatExport {
         format_version: 1,
         chat_id: cid,
-        title: safe_text(s, &chat.title),
+        title: export_text(s, &chat.title),
         created_at_ms: chat.created_at_ms,
         messages: Vec::new(),
         steps: steps
             .into_iter()
             .map(|(run, name, status, ts)| ExportStep {
                 run_id: run.0,
-                name: safe_text(s, &name),
-                status: safe_text(s, &status),
+                name: export_text(s, &name),
+                status: export_text(s, &status),
                 created_at_ms: ts,
             })
             .collect(),
@@ -457,14 +477,14 @@ fn export_response(s: &AppState, cid: Uuid, q: &ExportQuery) -> Result<Response,
     for message in messages {
         doc.messages.push(export_message(s, chat.id, message));
     }
-    let (body, mime, extension) = if format == "json" {
-        (
+    let (body, mime, extension) = match format {
+        "json" => (
             serde_json::to_string_pretty(&doc).map_err(ApiError::internal)?,
             "application/json",
             "json",
-        )
-    } else {
-        (markdown(&doc), "text/markdown; charset=utf-8", "md")
+        ),
+        "html" => (html(&doc), "text/html; charset=utf-8", "html"),
+        _ => (markdown(&doc), "text/markdown; charset=utf-8", "md"),
     };
     if body.len() > MAX_EXPORT_BYTES {
         return Err(ApiError::bad_request("chat exceeds export limits"));
@@ -477,6 +497,11 @@ fn export_response(s: &AppState, cid: Uuid, q: &ExportQuery) -> Result<Response,
                 format!("attachment; filename=\"chat-{cid}.{extension}\""),
             ),
             (header::CACHE_CONTROL, "no-store".into()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".into()),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; style-src 'unsafe-inline'".into(),
+            ),
         ],
         body,
     )
@@ -502,7 +527,7 @@ fn export_message(s: &AppState, chat: ChatId, m: storage::Message) -> ExportMess
         ids.into_iter()
             .take(agent_core::attachments::MAX_PER_MESSAGE)
             .filter_map(|id| agent_core::attachments::meta(s.storage().data_dir(), chat, id).ok())
-            .map(|a| agent_core::attachments::clean_name(&safe_text(s, &a.name)))
+            .map(|a| agent_core::attachments::clean_name(&export_text(s, &a.name)))
             .collect()
     };
     ExportMessage {
@@ -513,7 +538,7 @@ fn export_message(s: &AppState, chat: ChatId, m: storage::Message) -> ExportMess
         content: if m.exposure_private {
             "[REDACTED]".into()
         } else {
-            safe_text(s, text)
+            export_text(s, text)
         },
         source,
         attachments,
@@ -590,9 +615,129 @@ fn markdown(doc: &ChatExport) -> String {
     out
 }
 
+fn esc(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// One self-contained page: inline style only, no script, image, link or network
+/// (CSP `default-src 'none'`), and every value escaped.
+fn html(doc: &ChatExport) -> String {
+    let mut out = format!(
+        "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\">\n\
+<title>{title}</title>\n<style>\n\
+:root{{color-scheme:light dark;font-family:system-ui,sans-serif}}\n\
+body{{max-width:46rem;margin:2rem auto;padding:0 1rem;line-height:1.5}}\n\
+.meta{{opacity:.7}}\n\
+article{{border-left:4px solid #888;padding:.25rem .75rem;margin:1rem 0}}\n\
+article.user{{border-left-color:#2e7d4f}}\n\
+pre{{white-space:pre-wrap;word-break:break-word;font:inherit;margin:.25rem 0}}\n\
+</style>\n</head>\n<body>\n<h1>{title}</h1>\n<p class=\"meta\">{created}</p>\n",
+        title = esc(&doc.title.replace(['\r', '\n'], " ")),
+        created = esc(&timestamp(doc.created_at_ms)),
+    );
+    for m in &doc.messages {
+        let class = if m.role == "user" {
+            "user"
+        } else {
+            "assistant"
+        };
+        let _ = write!(
+            out,
+            "<article class=\"{class}\">\n<h2>{} · {}</h2>\n<pre>{}</pre>\n",
+            esc(&m.role),
+            esc(&timestamp(m.created_at_ms)),
+            esc(&m.content)
+        );
+        for name in &m.attachments {
+            let _ = writeln!(
+                out,
+                "<p class=\"meta\">Attachment: {}</p>",
+                esc(&name.replace(['\r', '\n'], " "))
+            );
+        }
+        out.push_str("</article>\n");
+    }
+    if !doc.steps.is_empty() {
+        out.push_str("<h2>Steps</h2>\n<ul>\n");
+        for step in &doc.steps {
+            let _ = writeln!(
+                out,
+                "<li>{} · {} · {} (run {})</li>",
+                esc(&timestamp(step.created_at_ms)),
+                esc(&step.name.replace(['\r', '\n'], " ")),
+                esc(&step.status.replace(['\r', '\n'], " ")),
+                step.run_id
+            );
+        }
+        out.push_str("</ul>\n");
+    }
+    if !doc.approvals.is_empty() {
+        out.push_str("<h2>Approvals</h2>\n<ul>\n");
+        for a in &doc.approvals {
+            let _ = writeln!(
+                out,
+                "<li>{} · {} (run {})</li>",
+                esc(&timestamp(a.created_at_ms)),
+                esc(&a.outcome),
+                a.run_id
+            );
+        }
+        out.push_str("</ul>\n");
+    }
+    out.push_str("</body>\n</html>\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn html_export_escapes_everything_and_carries_a_strict_csp() {
+        let doc = ChatExport {
+            format_version: 1,
+            chat_id: Uuid::from_u128(1),
+            title: "<script>alert(1)</script>".into(),
+            created_at_ms: 0,
+            messages: vec![ExportMessage {
+                id: Uuid::from_u128(2),
+                run_id: None,
+                role: "user".into(),
+                created_at_ms: 0,
+                content: "<img src=x onerror=alert(1)> & \"q\"".into(),
+                source: None,
+                attachments: vec!["<b>a.txt".into()],
+            }],
+            steps: vec![],
+            approvals: vec![],
+        };
+        let page = html(&doc);
+        assert!(page.contains("default-src 'none'"));
+        assert!(!page.contains("<script") && !page.contains("<img") && !page.contains("<b>"));
+        assert!(page.contains("&lt;img src=x onerror=alert(1)&gt; &amp; &quot;q&quot;"));
+    }
+
+    #[test]
+    fn the_profile_folder_becomes_a_tilde_in_any_slash_style() {
+        let masked = crate::doctor::mask_home(
+            r"see C:\Users\Ada\notes and C:/Users/Ada/x",
+            Some(r"C:\Users\Ada"),
+        );
+        assert_eq!(masked, r"see ~\notes and ~/x");
+    }
 
     #[test]
     fn export_formats_match_documented_golden_files() {

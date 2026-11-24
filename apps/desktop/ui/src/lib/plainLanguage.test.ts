@@ -38,7 +38,7 @@ const ADVANCED_ALLOWED = [
   "pastedSecret.kind.", // names of the products a pasted key belongs to
   "apps.advanced.", // "Advanced" apps section
   "chat.route.hover", // routing details shown on hover
-  "chatHistory.exportJson",
+  "chatExport.formats.json",
   "health.details"
 ];
 

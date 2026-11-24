@@ -1,4 +1,24 @@
-export type ExportFormat = "markdown" | "json";
+export type ExportFormat = "markdown" | "json" | "html";
+
+/** What the owner chose to include next to the messages. */
+export interface ExportOptions {
+  steps: boolean;
+  approvals: boolean;
+}
+
+export const DEFAULT_EXPORT_OPTIONS: ExportOptions = { steps: true, approvals: true };
+
+const EXTENSION: Record<ExportFormat, string> = { markdown: "md", json: "json", html: "html" };
+
+/** Query string of the daemon's export route. */
+export function exportQuery(format: ExportFormat, options: ExportOptions = DEFAULT_EXPORT_OPTIONS): string {
+  return `format=${format}&steps=${options.steps}&approvals=${options.approvals}`;
+}
+
+/** The preview shows the start of the file only; it says so when it cut something. */
+export function clipPreview(text: string, max = 6000): { text: string; clipped: boolean } {
+  return text.length > max ? { text: text.slice(0, max), clipped: true } : { text, clipped: false };
+}
 
 /**
  * Fetch one page of hits. A page whose hits were all omitted by the daemon comes back empty
@@ -50,17 +70,20 @@ export function historySnippetParts(text: string, query: string): { text: string
   }, []);
 }
 
+type ExportClient = { exportChat: (id: string, format: ExportFormat, options?: ExportOptions) => Promise<Blob> };
+
 /** The daemon supplies redacted bytes; filenames contain no conversation content. */
 export async function saveChatExport(
-  client: { exportChat: (id: string, format: ExportFormat) => Promise<Blob> },
+  client: ExportClient,
   chatId: string,
-  format: ExportFormat
+  format: ExportFormat,
+  options: ExportOptions = DEFAULT_EXPORT_OPTIONS
 ): Promise<void> {
-  const blob = await client.exportChat(chatId, format);
+  const blob = await client.exportChat(chatId, format, options);
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `chat-${chatId}.${format === "json" ? "json" : "md"}`;
+  anchor.download = `chat-${chatId}.${EXTENSION[format]}`;
   document.body.append(anchor);
   anchor.click();
   anchor.remove();

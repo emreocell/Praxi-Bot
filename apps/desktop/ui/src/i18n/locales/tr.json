@@ -2086,12 +2086,32 @@
     "working": "Çalışıyor…",
     "yesterdayLabel": "Dün"
   },
+  "chatExport": {
+    "approvals": "Onay yanıtları (izin verildi ya da reddedildi)",
+    "copied": "Markdown olarak kopyalandı",
+    "copy": "Markdown olarak kopyala",
+    "copyFailed": "Kopyalanamadı. Bunun yerine dosyayı kaydetmeyi deneyin.",
+    "format": "Dosya türü",
+    "formats": {
+      "html": "Web sayfası (HTML)",
+      "json": "Veri dosyası (JSON)",
+      "markdown": "Metin (Markdown)"
+    },
+    "include": "Dahil et",
+    "loading": "Önizleme hazırlanıyor…",
+    "menu": "Sohbeti dışa aktar…",
+    "messages": "Mesajlar",
+    "previewClipped": "Önizleme yalnızca başlangıcı gösterir. Dosyada her şey bulunur.",
+    "previewLabel": "Dışa aktarılan sohbetin önizlemesi",
+    "privacy": "Parolalar, anahtarlar, özel mesajlar ve kullanıcı klasörünüz, hiçbir şey gösterilmeden ya da kaydedilmeden önce kaldırılır. Ekli dosyalar dahil değildir.",
+    "save": "Dosyayı kaydet…",
+    "steps": "Botun attığı adımlar",
+    "title": "Sohbeti dışa aktar"
+  },
   "chatHistory": {
     "count": "{{count}} eşleşen mesaj",
     "count_one": "{{count}} eşleşen mesaj",
     "count_other": "{{count}} eşleşen mesaj",
-    "exportJson": "JSON olarak dışa aktar",
-    "exportMarkdown": "Markdown olarak dışa aktar",
     "more": "Daha fazla sonuç",
     "noneYet": "Bu sayfada henüz görünen eşleşme yok",
     "results": "Mesaj arama sonuçları",

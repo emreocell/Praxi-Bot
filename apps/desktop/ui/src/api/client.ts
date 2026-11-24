@@ -1,4 +1,5 @@
 import { createSseParser } from "./events.ts";
+import { exportQuery } from "../lib/chatHistory.ts";
 import { isLocalBaseUrl } from "../lib/liveViewState.ts";
 import type { Connection } from "./connection";
 import type {
@@ -760,8 +761,15 @@ export class ApiClient {
   searchChatHistory(q: string, offset = 0, signal?: AbortSignal): Promise<import("./types").SearchPage> {
     return this.request("GET", "/chats/search", { query: { q, offset }, signal });
   }
-  exportChat(chatId: string, format: import("../lib/chatHistory").ExportFormat): Promise<Blob> {
-    return this.requestBlob("GET", `/chats/${encodeURIComponent(chatId)}/export?format=${format}`);
+  exportChat(
+    chatId: string,
+    format: import("../lib/chatHistory").ExportFormat,
+    options?: import("../lib/chatHistory").ExportOptions
+  ): Promise<Blob> {
+    return this.requestBlob(
+      "GET",
+      `/chats/${encodeURIComponent(chatId)}/export?${exportQuery(format, options)}`
+    );
   }
 
   listChats(): Promise<Chat[]> {

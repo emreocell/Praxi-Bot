@@ -2086,12 +2086,32 @@
     "working": "Arbeitet …",
     "yesterdayLabel": "Gestern"
   },
+  "chatExport": {
+    "approvals": "Freigabe-Antworten (erlaubt oder abgelehnt)",
+    "copied": "Als Markdown kopiert",
+    "copy": "Als Markdown kopieren",
+    "copyFailed": "Kopieren war nicht möglich. Speichern Sie stattdessen die Datei.",
+    "format": "Dateityp",
+    "formats": {
+      "html": "Webseite (HTML)",
+      "json": "Datendatei (JSON)",
+      "markdown": "Textdatei (Markdown)"
+    },
+    "include": "Enthalten",
+    "loading": "Vorschau wird vorbereitet…",
+    "menu": "Chat exportieren…",
+    "messages": "Nachrichten",
+    "previewClipped": "Die Vorschau zeigt nur den Anfang. Die Datei enthält alles.",
+    "previewLabel": "Vorschau des exportierten Chats",
+    "privacy": "Passwörter, Schlüssel, private Nachrichten und Ihr Benutzerordner werden entfernt, bevor etwas angezeigt oder gespeichert wird. Angehängte Dateien sind nicht enthalten.",
+    "save": "Datei speichern…",
+    "steps": "Schritte des Bots",
+    "title": "Chat exportieren"
+  },
   "chatHistory": {
     "count": "{{count}} passende Nachrichten",
     "count_one": "{{count}} passende Nachricht",
     "count_other": "{{count}} passende Nachrichten",
-    "exportJson": "Als JSON exportieren",
-    "exportMarkdown": "Als Markdown exportieren",
     "more": "Weitere Ergebnisse",
     "noneYet": "Auf dieser Seite noch keine sichtbaren Treffer",
     "results": "Ergebnisse der Nachrichtensuche",

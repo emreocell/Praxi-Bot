@@ -1401,6 +1401,18 @@ pub fn home_dir() -> Option<String> {
         .filter(|h| h.len() > 3)
 }
 
+/// Replace the profile (home) folder, in any slash style, with `~`.
+#[must_use]
+pub(crate) fn mask_home(text: &str, home: Option<&str>) -> String {
+    let Some(home) = home.filter(|h| h.len() > 3) else {
+        return text.to_owned();
+    };
+    let home = home.trim_end_matches(['/', '\\']);
+    let s = replace_ci(text, home, "~");
+    let s = replace_ci(&s, &home.replace('\\', "/"), "~");
+    replace_ci(&s, &home.replace('/', "\\"), "~")
+}
+
 /// Length in bytes of the prefix of `hay` that equals `needle` ignoring
 /// letter case (Unicode), if it does.
 fn ci_prefix(hay: &str, needle: &str) -> Option<usize> {
