@@ -29,6 +29,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "stop", group: "global", labelKey: "help.stop", keys: "@stop", source: "App.tsx" },
   { id: "findInChat", group: "global", labelKey: "help.findInChat", keys: "Ctrl/Cmd+F", source: "views/ChatView.tsx" },
   { id: "findNav", group: "global", labelKey: "help.findNav", keys: "Enter / Shift+Enter, Esc", source: "components/ChatFindBar.tsx" },
+  { id: "contextMenu", group: "global", labelKey: "help.contextMenu", keys: "Shift+F10 / Menu", source: "lib/contextMenu.ts" },
   { id: "closePanel", group: "global", labelKey: "help.closePanel", keys: "Esc", source: "App.tsx" },
   { id: "exitLiveFocus", group: "global", labelKey: "help.exitLiveFocus", keys: "Shift+Esc", source: "lib/liveViewStage.ts" },
   { id: "send", group: "composer", labelKey: "help.send", keys: "@send", source: "lib/settingsPrefs.ts" },

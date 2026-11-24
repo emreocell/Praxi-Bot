@@ -1,0 +1,148 @@
+/*
+ * Right-click menu.  Same raised, ringed surface as Popover (frosted in the glass style, outlined
+ * in the line style) so it never reads as a foreign widget; compact rows, calm hover, one fade and
+ * scale of --motion-duration-fast that is switched off for prefers-reduced-motion.
+ * Drawn in a portal on <body>: a glass panel's backdrop-filter cannot clip it.
+ */
+.menu {
+  --shadow-overlay-y: calc(var(--space-8) - var(--space-1));
+  --shadow-overlay-blur: calc(var(--space-16) + var(--space-2));
+  position: fixed;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  min-width: calc(var(--space-16) * 3);
+  max-width: calc(100vw - var(--space-4));
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: none;
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated-opaque);
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--color-text) 5%, transparent), transparent 70%);
+  box-shadow:
+    0 0 0 var(--size-border) color-mix(in srgb, var(--color-text) 13%, transparent),
+    0 var(--shadow-overlay-y) var(--shadow-overlay-blur) calc(var(--space-4) * -1) var(--color-shadow),
+    0 var(--size-border-heavy) var(--space-2) calc(var(--space-1) / -2) var(--color-shadow);
+  color: var(--color-text);
+  animation: menuIn var(--motion-duration-fast) ease-out;
+}
+
+@keyframes menuIn {
+  from { opacity: 0; transform: scale(0.96); }
+}
+
+:global(:root[data-style="glass"]) .menu,
+:global(:root[data-style="tinted"]) .menu {
+  background-color: var(--float-fill);
+  backdrop-filter: var(--float-filter);
+  box-shadow:
+    var(--float-highlight),
+    0 0 0 var(--size-border) var(--float-border),
+    0 var(--shadow-overlay-y) var(--shadow-overlay-blur) calc(var(--space-4) * -1) var(--color-shadow);
+}
+
+:global(:root[data-style="line"]) .menu {
+  background-color: var(--color-background);
+  background-image: none;
+  box-shadow:
+    0 0 0 var(--size-border) color-mix(in srgb, var(--color-text) 22%, transparent),
+    0 var(--space-5) calc(var(--space-12) + var(--size-border-thick)) calc(var(--space-4) * -1) var(--color-shadow);
+}
+
+.menu:focus-visible {
+  outline: none;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--space-8);
+  padding: var(--space-0) var(--space-2);
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--font-size-ui-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:focus {
+  outline: none;
+  background-color: var(--color-surface-active);
+}
+
+.item:focus-visible {
+  box-shadow: inset 0 0 0 var(--size-border-thick) var(--color-focus);
+}
+
+.item[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.icon {
+  display: inline-flex;
+  flex: none;
+  width: var(--space-4);
+  height: var(--space-4);
+  color: var(--color-text-muted);
+}
+
+.icon > svg {
+  width: 100%;
+  height: 100%;
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hint {
+  flex: none;
+  margin-left: var(--space-4);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+}
+
+.check {
+  flex: none;
+  width: var(--space-4);
+  height: var(--space-4);
+  color: var(--color-text-muted);
+}
+
+.separator {
+  height: var(--size-border);
+  margin: var(--space-1) var(--space-2);
+  background-color: color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+
+/* The real host of a link: small, muted, one line. */
+.header {
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item[data-danger="true"],
+.item[data-danger="true"] .icon {
+  color: var(--color-danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu {
+    animation: none;
+  }
+}

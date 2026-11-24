@@ -24,6 +24,7 @@ const ALLOWED: Record<string, string> = {
   "apps/desktop/ui/src/components/Modal.module.css|:global(:root[data-style=\"glass\"]) .dialog,\n:global(:root[data-style=\"tinted\"]) .dialog": "dialog (portal)",
   "apps/desktop/ui/src/components/Modal.module.css|.backdrop": "3 px veil behind a dialog (transient)",
   "apps/desktop/ui/src/components/Popover.module.css|:global(:root[data-style=\"glass\"]) .popover,\n:global(:root[data-style=\"tinted\"]) .popover": "popover (portal)",
+  "apps/desktop/ui/src/components/ContextMenu.module.css|:global(:root[data-style=\"glass\"]) .menu,\n:global(:root[data-style=\"tinted\"]) .menu": "right-click menu (portal)",
   "apps/desktop/ui/src/components/CommandPalette.module.css|:global(:root[data-style=\"glass\"]) .dialog,\n:global(:root[data-style=\"tinted\"]) .dialog": "command palette (portal)",
   "apps/desktop/ui/src/components/Toast.module.css|:global(:root[data-style=\"glass\"]) .toast:not(.danger),\n:global(:root[data-style=\"tinted\"]) .toast:not(.danger)": "toast (fixed, top layer)",
   // Owned by PR #94 (live view): left as is.

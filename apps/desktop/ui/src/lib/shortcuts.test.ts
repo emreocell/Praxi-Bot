@@ -26,6 +26,7 @@ const LOCAL_ONLY: Record<string, string> = {
   "components/BotPanel.tsx": "arrow keys on the panel tabs",
   "components/CharacterPicker.tsx": "arrow keys inside the bot shape and color pickers",
   "components/ChatList.tsx": "Enter/Escape in inline rename and arrow keys on chat menu trigger",
+  "components/ContextMenu.tsx": "arrow keys, type-ahead, Esc and Tab inside an open right-click menu (opening it is the contextMenu entry)",
   "components/ComputerPicker.tsx": "arrow keys between the run-location radio rows",
   "components/ModelPicker.tsx": "arrow keys inside the model picker list",
   "components/ResendTurn.tsx": "Escape and Ctrl/Cmd+Enter inside the inline message editor",

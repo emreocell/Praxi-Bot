@@ -52,6 +52,11 @@ const screens = [
   { name: 'add-server-choose', query: 'screen=home&menu=1', act: [{ click: '[data-testid=computer-add]' }, { click: '[data-testid=add-server-next]', optional: true }] },
   { name: 'schedule-builder', expect: 'form', query: 'screen=schedules', act: [{ click: '[data-testid=schedules-empty-new], [data-testid=schedules-new]', optional: true }, { clickText: /new schedule/i, optional: true }] },
   { name: 'run-timeline', expect: '[role=dialog]', query: 'screen=changes', act: [{ click: '[data-testid=run-timeline]' }] },
+  // Right-click menus (act: rightClick a selector); the keyboard pass skips them because Tab closes a menu.
+  { name: 'context-menu-message', expect: '[role=menu][data-testid=context-menu]', skipRing: true, scope: '[data-testid=context-menu]', query: 'screen=chat', act: [{ rightClick: '[data-message-row=assistant]' }] },
+  { name: 'context-menu-user-message', expect: '[role=menu][data-testid=context-menu]', skipRing: true, scope: '[data-testid=context-menu]', query: 'screen=chat', act: [{ rightClick: '[data-message-row=user]' }] },
+  { name: 'context-menu-chat-row', expect: '[role=menu][data-testid=context-menu]', skipRing: true, scope: '[data-testid=context-menu]', query: 'screen=bot&panel=1', act: [{ click: '#bot-panel-tab-library' }, { rightClick: '[data-testid=chat-row-panel] button' }] },
+  { name: 'context-menu-bot-row', expect: '[role=menu][data-testid=context-menu]', skipRing: true, scope: '[data-testid=context-menu]', query: 'screen=bot', act: [{ rightClick: '[data-bot-id] button' }] },
   { name: 'command-popover', expect: '[role=listbox]', query: 'screen=chat', act: [{ type: ['textarea', '/'] }] },
   { name: 'mention-popover', expect: '[role=listbox]', query: 'screen=chat', act: [{ type: ['textarea', '@'] }] },
   ...SETTINGS.map((s) => ({ name: `settings-${s}`, query: `screen=settings&section=${s}` }))
@@ -59,7 +64,7 @@ const screens = [
 // Two themes (one light, one dark) in English, plus two other locales (text differs, structure does not).
 const themes = ['clay', 'obsidian'];
 const cases = [];
-for (const s of screens) for (const theme of themes) cases.push({ name: `${s.name}/${theme}/en`, query: `${s.query}&theme=${theme}&lang=en`, act: s.act, expect: s.expect });
+for (const s of screens) for (const theme of themes) cases.push({ name: `${s.name}/${theme}/en`, query: `${s.query}&theme=${theme}&lang=en`, act: s.act, expect: s.expect, scope: s.scope });
 cases.push({ name: 'home/clay/tr', query: 'screen=home&theme=clay&lang=tr' }, { name: 'settings-general/clay/de', query: 'screen=settings&section=general&theme=clay&lang=de' });
 const selected = only ? cases.filter((c) => c.name.includes(only)) : cases;
 
@@ -107,16 +112,17 @@ try {
           if (a.press) await page.keyboard.press(a.press);
           else if (a.type) await page.locator(a.type[0]).first().fill(a.type[1], { timeout: 5000 });
           else if (a.clickText) await page.getByRole('button', { name: a.clickText }).first().click({ timeout: 5000 });
+          else if (a.rightClick) await page.locator(a.rightClick).first().click({ button: 'right', timeout: 5000 });
           else await page.locator(a.click).first().click({ timeout: 5000 });
         } catch (err) { if (!a.optional) throw err; }
         await page.waitForTimeout(400);
       }
       if (c.expect) await page.waitForSelector(c.expect, { timeout: 5000 }); // the view under test really opened
       await page.evaluate(axeSource);
-      const result = await page.evaluate(() => globalThis.axe.run(globalThis.document, {
+      const result = await page.evaluate((scope) => globalThis.axe.run(scope ? globalThis.document.querySelector(scope) : globalThis.document, {
         runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'] },
         resultTypes: ['violations']
-      }));
+      }), c.scope);
       for (const v of result.violations) {
         for (const node of v.nodes) {
           const selector = node.target.join(' >> ');
@@ -140,7 +146,7 @@ try {
 
   // Keyboard pass: Tab through the new views in four themes; every stop must show a focus indicator.
   const ringThemes = ['clay', 'obsidian', 'contrast-dark', 'contrast-light'];
-  const ringScreens = screens.filter((s) => s.expect && (!only || s.name.includes(only)));
+  const ringScreens = screens.filter((s) => s.expect && !s.skipRing && (!only || s.name.includes(only)));
   const ringProblems = new Map();
   const combos = ringScreens.flatMap((sc) => ringThemes.map((theme) => ({ sc, theme })));
   let nextCombo = 0;
