@@ -205,6 +205,19 @@
     "summary": "Deine Bots laufen auf dem Computer, auf dem du Praxi installiert hast. Sie arbeiten, solange Praxi offen und dein Computer wach ist."
   },
   {
+    "doc": "de/memory.md",
+    "title": "Gedächtnis: woran sich deine Bots erinnern",
+    "headings": [
+      "Was gemerkt wird",
+      "Wo es liegt",
+      "Ansehen, korrigieren und vergessen",
+      "Braucht dein OK",
+      "Ausschalten oder erst fragen",
+      "Wie Notizen gefunden werden: Einfach oder Intelligent"
+    ],
+    "summary": "In anderer Sprache: English · Türkçe."
+  },
+  {
     "doc": "de/quick-faq.md",
     "title": "Kurze Antworten",
     "headings": [],

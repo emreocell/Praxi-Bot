@@ -2630,6 +2630,10 @@
         "hint": "Kartı yenile ve karar vermeden önce yeni metni oku. Hiçbir şey onaylanmadı.",
         "title": "Uygulama bu aracı yeniden değiştirdi"
       },
+      "memory_owner_only": {
+        "hint": "Botun bellek ayarlarını, botun çalıştığı bilgisayardaki uygulamadan değiştir.",
+        "title": "Bunu yalnızca sahibi değiştirebilir"
+      },
       "message_not_editable": {
         "hint": "Yalnızca kendi son mesajınız düzenlenebilir veya yeniden oluşturulabilir, o da bot işini bitirdikten sonra.",
         "title": "Bu mesaj düzenlenemez"
@@ -3825,15 +3829,20 @@
     "addTitle": "Hafıza kaydı ekle",
     "addedNotice": "Hafıza kaydı eklendi.",
     "allKinds": "Tüm kategoriler",
+    "approve": "Onayla",
+    "approvedNotice": "Onaylandı. Bot artık kullanabilir.",
     "bot": "Bot",
     "botOnly": "Yalnızca bu bota özel kayıtlar",
     "content": "Hatırlanacak bilgi",
     "contentPlaceholder": "Kısa bir bilgi veya tercih yaz…",
     "description": "Her botun geçmiş sohbetlerden ne hatırladığını gör, herhangi bir kaydı düzenle veya unut, değişiklikleri geri al ve bir sonraki tura ne gireceğini önizle.",
+    "discard": "At",
+    "discardedNotice": "Atıldı.",
     "edit": "Düzenle",
     "editLabel": "Hafıza metni",
     "empty": "Botun burada adın gibi işe yarar bilgileri hatırlar. Bir sohbette ona bir şey söyle ya da aşağıdan kendin ekle.",
     "emptyTitle": "Henüz kayıt yok",
+    "expires": "{{date}} tarihinde sona erer",
     "forget": "Unut",
     "forgottenBadge": "Unutuldu",
     "forgottenNotice": "Hafıza kaydı unutuldu.",
@@ -3848,6 +3857,8 @@
       "profile": "Kullanıcı profili"
     },
     "noBot": "Hafıza kayıtlarını görmek veya eklemek için bir bot oluştur.",
+    "pendingHint": "Bunlar web sayfalarından, dosyalardan veya araçlardan alındı ya da her şeyi onaylamak istedin. Sen onaylayana kadar bot bunları kullanmaz.",
+    "pendingTitle": "Onayın gerekiyor",
     "previewEmpty": "Bu mesaj için hiçbir hafıza kaydı çağrılmaz.",
     "previewHint": "Tura eklenecek hatırlanan kayıtlar veri bloğunu görmek için örnek bir mesaj gir.",
     "previewPlaceholder": "ör. Sürüm notlarını ne zaman hazırlıyoruz?",
@@ -3870,6 +3881,46 @@
     "undo": "Geri al",
     "undoneNotice": "Son değişiklik geri alındı.",
     "updatedNotice": "Hafıza kaydı güncellendi."
+  },
+  "memoryRecall": {
+    "consent": "Anılarımın arama verisine çevrilmek üzere {{provider}} sağlayıcısına gönderilmesini kabul ediyorum",
+    "disable": "Temel moda dön",
+    "enable": "Akıllı moda geç",
+    "explain": {
+      "basic": "Bir anı, mesajınla aynı kelimeleri içeriyorsa bulunur. Hiçbir şey bu bilgisayardan çıkmaz.",
+      "smart": "Seçtiğin gömme modeli sayesinde bir anı, farklı kelimeler kullanılsa bile anlamına göre bulunur."
+    },
+    "failed": "Akıllı mod açılamadı, bu yüzden Temel mod kullanılıyor. Hiçbir şey kaybolmadı. Modeli kontrol edip tekrar dene.",
+    "noSource": "Akıllı mod, bir botun bilgi kaynakları için kurduğun gömme modelini kullanır. Etkinleştirmek için önce orada bir tane kur.",
+    "progress": "{{total}} anıdan {{done}} tanesi yeniden dizinleniyor",
+    "source": "Kullanılacak model",
+    "state": {
+      "basic": "Temel (kelime eşleşmesi)",
+      "smart": "Akıllı (anlam)"
+    },
+    "title": "Anılar nasıl bulunur",
+    "waiting": "model başlıyor; bu sırada kelimeler kullanılıyor"
+  },
+  "memorySettings": {
+    "advanced": "Gelişmiş",
+    "budget": "Bir yanıta okunan bellek: yaklaşık {{words}} kelime",
+    "budgetHint": "Daha fazla bellek bota daha çok arka plan bilgisi verir ama her yanıtı biraz yavaşlatır ve pahalılaştırır. Varsayılan yaklaşık 600 kelimedir.",
+    "budgetLabel": "Yanıt başına bellek boyutu",
+    "mode": {
+      "ask": "Kaydetmeden önce sor",
+      "off": "Kapalı",
+      "on": "Açık"
+    },
+    "modeHint": {
+      "ask": "Her yeni anı, sen onaylayana kadar \"Onayın gerekiyor\" listesinde bekler.",
+      "off": "Hiçbir şey öğrenmez, hatırlamaz ve bellek araçları yoktur. Mevcut anılar saklanır ama kullanılmaz.",
+      "on": "Söylediklerinden öğrenir. Web sayfalarından, dosyalardan veya araçlardan aldığı her şey önce senin onayını bekler."
+    },
+    "sectionHint": "Bu botun sohbetlerinden öğrenip öğrenmeyeceğini ve öğrendiklerini kullanıp kullanmayacağını seç.",
+    "sectionTitle": "Bellek",
+    "share": "Öğrendiklerimi diğer botlarımla paylaş",
+    "shareHint": "Açık: seninle ve geçmiş olaylarla ilgili bilgiler tüm botlarının kullanımına açılır. Kapalı: bu bot öğrendiği her şeyi kendine saklar.",
+    "title": "Bellek"
   },
   "messageInfo": {
     "label": "Mesaj bilgisi",

@@ -521,6 +521,7 @@ function BotEditDialog({
               deleteBlocked={deleteBlocked}
               chatCount={chatCount}
               runCount={runCount ?? 0}
+              memoryBotId={bot.id}
               onDelete={() => {
                 setDeleteError(null);
                 setConfirmDelete(true);
