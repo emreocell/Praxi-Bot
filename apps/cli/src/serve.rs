@@ -1410,6 +1410,7 @@ pub fn serve(
                 Err(e) => support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: composio: {e}; app connections are off"),
             }
         }
+        let email_for_channel = email.clone();
         if let Some(email) = email {
             state.set_email(email as Arc<dyn daemon_api::EmailControl>);
         }
@@ -1459,7 +1460,20 @@ pub fn serve(
         let leader = state.leader().clone();
         let channel_state = state.clone();
         let channel_data = data_dir.to_path_buf();
+        let email_channel_token = api_token.clone();
         let prepare_channels = async move {
+            // The e-mail channel: off until the owner turns it on; never in safe mode.
+            if let Some(email) = email_for_channel.filter(|_| !safe_mode) {
+                let host = crate::email_channel_host::EmailChannelHost::new(
+                    &channel_data,
+                    email,
+                    &format!("http://{addr}"),
+                    &email_channel_token,
+                );
+                channel_state
+                    .set_email_channel(host.clone() as Arc<dyn daemon_api::EmailChannelControl>);
+                channel_state.add_channel(host);
+            }
             // Safe mode starts no channel: the Telegram bridge stays off.
             if let Some(store) = telegram_store.filter(|_| !safe_mode) {
                 let owner_key = channel_state.owner_key();

@@ -61,7 +61,7 @@ fn check_password(p: &str) -> Result<(), ApiError> {
 
 /// A bound bot must exist; the id is stored in its canonical (lower-case,
 /// hyphenated) form, the one `ToolContext::bot_id` carries.
-fn canonical_bot(s: &AppState, raw: &str) -> Result<String, ApiError> {
+pub(crate) fn canonical_bot(s: &AppState, raw: &str) -> Result<String, ApiError> {
     if raw.is_empty() || raw.len() > MAX_BOT_ID_LEN {
         return Err(ApiError::bad_request("malformed bot id"));
     }

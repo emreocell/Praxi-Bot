@@ -30,6 +30,7 @@ pub mod doctor;
 mod doctor_routes;
 pub mod dto;
 pub mod email;
+pub mod email_channel;
 mod email_routes;
 pub mod error;
 #[cfg(any(test, feature = "fake-provider"))]
@@ -120,6 +121,7 @@ pub use composio::{ComposioControl, ComposioControlError};
 pub use control::{ControlConfig, ControlHub};
 pub use doctor_routes::{DoctorHost, DoctorReport, RepairResult};
 pub use email::{EmailControl, EmailControlError};
+pub use email_channel::EmailChannelControl;
 pub use error::ApiError;
 pub use mcp::{McpControl, McpControlError};
 pub use openapi::openapi_json;
@@ -278,6 +280,8 @@ struct Inner {
     components: OnceLock<Arc<dyn ComponentControl>>,
     /// E-mail account management (see [`AppState::set_email`]).
     email: OnceLock<Arc<dyn EmailControl>>,
+    /// E-mail channel control (see [`AppState::set_email_channel`]).
+    email_channel: OnceLock<Arc<dyn EmailChannelControl>>,
     /// Bounds concurrent "test connection" calls (see `email_routes`).
     email_tests: Arc<tokio::sync::Semaphore>,
     /// Web search settings management (see [`AppState::set_web`]).
@@ -480,6 +484,7 @@ impl AppState {
             composio: OnceLock::new(),
             components: OnceLock::new(),
             email: OnceLock::new(),
+            email_channel: OnceLock::new(),
             email_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
             web: OnceLock::new(),
             voice: OnceLock::new(),
@@ -582,6 +587,15 @@ impl AppState {
     /// [`serve`]; a second call is ignored).
     pub fn set_email(&self, email: Arc<dyn EmailControl>) {
         let _ = self.0.email.set(email);
+    }
+
+    /// Enable `/v1/email/channel*` (call once, before serving).
+    pub fn set_email_channel(&self, control: Arc<dyn EmailChannelControl>) {
+        let _ = self.0.email_channel.set(control);
+    }
+
+    pub(crate) fn email_channel(&self) -> Option<Arc<dyn EmailChannelControl>> {
+        self.0.email_channel.get().cloned()
     }
 
     /// Enable `/v1/web/search*` with the embedder web-search manager (call once,
@@ -1637,6 +1651,22 @@ fn api_routes() -> Router<AppState> {
             post(e::send_email_test),
         )
         .route("/v1/email/test", post(e::test_email_draft))
+        .route(
+            "/v1/email/channel",
+            get(email_channel::get_channel).put(email_channel::put_channel),
+        )
+        .route(
+            "/v1/email/channel/replies",
+            get(email_channel::list_replies),
+        )
+        .route(
+            "/v1/email/channel/replies/{id}/approve",
+            post(email_channel::approve_reply),
+        )
+        .route(
+            "/v1/email/channel/replies/{id}/deny",
+            post(email_channel::deny_reply),
+        )
         .route(
             "/v1/web/search",
             get(w::get_web_search).put(w::update_web_search),

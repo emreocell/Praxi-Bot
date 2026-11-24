@@ -5644,6 +5644,30 @@
         "saved": "{{name}} kaydedildi"
       }
     },
+    "emailChannel": {
+      "account": "İzlenecek posta kutusu",
+      "approve": "Tam olarak bunu gönder",
+      "bot": "Postaları alacak bot",
+      "choose": "Seçin…",
+      "deny": "Gönderme",
+      "description": "Bir botun, posta kutunuzun tek bir klasöründeki yeni postaları görmesine izin verin.",
+      "enable": "E-posta kanalını aç",
+      "folder": "İzlenecek klasör",
+      "folderHint": "Genellikle INBOX. Yalnızca bunu açtıktan sonra gelen postalar iletilir.",
+      "full": "Bota her postanın özetini değil tüm metnini göster",
+      "noAccount": "Önce yukarıdan bir posta kutusu ekleyin.",
+      "note": "Postaları başkaları yazar; bu yüzden bot onları emir değil bilgi olarak ele alır. Varsayılan olarak yalnızca göndereni, konuyu ve ilk birkaç satırı görür. Ekler hiçbir zaman açılmaz. Yanıtlara izin verip her birini burada onaylamadıkça hiçbir şey gönderilmez.",
+      "replies": "Botun yanıt önermesine izin ver (her yanıt gönderilmeden önce sizin onayınızı bekler)",
+      "running": "Çalışıyor",
+      "save": "Kaydet",
+      "saved": "Kaydedildi.",
+      "sent": "E-posta gönderildi.",
+      "stopped": "Çalışmıyor",
+      "subject": "Konu: {{subject}}",
+      "title": "Bota e-posta",
+      "to": "Alıcı: {{to}}",
+      "waiting": "Onayınızı bekleyen yanıtlar"
+    },
     "general": {
       "account": {
         "description": "Kenar çubuğundaki hesap menüsünde görünür.",

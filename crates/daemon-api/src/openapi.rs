@@ -20,6 +20,7 @@ use crate::doctor;
 use crate::doctor_routes;
 use crate::dto;
 use crate::email;
+use crate::email_channel;
 use crate::email_routes;
 use crate::embeddings_routes;
 use crate::error;
@@ -134,6 +135,11 @@ impl Modify for Security {
         doctor_routes::get_doctor,
         doctor_routes::repair,
         doctor_routes::report,
+        email_channel::approve_reply,
+        email_channel::deny_reply,
+        email_channel::get_channel,
+        email_channel::list_replies,
+        email_channel::put_channel,
         email_routes::create_email_account,
         email_routes::delete_email_account,
         email_routes::list_email_accounts,
@@ -520,6 +526,10 @@ impl Modify for Security {
         dto::UsageSummary,
         dto::UsageTotals,
         email::EmailAccountDto,
+        email_channel::EmailChannelDto,
+        email_channel::EmailChannelMode,
+        email_channel::EmailChannelSettingsDto,
+        email_channel::EmailPendingReplyDto,
         email::EmailAccountInput,
         email::EmailAccountPatch,
         email::EmailImapServer,

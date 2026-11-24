@@ -70,3 +70,25 @@ quoted_printable dependency uses 0BSD, which this workspace does not allow.
 Tests use in-process TLS servers bound to loopback with ephemeral ports and
 generated certificates, plus MIME fixtures. They require no external network
 or real email credentials.
+
+## E-mail channel (`channel` module)
+
+`connector_email::channel::EmailChannel` implements `channel_api::Channel` on top
+of a `MailboxProvider`: new unread mail in one folder becomes an *untrusted*
+inbound message for a bot (settings in `<data dir>/email-channel.toml`, managed
+through the owner-only `/v1/email/channel*` routes).
+
+- Off by default; only mail arriving after it is switched on is delivered; the
+  position survives restarts (`email-channel-state.json`).
+- Summary by default (sender, subject, date, a short snippet); the full plain-text
+  body is an opt-in. Attachments are listed (name, size) and never opened. Mail is
+  fetched with `BODY.PEEK`, nothing is marked read. Control and direction-override
+  characters are stripped and every message starts with a fixed untrusted banner.
+- `allowed_senders` of the account are enforced; the account's own address is skipped.
+  At most `max_per_poll` mails per check (the rest become one notice).
+- Replies are a separate opt-in. `Channel::send` never sends: it files a pending
+  reply (To only, at most 5 recipients, only addresses that wrote to the mailbox,
+  at most 20 waiting, 24 h expiry). The owner approves the exact text through
+  `POST /v1/email/channel/replies/{id}/approve`; at most 10 sends per hour.
+- Transport rules (verified TLS, host validation, size caps) are the connector's.
+  UIDVALIDITY resets are not tracked.

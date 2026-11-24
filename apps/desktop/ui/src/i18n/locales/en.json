@@ -5644,6 +5644,30 @@
         "saved": "{{name}} saved"
       }
     },
+    "emailChannel": {
+      "account": "Mailbox to watch",
+      "approve": "Send exactly this",
+      "bot": "Bot that gets the mail",
+      "choose": "Choose…",
+      "deny": "Don't send",
+      "description": "Let one bot see new mail from one folder of your mailbox.",
+      "enable": "Switch on the e-mail channel",
+      "folder": "Folder to watch",
+      "folderHint": "Usually INBOX. Only mail that arrives after you switch this on is passed on.",
+      "full": "Show the bot the whole text of each mail, not just a summary",
+      "noAccount": "Add a mailbox above first.",
+      "note": "Mail is written by other people, so the bot treats it as information, never as orders. By default it only sees the sender, the subject and the first few lines. Attachments are never opened. Nothing is sent unless you allow replies and then approve each one here.",
+      "replies": "Let the bot suggest replies (you approve every one before it is sent)",
+      "running": "Running",
+      "save": "Save",
+      "saved": "Saved.",
+      "sent": "E-mail sent.",
+      "stopped": "Not running",
+      "subject": "Subject: {{subject}}",
+      "title": "E-mail to a bot",
+      "to": "To: {{to}}",
+      "waiting": "Replies waiting for your OK"
+    },
     "general": {
       "account": {
         "description": "Shown in the sidebar account menu.",

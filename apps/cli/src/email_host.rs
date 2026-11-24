@@ -257,6 +257,18 @@ fn senders(list: &[String]) -> Result<Vec<String>, EmailControlError> {
 }
 
 impl EmailHost {
+    /// The running connector (accounts, tools).
+    pub(crate) fn connector(&self) -> &Arc<EmailConnector> {
+        &self.connector
+    }
+
+    /// The secret store the account passwords live in.
+    pub(crate) fn secrets(&self) -> Arc<dyn SecretStore> {
+        Arc::clone(&self.secrets)
+    }
+}
+
+impl EmailHost {
     /// Load `email.toml` into a fresh reloadable connector.
     #[cfg(test)]
     fn open(data_dir: &Path, secrets: Arc<dyn SecretStore>) -> Arc<Self> {

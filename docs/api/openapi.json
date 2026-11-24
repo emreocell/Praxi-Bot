@@ -6636,6 +6636,255 @@
         ]
       }
     },
+    "/v1/email/channel": {
+      "get": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Settings and state of the e-mail channel.",
+        "operationId": "get_channel",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChannelDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Save new settings (owner only). Replies stay off unless switched on here.",
+        "operationId": "put_channel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChannelSettingsDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChannelDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "unknown bot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/email/channel/replies": {
+      "get": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Replies waiting for approval (owner only).",
+        "operationId": "list_replies",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmailPendingReplyDto"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/email/channel/replies/{id}/approve": {
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Approve a waiting reply: it is sent exactly as listed (owner only).",
+        "operationId": "approve_reply",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Reply id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "sent"
+          },
+          "404": {
+            "description": "no such reply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "the mail server refused it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/email/channel/replies/{id}/deny": {
+      "post": {
+        "tags": [
+          "email"
+        ],
+        "summary": "Drop a waiting reply (owner only).",
+        "operationId": "deny_reply",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Reply id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "dropped"
+          },
+          "404": {
+            "description": "no such reply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/email/test": {
       "post": {
         "tags": [
@@ -18998,6 +19247,91 @@
           }
         }
       },
+      "EmailChannelDto": {
+        "type": "object",
+        "description": "The e-mail channel as the app shows it.",
+        "required": [
+          "settings",
+          "running",
+          "pending_replies"
+        ],
+        "properties": {
+          "pending_replies": {
+            "type": "integer",
+            "description": "Replies waiting for approval.",
+            "minimum": 0
+          },
+          "running": {
+            "type": "boolean",
+            "description": "The channel is running in this daemon."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/EmailChannelSettingsDto",
+            "description": "The saved choices."
+          }
+        }
+      },
+      "EmailChannelMode": {
+        "type": "string",
+        "description": "How much of a mail the bot sees.",
+        "enum": [
+          "summary",
+          "full"
+        ]
+      },
+      "EmailChannelSettingsDto": {
+        "type": "object",
+        "description": "What the owner chose for the e-mail channel.",
+        "required": [
+          "enabled",
+          "account",
+          "folder",
+          "poll_secs",
+          "mode",
+          "max_per_poll",
+          "replies_enabled"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Saved e-mail account to watch."
+          },
+          "bot": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Bot that receives the mail (storage id); `null` = nobody yet."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Off until the owner turns it on."
+          },
+          "folder": {
+            "type": "string",
+            "description": "Folder to watch."
+          },
+          "max_per_poll": {
+            "type": "integer",
+            "description": "Most mails delivered per check.",
+            "minimum": 0
+          },
+          "mode": {
+            "$ref": "#/components/schemas/EmailChannelMode",
+            "description": "Summary (default) or full text."
+          },
+          "poll_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds between checks (60 to 3600).",
+            "minimum": 0
+          },
+          "replies_enabled": {
+            "type": "boolean",
+            "description": "The bot may propose replies (each needs the owner's approval)."
+          }
+        }
+      },
       "EmailImapServer": {
         "type": "object",
         "description": "An IMAP server (always implicit TLS).",
@@ -19049,6 +19383,44 @@
           "unread": {
             "type": "boolean",
             "description": "Not read yet."
+          }
+        }
+      },
+      "EmailPendingReplyDto": {
+        "type": "object",
+        "description": "A reply waiting for the owner's approval.",
+        "required": [
+          "id",
+          "to",
+          "subject",
+          "body",
+          "created_ms"
+        ],
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "The whole body, exactly as it will be sent. Plain text: show it as text."
+          },
+          "created_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it was proposed (Unix ms).",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Id used to approve or deny."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Subject."
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exact recipients."
           }
         }
       },

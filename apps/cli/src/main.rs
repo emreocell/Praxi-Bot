@@ -15,6 +15,7 @@ mod components_host;
 mod composio_host;
 mod computer;
 mod doctor;
+mod email_channel_host;
 mod email_cmd;
 mod email_host;
 mod homeassistant_host;

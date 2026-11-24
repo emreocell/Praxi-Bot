@@ -428,6 +428,9 @@ export type ComposioDisconnect = S["ComposioDisconnectDto"];
 // ---- E-mail accounts (`/v1/email/*`) ---------------------------------------
 
 export type EmailAccount = S["EmailAccountDto"];
+export type EmailChannel = S["EmailChannelDto"];
+export type EmailChannelSettings = S["EmailChannelSettingsDto"];
+export type EmailPendingReply = S["EmailPendingReplyDto"];
 /** Body of `POST /v1/email/accounts` and `POST /v1/email/test`. */
 export type EmailAccountInput = S["EmailAccountInput"];
 /** Body of `PUT /v1/email/accounts/{name}` (every field optional). */

@@ -490,7 +490,9 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
         return ApiError::forbidden("components are managed by the owner's desktop only")
             .into_response();
     }
-    if is_email_messages_path(&check_path) && peer.role != PeerRole::Desktop {
+    if (is_email_messages_path(&check_path) || under(&check_path, "/v1/email/channel"))
+        && peer.role != PeerRole::Desktop
+    {
         return ApiError::forbidden("mailboxes are read from the owner's desktop only")
             .into_response();
     }

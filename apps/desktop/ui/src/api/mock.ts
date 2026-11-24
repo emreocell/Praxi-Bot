@@ -22,6 +22,8 @@ import type {
   GrantTarget,
   EmailAccount,
   EmailAccountInput,
+  EmailChannelSettings,
+  EmailPendingReply,
   InputBatch,
   ComposioApp,
   ComposioToolkit,
@@ -877,6 +879,17 @@ export class MockApiClient extends ApiClient {
     duckduckgo_lite: true,
     bing: true
   };
+  emailChannel: EmailChannelSettings = {
+    enabled: false,
+    account: "",
+    folder: "INBOX",
+    bot: null,
+    poll_secs: 120,
+    mode: "summary",
+    max_per_poll: 10,
+    replies_enabled: false
+  };
+  emailReplies: EmailPendingReply[] = [];
   readonly emailAccounts: EmailAccount[] = [
     {
       name: "personal",
@@ -2267,6 +2280,23 @@ export class MockApiClient extends ApiClient {
       return draft.provider === "agentmail"
         ? { imap: "ok", smtp: "ok", ok: true, api: "ok" }
         : { imap: "ok", smtp: "ok", ok: true };
+    }
+    if (sub === "channel") {
+      if (name === "replies" && action && seg[4]) {
+        this.emailReplies = this.emailReplies.filter((r) => r.id !== action);
+        return undefined;
+      }
+      if (name === "replies") {
+        return this.emailReplies;
+      }
+      if (method === "PUT") {
+        this.emailChannel = body as EmailChannelSettings;
+      }
+      return {
+        settings: this.emailChannel,
+        running: this.emailChannel.enabled,
+        pending_replies: this.emailReplies.length
+      };
     }
     if (sub !== "accounts") {
       throw new ApiError(404, "not_found", "mock email");

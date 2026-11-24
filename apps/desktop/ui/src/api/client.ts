@@ -84,6 +84,9 @@ import type {
   EmailAccount,
   EmailAccountInput,
   EmailAccountPatch,
+  EmailChannel,
+  EmailChannelSettings,
+  EmailPendingReply,
   EmailMessage,
   EmailSendTestResponse,
   EmailTestReport,
@@ -1506,6 +1509,23 @@ export class ApiClient {
   /** One fixed test message from the mailbox to its own address (owner-only). */
   sendEmailTest(name: string): Promise<EmailSendTestResponse> {
     return this.request("POST", `/email/accounts/${encodeURIComponent(name)}/send-test`);
+  }
+  /** The e-mail channel: settings and state (owner-only to change). */
+  getEmailChannel(): Promise<EmailChannel> {
+    return this.request("GET", "/email/channel");
+  }
+  saveEmailChannel(settings: EmailChannelSettings): Promise<EmailChannel> {
+    return this.request("PUT", "/email/channel", { body: settings });
+  }
+  /** Replies the bot proposed; nothing is sent until the owner approves one. */
+  listEmailReplies(): Promise<EmailPendingReply[]> {
+    return this.request("GET", "/email/channel/replies");
+  }
+  approveEmailReply(id: string): Promise<void> {
+    return this.request("POST", `/email/channel/replies/${encodeURIComponent(id)}/approve`);
+  }
+  denyEmailReply(id: string): Promise<void> {
+    return this.request("POST", `/email/channel/replies/${encodeURIComponent(id)}/deny`);
   }
   /** The same for an account that is not saved (nothing is stored). */
   testEmailDraft(input: EmailAccountInput): Promise<EmailTestReport> {

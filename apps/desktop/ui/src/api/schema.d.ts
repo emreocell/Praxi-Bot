@@ -1681,6 +1681,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/email/channel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Settings and state of the e-mail channel. */
+        get: operations["get_channel"];
+        /** Save new settings (owner only). Replies stay off unless switched on here. */
+        put: operations["put_channel"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/email/channel/replies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Replies waiting for approval (owner only). */
+        get: operations["list_replies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/email/channel/replies/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve a waiting reply: it is sent exactly as listed (owner only). */
+        post: operations["approve_reply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/email/channel/replies/{id}/deny": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Drop a waiting reply (owner only). */
+        post: operations["deny_reply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/email/test": {
         parameters: {
             query?: never;
@@ -5851,6 +5920,42 @@ export interface components {
             /** @description Login name; empty = the address. */
             username?: string | null;
         };
+        /** @description The e-mail channel as the app shows it. */
+        EmailChannelDto: {
+            /** @description Replies waiting for approval. */
+            pending_replies: number;
+            /** @description The channel is running in this daemon. */
+            running: boolean;
+            /** @description The saved choices. */
+            settings: components["schemas"]["EmailChannelSettingsDto"];
+        };
+        /**
+         * @description How much of a mail the bot sees.
+         * @enum {string}
+         */
+        EmailChannelMode: "summary" | "full";
+        /** @description What the owner chose for the e-mail channel. */
+        EmailChannelSettingsDto: {
+            /** @description Saved e-mail account to watch. */
+            account: string;
+            /** @description Bot that receives the mail (storage id); `null` = nobody yet. */
+            bot?: string | null;
+            /** @description Off until the owner turns it on. */
+            enabled: boolean;
+            /** @description Folder to watch. */
+            folder: string;
+            /** @description Most mails delivered per check. */
+            max_per_poll: number;
+            /** @description Summary (default) or full text. */
+            mode: components["schemas"]["EmailChannelMode"];
+            /**
+             * Format: int64
+             * @description Seconds between checks (60 to 3600).
+             */
+            poll_secs: number;
+            /** @description The bot may propose replies (each needs the owner's approval). */
+            replies_enabled: boolean;
+        };
         /** @description An IMAP server (always implicit TLS). */
         EmailImapServer: {
             /** @description Host name. */
@@ -5877,6 +5982,22 @@ export interface components {
             subject: string;
             /** @description Not read yet. */
             unread: boolean;
+        };
+        /** @description A reply waiting for the owner's approval. */
+        EmailPendingReplyDto: {
+            /** @description The whole body, exactly as it will be sent. Plain text: show it as text. */
+            body: string;
+            /**
+             * Format: int64
+             * @description When it was proposed (Unix ms).
+             */
+            created_ms: number;
+            /** @description Id used to approve or deny. */
+            id: string;
+            /** @description Subject. */
+            subject: string;
+            /** @description Exact recipients. */
+            to: string[];
         };
         /**
          * @description What a "test connection" learned about one server.
@@ -14134,6 +14255,199 @@ export interface operations {
                 };
             };
             /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailChannelDto"];
+                };
+            };
+            /** @description not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailChannelSettingsDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailChannelDto"];
+                };
+            };
+            /** @description unknown bot */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid settings */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_replies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailPendingReplyDto"][];
+                };
+            };
+            /** @description not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    approve_reply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Reply id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description sent */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description no such reply */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the mail server refused it */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    deny_reply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Reply id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description dropped */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description no such reply */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available */
             503: {
                 headers: {
                     [name: string]: unknown;

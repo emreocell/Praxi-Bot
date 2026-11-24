@@ -5644,6 +5644,30 @@
         "saved": "{{name}} gespeichert"
       }
     },
+    "emailChannel": {
+      "account": "Postfach, das beobachtet wird",
+      "approve": "Genau so senden",
+      "bot": "Bot, der die Mails erhält",
+      "choose": "Auswählen …",
+      "deny": "Nicht senden",
+      "description": "Ein Bot darf neue Mails aus einem Ordner Ihres Postfachs sehen.",
+      "enable": "E-Mail-Kanal einschalten",
+      "folder": "Ordner, der beobachtet wird",
+      "folderHint": "Meist INBOX. Nur Mails, die nach dem Einschalten eintreffen, werden weitergegeben.",
+      "full": "Dem Bot den ganzen Text jeder Mail zeigen, nicht nur eine Zusammenfassung",
+      "noAccount": "Fügen Sie zuerst oben ein Postfach hinzu.",
+      "note": "Mails stammen von anderen Personen, deshalb behandelt der Bot sie als Information, nie als Anweisung. Standardmäßig sieht er nur Absender, Betreff und die ersten Zeilen. Anhänge werden nie geöffnet. Es wird nichts gesendet, außer Sie erlauben Antworten und bestätigen jede einzelne hier.",
+      "replies": "Dem Bot erlauben, Antworten vorzuschlagen (Sie bestätigen jede, bevor sie gesendet wird)",
+      "running": "Läuft",
+      "save": "Speichern",
+      "saved": "Gespeichert.",
+      "sent": "E-Mail gesendet.",
+      "stopped": "Läuft nicht",
+      "subject": "Betreff: {{subject}}",
+      "title": "E-Mail an einen Bot",
+      "to": "An: {{to}}",
+      "waiting": "Antworten, die auf Ihre Freigabe warten"
+    },
     "general": {
       "account": {
         "description": "Wird im Kontomenü der Seitenleiste angezeigt.",

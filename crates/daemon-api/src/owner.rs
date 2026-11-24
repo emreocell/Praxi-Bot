@@ -225,6 +225,11 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     // a bot's credential request: the value is typed by the owner, never a token holder
     ("POST", "/v1/secret-requests/{}"),
     ("POST", "/v1/secret-requests/{}/cancel"),
+    // the e-mail channel: settings, and replies that go out in the owner's name
+    ("PUT", "/v1/email/channel"),
+    ("GET", "/v1/email/channel/replies"),
+    ("POST", "/v1/email/channel/replies/{}/approve"),
+    ("POST", "/v1/email/channel/replies/{}/deny"),
     ("POST", "/v1/email/accounts"),
     ("PUT", "/v1/email/accounts/{}"),
     ("DELETE", "/v1/email/accounts/{}"),
