@@ -736,10 +736,9 @@ impl Shared {
     }
 
     /// The URL of a plain navigation: `browser_open` with the `url` field alone, http(s), no
-    /// userinfo, no query, no fragment, and a path that is a short readable page address.
-    /// Such a URL has no room for a value the model copied out of a page or a file: a
-    /// query, a fragment, escapes, long or random-looking segments are all refused. (A short
-    /// readable slug can still say a few words; see the residual risk in the PR.)
+    /// userinfo, no query, no fragment, and a path of plain characters. This is only the
+    /// structural part: whether the path may go out silently is decided by
+    /// [`Self::path_is_owner_said`] (the root, or words the owner typed), never by its shape.
     pub(crate) fn plain_navigation(name: &str, input: &Value) -> Option<url::Url> {
         if name != "browser_open" || input.as_object().is_none_or(|o| o.len() != 1) {
             return None;
@@ -752,8 +751,6 @@ impl Shared {
                     && seg
                         .chars()
                         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~'))
-                    // A long run of hex digits is an id or a digest, not a page name.
-                    && !(seg.len() >= 16 && seg.chars().all(|c| c.is_ascii_hexdigit()))
             });
         (matches!(url.scheme(), "http" | "https")
             && url.username().is_empty()
@@ -763,6 +760,58 @@ impl Shared {
             && url.fragment().is_none()
             && plain_path)
             .then_some(url)
+    }
+
+    /// The path of a plain navigation may leave silently only when it is the origin root or
+    /// every segment is a word the owner typed (a whole token of an owner message). No shape
+    /// rule: a path can carry a value copied from a page, so only the owner's own words pass.
+    fn path_is_owner_said(url: &url::Url, texts: &[String]) -> bool {
+        let segs: Vec<&str> = url.path().split('/').filter(|s| !s.is_empty()).collect();
+        if url.path() == "/" || segs.is_empty() {
+            return true;
+        }
+        let is_word = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~');
+        segs.iter().all(|seg| {
+            !matches!(*seg, "." | "..")
+                && texts
+                    .iter()
+                    .any(|m| m.split(|c: char| !is_word(c)).any(|tok| tok == *seg))
+        })
+    }
+
+    /// A bare token (no scheme) an owner wrote counts as a site name only when it is a
+    /// registrable-domain shape under a real public TLD that is not a common file extension
+    /// (`README.md`, `main.rs`, `script.sh` are files, not sites).
+    fn bare_site_name(authority: &str) -> bool {
+        const FILE_EXT: &[&str] = &[
+            "md", "rs", "py", "sh", "js", "ts", "json", "toml", "txt", "html", "htm", "css", "exe",
+            "zip", "pdf", "yml", "yaml", "log", "bat", "ps1", "cs", "pl", "rb", "go", "cc", "c",
+            "h", "so", "dll", "doc", "docx", "xls", "xlsx", "png", "jpg", "gif", "svg", "xml",
+            "csv", "ini", "cfg", "lock", "tmp", "bak", "mov", "mp3", "mp4", "tar", "gz", "rar",
+            "7z", "jar", "apk", "iso", "dmg", "msi", "sql", "db", "php", "lua", "ex", "kt",
+            "swift",
+        ];
+        const TLDS: &[&str] = &[
+            "com", "net", "org", "io", "dev", "app", "co", "de", "uk", "edu", "gov", "info", "ai",
+            "tr", "fr", "es", "it", "nl", "be", "ch", "at", "se", "no", "dk", "fi", "pl", "pt",
+            "ie", "gr", "cz", "ru", "ua", "jp", "kr", "cn", "in", "au", "nz", "ca", "us", "br",
+            "mx", "ar", "za", "eu", "biz", "xyz", "online", "site", "shop", "store", "tech",
+            "cloud", "blog", "news", "me", "tv",
+        ];
+        let labels: Vec<&str> = authority.split('.').collect();
+        let ok_label = |l: &&str| {
+            !l.is_empty()
+                && !l.starts_with('-')
+                && !l.ends_with('-')
+                && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        };
+        let Some(tld) = labels.last().map(|t| t.to_ascii_lowercase()) else {
+            return false;
+        };
+        labels.len() >= 2
+            && labels.iter().all(ok_label)
+            && TLDS.contains(&tld.as_str())
+            && !FILE_EXT.contains(&tld.as_str())
     }
 
     /// `host:port` of a navigation, host lower case with no trailing dot.
@@ -788,6 +837,13 @@ impl Shared {
             return false;
         };
         let origin = format!("{}://{}:{}", url.scheme(), site.0, site.1);
+        let Ok(texts) = self.storage.owner_message_texts(ctx.chat_id) else {
+            return false;
+        };
+        // Whatever site is allowed, only the root or the owner's own path words go silently.
+        if !Self::path_is_owner_said(&url, &texts) {
+            return false;
+        }
         if self
             .grants
             .lock()
@@ -796,9 +852,6 @@ impl Shared {
         {
             return true;
         }
-        let Ok(texts) = self.storage.owner_message_texts(ctx.chat_id) else {
-            return false;
-        };
         texts
             .iter()
             .flat_map(|m| m.split_whitespace())
@@ -814,16 +867,8 @@ impl Shared {
                     None => (None, w),
                 };
                 let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-                // A bare domain: letters, digits, dots and dashes only, with a real TLD.
-                if scheme.is_none()
-                    && !(authority.contains('.')
-                        && authority
-                            .chars()
-                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
-                        && authority.rsplit('.').next().is_some_and(|t| {
-                            t.len() >= 2 && t.chars().all(|c| c.is_ascii_alphabetic())
-                        }))
-                {
+                // A bare domain must look like a real site, not a file name.
+                if scheme.is_none() && !Self::bare_site_name(authority) {
                     return false;
                 }
                 let Ok(said) =
