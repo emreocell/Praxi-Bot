@@ -489,10 +489,17 @@ impl TurnExecutor {
         else {
             return text;
         };
-        match m
-            .store
-            .recall(ctx.user_id, ctx.bot_id, &text, m.recall_budget_tokens)
-        {
+        // Per-bot switch and budget: Off recalls nothing at all.
+        let settings = self.sh.memory_settings(ctx.bot_id);
+        if !settings.enabled() {
+            return text;
+        }
+        match m.store.recall(
+            ctx.user_id,
+            ctx.bot_id,
+            &text,
+            settings.budget(m.recall_budget_tokens),
+        ) {
             Ok(mems) => {
                 if !mems.is_empty() {
                     let untrusted = mems

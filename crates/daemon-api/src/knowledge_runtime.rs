@@ -496,7 +496,7 @@ async fn run_embedding_batch(
     .map_err(|_| ApiError::unavailable("embedding batch unavailable"))
 }
 
-fn provider(
+pub(crate) fn provider(
     state: &AppState,
     config: &EmbeddingConfig,
 ) -> Result<Arc<dyn EmbeddingProvider>, ApiError> {

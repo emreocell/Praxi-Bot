@@ -77,9 +77,10 @@ pub(crate) fn fts_query(text: &str) -> Option<String> {
     (!toks.is_empty()).then(|| toks.join(" OR "))
 }
 
-fn visible(m: &Memory, user: UserId, bot: BotId, now: i64) -> bool {
+fn visible(m: &Memory, user: UserId, bot: BotId, now: i64, pending_ok: bool) -> bool {
     m.user_id == user
         && !m.deleted
+        && (pending_ok || !m.pending)
         && m.bot_id.is_none_or(|b| b == bot)
         && m.valid_until_ms.is_none_or(|v| v > now)
 }
@@ -93,8 +94,23 @@ struct Fused {
 }
 
 impl MemoryStore {
-    fn gather(&self, user: UserId, bot: BotId, query: &str, limit: usize) -> Result<Vec<Fused>> {
-        let emb = self.embed_one(query)?;
+    /// `pending_ok`: also return memories held for review (only consolidation
+    /// may see them, so it does not store the same held fact twice; recall never).
+    fn gather(
+        &self,
+        user: UserId,
+        bot: BotId,
+        query: &str,
+        limit: usize,
+        pending_ok: bool,
+    ) -> Result<Vec<Fused>> {
+        // While the vector index is rebuilding (or its embedder is away) or the
+        // embedder fails, recall degrades to words only instead of failing.
+        let emb = if self.semantic_ready() {
+            self.embed_query_one(query).ok()
+        } else {
+            None
+        };
         let now = now_ms();
         let conn = self.conn();
         let cands = i64::try_from(self.config.candidates.max(limit)).unwrap_or(i64::MAX);
@@ -106,11 +122,19 @@ impl MemoryStore {
                  WHERE memories_fts MATCH ?1 AND m.user_id = ?2 \
                  AND (m.bot_id IS NULL OR m.bot_id = ?3) AND m.deleted = 0 \
                  AND (m.valid_until_ms IS NULL OR m.valid_until_ms > ?4) \
+                 AND (?6 = 1 OR m.pending = 0) \
                  ORDER BY bm25(memories_fts) LIMIT ?5",
             )?;
             lexical = st
                 .query_map(
-                    params![q, user.0.to_string(), bot.0.to_string(), now, cands],
+                    params![
+                        q,
+                        user.0.to_string(),
+                        bot.0.to_string(),
+                        now,
+                        cands,
+                        i64::from(pending_ok)
+                    ],
                     |r| r.get(0),
                 )?
                 .collect::<rusqlite::Result<_>>()?;
@@ -120,8 +144,8 @@ impl MemoryStore {
         // filled with other users' / expired rows.  Re-query with a doubled `k`
         // until enough visible hits are found or the index is exhausted.
         let mut semantic: Vec<i64> = Vec::new();
-        {
-            let blob = to_blob(&emb);
+        if let Some(emb) = &emb {
+            let blob = to_blob(emb);
             let mut k = cands.saturating_mul(4).clamp(1, VEC_MAX_K);
             loop {
                 semantic.clear();
@@ -142,7 +166,7 @@ impl MemoryStore {
                         break;
                     }
                     if let Some(m) = by_rowid(&conn, rowid)?
-                        && visible(&m, user, bot, now)
+                        && visible(&m, user, bot, now, pending_ok)
                     {
                         semantic.push(rowid);
                     }
@@ -185,7 +209,7 @@ impl MemoryStore {
         limit: usize,
     ) -> Result<Vec<Memory>> {
         Ok(self
-            .gather(user, bot, text, limit)?
+            .gather(user, bot, text, limit, true)?
             .into_iter()
             .take(limit)
             .map(|f| f.memory)
@@ -202,7 +226,7 @@ impl MemoryStore {
     ) -> Result<Vec<(Memory, f64)>> {
         let cfg = self.config;
         let mut scored: Vec<(f64, Memory)> = self
-            .gather(user, bot, query, self.config.candidates)?
+            .gather(user, bot, query, self.config.candidates, false)?
             .into_iter()
             .map(|f| {
                 let m = f.memory;
