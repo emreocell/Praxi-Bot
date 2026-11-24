@@ -180,14 +180,14 @@ impl CliComputerProvider {
             {
                 Err(MonitorConnectError::Failed(err)) => {
                     let n = self.dial_backoff.lock().failed(&device.id, Instant::now());
-                    eprintln!(
+                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
                         "warning: remote desktop connect to {} failed (attempt {n}, backing off): {err}",
                         device.id
                     );
                 }
                 Err(MonitorConnectError::TimedOut) => {
                     let n = self.dial_backoff.lock().failed(&device.id, Instant::now());
-                    eprintln!(
+                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
                         "warning: remote desktop connect to {} timed out after {}s (attempt {n}, backing off)",
                         device.id,
                         MONITOR_CONNECT_TIMEOUT.as_secs()
@@ -474,7 +474,7 @@ pub(crate) fn machine_computer_id(data_dir: &std::path::Path, net: Option<&PeerN
     match peer_network::load_or_create_secret_key(&path) {
         Ok(key) => key_to_string(&key.public()),
         Err(err) => {
-            eprintln!(
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
                 "warning: cannot read the daemon identity key ({err}); local computer grants will not match a previous machine"
             );
             // Not the legacy constant, and not a fingerprint, so imported

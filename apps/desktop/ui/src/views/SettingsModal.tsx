@@ -3,6 +3,7 @@ import {
   Bell,
   BrainCircuit,
   Check,
+  CircleHelp,
   Database,
   LoaderCircle,
   Monitor,
@@ -69,6 +70,7 @@ const PAGE_ICONS = {
   notifications: Bell,
   voice: Mic,
   data: Database,
+  help: CircleHelp,
   advanced: SlidersHorizontal
 } as const;
 

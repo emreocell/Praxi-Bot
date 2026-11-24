@@ -9,6 +9,7 @@ import { useDaemon } from "../../state/DaemonContext";
 import { UsageView } from "../UsageView";
 import { DataCard } from "./DataCard";
 import { DiagnosticsCard } from "./DiagnosticsCard";
+import { RecentLogs } from "../../components/RecentLogs";
 import { SafeModeCard } from "./SafeModeCard";
 import { UpdatePanel } from "./UpdatePanel";
 import type { CardDef } from "./types";
@@ -53,6 +54,15 @@ function VersionBlock() {
 /** Cards of the "Usage", "Diagnostics" and "Updates" sections. */
 export function otherCards(t: TFunction): CardDef[] {
   return [
+    {
+      id: "logs",
+      section: "diagnostics",
+      kind: "block",
+      title: t("logs.title"),
+      description: t("logs.privacy"),
+      keywords: "logs support help journal gunluk destek hilfe protokoll",
+      node: <RecentLogs />
+    },
     {
       id: "usage",
       section: "usage",

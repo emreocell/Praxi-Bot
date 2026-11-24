@@ -1586,7 +1586,7 @@ async fn boot_recover_stale_takeover_within(s: &AppState, probe_wait: Duration) 
     let deadline = tokio::time::Instant::now() + probe_wait;
     while !screen_probe_settled(s) {
         if tokio::time::Instant::now() >= deadline {
-            eprintln!(
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
                 "warning: the screen probe did not settle; the takeover latch kept                  (clear it with /v1/control/recover)"
             );
             return false;

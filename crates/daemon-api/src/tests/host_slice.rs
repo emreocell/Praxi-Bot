@@ -898,11 +898,14 @@ async fn every_owner_route_refuses_the_general_bearer_and_accepts_the_owner_key(
         let body = Some(json!({}));
         let token_only = call_token_only(&t, m.clone(), &path, body.clone()).await;
         assert_eq!(token_only.status, StatusCode::FORBIDDEN, "{method} {path}");
-        assert_eq!(
-            token_only.json()["error"]["code"],
-            "owner_key_required",
-            "{method} {path}"
-        );
+        // A HEAD response has no body, so only its status can be checked.
+        if *method != "HEAD" {
+            assert_eq!(
+                token_only.json()["error"]["code"],
+                "owner_key_required",
+                "{method} {path}"
+            );
+        }
         let owner = call(&t, m, &path, body).await;
         assert_ne!(
             owner.json()["error"]["code"],

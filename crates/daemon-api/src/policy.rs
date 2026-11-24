@@ -94,13 +94,13 @@ pub(crate) fn preserve_corrupt(data_dir: &Path) {
             Ok(mut f) => {
                 use std::io::Write;
                 if let Err(e) = f.write_all(&bytes) {
-                    eprintln!("daemon-api: WARNING: could not keep a copy of {POLICY_FILE}: {e}");
+                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: WARNING: could not keep a copy of {POLICY_FILE}: {e}");
                 }
                 return;
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(e) => {
-                eprintln!("daemon-api: WARNING: could not keep a copy of {POLICY_FILE}: {e}");
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: WARNING: could not keep a copy of {POLICY_FILE}: {e}");
                 return;
             }
         }

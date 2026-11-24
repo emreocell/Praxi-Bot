@@ -8,6 +8,7 @@ import { openExternal } from "../lib/externalLink";
 import { resolveKeys, SHORTCUT_GROUPS, SHORTCUTS, slashShortcuts } from "../lib/shortcuts";
 import { demoData } from "../demo/demoData";
 import { DiagnosticInfo } from "./DiagnosticInfo";
+import { RecentLogs } from "./RecentLogs";
 import { Modal } from "./Modal";
 import styles from "./HelpModal.module.css";
 
@@ -114,6 +115,7 @@ export function HelpModal({
           ))}
         </details>
         <DiagnosticInfo />
+        <RecentLogs />
         <div className={styles.actions}>
           <Button variant="ghost" size="sm" onClick={() => openExternal(DOCS_INDEX_URL)}>
             {t("help.center.allDocs")}

@@ -226,7 +226,9 @@ impl ChannelControl for TelegramRuntime {
         if let Some(config) = &self.config {
             match TelegramChannel::start(config.clone(), self.client.clone()) {
                 Ok(c) => *channel = Some(c),
-                Err(e) => eprintln!("warning: telegram channel not started: {e}"),
+                Err(e) => {
+                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: telegram channel not started: {e}");
+                }
             }
         }
     }

@@ -42,22 +42,22 @@ pub fn start_calendar(
         Ok(text) => match toml::from_str::<CalendarConfigFile>(&text) {
             Ok(cfg) => cfg.calendar,
             Err(e) => {
-                eprintln!("warning: {}: {e}", path.display());
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {}: {e}", path.display());
                 Vec::new()
             }
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => {
-            eprintln!("warning: cannot read {}: {e}", path.display());
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: cannot read {}: {e}", path.display());
             Vec::new()
         }
     };
     let (connector, problems) = CalendarConnector::new(accounts, store);
     for p in problems {
-        eprintln!("warning: {p}");
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {p}");
     }
     let added = connector_calendar::register(registry, &Arc::new(connector));
-    eprintln!("calendar: {added} tool(s) registered");
+    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "calendar: {added} tool(s) registered");
     added
 }
 

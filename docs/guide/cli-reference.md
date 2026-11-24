@@ -89,6 +89,18 @@ before a provider is configured, reporting `setup_required` until you run
 | `--safe` (alias `--safe-mode`, or env `BOT_SAFE_MODE=1`) | Safe mode: chat answers without tools; tools, schedules, channels, MCP servers, apps, memory work, desktop and peer networking stay off. Nothing is deleted or changed. Cannot be combined with `--host` or `--peer`. See [Safe mode](troubleshooting.md#safe-mode-start-with-everything-off) |
 | `--fake-provider` | Only in builds with the `fake-provider` feature: use a built-in echo provider (demos, tests) |
 
+### `bot logs`
+
+Read this computer's recent redacted operational logs, even while the daemon is stopped.
+Output is always JSON lines. No network connection or secret-store access is needed.
+Use the same `--data-dir` as the service. See [Troubleshooting](troubleshooting.md#recent-logs-and-a-support-bundle).
+
+| Option | Meaning |
+| --- | --- |
+| `--follow` | Wait for new records; stop with Ctrl-C |
+| `--level <trace\|debug\|info\|warn\|error>` | Show only this level |
+| `--since <TIME>` | UTC Unix milliseconds, or an age such as `15m`, `2h`, `1d` |
+
 ### `bot doctor`
 
 Check installation health (data dir writability and free disk space, config,

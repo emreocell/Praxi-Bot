@@ -139,7 +139,7 @@ impl RedactorSources {
     /// Re-read everything into `handle`; on failure the previous contents stay.
     fn refresh(&self, handle: &SharedRedactor) {
         if let Err(e) = handle.refresh_from_store(self.store.as_deref(), &self.extras()) {
-            eprintln!("warning: secret redaction refresh failed (keeping the previous set): {e}");
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: secret redaction refresh failed (keeping the previous set): {e}");
         }
     }
 }
@@ -153,7 +153,7 @@ fn production_redactor(sources: &RedactorSources) -> SharedRedactor {
     let handle = SharedRedactor::default();
     let extras = sources.extras();
     if let Err(e) = handle.refresh_from_store(sources.store.as_deref(), &extras) {
-        eprintln!("warning: secret redaction: cannot read the secret store: {e}");
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: secret redaction: cannot read the secret store: {e}");
         let _ = handle.refresh_from_store(None, &extras);
     }
     let s = sources.clone();
@@ -349,7 +349,7 @@ fn build_agent_with_skills(
         match agent_core::MemoryConfig::open_default(storage.data_dir()) {
             Ok(cfg) => Some(cfg),
             Err(e) => {
-                eprintln!("warning: memory store unavailable: {e}");
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: memory store unavailable: {e}");
                 None
             }
         }
@@ -549,9 +549,13 @@ pub fn load_email_accounts(data_dir: &Path) -> Vec<connector_email::AccountConfi
         match std::fs::read_to_string(&email_path) {
             Ok(s) => match toml::from_str::<EmailConfigFile>(&s) {
                 Ok(cfg) => return cfg.accounts,
-                Err(e) => eprintln!("warning: {}: {e}", email_path.display()),
+                Err(e) => {
+                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {}: {e}", email_path.display());
+                }
             },
-            Err(e) => eprintln!("warning: cannot read {}: {e}", email_path.display()),
+            Err(e) => {
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: cannot read {}: {e}", email_path.display());
+            }
         }
     }
     let providers_path = provider_catalog::config_path(data_dir);
@@ -571,11 +575,17 @@ pub fn load_email_accounts(data_dir: &Path) -> Vec<connector_email::AccountConfi
 /// defaults would silently undo limits the user tightened.
 fn register_schedule_tools(data_dir: &Path, state: &AppState) {
     match daemon_api::load_schedule_limits(data_dir) {
-        Err(e) => eprintln!("warning: schedule tools are disabled: {e}"),
+        Err(e) => {
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: schedule tools are disabled: {e}");
+        }
         Ok(limits) => match state.enable_schedule_tools(limits) {
             Ok(n) if n == builtin_tools::SCHEDULE_TOOL_NAMES.len() => {}
-            Ok(n) => eprintln!("warning: only {n} schedule tool(s) registered (name clash)"),
-            Err(e) => eprintln!("warning: schedule tools are disabled: {e}"),
+            Ok(n) => {
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: only {n} schedule tool(s) registered (name clash)");
+            }
+            Err(e) => {
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: schedule tools are disabled: {e}");
+            }
         },
     }
 }
@@ -585,7 +595,7 @@ fn register_schedule_tools(data_dir: &Path, state: &AppState) {
 fn register_bot_tools(state: &AppState) {
     let n = state.enable_bot_tools();
     if n != builtin_tools::BOT_TOOL_NAMES.len() {
-        eprintln!("warning: only {n} bot tool(s) registered (name clash)");
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: only {n} bot tool(s) registered (name clash)");
     }
 }
 
@@ -884,18 +894,18 @@ pub fn register_web(
         result = builtin_tools::register_web_tools(registry, cfg);
     }
     for w in &warnings {
-        eprintln!("warning: {w}");
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {w}");
     }
     match result {
         Ok(added) => {
-            eprintln!(
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
                 "web: {} tool(s) registered (search: {summary})",
                 added.len()
             );
             added.len()
         }
         Err(e) => {
-            eprintln!("warning: web tools unavailable: {e}");
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: web tools unavailable: {e}");
             0
         }
     }
@@ -949,7 +959,7 @@ impl daemon_api::DoctorHost for ServeDoctorHost {
 fn step(name: &str) {
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     let start = START.get_or_init(std::time::Instant::now);
-    eprintln!("startup: {name} (+{} ms)", start.elapsed().as_millis());
+    support_logs::tracing::info!(target: "praxi_support", phase = name, elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX));
 }
 
 /// Run the daemon until a stop request (see [`shutdown_signal`]); running tool
@@ -994,12 +1004,12 @@ pub fn serve(
     step("database open");
     // Result of the early process guard (see `run_serve`), for `doctor`.
     if let Err(e) = process_guard::record(data_dir, &process_guard::protect()) {
-        eprintln!("warning: could not record the process guard status: {e}");
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: could not record the process guard status: {e}");
     }
     let token = load_or_create_token(data_dir)?;
     step("api token ready");
     if !token.restricted {
-        eprintln!(
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
             "warning: could not restrict {} to the current user",
             token_path(data_dir).display()
         );
@@ -1032,7 +1042,9 @@ pub fn serve(
         crate::view_targets::local_opener(desktop.clone()),
         {
             let redactor = redactor.clone();
-            Arc::new(move |line: &str| eprintln!("warning: {}", redactor.redact(line)))
+            Arc::new(
+                move |line: &str| support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {}", redactor.redact(line)),
+            )
         },
         crate::view_targets::Timing::default(),
     );
@@ -1055,7 +1067,7 @@ pub fn serve(
                 hook_redactor.register(v);
             })))),
             Err(e) => {
-                eprintln!("warning: fill secrets are disabled: {e}");
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: fill secrets are disabled: {e}");
                 None
             }
         }
@@ -1138,7 +1150,7 @@ pub fn serve(
         match daemon_api::load_or_create_owner_key(data_dir) {
             Ok(key) => state.set_owner_key(key),
             Err(e) => {
-                eprintln!("warning: owner key unavailable, owner-only operations are off: {e}");
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: owner key unavailable, owner-only operations are off: {e}");
             }
         }
     }
@@ -1283,7 +1295,7 @@ pub fn serve(
             // owner's PC": once, logged, they run on this host's own computer.
             let moved = state.normalise_moved_bots();
             if moved > 0 {
-                eprintln!("migration: {moved} moved bot(s) now use this host's own computer");
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "migration: {moved} moved bot(s) now use this host's own computer");
             }
         }
         if let Some(pc) = pc_target.filter(|_| !safe_mode) {
@@ -1318,7 +1330,7 @@ pub fn serve(
             });
             agent.reconcile_computer_identity(&local_id, paired_computers.as_deref())?;
         } else {
-            eprintln!(
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
                 "warning: local computer identity unavailable this boot; skipping computer grant reconcile (nothing was changed or persisted)"
             );
         }
@@ -1395,7 +1407,7 @@ pub fn serve(
                 { let handle = redactor.clone(); Arc::new(move |value| handle.register(value)) },
             ) {
                 Ok(host) => state.set_composio(host as Arc<dyn daemon_api::ComposioControl>),
-                Err(e) => eprintln!("warning: composio: {e}; app connections are off"),
+                Err(e) => support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: composio: {e}; app connections are off"),
             }
         }
         if let Some(email) = email {
@@ -1414,7 +1426,7 @@ pub fn serve(
         }
         let configured = mcp.as_ref().map_or(0, |m| m.list().len());
         if configured > 0 {
-            eprintln!("mcp: {configured} server(s) configured");
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "mcp: {configured} server(s) configured");
         }
         step("components and apps wired");
         // Loopback only: never bind another interface.
@@ -1428,13 +1440,13 @@ pub fn serve(
                 "{}",
                 serde_json::json!({
                     "listening": format!("http://{addr}"),
-                    "token_file": token_path(data_dir),
+                    "token_file": "<data dir>/api-token",
                     "recovered_runs": recovered.len(),
                 })
             );
         } else {
             println!("listening on http://{addr}");
-            println!("token file: {}", token_path(data_dir).display());
+            println!("token file: <data dir>/api-token");
             if !recovered.is_empty() {
                 println!(
                     "{} interrupted run(s) are paused; resume via POST /v1/runs/{{id}}/resume",
@@ -1471,13 +1483,14 @@ pub fn serve(
                         }
                         step("telegram configuration loaded");
                     }
-                    Err(e) => eprintln!("warning: telegram configuration task failed: {e}"),
+                    Err(e) => support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: telegram configuration task failed: {e}"),
                 }
             }
         };
         let shutdown_peer = peer.clone();
         let outcome = daemon_api::serve_with_startup(listener, state, prepare_channels, async move {
             shutdown_signal().await;
+            support_logs::tracing::info!(target: "praxi_support", phase = "stopping", reason = "shutdown_signal");
             if let Some(peer) = shutdown_peer {
                 peer.shutdown().await;
             }
@@ -1492,6 +1505,7 @@ pub fn serve(
         }
         refresher.abort();
         let paused = outcome?;
+        step("stopped");
         if json {
             println!(
                 "{}",

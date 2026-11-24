@@ -23,6 +23,7 @@ local-voice = ["dep:sherpa-onnx", "dep:opus-decoder", "dep:ogg"]
 tauri-winres = "0.3"
 
 [dependencies]
+support-logs = { path = "../../crates/support-logs", version = "0.1.0" }
 sherpa-onnx = { version = "2", optional = true }
 opus-decoder = { version = "0.1", optional = true }
 ogg = { version = "0.9", optional = true }
