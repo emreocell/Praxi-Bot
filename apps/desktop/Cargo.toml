@@ -20,6 +20,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+support-logs = { path = "../../crates/support-logs", version = "0.1.0" }
 getrandom = "0.3"
 open = { version = "5", features = ["shellexecute-on-windows"] }
 parking_lot.workspace = true

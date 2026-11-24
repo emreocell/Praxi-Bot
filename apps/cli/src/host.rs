@@ -356,7 +356,7 @@ fn watch_peers_with_config(
                             .observe_conflict(&peer_network::key_to_string(&event.peer))
                             .await
                         {
-                            eprintln!("host conflict: {e}");
+                            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "host conflict: {e}");
                         }
                         continue;
                     }
@@ -364,7 +364,7 @@ fn watch_peers_with_config(
                     if let Some(info) = event.leader {
                         let local = state.leader().config();
                         let conflict = local.state == daemon_api::host::HostState::Active && info.state == LeaderState::Active && info.epoch == local.epoch;
-                        if let Err(e) = state.leader().observe(&event.peer.to_string(), info).await { eprintln!("host leadership: {e}"); }
+                        if let Err(e) = state.leader().observe(&event.peer.to_string(), info).await { support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "host leadership: {e}"); }
                         if conflict {
                             // Echo the heartbeat we just applied. The receiver ignores
                             // this field and reads our state from its heartbeat cache.

@@ -77,6 +77,9 @@ impl AppState {
 /// path. Paired peers never reach the local router: their roles are enforced
 /// by the peer router (`peer.rs`), which this table does not change.
 pub const OWNER_ROUTES: &[(&str, &str)] = &[
+    ("GET", "/v1/logs/recent"),
+    // axum also serves HEAD for a GET handler; it must cross the same guard.
+    ("HEAD", "/v1/logs/recent"),
     // Full history reads and portable transcripts expose sensitive conversation data.
     ("GET", "/v1/chats/search"),
     ("GET", "/v1/chats/{}/export"),

@@ -1,0 +1,49 @@
+name: Landing page
+
+# Static landing page in site/. Tests and builds on every change; publishes to
+# GitHub Pages only from main. If the docs site (VitePress) is later published
+# from the same Pages deployment, merge the two build steps into one artifact.
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "packages/ui/tokens.css", ".github/workflows/site.yml"]
+  pull_request:
+    paths: ["site/**", "packages/ui/tokens.css", ".github/workflows/site.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-landing
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Test
+        run: node --test site/test/site.test.mjs
+      - name: Build
+        run: node site/scripts/build.mjs
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

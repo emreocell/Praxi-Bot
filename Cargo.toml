@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/support-logs",
     "crates/windows-sandbox-spike",
     "crates/live-view",
     "crates/host-provision",

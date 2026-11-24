@@ -26,6 +26,7 @@ import type {
   MemoryPreview
 } from "./types";
 import type {
+  RecentLogs,
   AcceptedResponse,
   AdminCliEngine,
   AdminCliInstall,
@@ -1453,6 +1454,11 @@ export class ApiClient {
   }
 
   // ---- Diagnostics -----------------------------------------------------
+
+  /** Owner-only, host-local redacted operational records. */
+  recentLogs(): Promise<RecentLogs> {
+    return this.request("GET", "/logs/recent");
+  }
 
   /** Read-only checks (`GET /v1/doctor`, at most ~10 s). */
   doctor(): Promise<DoctorReport> {

@@ -16,6 +16,7 @@ local-embeddings = ["memory-store/local-embeddings"]
 workspace = true
 
 [dependencies]
+support-logs = { path = "../support-logs", version = "0.1.0" }
 workflow-replay = { path = "../workflow-replay", version = "0.1.0" }
 base64.workspace = true
 cap-fs-ext = "4.0.3"

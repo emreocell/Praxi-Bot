@@ -3843,6 +3843,32 @@
     "unknown": "Could not read this computer's hardware, so there is no recommendation. Start with a small model (about 4B) and go up if it runs well.",
     "unknownValue": "unknown"
   },
+  "logs": {
+    "bundleNote": "Open each file to review its exact contents. The ZIP contains these four files only. It includes all recent logs, even when the search or level filter hides some. No chats or secrets are included.",
+    "bundlePreview": "Files included in the support bundle",
+    "copied": "Redacted logs copied.",
+    "copy": "Copy shown logs",
+    "copyFailed": "Could not copy the logs. Check clipboard access.",
+    "empty": "No matching log entries. Older entries may have rotated out.",
+    "failed": "Could not read diagnostics. Try again when the service is connected.",
+    "level": "Level",
+    "levels": {
+      "all": "All levels",
+      "debug": "Debug details",
+      "error": "Errors",
+      "info": "Information",
+      "trace": "Trace details",
+      "warn": "Warnings"
+    },
+    "loading": "Reading diagnostics…",
+    "prepare": "Preview support bundle",
+    "privacy": "Operational events only. Messages, passwords, keys, email addresses and personal file paths are excluded. Nothing is sent automatically.",
+    "refresh": "Refresh",
+    "save": "Save support bundle",
+    "saveFailed": "Could not save the bundle. Try again.",
+    "search": "Search logs",
+    "title": "View recent logs"
+  },
   "main": {
     "clearSelection": "Back to overview",
     "daemonConnectingDescription": "Connecting to the bundled Praxi-Bot background service on this computer.",
@@ -5285,6 +5311,10 @@
       "general": {
         "description": "Your name, language and how sending messages works.",
         "name": "General"
+      },
+      "help": {
+        "description": "Review recent events and prepare a safe support report.",
+        "name": "Help"
       },
       "models": {
         "description": "Which AI your bots think with, and what they can remember.",
