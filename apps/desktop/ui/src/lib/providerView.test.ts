@@ -187,7 +187,7 @@ test("Mistral key help points at the API key page and says Le Chat is not a key"
   const help = providerKeyHelp("mistral");
   assert.equal(help?.url, "https://console.mistral.ai/api-keys");
   assert.equal(providerKeyHelp("deepseek"), null);
-  for (const locale of ["en", "tr", "de"]) {
+  for (const locale of ["en", "tr", "de", "es"]) {
     const json = JSON.parse(
       readFileSync(new URL(`../i18n/locales/${locale}.json`, import.meta.url), "utf8")
     );
