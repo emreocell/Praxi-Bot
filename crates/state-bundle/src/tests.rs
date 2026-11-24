@@ -609,7 +609,7 @@ async fn memory_vectors_import_without_an_embedder_or_dimension_change() {
             .as_ref()
             .unwrap()
             .get("memory.db"),
-        Some(&2)
+        Some(&3)
     );
     let conn = Connection::open(target.path().join("memory.db")).unwrap();
     let dim: String = conn
