@@ -3779,6 +3779,32 @@
     "unknown": "Bu bilgisayarın donanımı okunamadı, bu yüzden öneri yok. Küçük bir modelle (yaklaşık 4B) başlayın, iyi çalışırsa büyütün.",
     "unknownValue": "bilinmiyor"
   },
+  "logs": {
+    "bundleNote": "İçeriğinin tamamını incelemek için her dosyayı aç. ZIP yalnızca bu dört dosyayı içerir. Arama veya düzey filtresinin gizlediği kayıtlar dahil tüm son günlükler eklenir. Sohbetler ve gizli bilgiler eklenmez.",
+    "bundlePreview": "Destek paketine eklenen dosyalar",
+    "copied": "Gizli bilgilerden arındırılmış günlükler kopyalandı.",
+    "copy": "Gösterilen günlükleri kopyala",
+    "copyFailed": "Günlükler kopyalanamadı. Pano erişimini kontrol et.",
+    "empty": "Eşleşen günlük kaydı yok. Eski kayıtlar yer açmak için kaldırılmış olabilir.",
+    "failed": "Tanılama bilgileri okunamadı. Servis bağlandığında yeniden dene.",
+    "level": "Düzey",
+    "levels": {
+      "all": "Tüm düzeyler",
+      "debug": "Hata ayıklama ayrıntıları",
+      "error": "Hatalar",
+      "info": "Bilgiler",
+      "trace": "İzleme ayrıntıları",
+      "warn": "Uyarılar"
+    },
+    "loading": "Tanılama bilgileri okunuyor…",
+    "prepare": "Destek paketini önizle",
+    "privacy": "Yalnızca servis olayları gösterilir. Mesajlar, kimlik bilgileri, e-posta adresleri ve kişisel dosya yolları eklenmez. Hiçbir şey kendiliğinden gönderilmez.",
+    "refresh": "Yenile",
+    "save": "Destek paketini kaydet",
+    "saveFailed": "Paket kaydedilemedi. Yeniden dene.",
+    "search": "Günlüklerde ara",
+    "title": "Son günlükleri görüntüle"
+  },
   "main": {
     "clearSelection": "Genel görünüme dön",
     "daemonConnectingDescription": "Bu bilgisayardaki yerleşik Praxi-Bot arka plan servisine bağlanılıyor.",
@@ -5221,6 +5247,10 @@
       "general": {
         "description": "Adın, dilin ve mesaj gönderme ayarları.",
         "name": "Genel"
+      },
+      "help": {
+        "description": "Son olayları incele ve güvenli bir destek raporu hazırla.",
+        "name": "Yardım"
       },
       "models": {
         "description": "Botların hangi yapay zekâyla düşündüğü ve neleri hatırlayabildiği.",

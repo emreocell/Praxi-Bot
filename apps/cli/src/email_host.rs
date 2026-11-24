@@ -176,13 +176,13 @@ pub fn start_email_with(
     endpoint: AgentMailEndpoint,
 ) -> Option<(Arc<EmailHost>, usize)> {
     let Some(store) = store else {
-        eprintln!("warning: e-mail needs a secret store, which is not available");
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: e-mail needs a secret store, which is not available");
         return None;
     };
     let host = EmailHost::open_with(data_dir, Arc::clone(store), endpoint);
     let added = connector_email::register(registry, &host.connector);
     let count = host.connector.account_names().len();
-    eprintln!("email: {added} tool(s) registered ({count} account(s))");
+    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "email: {added} tool(s) registered ({count} account(s))");
     Some((host, added))
 }
 
@@ -277,12 +277,12 @@ impl EmailHost {
         match load(data_dir) {
             Ok(accounts) => {
                 if let Err(e) = connector.replace_accounts(accounts) {
-                    eprintln!("warning: cannot initialize email connector: {e}");
+                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: cannot initialize email connector: {e}");
                     broken = Some(e.to_string());
                 }
             }
             Err(e) => {
-                eprintln!("warning: {e}");
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {e}");
                 broken = Some(e);
             }
         }
@@ -314,7 +314,7 @@ impl EmailHost {
         let ok = serde_json::to_vec(names).is_ok_and(|b| std::fs::write(&tmp, b).is_ok())
             && std::fs::rename(&tmp, &self.cleanup_path).is_ok();
         if !ok {
-            eprintln!("email: warning: could not record secrets still to delete");
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "email: warning: could not record secrets still to delete");
         }
     }
 
@@ -443,7 +443,7 @@ impl EmailHost {
             let name = secret.clone();
             let r = tokio::task::spawn_blocking(move || store.delete(&name)).await;
             if !matches!(r, Ok(Ok(_))) {
-                eprintln!(
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
                     "email: warning: could not delete the password of account {}; it will be retried on the next start",
                     a.name
                 );

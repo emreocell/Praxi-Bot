@@ -23,13 +23,13 @@ fn load(data_dir: &Path) -> Option<HomeAssistantConfig> {
         Ok(text) => match toml::from_str(&text) {
             Ok(cfg) => Some(cfg),
             Err(e) => {
-                eprintln!("warning: {}: {e}", path.display());
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {}: {e}", path.display());
                 None
             }
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => {
-            eprintln!("warning: cannot read {}: {e}", path.display());
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: cannot read {}: {e}", path.display());
             None
         }
     }
@@ -47,7 +47,7 @@ pub fn start_homeassistant(
     };
     let (added, problem) = connector_homeassistant::register(registry, load(data_dir), store);
     if let Some(p) = problem {
-        eprintln!("warning: home assistant: {p}");
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: home assistant: {p}");
     }
     added
 }

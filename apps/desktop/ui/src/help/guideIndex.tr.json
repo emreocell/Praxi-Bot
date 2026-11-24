@@ -252,6 +252,7 @@
     "doc": "tr/troubleshooting.md",
     "title": "Sorun giderme (teknik)",
     "headings": [
+      "Son günlükler ve destek paketi",
       "Tanılama (Ayarlar → Tanılama, bot doctor)",
       "7/24 çalışan sunucu",
       "daemon not reachable at http://127.0.0.1:47821 (çıkış kodu 3)",

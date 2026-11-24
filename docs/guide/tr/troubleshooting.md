@@ -2,6 +2,34 @@
 
 Önce `bot status` komutunu çalıştır. Arka plan servisinin (daemon) çalıştığını, anahtarının kabul edildiğini ve kaç onayın seni beklediğini gösterir. Terminal kullanmıyorsan önce sade dille yazılmış [Sık görülen sorunları çöz](fix-common-problems.md) sayfasına bak.
 
+## Son günlükler ve destek paketi
+
+**Ayarlar → Yardım → Son günlükleri görüntüle** yolunu aç (Yardım penceresinde
+de bulunur). Ara veya düzey seç; **Gösterilen günlükleri kopyala**, ekranda
+gördüğün arındırılmış kayıtları kopyalar. **Destek paketini önizle** dört dosya
+hazırlar: `versions.json`, `diagnostics.json` (servisin hazır olma ve güvenli mod
+bilgileri), `recent-logs.jsonl` ve arındırılmış `doctor.md`. **Destek paketini
+kaydet** öncesinde her dosyanın önizlemesini aç. ZIP tam bu içerikleri kaydeder;
+arama filtresinin gizlediği son kayıtlar da eklenir. Sohbet veya kimlik bilgisi
+içermez, kendiliğinden yüklenmez. Gizli bilgiler güvenle ayıklanamazsa paket sunulmaz.
+
+Terminalde `bot logs --since 15m --level warn`, son 15 dakikanın uyarılarını gösterir.
+`bot logs --follow` yeni kayıtları bekler (durdurmak için Ctrl-C). `--since`, `2h`,
+`1d` veya UTC Unix milisaniye zamanını da kabul eder. Yerel dosyaları okur, servis
+kapalıyken de çalışır; servisin veri klasörünü kullan. Boş sonuç, filtrenin hiçbir
+kayıtla eşleşmediği veya eski kayıtların yer açmak için kaldırıldığı anlamına gelebilir.
+
+Dosyalar `<veri klasörü>/logs` içindedir: daemon ve yan servis yöneticisinin her
+biri için en fazla 2 MiB boyutunda beş dosya tutulur; görüntüleyici en son 500
+kaydı gösterir. `RUST_LOG` izleme düzeyini belirler (varsayılan `info`); `trace`
+bile istek gövdelerini, başlıkları, kimlik bilgilerini ve kişisel yolları içermez.
+Başarısız HTTP istekleri yol şablonu, durum, hata kodu ve üretilmiş istek kimliğiyle;
+başlangıç adımları ve yeniden başlatma nedenleri de kaydedilir. Linux systemd
+sunucularında aynı çıktı sistem günlüğüne gider: `journalctl -u praxi.service
+--since '15 minutes ago'` (kurulumundaki birim adını kullan).
+`GET /v1/logs/recent?level=warn&since=<milisaniye>` hem API erişim anahtarını hem
+yerel sahip anahtarını gerektirir. Eşleşmiş cihazların tümüne kapalıdır.
+
 ## Tanılama (Ayarlar → Tanılama, `bot doctor`)
 
 **Hata bildirmek için:** Yardım'ı aç ve *Tanılama bilgisini kopyala* düğmesini kullan. Önce kopyalayacağı metnin tamamını gösterir (sürümler, platform, kontrol sonuçları; anahtarlar, parolalar, e-posta adresleri ve kullanıcı klasörün gizlenir, hiçbir mesaj eklenmez) ve yalnızca sen *Kopyala*'ya basınca kopyalar. Hiçbir yere bir şey gönderilmez.

@@ -86,6 +86,7 @@ impl Modify for Security {
             except GET /v1/health need `Authorization: Bearer <token>`."
     ),
     paths(
+        crate::logs::recent,
         crate::chat_history::search,
         crate::chat_history::export,
         crate::chat_history::import,
@@ -401,6 +402,7 @@ impl Modify for Security {
         doctor::Repair,
         doctor::Status,
         doctor_routes::DoctorReport,
+        crate::logs::RecentLogs,
         doctor_routes::RepairResult,
         dto::AcceptedResponse,
         dto::AnswerQuestion,

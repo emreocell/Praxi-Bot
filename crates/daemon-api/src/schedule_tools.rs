@@ -969,7 +969,7 @@ impl DaemonScheduleHost {
                 .append_audit(self.user_id, run, "bot", "schedule.failed", &detail)
         {
             let _ = (error, e);
-            eprintln!("daemon-api: could not record failed schedule change");
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: could not record failed schedule change");
         }
     }
 

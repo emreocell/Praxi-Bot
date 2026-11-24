@@ -1569,6 +1569,14 @@ export class MockApiClient extends ApiClient {
         const checks = structuredClone(this.doctorChecks);
         return ok({ ok: checks.every((c) => c.status !== "fail"), checks });
       }
+      case "GET /logs":
+        return ok({ lines: [JSON.stringify({
+          timestamp_ms: 1773300000000,
+          id: "019b3c9a-0000-7000-8000-000000000001",
+          level: "info",
+          component: "daemon",
+          fields: { phase: "ready" }
+        })] });
       case "POST /doctor": {
         const id = seg[1] === "repair" ? (seg[2] ?? "") : "";
         if (!["create_data_dir", "reload_providers", "restart_browser"].includes(id)) {

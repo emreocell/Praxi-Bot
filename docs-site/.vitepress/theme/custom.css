@@ -1,0 +1,58 @@
+@import "./tokens.css";
+
+:root {
+  --vp-c-bg: var(--praxi-bg);
+  --vp-c-bg-alt: var(--praxi-bg-alt);
+  --vp-c-bg-elv: var(--praxi-bg-elv);
+  --vp-c-bg-soft: var(--praxi-bg-alt);
+  --vp-c-text-1: var(--praxi-text);
+  --vp-c-text-2: var(--praxi-text-2);
+  --vp-c-text-3: var(--praxi-text-3);
+  --vp-c-divider: var(--praxi-border);
+  --vp-c-gutter: var(--praxi-border);
+  --vp-c-brand-1: var(--praxi-accent);
+  --vp-c-brand-2: var(--praxi-accent-hover);
+  --vp-c-brand-3: var(--praxi-accent);
+  --vp-c-brand-soft: var(--praxi-accent-soft);
+  --vp-button-brand-bg: var(--praxi-accent);
+  --vp-button-brand-hover-bg: var(--praxi-accent-hover);
+  --vp-button-brand-text: var(--praxi-on-accent);
+  --vp-button-brand-hover-text: var(--praxi-on-accent);
+  --vp-code-block-bg: var(--praxi-code-bg);
+  --vp-font-family-base: "Geist Variable", "Segoe UI", system-ui, sans-serif;
+  --vp-font-family-mono: "Geist Mono Variable", consolas, monospace;
+}
+
+/* Landing page: two clearly separated starting points. */
+.start-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(40ch, 1fr));
+  gap: 2ch;
+  margin: 3ch 0;
+}
+
+.start-card {
+  border: var(--praxi-line) solid var(--vp-c-divider);
+  border-radius: var(--praxi-radius);
+  background: var(--vp-c-bg-alt);
+  padding: 2ch 3ch;
+}
+
+.start-card h2 {
+  margin-top: 0;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.praxi-lang {
+  display: flex;
+  align-items: center;
+  gap: 1.5ch;
+  margin-left: 2ch;
+  font-size: 90%;
+}
+
+.praxi-lang [aria-current="true"] {
+  font-weight: 600;
+  color: var(--vp-c-brand-1);
+}

@@ -809,7 +809,7 @@ impl ControlHub {
         // restart (it over-audits, never under-audits); log it.
         self.persist_tracked(&mut st);
         if st.persist_dirty {
-            eprintln!("warning: could not persist the release audit marker");
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: could not persist the release audit marker");
         }
     }
     pub fn release_journal(&self, request: Uuid) -> Option<ReleaseJournal> {

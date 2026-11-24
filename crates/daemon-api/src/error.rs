@@ -111,6 +111,8 @@ impl IntoResponse for ApiError {
             "error": { "code": self.code, "message": self.message }
         }));
         let mut resp = (self.status, body).into_response();
+        resp.extensions_mut()
+            .insert(crate::logs::ErrorCode(self.code));
         if self.status == StatusCode::UNAUTHORIZED {
             resp.headers_mut().insert(
                 axum::http::header::WWW_AUTHENTICATE,

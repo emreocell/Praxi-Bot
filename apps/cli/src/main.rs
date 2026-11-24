@@ -24,6 +24,7 @@ mod host_provision;
 mod host_runtime;
 mod host_setup;
 mod import_cmd;
+mod logs_cmd;
 mod mcp_host;
 mod mcp_paste;
 mod mcp_serve;
@@ -173,6 +174,8 @@ enum Command {
     Setup(SetupCmd),
     /// Check installation health (data directory, config, providers, daemon, browser, and more).
     Doctor(DoctorCmd),
+    /// Show recent redacted logs from this computer (also works while the daemon is stopped).
+    Logs(logs_cmd::LogsCmd),
     /// Manage stored secrets (values are never printed).
     Secrets {
         #[command(subcommand)]
@@ -689,9 +692,37 @@ fn read_value(env_var: Option<&str>, prompt: &str) -> Result<SecretValue> {
     Ok(SecretValue::new(v.trim()))
 }
 
+static SERVING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn main() {
     if let Err(e) = run() {
-        eprintln!("error: {e}");
+        if SERVING.load(std::sync::atomic::Ordering::Relaxed) {
+            let reason = if e.to_string().contains("no usable provider") {
+                "no usable provider"
+            } else if let Some(io) = e.downcast_ref::<std::io::Error>() {
+                match io.kind() {
+                    std::io::ErrorKind::AddrInUse => "port_in_use",
+                    std::io::ErrorKind::PermissionDenied => "data_access_denied",
+                    std::io::ErrorKind::NotFound => "file_missing",
+                    _ => "startup_failed",
+                }
+            } else {
+                "startup_failed"
+            };
+            support_logs::tracing::error!(target: "praxi_support", phase = "failed", reason);
+            if e.to_string()
+                .starts_with("safe mode cannot be combined with --host or --peer")
+            {
+                eprintln!(
+                    "safe mode cannot be combined with --host or --peer; start without them or turn safe mode off."
+                );
+            }
+            eprintln!(
+                "The service stopped. Run bot doctor or open Help > View recent logs for details."
+            );
+        } else {
+            eprintln!("error: {e}");
+        }
         std::process::exit(e.downcast_ref::<ExitError>().map_or(1, |x| x.code));
     }
 }
@@ -800,6 +831,7 @@ fn run() -> Result<()> {
         }
         Command::Serve { .. } => return run_serve(&cli, command, &data_dir),
         Command::Doctor(c) => return run_doctor(&cli, c, &data_dir),
+        Command::Logs(c) => return logs_cmd::run(c, &data_dir),
         Command::Backup { action } if !action.needs_secret_store() => {
             return backup_cmd::run(
                 action,
@@ -942,6 +974,7 @@ fn run() -> Result<()> {
         | Command::Token { .. }
         | Command::Host { .. }
         | Command::SelfUpdate(_)
+        | Command::Logs(_)
         | Command::Doctor(_)
         | Command::Serve { .. }
         | Command::Status
@@ -1069,17 +1102,23 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
     use std::sync::Arc;
 
+    SERVING.store(true, std::sync::atomic::Ordering::Relaxed);
     // First thing: restrict the daemon process before secrets are read or
     // children are spawned. Never fatal; the result is recorded in `serve`
     // and shown by `doctor`.
     // Held for the whole run so `bot backup restore` can tell a daemon is using the data dir.
     let _daemon_lock = backup_cmd::hold_daemon_lock(data_dir)?;
+    support_logs::init(data_dir, "daemon").map_err(
+        |_| "The service could not open its log folder. Check access to the data folder.",
+    )?;
+    support_logs::tracing::info!(target: "praxi_support", phase = "process_guard");
     let guard = process_guard::protect();
     if guard.outcome == process_guard::Outcome::Failed {
-        eprintln!("warning: DEGRADED process guard: {}", guard.detail);
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: DEGRADED process guard: {}", guard.detail);
     }
 
     let (host_mode, peer_enabled) = match command {
@@ -1098,7 +1137,7 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         );
     }
     if safe_mode {
-        eprintln!(
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning",
             "SAFE MODE: tools, schedules, channels, MCP servers and apps are off; nothing was changed. Restart without --safe (and BOT_SAFE_MODE) to leave it."
         );
     }
@@ -1143,10 +1182,11 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
         None
     };
     let (store, kind) = open_store(cli.secrets_backend, data_dir, &ask_passphrase)?;
-    eprintln!("(secret backend: {})", secret_backend_label(kind));
+    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "(secret backend: {})", secret_backend_label(kind));
+    support_logs::tracing::info!(target: "praxi_support", phase = "providers");
     let catalog = load_catalog(cli.catalog_dir.as_ref())?;
     let providers = serve::build_providers(data_dir, &catalog, store.as_ref(), &mut |w| {
-        eprintln!("warning: {w}");
+        support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {w}");
     })?;
     // `POST /v1/providers/reload` rebuilds the providers the same way.
     let store: Arc<dyn secret_store::SecretStore> = Arc::from(store);
@@ -1165,7 +1205,9 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
     let desktop = if safe_mode {
         None
     } else {
-        serve::local_desktop(&mut |w| eprintln!("warning: {w}"))
+        serve::local_desktop(
+            &mut |w| support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {w}"),
+        )
     };
     let opts = serve::ServeOptions {
         port: cli.port,
