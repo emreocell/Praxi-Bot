@@ -291,7 +291,8 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
         "fs_read" | "fs_list" | "fs_search" | "fs_write" | "fs_edit" | "fs_move" | "fs_delete"
         | "checkpoint_list" | "checkpoint_restore" | "pdf_extract" | "docx_read" | "docx_write"
         | "xlsx_read" | "xlsx_write" | "csv_read" | "csv_transform" | "json_query"
-        | "git_status" | "git_diff" | "git_log" | "git_show" | "git_branch" | "git_commit" => {
+        | "doc_convert" | "doc_preview" | "git_status" | "git_diff" | "git_log" | "git_show"
+        | "git_branch" | "git_commit" => {
             format!("file {}", str_field("path").unwrap_or("a file"))
         }
         "email_read" | "email_search" | "email_list_folders" => {

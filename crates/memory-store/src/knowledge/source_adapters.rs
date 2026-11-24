@@ -481,7 +481,7 @@ fn extract(extension: &str, title: &str, bytes: &[u8]) -> Result<(String, Docume
                 max_rows: 2000,
                 max_cell_chars: 16_000,
                 max_output_bytes: MAX_TEXT_BYTES,
-                write_guard: None,
+                ..doc_tools::DocToolsConfig::default()
             };
             let reply = doc_tools::extract_bytes(&cfg, extension, title, bytes)
                 .map_err(|_| invalid("document extraction failed"))?;

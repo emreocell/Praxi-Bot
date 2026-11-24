@@ -373,7 +373,8 @@ impl Shared {
         // one-column CSV can be a valid SKILL.md or workflow/config document.
         let output_field = match name {
             "docx_write" | "xlsx_write" => Some("path"),
-            "csv_transform" => Some("output_path"),
+            "csv_transform" | "doc_convert" => Some("output_path"),
+            "doc_preview" => Some("output_dir"),
             _ => None,
         };
         if let Some(path) = output_field

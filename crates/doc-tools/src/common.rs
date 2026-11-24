@@ -16,6 +16,8 @@ pub struct Reply {
     pub markdown: String,
     /// Structured result.
     pub data: Value,
+    /// Base64 PNG pages returned inline (previews only).
+    pub(crate) images: Vec<String>,
 }
 
 impl Reply {
@@ -23,17 +25,23 @@ impl Reply {
         Self {
             markdown: truncate_chars(markdown, cfg.max_preview_chars),
             data,
+            images: Vec::new(),
         }
     }
 
     pub(crate) fn into_output(self) -> ToolOutput {
+        let mut content = vec![
+            ContentPart::Text {
+                text: self.markdown,
+            },
+            ContentPart::Json { data: self.data },
+        ];
+        content.extend(self.images.into_iter().map(|base64| ContentPart::Binary {
+            mime_type: "image/png".into(),
+            base64,
+        }));
         ToolOutput {
-            content: vec![
-                ContentPart::Text {
-                    text: self.markdown,
-                },
-                ContentPart::Json { data: self.data },
-            ],
+            content,
             spill: None,
             exposure: None,
         }
