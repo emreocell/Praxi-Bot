@@ -668,6 +668,29 @@ pub struct DailyUsage {
     pub calls_without_cost: u64,
 }
 
+/// One run in the "most expensive runs" list of `GET /v1/usage`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TopRunUsage {
+    /// Run id.
+    pub run_id: Uuid,
+    /// Bot that executed the run.
+    pub bot_id: Uuid,
+    /// Chat the run belongs to (lets the UI open it), when it has one.
+    #[serde(default)]
+    pub chat_id: Option<Uuid>,
+    /// When the run started (Unix ms).
+    pub created_at_ms: i64,
+    /// Totals of the run; `cost_usd` is `null` when no call had a known price.
+    #[serde(flatten)]
+    pub totals: UsageTotals,
+    /// Calls of this run that reported no token usage.
+    #[serde(default)]
+    pub calls_without_usage: u64,
+    /// Calls of this run whose cost is unknown.
+    #[serde(default)]
+    pub calls_without_cost: u64,
+}
+
 /// `GET /v1/usage`.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UsageSummary {
@@ -689,6 +712,10 @@ pub struct UsageSummary {
     /// Daily series bucketed in `time_zone` (chronological, bounded to at most 366 days).
     #[serde(default)]
     pub daily: Vec<DailyUsage>,
+    /// The (at most five) most expensive runs in the range: known cost first,
+    /// then runs of unknown price by tokens.
+    #[serde(default)]
+    pub top_runs: Vec<TopRunUsage>,
     /// Calls in the selected range that reported no token usage.
     #[serde(default)]
     pub calls_without_usage: u64,

@@ -5807,6 +5807,16 @@
     "exportCsv": "CSV indir",
     "exportDone": "Kullanım CSV dosyası indirildi.",
     "exportFailed": "Kullanım CSV dosyası indirilemedi",
+    "insights": {
+      "noChat": "Açılacak sohbet yok",
+      "openRun": "Aç",
+      "openRunLabel": "{{when}} tarihinde {{bot}} botunun çalıştırmasının sohbetini aç",
+      "priceUnknown": "Fiyat bilinmiyor",
+      "title": "Para nereye gidiyor",
+      "tokensShort": "{{amount}} token",
+      "topRuns": "En pahalı çalıştırmalar",
+      "unknownPriceNote": "\"Bilinmiyor\" yazan satırlar fiyatı bilinmeyen bir model kullanır: token sayıları hesaba katılır, maliyetleri katılmaz."
+    },
     "limit": {
       "clear": "Limiti kaldır",
       "forecast": "Ay sonu tahmini",
@@ -5855,15 +5865,27 @@
     "tokens": "Token",
     "total": "Toplam",
     "trend": {
+      "alertKey": "%80 uyarısı ({{amount}})",
       "ariaLabel": "{{days}} günlük {{metric}} eğilimi",
       "dayReadout": "{{day}} · {{calls}} çağrı · {{amount}} token · {{cost}}",
+      "forecast": "Bu ay harcanan: {{spent}}. Bu hızla ay yaklaşık {{forecast}} ile biter.",
+      "forecastNone": "Bu ay tahmin için henüz yeterli fiyatlı kullanım yok.",
+      "forecastPartial": "{{count}} çağrının fiyatı bilinmiyor ve hesaba katılmadı.",
+      "granularities": {
+        "day": "Günlük",
+        "month": "Aylık",
+        "week": "Haftalık"
+      },
+      "granularity": "Gruplama",
       "hoverHint": "Toplamlarını görmek için bir günün üzerine gelin veya odaklanın.",
+      "limitKey": "Aylık limit ({{amount}})",
       "metric": "Grafik ölçütü",
       "metrics": {
         "calls": "Çağrılar",
         "cost": "Maliyet",
         "tokens": "Token"
       },
+      "prorated": "Çizgiler, aylık limitinizin bir gün veya bir hafta için eşit payını gösterir.",
       "showTable": "Günlük döküm tablosunu göster",
       "timeZone": "Yerel günler ({{tz}})",
       "title": "Günlük eğilim"

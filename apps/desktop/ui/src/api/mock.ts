@@ -645,6 +645,34 @@ const USAGE: UsageSummary = {
     }
   ],
   daily: mockDailySeries(30),
+  top_runs: [
+    {
+      run_id: "run-top-1",
+      bot_id: ATLAS,
+      chat_id: "chat-atlas-1",
+      created_at_ms: Date.now() - 2 * 86_400_000,
+      model_calls: 38,
+      prompt_tokens: 210_000,
+      completion_tokens: 31_000,
+      cached_tokens: 90_000,
+      cost_usd: 0.62,
+      calls_without_usage: 0,
+      calls_without_cost: 0
+    },
+    {
+      run_id: "run-top-2",
+      bot_id: NOVA,
+      chat_id: null,
+      created_at_ms: Date.now() - 5 * 86_400_000,
+      model_calls: 12,
+      prompt_tokens: 80_000,
+      completion_tokens: 9_000,
+      cached_tokens: 0,
+      cost_usd: null,
+      calls_without_usage: 0,
+      calls_without_cost: 12
+    }
+  ],
   calls_without_usage: 2,
   calls_without_cost: 31,
   time_zone: "UTC"

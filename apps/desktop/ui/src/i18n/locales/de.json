@@ -5807,6 +5807,16 @@
     "exportCsv": "CSV herunterladen",
     "exportDone": "Nutzungs-CSV heruntergeladen.",
     "exportFailed": "Nutzungs-CSV konnte nicht heruntergeladen werden",
+    "insights": {
+      "noChat": "Kein Chat zum Öffnen",
+      "openRun": "Öffnen",
+      "openRunLabel": "Chat des Laufs von {{bot}} am {{when}} öffnen",
+      "priceUnknown": "Preis unbekannt",
+      "title": "Wohin das Geld geht",
+      "tokensShort": "{{amount}} Tokens",
+      "topRuns": "Teuerste Läufe",
+      "unknownPriceNote": "Einträge mit „Unbekannt“ nutzen ein Modell ohne bekannten Preis: Ihre Tokens werden gezählt, die Kosten nicht."
+    },
     "limit": {
       "clear": "Limit entfernen",
       "forecast": "Prognose zum Monatsende",
@@ -5855,15 +5865,27 @@
     "tokens": "Tokens",
     "total": "Gesamt",
     "trend": {
+      "alertKey": "Warnung bei 80 % ({{amount}})",
       "ariaLabel": "Täglicher {{metric}}-Verlauf über {{days}} Tage",
       "dayReadout": "{{day}} · {{calls}} Aufrufe · {{amount}} Tokens · {{cost}}",
+      "forecast": "Diesen Monat ausgegeben: {{spent}}. In diesem Tempo endet der Monat bei etwa {{forecast}}.",
+      "forecastNone": "Für eine Prognose gibt es diesen Monat noch zu wenig Nutzung mit bekanntem Preis.",
+      "forecastPartial": "{{count}} Aufrufe hatten keinen bekannten Preis und werden nicht mitgezählt.",
+      "granularities": {
+        "day": "Pro Tag",
+        "month": "Pro Monat",
+        "week": "Pro Woche"
+      },
+      "granularity": "Gruppieren nach",
       "hoverHint": "Fahre über einen Tag oder fokussiere ihn, um die Summen zu sehen.",
+      "limitKey": "Monatslimit ({{amount}})",
       "metric": "Diagramm-Kennzahl",
       "metrics": {
         "calls": "Aufrufe",
         "cost": "Kosten",
         "tokens": "Token-Menge"
       },
+      "prorated": "Die Linien zeigen den gleichmäßigen Anteil Ihres Monatslimits für einen Tag bzw. eine Woche.",
       "showTable": "Tägliche Tabelle anzeigen",
       "timeZone": "Lokale Tage ({{tz}})",
       "title": "Tagesverlauf"

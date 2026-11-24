@@ -5807,6 +5807,16 @@
     "exportCsv": "Download CSV",
     "exportDone": "Usage CSV downloaded.",
     "exportFailed": "Could not download usage CSV",
+    "insights": {
+      "noChat": "No chat to open",
+      "openRun": "Open",
+      "openRunLabel": "Open the chat of the run by {{bot}} on {{when}}",
+      "priceUnknown": "Price unknown",
+      "title": "Where the money goes",
+      "tokensShort": "{{amount}} tokens",
+      "topRuns": "Most expensive runs",
+      "unknownPriceNote": "Entries marked \"Unknown\" use a model without a known price: their tokens are counted, their cost is not."
+    },
     "limit": {
       "clear": "Remove limit",
       "forecast": "Forecast for month end",
@@ -5855,15 +5865,27 @@
     "tokens": "Tokens",
     "total": "Total",
     "trend": {
+      "alertKey": "Alert at 80% ({{amount}})",
       "ariaLabel": "Daily {{metric}} trend over {{days}} days",
       "dayReadout": "{{day}} · {{calls}} calls · {{amount}} tokens · {{cost}}",
+      "forecast": "Spent this month: {{spent}}. At this pace the month ends at about {{forecast}}.",
+      "forecastNone": "Not enough priced usage this month yet for a forecast.",
+      "forecastPartial": "{{count}} calls had no known price and are not counted.",
+      "granularities": {
+        "day": "Per day",
+        "month": "Per month",
+        "week": "Per week"
+      },
+      "granularity": "Group by",
       "hoverHint": "Hover or focus a day to see its totals.",
+      "limitKey": "Monthly limit ({{amount}})",
       "metric": "Chart metric",
       "metrics": {
         "calls": "Calls",
         "cost": "Cost",
         "tokens": "Tokens"
       },
+      "prorated": "Lines show the even share of your monthly limit for one day or week.",
       "showTable": "Show daily breakdown table",
       "timeZone": "Local days ({{tz}})",
       "title": "Daily trend"

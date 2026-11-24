@@ -8984,6 +8984,39 @@ export interface components {
             /** Format: int32 */
             rows: number;
         };
+        /** @description One run in the "most expensive runs" list of `GET /v1/usage`. */
+        TopRunUsage: components["schemas"]["UsageTotals"] & {
+            /**
+             * Format: uuid
+             * @description Bot that executed the run.
+             */
+            bot_id: string;
+            /**
+             * Format: int64
+             * @description Calls of this run whose cost is unknown.
+             */
+            calls_without_cost?: number;
+            /**
+             * Format: int64
+             * @description Calls of this run that reported no token usage.
+             */
+            calls_without_usage?: number;
+            /**
+             * Format: uuid
+             * @description Chat the run belongs to (lets the UI open it), when it has one.
+             */
+            chat_id?: string | null;
+            /**
+             * Format: int64
+             * @description When the run started (Unix ms).
+             */
+            created_at_ms: number;
+            /**
+             * Format: uuid
+             * @description Run id.
+             */
+            run_id: string;
+        };
         /** @description Body of `POST /v1/voice/transcribe`. */
         TranscribeInput: {
             /** @description The recording, base64 (standard alphabet). */
@@ -9081,6 +9114,11 @@ export interface components {
             runs: number;
             /** @description IANA time zone used to bucket `daily` (e.g. `Europe/Istanbul` or `UTC`). */
             time_zone?: string;
+            /**
+             * @description The (at most five) most expensive runs in the range: known cost first,
+             *     then runs of unknown price by tokens.
+             */
+            top_runs?: components["schemas"]["TopRunUsage"][];
             /** @description Totals over all counted runs. */
             total: components["schemas"]["UsageTotals"];
         };
