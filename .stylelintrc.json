@@ -1,6 +1,7 @@
 {
   "ignoreFiles": [
     "**/tokens.css",
+    "site/**",
     "**/node_modules/**",
     "**/dist/**",
     "**/target/**"
