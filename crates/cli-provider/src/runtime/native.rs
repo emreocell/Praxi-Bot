@@ -719,12 +719,12 @@ impl Run<'_> {
                         .as_str()
                         .ok_or(CliError::Protocol)?;
                     session = Some(id.to_owned());
-                    // Antigravity selects mode and model after `session/new` (ACP
+                    // Antigravity and Qoder select mode and model after `session/new` (ACP
                     // `session/set_mode`, `session/set_model`), Kiro V3 its model through
                     // `session/set_config_option`; the prompt waits for each answer.
                     let model = self.nt.turn.model.as_deref();
                     let requests = match self.nt.driver {
-                        Driver::Agy => agy_setup(id, self.plan.acp_mode, model),
+                        Driver::Agy | Driver::Qoder => agy_setup(id, self.plan.acp_mode, model),
                         Driver::Kiro => kiro_setup(id, model),
                         _ => Vec::new(),
                     };

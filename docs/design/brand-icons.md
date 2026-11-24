@@ -47,6 +47,7 @@ not trademark ownership.
 | Qwen Code: `qwen`, `cli:qwen` | Not listed | SI `qwen.svg` | CC0 1.0 |
 | Kiro CLI: `kiro`, `cli:kiro`, `kiro-cli` | Not listed | Original neutral terminal-prompt glyph, not the Kiro mark | Absent from SI 16.38.1; no mark redistribution grant verified |
 | GitHub Copilot CLI: `copilot`, `cli:copilot` | Not listed | SI `githubcopilot.svg`, already bundled | CC0 1.0 |
+| Qoder CLI: `qoder`, `cli:qoder`, `qodercli` | Not listed | The same neutral terminal-prompt glyph as Kiro, not the Qoder mark | Absent from SI 16.38.1; no mark redistribution grant verified |
 | Anthropic: `anthropic` | Real mark | SI `anthropic.svg`, retained | CC0 1.0 |
 | DeepSeek: `deepseek` | Real mark | SI `deepseek.svg`, retained | CC0 1.0 |
 | LM Studio: `lmstudio` | Real mark | SI `lmstudio.svg`, retained | CC0 1.0 |
@@ -114,7 +115,7 @@ resolve locally. Custom providers/servers keep the deterministic unknown fallbac
 
 Obtain explicit redistributable artwork or permission for Groq, Together AI,
 llama.cpp, Playwright, Exa, Tavily, Firecrawl and Context7 before replacing
-their initials, and for Kiro before replacing its neutral glyph. Keep this note open until each mark has a source and licence.
+their initials, and for Kiro and Qoder before replacing their neutral glyph. Keep this note open until each mark has a source and licence.
 Do not trace logos or extract installed-app artwork. Groq is a trademark of
 Groq LLC and/or its affiliates. Praxi-Bot is not affiliated with or endorsed
 by Groq LLC.

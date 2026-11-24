@@ -32,6 +32,7 @@ const CLI_LABELS: Record<string, string> = {
   agy: "Antigravity",
   qwen: "Qwen Code",
   kiro: "Kiro",
+  qoder: "Qoder",
   copilot: "GitHub Copilot"
 };
 

@@ -9,7 +9,7 @@ async fn registry_is_authenticated_and_preserves_confinement() {
     assert_eq!(response.status, StatusCode::OK);
     let body = response.json();
     let rows = body.as_array().unwrap();
-    assert_eq!(rows.len(), 8);
+    assert_eq!(rows.len(), 9);
     let qwen = rows.iter().find(|r| r["detected"]["id"] == "qwen").unwrap();
     assert_eq!(qwen["native"]["support"], "experimental");
     assert_eq!(
@@ -31,6 +31,16 @@ async fn registry_is_authenticated_and_preserves_confinement() {
         kiro["native"]["levels"][0]["native_setting"],
         "default permissions"
     );
+    let qoder = rows
+        .iter()
+        .find(|r| r["detected"]["id"] == "qoder")
+        .unwrap();
+    assert_eq!(qoder["native"]["support"], "experimental");
+    assert_eq!(
+        qoder["native"]["levels"][0]["native_setting"],
+        "mode default"
+    );
+    assert_eq!(qoder["auth_args"], json!(["status", "-o", "json"]));
     let claude = rows
         .iter()
         .find(|r| r["detected"]["id"] == "claude")

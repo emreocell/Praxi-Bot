@@ -1187,6 +1187,7 @@ const CREDENTIAL_NAMES: &[&str] = &[
     ".qwen",
     ".kiro",
     ".copilot",
+    ".qoder",
     // Project-level OpenCode config can declare plugins, commands and MCP
     // servers that run code, so it is protected in every workspace on purpose.
     // Likewise `.claude/` (hooks, commands) and `.cursor/` (rules, MCP).
@@ -1353,9 +1354,9 @@ pub fn workspace_refusal(dir: &Path, data_dir: &Path) -> Option<&'static str> {
 
 /// Credential and tool-configuration folders (SSH, cloud, GPG, container, CLI settings).
 /// A workspace may not be one, sit inside one, or contain one under the home folder.
-const CREDENTIAL_DIRS: [&str; 15] = [
-    ".claude", ".codex", ".gemini", ".qwen", ".copilot", ".kiro", ".cursor", ".config", ".local",
-    ".ssh", ".aws", ".gnupg", ".azure", ".kube", ".docker",
+const CREDENTIAL_DIRS: [&str; 16] = [
+    ".claude", ".codex", ".gemini", ".qwen", ".copilot", ".kiro", ".qoder", ".cursor", ".config",
+    ".local", ".ssh", ".aws", ".gnupg", ".azure", ".kube", ".docker",
 ];
 
 fn workspace_refusal_with_home(
@@ -1808,6 +1809,7 @@ const SENSITIVE_SEQUENCES: &[&[&str]] = &[
     &[".qwen"],
     &[".kiro"],
     &[".copilot"],
+    &[".qoder"],
     &[".opencode"],
     // Linux keyrings, wallets, browsers
     &[".local", "share", "keyrings"],
@@ -4303,6 +4305,8 @@ mod tests {
             ".kiro/hooks/post-save.json",
             ".copilot/config.json",
             ".copilot/settings.json",
+            ".qoder/settings.json",
+            ".qoder/.auth/machine_id",
             ".cursor/mcp.json",
             ".cursor-agent/auth.json",
             "AppData/Roaming/Cursor/User/settings.json",
@@ -6134,6 +6138,7 @@ mod tests {
             ".qwen",
             ".kiro",
             ".copilot",
+            ".qoder",
             ".claude.json.backup",
             "opencode.json",
             "opencode.jsonc",

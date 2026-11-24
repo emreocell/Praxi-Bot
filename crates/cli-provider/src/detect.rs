@@ -70,7 +70,7 @@ pub enum AuthState {
 /// A detected coding CLI engine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DetectedCli {
-    /// Engine id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`).
+    /// Engine id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `qoder`).
     pub id: String,
     /// Display name.
     pub display_name: String,
@@ -1277,7 +1277,7 @@ impl Detector {
     }
 
     async fn detect_fresh(&self) -> Vec<DetectedCli> {
-        let (claude, codex, cursor, opencode, gemini, agy, qwen, copilot, kiro) = tokio::join!(
+        let (claude, codex, cursor, opencode, gemini, agy, qwen, copilot, kiro, qoder) = tokio::join!(
             self.probe_claude(),
             self.probe_codex(),
             self.probe_cursor(),
@@ -1287,10 +1287,11 @@ impl Detector {
             self.probe_qwen(),
             self.probe_copilot(),
             self.probe_unverified_auth("kiro"),
+            self.probe_qoder(),
         );
 
         let mut rows = vec![
-            claude, codex, cursor, opencode, gemini, agy, qwen, copilot, kiro,
+            claude, codex, cursor, opencode, gemini, agy, qwen, copilot, kiro, qoder,
         ];
         // Gemini CLI is retired (Antigravity replaces it): never offered for install,
         // listed only where it is already installed so that setup keeps working.
@@ -1602,6 +1603,37 @@ impl Detector {
             }
         }
 
+        cli
+    }
+
+    /// Qoder CLI: `qodercli status -o json` reports `logged_in` (1.1.97). Only a parsed
+    /// answer counts; a token in the environment is not forwarded to the probe.
+    async fn probe_qoder(&self) -> DetectedCli {
+        let (mut cli, resolved) = self.probe_engine_version("qoder").await;
+        if !cli.installed || cli.detail.is_some() {
+            return cli;
+        }
+        let Some(resolved) = resolved else {
+            return cli;
+        };
+        let (auth, detail) = match run_process_probe(
+            &resolved,
+            engine_spec("qoder").unwrap().auth_args,
+            &self.env,
+        )
+        .await
+        {
+            Ok((status, stdout, _stderr)) => match parse_cursor_json(&stdout) {
+                Some(true) => auth_for_exit_status(status.success(), (AuthState::SignedIn, None)),
+                Some(false) => (AuthState::SignedOut, None),
+                None => (AuthState::Unknown, Some("auth_unparsed")),
+            },
+            Err(ProbeError::Timeout) => (AuthState::Unknown, Some("timeout")),
+            Err(ProbeError::OutputTooLarge) => (AuthState::Unknown, Some("output_too_large")),
+            Err(_) => (AuthState::Unknown, Some("auth_unparsed")),
+        };
+        cli.auth = auth;
+        cli.detail = detail.map(str::to_owned);
         cli
     }
 

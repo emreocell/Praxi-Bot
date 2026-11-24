@@ -33,6 +33,8 @@ test("rows show the product logo, not the company's", () => {
   assert.equal(providerBrand("cli:kiro").label, "Kiro");
   assert.equal(sourceLabel("cli:kiro"), "Kiro CLI");
   assert.equal(providerBrand("cli:kiro").company, "kiro");
+  assert.equal(providerBrand("cli:qoder").label, "Qoder");
+  assert.equal(sourceLabel("cli:qoder"), "Qoder CLI");
   assert.equal(providerBrand("cli:copilot").label, "GitHub Copilot");
   assert.equal(sourceLabel("cli:copilot"), "GitHub Copilot CLI");
   assert.equal(providerBrand("cli:copilot").company, "githubcopilot");

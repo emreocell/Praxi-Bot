@@ -29,6 +29,8 @@ const aliases: Record<string, string> = {
   cliagy: 'antigravity',
   cliqwen: 'qwen',
   clikiro: 'kiro',
+  cliqoder: 'qoder',
+  qodercli: 'qoder',
   kirocli: 'kiro',
   copilot: 'githubcopilot',
   clicopilot: 'githubcopilot',
@@ -74,6 +76,8 @@ export function brandIcon(name: string): BrandArtwork {
   if (key === 'antigravity') return { name: 'Antigravity', color: '#202124', path: 'M19.23306667 19.87493333C20.23306667 20.62506667 21.73306667 20.12506667 20.358 18.75C16.23306667 14.75 17.108 3.75 11.98302667 3.75C6.85802667 3.75 7.73302667 14.75 3.60802667 18.75C2.10802667 20.25 3.73302667 20.62506667 4.73302667 19.87493333C8.60802667 17.25 8.35802667 12.625 11.98302667 12.625C15.608 12.625 15.358 17.25 19.23306667 19.87493333Z', monogram: '', known: true, monochrome: true };
   // No licensed Kiro mark: an original, neutral terminal-prompt glyph.
   if (key === 'kiro') return { name: 'Kiro CLI', color: 'currentColor', path: 'M3.5 6.5 5 5l7 7-7 7-1.5-1.5L9 12ZM12 17h8.5v2H12Z', monogram: '', known: true, monochrome: true };
+  // No licensed Qoder mark either: the same neutral terminal-prompt glyph.
+  if (key === 'qoder') return { name: 'Qoder CLI', color: 'currentColor', path: 'M3.5 6.5 5 5l7 7-7 7-1.5-1.5L9 12ZM12 17h8.5v2H12Z', monogram: '', known: true, monochrome: true };
   if (initials[key]) return { name: initials[key], color: 'currentColor', path: '', monogram: initials[key][0].toUpperCase(), known: true, monochrome: true };
   if (key === 'slack') return { name: 'Slack', color: '#4A154B', path: '', monogram: '', known: true };
   let hash = 0;

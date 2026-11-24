@@ -740,6 +740,7 @@ const HOME_STORES: &[&str] = &[
     ".qwen",
     ".kiro",
     ".copilot",
+    ".qoder",
     ".config/opencode",
     ".config/claude",
     ".config/cursor",
@@ -1092,6 +1093,10 @@ mod tests {
             // Kiro CLI: MCP servers, hooks and permission rules under ~/.kiro
             ("cat ~/.kiro/settings/mcp.json", None),
             ("rm ${HOME}/.kiro/settings/permissions.yaml", None),
+            // Qoder CLI: sign-in state under ~/.qoder/.auth, settings with hooks and MCP servers
+            ("cat ~/.qoder/.auth/machine_id", None),
+            ("cat ${HOME}/.qoder/settings.json", None),
+            ("cat .qoder/settings.json", Some("/home/praxi")),
             // Copilot CLI: config.json (accounts, plaintext token without a keychain) and
             // settings.json (hooks, MCP servers) under ~/.copilot
             ("cat ~/.copilot/config.json", None),
