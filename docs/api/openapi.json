@@ -9214,6 +9214,96 @@
         ]
       }
     },
+    "/v1/memory/forgotten": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "operationId": "list_forgotten",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "query",
+            "description": "Only items that apply to this bot",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ForgottenItemDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/memory/forgotten/{id}": {
+      "delete": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Let a forgotten statement be learned again.",
+        "operationId": "remove_forgotten",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/memory/{id}": {
       "delete": {
         "tags": [
@@ -9305,6 +9395,46 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/memory/{id}/erase": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Erase a memory permanently (live or already forgotten): its text is removed\nfrom the item, the search index and the undo journal. Backups made earlier\nstill contain it; restoring one can bring the item back.",
+        "operationId": "erase_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
           },
           "404": {
             "description": "",
@@ -18152,6 +18282,48 @@
           "slow",
           "too_large"
         ]
+      },
+      "ForgottenItemDto": {
+        "type": "object",
+        "description": "A statement the owner forgot; extraction does not learn it again until the\nowner removes this entry. Holds no text once erased permanently.",
+        "required": [
+          "id",
+          "kind",
+          "erased",
+          "created_ms"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "`None` means the statement was forgotten for all bots."
+          },
+          "created_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "erased": {
+            "type": "boolean",
+            "description": "Erased permanently: the text is gone everywhere."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MemoryKindDto"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short preview; `None` when the item was erased permanently."
+          }
+        }
       },
       "FrameAck": {
         "type": "object",

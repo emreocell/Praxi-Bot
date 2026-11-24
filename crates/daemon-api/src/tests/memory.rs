@@ -222,3 +222,125 @@ async fn memory_rejects_secrets_and_blocks_peer_mutations() {
         }
     }
 }
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)] // one ordered forgotten/erase/chat/bot scenario
+async fn forgotten_items_erase_and_chat_and_bot_deletes_clean_memory() {
+    let t = setup();
+    let (bot, chat) = make_chat(&t).await;
+    let store = t.state.memory_store().unwrap();
+    let user = t.state.user_id();
+    let bot_id = BotId(bot.parse().unwrap());
+    let create = |content: &str| json!({ "bot_id": bot, "kind": "bot", "content": content });
+
+    // Forgetting leaves a visible "forgotten item" the owner can remove.
+    let m = call(
+        &t,
+        Method::POST,
+        "/v1/memory",
+        Some(create("Project Atlas deploys on Tuesday mornings.")),
+    )
+    .await;
+    let id = m.json()["id"].as_str().unwrap().to_owned();
+    let del = call(&t, Method::DELETE, &format!("/v1/memory/{id}"), None).await;
+    assert_eq!(del.status, StatusCode::OK);
+    let list = call(
+        &t,
+        Method::GET,
+        &format!("/v1/memory/forgotten?bot={bot}"),
+        None,
+    )
+    .await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.json());
+    assert_eq!(list.json().as_array().unwrap().len(), 1);
+    assert_eq!(
+        list.json()[0]["label"],
+        "Project Atlas deploys on Tuesday mornings."
+    );
+    assert_eq!(list.json()[0]["erased"], false);
+    let tomb = list.json()[0]["id"].as_str().unwrap().to_owned();
+    let gone = call(
+        &t,
+        Method::DELETE,
+        &format!("/v1/memory/forgotten/{tomb}"),
+        None,
+    )
+    .await;
+    assert_eq!(gone.status, StatusCode::NO_CONTENT);
+    let again = call(
+        &t,
+        Method::DELETE,
+        &format!("/v1/memory/forgotten/{tomb}"),
+        None,
+    )
+    .await;
+    assert_eq!(again.status, StatusCode::NOT_FOUND);
+
+    // "Erase permanently" removes the row and keeps a text-free tombstone.
+    let m2 = call(
+        &t,
+        Method::POST,
+        "/v1/memory",
+        Some(create("Secret launch codename is Falcon.")),
+    )
+    .await;
+    let id2 = m2.json()["id"].as_str().unwrap().to_owned();
+    let erased = call(&t, Method::POST, &format!("/v1/memory/{id2}/erase"), None).await;
+    assert_eq!(erased.status, StatusCode::NO_CONTENT);
+    let all = call(&t, Method::GET, "/v1/memory?include_deleted=true", None).await;
+    assert!(!all.json().to_string().contains("Falcon"));
+    let list = call(&t, Method::GET, "/v1/memory/forgotten", None).await;
+    assert_eq!(list.json()[0]["erased"], true);
+    assert!(list.json()[0]["label"].is_null());
+    assert!(!list.json().to_string().contains("Falcon"));
+    let missing = call(&t, Method::POST, &format!("/v1/memory/{id2}/erase"), None).await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+
+    // Deleting a chat removes its text from past-session search.
+    let msg = storage::Message {
+        id: Uuid::now_v7(),
+        user_id: user,
+        chat_id: protocol::ChatId(chat.parse().unwrap()),
+        run_id: None,
+        role: "user".into(),
+        content: "the quarterly invoice password reminder".into(),
+        created_at_ms: 1,
+        exposure_untrusted: false,
+        exposure_private: false,
+        exposure_sources: Vec::new(),
+    };
+    store.index_message(&msg).unwrap();
+    assert_eq!(store.search_sessions(user, "invoice", 5).unwrap().len(), 1);
+    let r = call(&t, Method::DELETE, &format!("/v1/chats/{chat}"), None).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(store.search_sessions(user, "invoice", 5).unwrap().len(), 0);
+
+    // Deleting a bot erases what only it knew; shared memories stay.
+    let own = call(
+        &t,
+        Method::POST,
+        "/v1/memory",
+        Some(create("Bot only note about pelicans.")),
+    )
+    .await;
+    let own_id: Uuid = own.json()["id"].as_str().unwrap().parse().unwrap();
+    let shared = call(
+        &t,
+        Method::POST,
+        "/v1/memory",
+        Some(json!({ "bot_id": null, "kind": "profile", "content": "User keeps ferrets." })),
+    )
+    .await;
+    let shared_id: Uuid = shared.json()["id"].as_str().unwrap().parse().unwrap();
+    let r = call(&t, Method::DELETE, &format!("/v1/bots/{bot}"), None).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "{}", r.json());
+    assert!(store.get(own_id).unwrap().is_none());
+    assert!(store.get(shared_id).unwrap().is_some());
+    assert!(
+        store
+            .list_tombstones(user, Some(bot_id))
+            .unwrap()
+            .iter()
+            .all(|t| t.bot_id.is_none())
+    );
+}

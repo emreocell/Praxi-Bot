@@ -154,6 +154,28 @@ pub struct MemoryPreviewDto {
     pub hits: Vec<MemoryPreviewHitDto>,
 }
 
+/// A statement the owner forgot; extraction does not learn it again until the
+/// owner removes this entry. Holds no text once erased permanently.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ForgottenItemDto {
+    pub id: Uuid,
+    /// `None` means the statement was forgotten for all bots.
+    pub bot_id: Option<Uuid>,
+    pub kind: MemoryKindDto,
+    /// Short preview; `None` when the item was erased permanently.
+    pub label: Option<String>,
+    /// Erased permanently: the text is gone everywhere.
+    pub erased: bool,
+    pub created_ms: i64,
+}
+
+/// Query parameters for `GET /v1/memory/forgotten`.
+#[derive(Debug, Default, Deserialize)]
+pub struct ForgottenListQuery {
+    /// Restrict to items that apply to this bot (shared + this bot's).
+    pub bot: Option<Uuid>,
+}
+
 fn map_err(error: MemoryError) -> ApiError {
     match error {
         MemoryError::NotFound(msg) => ApiError::not_found(msg),
@@ -363,6 +385,104 @@ pub(crate) async fn delete_memory(
         .filter(|m| m.user_id == user)
         .ok_or_else(|| ApiError::not_found(format!("memory {id}")))?;
     Ok(Json(item_dto(&store, user, deleted)?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/memory/{id}/erase",
+    tag = "memory",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 204),
+        (status = 404, body = ErrorBody)
+    )
+)]
+/// Erase a memory permanently (live or already forgotten): its text is removed
+/// from the item, the search index and the undo journal. Backups made earlier
+/// still contain it; restoring one can bring the item back.
+pub(crate) async fn erase_memory(
+    State(s): State<AppState>,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    let user = s.user_id();
+    s.storage().append_audit(
+        user,
+        None,
+        "user",
+        "memory.erase",
+        &json!({ "memory_id": id }),
+    )?;
+    let store = s.memory_store()?;
+    store.purge(user, id, "owner erased").map_err(map_err)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/memory/forgotten",
+    tag = "memory",
+    security(("bearer" = [])),
+    params(("bot" = Option<Uuid>, Query, description = "Only items that apply to this bot")),
+    responses(
+        (status = 200, body = Vec<ForgottenItemDto>),
+        (status = 404, body = ErrorBody)
+    )
+)]
+pub(crate) async fn list_forgotten(
+    State(s): State<AppState>,
+    Query(query): Query<ForgottenListQuery>,
+) -> Result<Json<Vec<ForgottenItemDto>>, ApiError> {
+    let bot_id = match query.bot {
+        Some(id) => Some(s.bot_of_user(BotId(id))?.id),
+        None => None,
+    };
+    let store = s.memory_store()?;
+    let items = store
+        .list_tombstones(s.user_id(), bot_id)
+        .map_err(map_err)?;
+    Ok(Json(
+        items
+            .into_iter()
+            .map(|t| ForgottenItemDto {
+                id: t.id,
+                bot_id: t.bot_id.map(|b| b.0),
+                kind: t.kind.into(),
+                label: t.label,
+                erased: t.erased,
+                created_ms: t.created_ms,
+            })
+            .collect(),
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/memory/forgotten/{id}",
+    tag = "memory",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 204),
+        (status = 404, body = ErrorBody)
+    )
+)]
+/// Let a forgotten statement be learned again.
+pub(crate) async fn remove_forgotten(
+    State(s): State<AppState>,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    let user = s.user_id();
+    s.storage().append_audit(
+        user,
+        None,
+        "user",
+        "memory.forgotten.remove",
+        &json!({ "forgotten_id": id }),
+    )?;
+    let store = s.memory_store()?;
+    store.remove_tombstone(user, id).map_err(map_err)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(

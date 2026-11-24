@@ -826,6 +826,19 @@ impl AppState {
         Ok(store)
     }
 
+    /// The memory store when memory has ever been used here (the agent's store,
+    /// one opened earlier, or a `memory.db` on disk); never creates a database.
+    /// Used by deletions, which must clean up memory but must not start it.
+    pub(crate) fn memory_store_if_present(&self) -> Option<Arc<memory_store::MemoryStore>> {
+        if self.0.agent.memory_store().is_some()
+            || self.0.memory.lock().is_some()
+            || self.data_dir().join("memory.db").exists()
+        {
+            return self.memory_store().ok();
+        }
+        None
+    }
+
     /// The running scheduler, or `503` when the daemon did not start one.
     pub(crate) fn scheduler(&self) -> Result<Scheduler, ApiError> {
         if self.leader().is_starting() {
@@ -1316,6 +1329,12 @@ fn api_routes() -> Router<AppState> {
             axum::routing::patch(memory::update_memory).delete(memory::delete_memory),
         )
         .route("/v1/memory/{id}/undo", post(memory::undo_memory))
+        .route("/v1/memory/{id}/erase", post(memory::erase_memory))
+        .route("/v1/memory/forgotten", get(memory::list_forgotten))
+        .route(
+            "/v1/memory/forgotten/{id}",
+            axum::routing::delete(memory::remove_forgotten),
+        )
         .route(
             "/v1/bots/{id}/memory/preview",
             get(memory::preview_bot_memory),

@@ -903,7 +903,15 @@ pub(crate) async fn remove_bot(s: &AppState, bot: &Bot) -> Result<(), ApiError> 
                     ))
                 })?;
                 crate::knowledge::remove_bot_index(&state, &removed)
-                    .map_err(storage::StorageError::Io)
+                    .map_err(storage::StorageError::Io)?;
+                // Memories only this bot knew, their journal and its forgotten
+                // items go with it (shared memories belong to the user).
+                if let Some(memory) = state.memory_store_if_present() {
+                    memory
+                        .erase_bot(removed.user_id, removed.id)
+                        .map_err(|e| storage::StorageError::Io(std::io::Error::other(e)))?;
+                }
+                Ok(())
             })
             .map_err(|_| {
                 ApiError::conflict(
@@ -1016,6 +1024,12 @@ pub(crate) async fn delete_chat(
         other => other.into(),
     })?;
     agent_core::attachments::remove_chat(&s.data_dir(), chat.id);
+    // The deleted chat must not stay searchable through past-session search.
+    if let Some(memory) = s.memory_store_if_present()
+        && let Err(e) = memory.erase_chat(chat.id)
+    {
+        eprintln!("daemon-api: warning: could not erase a deleted chat from memory search: {e}");
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
