@@ -19,6 +19,7 @@ import type {
   KnowledgeEmbeddingProgress,
   KnowledgeEmbeddingApproval,
   KnowledgeEmbeddingGrantTarget,
+  ForgottenItem,
   MemoryItem,
   MemoryKind,
   CreateMemoryInput,
@@ -310,6 +311,21 @@ export class ApiClient {
 
   undoMemory(id: string): Promise<MemoryItem> {
     return this.request("POST", `/memory/${encodeURIComponent(id)}/undo`);
+  }
+
+  /** Erase a memory for good (text, search entries and undo history). */
+  eraseMemory(id: string): Promise<void> {
+    return this.request("POST", `/memory/${encodeURIComponent(id)}/erase`);
+  }
+
+  /** Statements the owner forgot; extraction does not learn them again. */
+  listForgottenMemories(bot?: string | null): Promise<ForgottenItem[]> {
+    return this.request("GET", "/memory/forgotten", { query: { bot: bot ?? undefined } });
+  }
+
+  /** Let a forgotten statement be learned again. */
+  removeForgottenMemory(id: string): Promise<void> {
+    return this.request("DELETE", `/memory/forgotten/${encodeURIComponent(id)}`);
   }
 
   previewBotMemory(bot: string, query: string): Promise<MemoryPreview> {

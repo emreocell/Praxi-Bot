@@ -24,6 +24,7 @@ export type MemoryTrust = S["MemoryTrustDto"];
 export type MemoryItem = S["MemoryItemDto"];
 export type CreateMemoryInput = S["CreateMemoryInput"];
 export type UpdateMemoryInput = S["UpdateMemoryInput"];
+export type ForgottenItem = S["ForgottenItemDto"];
 export type MemoryPreviewHit = S["MemoryPreviewHitDto"];
 export type MemoryPreview = S["MemoryPreviewDto"];
 

@@ -2606,6 +2606,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/memory/forgotten": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_forgotten"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/forgotten/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Let a forgotten statement be learned again. */
+        delete: operations["remove_forgotten"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/memory/{id}": {
         parameters: {
             query?: never;
@@ -2620,6 +2653,27 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["update_memory"];
+        trace?: never;
+    };
+    "/v1/memory/{id}/erase": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Erase a memory permanently (live or already forgotten): its text is removed
+         *     from the item, the search index and the undo journal. Backups made earlier
+         *     still contain it; restoring one can bring the item back.
+         */
+        post: operations["erase_memory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/memory/{id}/undo": {
@@ -5664,6 +5718,26 @@ export interface components {
          * @enum {string}
          */
         FitDto: "comfortable" | "slow" | "too_large";
+        /**
+         * @description A statement the owner forgot; extraction does not learn it again until the
+         *     owner removes this entry. Holds no text once erased permanently.
+         */
+        ForgottenItemDto: {
+            /**
+             * Format: uuid
+             * @description `None` means the statement was forgotten for all bots.
+             */
+            bot_id?: string | null;
+            /** Format: int64 */
+            created_ms: number;
+            /** @description Erased permanently: the text is gone everywhere. */
+            erased: boolean;
+            /** Format: uuid */
+            id: string;
+            kind: components["schemas"]["MemoryKindDto"];
+            /** @description Short preview; `None` when the item was erased permanently. */
+            label?: string | null;
+        };
         /**
          * @description `POST /v1/view/sessions/{id}/ack`: the newest frame this viewer has put on screen. Unlike
          *     `SessionUpdate` it changes nothing else and never forces a refresh, so a viewer can send
@@ -15258,6 +15332,63 @@ export interface operations {
             };
         };
     };
+    list_forgotten: {
+        parameters: {
+            query?: {
+                /** @description Only items that apply to this bot */
+                bot?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForgottenItemDto"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    remove_forgotten: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     delete_memory: {
         parameters: {
             query?: never;
@@ -15317,6 +15448,33 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    erase_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             404: {
                 headers: {
