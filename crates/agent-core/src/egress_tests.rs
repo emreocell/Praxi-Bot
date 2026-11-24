@@ -3374,6 +3374,28 @@ async fn a_path_cannot_carry_a_secret_by_shape() {
 }
 
 #[tokio::test]
+async fn an_owner_typed_secret_or_odd_shape_is_not_a_waived_path() {
+    let site = "https://webioo.com.tr";
+    let digest = "0123456789abcdef0123456789abcdef";
+    for seg in [
+        "sk-live-AbCdEfGhIjKlMnOp",
+        digest,
+        "abcdefghijklmnopq", // 17 letters in one part
+        "a1b2",
+    ] {
+        let said = format!("look at webioo.com.tr, key {seg}");
+        let url = format!("{site}/{seg}");
+        assert!(!plain_open_runs_silently(&said, &url, false).await, "{seg}");
+    }
+    // short plain words the owner typed pass, Turkish letters included
+    for seg in ["iletisim", "referanslarimiz", "ağış-çözüm"] {
+        let said = format!("look at webioo.com.tr, page {seg}");
+        let url = format!("{site}/{seg}");
+        assert!(plain_open_runs_silently(&said, &url, false).await, "{seg}");
+    }
+}
+
+#[tokio::test]
 async fn a_remembered_origin_does_not_silence_secret_paths() {
     let env = setup();
     let page = read_tool("fs_read", ContentClass::untrusted());
@@ -3401,8 +3423,13 @@ async fn a_remembered_origin_does_not_silence_secret_paths() {
         cfg(Policy::full()),
     );
     let mut rx = lp.subscribe();
-    lp.send_user_message_from(env.chat, "go", crate::MessageMode::Steer, "owner")
-        .unwrap();
+    lp.send_user_message_from(
+        env.chat,
+        "go, key sk-live-AbCdEfGhIjKlMnOp",
+        crate::MessageMode::Steer,
+        "owner",
+    )
+    .unwrap();
     // the first open (new origin) asks; approve it for this chat
     let Event::ApprovalNeeded(card) =
         until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await

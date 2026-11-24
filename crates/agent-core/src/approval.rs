@@ -748,9 +748,9 @@ impl Shared {
             && url.path().split('/').count() <= 8
             && url.path().split('/').all(|seg| {
                 seg.len() <= 48
-                    && seg
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~'))
+                    && seg.chars().all(|c| {
+                        c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~' | '%')
+                    })
             });
         (matches!(url.scheme(), "http" | "https")
             && url.username().is_empty()
@@ -770,13 +770,47 @@ impl Shared {
         if url.path() == "/" || segs.is_empty() {
             return true;
         }
-        let is_word = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~');
+        let is_word = |c: char| c.is_alphanumeric() || matches!(c, '-' | '_');
         segs.iter().all(|seg| {
-            !matches!(*seg, "." | "..")
+            let Some(seg) = Self::percent_decode(seg) else {
+                return false;
+            };
+            Self::is_short_plain_word(&seg)
                 && texts
                     .iter()
-                    .any(|m| m.split(|c: char| !is_word(c)).any(|tok| tok == *seg))
+                    .any(|m| m.split(|c: char| !is_word(c)).any(|tok| tok == seg))
         })
+    }
+
+    /// Shape limit on every waived path segment, so a secret the owner once typed cannot be
+    /// replayed as a path: letters only (any script), parts joined by single `-` or `_`, no
+    /// digits, at most 24 characters (16 per part) and at most 2 upper-case letters.
+    fn is_short_plain_word(seg: &str) -> bool {
+        seg.chars().count() <= 24
+            && seg.chars().filter(|c| c.is_uppercase()).count() <= 2
+            && seg.split(['-', '_']).all(|part| {
+                !part.is_empty()
+                    && part.chars().count() <= 16
+                    && part.chars().all(char::is_alphabetic)
+            })
+    }
+
+    /// Decode `%XX` escapes (needed for non-ASCII letters such as `ğ`); `None` on bad UTF-8.
+    fn percent_decode(seg: &str) -> Option<String> {
+        let b = seg.as_bytes();
+        let mut out = Vec::with_capacity(b.len());
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'%' {
+                let hex = std::str::from_utf8(b.get(i + 1..i + 3)?).ok()?;
+                out.push(u8::from_str_radix(hex, 16).ok()?);
+                i += 3;
+            } else {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8(out).ok()
     }
 
     /// A bare token (no scheme) an owner wrote counts as a site name only when it is a

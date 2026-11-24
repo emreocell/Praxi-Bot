@@ -90,8 +90,11 @@ Standing choices (this chat, always) need the owner's authority, as gate grants 
 remembered site (or a site the owner named: a full http(s) URL, or a bare domain under a real
 public TLD that is not a file extension, so `README.md` is not a site) also satisfies the egress
 gate for a plain navigation (one argument, `url`, no query or fragment) to that origin, but only
-to its root or to a path whose every segment the owner typed verbatim; no path is waived by its
-shape. A redirect to another origin is not remembered: opening that origin later asks; a remembered command never satisfies the
+to its root or to a path whose every segment the owner typed verbatim AND that is a short plain
+word (letters of any script, parts joined by single `-` or `_`, no digits, at most 24 characters,
+at most 16 per part, at most 2 upper-case letters), so a key or digest the owner once typed is
+never replayed as a path; anything else asks, remembered origin or not. Residual risk: an
+owner-typed short lower-case word could still be replayed as a path. A redirect to another origin is not remembered: opening that origin later asks; a remembered command never satisfies the
 "untrusted content, then run a program" gate. Risky programs (shells, interpreters, `rm`, `curl`,
 `ssh`, `sudo`, ...) and commands with arguments other than flags and one sub-command word are
 never remembered. The old tool-wide and category-wide rules keep working for other tools.
