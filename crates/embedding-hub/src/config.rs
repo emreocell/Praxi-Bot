@@ -69,6 +69,7 @@ impl ProviderType {
 
 /// One configured provider.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
     /// Short unique id (`a-z`, `0-9`, `-`).

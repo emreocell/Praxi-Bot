@@ -191,6 +191,7 @@ pub struct EmbeddingsDto {
 
 /// A provider as the owner edits it.
 #[derive(Debug, Deserialize, ToSchema)]
+#[allow(clippy::struct_excessive_bools)]
 #[serde(deny_unknown_fields)]
 pub struct EmbeddingProviderInput {
     /// Short id (`a-z`, `0-9`, `-`).
