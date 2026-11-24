@@ -16,6 +16,14 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ["site/scripts/**", "site/src/release.mjs", "site/test/**"],
+    languageOptions: { globals: { ...globals.node } }
+  },
+  {
+    files: ["site/src/app.js"],
+    languageOptions: { globals: { ...globals.browser } }
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
       ecmaVersion: 2022,
