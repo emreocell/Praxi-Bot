@@ -366,8 +366,11 @@ fn base_url() -> Result<String, String> {
     match std::env::var("BOT_URL") {
         Ok(u) if !u.trim().is_empty() => validate_bot_url(u.trim()),
         _ => {
+            // Only a record whose pid owns the socket, runs as this user and runs this
+            // install's bot binary may decide the URL.
             if let Ok(data) = data_dir()
-                && let Some(endpoint) = process_guard::lifecycle::discover(&data)
+                && let Ok(Some(endpoint)) =
+                    process_guard::owner::discover_trusted(&data, &trusted_images())
             {
                 return Ok(endpoint.url());
             }
@@ -774,8 +777,8 @@ fn child_pid(handle: &DaemonHandle) -> Option<u32> {
     matches!(c.try_wait(), Ok(None)).then(|| c.id())
 }
 
-/// Loopback port of `url` when its host is a local one (remote `BOT_URL`s are
-/// the user's explicit choice and cannot be checked by socket owner).
+/// IPv4 loopback port of `url`; every other host (including `[::1]`) is `None`
+/// and is refused, because the socket-owner check only covers 127.0.0.1.
 fn loopback_port(url: &str) -> Option<u16> {
     let hp = host_port(url)?;
     let (host, port) = hp.rsplit_once(':')?;
@@ -800,13 +803,19 @@ fn trusted_images() -> Vec<std::path::PathBuf> {
 /// Identity gate run before the bearer token is handed out.  The health probe
 /// is unauthenticated, so an answer only proves "something listens".  The
 /// owning process of the socket must be the child this app spawned (exact PID),
-/// or, when the app has no running child and did not just spawn one, a process
-/// of the same OS user.  After our own spawn with no running child the
-/// listener is a squatter that won the bind race.
-async fn check_listener(handle: &DaemonHandle, url: &str, after_spawn: bool) -> Result<(), String> {
-    let Some(port) = loopback_port(url) else {
-        return Ok(());
-    };
+/// or, when the app has no running child and did not just spawn one, a
+/// verified endpoint (pid owns the socket, same OS user, this install's bot image).
+/// There is no weaker "any same-user process" fallback: a missing or different
+/// record fails closed.  After our own spawn with no running child the listener
+/// is a squatter that won the bind race.
+fn listener_expectation(
+    handle: &DaemonHandle,
+    url: &str,
+    after_spawn: bool,
+) -> Result<(u16, Expect), String> {
+    let port = loopback_port(url).ok_or_else(|| {
+        format!("cannot verify the owner of {url} (only http://127.0.0.1:PORT can be checked); refusing to send the API token")
+    })?;
     let expect = match child_pid(handle) {
         Some(pid) => Expect::Child(pid),
         None if after_spawn => {
@@ -816,18 +825,24 @@ async fn check_listener(handle: &DaemonHandle, url: &str, after_spawn: bool) -> 
             ));
         }
         None => {
-            // The record is plain data any same-user process can rewrite: its pid must
-            // own the socket and run this install's bot binary before the token is sent.
-            let recorded = match data_dir() {
-                Ok(data) => process_guard::owner::discover_trusted(&data, &trusted_images()),
-                Err(_) => Ok(None),
-            }
-            .map_err(|_| process_guard::owner::FOREIGN_PORT_MESSAGE.to_owned())?;
-            recorded
+            // The record is plain data any same-user process can rewrite.
+            let data = data_dir()?;
+            let endpoint = process_guard::owner::discover_trusted(&data, &trusted_images())
+                .map_err(|_| process_guard::owner::FOREIGN_PORT_MESSAGE.to_owned())?
                 .filter(|endpoint| endpoint.port == port)
-                .map_or(Expect::SameUser, |endpoint| Expect::Recorded(endpoint.pid))
+                .ok_or_else(|| {
+                    format!(
+                        "no verified Praxi daemon is recorded for {url}; refusing to send the API token"
+                    )
+                })?;
+            Expect::Recorded(endpoint.pid)
         }
     };
+    Ok((port, expect))
+}
+
+async fn check_listener(handle: &DaemonHandle, url: &str, after_spawn: bool) -> Result<(), String> {
+    let (port, expect) = listener_expectation(handle, url, after_spawn)?;
     tokio::task::spawn_blocking(move || listener::verify(port, expect))
         .await
         .map_err(|e| e.to_string())?
@@ -835,6 +850,12 @@ async fn check_listener(handle: &DaemonHandle, url: &str, after_spawn: bool) -> 
 }
 
 fn connection(handle: &DaemonHandle, url: String, data: &Path) -> Result<Connection, String> {
+    // Re-check immediately before the token is read: the earlier async check may be
+    // stale (the record or the listener can change in between).  The webview later
+    // sends the owner key to exactly this verified `url`.
+    let (port, expect) = listener_expectation(handle, &url, false)?;
+    listener::verify(port, expect)
+        .map_err(|e| format!("{e}; refusing to send the API token to {url}"))?;
     let token = read_token(data)?;
     ensure_logging(data);
     support_logs::tracing::info!(target: "praxi_support", phase = "ready");
@@ -1462,8 +1483,12 @@ mod tests {
 
         // Control: the check passes for the real owner of the socket.
         assert!(listener::verify(port, Expect::Child(std::process::id())).is_ok());
-        // A pre-existing daemon of the same user is accepted.
-        assert!(check_listener(&handle, &url, false).await.is_ok());
+        // A same-user process that merely answers health (no verified record, as when it
+        // planted its own pid/port) must NOT receive the token.
+        assert!(check_listener(&handle, &url, false).await.is_err());
+        // IPv6 loopback cannot be owner-checked and is refused, not skipped.
+        let v6 = format!("http://[::1]:{port}");
+        assert!(check_listener(&handle, &v6, false).await.is_err());
     }
 
     #[test]

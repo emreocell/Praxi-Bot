@@ -16,8 +16,6 @@ pub enum Expect {
     Child(u32),
     /// A discovered daemon must match the record AND the current OS user.
     Recorded(u32),
-    /// Any process of the current OS user (a daemon started from a shell).
-    SameUser,
 }
 
 /// Pure decision: every listener PID satisfies `expect`, and there is at least one.
@@ -26,7 +24,6 @@ pub fn trusted(pids: &BTreeSet<u32>, expect: Expect, same_user: impl Fn(u32) -> 
         && pids.iter().all(|&p| match expect {
             Expect::Child(c) => p == c,
             Expect::Recorded(c) => p == c && same_user(p),
-            Expect::SameUser => same_user(p),
         })
 }
 
@@ -320,12 +317,11 @@ mod tests {
         assert!(trusted(&set(&[5]), Expect::Child(5), |_| false));
         assert!(!trusted(&set(&[6]), Expect::Child(5), |_| true));
         assert!(!trusted(&set(&[5, 6]), Expect::Child(5), |_| true));
-        assert!(trusted(&set(&[7]), Expect::SameUser, |_| true));
         assert!(trusted(&set(&[7]), Expect::Recorded(7), |_| true));
         assert!(!trusted(&set(&[7]), Expect::Recorded(7), |_| false));
         assert!(!trusted(&set(&[8]), Expect::Recorded(7), |_| true));
-        assert!(!trusted(&set(&[7, 8]), Expect::SameUser, |p| p == 7));
-        assert!(!trusted(&set(&[]), Expect::SameUser, |_| true));
+        assert!(!trusted(&set(&[7, 8]), Expect::Recorded(7), |_| true));
+        assert!(!trusted(&set(&[]), Expect::Recorded(7), |_| true));
     }
 
     #[test]
@@ -338,7 +334,7 @@ mod tests {
         let me = std::process::id();
         assert!(platform::listener_pids(port).unwrap().contains(&me));
         assert!(platform::is_same_user(me));
-        assert!(verify(port, Expect::SameUser).is_ok());
+        assert!(verify(port, Expect::Recorded(me)).is_ok());
         assert!(verify(port, Expect::Child(me)).is_ok());
         // A listener that is not the expected child is refused.
         assert!(verify(port, Expect::Child(me.wrapping_add(1))).is_err());

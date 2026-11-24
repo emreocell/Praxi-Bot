@@ -3,8 +3,8 @@
 //! The endpoint file is plain data: any same-user process can replace it while
 //! the real daemon holds the lock. So before any bearer token is sent to a
 //! recorded endpoint, the recorded pid must (1) be the only owner of the
-//! listening socket and (2) run this installation's `bot` image. Anything else
-//! fails closed: treat it as "no daemon" and never send the token.
+//! listening socket, (2) run as the same OS user and (3) run this installation's
+//! `bot` image, on every OS. Anything else fails closed: treat it as "no daemon" and never send the token.
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -22,6 +22,8 @@ pub trait Probe {
     /// # Errors
     /// The owner table cannot be read.
     fn listener_pids(&self, port: u16) -> Result<BTreeSet<u32>, String>;
+    /// Whether `pid` runs as the same OS user as this process (fail closed).
+    fn same_user(&self, pid: u32) -> bool;
 }
 
 /// Why a recorded endpoint is not trusted.
@@ -31,6 +33,8 @@ pub enum Rejection {
     Listener,
     /// The recorded pid does not run this install's `bot` binary.
     Image,
+    /// The recorded pid is not the current OS user's.
+    User,
 }
 
 /// Canonical equality: resolves `\?\` prefixes, 8.3 names, `..` and case. A path
@@ -60,6 +64,9 @@ pub fn verify_with(
     if pids.is_empty() || pids.iter().any(|&p| p != endpoint.pid) {
         return Err(Rejection::Listener);
     }
+    if !probe.same_user(endpoint.pid) {
+        return Err(Rejection::User);
+    }
     let image = probe.image_path(endpoint.pid).ok_or(Rejection::Image)?;
     if expected.iter().any(|e| same_file(e, &image)) {
         Ok(())
@@ -71,8 +78,7 @@ pub fn verify_with(
 /// [`discover`] plus the ownership proof. `Ok(None)`: no daemon holds the lock.
 ///
 /// # Errors
-/// A lock holder published an endpoint that is not one of `expected` (Windows;
-/// other platforms keep their existing socket-owner check in the apps).
+/// A lock holder published an endpoint that is not one of `expected`.
 pub fn discover_trusted(data: &Path, expected: &[PathBuf]) -> Result<Option<Endpoint>, Rejection> {
     let Some(endpoint) = discover(data) else {
         return Ok(None);
@@ -89,13 +95,22 @@ pub fn verify(endpoint: Endpoint, expected: &[PathBuf]) -> Result<(), Rejection>
     verify_with(endpoint, expected, &crate::windows::SystemProbe)
 }
 
-/// Non-Windows: the apps' own `/proc` / `lsof` socket-owner check applies.
+/// Unix: `/proc` (Linux) or `lsof`/`ps` (macOS); anything unreadable fails closed.
 ///
 /// # Errors
-/// Never.
-#[cfg(not(windows))]
+/// See [`verify_with`].
+#[cfg(unix)]
+pub fn verify(endpoint: Endpoint, expected: &[PathBuf]) -> Result<(), Rejection> {
+    verify_with(endpoint, expected, &crate::unix::SystemProbe)
+}
+
+/// Other platforms cannot prove ownership: fail closed.
+///
+/// # Errors
+/// Always [`Rejection::Listener`].
+#[cfg(not(any(unix, windows)))]
 pub fn verify(_endpoint: Endpoint, _expected: &[PathBuf]) -> Result<(), Rejection> {
-    Ok(())
+    Err(Rejection::Listener)
 }
 
 #[cfg(test)]
@@ -106,6 +121,7 @@ mod tests {
     struct Fake {
         images: HashMap<u32, PathBuf>,
         listeners: BTreeSet<u32>,
+        foreign_users: BTreeSet<u32>,
     }
     impl Probe for Fake {
         fn image_path(&self, pid: u32) -> Option<PathBuf> {
@@ -113,6 +129,9 @@ mod tests {
         }
         fn listener_pids(&self, _port: u16) -> Result<BTreeSet<u32>, String> {
             Ok(self.listeners.clone())
+        }
+        fn same_user(&self, pid: u32) -> bool {
+            !self.foreign_users.contains(&pid)
         }
     }
 
@@ -139,6 +158,7 @@ mod tests {
         let fake = |listeners: &[u32], images: &[(u32, &PathBuf)]| Fake {
             images: images.iter().map(|(p, i)| (*p, (*i).clone())).collect(),
             listeners: listeners.iter().copied().collect(),
+            foreign_users: BTreeSet::new(),
         };
         // pid and image match
         let ok = fake(&[7], &[(7, &ours)]);
@@ -176,6 +196,56 @@ mod tests {
             verify_with(endpoint(7), &expected, &fake(&[7, 8], &[(7, &ours)])),
             Err(Rejection::Listener)
         );
+    }
+
+    #[test]
+    fn a_planted_record_for_another_user_or_image_gets_no_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let ours = touch(dir.path(), "bot.exe");
+        let evil = touch(dir.path(), "evil.exe");
+        let expected = [ours.clone()];
+        let other_user = Fake {
+            images: HashMap::from([(99, ours)]),
+            listeners: BTreeSet::from([99]),
+            foreign_users: BTreeSet::from([99]),
+        };
+        assert_eq!(
+            verify_with(endpoint(99), &expected, &other_user),
+            Err(Rejection::User)
+        );
+        let same_user_evil = Fake {
+            images: HashMap::from([(99, evil)]),
+            listeners: BTreeSet::from([99]),
+            foreign_users: BTreeSet::new(),
+        };
+        assert_eq!(
+            verify_with(endpoint(99), &expected, &same_user_evil),
+            Err(Rejection::Image)
+        );
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn real_probe_rejects_a_record_pointing_at_a_foreign_image_and_pid() {
+        // This test process really listens on the port, but is not the `bot` image.
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = Endpoint {
+            pid: std::process::id(),
+            port: socket.local_addr().unwrap().port(),
+            requested_port: 47821,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let bot = touch(dir.path(), "bot");
+        assert!(verify(endpoint, &[bot]).is_err());
+        // a record whose pid does not own the socket is rejected even with our image
+        let me = std::env::current_exe().unwrap();
+        let wrong_pid = Endpoint {
+            pid: std::process::id().wrapping_add(1),
+            ..endpoint
+        };
+        assert!(verify(wrong_pid, std::slice::from_ref(&me)).is_err());
+        // and the genuine owner running the expected image passes
+        assert_eq!(verify(endpoint, &[me]), Ok(()));
     }
 
     #[test]

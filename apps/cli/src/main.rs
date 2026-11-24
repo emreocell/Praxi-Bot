@@ -1317,10 +1317,32 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
 
 /// A client of the daemon: token from `BOT_API_TOKEN` or the token file,
 /// address from `--url` / `--port`.
+///
+/// The on-disk token and owner key only ever go to the daemon proven by
+/// [`recorded_daemon`] (recorded pid owns the loopback listener, runs as this user
+/// and runs THIS binary). An explicit `BOT_API_TOKEN` is the user's own secret and
+/// may be sent to the `--url` they chose, but never together with the owner key.
 fn make_client(cli: &Cli, data_dir: &std::path::Path) -> Result<Client> {
-    let token = match std::env::var("BOT_API_TOKEN") {
-        Ok(t) if !t.trim().is_empty() => t.trim().to_owned(),
-        _ => daemon_api::read_token(data_dir).map_err(|e| {
+    let verified = recorded_daemon(data_dir)?;
+    let env_token = std::env::var("BOT_API_TOKEN")
+        .ok()
+        .map(|t| t.trim().to_owned())
+        .filter(|t| !t.is_empty());
+    let base = match (&cli.url, verified) {
+        (Some(url), _) => url.trim_end_matches('/').to_owned(),
+        (None, Some(endpoint))
+            if cli.port == daemon_api::DEFAULT_PORT || cli.port == endpoint.requested_port =>
+        {
+            endpoint.url()
+        }
+        (None, _) if env_token.is_some() => format!("http://127.0.0.1:{}", cli.port),
+        (None, _) => return Err(no_verified_daemon()),
+    };
+    // Disk secrets: only for exactly the verified loopback listener.
+    let is_verified = verified.is_some_and(|e| base == e.url());
+    let token = match env_token {
+        Some(t) => t,
+        None if is_verified => daemon_api::read_token(data_dir).map_err(|e| {
             let msg = if e.kind() == std::io::ErrorKind::NotFound {
                 "daemon API token not found in this data directory; start the daemon with `bot serve` (or pass the same `--data-dir` / set `BOT_API_TOKEN`)".to_owned()
             } else {
@@ -1331,33 +1353,38 @@ fn make_client(cli: &Cli, data_dir: &std::path::Path) -> Result<Client> {
             };
             client::fail(client::exit::AUTH, msg)
         })?,
-    };
-    let base = match &cli.url {
-        Some(url) => url.clone(),
-        None => recorded_daemon_url(cli.port, data_dir)?,
+        None => return Err(no_verified_daemon()),
     };
     // The owner key of this data dir: present when the daemon is a terminal
     // `bot serve` or a host, absent for a daemon the app started (memory only).
-    Ok(Client::new(&base, token).with_owner_key(daemon_api::read_owner_key(data_dir).ok()))
+    let owner_key = if is_verified {
+        daemon_api::read_owner_key(data_dir).ok()
+    } else {
+        None
+    };
+    Ok(Client::new(&base, token).with_owner_key(owner_key))
 }
 
-/// The daemon URL from the discovery record. The record is plain data, so the pid
-/// behind it must own the socket and run THIS binary before the token goes anywhere;
-/// otherwise fail closed (never fall back to a port that might be the squatter's).
-fn recorded_daemon_url(port: u16, data_dir: &std::path::Path) -> Result<String> {
+fn no_verified_daemon() -> Box<dyn std::error::Error> {
+    client::fail(
+        client::exit::AUTH,
+        "no verified Praxi daemon for this data directory (its recorded process must own the          loopback port, run as you and be this `bot` binary); start `bot serve`, or set          `BOT_API_TOKEN` with `--url` to a daemon you trust",
+    )
+}
+
+/// The daemon in the discovery record, or `None` when no daemon holds the lock. The
+/// record is plain data, so a record that fails the proof is an error: never a
+/// fallback to a port that might be a squatter's.
+fn recorded_daemon(
+    data_dir: &std::path::Path,
+) -> Result<Option<process_guard::lifecycle::Endpoint>> {
     let expected: Vec<std::path::PathBuf> = std::env::current_exe().into_iter().collect();
-    match process_guard::owner::discover_trusted(data_dir, &expected) {
-        Ok(Some(endpoint))
-            if port == daemon_api::DEFAULT_PORT || port == endpoint.requested_port =>
-        {
-            Ok(endpoint.url())
-        }
-        Ok(_) => Ok(format!("http://127.0.0.1:{port}")),
-        Err(_) => Err(client::fail(
+    process_guard::owner::discover_trusted(data_dir, &expected).map_err(|_| {
+        client::fail(
             client::exit::AUTH,
             process_guard::owner::FOREIGN_PORT_MESSAGE,
-        )),
-    }
+        )
+    })
 }
 
 fn current_thread_runtime() -> Result<tokio::runtime::Runtime> {
@@ -1798,6 +1825,36 @@ fn run_setup(c: &SetupCmd, env: &SetupEnv<'_>) -> Result<()> {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn a_planted_endpoint_record_gets_no_token_or_owner_key() {
+        // A same-user process lists itself as the daemon: it listens on a real port, but
+        // the recorded pid is another one, so the record is not the listener's proof.
+        let dir = tempfile::tempdir().unwrap();
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = socket.local_addr().unwrap().port();
+        let _lock = process_guard::lifecycle::acquire(dir.path()).unwrap();
+        process_guard::lifecycle::Endpoint {
+            pid: std::process::id().wrapping_add(1),
+            port,
+            requested_port: daemon_api::DEFAULT_PORT,
+        }
+        .publish(dir.path())
+        .unwrap();
+        std::fs::write(dir.path().join("api-token"), "a".repeat(64)).unwrap();
+        assert!(recorded_daemon(dir.path()).is_err());
+        let cli = Cli::try_parse_from([
+            "bot",
+            "--url",
+            &format!("http://127.0.0.1:{port}"),
+            "status",
+        ])
+        .unwrap();
+        assert!(
+            make_client(&cli, dir.path()).is_err(),
+            "no token may be attached to a planted record"
+        );
+    }
 
     #[test]
     fn host_invite_accepts_ttl_and_ticket_only_for_the_one_command_setup() {

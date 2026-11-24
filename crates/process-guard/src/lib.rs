@@ -39,6 +39,9 @@ pub mod supervision;
 #[cfg(windows)]
 mod windows;
 
+#[cfg(unix)]
+mod unix;
+
 /// File in the data directory holding the last [`Report`] (read by `doctor`).
 pub const REPORT_FILE: &str = "process-guard.json";
 

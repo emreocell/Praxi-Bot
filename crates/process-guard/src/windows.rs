@@ -8,7 +8,7 @@ use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use windows::Win32::{
-    Foundation::{CloseHandle, HLOCAL, LocalFree},
+    Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree},
     NetworkManagement::IpHelper::{
         GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
     },
@@ -18,12 +18,13 @@ use windows::Win32::{
             ConvertStringSecurityDescriptorToSecurityDescriptorW, SE_FILE_OBJECT, SE_KERNEL_OBJECT,
             SetNamedSecurityInfoW, SetSecurityInfo,
         },
-        DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION,
-        PSECURITY_DESCRIPTOR,
+        DACL_SECURITY_INFORMATION, EqualSid, GetSecurityDescriptorDacl, GetTokenInformation,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, TOKEN_QUERY, TOKEN_USER,
+        TokenUser,
     },
     System::Threading::{
-        GetCurrentProcess, OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_DUP_HANDLE,
-        PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_ACCESS_RIGHTS,
+        PROCESS_DUP_HANDLE, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
         QueryFullProcessImageNameW,
     },
 };
@@ -48,6 +49,27 @@ impl crate::owner::Probe for SystemProbe {
             .is_ok();
             let _ = CloseHandle(handle);
             ok.then(|| PathBuf::from(String::from_utf16_lossy(&path[..len as usize])))
+        }
+    }
+
+    fn same_user(&self, pid: u32) -> bool {
+        // SAFETY: pseudo handle for ourselves, never closed.
+        let me = token_user(unsafe { GetCurrentProcess() });
+        // SAFETY: query-only handle, closed once; failure means untrusted.
+        let Ok(h) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) else {
+            return false;
+        };
+        let them = token_user(h);
+        // SAFETY: handle opened above.
+        let _ = unsafe { CloseHandle(h) };
+        let (Some(a), Some(b)) = (me, them) else {
+            return false;
+        };
+        // SAFETY: both buffers hold a TOKEN_USER written by the OS and outlive the call.
+        unsafe {
+            let sa = (*a.as_ptr().cast::<TOKEN_USER>()).User.Sid;
+            let sb = (*b.as_ptr().cast::<TOKEN_USER>()).User.Sid;
+            EqualSid(sa, sb).is_ok()
         }
     }
 
@@ -79,6 +101,36 @@ impl crate::owner::Probe for SystemProbe {
         }
         Err("GetExtendedTcpTable kept growing".to_owned())
     }
+}
+
+/// `TOKEN_USER` bytes in an 8-aligned buffer.
+fn token_user(process: HANDLE) -> Option<Vec<u64>> {
+    let mut tok = HANDLE::default();
+    // SAFETY: valid process handle, out pointer to a local.
+    unsafe { OpenProcessToken(process, TOKEN_QUERY, &raw mut tok) }.ok()?;
+    let mut len = 0u32;
+    // SAFETY: size query; the expected error is ignored.
+    let _ = unsafe { GetTokenInformation(tok, TokenUser, None, 0, &raw mut len) };
+    let buf = if len == 0 {
+        None
+    } else {
+        let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+        // SAFETY: `buf` has at least `len` writable bytes.
+        unsafe {
+            GetTokenInformation(
+                tok,
+                TokenUser,
+                Some(buf.as_mut_ptr().cast()),
+                len,
+                &raw mut len,
+            )
+        }
+        .ok()
+        .map(|()| buf)
+    };
+    // SAFETY: token opened above, closed once.
+    let _ = unsafe { CloseHandle(tok) };
+    buf
 }
 
 fn parse_listeners(buf: &[u8], port: u16) -> BTreeSet<u32> {
