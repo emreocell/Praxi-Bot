@@ -15,8 +15,25 @@
 //! - macro-enabled files (`.docm`, `.xlsm`, ... and any archive that carries a VBA or
 //!   Basic project) and legacy binary formats are refused;
 //! - input and output sizes are capped, the result is written only through the shared
-//!   `write_file` (data-directory guard, no overwrite without `overwrite: true`) and,
-//!   when `output_root` is set, only inside that folder.
+//!   `write_file` (data-directory guard, no overwrite without `overwrite: true`) and only
+//!   inside `output_root`;
+//! - a document that refers to anything outside itself (linked images, templates, OLE,
+//!   DDE, ODF `xlink:href`, mail merge) is refused before the converter starts (see
+//!   `convert_vet`), and the throw-away profile is pre-seeded to block macros, link
+//!   updates and network access;
+//! - `output_root` and `read_guard` are mandatory: without them both tools fail closed.
+//!   The input must not be a symlink / junction, and a link anywhere above it may not lead
+//!   out of `output_root`;
+//! - one conversion runs at a time (a global slot), previews are pixel-, page- and
+//!   byte-bounded, and the converter is killed when it floods its output folder.
+//!
+//! Trust: the converter binaries are found by the configured `soffice_path` /
+//! `pdftoppm_path`, then in fixed install locations, then on `PATH`. Empty, relative and
+//! current-directory `PATH` entries are ignored, but an absolute, user-writable `PATH`
+//! entry is trusted: whoever can write there can already run code as the daemon.
+//! PDF input is not decoded in this process: the converter reads it under the input size
+//! cap, the timeout and the output-folder cap; only the built-in PDF to DOCX fallback
+//! parses it here, under the extraction budget of `pdf_budget`.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -30,8 +47,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tool_registry::{Effect, ToolError, ToolSpec};
 
-use crate::DocToolsConfig;
 use crate::common::{Reply, exec, invalid, parse, parse_ranges, read_limited, write_file};
+use crate::convert_vet::vet_source;
+use crate::{DocToolsConfig, WriteGuard};
 
 /// Where the converters live and how far they may go. All values are owner-tunable.
 #[derive(Debug, Clone)]
@@ -42,8 +60,14 @@ pub struct ConvertConfig {
     pub pdftoppm_path: Option<PathBuf>,
     /// Longest a single converter run may take (default 120 s).
     pub timeout: Duration,
-    /// When set, every file the tools write must be inside this folder (the bot workspace).
+    /// The bot workspace. MANDATORY: every file the tools write must be inside this
+    /// folder, and the tools refuse to run while it is unset.
     pub output_root: Option<PathBuf>,
+    /// MANDATORY check on the input path (same rule as `fs_read`: credential folders,
+    /// the daemon data directory, ...). It is a hook because `builtin-tools` cannot be
+    /// imported here; it runs on the given path and on its resolved location. The tools
+    /// refuse to run while it is unset.
+    pub read_guard: Option<WriteGuard>,
     /// Most preview pages per call (default 5, hard cap 10).
     pub preview_max_pages: u32,
     /// Preview resolution in dots per inch (default 110).
@@ -59,6 +83,7 @@ impl Default for ConvertConfig {
             pdftoppm_path: None,
             timeout: Duration::from_secs(120),
             output_root: None,
+            read_guard: None,
             preview_max_pages: 5,
             preview_dpi: 110,
             preview_inline_bytes: 1536 * 1024,
@@ -108,47 +133,6 @@ fn is_macro_or_legacy(ext: &str) -> Option<&'static str> {
     }
 }
 
-/// Refuse a document that is not what its extension says or that carries macros.
-fn vet_source(ext: &str, bytes: &[u8]) -> Result<(), ToolError> {
-    match ext {
-        "pdf" => {
-            if !bytes.starts_with(b"%PDF") {
-                return Err(invalid("the file is not a valid PDF"));
-            }
-        }
-        "rtf" => {
-            if !bytes.starts_with(b"{\\rtf") {
-                return Err(invalid("the file is not a valid RTF document"));
-            }
-        }
-        _ => {
-            crate::check_zip_limits(bytes)?;
-            let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-                .map_err(|_| invalid("the file is not a valid Office document"))?;
-            for name in zip
-                .file_names()
-                .filter_map(Result::ok)
-                .map(|n| n.to_ascii_lowercase())
-            {
-                if name.ends_with("vbaproject.bin")
-                    || name.starts_with("basic/")
-                    || name.starts_with("scripts/")
-                {
-                    return Err(invalid("the document contains macros; it is not converted"));
-                }
-            }
-            if let Ok(entry) = zip.by_name("[Content_Types].xml") {
-                let mut head = Vec::new();
-                let _ = entry.take(256 * 1024).read_to_end(&mut head);
-                if String::from_utf8_lossy(&head).contains("macroEnabled") {
-                    return Err(invalid("the document contains macros; it is not converted"));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Whether `from` can be turned into `to`.
 fn pair_supported(from: &str, to: &str) -> bool {
     let (Some(f), Some(t)) = (family(from), family(to)) else {
@@ -179,9 +163,19 @@ fn convert_filter(to: &str) -> &'static str {
 
 // ---------------------------------------------------------------- tool lookup
 
-fn find_in_path(names: &[&str]) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&paths) {
+/// First existing `name` in the absolute, non-current directories of `paths`.
+/// Empty and relative entries (which mean "the current directory") are skipped.
+pub(crate) fn find_in(paths: &std::ffi::OsStr, names: &[&str]) -> Option<PathBuf> {
+    let cwd = std::env::current_dir()
+        .ok()
+        .and_then(|c| c.canonicalize().ok());
+    for dir in std::env::split_paths(paths) {
+        if dir.as_os_str().is_empty() || !dir.is_absolute() {
+            continue;
+        }
+        if cwd.is_some() && dir.canonicalize().ok() == cwd {
+            continue;
+        }
         for name in names {
             let p = dir.join(name);
             if p.is_file() {
@@ -192,20 +186,27 @@ fn find_in_path(names: &[&str]) -> Option<PathBuf> {
     None
 }
 
+fn find_in_path(names: &[&str]) -> Option<PathBuf> {
+    find_in(&std::env::var_os("PATH")?, names)
+}
+
 fn soffice(cfg: &DocToolsConfig) -> Option<PathBuf> {
     if let Some(p) = &cfg.convert.soffice_path {
         return p.is_file().then(|| p.clone());
     }
-    find_in_path(&["soffice", "soffice.exe", "libreoffice"]).or_else(|| {
-        [
-            r"C:\Program Files\LibreOffice\program\soffice.exe",
-            r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
-            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-        ]
-        .iter()
-        .map(PathBuf::from)
-        .find(|p| p.is_file())
-    })
+    // Fixed install locations first, `PATH` last.
+    [
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        "/usr/bin/soffice",
+        "/usr/lib/libreoffice/program/soffice",
+        "/opt/libreoffice/program/soffice",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .find(|p| p.is_file())
+    .or_else(|| find_in_path(&["soffice", "soffice.exe", "libreoffice"]))
 }
 
 fn pdftoppm(cfg: &DocToolsConfig) -> Option<PathBuf> {
@@ -213,6 +214,30 @@ fn pdftoppm(cfg: &DocToolsConfig) -> Option<PathBuf> {
         return p.is_file().then(|| p.clone());
     }
     find_in_path(&["pdftoppm", "pdftoppm.exe"])
+}
+
+// ---------------------------------------------------------- one conversion at a time
+
+static SLOT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Wait for the global conversion slot. Concurrent calls would each start a converter
+/// that may run for the whole timeout; only one runs, the others wait (bounded).
+fn acquire_slot(cfg: &DocToolsConfig) -> Result<std::sync::MutexGuard<'static, ()>, ToolError> {
+    let give_up = Instant::now() + cfg.convert.timeout.max(Duration::from_secs(30));
+    loop {
+        match SLOT.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::Poisoned(p)) => return Ok(p.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if Instant::now() >= give_up {
+                    return Err(exec(
+                        "another document conversion is still running; try again in a moment",
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------ process running
@@ -234,7 +259,9 @@ fn percent_path_url(p: &Path) -> String {
     out
 }
 
-/// Environment the converters may see: nothing that could carry a proxy or a token.
+/// Environment the converters may see: an allow-list of what they need to start. Nothing
+/// that could carry a proxy, a certificate store, credentials or a token is passed
+/// (`HTTP(S)_PROXY`, `SSL_CERT_*`, `AWS_*`, `*_TOKEN`, ... are all dropped by `env_clear`).
 fn clean_env(cmd: &mut Command, home: &Path) {
     cmd.env_clear();
     for key in [
@@ -257,14 +284,41 @@ fn clean_env(cmd: &mut Command, home: &Path) {
         .env("TMP", home);
 }
 
+/// Pre-seed the throw-away profile so LibreOffice starts locked down even if a document
+/// slips past `vet_source`: macros off (security level 3, "very high"), links never
+/// updated, no Java, and every proxy pointed at a closed local port so that a stray
+/// network request fails at once instead of leaving the machine. Keys LibreOffice does
+/// not know are ignored; this is a second line, `vet_source` is the first.
+fn seed_profile(profile: &Path) -> Result<(), ToolError> {
+    const XCU: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>2</value></prop></item>
+<item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Field" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Chart" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Calc/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>2</value></prop></item>
+<item oor:path="/org.openoffice.Office.Java/VirtualMachine"><prop oor:name="Enable" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetProxyType" oor:op="fuse"><value>1</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPProxyName" oor:op="fuse"><value>127.0.0.1</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPProxyPort" oor:op="fuse"><value>9</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPSProxyName" oor:op="fuse"><value>127.0.0.1</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetHTTPSProxyPort" oor:op="fuse"><value>9</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetFTPProxyName" oor:op="fuse"><value>127.0.0.1</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetFTPProxyPort" oor:op="fuse"><value>9</value></prop></item>
+<item oor:path="/org.openoffice.Inet/Settings"><prop oor:name="ooInetNoProxy" oor:op="fuse"><value></value></prop></item>
+</oor:items>
+"#;
+    let user = profile.join("user");
+    fs::create_dir_all(&user).map_err(|e| exec(format!("temp folder: {e}")))?;
+    fs::write(user.join("registrymodifications.xcu"), XCU)
+        .map_err(|e| exec(format!("temp folder: {e}")))
+}
+
+#[cfg(unix)]
 fn kill_tree(id: u32) {
-    #[cfg(windows)]
-    let _ = Command::new("taskkill")
-        .args(["/PID", &id.to_string(), "/T", "/F"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    #[cfg(not(windows))]
+    // The converter is its own process-group leader, so `-id` is the whole group.
     let _ = Command::new("kill")
         .args(["-KILL", "--", &format!("-{id}")])
         .stdout(Stdio::null())
@@ -272,9 +326,53 @@ fn kill_tree(id: u32) {
         .status();
 }
 
-/// Run `cmd` with no stdin and a deadline. On a timeout the whole process tree is killed.
-/// Returns the tail of stderr when the command fails.
-fn run_limited(mut cmd: Command, work: &Path, timeout: Duration) -> Result<(), String> {
+#[cfg(windows)]
+fn kill_tree(id: u32) {
+    let _ = Command::new("taskkill")
+        .args(["/PID", &id.to_string(), "/T", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// Total size of the regular files under `dir` (bounded walk).
+fn dir_bytes(dir: &Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![dir.to_path_buf()];
+    let mut seen = 0usize;
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = fs::read_dir(&d) else { continue };
+        for entry in rd.flatten() {
+            seen += 1;
+            if seen > 20_000 {
+                return u64::MAX;
+            }
+            let Ok(meta) = entry.path().symlink_metadata() else {
+                continue;
+            };
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    total
+}
+
+/// Most diagnostic text a converter may write.
+const STDERR_CAP: u64 = 4 * 1024 * 1024;
+
+/// Run `cmd` with no stdin and a deadline. On a timeout, or when it writes more than
+/// `out_cap` bytes into `out_dir`, the whole process tree is killed. On Unix the tree is
+/// killed after a normal exit as well, so a lingering helper (`soffice.bin`) cannot
+/// outlive the call. Returns the tail of stderr when the command fails.
+fn run_limited(
+    mut cmd: Command,
+    work: &Path,
+    timeout: Duration,
+    out: Option<(&Path, u64)>,
+) -> Result<(), String> {
     let err_path = work.join("stderr.txt");
     let err_file = fs::File::create(&err_path).map_err(|e| format!("temp file: {e}"))?;
     cmd.stdin(Stdio::null())
@@ -294,9 +392,17 @@ fn run_limited(mut cmd: Command, work: &Path, timeout: Duration) -> Result<(), S
         .spawn()
         .map_err(|e| format!("could not start the converter: {e}"))?;
     let deadline = Instant::now() + timeout;
+    let mut tick = 0u32;
+    let stop = |child: &mut std::process::Child| {
+        kill_tree(child.id());
+        let _ = child.kill();
+        let _ = child.wait();
+    };
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
+                #[cfg(unix)]
+                kill_tree(child.id());
                 if status.success() {
                     return Ok(());
                 }
@@ -305,15 +411,32 @@ fn run_limited(mut cmd: Command, work: &Path, timeout: Duration) -> Result<(), S
                 return Err(format!("the converter failed ({status}) {}", tail.trim()));
             }
             Ok(None) if Instant::now() >= deadline => {
-                kill_tree(child.id());
-                let _ = child.kill();
-                let _ = child.wait();
+                stop(&mut child);
                 return Err(format!(
                     "the converter took longer than {} seconds and was stopped",
                     timeout.as_secs()
                 ));
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+            Ok(None) => {
+                tick = tick.wrapping_add(1);
+                if tick.is_multiple_of(8) {
+                    if let Some((dir, cap)) = out
+                        && dir_bytes(dir) > cap
+                    {
+                        stop(&mut child);
+                        return Err(format!(
+                            "the converter wrote more than the {cap} byte limit and was stopped"
+                        ));
+                    }
+                    if fs::metadata(&err_path).is_ok_and(|m| m.len() > STDERR_CAP) {
+                        stop(&mut child);
+                        return Err(
+                            "the converter wrote too much diagnostic output and was stopped".into(),
+                        );
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
             Err(e) => return Err(format!("converter wait failed: {e}")),
         }
     }
@@ -321,15 +444,81 @@ fn run_limited(mut cmd: Command, work: &Path, timeout: Duration) -> Result<(), S
 
 // ------------------------------------------------------------------ path rules
 
-/// Refuse `path` unless it is inside `output_root` (when one is configured).
-fn confine(cfg: &DocToolsConfig, path: &str) -> Result<(), ToolError> {
+/// The bot workspace, canonical. Fails closed when none is configured.
+fn workspace(cfg: &DocToolsConfig) -> Result<PathBuf, ToolError> {
     let Some(root) = &cfg.convert.output_root else {
-        return Ok(());
+        return Err(exec(
+            "document conversion is not available: no bot workspace folder is configured",
+        ));
     };
-    let root = root
-        .canonicalize()
-        .map_err(|_| exec("the bot workspace folder does not exist"))?;
+    root.canonicalize()
+        .map_err(|_| exec("the bot workspace folder does not exist"))
+}
+
+/// Both mandatory settings, before anything else happens.
+fn require_setup(cfg: &DocToolsConfig) -> Result<PathBuf, ToolError> {
+    let root = workspace(cfg)?;
+    if cfg.convert.read_guard.is_none() {
+        return Err(exec(
+            "document conversion is not available: no input path guard is configured",
+        ));
+    }
+    Ok(root)
+}
+
+/// Drop the `\\?\` prefix `canonicalize` adds on Windows so path guards see a normal path.
+fn plain(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    s.strip_prefix(r"\\?\")
+        .filter(|rest| rest.as_bytes().get(1) == Some(&b':'))
+        .unwrap_or(&s)
+        .to_owned()
+}
+
+/// Refuse an input that is a link, that leads out of the workspace through a linked
+/// folder, or that the read guard (same rule as `fs_read`) protects.
+fn check_input(cfg: &DocToolsConfig, root: &Path, path: &str) -> Result<(), ToolError> {
     let p = Path::new(path);
+    let meta = fs::symlink_metadata(p).map_err(|e| exec(format!("cannot stat {path}: {e}")))?;
+    if meta.file_type().is_symlink() {
+        return Err(invalid(format!(
+            "{path} is a symbolic link or junction; give the path of the real file"
+        )));
+    }
+    let resolved = p
+        .canonicalize()
+        .map_err(|e| exec(format!("cannot resolve {path}: {e}")))?;
+    let via_link = p.ancestors().skip(1).any(|a| {
+        !a.as_os_str().is_empty()
+            && fs::symlink_metadata(a).is_ok_and(|m| m.file_type().is_symlink())
+    });
+    if via_link && !resolved.starts_with(root) {
+        return Err(exec(format!(
+            "{path} goes through a link that leaves the bot workspace ({})",
+            root.display()
+        )));
+    }
+    if let Some(guard) = &cfg.convert.read_guard {
+        guard.check(path).map_err(exec)?;
+        guard.check(&plain(&resolved)).map_err(exec)?;
+    }
+    Ok(())
+}
+
+/// Refuse `path` unless it is inside the bot workspace.
+fn confine(cfg: &DocToolsConfig, path: &str) -> Result<(), ToolError> {
+    let root = workspace(cfg)?;
+    let p = Path::new(path);
+    if p.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(invalid("output paths may not contain '..'"));
+    }
+    // An existing or dangling link at the destination would redirect the write.
+    if fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(exec(format!(
+            "{path} is a symbolic link or junction; output must stay inside the bot workspace ({})",
+            root.display()
+        )));
+    }
     let mut existing = p;
     let mut rest: Vec<&std::ffi::OsStr> = Vec::new();
     while !existing.exists() {
@@ -338,9 +527,6 @@ fn confine(cfg: &DocToolsConfig, path: &str) -> Result<(), ToolError> {
         };
         rest.push(name);
         existing = parent;
-    }
-    if p.components().any(|c| matches!(c, Component::ParentDir)) {
-        return Err(invalid("output paths may not contain '..'"));
     }
     let mut full = existing
         .canonicalize()
@@ -394,6 +580,7 @@ impl Sandbox {
         for sub in ["profile", "in", "out"] {
             fs::create_dir(dir.path().join(sub)).map_err(|e| exec(format!("temp folder: {e}")))?;
         }
+        seed_profile(&dir.path().join("profile"))?;
         let input = dir.path().join("in").join(format!("input.{ext}"));
         fs::write(&input, source).map_err(|e| exec(format!("temp copy: {e}")))?;
         Ok((Self { dir }, input))
@@ -441,17 +628,20 @@ fn run_soffice(
         .arg(input)
         .current_dir(sb.work());
     clean_env(&mut cmd, &sb.work().join("profile"));
-    run_limited(cmd, sb.work(), cfg.convert.timeout).map_err(exec)?;
+    let cap = cfg.max_output_bytes as u64;
+    run_limited(cmd, sb.work(), cfg.convert.timeout, Some((&sb.out(), cap))).map_err(exec)?;
     let produced = sb.out().join(format!("input.{out_ext}"));
-    let len = fs::metadata(&produced)
-        .map_err(|_| {
-            exec("the converter finished but produced no file (is the document damaged?)")
-        })?
-        .len();
+    let meta = fs::symlink_metadata(&produced).map_err(|_| {
+        exec("the converter finished but produced no file (is the document damaged?)")
+    })?;
+    if !meta.is_file() {
+        return Err(exec("the converter produced something that is not a file"));
+    }
+    let len = meta.len();
     if len == 0 {
         return Err(exec("the converter produced an empty file"));
     }
-    if len > cfg.max_output_bytes as u64 {
+    if len > cap {
         return Err(exec(format!(
             "the result is {len} bytes, over the {} byte limit",
             cfg.max_output_bytes
@@ -487,6 +677,7 @@ pub fn convert_spec() -> ToolSpec {
 
 pub fn run_convert(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolError> {
     let i: ConvertIn = parse(input)?;
+    let root = require_setup(cfg)?;
     let from = ext_of(&i.path);
     let to = i.to.trim().trim_start_matches('.').to_ascii_lowercase();
     if let Some(why) = is_macro_or_legacy(&from) {
@@ -505,8 +696,10 @@ pub fn run_convert(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolErro
         return Err(invalid(format!("output_path must end in .{to}")));
     }
     check_free(cfg, &out_path, i.overwrite)?;
+    check_input(cfg, &root, &i.path)?;
     let bytes = read_limited(cfg, &i.path)?;
     vet_source(&from, &bytes)?;
+    let _slot = acquire_slot(cfg)?;
 
     let (result, engine, note) = if let Some(exe) = soffice(cfg) {
         let (sb, input_copy) = Sandbox::new(&bytes, &from)?;
@@ -603,8 +796,82 @@ fn page_number(file: &str) -> Option<u32> {
     file.strip_suffix(".png")?.rsplit('-').next()?.parse().ok()
 }
 
+/// Longest side of an output image in pixels, whatever the page size and dpi.
+const MAX_PREVIEW_PX: f64 = 2000.0;
+/// Side used when the page size cannot be read cheaply from the PDF.
+const UNKNOWN_PAGE_PX: u32 = 1600;
+/// A page longer than this many points (200 inches) is refused as absurd.
+const MAX_PAGE_POINTS: f64 = 14_400.0;
+/// How much of the PDF is searched for page boxes.
+const BOX_SCAN_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The largest `/MediaBox` or `/CropBox` side (in points) written in plain text in the
+/// first bytes of the PDF. `None` when none is readable (object streams hide them); the
+/// pixel cap then still applies.
+fn page_extent(pdf: &Path) -> Option<f64> {
+    let mut head = Vec::new();
+    fs::File::open(pdf)
+        .ok()?
+        .take(BOX_SCAN_BYTES)
+        .read_to_end(&mut head)
+        .ok()?;
+    let mut best: Option<f64> = None;
+    for key in [&b"/MediaBox"[..], &b"/CropBox"[..]] {
+        let mut from = 0;
+        while let Some(at) = head[from..].windows(key.len()).position(|w| w == key) {
+            let start = from + at + key.len();
+            from = start;
+            let rest = &head[start..head.len().min(start + 120)];
+            let text = String::from_utf8_lossy(rest);
+            let Some(inner) = text.trim_start().strip_prefix('[') else {
+                continue;
+            };
+            let nums: Vec<f64> = inner
+                .split(']')
+                .next()
+                .unwrap_or("")
+                .split_whitespace()
+                .filter_map(|n| n.parse().ok())
+                .collect();
+            if let [x1, y1, x2, y2] = nums[..] {
+                let side = (x2 - x1).abs().max((y2 - y1).abs());
+                if side.is_nan() || side > f64::from(u32::MAX) {
+                    return Some(f64::INFINITY);
+                }
+                best = Some(best.map_or(side, |b| b.max(side)));
+            }
+        }
+    }
+    best
+}
+
+/// Pixel length of the longer page side for `pdftoppm -scale-to`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn scale_to(extent: Option<f64>, dpi: u32) -> u32 {
+    extent.map_or(UNKNOWN_PAGE_PX, |pts| {
+        // Clamped to 64..=2000 first, so the narrowing is exact.
+        (pts / 72.0 * f64::from(dpi))
+            .round()
+            .clamp(64.0, MAX_PREVIEW_PX) as u32
+    })
+}
+
+/// Group sorted page numbers into runs of consecutive pages, so that `1,99999` is two
+/// one-page renders and never a hundred thousand pages.
+fn runs(pages: &[u32]) -> Vec<(u32, u32)> {
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    for &n in pages {
+        match out.last_mut() {
+            Some((_, last)) if *last + 1 == n => *last = n,
+            _ => out.push((n, n)),
+        }
+    }
+    out
+}
+
 pub fn run_preview(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolError> {
     let i: PreviewIn = parse(input)?;
+    let root = require_setup(cfg)?;
     let from = ext_of(&i.path);
     if let Some(why) = is_macro_or_legacy(&from) {
         return Err(invalid(why));
@@ -618,9 +885,9 @@ pub fn run_preview(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolErro
         .into_iter()
         .take(max_pages as usize)
         .collect();
-    let (Some(&first), Some(&last)) = (wanted.first(), wanted.last()) else {
+    if wanted.is_empty() {
         return Err(invalid("no pages requested"));
-    };
+    }
     let dpi = i.dpi.unwrap_or(cfg.convert.preview_dpi).clamp(50, 200);
     let out_dir = i.output_dir.clone().unwrap_or_else(|| {
         Path::new(&i.path)
@@ -641,9 +908,12 @@ pub fn run_preview(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolErro
     for n in &wanted {
         check_free(cfg, &target(*n), i.overwrite)?;
     }
+    check_input(cfg, &root, &i.path)?;
     let bytes = read_limited(cfg, &i.path)?;
     vet_source(&from, &bytes)?;
+    let _slot = acquire_slot(cfg)?;
 
+    let cap = cfg.max_output_bytes as u64;
     let ppm = pdftoppm(cfg);
     let office = soffice(cfg);
     let (sb, input_copy) = Sandbox::new(&bytes, &from)?;
@@ -656,25 +926,45 @@ pub fn run_preview(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolErro
         } else {
             return Err(exec(NEED_OFFICE_PACK));
         };
-        let mut cmd = Command::new(ppm);
-        cmd.args([
-            "-png",
-            "-r",
-            &dpi.to_string(),
-            "-f",
-            &first.to_string(),
-            "-l",
-        ])
-        .arg(last.to_string())
-        .arg(&pdf)
-        .arg(sb.out().join("page"))
-        .current_dir(sb.work());
-        clean_env(&mut cmd, sb.work());
-        run_limited(cmd, sb.work(), cfg.convert.timeout).map_err(exec)?;
+        let extent = page_extent(&pdf);
+        if extent.is_some_and(|pts| pts > MAX_PAGE_POINTS) {
+            return Err(exec(
+                "the document has an absurdly large page size and is not rendered",
+            ));
+        }
+        let px = scale_to(extent, dpi);
+        let started = Instant::now();
+        for (run_no, (first, last)) in runs(&wanted).into_iter().enumerate() {
+            let left = cfg.convert.timeout.saturating_sub(started.elapsed());
+            if left.is_zero() {
+                return Err(exec(format!(
+                    "the converter took longer than {} seconds and was stopped",
+                    cfg.convert.timeout.as_secs()
+                )));
+            }
+            let mut cmd = Command::new(&ppm);
+            cmd.args([
+                "-png",
+                "-scale-to",
+                &px.to_string(),
+                "-f",
+                &first.to_string(),
+                "-l",
+            ])
+            .arg(last.to_string())
+            .arg(&pdf)
+            .arg(sb.out().join(format!("r{run_no}")))
+            .current_dir(sb.work());
+            clean_env(&mut cmd, sb.work());
+            run_limited(cmd, sb.work(), left, Some((&sb.out(), cap))).map_err(exec)?;
+        }
         for entry in fs::read_dir(sb.out()).map_err(|e| exec(format!("preview folder: {e}")))? {
             let entry = entry.map_err(|e| exec(format!("preview folder: {e}")))?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            if let Some(n) = page_number(&name).filter(|n| wanted.contains(n)) {
+            if let Some(n) = page_number(&name)
+                .filter(|n| wanted.contains(n))
+                .filter(|n| !produced.iter().any(|(m, _)| m == n))
+            {
                 produced.push((n, entry.path()));
             }
         }
@@ -690,6 +980,23 @@ pub fn run_preview(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolErro
     produced.sort_by_key(|(n, _)| *n);
     if produced.is_empty() {
         return Err(exec("the document has none of the requested pages"));
+    }
+    // Size every produced file BEFORE reading any of them: each one and the sum must fit
+    // the output limit, so a huge render can never be pulled into memory.
+    let mut total = 0u64;
+    for (_, tmp) in &produced {
+        let meta = fs::symlink_metadata(tmp)
+            .map_err(|e| exec(format!("cannot inspect a preview: {e}")))?;
+        if !meta.is_file() {
+            return Err(exec("the renderer produced something that is not a file"));
+        }
+        total = total.saturating_add(meta.len());
+        if meta.len() > cap || total > cap {
+            return Err(exec(format!(
+                "the previews are over the {} byte limit",
+                cfg.max_output_bytes
+            )));
+        }
     }
     let mut files = Vec::new();
     let mut inline = Vec::new();

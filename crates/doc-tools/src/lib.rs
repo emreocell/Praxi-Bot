@@ -29,6 +29,14 @@
 //! file unless `overwrite: true` is given. Inputs larger than
 //! [`DocToolsConfig::max_input_bytes`] are rejected.
 //!
+//! # `doc_convert` / `doc_preview`
+//!
+//! These two tools run LibreOffice and `pdftoppm` on untrusted documents and fail closed
+//! unless the host sets [`ConvertConfig::output_root`] (the bot workspace) and
+//! [`ConvertConfig::read_guard`] (the `fs_read` path rule). No daemon crate registers them
+//! with such a configuration yet; `DocToolsConfig::default()` leaves both unset, so the
+//! tools exist in the registry but refuse every call until the wiring sets them.
+//!
 //! # Wiring
 //!
 //! ```ignore
@@ -46,6 +54,7 @@ mod common;
 mod convert;
 #[cfg(test)]
 mod convert_tests;
+mod convert_vet;
 mod csv_tools;
 mod docx;
 mod json_query;
