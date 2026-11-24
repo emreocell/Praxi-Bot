@@ -480,6 +480,37 @@
       "themeHint": "Die eigene Akzentfarbe des Designs.",
       "title": "Akzent"
     },
+    "accessibility": {
+      "densities": {
+        "comfortable": "Normal",
+        "compact": "Kompakt",
+        "spacious": "Großzügig"
+      },
+      "density": "Abstände",
+      "description": "Macht die App leichter lesbar und bedienbar. Änderungen wirken sofort und werden nur auf diesem Gerät gespeichert.",
+      "dyslexiaFont": {
+        "hint": "Verwendet die Schrift OpenDyslexic mit etwas mehr Zeilenabstand.",
+        "title": "Legasthenie-freundliche Schrift"
+      },
+      "focusRing": "Fokusrahmen",
+      "focusRings": {
+        "extra": "Extra dick",
+        "normal": "Normal",
+        "thick": "Dick"
+      },
+      "highContrastHint": "Für den stärksten Kontrast wählen Sie unter Design das Design „Hoher Kontrast“ (dunkel oder hell).",
+      "previewSample": "Beispiel: So sehen Ihre Nachrichten und Einstellungen aus.",
+      "reduceMotion": {
+        "hint": "Stoppt Animationen und Übergänge; der Live-Hintergrund steht still.",
+        "title": "Bewegung reduzieren"
+      },
+      "reduceTransparency": {
+        "hint": "Panels werden immer deckend gezeichnet, auch wenn Windows Transparenzeffekte erlaubt.",
+        "title": "Transparenz reduzieren"
+      },
+      "textSize": "Schriftgröße",
+      "title": "Barrierefreiheit"
+    },
     "backdrop": {
       "all": "Alle Hintergründe",
       "calm": "Ruhig",

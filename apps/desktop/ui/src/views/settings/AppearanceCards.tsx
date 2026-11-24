@@ -22,6 +22,13 @@ import {
   type BubbleStyle,
   type UiStyle
 } from "ui";
+import {
+  DENSITIES,
+  FOCUS_RINGS,
+  TEXT_SCALE_MAX,
+  TEXT_SCALE_MIN,
+  TEXT_SCALE_STEP
+} from "../../lib/accessibility";
 import { sceneColors } from "../../components/Backdrop";
 import { BackdropPicker } from "../../components/BackdropPicker";
 import formStyles from "../../components/Form.module.css";
@@ -494,6 +501,70 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
         <BackgroundControls b={b} t={t} />
       </SettingRow>,
       { keywords: "wallpaper image arka plan" }
+    ),
+    card(
+      "accessibility",
+      t("appearance.accessibility.title"),
+      t("appearance.accessibility.description"),
+      row(
+        "accessibility",
+        <div className={pickerStyles.root}>
+          <label className={pickerStyles.range}>
+            <span className={pickerStyles.rangeName}>{t("appearance.accessibility.textSize")}</span>
+            <input
+              type="range"
+              min={TEXT_SCALE_MIN}
+              max={TEXT_SCALE_MAX}
+              step={TEXT_SCALE_STEP}
+              value={settings.textScale}
+              aria-label={t("appearance.accessibility.textSize")}
+              aria-valuetext={`${settings.textScale} %`}
+              onChange={(e) => update({ textScale: Number(e.target.value) }, { deferSave: true })}
+            />
+            <span>{settings.textScale} %</span>
+          </label>
+          <div className={pickerStyles.row}>
+            <span className={pickerStyles.rangeName}>{t("appearance.accessibility.density")}</span>
+            <Segmented
+              label={t("appearance.accessibility.density")}
+              value={settings.density}
+              onChange={(density) => update({ density })}
+              options={DENSITIES.map((v) => ({ value: v, label: t(`appearance.accessibility.densities.${v}`) }))}
+            />
+          </div>
+          <div className={pickerStyles.row}>
+            <span className={pickerStyles.rangeName}>{t("appearance.accessibility.focusRing")}</span>
+            <Segmented
+              label={t("appearance.accessibility.focusRing")}
+              value={settings.focusRing}
+              onChange={(focusRing) => update({ focusRing })}
+              options={FOCUS_RINGS.map((v) => ({ value: v, label: t(`appearance.accessibility.focusRings.${v}`) }))}
+            />
+          </div>
+          {(["dyslexiaFont", "reduceMotion", "reduceTransparency"] as const).map((key) => (
+            <div className={pickerStyles.row} key={key}>
+              <Switch
+                label={t(`appearance.accessibility.${key}.title`)}
+                checked={settings[key]}
+                onChange={(on) => update({ [key]: on })}
+              />
+              <span>
+                <span className={pickerStyles.rangeName}>{t(`appearance.accessibility.${key}.title`)}</span>
+                <br />
+                <span className={pickerStyles.hint}>{t(`appearance.accessibility.${key}.hint`)}</span>
+              </span>
+            </div>
+          ))}
+          <p className={pickerStyles.hint}>{t("appearance.accessibility.highContrastHint")}</p>
+          <p className={pickerStyles.preview} data-testid="a11y-preview">
+            {t("appearance.accessibility.previewSample")}
+          </p>
+        </div>
+      ),
+      {
+        keywords:
+          "accessibility text size font dyslexia motion transparency focus contrast density erisilebilirlik yazi boyutu disleksi hareket seffaflik odak yogunluk barrierefreiheit schriftgroesse legasthenie bewegung transparenz fokus dichte"
+      }
     ),
     card(
       "frame",

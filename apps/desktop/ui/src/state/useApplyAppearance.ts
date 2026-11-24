@@ -21,6 +21,7 @@ import {
   subscribeSceneSource,
   type ToneSource
 } from "../lib/backdropTone";
+import { applyAccessibility } from "../lib/accessibility";
 import { useOwnImageSource } from "./useOwnImageSource";
 import { loadSettingsSync, type AppSettings } from "../store/settingsStore";
 
@@ -31,7 +32,20 @@ export interface AppliedAppearance {
 }
 
 type AppearanceInput = Pick<AppSettings, "themeMode" | "customTheme" | "accentColor"> &
-  Partial<Pick<AppSettings, "photorealAvatars" | "systemLightTheme" | "systemDarkTheme">>;
+  Partial<
+    Pick<
+      AppSettings,
+      | "photorealAvatars"
+      | "systemLightTheme"
+      | "systemDarkTheme"
+      | "textScale"
+      | "density"
+      | "dyslexiaFont"
+      | "reduceMotion"
+      | "reduceTransparency"
+      | "focusRing"
+    >
+  >;
 
 /** The window's own backdrop / style axes only apply to the main window. */
 type FullAppearanceInput = AppearanceInput &
@@ -64,6 +78,8 @@ export function paintAppearance(
   tone?: BackdropTone
 ): void {
   const f = settings as FullAppearanceInput;
+  // Before applyTheme: it reads the forced "reduce transparency" flag.
+  applyAccessibility(document.documentElement, settings);
   setAvatarSkin(settings.photorealAvatars === false ? "procedural" : "render");
   if (full) setReducedTransparencyOverride(f.transparencyOverride === true);
   applyTheme(theme, {
@@ -181,7 +197,13 @@ export function useApplyAppearance(
     full?.backgroundUrl,
     full?.backgroundBlur,
     full?.backgroundDim,
-    settings.photorealAvatars
+    settings.photorealAvatars,
+    settings.textScale,
+    settings.density,
+    settings.dyslexiaFont,
+    settings.reduceMotion,
+    settings.reduceTransparency,
+    settings.focusRing
   ];
   useEffect(() => {
     paintAppearance(settings, theme, accent, full !== null, tone);

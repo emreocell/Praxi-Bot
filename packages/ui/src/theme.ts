@@ -39,6 +39,7 @@ export {
   osPrefersReducedTransparency,
   paintedUiStyle,
   setReducedTransparencyOverride,
+  setReducedTransparencyForced,
   subscribeSurfaceSupport,
   surfaceSupport,
   type BackdropTone,

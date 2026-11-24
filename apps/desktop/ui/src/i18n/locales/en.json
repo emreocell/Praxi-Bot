@@ -480,6 +480,37 @@
       "themeHint": "The theme's own accent color.",
       "title": "Accent"
     },
+    "accessibility": {
+      "densities": {
+        "comfortable": "Normal",
+        "compact": "Compact",
+        "spacious": "Roomy"
+      },
+      "density": "Spacing",
+      "description": "Make the app easier to read and use. Changes show at once and are saved on this device only.",
+      "dyslexiaFont": {
+        "hint": "Uses the OpenDyslexic font with a little more space between lines.",
+        "title": "Dyslexia-friendly font"
+      },
+      "focusRing": "Focus outline",
+      "focusRings": {
+        "extra": "Extra thick",
+        "normal": "Normal",
+        "thick": "Thick"
+      },
+      "highContrastHint": "For the strongest contrast, pick the High contrast theme (dark or light) under Theme.",
+      "previewSample": "Sample: this is how your messages and settings will look.",
+      "reduceMotion": {
+        "hint": "Stops animations and transitions, and the live wallpaper stands still.",
+        "title": "Reduce motion"
+      },
+      "reduceTransparency": {
+        "hint": "Panels are always solid, even if Windows allows see-through effects.",
+        "title": "Reduce transparency"
+      },
+      "textSize": "Text size",
+      "title": "Accessibility"
+    },
     "backdrop": {
       "all": "All backdrops",
       "calm": "Calm",

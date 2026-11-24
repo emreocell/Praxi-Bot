@@ -14,6 +14,14 @@ Bundled locally through `@fontsource-variable/geist` and
 Latin Extended (Turkish) glyphs. No font CDN is used. Full notices ship in
 `apps/desktop/ui/public/licenses/geist.txt` and `geist-mono.txt`.
 
+## OpenDyslexic (SIL OFL 1.1)
+
+Copyright (c) 2019-07-29, Abbie Gonzalez (https://abbiecod.es), with Reserved Font
+Name OpenDyslexic. Bundled locally through `@fontsource/opendyslexic` 5.3.0
+(Latin WOFF2/WOFF, regular and bold) and used only when the owner turns on
+Settings > Appearance > Accessibility > Dyslexia-friendly font. No font CDN is
+used. The full notice ships in `apps/desktop/ui/public/licenses/opendyslexic.txt`.
+
 ## Lucide React (ISC; Feather-derived icons MIT)
 
 `lucide-react` 1.70.0 supplies the desktop UI icons. Copyright 2026 Lucide Icons

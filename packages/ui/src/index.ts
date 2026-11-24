@@ -50,6 +50,7 @@ export {
   osPrefersReducedTransparency,
   paintedUiStyle,
   setReducedTransparencyOverride,
+  setReducedTransparencyForced,
   PANEL_BLUR_DEFAULT,
   PANEL_BLUR_MAX,
   PANEL_BLUR_MIN,

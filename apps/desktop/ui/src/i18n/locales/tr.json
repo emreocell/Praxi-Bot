@@ -480,6 +480,37 @@
       "themeHint": "Temanın kendi vurgu rengi.",
       "title": "Vurgu"
     },
+    "accessibility": {
+      "densities": {
+        "comfortable": "Normal",
+        "compact": "Sıkı",
+        "spacious": "Ferah"
+      },
+      "density": "Boşluklar",
+      "description": "Uygulamayı okumayı ve kullanmayı kolaylaştırın. Değişiklikler anında görünür ve yalnızca bu cihazda saklanır.",
+      "dyslexiaFont": {
+        "hint": "OpenDyslexic yazı tipini ve satırlar arasında biraz daha boşluğu kullanır.",
+        "title": "Disleksi dostu yazı tipi"
+      },
+      "focusRing": "Odak çerçevesi",
+      "focusRings": {
+        "extra": "Çok kalın",
+        "normal": "Normal",
+        "thick": "Kalın"
+      },
+      "highContrastHint": "En güçlü karşıtlık için Tema bölümünden Yüksek karşıtlık temasını (koyu veya açık) seçin.",
+      "previewSample": "Örnek: mesajlarınız ve ayarlarınız böyle görünecek.",
+      "reduceMotion": {
+        "hint": "Animasyonları ve geçişleri durdurur; canlı duvar kağıdı sabit kalır.",
+        "title": "Hareketi azalt"
+      },
+      "reduceTransparency": {
+        "hint": "Windows saydam efektlere izin verse bile paneller her zaman düz boyanır.",
+        "title": "Saydamlığı azalt"
+      },
+      "textSize": "Yazı boyutu",
+      "title": "Erişilebilirlik"
+    },
     "backdrop": {
       "all": "Tüm arka planlar",
       "calm": "Sakin",

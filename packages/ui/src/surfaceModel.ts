@@ -187,6 +187,12 @@ export function effectiveUiStyle(style: UiStyle, env: PlatformSurfaceSupport = F
 const REDUCED_TRANSPARENCY = "(prefers-reduced-transparency: reduce)";
 
 let reducedTransparencyOverridden = false;
+let reducedTransparencyForced = false;
+
+/** The user turned "Reduce transparency" on in the app's own accessibility settings: always paint solid. */
+export function setReducedTransparencyForced(on: boolean): void {
+  reducedTransparencyForced = on;
+}
 
 /**
  * The user explicitly chose their panel style over the OS "reduce transparency" preference
@@ -208,7 +214,7 @@ export function surfaceSupport(): PlatformSurfaceSupport {
   const supports = typeof CSS !== "undefined" && typeof CSS.supports === "function";
   const backdropFilter =
     !supports || CSS.supports("backdrop-filter", "blur(1px)") || CSS.supports("-webkit-backdrop-filter", "blur(1px)");
-  const reducedTransparency = !reducedTransparencyOverridden && osPrefersReducedTransparency();
+  const reducedTransparency = reducedTransparencyForced || (!reducedTransparencyOverridden && osPrefersReducedTransparency());
   return { backdropFilter, reducedTransparency };
 }
 

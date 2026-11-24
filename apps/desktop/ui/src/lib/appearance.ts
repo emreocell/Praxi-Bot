@@ -28,6 +28,7 @@ import {
   parseVeil,
   VEIL_DEFAULT
 } from "ui/surface-model";
+import { DEFAULT_ACCESSIBILITY, normalizeAccessibility, type AccessibilitySettings } from "./accessibility.ts";
 import {
   DEFAULT_WALLPAPER,
   DEFAULT_WALLPAPER_MOTION,
@@ -39,7 +40,7 @@ import {
 import { DEFAULT_BACKDROP_DIM, NO_BACKDROP, parseBackdrop, parseBackdropDim } from "./backdropCatalog.ts";
 
 /** Everything the Appearance page controls (persisted inside `AppSettings`). */
-export interface AppearanceSettings {
+export interface AppearanceSettings extends AccessibilitySettings {
   /** Palette id, `custom`, `system`, or a legacy name (`light`, `dark`). */
   themeMode: string;
   customTheme: CustomTheme;
@@ -101,7 +102,8 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   transparentChat: true,
   chatPanel: false,
   transparencyOverride: false,
-  photorealAvatars: true
+  photorealAvatars: true,
+  ...DEFAULT_ACCESSIBILITY
 };
 
 function oneOf<T extends string>(values: readonly T[], v: unknown, fallback: T): T {
@@ -142,7 +144,8 @@ export function normalizeAppearance(raw: Record<string, unknown>): AppearanceSet
     chatPanel,
     transparencyOverride: raw.transparencyOverride === true,
     // Default on: only an explicit `false` turns the photoreal skin off.
-    photorealAvatars: raw.photorealAvatars !== false
+    photorealAvatars: raw.photorealAvatars !== false,
+    ...normalizeAccessibility(raw)
   };
 }
 

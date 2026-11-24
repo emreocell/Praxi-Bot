@@ -55,6 +55,8 @@ input::placeholder, textarea::placeholder { color: var(--color-text-muted); opac
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+/* Accessibility > Reduce motion (the app's own switch, same effect as the OS preference). */
+html[data-reduce-motion] *, html[data-reduce-motion] *::before, html[data-reduce-motion] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 @media (prefers-contrast: more) {
   :root[data-theme] { --color-border: var(--color-border-strong); --color-text-muted: var(--color-text); }
 }

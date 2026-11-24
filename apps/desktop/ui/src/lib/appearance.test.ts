@@ -102,7 +102,13 @@ test("valid new values round-trip", () => {
     transparencyOverride: true,
     photorealAvatars: false,
     systemLightTheme: "clay",
-    systemDarkTheme: "obsidian"
+    systemDarkTheme: "obsidian",
+    textScale: 125,
+    density: "spacious",
+    dyslexiaFont: true,
+    reduceMotion: true,
+    reduceTransparency: true,
+    focusRing: "thick"
   };
   assert.deepEqual(normalizeAppearance(stored), {
     ...stored,

@@ -1,4 +1,5 @@
 import { BellDot, BellRing, ChevronDown, FlaskConical, GripVertical, Star, LoaderCircle, MessageSquare, Monitor, Plus, Search, Server, ServerOff, Settings2 } from "lucide-react";
+import { effectiveWallpaperMotion } from "./lib/accessibility";
 import { unreadBotIds } from "./lib/unread";
 import { useReadState } from "./store/readStateStore";
 import { ApiError } from "./api/client";
@@ -850,7 +851,7 @@ function AppShell() {
       style={{ "--size-sidebar-width": `${railWidth}px` } as CSSProperties}
       backdrop={
         wallpaperKind ? (
-          <Wallpaper kind={wallpaperKind} motion={settings.wallpaperMotion} />
+          <Wallpaper kind={wallpaperKind} motion={effectiveWallpaperMotion(settings.wallpaperMotion, settings.reduceMotion)} />
         ) : settings.backdrop !== NO_BACKDROP && settings.backdrop !== CUSTOM_BACKDROP ? (
           <Backdrop
             scene={settings.backdrop}
