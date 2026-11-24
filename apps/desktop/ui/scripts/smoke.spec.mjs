@@ -268,10 +268,25 @@ export async function flows(ctx) {
     await page.keyboard.press('Escape');
   });
   await run(s, 'Apps modal opens at once and shows tiles', async (page) => {
-    await page.getByTestId('open-apps').click();
-    // The modal opens before the daemon's catalog has loaded.
-    await page.getByRole('dialog', { name: 'Apps' }).waitFor({ timeout: 4000 });
-    await page.getByTestId('apps-grid').waitFor(T);
+    // Track what is still in flight, so a stalled catalog names the request that never answered.
+    const inflight = new Map();
+    const started = (r) => inflight.set(r, `${r.method()} ${new URL(r.url()).pathname}`);
+    const ended = (r) => inflight.delete(r);
+    page.on('request', started);
+    page.on('requestfinished', ended);
+    page.on('requestfailed', ended);
+    try {
+      await page.getByTestId('open-apps').click();
+      // The modal opens before the daemon's catalog has loaded.
+      await page.getByRole('dialog', { name: 'Apps' }).waitFor({ timeout: 4000 });
+      await page.getByTestId('apps-grid').waitFor(T);
+    } catch (e) {
+      throw new Error(`${e.message.split(String.fromCharCode(10))[0]} (requests still pending: ${[...inflight.values()].join(', ') || 'none'})`);
+    } finally {
+      page.off('request', started);
+      page.off('requestfinished', ended);
+      page.off('requestfailed', ended);
+    }
   });
   if (await s.page.getByRole('dialog', { name: 'Apps' }).isVisible()) await s.page.keyboard.press('Escape');
   await run(s, 'add-server wizard opens and validates input without SSH', async (page) => {

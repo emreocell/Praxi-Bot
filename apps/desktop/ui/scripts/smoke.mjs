@@ -51,7 +51,7 @@ const freePort = () => new Promise((ok, no) => {
   s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => ok(port)); });
   s.on('error', no);
 });
-const killTree = (c) => {
+const killTree = (c, signal = 'SIGTERM') => {
   if (!c.pid) return;
   if (windows) {
     const killed = spawnSync('taskkill', ['/PID', String(c.pid), '/T', '/F'], { stdio: 'ignore', timeout: 5000, windowsHide: true });
@@ -59,7 +59,7 @@ const killTree = (c) => {
     // The harness already owns the child process handle from spawn.
     if (killed.status !== 0) c.kill();
   }
-  else try { process.kill(-c.pid); } catch { /* gone */ }
+  else try { process.kill(-c.pid, signal); } catch { /* gone */ }
 };
 function start(program, argv, options) {
   const child = spawn(program, argv, { detached: !windows, windowsHide: true, ...options });
@@ -382,7 +382,15 @@ async function main() {
       killTree(child);
       return closed;
     });
-    allStopped = await Promise.race([Promise.all(stopped).then(() => true), delay(5000, false, { ref: false })]);
+    const allClosed = Promise.all(stopped).then(() => true);
+    allStopped = await Promise.race([allClosed, delay(5000, false, { ref: false })]);
+    if (!allStopped) {
+      // A daemon that is slow to shut down on SIGTERM (a loaded runner) must not fail an otherwise green run:
+      // end the whole process group for good and give it a moment to be reaped.
+      log(`smoke children still running after SIGTERM: ${[...children].map((c) => c.pid).join(', ')}; sending SIGKILL`);
+      for (const child of children) killTree(child, 'SIGKILL');
+      allStopped = await Promise.race([allClosed, delay(5000, false, { ref: false })]);
+    }
     if (args.includes('--keep')) log(`kept ${tmp}`);
     else {
       // Windows can refuse removal of the daemon's ACL-protected token file.
