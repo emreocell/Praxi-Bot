@@ -215,3 +215,164 @@ async fn new_tool_on_a_pinned_server_is_pending() {
     );
     mgr.shutdown().await;
 }
+
+// ---- annotation drift -------------------------------------------------------
+
+/// The test server as a TRUSTED server (`trust_hints = true`): `echo` keeps the
+/// description "Say hello" and carries `annotations` (`none` = no object).
+fn trusted_config(annotations: &str) -> McpServerConfig {
+    let mut c = config("Say hello");
+    c.trust_hints = true;
+    if let McpTransport::Stdio { env, .. } = &mut c.transport {
+        env.insert("MCP_TEST_ECHO_ANNOTATIONS".into(), annotations.into());
+    }
+    c
+}
+
+/// Approve `before`, then offer `after` with everything else byte-identical:
+/// the tool must be unreachable until the owner approves it again.
+async fn assert_annotation_change_is_drift(before: &str, after: &str) {
+    use agent_router::{FIND_TOOL, GET_TOOL_DETAILS, TOOL_DESCRIBE, TOOL_SEARCH, ToolSurface};
+    let label = format!("{before} -> {after}");
+    let dir = tempfile::tempdir().unwrap();
+    let pins: Arc<dyn PinStore> = Arc::new(FilePinStore::open(dir.path().join("pins.json")));
+
+    let (reg, mgr) = session(&pins);
+    mgr.add_server(trusted_config(before)).await.unwrap();
+    assert!(reg.get("mcp:t/echo").is_some(), "{label}: first listing");
+    mgr.shutdown().await;
+
+    let (reg, mgr) = session(&pins);
+    mgr.add_server(trusted_config(after)).await.unwrap();
+    assert!(reg.get("mcp:t/echo").is_none(), "{label}: still callable");
+    let snap = mgr.snapshot("t").unwrap();
+    let change = snap
+        .changed_tools
+        .iter()
+        .find(|c| c.tool == "echo")
+        .unwrap_or_else(|| panic!("{label}: not held back"));
+    // The visible text and the schema did not move: only the hints did.
+    assert!(
+        change.other_changed && !change.description_changed && !change.schema_changed,
+        "{label}"
+    );
+    let surface = ToolSurface::new(reg.clone(), 3);
+    let ctx = ToolContext::default();
+    assert!(
+        surface
+            .resolve(agent_router::USE_TOOL)
+            .unwrap()
+            .call(&ctx, json!({"name": "mcp:t/echo", "input": {"text": "x"}}))
+            .await
+            .is_err(),
+        "{label}: use_tool reached it"
+    );
+    let tool_named = |name: &str| {
+        surface
+            .deferred_tools()
+            .iter()
+            .find(|t| t.spec().name == name)
+            .cloned()
+            .or_else(|| surface.resolve(name))
+            .unwrap_or_else(|| panic!("{name} missing"))
+    };
+    for meta in [TOOL_SEARCH, FIND_TOOL] {
+        let hits = tool_named(meta)
+            .call(&ctx, json!({"query": "echo say hello"}))
+            .await
+            .unwrap();
+        assert!(
+            !format!("{:?}", hits.content).contains("mcp:t/echo"),
+            "{label}: {meta} listed it"
+        );
+    }
+    for meta in [TOOL_DESCRIBE, GET_TOOL_DETAILS] {
+        let described = tool_named(meta)
+            .call(&ctx, json!({"name": "mcp:t/echo"}))
+            .await;
+        let leaked = described.is_ok_and(|out| format!("{:?}", out.content).contains("Say hello"));
+        assert!(!leaked, "{label}: {meta} described it");
+    }
+    // The owner approves what they were shown and it comes back.
+    mgr.approve_tool_changes("t", "echo", &change.hash.clone())
+        .await
+        .unwrap();
+    assert!(reg.get("mcp:t/echo").is_some(), "{label}: not restored");
+    mgr.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_changed_annotation_on_a_trusted_server_sends_the_tool_back_to_approval() {
+    let a = |json: &str| json.to_owned();
+    // Toward "safe" (the dangerous case) and back, for every hint.
+    let pairs = [
+        // destructiveHint true -> false and back
+        (
+            a(r#"{"readOnlyHint":false,"destructiveHint":true}"#),
+            a(r#"{"readOnlyHint":false,"destructiveHint":false}"#),
+        ),
+        (
+            a(r#"{"readOnlyHint":false,"destructiveHint":false}"#),
+            a(r#"{"readOnlyHint":false,"destructiveHint":true}"#),
+        ),
+        // readOnlyHint false -> true and back
+        (
+            a(r#"{"readOnlyHint":false}"#),
+            a(r#"{"readOnlyHint":true}"#),
+        ),
+        (
+            a(r#"{"readOnlyHint":true}"#),
+            a(r#"{"readOnlyHint":false}"#),
+        ),
+        // openWorldHint false -> true -> false
+        (
+            a(r#"{"openWorldHint":false}"#),
+            a(r#"{"openWorldHint":true}"#),
+        ),
+        (
+            a(r#"{"openWorldHint":true}"#),
+            a(r#"{"openWorldHint":false}"#),
+        ),
+        // idempotentHint
+        (
+            a(r#"{"idempotentHint":false}"#),
+            a(r#"{"idempotentHint":true}"#),
+        ),
+        (
+            a(r#"{"idempotentHint":true}"#),
+            a(r#"{"idempotentHint":false}"#),
+        ),
+        // The object appears or disappears.
+        (a("none"), a(r#"{"readOnlyHint":true}"#)),
+        (a(r#"{"readOnlyHint":true}"#), a("none")),
+        (a("none"), a("{}")),
+        // A hint appears next to others.
+        (
+            a(r#"{"readOnlyHint":true}"#),
+            a(r#"{"readOnlyHint":true,"openWorldHint":true}"#),
+        ),
+        // The annotation title is part of the definition too.
+        (a(r#"{"title":"Echo"}"#), a(r#"{"title":"Echo it"}"#)),
+    ];
+    for (before, after) in &pairs {
+        assert_annotation_change_is_drift(before, after).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn identical_annotations_stay_approved() {
+    let dir = tempfile::tempdir().unwrap();
+    let pins: Arc<dyn PinStore> = Arc::new(FilePinStore::open(dir.path().join("pins.json")));
+    for _ in 0..2 {
+        let (reg, mgr) = session(&pins);
+        // Key order of the JSON the server sends is irrelevant.
+        mgr.add_server(trusted_config(
+            r#"{"destructiveHint":false,"readOnlyHint":false}"#,
+        ))
+        .await
+        .unwrap();
+        assert!(reg.get("mcp:t/echo").is_some());
+        assert_eq!(mgr.snapshot("t").unwrap().changed_tools, []);
+        mgr.shutdown().await;
+    }
+}

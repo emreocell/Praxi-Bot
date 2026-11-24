@@ -14,6 +14,7 @@ import { MESSAGE_TIMES_VALUES } from "../../lib/messageTime";
 import { SEND_WITH_VALUES } from "../../lib/settingsPrefs";
 import { NotificationSettings } from "../NotificationSettings";
 import styles from "../SettingsModal.module.css";
+import { QuickAskCard } from "./QuickAskCard";
 import { DictationCard } from "./DictationCard";
 import { VoiceInputSettings } from "./VoiceInputSettings";
 import { VoiceSettings } from "./VoiceSettings";
@@ -189,6 +190,13 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
         />
       </SettingRow>,
       { keywords: "tray taskbar system tray tepsi bildirim alani hintergrund infobereich minimize" }
+    ),
+    card(
+      "quickAsk",
+      t("settings.quickAsk.title"),
+      t("settings.quickAsk.description"),
+      <QuickAskCard settings={settings} update={update} />,
+      { keywords: "quick ask hotkey shortcut global schnell fragen kisayol hizli sor overlay" }
     ),
     card(
       "hotkey",

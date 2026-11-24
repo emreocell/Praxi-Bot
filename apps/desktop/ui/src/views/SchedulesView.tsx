@@ -106,9 +106,11 @@ function historyToneClass(status: string): string {
 
 /** Scheduled tasks: list, calendar, next-runs preview, create/edit, run history, retry. */
 export function SchedulesView({
-  onOpenChat
+  onOpenChat,
+  initialBotId
 }: {
   onOpenChat: (chatId: string) => void;
+  initialBotId?: string;
 }) {
   const { t, i18n } = useTranslation();
   const { client, bots, events, onDaemonEvent } = useDaemon();
@@ -127,7 +129,7 @@ export function SchedulesView({
   // A moved schedule whose server could not be asked: waiting for the owner to confirm.
   const [confirmReclaimId, setConfirmReclaimId] = useState<string | null>(null);
   /** `null` = no form; `"new"` or a schedule id being edited. */
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(initialBotId ? "new" : null);
 
   const fmt = useCallback(
     (ms: number) =>
@@ -282,6 +284,7 @@ export function SchedulesView({
           <ScheduleForm
             key={editing}
             editing={editingSchedule}
+            initialBotId={initialBotId}
             onCancel={() => setEditing(null)}
             onSaved={async () => {
               setEditing(null);
@@ -1075,10 +1078,12 @@ function ScheduleCalendar({
 
 function ScheduleForm({
   editing,
+  initialBotId,
   onCancel,
   onSaved
 }: {
   editing?: Schedule;
+  initialBotId?: string;
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
@@ -1087,7 +1092,7 @@ function ScheduleForm({
   const [draft, setDraft] = useState<ScheduleDraft>(() =>
     editing
       ? draftFromSchedule(editing)
-      : { ...emptyDraft(bots[0]?.id ?? ""), tz: LOCAL_TZ }
+      : { ...emptyDraft(bots.find((b) => b.id === initialBotId)?.id ?? bots[0]?.id ?? ""), tz: LOCAL_TZ }
   );
   const [preview, setPreview] = useState<{
     key: string;

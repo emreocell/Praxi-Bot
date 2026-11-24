@@ -964,6 +964,64 @@ async fn every_mcp_mutation_is_audited_without_values() {
     }
 }
 
+/// Believing a server's own tool labels is a security choice: every change of
+/// `trust_hints` (add or edit) leaves its own audit row with the new value.
+#[tokio::test]
+async fn changing_label_trust_is_audited_with_the_new_value() {
+    let (t, _) = with_mcp();
+    let rows = |action: &str| {
+        t.state
+            .storage()
+            .list_audit(t.state.user_id())
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.action == action)
+            .map(|r| (r.detail["name"].clone(), r.detail["trust_hints"].clone()))
+            .collect::<Vec<_>>()
+    };
+    // Added without trust: the safe default writes no trust row.
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/mcp/servers",
+        Some(stdio_body("files")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    assert_eq!(rows("mcp.trust_hints_changed").len(), 0);
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/mcp/servers/files",
+        Some(json!({"trust_hints": true})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let r = call(
+        &t,
+        Method::PUT,
+        "/v1/mcp/servers/files",
+        Some(json!({"trust_hints": false})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    // An unrelated edit writes no trust row.
+    call(
+        &t,
+        Method::PUT,
+        "/v1/mcp/servers/files",
+        Some(json!({"enabled": false})),
+    )
+    .await;
+    assert_eq!(
+        rows("mcp.trust_hints_changed"),
+        [
+            (json!("files"), json!(true)),
+            (json!("files"), json!(false))
+        ]
+    );
+}
+
 /// 244-A review finding 1: MCP management starts programs and names host
 /// secrets, so every mutation is refused to every paired peer role (also under
 /// encoded, double-slash and trailing-slash spellings); GET stays open.

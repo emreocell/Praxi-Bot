@@ -13,6 +13,7 @@ import type { McpAuthState, McpCatalogEntry, McpServer } from "../api/types";
 import { ConnectionTestButton } from "../components/ConnectionTest";
 import formStyles from "../components/Form.module.css";
 import { BotAccessPicker } from "../components/BotAccessPicker";
+import { McpTrustChoice } from "../components/McpTrustChoice";
 import { Modal } from "../components/Modal";
 import { Segmented } from "../components/SettingsUi";
 import { useToast } from "../components/Toast";
@@ -226,6 +227,7 @@ function ConnectedCell({
   onDisconnect,
   onSaveBots,
   onSaveTools,
+  onSaveTrust,
   onChooseFolder
 }: {
   server: McpServer;
@@ -244,6 +246,7 @@ function ConnectedCell({
   onDisconnect: () => void;
   onSaveBots: (from: BotScope, to: BotScope) => void;
   onSaveTools: (exclude: string[]) => void;
+  onSaveTrust: (trusted: boolean) => void;
 }) {
   const { t } = useTranslation();
   const { bots, client } = useDaemon();
@@ -314,6 +317,13 @@ function ConnectedCell({
             {description ?? t("apps.toolCount", { count: server.tool_count })}
             {" · "}
             {usedBy}
+            {" · "}
+            <span
+              className={server.trust_hints ? styles.trustOn : styles.trustOff}
+              data-testid={`mcp-trust-badge-${server.name}`}
+            >
+              {server.trust_hints ? t("apps.trust.badgeTrusted") : t("apps.trust.badgeAsks")}
+            </span>
           </small>
         </div>
         <span className={`${styles.state} ${styles[signingIn ? "tone_busy" : `tone_${tone}`]}`}>
@@ -354,6 +364,12 @@ function ConnectedCell({
         <div className={styles.panel} id={panelId}>
           <span className={styles.panelLabel}>{t("apps.access.label")}</span>
           <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
+          <McpTrustChoice
+            id={`server-${server.name}`}
+            value={server.trust_hints}
+            disabled={busy}
+            onChange={onSaveTrust}
+          />
           <McpToolList server={server} client={client} busy={busy} onChange={onSaveTools} />
           <ConnectionTestButton
             testId={`mcp-connection-test-${server.name}`}
@@ -478,7 +494,7 @@ function DiscoverCell({
   onConnect
 }: {
   entry: McpCatalogEntry;
-  onConnect: (values: Record<string, string>, folder?: string) => Promise<void>;
+  onConnect: (values: Record<string, string>, folder?: string, trustHints?: boolean) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const secrets = entry.install.required_secrets;
@@ -487,13 +503,16 @@ function DiscoverCell({
   const [asking, setAsking] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  // The safe answer is the default: every action of this server asks.
+  const [trust, setTrust] = useState(false);
 
   const submit = async (v: Record<string, string>) => {
     setBusy(true);
     try {
-      await onConnect(v, wantsFolder ? folder : undefined);
+      await onConnect(v, wantsFolder ? folder : undefined, trust);
       setAsking(false);
       setValues({});
+      setTrust(false);
     } finally {
       setBusy(false);
     }
@@ -521,13 +540,7 @@ function DiscoverCell({
           className={styles.connect}
           disabled={busy || asking}
           aria-label={t("apps.connectApp", { name: entry.name })}
-          onClick={() => {
-            if (secrets.length === 0 && !wantsFolder) {
-              void submit({});
-            } else {
-              setAsking(true);
-            }
-          }}
+          onClick={() => setAsking(true)}
         >
           {t("apps.connect")}
         </button>
@@ -590,6 +603,7 @@ function DiscoverCell({
           {secrets.length > 0 ? (
             <p className={formStyles.hint}>{t("apps.secretHint")}</p>
           ) : null}
+          <McpTrustChoice id={entry.id} value={trust} onChange={setTrust} disabled={busy} />
           <div className={styles.actions}>
             <Button type="submit" size="sm" variant="primary" disabled={!complete || busy}>
               {t("apps.connectNow")}
@@ -600,6 +614,7 @@ function DiscoverCell({
               onClick={() => {
                 setAsking(false);
                 setValues({});
+                setTrust(false);
               }}
             >
               {t("common.cancel")}
@@ -632,6 +647,7 @@ function CustomServerForm({
   const [busy, setBusy] = useState(false);
   const { bots } = useDaemon();
   const [scope, setScope] = useState<BotScope>({ mode: "all" });
+  const [trust, setTrust] = useState(false);
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
 
   return (
@@ -639,7 +655,7 @@ function CustomServerForm({
       className={styles.custom}
       onSubmit={(e) => {
         e.preventDefault();
-        const result = customServerConfig(form, existing, botSelection(scope, bots));
+        const result = customServerConfig(form, existing, botSelection(scope, bots), trust);
         setError(result.ok ? null : result.error);
         if (result.ok) {
           setBusy(true);
@@ -724,6 +740,7 @@ function CustomServerForm({
         <span className={formStyles.label}>{t("apps.access.label")}</span>
         <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
       </div>
+      <McpTrustChoice id="custom" value={trust} onChange={setTrust} disabled={busy} />
       <div className={styles.formActions}>
         <Button type="submit" variant="primary" size="sm" disabled={busy}>
           {t("apps.custom.add")}
@@ -879,13 +896,14 @@ export function AppsModal({
   const connect = async (
     entry: McpCatalogEntry,
     values: Record<string, string>,
-    folder?: string
+    folder?: string,
+    trustHints = false
   ) => {
     if (!client) {
       return;
     }
     try {
-      await connectCatalogEntry(client, entry, values, folder);
+      await connectCatalogEntry(client, entry, values, folder, trustHints);
       toast.show(t("apps.connectedToast", { name: entry.name }), "success");
       await reload();
     } catch (e) {
@@ -1038,6 +1056,16 @@ export function AppsModal({
           await reload();
         })
       }
+      onSaveTrust={(trusted) =>
+        void run(s.name, async () => {
+          await client?.updateMcpServer(s.name, { trust_hints: trusted });
+          toast.show(
+            t(trusted ? "apps.trust.savedYes" : "apps.trust.savedNo", { name: s.name }),
+            "success"
+          );
+          await reload();
+        })
+      }
       onSaveBots={(from, to) =>
         void run(s.name, async () => {
           if (!client) {
@@ -1138,7 +1166,7 @@ export function AppsModal({
                     <DiscoverCell
                       key={entry.id}
                       entry={entry}
-                      onConnect={(values, folder) => connect(entry, values, folder)}
+                      onConnect={(values, folder, trust) => connect(entry, values, folder, trust)}
                     />
                   ))}
                 </ul>
@@ -1153,7 +1181,7 @@ export function AppsModal({
                     <DiscoverCell
                       key={entry.id}
                       entry={entry}
-                      onConnect={(values) => connect(entry, values)}
+                      onConnect={(values, _folder, trust) => connect(entry, values, undefined, trust)}
                     />
                   ))}
                 </ul>

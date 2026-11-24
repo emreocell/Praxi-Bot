@@ -97,6 +97,28 @@ fn audit_after<T>(
     );
 }
 
+/// Record that the owner chose whether to believe a server's own tool labels
+/// (`trust_hints`), with the new value, **before** it takes effect. Fails
+/// closed like [`audit_before`]. The value is a yes/no, never server text.
+fn audit_trust_choice(
+    s: &AppState,
+    actor: &MaybeActor,
+    name: &str,
+    trusted: bool,
+) -> Result<(), ApiError> {
+    let (who, name) = audit_fields(s, actor, name);
+    s.storage()
+        .append_audit(
+            s.user_id(),
+            None,
+            &who,
+            "mcp.trust_hints_changed",
+            &serde_json::json!({ "name": name, "trust_hints": trusted, "phase": "requested" }),
+        )
+        .map(|_| ())
+        .map_err(|_| ApiError::internal("cannot write the audit log"))
+}
+
 /// Audit around `op`: a row before (fail closed) and one after.
 async fn audited<T, F>(
     s: &AppState,
@@ -169,6 +191,9 @@ pub(crate) async fn create_mcp_server(
     }
     let host = mcp(&s)?;
     let name = input.name.clone().unwrap_or_default();
+    if input.trust_hints {
+        audit_trust_choice(&s, &actor, &name, true)?;
+    }
     let server = audited(&s, &actor, "mcp.server_create", &name, async {
         Ok(host.add(input).await?)
     })
@@ -202,6 +227,12 @@ pub(crate) async fn update_mcp_server(
         }
     }
     let host = mcp(&s)?;
+    if let Some(trusted) = patch
+        .get("trust_hints")
+        .and_then(serde_json::Value::as_bool)
+    {
+        audit_trust_choice(&s, &actor, &name, trusted)?;
+    }
     audited(&s, &actor, "mcp.server_update", &name, async {
         Ok(Json(host.update(&name, patch).await?))
     })

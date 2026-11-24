@@ -80,6 +80,8 @@
 .actions, .formActions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .link { align-self: flex-start; padding: var(--space-0); border: none; background: none; color: var(--color-accent-text); font: inherit; font-size: var(--font-size-xs); cursor: pointer; }
 .link:hover { text-decoration: underline; }
+.trustOn { color: var(--color-accent-text); }
+.trustOff { color: var(--color-text-muted); }
 
 /* stylelint-disable-next-line unit-disallowed-list -- desktop window resize boundary */
 @media (width <= 56em) { .grid { grid-template-columns: minmax(0, 1fr); } .manage { opacity: 1; } }

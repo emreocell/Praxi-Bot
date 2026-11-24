@@ -183,7 +183,9 @@ export function buildDailyBars(
   daily: readonly DailyUsageLike[],
   metric: TrendMetric,
   plotWidth = 560,
-  plotHeight = 100
+  plotHeight = 100,
+  /** Keep the scale at least this high (so limit lines drawn above the data stay on the chart). */
+  scaleFloor = 0
 ): DailyChartModel {
   if (daily.length === 0) {
     return { bars: [], max: 0, hasData: false, labelIndices: [] };
@@ -221,7 +223,8 @@ export function buildDailyBars(
     };
   });
 
-  const max = raw.reduce((m, r) => (r.value !== null && r.value > m ? r.value : m), 0);
+  const dataMax = raw.reduce((m, r) => (r.value !== null && r.value > m ? r.value : m), 0);
+  const max = Math.max(dataMax, scaleFloor);
   const hasData = raw.some((r) => r.calls > 0);
   const slot = plotWidth / raw.length;
   const gap = Math.min(4, slot * 0.25);

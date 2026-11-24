@@ -828,6 +828,17 @@
       "label": "Werkzeuge, die Bots nutzen dürfen",
       "restricted": "Einige Werkzeuge sind durch eine eigene Erlaubnisliste eingeschränkt; bearbeite sie in den Servereinstellungen."
     },
+    "trust": {
+      "badgeAsks": "Fragt immer",
+      "badgeTrusted": "Kennzeichnungen vertraut",
+      "explain": "Ein Server kennzeichnet jedes Werkzeug als schreibgeschützt oder nicht. Bei „Nein“ fragt jede Aktion zuerst nach. Bei „Ja“ laufen nur als schreibgeschützt gekennzeichnete Werkzeuge ohne Nachfrage; alles, was etwas ändert oder löscht, fragt weiterhin nach. Sie können das später in den Einstellungen der App ändern.",
+      "learn": "Mehr erfahren",
+      "no": "Nein, bei jeder Aktion nachfragen",
+      "question": "Vertrauen Sie diesem Server, seine eigenen Werkzeuge ehrlich zu beschreiben?",
+      "savedNo": "{{name}}: Jede Aktion fragt wieder nach.",
+      "savedYes": "{{name}}: Die lesenden Werkzeuge laufen jetzt ohne Nachfrage.",
+      "yes": "Ja, nur lesende Werkzeuge ohne Nachfrage ausführen"
+    },
     "usedBy": "Genutzt von"
   },
   "backdrop": {
@@ -1515,15 +1526,35 @@
     },
     "attach": {
       "add": "Dateien oder Bilder anhängen",
-      "failed": "Diese Datei konnte nicht angehängt werden",
+      "command": "Senden Sie Dateien mit einer normalen Nachricht. Entfernen Sie sie, bevor Sie einen Schrägstrichbefehl verwenden.",
+      "delivery": "Neue Dateien bleiben bis zum Senden in diesem Browser. Beim Senden werden sie auf den Computer des Chats kopiert. Bilder oder ausgelesener Text werden an den gewählten KI-Anbieter übermittelt.",
+      "details": "Ziel der Dateien und Größenlimits",
+      "documentHelp": "Dokumenttext wird als nicht vertrauenswürdige Daten behandelt, niemals als Anweisungen. Gescannte PDFs enthalten möglicherweise keinen lesbaren Text. Beim Verkleinern eines animierten Bildes wird das erste Einzelbild verwendet.",
+      "empty": "Diese Datei ist leer. Wählen Sie eine Datei mit Inhalt.",
+      "failed": "Diese Datei konnte nicht angehängt werden. Entfernen Sie sie und versuchen Sie es erneut.",
+      "footer": "Beheben Sie Dateifehler oder entfernen Sie die Dateien vor dem Senden. Bereits kopierte Dateien bleiben auf dem Computer des Chats, auch wenn sie hier entfernt werden.",
+      "imageFailed": "Dieses Bild konnte nicht vorbereitet werden. Versuchen Sie ein kleineres PNG-, JPEG-, GIF- oder WebP-Bild.",
+      "imageTooLarge": "Das Bild ist auch nach dem Verkleinern zu groß. Wählen Sie ein Bild unter 5 MB.",
+      "limits": "Bis zu 6 Dateien; jeweils 15 MB, Textdateien 1 MB, vorbereitete Bilder 5 MB. Bilder über 2048 Pixel werden verkleinert.",
       "list": "Angehängte Dateien",
+      "local": "Im Browser bereit",
+      "localNotice": "Neue Dateien bleiben bis zum Senden in diesem Browser.",
       "pastedName": "Eingefügte Datei",
+      "preparing": "Wird in diesem Browser vorbereitet…",
+      "providerImage": "An die KI: dieses Bild",
+      "providerText": "An die KI: ausgelesener Text (nicht vertrauenswürdig)",
+      "ready": "Bereit zum Senden",
       "remove": "{{name}} entfernen",
+      "resized": "Bild verkleinert",
+      "retry": "{{name}} für einen weiteren Sendeversuch vorbereiten",
+      "stored": "Auf dem Computer des Chats gespeichert",
+      "textTooLarge": "Textdateien dürfen höchstens 1 MB groß sein. Wählen Sie eine kleinere Datei.",
       "tooLarge": "Zu groß (höchstens 15 MB)",
       "tooMany": "Höchstens 6 Dateien pro Nachricht",
       "truncated": "Nur der Anfang dieser Datei wurde gelesen",
-      "unsupported": "Dieser Dateityp wird nicht unterstützt. Nutze ein Bild, PDF, Word, Excel, PowerPoint oder eine Textdatei.",
-      "uploading": "Wird hochgeladen"
+      "unsupported": "Verwenden Sie PNG, JPEG, GIF, WebP, PDF, DOCX, XLSX, PPTX oder eine UTF-8-Textdatei. Audio, Video und andere Binärdateien werden nicht unterstützt.",
+      "untrusted": "Nicht vertrauenswürdiger Dateiinhalt",
+      "uploading": "Wird auf den Computer des Chats kopiert…"
     },
     "chain": {
       "details": "Details",
@@ -3227,6 +3258,15 @@
     "saved": "Vertrauenswürdig: {{folder}}",
     "title": "Vertrauenswürdige Ordner"
   },
+  "gettingStarted": {
+    "allDone": "Alles bereit. Hier ist alles erledigt.",
+    "hide": "Auf dem Startbildschirm ausblenden",
+    "progress": "{{done}} von {{total}} erledigt",
+    "show": "Auf dem Startbildschirm wieder anzeigen",
+    "stateDone": "erledigt",
+    "stateOpen": "noch nicht erledigt",
+    "title": "Erste Schritte"
+  },
   "health": {
     "connected": "Lokaler Dienst läuft",
     "connecting": "Der lokale Dienst wird gestartet …",
@@ -3993,6 +4033,55 @@
     "thinking": "Denken",
     "title": "Modell"
   },
+  "myBots": {
+    "all": "Alle Zustände",
+    "clear": "Filter zurücksetzen",
+    "costHint": "In USD auf das Tageslimit angerechneter Betrag am lokalen Tag des Bots. Fehlende Nutzungsdaten werden gegebenenfalls geschätzt; Modelle ohne bekannten Preis sind nicht enthalten. Weitere Tages-, Wochen- und Monatslimits können ebenfalls gelten.",
+    "costLimit": "{{cost}} von {{limit}}",
+    "costNoLimit": "{{cost}} / kein tägliches Geldlimit",
+    "costUnavailable": "Kosten nicht verfügbar",
+    "count": "{{shown}} von {{total}} Bots werden angezeigt",
+    "dailyLimit": "Tägliche Ausgaben für {{name}}",
+    "emptyHint": "Erstellen Sie einen Bot für Recherchen, alltägliche Aufgaben oder eigene Ideen.",
+    "emptyTitle": "Erstellen Sie Ihren ersten Bot",
+    "filter": "Zustand",
+    "grid": "Kartenraster",
+    "lastActivity": "Letzte Aktivität",
+    "layout": "Botansicht",
+    "list": "Kompakte Liste",
+    "loading": "Kosten werden geladen…",
+    "newBot": "Bot erstellen",
+    "newChat": "Neuer Chat",
+    "noActivity": "Noch keine Aktivität",
+    "noMatches": "Keine passenden Bots",
+    "noMatchesHint": "Versuchen Sie einen anderen Namen oder Zustand.",
+    "pause": "Pausieren",
+    "pauseUnavailable": "Der Bot, der diesen Computer steuert, kann pausiert werden. Andere Aufgaben können Sie im jeweiligen Chat stoppen.",
+    "refresh": "Bots aktualisieren",
+    "resume": "Fortsetzen",
+    "review": "Anfrage prüfen",
+    "schedule": "Zeitplan erstellen",
+    "scope": "Bots auf {{place}}. Wählen Sie einen anderen Ort, um die dortigen Bots zu sehen.",
+    "search": "Bot suchen",
+    "server": "Eigener Server",
+    "settings": "Einstellungen",
+    "sort": "Sortieren nach",
+    "sortBy": {
+      "activity": "Letzte Aktivität",
+      "cost": "Höchste Kosten heute",
+      "name": "Botname"
+    },
+    "stale": "Die Verbindung für Aktualisierungen ist unterbrochen. Dies sind die zuletzt bekannten Angaben. Verbinden Sie sich erneut, bevor Sie Änderungen vornehmen.",
+    "status": {
+      "approval": "Wartet auf Ihre Antwort",
+      "idle": "Bereit",
+      "paused": "Pausiert",
+      "running": "Arbeitet"
+    },
+    "thisComputer": "Dieser Computer",
+    "title": "Meine Bots",
+    "today": "Heute / Tageslimit"
+  },
   "needs": {
     "empty": "Wenn ein Bot dein OK braucht oder eine Frage hat, erscheint das hier.",
     "emptyTitle": "Alles erledigt",
@@ -4080,10 +4169,15 @@
     }
   },
   "notifyHistory": {
+    "allBots": "Alle Bots",
+    "allTypes": "Alle Arten",
     "clear": "Verlauf löschen",
     "empty": "Wenn ein Bot eine Aufgabe beendet oder dein OK braucht, siehst du es hier.",
     "emptyAction": "Ansehen, was dich braucht",
     "emptyTitle": "Nichts Neues",
+    "filterBot": "Bot",
+    "filterType": "Art",
+    "filters": "Benachrichtigungen filtern",
     "held": "Zurückgehalten (Ruhezeit)",
     "heldMuted": "Zurückgehalten (Bot stummgeschaltet)",
     "kind": {
@@ -4094,12 +4188,23 @@
       "scheduleDone": "Geplanter Auftrag fertig"
     },
     "markAllRead": "Alle als gelesen markieren",
+    "noMatch": "Keine Benachrichtigung passt zu diesen Filtern.",
+    "noMatchTitle": "Hier ist nichts",
+    "onlyUnread": "Nur ungelesene",
     "openNeeds": "„Braucht dich“ öffnen",
+    "quietNote": "{{count}} Benachrichtigungen wurden in den Ruhezeiten zurückgehalten und sind noch ungelesen.",
+    "quietNote_one": "{{count}} Benachrichtigung wurde in den Ruhezeiten zurückgehalten und ist noch ungelesen.",
+    "resetFilters": "Alles anzeigen",
+    "retention": "Wird {{days}} Tage lang aufbewahrt, höchstens {{max}} Benachrichtigungen, danach automatisch entfernt.",
+    "showSnoozed": "Zurückgestellt ({{count}})",
     "shown": "Angezeigt",
+    "snooze": "1 Std. zurückstellen",
+    "snoozeHint": "Blendet dies für eine Stunde aus. Es kommt von selbst wieder.",
     "subtitle": "Was die Bots gemeldet haben und was die Ruhezeiten zurückgehalten haben. Offene Freigaben bleiben immer unter „Braucht dich“.",
     "title": "Benachrichtigungsverlauf",
     "unread": "Ungelesen",
-    "unreadCount": "{{count}} ungelesen"
+    "unreadCount": "{{count}} ungelesen",
+    "unsnooze": "Zurückholen"
   },
   "overlay": {
     "actions": {
@@ -4128,6 +4233,7 @@
     "empty": "Kein passender Befehl",
     "go": {
       "home": "Zur Übersicht",
+      "myBots": "Meine Bots",
       "needs": "Zu „Braucht dich“",
       "schedules": "Zu geplanten Aufgaben",
       "settings": "Einstellungen öffnen",
@@ -4277,6 +4383,31 @@
     "label": "In der Warteschlange.",
     "remove": "Diese Nachricht aus der Warteschlange entfernen",
     "sendNow": "Jetzt senden"
+  },
+  "quickAsk": {
+    "bot": "Bot",
+    "clipboardEmpty": "In der Zwischenablage ist nichts Brauchbares.",
+    "clipboardOff": "Deine Zwischenablage wird nur genutzt, wenn du hier klickst.",
+    "close": "Schließen",
+    "failed": "Das hat nicht geklappt. Bitte versuche es noch einmal.",
+    "hints": "Enter sendet · Esc schließt",
+    "includeClipboard": "Zwischenablage einbeziehen",
+    "needsYou": "Dafür brauchst du die Freigabe. Öffne es in der App, um zu entscheiden.",
+    "noBots": "Noch keine Bots. Lege zuerst in der App einen an.",
+    "noService": "Praxi-Bot ist noch nicht bereit: {{reason}}",
+    "openInApp": "In der App öffnen",
+    "placeholder": "Frag etwas und drücke Enter",
+    "problem": {
+      "in_use": "Ein anderes Programm nutzt dieses Kürzel bereits. Wähle ein anderes.",
+      "invalid": "Dieses Tastenkürzel ist ungültig. Beispiel: Ctrl+Alt+Space.",
+      "needs_modifier": "Füge Ctrl oder Alt hinzu, sonst würde normales Tippen blockiert.",
+      "reserved": "Windows und die meisten Apps nutzen dieses Kürzel bereits. Wähle ein anderes.",
+      "same_as_stop": "Das ist bereits dein Stopp-Kürzel. Wähle ein anderes.",
+      "shift_only": "Shift allein reicht nicht. Füge Ctrl oder Alt hinzu."
+    },
+    "send": "Senden",
+    "thinking": "Denkt nach…",
+    "title": "Schnell fragen"
   },
   "quota": {
     "remaining": "{{label}}: {{pct}} % übrig",
@@ -4834,6 +4965,12 @@
       "restartManual": "Starte den Hintergrunddienst selbst neu, damit er die Änderung übernimmt (er wurde nicht von dieser App gestartet).",
       "test": "Verbindung testen",
       "title": "Modellanbieter"
+    },
+    "quickAsk": {
+      "description": "Standardmäßig aus. Wenn aktiv, öffnet ein Tastenkürzel in jedem Programm ein kleines Feld, in dem du eine Frage eintippst und Enter drückst. Jede Frage startet einen neuen Chat mit dem gewählten Bot.",
+      "hotkey": "Tasten für „Schnell fragen“",
+      "privacy": "Zwischenablage und Bildschirm werden nie gelesen, außer du klickst im Feld auf „Zwischenablage einbeziehen“.",
+      "title": "Kürzel für „Schnell fragen“"
     },
     "quiet": {
       "allowUrgent": "Trotzdem melden, wenn ein Bot auf mich wartet",
@@ -5808,6 +5945,16 @@
     "exportCsv": "CSV herunterladen",
     "exportDone": "Nutzungs-CSV heruntergeladen.",
     "exportFailed": "Nutzungs-CSV konnte nicht heruntergeladen werden",
+    "insights": {
+      "noChat": "Kein Chat zum Öffnen",
+      "openRun": "Öffnen",
+      "openRunLabel": "Chat des Laufs von {{bot}} am {{when}} öffnen",
+      "priceUnknown": "Preis unbekannt",
+      "title": "Wohin das Geld geht",
+      "tokensShort": "{{amount}} Tokens",
+      "topRuns": "Teuerste Läufe",
+      "unknownPriceNote": "Einträge mit „Unbekannt“ nutzen ein Modell ohne bekannten Preis: Ihre Tokens werden gezählt, die Kosten nicht."
+    },
     "limit": {
       "clear": "Limit entfernen",
       "forecast": "Prognose zum Monatsende",
@@ -5856,15 +6003,27 @@
     "tokens": "Tokens",
     "total": "Gesamt",
     "trend": {
+      "alertKey": "Warnung bei 80 % ({{amount}})",
       "ariaLabel": "Täglicher {{metric}}-Verlauf über {{days}} Tage",
       "dayReadout": "{{day}} · {{calls}} Aufrufe · {{amount}} Tokens · {{cost}}",
+      "forecast": "Diesen Monat ausgegeben: {{spent}}. In diesem Tempo endet der Monat bei etwa {{forecast}}.",
+      "forecastNone": "Für eine Prognose gibt es diesen Monat noch zu wenig Nutzung mit bekanntem Preis.",
+      "forecastPartial": "{{count}} Aufrufe hatten keinen bekannten Preis und werden nicht mitgezählt.",
+      "granularities": {
+        "day": "Pro Tag",
+        "month": "Pro Monat",
+        "week": "Pro Woche"
+      },
+      "granularity": "Gruppieren nach",
       "hoverHint": "Fahre über einen Tag oder fokussiere ihn, um die Summen zu sehen.",
+      "limitKey": "Monatslimit ({{amount}})",
       "metric": "Diagramm-Kennzahl",
       "metrics": {
         "calls": "Aufrufe",
         "cost": "Kosten",
         "tokens": "Token-Menge"
       },
+      "prorated": "Die Linien zeigen den gleichmäßigen Anteil Ihres Monatslimits für einen Tag bzw. eine Woche.",
       "showTable": "Tägliche Tabelle anzeigen",
       "timeZone": "Lokale Tage ({{tz}})",
       "title": "Tagesverlauf"

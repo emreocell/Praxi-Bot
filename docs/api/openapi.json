@@ -27043,6 +27043,60 @@
         },
         "additionalProperties": false
       },
+      "TopRunUsage": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/UsageTotals",
+            "description": "Totals of the run; `cost_usd` is `null` when no call had a known price."
+          },
+          {
+            "type": "object",
+            "required": [
+              "run_id",
+              "bot_id",
+              "created_at_ms"
+            ],
+            "properties": {
+              "bot_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Bot that executed the run."
+              },
+              "calls_without_cost": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Calls of this run whose cost is unknown.",
+                "minimum": 0
+              },
+              "calls_without_usage": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Calls of this run that reported no token usage.",
+                "minimum": 0
+              },
+              "chat_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid",
+                "description": "Chat the run belongs to (lets the UI open it), when it has one."
+              },
+              "created_at_ms": {
+                "type": "integer",
+                "format": "int64",
+                "description": "When the run started (Unix ms)."
+              },
+              "run_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Run id."
+              }
+            }
+          }
+        ],
+        "description": "One run in the \"most expensive runs\" list of `GET /v1/usage`."
+      },
       "TranscribeInput": {
         "type": "object",
         "description": "Body of `POST /v1/voice/transcribe`.",
@@ -27302,6 +27356,13 @@
           "time_zone": {
             "type": "string",
             "description": "IANA time zone used to bucket `daily` (e.g. `Europe/Istanbul` or `UTC`)."
+          },
+          "top_runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TopRunUsage"
+            },
+            "description": "The (at most five) most expensive runs in the range: known cost first,\nthen runs of unknown price by tokens."
           },
           "total": {
             "$ref": "#/components/schemas/UsageTotals",
