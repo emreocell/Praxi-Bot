@@ -294,6 +294,7 @@ test("search finds every card by its English title and by en, tr and de synonyms
     ["target", "settingsModal.computer.target.title", "settingsModal.computer.target.description", "computer", "bilgisayar", "rechner"],
     ["my-computer", "computerAccess.title", "computerAccess.description", "screen", "ekran", "bildschirm"],
     ["trusted-folders", "folderTrust.title", "folderTrust.description", "folder", "klasor", "ordner"],
+    ["allowed-grants", "settingsModal.safety.allowedGrants.title", "settingsModal.safety.allowedGrants.description", "revoke", "izin", "widerrufen"],
     ["permissions", "settings.permissions.title", "settings.permissions.description", "permission", "izin", "erlaubnis"],
     ["web-search", "settingsModal.webSearch.title", "settingsModal.webSearch.description", "web search", "arama", "suche"],
     ["email", "settingsModal.email.title", "settingsModal.email.description", "mail", "e-posta", "postfach"],
