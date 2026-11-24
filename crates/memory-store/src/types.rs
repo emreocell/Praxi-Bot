@@ -90,6 +90,9 @@ pub struct Memory {
     pub valid_until_ms: Option<i64>,
     /// Soft-delete flag.
     pub deleted: bool,
+    /// Held for the owner's review ("Needs your OK"): never recalled until approved.
+    #[serde(default)]
+    pub pending: bool,
 }
 
 /// Input for [`MemoryStore::add`](crate::MemoryStore::add).
@@ -115,6 +118,8 @@ pub struct NewMemory {
     pub importance: f32,
     /// Expiry.
     pub valid_until_ms: Option<i64>,
+    /// Hold for the owner's review instead of recalling it right away.
+    pub pending: bool,
 }
 
 impl NewMemory {
@@ -137,6 +142,7 @@ impl NewMemory {
             trust: Trust::User,
             importance: 0.5,
             valid_until_ms: None,
+            pending: false,
         }
     }
 }
@@ -190,4 +196,6 @@ pub struct MemoryPatch {
     pub importance: Option<f32>,
     /// New expiry (`Some(None)` clears it).
     pub valid_until_ms: Option<Option<i64>>,
+    /// Review state (`Some(false)` approves a held memory).
+    pub pending: Option<bool>,
 }

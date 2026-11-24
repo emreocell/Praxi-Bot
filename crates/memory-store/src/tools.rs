@@ -28,10 +28,11 @@ use tool_registry::{
 };
 use uuid::Uuid;
 
-use crate::pipeline::looks_like_question_or_hypothetical;
+use crate::pipeline::{looks_like_question_or_hypothetical, memory_scope};
 use crate::recall::estimate_tokens;
 use crate::render::render_recall_block;
 use crate::secrets::contains_secret;
+use crate::settings::MemorySettings;
 use crate::store::MemoryStore;
 use crate::types::{Kind, ListFilter, NewMemory, Trust};
 
@@ -305,7 +306,13 @@ fn format_utc_ms(ms: i64) -> String {
 }
 
 impl MemoryTool {
-    fn resolve_caller(&self, ctx: &ToolContext) -> Result<(UserId, BotId), ToolError> {
+    /// The calling bot, its owner and the bot's memory settings.  A bot whose
+    /// memory is switched off cannot use any memory tool, even if the model
+    /// somehow names one.
+    fn resolve_caller(
+        &self,
+        ctx: &ToolContext,
+    ) -> Result<(UserId, BotId, MemorySettings), ToolError> {
         let bot_str = ctx
             .bot_id
             .as_deref()
@@ -332,7 +339,13 @@ impl MemoryTool {
                 ));
             }
         }
-        Ok((bot.user_id, bot_id))
+        let settings = MemorySettings::from_bot_config(&bot.config);
+        if !settings.enabled() {
+            return Err(ToolError::Execution(
+                "memory is switched off for this bot".into(),
+            ));
+        }
+        Ok((bot.user_id, bot_id, settings))
     }
 
     fn has_secret(&self, text: &str) -> bool {
@@ -348,28 +361,25 @@ impl MemoryTool {
         ctx: &ToolContext,
         input: &Value,
     ) -> Result<ToolOutput, ToolError> {
-        let (user_id, bot_id) = self.resolve_caller(ctx)?;
+        let (user_id, bot_id, settings) = self.resolve_caller(ctx)?;
+        let budget = settings.budget(self.recall_budget_tokens);
         let query = str_arg(input, "query")?;
         let limit = limit_arg(input)?;
         let mut memories = self
             .store
-            .recall(user_id, bot_id, query, self.recall_budget_tokens)
+            .recall(user_id, bot_id, query, budget)
             .map_err(|e| ToolError::Execution(format!("memory_search: {e}")))?;
         memories.truncate(limit);
 
-        while memories.len() > 1
-            && estimate_tokens(&render_recall_block(&memories)) > self.recall_budget_tokens
-        {
+        while memories.len() > 1 && estimate_tokens(&render_recall_block(&memories)) > budget {
             memories.pop();
         }
-        if memories.len() == 1
-            && estimate_tokens(&render_recall_block(&memories)) > self.recall_budget_tokens
-        {
+        if memories.len() == 1 && estimate_tokens(&render_recall_block(&memories)) > budget {
             let overhead = estimate_tokens(&render_recall_block(&[crate::types::Memory {
                 content: String::new(),
                 ..memories[0].clone()
             }]));
-            let allowed_chars = self.recall_budget_tokens.saturating_sub(overhead + 2) * 4;
+            let allowed_chars = budget.saturating_sub(overhead + 2) * 4;
             memories[0].content = memories[0].content.chars().take(allowed_chars).collect();
         }
 
@@ -399,7 +409,8 @@ impl MemoryTool {
         ctx: &ToolContext,
         input: &Value,
     ) -> Result<ToolOutput, ToolError> {
-        let (user_id, bot_id) = self.resolve_caller(ctx)?;
+        let (user_id, bot_id, settings) = self.resolve_caller(ctx)?;
+        let budget = settings.budget(self.recall_budget_tokens);
         let query = str_arg(input, "query")?;
         let limit = limit_arg(input)?;
         let chat_filter = input
@@ -462,13 +473,13 @@ impl MemoryTool {
             );
             let candidate_tokens =
                 estimate_tokens(&body) + estimate_tokens(&line) + estimate_tokens(SESSION_FOOTER);
-            if added > 0 && candidate_tokens > self.recall_budget_tokens {
+            if added > 0 && candidate_tokens > budget {
                 break;
             }
-            if added == 0 && candidate_tokens > self.recall_budget_tokens {
+            if added == 0 && candidate_tokens > budget {
                 let overhead =
                     estimate_tokens(SESSION_HEADER) + estimate_tokens(SESSION_FOOTER) + 20;
-                let max_chars = self.recall_budget_tokens.saturating_sub(overhead) * 4;
+                let max_chars = budget.saturating_sub(overhead) * 4;
                 let clipped: String = hit.content.chars().take(max_chars).collect();
                 line.clear();
                 let _ = writeln!(
@@ -505,7 +516,8 @@ impl MemoryTool {
     }
 
     fn exec_memory_save(&self, ctx: &ToolContext, input: &Value) -> Result<ToolOutput, ToolError> {
-        let (user_id, bot_id) = self.resolve_caller(ctx)?;
+        let (user_id, bot_id, settings) = self.resolve_caller(ctx)?;
+
         let content = str_arg(input, "content")?;
         let kind_str = str_arg(input, "kind")?;
         let quote = str_arg(input, "quote")?;
@@ -586,7 +598,17 @@ impl MemoryTool {
             ));
         };
 
-        let mut new = NewMemory::new(user_id, Some(bot_id), kind, content);
+        // One scope rule for tool saves and background extraction (see
+        // `memory_scope`): profile/episodic are shared unless this bot is isolated.
+        let mut new = NewMemory::new(
+            user_id,
+            memory_scope(bot_id, kind, settings.share_with_other_bots),
+            kind,
+            content,
+        );
+        new.valid_until_ms = crate::expiry::parse_expiry_in_sentence(quote, storage::now_ms());
+        // "Ask before saving": the owner approves before it is ever recalled.
+        new.pending = settings.holds(false);
         new.source_quote = Some(quote.to_owned());
         new.source_chat_id = Some(chat_id);
         new.source_message_id = Some(user_msg.id);
@@ -597,8 +619,13 @@ impl MemoryTool {
             .add(&new, "user tool save")
             .map_err(|e| ToolError::Execution(format!("memory_save: {e}")))?;
 
+        let note = if saved.pending {
+            " (waiting for the owner's OK before it is used)"
+        } else {
+            ""
+        };
         Ok(ToolOutput::text(format!(
-            "Saved [{}] memory ({}): {}",
+            "Saved [{}] memory ({}){note}: {}",
             saved.kind.as_str(),
             saved.id,
             saved.content
@@ -610,7 +637,8 @@ impl MemoryTool {
         ctx: &ToolContext,
         input: &Value,
     ) -> Result<ToolOutput, ToolError> {
-        let (user_id, bot_id) = self.resolve_caller(ctx)?;
+        let (user_id, bot_id, settings) = self.resolve_caller(ctx)?;
+        let budget = settings.budget(self.recall_budget_tokens);
         if !ctx.run_id.is_empty()
             && let Ok(run_uuid) = Uuid::parse_str(&ctx.run_id)
             && let Some(run) = self
@@ -657,7 +685,7 @@ impl MemoryTool {
         } else if let Some(q) = query {
             let recalled = self
                 .store
-                .recall(user_id, bot_id, q, self.recall_budget_tokens)
+                .recall(user_id, bot_id, q, budget)
                 .map_err(|e| ToolError::Execution(format!("memory_forget: {e}")))?;
             if let Some(first) = recalled.into_iter().next() {
                 first
@@ -834,6 +862,90 @@ mod tests {
             bot_id: Some(bot_id.to_string()),
             ..ToolContext::default()
         }
+    }
+
+    fn extra_bot(env: &Env, memory: Value) -> (BotId, ChatId) {
+        let (bot, chat) = (BotId::new(), ChatId::new());
+        let now = now_ms();
+        env.storage
+            .insert_bot(&Bot {
+                id: bot,
+                user_id: env.user,
+                name: "Extra".into(),
+                config: json!({ "memory": memory }),
+                created_at_ms: now,
+            })
+            .unwrap();
+        env.storage
+            .insert_chat(&Chat {
+                id: chat,
+                user_id: env.user,
+                bot_id: bot,
+                title: "Extra chat".into(),
+                created_at_ms: now,
+            })
+            .unwrap();
+        (bot, chat)
+    }
+
+    #[tokio::test]
+    async fn per_bot_memory_settings_gate_every_tool_and_scope_saves() {
+        let (env, tools) = setup(800);
+        let save = find_tool(&tools, "memory_save");
+        let search = find_tool(&tools, "memory_search");
+        let say = "My birthday is March 3, remember it until Friday";
+        let args = json!({"content": "Birthday is March 3", "kind": "profile",
+            "quote": "My birthday is March 3, remember it until Friday"});
+
+        // Off: every memory tool refuses, nothing is stored.
+        let (off, off_chat) = extra_bot(&env, json!({"mode": "off"}));
+        let ctx = start_turn(&env, off, off_chat, say);
+        for tool in ["memory_save", "memory_search"] {
+            let err = find_tool(&tools, tool)
+                .call(
+                    &ctx,
+                    json!({"content": "x", "kind": "profile", "quote": say, "query": "x"}),
+                )
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("switched off"), "{tool}: {err}");
+        }
+        assert!(
+            env.store
+                .list(env.user, &ListFilter::default())
+                .unwrap()
+                .is_empty()
+        );
+
+        // Ask: saved but held, so a search by the same bot does not see it.
+        let (ask, ask_chat) = extra_bot(&env, json!({"mode": "ask"}));
+        let ctx = start_turn(&env, ask, ask_chat, say);
+        let out = save.call(&ctx, args.clone()).await.unwrap();
+        assert!(text_of(&out).contains("waiting for the owner's OK"));
+        let held = env.store.list_pending(env.user).unwrap();
+        assert_eq!(held.len(), 1);
+        assert!(
+            held[0].valid_until_ms.is_some(),
+            "until Friday sets an expiry"
+        );
+        let found = search
+            .call(&ctx, json!({"query": "birthday March"}))
+            .await
+            .unwrap();
+        assert!(text_of(&found).contains("No matching memories"));
+
+        // Shared (default) saves a profile fact for every bot; isolated keeps it to one.
+        let (shared, shared_chat) = extra_bot(&env, json!({"share_with_other_bots": true}));
+        save.call(&start_turn(&env, shared, shared_chat, say), args.clone())
+            .await
+            .unwrap();
+        let (iso, iso_chat) = extra_bot(&env, json!({"share_with_other_bots": false}));
+        save.call(&start_turn(&env, iso, iso_chat, say), args)
+            .await
+            .unwrap();
+        let all = env.store.list(env.user, &ListFilter::default()).unwrap();
+        assert!(all.iter().any(|m| !m.pending && m.bot_id.is_none()));
+        assert!(all.iter().any(|m| m.bot_id == Some(iso)));
     }
 
     #[tokio::test]
