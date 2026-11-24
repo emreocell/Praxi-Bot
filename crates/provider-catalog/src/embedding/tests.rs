@@ -351,3 +351,49 @@ fn durable_retry_info_handles_fractional_invalid_and_overflowing_delays() {
         assert_eq!(retry_info(&body(delay)), None);
     }
 }
+
+#[test]
+fn custom_endpoints_refuse_metadata_private_and_plain_http() {
+    for bad in [
+        "http://169.254.169.254/latest",
+        "https://169.254.169.254/",
+        "https://[fe80::1]/",
+        "http://example.com/v1",
+        "https://10.0.0.5/v1",
+        "https://192.168.1.2/v1",
+        "https://127.0.0.1/v1",
+        "ftp://example.com/",
+        "https://user:pw@example.com/",
+    ] {
+        assert!(
+            validate_endpoint(bad, false).is_err() || bad.contains("127.0.0.1"),
+            "{bad}"
+        );
+    }
+    // https to a loopback address literal is fine (it is loopback); plain http only to loopback.
+    assert!(validate_endpoint("http://localhost:11434/v1", false).is_ok());
+    assert!(validate_endpoint("http://127.0.0.1:11434/v1", false).is_ok());
+    assert!(validate_endpoint("http://[::1]:11434/v1", false).is_ok());
+    assert!(validate_endpoint("https://api.example.com/v1", false).is_ok());
+    // The owner switch opens the LAN but never link-local/metadata.
+    assert!(validate_endpoint("https://192.168.1.2/v1", true).is_ok());
+    assert!(validate_endpoint("https://169.254.169.254/", true).is_err());
+}
+
+#[tokio::test]
+async fn a_metadata_endpoint_never_receives_a_request() {
+    let provider = build_embedding_provider(
+        &entry("http://169.254.169.254/v1", ProviderKind::OpenAiCompatible),
+        OpenAiCompatConfig::default(),
+        Some("k".into()),
+    )
+    .unwrap();
+    let error = provider
+        .embed(request(EmbeddingTaskFormat::Plain))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, ProviderError::InvalidRequest(_)),
+        "{error:?}"
+    );
+}

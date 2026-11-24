@@ -5,6 +5,7 @@
 //! never log request bodies and never follow redirects with document text.
 
 use std::fmt;
+use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
@@ -163,8 +164,133 @@ pub fn endpoint_identity(endpoint: &str) -> Result<String, ProviderError> {
     Ok(url.as_str().trim_end_matches('/').to_owned())
 }
 
-pub(crate) fn client(config: &OpenAiCompatConfig) -> Result<reqwest::Client, ProviderError> {
+fn is_loopback_host(host: &str) -> bool {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|ip| canonical(ip).is_loopback())
+}
+
+fn canonical(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(IpAddr::V6(v6), IpAddr::V4),
+        v4 @ IpAddr::V4(_) => v4,
+    }
+}
+
+/// Link-local, metadata, unspecified, multicast: never allowed.
+fn always_blocked(ip: IpAddr) -> bool {
+    match canonical(ip) {
+        IpAddr::V4(v4) => {
+            v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || v4.octets() == [100, 100, 100, 200]
+        }
+        IpAddr::V6(v6) => {
+            let s = v6.segments();
+            v6.is_unspecified() || v6.is_multicast() || (s[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Private LAN, ULA, CGNAT and reserved ranges.
+fn is_private_ip(ip: IpAddr) -> bool {
+    match canonical(ip) {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_private()
+                || (o[0] == 100 && (o[1] & 0xc0) == 64)
+                || (o[0] == 198 && (o[1] & 0xfe) == 18)
+                || o[0] == 0
+                || o[0] >= 240
+        }
+        IpAddr::V6(v6) => {
+            let s = v6.segments();
+            (s[0] & 0xfe00) == 0xfc00 || (s[0] & 0xffc0) == 0xfec0
+        }
+    }
+}
+
+/// May an address reached through `host` receive embedding text and keys?
+/// Loopback only when the host is spelled as loopback (so a public name that
+/// resolves to 127.0.0.1 is refused).
+fn address_allowed(host: &str, ip: IpAddr, allow_local_network: bool) -> bool {
+    if always_blocked(ip) {
+        return false;
+    }
+    if canonical(ip).is_loopback() {
+        return is_loopback_host(host);
+    }
+    allow_local_network || !is_private_ip(ip)
+}
+
+/// Check an embedding endpoint the owner typed: `https` only, except plain
+/// `http` to a loopback host (Ollama); no credentials; no link-local or cloud
+/// metadata address; no private address unless `allow_local_network`.
+///
+/// # Errors
+/// A plain-language description of what is not allowed.
+pub fn validate_endpoint(
+    endpoint: &str,
+    allow_local_network: bool,
+) -> Result<String, ProviderError> {
+    let identity = endpoint_identity(endpoint)?;
+    let url = Url::parse(&identity).map_err(|_| invalid("invalid embedding endpoint URL"))?;
+    let host = url.host_str().unwrap_or_default();
+    let loopback = is_loopback_host(host);
+    if url.scheme() == "http" && !loopback {
+        return Err(invalid(
+            "plain http is only allowed for localhost; use https",
+        ));
+    }
+    if let Ok(ip) = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<IpAddr>()
+        && !address_allowed(host, ip, allow_local_network)
+    {
+        return Err(invalid(
+            "this address is link-local, private or reserved and is not allowed",
+        ));
+    }
+    Ok(identity)
+}
+
+/// Resolves names and refuses answers that point at forbidden addresses, so a
+/// public-looking name cannot be rebound to the metadata service or the LAN.
+struct GuardedResolver {
+    allow_local_network: bool,
+}
+
+impl reqwest::dns::Resolve for GuardedResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let allow = self.allow_local_network;
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            let found = tokio::net::lookup_host((host.as_str(), 0)).await?;
+            let addrs: Vec<std::net::SocketAddr> = found
+                .filter(|a| address_allowed(&host, a.ip(), allow))
+                .collect();
+            if addrs.is_empty() {
+                return Err("embedding endpoint resolves to a forbidden address".into());
+            }
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+pub(crate) fn client(
+    config: &OpenAiCompatConfig,
+    base_url: &str,
+) -> Result<reqwest::Client, ProviderError> {
+    validate_endpoint(base_url, config.allow_local_network)?;
     reqwest::Client::builder()
+        .dns_resolver(std::sync::Arc::new(GuardedResolver {
+            allow_local_network: config.allow_local_network,
+        }))
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(config.connect_timeout)
         .read_timeout(config.timeout)

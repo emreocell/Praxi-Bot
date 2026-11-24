@@ -32,6 +32,7 @@ mod composio;
 mod connection_test;
 mod doctor;
 mod email;
+mod embeddings;
 mod fill_secrets;
 mod host;
 mod host_admin;
@@ -4469,6 +4470,7 @@ async fn usage_purpose_totals_are_additive_and_preserve_the_legacy_shape() {
         "by_model",
         "by_provider",
         "daily",
+        "top_runs",
         "calls_without_usage",
         "calls_without_cost",
         "time_zone",

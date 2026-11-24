@@ -645,6 +645,34 @@ const USAGE: UsageSummary = {
     }
   ],
   daily: mockDailySeries(30),
+  top_runs: [
+    {
+      run_id: "run-top-1",
+      bot_id: ATLAS,
+      chat_id: "chat-atlas-1",
+      created_at_ms: Date.now() - 2 * 86_400_000,
+      model_calls: 38,
+      prompt_tokens: 210_000,
+      completion_tokens: 31_000,
+      cached_tokens: 90_000,
+      cost_usd: 0.62,
+      calls_without_usage: 0,
+      calls_without_cost: 0
+    },
+    {
+      run_id: "run-top-2",
+      bot_id: NOVA,
+      chat_id: null,
+      created_at_ms: Date.now() - 5 * 86_400_000,
+      model_calls: 12,
+      prompt_tokens: 80_000,
+      completion_tokens: 9_000,
+      cached_tokens: 0,
+      cost_usd: null,
+      calls_without_usage: 0,
+      calls_without_cost: 12
+    }
+  ],
   calls_without_usage: 2,
   calls_without_cost: 31,
   time_zone: "UTC"
@@ -806,6 +834,8 @@ export class MockApiClient extends ApiClient {
   readonly secrets = new Map<string, number>();
   readonly doctorChecks: DoctorCheck[] = structuredClone(DOCTOR_CHECKS);
   spendLimit: number | null = null;
+  mockEmbeddings: { providers: Array<Record<string, unknown>>; chains: Record<string, string[]> } = { providers: [], chains: {} };
+  mockHelper = false;
   mockCacheBytes = 18 * 1024 * 1024;
   readonly botLimits = new Map<string, BotSpendLimits["limits"]>();
   /** Repairs run so far (tests). */
@@ -1606,6 +1636,48 @@ export class MockApiClient extends ApiClient {
         ];
         return ok({
           total_bytes: categories.reduce((n, c) => n + c.bytes, 0), categories, clearable_bytes: this.mockCacheBytes
+        });
+      }
+      case "GET /embeddings":
+      case "PUT /embeddings": {
+        if (method === "PUT") {
+          const body = opts.body as { providers: Array<Record<string, unknown>>; chains: Record<string, string[]> };
+          this.mockEmbeddings = {
+            providers: body.providers.map((p) => ({ ...p, api_key: undefined, has_key: Boolean(p.api_key) || p.reuse_key_from !== undefined })),
+            chains: body.chains
+          };
+        }
+        const free = { rpm: 100, tpm: 30000, rpd: 1000 };
+        return ok({
+          providers: this.mockEmbeddings.providers.map((p) => ({
+            ...p, state: p.allow_remote ? "ok" : "not_allowed", retry_in_secs: 0, remote: p.kind !== "local",
+            base_url: p.base_url ?? null, limits: null,
+            usage: { requests_per_minute: { used: 3, limit: free.rpm }, tokens_per_minute: { used: 1200, limit: free.tpm }, requests_per_day: { used: 40, limit: free.rpd } }
+          })),
+          chains: this.mockEmbeddings.chains,
+          remote_denied_bots: [],
+          reusable_keys: ["gemini"],
+          catalog: {
+            last_reviewed: "2026-11-24", note: "Limits can change; check your provider.",
+            models: [
+              { provider: "gemini", model: "gemini-embedding-001", label: "Gemini Embedding 1", dimensions: 768, max_dimensions: 3072, max_input_tokens: 2048, free_tier: free, last_reviewed: "2026-11-24" },
+              { provider: "gemini", model: "gemini-embedding-2", label: "Gemini Embedding 2", dimensions: 768, max_dimensions: 3072, max_input_tokens: 8192, free_tier: free, last_reviewed: "2026-11-24" },
+              { provider: "openai", model: "text-embedding-3-small", label: "OpenAI text-embedding-3-small", dimensions: 1536, max_dimensions: 1536, max_input_tokens: 8191, free_tier: null, last_reviewed: "2026-11-24" }
+            ],
+            decision_models: [{ provider: "gemini", model: "gemini-decision-1", label: "Gemini Decision 1", free_tier: { rpm: 200, tpm: 50000, rpd: 10000 }, last_reviewed: "2026-11-24" }]
+          }
+        });
+      }
+      case "POST /embeddings":
+        return ok({ outcome: "ok" });
+      case "GET /decision-helper":
+      case "PUT /decision-helper": {
+        if (method === "PUT") {
+          this.mockHelper = (opts.body as { enabled: boolean }).enabled;
+        }
+        return ok({
+          available: true, enabled: this.mockHelper, custom_file: false, model: "gemini/gemini-decision-1",
+          free_tier: { rpm: 200, tpm: 50000, rpd: 10000 }, last_reviewed: "2026-11-24"
         });
       }
       case "GET /spend-limit":

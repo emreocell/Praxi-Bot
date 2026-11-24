@@ -5,6 +5,16 @@ about a user message. The existing K0–K3 router and
 [model tiering](model-tiering.md) still choose how ordinary turns run. This
 release prepares the pool but does not invoke it from ordinary turns.
 
+## Quick switch for Gemini
+
+If you only want the Gemini helper, open **Settings > Models > Helpers
+(optional) > Decision helper** and turn it on. It needs a Gemini key and writes a
+`decider.toml` with one `gemini_decisions` backend for `gemini/gemini-decision-1`
+at 180 requests per minute (90% of the free tier's 200; the free tier also allows
+50,000 tokens per minute and 10,000 requests per day, last checked 2026-11-24).
+Settings never overwrites a `decider.toml` you wrote yourself. See
+[Helpers (optional)](embeddings.md).
+
 ## Configure the pool
 
 Create `decider.toml` in the daemon's data directory, next to `providers.toml`.

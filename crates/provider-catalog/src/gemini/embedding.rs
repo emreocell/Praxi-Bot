@@ -83,7 +83,7 @@ impl EmbeddingProvider for GeminiProvider {
         );
         let response = self
             .authed(
-                client(&self.config)?
+                client(&self.config, &self.entry.base_url)?
                     .post(url)
                     .json(&json!({"requests": requests})),
             )
@@ -122,7 +122,7 @@ impl EmbeddingProvider for GeminiProvider {
     async fn list_embedding_models(&self) -> Result<Vec<String>, ProviderError> {
         let url = format!("{}/models?pageSize=1000", self.endpoint_identity()?);
         let response = self
-            .authed(client(&self.config)?.get(url))
+            .authed(client(&self.config, &self.entry.base_url)?.get(url))
             .send()
             .await
             .map_err(map_reqwest_error)?;

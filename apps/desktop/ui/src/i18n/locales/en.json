@@ -3430,6 +3430,81 @@
     "voiceCallEnd": "End the voice call",
     "voiceCallTalk": "Hold to talk in a push-to-talk call"
   },
+  "helpers": {
+    "add": {
+      "address": "Server address",
+      "addressHint": "For example Ollama, LM Studio, OpenRouter, Mistral or Together.",
+      "cancel": "Cancel",
+      "compatible": "Other (OpenAI-compatible)",
+      "dimensions": "Vector size",
+      "dimensionsHint": "Leave the suggested number unless your provider says otherwise.",
+      "key": "API key",
+      "keyOptional": "Leave empty if the server needs no key.",
+      "keyStored": "Stored safely on this computer. It is never shown again.",
+      "kind": "Provider",
+      "model": "Model",
+      "open": "Add an embedding provider",
+      "otherName": "this server",
+      "reuseGemini": "Use the Gemini key I already added",
+      "save": "Save provider",
+      "use": "Use it for"
+    },
+    "allowSending": "Allow Praxi to send my text to this provider",
+    "decision": {
+      "custom": "You set this up by hand in decider.toml.",
+      "description": "A small online helper that gives quick advice on simple questions. It can only advise: it can never give a permission or approve anything.",
+      "limits": "Free limits: {{rpm}} requests per minute, {{tpm}} units of text per minute, {{rpd}} requests per day (checked {{date}}).",
+      "needKey": "Add a Gemini key first to use it.",
+      "off": "Off",
+      "on": "On",
+      "title": "Decision helper",
+      "turnOff": "Turn off",
+      "turnOn": "Turn on"
+    },
+    "description": "Extra services that make memory and decisions smarter. Nothing here is needed to use Praxi.",
+    "embeddings": {
+      "description": "Embeddings let Praxi find notes and memories by meaning, not only by exact words. Without a provider Praxi uses a simple offline method, and nothing leaves this computer.",
+      "none": "No provider yet: Praxi uses its offline method.",
+      "title": "Embeddings"
+    },
+    "fallbackNote": "If a provider is busy, out of free quota or not reachable, Praxi uses the next one and finally the offline method. It never goes over a free limit on purpose.",
+    "keyOptional": "A Gemini key is optional; a free key gives you a smarter memory and faster decisions.",
+    "learnMore": "Learn more",
+    "privacy": {
+      "agree": "I understand and allow sending text to {{provider}}",
+      "notice": "The text of your notes, memories and documents will be sent to {{provider}} so it can be searched by meaning.",
+      "safeguards": "Passwords and keys are removed first. Anything marked private is never sent. You can switch this off at any time."
+    },
+    "purpose": {
+      "memory": "Memory recall",
+      "router": "Choosing the right shortcut or tool"
+    },
+    "remote": "Open Settings on this computer to change helpers.",
+    "remove": "Remove",
+    "retryIn": "again in {{seconds}} s",
+    "state": {
+      "cooling_down": "Resting for a moment",
+      "dimension_mismatch": "Answers have the wrong size",
+      "key_missing": "No key saved",
+      "key_rejected": "Key was refused",
+      "not_allowed": "Waiting for your permission",
+      "offline": "Not reachable",
+      "ok": "Working",
+      "rate_limited": "Free limit reached, resting",
+      "rejected": "Request was refused",
+      "unavailable": "Not available on this computer"
+    },
+    "test": "Test connection",
+    "testOk": "Connection works",
+    "title": "Helpers (optional)",
+    "usage": {
+      "noLimit": "{{used}} used",
+      "of": "{{used}} of {{limit}}",
+      "perDay": "Requests per day",
+      "perMinute": "Requests per minute",
+      "tokensPerMinute": "Amount of text per minute"
+    }
+  },
   "home": {
     "admin": {
       "byDesign": "{{name}} keeps some things to itself: the execution policy, command-line tool servers, skills, email accounts and coding-CLI sign-ins are changed on {{name}} directly.",
@@ -6040,6 +6115,16 @@
     "exportCsv": "Download CSV",
     "exportDone": "Usage CSV downloaded.",
     "exportFailed": "Could not download usage CSV",
+    "insights": {
+      "noChat": "No chat to open",
+      "openRun": "Open",
+      "openRunLabel": "Open the chat of the run by {{bot}} on {{when}}",
+      "priceUnknown": "Price unknown",
+      "title": "Where the money goes",
+      "tokensShort": "{{amount}} tokens",
+      "topRuns": "Most expensive runs",
+      "unknownPriceNote": "Entries marked \"Unknown\" use a model without a known price: their tokens are counted, their cost is not."
+    },
     "limit": {
       "clear": "Remove limit",
       "forecast": "Forecast for month end",
@@ -6088,15 +6173,27 @@
     "tokens": "Tokens",
     "total": "Total",
     "trend": {
+      "alertKey": "Alert at 80% ({{amount}})",
       "ariaLabel": "Daily {{metric}} trend over {{days}} days",
       "dayReadout": "{{day}} · {{calls}} calls · {{amount}} tokens · {{cost}}",
+      "forecast": "Spent this month: {{spent}}. At this pace the month ends at about {{forecast}}.",
+      "forecastNone": "Not enough priced usage this month yet for a forecast.",
+      "forecastPartial": "{{count}} calls had no known price and are not counted.",
+      "granularities": {
+        "day": "Per day",
+        "month": "Per month",
+        "week": "Per week"
+      },
+      "granularity": "Group by",
       "hoverHint": "Hover or focus a day to see its totals.",
+      "limitKey": "Monthly limit ({{amount}})",
       "metric": "Chart metric",
       "metrics": {
         "calls": "Calls",
         "cost": "Cost",
         "tokens": "Tokens"
       },
+      "prorated": "Lines show the even share of your monthly limit for one day or week.",
       "showTable": "Show daily breakdown table",
       "timeZone": "Local days ({{tz}})",
       "title": "Daily trend"

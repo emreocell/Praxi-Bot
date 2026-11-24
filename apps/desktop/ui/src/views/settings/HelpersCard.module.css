@@ -1,0 +1,22 @@
+.heading { margin: var(--space-4) var(--space-0) var(--space-1); font-size: var(--font-size-md); color: var(--color-text); }
+.list { margin: var(--space-2) var(--space-0); padding: var(--space-0); list-style: none; display: flex; flex-direction: column; gap: var(--space-3); }
+.provider { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-md); }
+.row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
+.model { color: var(--color-text-muted); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
+.state { margin-left: auto; font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.state[data-state="ok"] { color: var(--color-success); }
+.state[data-state="key_rejected"], .state[data-state="dimension_mismatch"], .state[data-state="rejected"] { color: var(--color-danger); }
+.state[data-state="rate_limited"], .state[data-state="offline"], .state[data-state="cooling_down"] { color: var(--color-warning); }
+.meter { display: flex; flex-direction: column; gap: var(--space-1); }
+.meterLine { display: flex; justify-content: space-between; font-size: var(--font-size-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.bar { height: var(--space-2); border-radius: var(--radius-pill); background-color: var(--color-surface-active); overflow: hidden; }
+.fill { height: 100%; border-radius: var(--radius-pill); background-color: var(--color-accent); transition: width var(--motion-duration-slow) var(--motion-easing-standard); }
+.bar[data-tone="warn"] .fill { background-color: var(--color-warning); }
+.bar[data-tone="full"] .fill { background-color: var(--color-danger); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.form { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-2); }
+.check { display: flex; align-items: flex-start; gap: var(--space-2); font-size: var(--font-size-sm); color: var(--color-text); }
+.fieldset { display: flex; flex-direction: column; gap: var(--space-1); border: none; padding: var(--space-0); margin: var(--space-0); }
+.notice { display: flex; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-md); background-color: var(--color-surface-active); color: var(--color-text); font-size: var(--font-size-sm); }
+.notice p { margin: var(--space-0) var(--space-0) var(--space-2); }
+@media (prefers-reduced-motion: reduce) { .fill { transition: none; } }

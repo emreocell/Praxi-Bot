@@ -65,6 +65,7 @@ import whatsNewFile from "./whats-new.json";
 import { getVersion } from "@tauri-apps/api/app";
 import { isHelpKey } from "./lib/shortcuts";
 import { chatTitleLabel } from "./lib/chatTitle";
+import { OPEN_CHAT_EVENT, type OpenChatTarget } from "./lib/openChatLink";
 import { APP_COMMAND_EVENT, type AppCommandTarget } from "./lib/slash";
 import { editorSection } from "./lib/botEditor";
 import { BOT_COLORS, botView, draftFromBot } from "./lib/botProfile";
@@ -679,6 +680,17 @@ function AppShell() {
     const chat = chats.find((c) => c.id === chatId);
     go({ kind: "chat", chatId, botId: chat?.bot_id ?? "", messageId, jumpRequestId: messageId ? Date.now() : undefined });
   };
+  // A card inside Settings (the Usage page's expensive runs) opens a chat and gets out of the way.
+  const openChatRef = useRef(openChat);
+  openChatRef.current = openChat;
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      setSettingsOpen(null);
+      openChatRef.current((e as CustomEvent<OpenChatTarget>).detail.chatId);
+    };
+    window.addEventListener(OPEN_CHAT_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_CHAT_EVENT, onOpen);
+  }, []);
   const openNeeds = () => go({ kind: "needs" });
   /** Where a "Getting started" step's button leads: always an existing screen, never a new flow. */
   const openGettingStartedTarget = (target: StepTarget, botId: string | undefined) => {

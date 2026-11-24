@@ -23,6 +23,7 @@ pub mod control_note;
 pub mod decider;
 mod discovery;
 mod discovery_prompt;
+mod embedding;
 mod exec;
 mod history;
 mod knowledge;
@@ -92,7 +93,7 @@ pub use scoped_grant::{Scope, ScopeKind};
 pub use shared::{
     ApprovalScope, CategoryDecision, Delivery, EffectivePolicy, Grant, GrantTarget, LoopError,
     MessageMode, Providers, ScheduleWork, SecretRequestInfo, SkillHintFn, SkillHints, StreamItem,
-    build_providers, initiator_of, occurrence_kind, schedule_id_of,
+    build_providers, embedding_key_resolver, initiator_of, occurrence_kind, schedule_id_of,
 };
 pub use subagent::MAX_DEPTH as MAX_SUBAGENT_DEPTH;
 pub use usage::CallPurpose;

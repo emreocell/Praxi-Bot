@@ -1479,6 +1479,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/decision-helper": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The optional decision helper (Gemini Decisions) and its state. */
+        get: operations["get_decision_helper"];
+        /**
+         * Switch the decision helper on or off (owner only). It only ever gives
+         *     advice: a decision never grants a permission.
+         */
+        put: operations["put_decision_helper"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/doctor": {
         parameters: {
             query?: never;
@@ -1675,6 +1696,44 @@ export interface paths {
          *     `name` is used. Same limits and the same coarse report as the saved test.
          */
         post: operations["test_email_draft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/embeddings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The embedding setup with live state and usage (no secrets). */
+        get: operations["get_embeddings"];
+        /**
+         * Save the embedding setup (owner only). Text is only ever sent to a provider
+         *     whose `allow_remote` the owner switched on.
+         */
+        put: operations["put_embeddings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/embeddings/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send one fixed test sentence to a provider (owner only). */
+        post: operations["test_embedding"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4649,6 +4708,24 @@ export interface components {
             reason?: null | components["schemas"]["Reason"];
             view: boolean;
         };
+        /** @description One model of the catalog. */
+        CatalogModelDto: {
+            /** @description Recommended vector size. */
+            dimensions: number;
+            free_tier?: null | components["schemas"]["LimitsDto"];
+            /** @description Plain-language name. */
+            label: string;
+            /** @description `YYYY-MM-DD` last reviewed. */
+            last_reviewed: string;
+            /** @description Largest vector size. */
+            max_dimensions: number;
+            /** @description Longest input in tokens. */
+            max_input_tokens: number;
+            /** @description Model id. */
+            model: string;
+            /** @description `gemini`, `openai` or `local`. */
+            provider: string;
+        };
         /** @description A catalog entry. */
         CatalogProviderDto: {
             /** @description `api_key_env` or `none`. */
@@ -5467,6 +5544,37 @@ export interface components {
          * @enum {string}
          */
         Decision: "approve" | "deny";
+        /** @description `GET /v1/decision-helper`. */
+        DecisionHelperDto: {
+            /** @description A Gemini key is set up, so the helper can be switched on. */
+            available: boolean;
+            /** @description `decider.toml` was written by hand; switching here would replace it. */
+            custom_file: boolean;
+            /** @description The helper is on. */
+            enabled: boolean;
+            free_tier?: null | components["schemas"]["LimitsDto"];
+            /** @description `YYYY-MM-DD` the limits were last reviewed. */
+            last_reviewed: string;
+            /** @description Model used. */
+            model: string;
+        };
+        /** @description `PUT /v1/decision-helper`. */
+        DecisionHelperInput: {
+            /** @description Switch the helper on or off. */
+            enabled: boolean;
+        };
+        /** @description The Gemini decision helper model of the catalog. */
+        DecisionModelDto: {
+            free_tier?: null | components["schemas"]["LimitsDto"];
+            /** @description Plain-language name. */
+            label: string;
+            /** @description `YYYY-MM-DD` last reviewed. */
+            last_reviewed: string;
+            /** @description Model id. */
+            model: string;
+            /** @description Provider id. */
+            provider: string;
+        };
         /** @description Response of a decision. */
         DecisionResponse: {
             /**
@@ -5761,6 +5869,17 @@ export interface components {
             source_label?: string | null;
             target: components["schemas"]["EmbeddingGrantTarget"];
         };
+        /** @description The dated catalog. */
+        EmbeddingCatalogDto: {
+            /** @description Decision models. */
+            decision_models: components["schemas"]["DecisionModelDto"][];
+            /** @description `YYYY-MM-DD` last reviewed. */
+            last_reviewed: string;
+            /** @description Embedding models. */
+            models: components["schemas"]["CatalogModelDto"][];
+            /** @description Caveat for the numbers. */
+            note: string;
+        };
         EmbeddingGrantTarget: {
             /** @enum {string} */
             kind: "queries";
@@ -5769,6 +5888,112 @@ export interface components {
             kind: "documents";
             /** Format: uuid */
             source_id: string;
+        };
+        /** @description One configured provider. */
+        EmbeddingProviderDto: {
+            /** @description Private-network endpoints are allowed for this provider. */
+            allow_local_network: boolean;
+            /** @description The owner agreed that text is sent to this provider. */
+            allow_remote: boolean;
+            /** @description Endpoint, if not the default. */
+            base_url?: string | null;
+            /** @description Vector size. */
+            dimensions: number;
+            /** @description Whether an API key is stored (the key itself is never returned). */
+            has_key: boolean;
+            /** @description Short id. */
+            id: string;
+            /** @description `gemini`, `openai`, `compatible` or `local`. */
+            kind: string;
+            limits?: null | components["schemas"]["LimitsDto"];
+            /** @description Model id. */
+            model: string;
+            /** @description Whether text leaves this computer. */
+            remote: boolean;
+            /** @description Whether the `dimensions` parameter is sent. */
+            request_dimensions: boolean;
+            /**
+             * Format: int64
+             * @description Seconds until the provider is tried again.
+             */
+            retry_in_secs: number;
+            /**
+             * @description `ok`, `not_allowed`, `key_missing`, `cooling_down`, `key_rejected`,
+             *     `rate_limited`, `offline`, `dimension_mismatch`, `rejected` or `unavailable`.
+             */
+            state: string;
+            /** @description Used / limit bars. */
+            usage: components["schemas"]["UsageDto"];
+        };
+        /** @description A provider as the owner edits it. */
+        EmbeddingProviderInput: {
+            /**
+             * @description Owner-only: also allow a custom endpoint on the private network.
+             *     Link-local and cloud-metadata addresses are never allowed.
+             */
+            allow_local_network?: boolean;
+            /** @description The owner agrees that text is sent to this provider. */
+            allow_remote?: boolean;
+            /** @description New API key (write-only; leave out to keep the stored key). */
+            api_key?: string | null;
+            /** @description Endpoint (required for `compatible`). */
+            base_url?: string | null;
+            /** @description Remove the stored key. */
+            clear_key?: boolean;
+            /**
+             * @description A fresh, explicit consent for exactly this destination (provider kind,
+             *     model and endpoint as sent in this request). Consent is only carried over
+             *     from the stored setup when none of those changed; otherwise
+             *     `allow_remote` is ignored unless this is true.
+             */
+            confirm_remote?: boolean;
+            /** @description Vector size. */
+            dimensions: number;
+            /** @description Short id (`a-z`, `0-9`, `-`). */
+            id: string;
+            /** @description `gemini`, `openai`, `compatible` or `local`. */
+            kind: string;
+            limits?: null | components["schemas"]["LimitsDto"];
+            /** @description Model id. */
+            model: string;
+            /** @description Send the `dimensions` parameter. */
+            request_dimensions?: boolean;
+            /** @description Copy the key of a chat provider (`gemini`) instead of typing it. */
+            reuse_key_from?: string | null;
+        };
+        /** @description Result of `POST /v1/embeddings/{id}/test`. */
+        EmbeddingTestDto: {
+            /** @description `ok` or the reason (see `state` of a provider). */
+            outcome: string;
+        };
+        /** @description `GET /v1/embeddings`. */
+        EmbeddingsDto: {
+            /** @description Known models and limits. */
+            catalog: components["schemas"]["EmbeddingCatalogDto"];
+            /**
+             * @description Per purpose (`router`, `memory`, `knowledge`): provider ids in priority
+             *     order. The offline embedder is always tried last.
+             */
+            chains: {
+                [key: string]: string[];
+            };
+            /** @description Configured providers. */
+            providers: components["schemas"]["EmbeddingProviderDto"][];
+            /** @description Bots that never use a remote provider. */
+            remote_denied_bots: string[];
+            /** @description Chat providers whose key can be reused (`gemini`). */
+            reusable_keys: string[];
+        };
+        /** @description `PUT /v1/embeddings`. */
+        EmbeddingsInput: {
+            /** @description Provider ids per purpose. */
+            chains?: {
+                [key: string]: string[];
+            };
+            /** @description The complete provider list. */
+            providers: components["schemas"]["EmbeddingProviderInput"][];
+            /** @description Bots that never use a remote provider. */
+            remote_denied_bots?: string[];
         };
         /** @description Request body for `POST /v1/providers/cli/enable`. */
         EnableCliProviderInput: {
@@ -6805,6 +7030,24 @@ export interface components {
              */
             gseq: number;
         };
+        /** @description Provider limits (RPM / TPM / RPD). */
+        LimitsDto: {
+            /**
+             * Format: int32
+             * @description Requests per day.
+             */
+            rpd?: number | null;
+            /**
+             * Format: int32
+             * @description Requests per minute.
+             */
+            rpm?: number | null;
+            /**
+             * Format: int32
+             * @description Tokens per minute.
+             */
+            tpm?: number | null;
+        };
         /** @description Advice for this machine. `recommended` null means "no recommendation". */
         LocalAdviceDto: {
             basis: components["schemas"]["MemoryBasisDto"];
@@ -7628,6 +7871,19 @@ export interface components {
              *     a tool that is not read-only, so redoing the turn could repeat an effect.
              */
             used_write_tools?: boolean;
+        };
+        /** @description A used / limit pair for the usage bars. */
+        MeterDto: {
+            /**
+             * Format: int64
+             * @description Provider limit, if known.
+             */
+            limit?: number | null;
+            /**
+             * Format: int64
+             * @description Used in the current window.
+             */
+            used: number;
         };
         /**
          * @description What to do when the chat already has a running turn.
@@ -9107,6 +9363,39 @@ export interface components {
             /** Format: int32 */
             rows: number;
         };
+        /** @description One run in the "most expensive runs" list of `GET /v1/usage`. */
+        TopRunUsage: components["schemas"]["UsageTotals"] & {
+            /**
+             * Format: uuid
+             * @description Bot that executed the run.
+             */
+            bot_id: string;
+            /**
+             * Format: int64
+             * @description Calls of this run whose cost is unknown.
+             */
+            calls_without_cost?: number;
+            /**
+             * Format: int64
+             * @description Calls of this run that reported no token usage.
+             */
+            calls_without_usage?: number;
+            /**
+             * Format: uuid
+             * @description Chat the run belongs to (lets the UI open it), when it has one.
+             */
+            chat_id?: string | null;
+            /**
+             * Format: int64
+             * @description When the run started (Unix ms).
+             */
+            created_at_ms: number;
+            /**
+             * Format: uuid
+             * @description Run id.
+             */
+            run_id: string;
+        };
         /** @description Body of `POST /v1/voice/transcribe`. */
         TranscribeInput: {
             /** @description The recording, base64 (standard alphabet). */
@@ -9173,6 +9462,15 @@ export interface components {
         UpdateMemoryInput: {
             content: string;
         };
+        /** @description Usage bars: requests/min, tokens/min, requests/day. */
+        UsageDto: {
+            /** @description Requests in the last 24 hours. */
+            requests_per_day: components["schemas"]["MeterDto"];
+            /** @description Requests in the last minute. */
+            requests_per_minute: components["schemas"]["MeterDto"];
+            /** @description Tokens in the last minute. */
+            tokens_per_minute: components["schemas"]["MeterDto"];
+        };
         /** @description `GET /v1/usage`. */
         UsageSummary: {
             /** @description Per bot. */
@@ -9204,6 +9502,11 @@ export interface components {
             runs: number;
             /** @description IANA time zone used to bucket `daily` (e.g. `Europe/Istanbul` or `UTC`). */
             time_zone?: string;
+            /**
+             * @description The (at most five) most expensive runs in the range: known cost first,
+             *     then runs of unknown price by tokens.
+             */
+            top_runs?: components["schemas"]["TopRunUsage"][];
             /** @description Totals over all counted runs. */
             total: components["schemas"]["UsageTotals"];
         };
@@ -13126,6 +13429,56 @@ export interface operations {
             };
         };
     };
+    get_decision_helper: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionHelperDto"];
+                };
+            };
+        };
+    };
+    put_decision_helper: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionHelperInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionHelperDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_doctor: {
         parameters: {
             query?: never;
@@ -13730,6 +14083,102 @@ export interface operations {
                 };
             };
             /** @description e-mail management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_embeddings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingsDto"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_embeddings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmbeddingsInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingsDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_embedding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description provider id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingTestDto"];
+                };
+            };
             503: {
                 headers: {
                     [name: string]: unknown;

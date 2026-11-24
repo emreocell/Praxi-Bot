@@ -70,6 +70,7 @@ dependencies = [
  "desktop-api",
  "dev-tools",
  "doc-tools",
+ "embedding-hub",
  "futures",
  "globset",
  "live-view",
@@ -1998,6 +1999,7 @@ dependencies = [
  "chrono-tz",
  "cli-provider",
  "desktop-api",
+ "embedding-hub",
  "fs4",
  "futures",
  "getrandom 0.3.4",
@@ -2698,6 +2700,19 @@ name = "embedded-io"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
+name = "embedding-hub"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "provider-catalog",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "wiremock",
+]
 
 [[package]]
 name = "encode_unicode"
