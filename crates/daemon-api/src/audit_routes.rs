@@ -294,7 +294,7 @@ fn to_dto(
 }
 
 /// Audit events, newest first, with filters and paging (owner-only).
-#[utoipa::path(get, path = "/v1/audit", tag = "audit", security(("bearer" = [])),
+#[utoipa::path(get, operation_id = "audit_list", path = "/v1/audit", tag = "audit", security(("bearer" = [])),
     params(AuditQuery),
     responses((status = 200, body = AuditPage), (status = 400, body = ErrorBody),
         (status = 403, body = ErrorBody)))]
@@ -317,7 +317,7 @@ pub(crate) async fn list(
 }
 
 /// Redacted CSV or JSON export of the filtered events (owner-only).
-#[utoipa::path(get, path = "/v1/audit/export", tag = "audit", security(("bearer" = [])),
+#[utoipa::path(get, operation_id = "audit_export", path = "/v1/audit/export", tag = "audit", security(("bearer" = [])),
     params(AuditQuery),
     responses((status = 200, description = "Redacted events as CSV or JSON", content_type = "text/csv", body = String),
         (status = 400, body = ErrorBody), (status = 403, body = ErrorBody)))]
@@ -381,7 +381,7 @@ pub(crate) async fn export(
 }
 
 /// Check the log's append-only protection and look for removed rows (owner-only).
-#[utoipa::path(get, path = "/v1/audit/verify", tag = "audit", security(("bearer" = [])),
+#[utoipa::path(get, operation_id = "audit_verify", path = "/v1/audit/verify", tag = "audit", security(("bearer" = [])),
     responses((status = 200, body = AuditVerify), (status = 403, body = ErrorBody)))]
 pub(crate) async fn verify(State(s): State<AppState>) -> Result<Json<AuditVerify>, ApiError> {
     let (entries, first_id, last_id, triggers) = s.storage().audit_integrity()?;

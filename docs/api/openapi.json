@@ -1316,7 +1316,7 @@
           "audit"
         ],
         "summary": "Audit events, newest first, with filters and paging (owner-only).",
-        "operationId": "list",
+        "operationId": "audit_list",
         "parameters": [
           {
             "name": "since_ms",
@@ -1449,7 +1449,7 @@
           "audit"
         ],
         "summary": "Redacted CSV or JSON export of the filtered events (owner-only).",
-        "operationId": "export",
+        "operationId": "audit_export",
         "parameters": [
           {
             "name": "since_ms",
@@ -1582,7 +1582,7 @@
           "audit"
         ],
         "summary": "Check the log's append-only protection and look for removed rows (owner-only).",
-        "operationId": "verify",
+        "operationId": "audit_verify",
         "responses": {
           "200": {
             "description": "",

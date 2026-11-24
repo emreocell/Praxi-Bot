@@ -380,7 +380,7 @@ export interface paths {
             cookie?: never;
         };
         /** Audit events, newest first, with filters and paging (owner-only). */
-        get: operations["list"];
+        get: operations["audit_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -397,7 +397,7 @@ export interface paths {
             cookie?: never;
         };
         /** Redacted CSV or JSON export of the filtered events (owner-only). */
-        get: operations["export"];
+        get: operations["audit_export"];
         put?: never;
         post?: never;
         delete?: never;
@@ -414,7 +414,7 @@ export interface paths {
             cookie?: never;
         };
         /** Check the log's append-only protection and look for removed rows (owner-only). */
-        get: operations["verify"];
+        get: operations["audit_verify"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10575,7 +10575,7 @@ export interface operations {
             };
         };
     };
-    list: {
+    audit_list: {
         parameters: {
             query?: {
                 /** @description Only events at or after this time (Unix ms). */
@@ -10629,7 +10629,7 @@ export interface operations {
             };
         };
     };
-    export: {
+    audit_export: {
         parameters: {
             query?: {
                 /** @description Only events at or after this time (Unix ms). */
@@ -10684,7 +10684,7 @@ export interface operations {
             };
         };
     };
-    verify: {
+    audit_verify: {
         parameters: {
             query?: never;
             header?: never;
