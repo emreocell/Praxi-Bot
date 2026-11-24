@@ -1317,7 +1317,7 @@ impl McpControl for McpHost {
                     return Err(map_err(error));
                 }
                 Err(error) => {
-                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: re-approving MCP tools failed: {error}")
+                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: re-approving MCP tools failed: {error}");
                 }
             }
             self.announce(name);

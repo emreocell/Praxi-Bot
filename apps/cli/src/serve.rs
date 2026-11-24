@@ -550,11 +550,11 @@ pub fn load_email_accounts(data_dir: &Path) -> Vec<connector_email::AccountConfi
             Ok(s) => match toml::from_str::<EmailConfigFile>(&s) {
                 Ok(cfg) => return cfg.accounts,
                 Err(e) => {
-                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {}: {e}", email_path.display())
+                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: {}: {e}", email_path.display());
                 }
             },
             Err(e) => {
-                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: cannot read {}: {e}", email_path.display())
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: cannot read {}: {e}", email_path.display());
             }
         }
     }
@@ -576,15 +576,15 @@ pub fn load_email_accounts(data_dir: &Path) -> Vec<connector_email::AccountConfi
 fn register_schedule_tools(data_dir: &Path, state: &AppState) {
     match daemon_api::load_schedule_limits(data_dir) {
         Err(e) => {
-            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: schedule tools are disabled: {e}")
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: schedule tools are disabled: {e}");
         }
         Ok(limits) => match state.enable_schedule_tools(limits) {
             Ok(n) if n == builtin_tools::SCHEDULE_TOOL_NAMES.len() => {}
             Ok(n) => {
-                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: only {n} schedule tool(s) registered (name clash)")
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: only {n} schedule tool(s) registered (name clash)");
             }
             Err(e) => {
-                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: schedule tools are disabled: {e}")
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: schedule tools are disabled: {e}");
             }
         },
     }

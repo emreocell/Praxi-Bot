@@ -57,7 +57,7 @@ pub fn run(cmd: &LogsCmd, data_dir: &Path) -> crate::Result<()> {
                 return Ok(());
             }
             tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+                () = tokio::time::sleep(Duration::from_secs(1)) => {},
                 result = tokio::signal::ctrl_c() => { result?; return Ok(()); }
             }
         }

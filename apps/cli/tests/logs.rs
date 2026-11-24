@@ -32,7 +32,7 @@ fn logs_reads_only_recent_structured_records_with_the_requested_filters() {
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, b"");
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert_eq!(stdout.lines().count(), 1);
     let entry: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();

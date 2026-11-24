@@ -227,7 +227,7 @@ impl ChannelControl for TelegramRuntime {
             match TelegramChannel::start(config.clone(), self.client.clone()) {
                 Ok(c) => *channel = Some(c),
                 Err(e) => {
-                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: telegram channel not started: {e}")
+                    support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: telegram channel not started: {e}");
                 }
             }
         }

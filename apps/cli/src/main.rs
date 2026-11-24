@@ -1102,6 +1102,7 @@ fn run_doctor(cli: &Cli, c: &DoctorCmd, data_dir: &std::path::Path) -> Result<()
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result<()> {
     use std::sync::Arc;
 
