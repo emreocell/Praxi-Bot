@@ -85,7 +85,7 @@ export function ModelLineText({ model }: { model: string | undefined }) {
   const { t } = useTranslation();
   const line = modelLine(model);
   if (!line.name) {
-    return <span className={styles.modelMuted}>{t("bots.noModel")}</span>;
+    return <span className={styles.modelMuted}>{t("modelPicker.connectModel")}</span>;
   }
   return (
     <span className={styles.modelLine} title={model} data-testid="bot-model-line">

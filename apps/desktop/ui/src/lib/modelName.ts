@@ -1,4 +1,5 @@
 import { providerBrand } from "./modelBrand.ts";
+import { isPlaceholderModel } from "./placeholderModel.ts";
 
 /**
  * Human names for model ids (owner feedback 244, points 3 and 4): the UI shows
@@ -119,7 +120,7 @@ export interface ModelLine {
 /** What the right panel and the profile show for a stored `provider/model` ref. */
 export function modelLine(ref: string | null | undefined): ModelLine {
   const text = (ref ?? "").trim();
-  if (!text) return { name: "", provider: "", brand: "", isDefault: false };
+  if (!text || isPlaceholderModel(text)) return { name: "", provider: "", brand: "", isDefault: false };
   const i = text.indexOf("/");
   const provider = i < 0 ? "" : text.slice(0, i);
   const model = i < 0 ? text : text.slice(i + 1);

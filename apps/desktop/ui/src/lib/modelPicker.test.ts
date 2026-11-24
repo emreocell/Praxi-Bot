@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ProvidersDto } from "../api/types.ts";
 import { sourceLabel } from "./modelBrand.ts";
-import { engineRows, filterModelGroups, isCliDefault, isNoiseModel, modelGroups, parseModel, pickerSections, recommendedOptions } from "./modelPicker.ts";
+import { isPlaceholderModel } from "./placeholderModel.ts";
+import { engineRows, filterModelGroups, hasConnectedModel, isCliDefault, isNoiseModel, modelGroups, parseModel, pickerSections, recommendedOptions } from "./modelPicker.ts";
 import { foldText, matchesQuery } from "./searchText.ts";
 
 const dto = {
@@ -221,4 +222,20 @@ test("a CLI without any listed model is never a group: it is reported apart", ()
   }
   // The current choice keeps its group visible.
   assert.deepEqual(pickerSections(modelGroups(d, "cli:codex/default"), "cli:codex/default").cli.map((g) => g.provider), ["cli:claude", "cli:codex"]);
+});
+
+test("the validation-only placeholder never reaches the picker, search or Recommended; alone it means no model yet", () => {
+  const placeholder = {
+    id: "validation-only", active: true, custom: false, default_model: "validation-placeholder",
+    enabled: true, has_key: false, is_default: true, models: ["validation-placeholder"]
+  };
+  const only = { active: [], catalog: [], default_provider: "validation-only", configured: [placeholder] } as unknown as ProvidersDto;
+  assert.deepEqual(modelGroups(only, "validation-only/validation-placeholder"), []);
+  assert.equal(hasConnectedModel(only), false);
+  const mixed = { ...dto, configured: [placeholder, ...dto.configured] } as unknown as ProvidersDto;
+  const groups = modelGroups(mixed, "validation-only/validation-placeholder");
+  assert.ok(groups.every((g) => g.provider !== "validation-only"));
+  assert.equal(filterModelGroups(groups, "validation").length, 0);
+  assert.ok(recommendedOptions(groups).every((r) => !isPlaceholderModel(r.option.ref)));
+  assert.equal(hasConnectedModel(mixed), true);
 });

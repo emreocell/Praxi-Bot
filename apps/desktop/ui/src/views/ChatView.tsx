@@ -101,7 +101,8 @@ import { botWriteMessage, writeBotProfile } from "../lib/botWrite";
 import { splitMentions } from "../lib/mentionText";
 import { saveChatExport } from "../lib/chatHistory";
 import { dayHeader, type MessageTimes } from "../lib/messageTime";
-import { modelGroups } from "../lib/modelPicker";
+import { hasConnectedModel, modelGroups } from "../lib/modelPicker";
+import { openSettingsTarget } from "../lib/settingsLink";
 import { type ChatRunPhase, runBarModel, runStopUi, STOP_CONFIRM_MS } from "../lib/runBar";
 import { sendButtonDisabled, sendButtonMode } from "../lib/composerRun";
 import { type PendingFile, MAX_ATTACHMENT_BYTES, filesOf, room, uploadErrorKey } from "../lib/attachments";
@@ -277,6 +278,10 @@ export function ChatView({
   const view = bot ? botView(bot) : null;
   const { dto: providersDto } = useProviders();
   const { askEngine, applyEngine, fixBotEngine } = useEngineConsent();
+  // Only the internal validation-only provider exists: nothing can answer yet. Sending shows a
+  // friendly "connect a model" card instead of a failed run.
+  const noModelYet = providersDto !== null && !hasConnectedModel(providersDto);
+  const [noModelCard, setNoModelCard] = useState(false);
   const pickerGroups = useMemo(
     () => modelGroups(providersDto, view?.executor),
     [providersDto, view?.executor]
@@ -876,6 +881,10 @@ export function ChatView({
     if (appCommand) {
       setText("");
       window.dispatchEvent(new CustomEvent(APP_COMMAND_EVENT, { detail: appCommand.target }));
+      return;
+    }
+    if (noModelYet && !body.startsWith("/")) {
+      setNoModelCard(true);
       return;
     }
     // A draft that looks like it holds a credential is not sent (or queued) until the owner says so.
@@ -1739,6 +1748,21 @@ export function ChatView({
           <p className={styles.error} role="status" data-testid="host-starting">
             {t("hostRecovery.starting")}
           </p>
+        ) : null}
+        {noModelCard && noModelYet ? (
+          <div className={styles.error} role="status" data-testid="no-model-card">
+            <strong>{t("modelPicker.connectTitle")}</strong>
+            <p>{t("modelPicker.connectBody")}</p>
+            <Button
+              size="sm"
+              onClick={() => {
+                setNoModelCard(false);
+                openSettingsTarget({ page: "models", card: "keys", field: "api-key" });
+              }}
+            >
+              {t("modelPicker.connectAction")}
+            </Button>
+          </div>
         ) : null}
         {sendFailure ? (
           <ErrorNotice

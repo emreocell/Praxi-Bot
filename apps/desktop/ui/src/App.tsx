@@ -54,6 +54,9 @@ import { HealthIndicator } from "./components/HealthIndicator";
 import { ServiceBanner } from "./components/ServiceBanner";
 import { ServiceStateProvider } from "./state/ServiceState";
 import { HelpModal } from "./components/HelpModal";
+import { DemoModal } from "./demo/DemoModal";
+import { type DemoTaskId, offerDemo } from "./demo/demoEngine";
+import { useProviders } from "./state/useProviders";
 import { WhatsNewModal } from "./components/WhatsNewModal";
 import { notesFor, whatsNewAction, type WhatsNewFile } from "./lib/whatsNew";
 import whatsNewFile from "./whats-new.json";
@@ -295,6 +298,10 @@ function AppShell() {
   const [botSearch, setBotSearch] = useState<string | null>(null);
   const { servers: appServers } = useMcp(true);
   const [helpOpen, setHelpOpen] = useState(false);
+  // The offline demo: `null` task = closed. It lives only here, never as a chat.
+  const [demo, setDemo] = useState<{ task: DemoTaskId | null } | null>(null);
+  const { dto: providersDto } = useProviders();
+  const showDemoOffer = offerDemo(providersDto);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   const [whatsNewDone, setWhatsNewDone] = useState(false);
@@ -1048,6 +1055,7 @@ function AppShell() {
             settings={settings}
             onLanguageChange={handleLanguageChange}
             onHelp={() => setHelpOpen(true)}
+            onDemo={() => setDemo({ task: null })}
             onSkip={() => {
               updateSettings({ onboardingSkipped: true });
               go({ kind: "home" });
@@ -1163,6 +1171,7 @@ function AppShell() {
             firstBot={bots[0] ? { id: bots[0].id, name: bots[0].name } : undefined}
             onGoFirst={goToBot}
             onCreateBot={() => setNewBotOpen(true)}
+            onDemo={showDemoOffer ? (task) => setDemo({ task }) : undefined}
           />
         ) : null}
         {route.kind === "chat" && !hostEmpty ? (
@@ -1288,6 +1297,23 @@ function AppShell() {
         onSetup={() => {
           setHelpOpen(false);
           handleOpenOnboarding(false);
+        }}
+        onDemo={() => {
+          setHelpOpen(false);
+          setDemo({ task: null });
+        }}
+      />
+      <DemoModal
+        open={demo !== null}
+        initialTask={demo?.task ?? null}
+        onClose={() => setDemo(null)}
+        onConnect={() => {
+          setDemo(null);
+          if (!onboardingBlocked && !settings.onboardingCompleted) {
+            handleOpenOnboarding(false);
+          } else {
+            setSettingsOpen("ai");
+          }
         }}
       />
       <LiveViewer onChatSlots={route.kind === "chat" && !hostEmpty ? setHomeChatSlots : undefined} />

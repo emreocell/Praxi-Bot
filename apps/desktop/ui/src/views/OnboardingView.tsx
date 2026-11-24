@@ -1,10 +1,11 @@
-import { ArrowLeft, ArrowRight, Check, CircleHelp, LoaderCircle, ServerOff } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CircleHelp, LoaderCircle, Play, ServerOff } from "lucide-react";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { BotShapeId } from "ui";
 import { isMockMode } from "../api/mockMode";
 import type { Bot } from "../api/types";
+import { demoData } from "../demo/demoData";
 import { saveBotAndApps } from "../lib/mcpApps";
 import { DEFAULT_STOP_HOTKEY } from "../config/product";
 import type { SupportedLanguage } from "../i18n";
@@ -41,6 +42,8 @@ export interface OnboardingViewProps {
   onSkip: () => void;
   /** Opens the Help window with its short answers; omitted where there is no shell around the wizard. */
   onHelp?: () => void;
+  /** Opens the offline demo for people with no key yet; shown only while no model is connected. */
+  onDemo?: () => void;
   onComplete: (result: { botId?: string }) => void;
   /** Design review and tests: open on this screen with a brain already chosen. */
   initialStep?: FirstRunStep;
@@ -59,7 +62,7 @@ function reviewStep(): FirstRunStep | undefined {
  * First run: three screens, one decision each (brain, freedom, bot), "Skip for now" on every one.
  * It only ever talks to the daemon this app started on this computer.
  */
-export function OnboardingView({ settings, onLanguageChange, onSkip, onHelp, onComplete, initialStep }: OnboardingViewProps) {
+export function OnboardingView({ settings, onLanguageChange, onSkip, onHelp, onDemo, onComplete, initialStep }: OnboardingViewProps) {
   const { t, i18n } = useTranslation();
   const { phase, client, bots, refreshBots, retry } = useDaemon();
   const { askEngine, applyEngine } = useEngineConsent();
@@ -171,6 +174,12 @@ export function OnboardingView({ settings, onLanguageChange, onSkip, onHelp, onC
             ))}
           </div>
           <div className={styles.topActions}>
+            {onDemo && state.step === "brain" && state.phase !== "connected" ? (
+              <Button size="sm" variant="ghost" onClick={onDemo} data-testid="onboarding-demo" title={demoData(i18n.language).ui.helpHint}>
+                <Play aria-hidden="true" />
+                {demoData(i18n.language).ui.title}
+              </Button>
+            ) : null}
             {onHelp ? (
               <Button size="sm" variant="ghost" onClick={onHelp} data-testid="onboarding-help" title={t("firstRun.help")}>
                 <CircleHelp aria-hidden="true" />

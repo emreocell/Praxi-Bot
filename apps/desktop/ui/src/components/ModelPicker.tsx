@@ -27,6 +27,8 @@ import styles from "./ModelPicker.module.css";
 import { Popover, type PopoverPlacement } from "./Popover";
 import { useToast } from "./Toast";
 import { humanLine } from "../lib/humanError";
+import { isPlaceholderModel } from "../lib/placeholderModel";
+import { openSettingsTarget } from "../lib/settingsLink";
 
 export interface ModelPickerAutoOption {
   label: string;
@@ -257,7 +259,7 @@ function CliListNote({ provider, testId }: { provider: string; testId: string })
 
 export function ModelPicker({
   groups,
-  value,
+  value: rawValue,
   onPick,
   autoOption,
   disabled = false,
@@ -289,6 +291,9 @@ export function ModelPicker({
   changeLink?: string;
 }) {
   const { t } = useTranslation();
+  // The internal validation-only model is never shown as a choice.
+  const value = isPlaceholderModel(rawValue) ? "" : rawValue;
+  const noModel = !groups.some((g) => g.models.length > 0);
   const valueRef = useMemo(() => {
     const [provider = "", ...rest] = value.split("/");
     return { provider, model: rest.join("/") };
@@ -508,8 +513,7 @@ export function ModelPicker({
               {autoOption?.selected
                 ? autoOption.label
                 : valueLabel ||
-                  placeholder ||
-                  t("modelPicker.none")}
+                  (noModel ? t("modelPicker.connectModel") : placeholder || t("modelPicker.none"))}
             </span>
             <ChevronDown />
           </>
@@ -558,7 +562,25 @@ export function ModelPicker({
           />
         </label>
         <div className={styles.scroll} role="listbox" aria-label={t("modelPicker.title")} onKeyDown={moveFocus}>
-          {shown.length === 0 && !showAuto && otherIds.length === 0 && !engines ? (
+          {noModel && !searching ? (
+            <div className={styles.group} data-testid={`${testId}-connect`}>
+              <p className={styles.noModels}>{t("modelPicker.connectBody")}</p>
+              <button
+                type="button"
+                data-picker-row
+                className={styles.option}
+                data-testid={`${testId}-connect-button`}
+                onClick={() => {
+                  close();
+                  openSettingsTarget({ page: "models", card: "keys", field: "api-key" });
+                }}
+              >
+                <Plug aria-hidden="true" />
+                <span className={styles.optionText}>{t("modelPicker.connectAction")}</span>
+              </button>
+            </div>
+          ) : null}
+          {shown.length === 0 && !showAuto && otherIds.length === 0 && !engines && !(noModel && !searching) ? (
             <p className={styles.empty}>{t("modelPicker.empty")}</p>
           ) : (
             <>
