@@ -3346,57 +3346,49 @@ async fn plain_navigation_to_a_named_site_is_silent_after_a_page_was_read() {
     }
     // a full URL the owner wrote names its site too (http stays http only)
     assert!(plain_open_runs_silently("see https://a.example/", "https://a.example/", false).await);
-    // a path goes silently only when every segment is a word the owner typed
+    // the root of the current page's origin needs no owner mention (see the page-origin test)
+    // any non-empty path asks, even a word the owner typed
     assert!(
-        plain_open_runs_silently(
+        !plain_open_runs_silently(
             "look at webioo.com.tr, the iletisim page",
             "https://webioo.com.tr/iletisim",
             false
         )
-        .await
-    );
-    assert!(
-        !plain_open_runs_silently(said, "https://webioo.com.tr/iletisim", false).await,
-        "iletisim was not said by the owner"
+        .await,
+        "a path is never waived by this exception"
     );
 }
 
 #[tokio::test]
-async fn a_path_cannot_carry_a_secret_by_shape() {
-    let said = "look at webioo.com.tr please";
-    for url in [
-        "https://webioo.com.tr/0123456789abcde/0123456789abcde/0123456789abcde",
-        "https://webioo.com.tr/sk-live-AbCdEfGhIjKlMnOp",
-        "https://webioo.com.tr/123456",
-    ] {
-        assert!(!plain_open_runs_silently(said, url, false).await, "{url}");
-    }
-}
-
-#[tokio::test]
-async fn an_owner_typed_secret_or_odd_shape_is_not_a_waived_path() {
-    let site = "https://webioo.com.tr";
+async fn an_owner_typed_secret_in_a_path_always_asks() {
     let digest = "0123456789abcdef0123456789abcdef";
-    for seg in [
-        "sk-live-AbCdEfGhIjKlMnOp",
-        digest,
-        "abcdefghijklmnopq", // 17 letters in one part
-        "a1b2",
+    let key = "sk-live-AbCdEfGhIjKlMnOp";
+    for (typed, path) in [
+        (key, key.to_owned()),
+        (digest, digest.to_owned()),
+        ("abcd/efgh/ijkl/mnop", "abcd/efgh/ijkl/mnop".to_owned()),
+        ("abcd.efgh.ijkl.mnop", "abcd/efgh/ijkl/mnop".to_owned()),
+        ("abcd.efgh.ijkl.mnop", "abcd.efgh.ijkl.mnop".to_owned()),
+        ("abcd~efgh~ijkl~mnop", "abcd~efgh~ijkl~mnop".to_owned()),
+        ("a1b2", "a1b2".to_owned()),
+        ("123456", "123456".to_owned()),
+        (
+            "0123456789abcde 0123456789abcde 0123456789abcde",
+            "0123456789abcde/0123456789abcde/0123456789abcde".to_owned(),
+        ),
+        (
+            "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqr",
+            "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqr".to_owned(),
+        ),
     ] {
-        let said = format!("look at webioo.com.tr, key {seg}");
-        let url = format!("{site}/{seg}");
-        assert!(!plain_open_runs_silently(&said, &url, false).await, "{seg}");
-    }
-    // short plain words the owner typed pass, Turkish letters included
-    for seg in ["iletisim", "referanslarimiz", "ağış-çözüm"] {
-        let said = format!("look at webioo.com.tr, page {seg}");
-        let url = format!("{site}/{seg}");
-        assert!(plain_open_runs_silently(&said, &url, false).await, "{seg}");
+        let said = format!("look at webioo.com.tr, key {typed}");
+        let url = format!("https://webioo.com.tr/{path}");
+        assert!(!plain_open_runs_silently(&said, &url, false).await, "{url}");
     }
 }
 
 #[tokio::test]
-async fn a_remembered_origin_does_not_silence_secret_paths() {
+async fn a_root_remembered_origin_does_not_silence_secret_paths() {
     let env = setup();
     let page = read_tool("fs_read", ContentClass::untrusted());
     let open = open_tool();
@@ -3526,4 +3518,106 @@ async fn navigation_that_could_carry_page_data_or_leave_the_named_site_still_ask
     assert!(!plain_open_runs_silently(said, "https://webioo.com.tr/iletisim", true).await);
     // a site only the page mentions is not named by the owner
     assert!(!plain_open_runs_silently("read page.html", "https://webioo.com.tr/", false).await);
+}
+
+#[tokio::test]
+async fn a_chat_site_grant_covers_every_path_of_that_exact_origin_only() {
+    let env = setup();
+    let page = read_tool("fs_read", ContentClass::untrusted());
+    let open = open_tool();
+    let fake = Fake::new(vec![
+        calls(&[("c1", "fs_read", json!({"path": "page.html"}))]),
+        // no grant yet: a deep path asks
+        calls(&[(
+            "c2",
+            "browser_open",
+            json!({"url": "https://a.example/deep/one"}),
+        )]),
+        // after the click: another deep path of the same origin passes
+        calls(&[(
+            "c3",
+            "browser_open",
+            json!({"url": "https://a.example/deep/two/x"}),
+        )]),
+        // the grant covers neither a subdomain, nor another scheme or port
+        calls(&[(
+            "c4",
+            "browser_open",
+            json!({"url": "https://sub.a.example/deep"}),
+        )]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&page), t(&open)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "read it then browse").unwrap();
+    let Event::ApprovalNeeded(first) =
+        until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(first.input["url"], "https://a.example/deep/one");
+    assert_eq!(open.count.load(Ordering::SeqCst), 0, "no grant: asked");
+    lp.approve(first.call_id, crate::ApprovalScope::ThisChat, env.user)
+        .unwrap();
+    let Event::ApprovalNeeded(next) =
+        until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(next.input["url"], "https://sub.a.example/deep");
+    assert_eq!(open.count.load(Ordering::SeqCst), 2, "one and two ran");
+    lp.cancel(run).unwrap();
+}
+
+#[tokio::test]
+async fn a_root_open_of_the_current_page_origin_is_silent_but_a_deep_path_asks() {
+    let env = setup();
+    let page = read_tool("fs_read", ContentClass::untrusted());
+    let open = open_tool();
+    let click = with_class(
+        "browser_click",
+        Effect::Write,
+        PermissionCategory::Browser,
+        ContentClass::untrusted(),
+        "clicked",
+    );
+    // the browser reports this origin as the current page
+    *click.page_origin.lock() = Some("https://cur.example:443".to_owned());
+    let click = Arc::new(click);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "fs_read", json!({"path": "page.html"}))]),
+        calls(&[("c1b", "browser_click", json!({"ref": "e1"}))]),
+        calls(&[("c2", "browser_open", json!({"url": "https://cur.example/"}))]),
+        calls(&[(
+            "c3",
+            "browser_open",
+            json!({"url": "https://cur.example/x"}),
+        )]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&page), t(&open), t(&click)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "read it then browse").unwrap();
+    let Event::ApprovalNeeded(card) =
+        until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(card.input["url"], "https://cur.example/x");
+    assert_eq!(open.count.load(Ordering::SeqCst), 1, "the root ran");
+    lp.cancel(run).unwrap();
 }

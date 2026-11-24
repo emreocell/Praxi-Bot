@@ -736,81 +736,20 @@ impl Shared {
     }
 
     /// The URL of a plain navigation: `browser_open` with the `url` field alone, http(s), no
-    /// userinfo, no query, no fragment, and a path of plain characters. This is only the
-    /// structural part: whether the path may go out silently is decided by
-    /// [`Self::path_is_owner_said`] (the root, or words the owner typed), never by its shape.
+    /// userinfo, no query and no fragment. Only the structural part: whether it may go out
+    /// silently is decided by [`Self::plain_navigation_waived`] (root URLs only).
     pub(crate) fn plain_navigation(name: &str, input: &Value) -> Option<url::Url> {
         if name != "browser_open" || input.as_object().is_none_or(|o| o.len() != 1) {
             return None;
         }
         let url = url::Url::parse(input.get("url")?.as_str()?).ok()?;
-        let plain_path = url.path().len() <= 120
-            && url.path().split('/').count() <= 8
-            && url.path().split('/').all(|seg| {
-                seg.len() <= 48
-                    && seg.chars().all(|c| {
-                        c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~' | '%')
-                    })
-            });
         (matches!(url.scheme(), "http" | "https")
             && url.username().is_empty()
             && url.password().is_none()
             && url.host_str().is_some()
             && url.query().is_none()
-            && url.fragment().is_none()
-            && plain_path)
-            .then_some(url)
-    }
-
-    /// The path of a plain navigation may leave silently only when it is the origin root or
-    /// every segment is a word the owner typed (a whole token of an owner message). No shape
-    /// rule: a path can carry a value copied from a page, so only the owner's own words pass.
-    fn path_is_owner_said(url: &url::Url, texts: &[String]) -> bool {
-        let segs: Vec<&str> = url.path().split('/').filter(|s| !s.is_empty()).collect();
-        if url.path() == "/" || segs.is_empty() {
-            return true;
-        }
-        let is_word = |c: char| c.is_alphanumeric() || matches!(c, '-' | '_');
-        segs.iter().all(|seg| {
-            let Some(seg) = Self::percent_decode(seg) else {
-                return false;
-            };
-            Self::is_short_plain_word(&seg)
-                && texts
-                    .iter()
-                    .any(|m| m.split(|c: char| !is_word(c)).any(|tok| tok == seg))
-        })
-    }
-
-    /// Shape limit on every waived path segment, so a secret the owner once typed cannot be
-    /// replayed as a path: letters only (any script), parts joined by single `-` or `_`, no
-    /// digits, at most 24 characters (16 per part) and at most 2 upper-case letters.
-    fn is_short_plain_word(seg: &str) -> bool {
-        seg.chars().count() <= 24
-            && seg.chars().filter(|c| c.is_uppercase()).count() <= 2
-            && seg.split(['-', '_']).all(|part| {
-                !part.is_empty()
-                    && part.chars().count() <= 16
-                    && part.chars().all(char::is_alphabetic)
-            })
-    }
-
-    /// Decode `%XX` escapes (needed for non-ASCII letters such as `ğ`); `None` on bad UTF-8.
-    fn percent_decode(seg: &str) -> Option<String> {
-        let b = seg.as_bytes();
-        let mut out = Vec::with_capacity(b.len());
-        let mut i = 0;
-        while i < b.len() {
-            if b[i] == b'%' {
-                let hex = std::str::from_utf8(b.get(i + 1..i + 3)?).ok()?;
-                out.push(u8::from_str_radix(hex, 16).ok()?);
-                i += 3;
-            } else {
-                out.push(b[i]);
-                i += 1;
-            }
-        }
-        String::from_utf8(out).ok()
+            && url.fragment().is_none())
+        .then_some(url)
     }
 
     /// A bare token (no scheme) an owner wrote counts as a site name only when it is a
@@ -856,27 +795,35 @@ impl Shared {
         ))
     }
 
-    /// A plain navigation (see [`Self::plain_navigation`]) to a site the owner named in this
-    /// chat (a full URL or a bare domain in a message they typed) or already allowed here
-    /// once. It carries no data, so it is not "sending"; every other site still asks.
+    /// A navigation to the ROOT of an origin (path `/` or empty, no query, fragment, userinfo
+    /// or explicit port) that is the current page's origin, an origin the owner named in this
+    /// chat (a full http(s) URL or a bare domain under a real TLD) or one they approved once.
+    /// A root URL carries nothing but the host, so it is not "sending". Any non-empty path
+    /// asks (unless the owner granted the whole site, see `gate_waived`): a path can carry a
+    /// value copied from a page, and no shape or word rule on it is reliable.
     fn plain_navigation_waived(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
-        // With private data in the context a path could carry it out: keep asking.
+        // With private data in the context even a host name is a channel: keep asking.
         if ctx.taint.lock().exposure.has_private() {
             return false;
         }
         let Some(url) = Self::plain_navigation(name, input) else {
             return false;
         };
+        if url.path() != "/" || url.port().is_some() {
+            return false;
+        }
         let Some(site) = Self::nav_site(&url) else {
             return false;
         };
         let origin = format!("{}://{}:{}", url.scheme(), site.0, site.1);
-        let Ok(texts) = self.storage.owner_message_texts(ctx.chat_id) else {
-            return false;
-        };
-        // Whatever site is allowed, only the root or the owner's own path words go silently.
-        if !Self::path_is_owner_said(&url, &texts) {
-            return false;
+        if ctx
+            .page_origin
+            .lock()
+            .as_deref()
+            .and_then(Self::origin_of)
+            .is_some_and(|o| o == origin)
+        {
+            return true;
         }
         if self
             .grants
@@ -886,6 +833,9 @@ impl Shared {
         {
             return true;
         }
+        let Ok(texts) = self.storage.owner_message_texts(ctx.chat_id) else {
+            return false;
+        };
         texts
             .iter()
             .flat_map(|m| m.split_whitespace())
@@ -2331,8 +2281,8 @@ impl ExecPermit {
                 ));
             }
         }
-        // Approving a plain navigation to a new site remembers that site for this chat, for plain
-        // navigation only (a query or a form still asks): the owner said yes to this site once.
+        // Approving a plain navigation remembers its origin for this chat, but only for the
+        // silent ROOT navigation (see `plain_navigation_waived`); it never covers other paths.
         if self.ctx.initiator == InitiatorKind::Human
             && let Some(url) = Shared::plain_navigation(&self.name, &self.input)
             && let Some((host, port)) = Shared::nav_site(&url)

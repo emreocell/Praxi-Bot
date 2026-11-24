@@ -87,14 +87,17 @@ only. A rule never covers a hard-stop class and never another target. Rules are 
 in the audit log (like existing grants), listed in the bot's Permissions page, and revocable.
 
 Standing choices (this chat, always) need the owner's authority, as gate grants already do. A
-remembered site (or a site the owner named: a full http(s) URL, or a bare domain under a real
-public TLD that is not a file extension, so `README.md` is not a site) also satisfies the egress
-gate for a plain navigation (one argument, `url`, no query or fragment) to that origin, but only
-to its root or to a path whose every segment the owner typed verbatim AND that is a short plain
-word (letters of any script, parts joined by single `-` or `_`, no digits, at most 24 characters,
-at most 16 per part, at most 2 upper-case letters), so a key or digest the owner once typed is
-never replayed as a path; anything else asks, remembered origin or not. Residual risk: an
-owner-typed short lower-case word could still be replayed as a path. A redirect to another origin is not remembered: opening that origin later asks; a remembered command never satisfies the
+remembered site grant ("allow this site for this chat", exact scheme + host + port) also satisfies
+the egress gate for a `browser_open` to any path of that origin, because the owner granted the
+whole site by clicking it. Without that grant, a plain navigation (one argument, `url`, no query,
+fragment, userinfo or explicit port) is silent after untrusted content only when its path is
+exactly `/` or empty AND the origin is the current page's origin, an origin the owner named in
+this chat (a full http(s) URL, or a bare domain under a real public TLD that is not a file
+extension, so `README.md` is not a site) or one approved once. A root URL carries nothing but the
+host, so no value copied from a page can ride in it. Any non-empty path asks (no verbatim-word or
+shape rule: those leak), and a one-time approval never widens to other paths. Residual risk: the
+host name itself (owner-named) is the only data channel. A redirect to another origin is not
+remembered: opening that origin later asks. A remembered command never satisfies the
 "untrusted content, then run a program" gate. Risky programs (shells, interpreters, `rm`, `curl`,
 `ssh`, `sudo`, ...) and commands with arguments other than flags and one sub-command word are
 never remembered. The old tool-wide and category-wide rules keep working for other tools.
