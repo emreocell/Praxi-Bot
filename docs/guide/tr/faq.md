@@ -64,8 +64,10 @@ Henüz değil (**Planlandı**). Bugün iş akışları senin yazdığın TOML do
 çalışmanın yolunu önbelleğe alır. Bkz. [İş akışları](../workflows.md).
 
 ### Uzun süreli hafızası var mı?
-Depoda bir hafıza kütüphanesi var (turdan önce hatırlama, sonra çıkarma), ancak daemon bunu henüz etkinleştirmiyor
-(**Planlandı**). Sohbetler kendi geçmişini tutar.
+Evet, ve varsayılan olarak açıktır (güvenli mod hariç). Bir turdan sonra bot, söylediklerin hakkında kısa notlar
+tutabilir; bir sonraki turdan önce mesajına uyan birkaçı arka plan olarak mesajın önüne konur. Web sayfalarından,
+dosyalardan veya araçlardan gelen notlar önce senin onayını bekler. Belleği bot başına görebilir, düzenleyebilir,
+unutturabilir ve kapatabilirsin; bkz. [Bellek](memory.md). Sohbetler ayrıca kendi geçmişini tutar.
 
 ### MCP sunucuları ya da eklentiler ekleyebilir miyim?
 MCP sunucuları için evet: `bot serve`, `mcp.toml` dosyasını yükler ve etkin sunucuları çalıştırır; bunları

@@ -62,7 +62,7 @@ jobs:
               || { ! printf '%s\n' "$f" | grep -Eq "$docs_only" && ! printf '%s\n' "$f" | grep -Eq "$ui_only"; }; then
               rust=true
             fi
-            if printf '%s\n' "$f" | grep -Eq '^(apps/desktop/ui/|packages/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|docs/api/openapi\.json$|\.github/workflows/ci\.yml$)'; then ui=true; fi
+            if printf '%s\n' "$f" | grep -Eq '^(apps/desktop/ui/|packages/|site/|eslint\.config\.js$|\.stylelintrc\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|docs/api/openapi\.json$|\.github/workflows/ci\.yml$)'; then ui=true; fi
             if printf '%s\n' "$f" | grep -Eq "$smoke_paths"; then smoke=true; fi
           done < changed.txt
           printf '%s\n' "rust=$rust" "ui=$ui" "smoke=$smoke" >> "$GITHUB_OUTPUT"

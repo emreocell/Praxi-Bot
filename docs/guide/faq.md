@@ -70,9 +70,12 @@ Not yet (**Planned**). Today workflows are TOML files you write, and "Remember"
 caches the route of a successful run. See [Workflows](workflows.md).
 
 ### Does it have long-term memory?
-There is a memory library (recall before a turn, extraction after) in the
-repository, but the daemon does not enable it yet (**Planned**). Chats keep
-their own history.
+Yes, and it is on by default (except in safe mode). After a turn the bot may
+keep short notes about what you said, and before the next turn the few that fit
+your message are placed in front of it as background. Notes that came from web
+pages, files or tools wait for your OK first. You can see, edit, forget and
+switch off memory per bot; see [Memory](memory.md). Chats also keep their own
+history.
 
 ### Can I add MCP servers or plugins?
 Yes for MCP servers: `bot serve` loads `mcp.toml` and runs the enabled servers,

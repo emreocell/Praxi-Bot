@@ -2650,6 +2650,10 @@
         "hint": "Lade die Karte neu und lies den neuen Text, bevor du entscheidest. Es wurde nichts freigegeben.",
         "title": "Die App hat dieses Werkzeug erneut geändert"
       },
+      "memory_owner_only": {
+        "hint": "Ändere die Gedächtnis-Einstellungen eines Bots in der App auf dem Computer, auf dem der Bot läuft.",
+        "title": "Nur der Besitzer kann das ändern"
+      },
       "message_not_editable": {
         "hint": "Nur deine eigene letzte Nachricht lässt sich bearbeiten oder neu erzeugen, und zwar erst, wenn der Bot fertig ist.",
         "title": "Diese Nachricht lässt sich nicht bearbeiten"
@@ -3845,15 +3849,20 @@
     "addTitle": "Erinnerung hinzufügen",
     "addedNotice": "Erinnerung hinzugefügt.",
     "allKinds": "Alle Kategorien",
+    "approve": "Freigeben",
+    "approvedNotice": "Freigegeben. Der Bot kann es jetzt nutzen.",
     "bot": "Bot",
     "botOnly": "Nur Erinnerungen dieses Bots",
     "content": "Was gemerkt werden soll",
     "contentPlaceholder": "Kurze Tatsache oder Präferenz eingeben …",
     "description": "Sieh dir an, woran sich jeder Bot aus früheren Unterhaltungen erinnert, bearbeite oder vergiss Einträge, mache Änderungen rückgängig und prüfe in der Vorschau, was in den nächsten Durchgang einfließt.",
+    "discard": "Verwerfen",
+    "discardedNotice": "Verworfen.",
     "edit": "Bearbeiten",
     "editLabel": "Erinnerungstext",
     "empty": "Dein Bot merkt sich hier nützliche Dinge, etwa deinen Namen. Erzähle ihm im Chat etwas oder füge unten selbst eine Erinnerung hinzu.",
     "emptyTitle": "Noch keine Erinnerungen",
+    "expires": "läuft am {{date}} ab",
     "forget": "Vergessen",
     "forgottenBadge": "Vergessen",
     "forgottenNotice": "Erinnerung vergessen.",
@@ -3868,6 +3877,8 @@
       "profile": "Benutzerprofil"
     },
     "noBot": "Erstelle einen Bot, um Erinnerungen anzusehen oder hinzuzufügen.",
+    "pendingHint": "Diese stammen aus Webseiten, Dateien oder Werkzeugen, oder du wolltest alles freigeben. Der Bot nutzt sie erst, wenn du zustimmst.",
+    "pendingTitle": "Braucht dein OK",
     "previewEmpty": "Für diese Nachricht würden keine Erinnerungen abgerufen.",
     "previewHint": "Gib eine Beispielnachricht ein, um den genauen Datenblock mit abgerufenen Erinnerungen zu sehen, der dem Durchgang vorangestellt wird.",
     "previewPlaceholder": "z. B. Wann erstellen wir die Versionshinweise?",
@@ -3890,6 +3901,46 @@
     "undo": "Rückgängig",
     "undoneNotice": "Letzte Änderung rückgängig gemacht.",
     "updatedNotice": "Erinnerung aktualisiert."
+  },
+  "memoryRecall": {
+    "consent": "Ich bin einverstanden, dass meine Erinnerungen an {{provider}} gesendet werden, um in Suchdaten umgewandelt zu werden",
+    "disable": "Zurück zu Einfach",
+    "enable": "Zu Intelligent wechseln",
+    "explain": {
+      "basic": "Eine Erinnerung wird gefunden, wenn sie Wörter mit deiner Nachricht gemeinsam hat. Nichts verlässt diesen Computer.",
+      "smart": "Eine Erinnerung wird über ihre Bedeutung gefunden, auch mit anderen Wörtern, mit dem von dir gewählten Embedding-Modell."
+    },
+    "failed": "Der intelligente Modus konnte nicht eingeschaltet werden, deshalb gilt der einfache. Nichts ging verloren. Prüfe das Modell und versuche es erneut.",
+    "noSource": "Der intelligente Modus nutzt ein Embedding-Modell, das du für das Wissen eines Bots eingerichtet hast. Richte dort zuerst eines ein.",
+    "progress": "{{done}} von {{total}} Erinnerungen werden neu indexiert",
+    "source": "Zu verwendendes Modell",
+    "state": {
+      "basic": "Einfach (Wortvergleich)",
+      "smart": "Intelligent (Bedeutung)"
+    },
+    "title": "Wie Erinnerungen gefunden werden",
+    "waiting": "das Modell startet; so lange werden Wörter verglichen"
+  },
+  "memorySettings": {
+    "advanced": "Erweitert",
+    "budget": "Gedächtnis pro Antwort: etwa {{words}} Wörter",
+    "budgetHint": "Mehr Gedächtnis gibt dem Bot mehr Hintergrundwissen, macht aber jede Antwort etwas langsamer und teurer. Standard sind etwa 600 Wörter.",
+    "budgetLabel": "Gedächtnis-Größe pro Antwort",
+    "mode": {
+      "ask": "Vor dem Speichern fragen",
+      "off": "Aus",
+      "on": "An"
+    },
+    "modeHint": {
+      "ask": "Jede neue Erinnerung wartet unter \"Braucht dein OK\", bis du sie freigibst.",
+      "off": "Lernt nichts, merkt sich nichts und hat keine Gedächtnis-Werkzeuge. Vorhandene Erinnerungen bleiben gespeichert, werden aber nicht verwendet.",
+      "on": "Lernt aus dem, was du sagst. Alles, was er aus Webseiten, Dateien oder Werkzeugen aufschnappt, wartet zuerst auf dein OK."
+    },
+    "sectionHint": "Lege fest, ob dieser Bot aus deinen Chats lernt und das Gelernte nutzt.",
+    "sectionTitle": "Gedächtnis",
+    "share": "Gelerntes mit meinen anderen Bots teilen",
+    "shareHint": "An: Fakten über dich und vergangene Ereignisse stehen all deinen Bots zur Verfügung. Aus: Dieser Bot behält alles, was er lernt, für sich.",
+    "title": "Gedächtnis"
   },
   "messageInfo": {
     "label": "Nachrichteninfo",

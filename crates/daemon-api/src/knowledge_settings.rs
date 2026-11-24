@@ -74,7 +74,7 @@ pub struct KnowledgeSettingsInput {
     pub embedding: Option<KnowledgeEmbeddingInput>,
 }
 
-fn embedding_config(bot: &storage::Bot) -> Result<Option<EmbeddingConfig>, ApiError> {
+pub(crate) fn embedding_config(bot: &storage::Bot) -> Result<Option<EmbeddingConfig>, ApiError> {
     let value = &bot.config["knowledge"]["embedding"];
     if value.is_null() {
         return Ok(None);
