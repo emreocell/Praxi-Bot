@@ -1,388 +1,388 @@
 {
   "account": {
-    "ai": "AI",
-    "appearance": "Appearance",
+    "ai": "IA",
+    "appearance": "Apariencia",
     "apps": "Apps",
-    "computer": "Computer",
-    "defaultName": "User",
-    "help": "Help",
-    "localComputer": "This computer",
-    "settings": "Settings",
+    "computer": "Equipo",
+    "defaultName": "Usuario",
+    "help": "Ayuda",
+    "localComputer": "Este equipo",
+    "settings": "Ajustes",
     "shortcutSettings": "Ctrl ,",
-    "updates": "Updates",
-    "usage": "Usage"
+    "updates": "Actualizaciones",
+    "usage": "Uso"
   },
   "addServer": {
-    "advanced": "Advanced",
-    "agentHint": "Praxi will use the keys your computer has already loaded for signing in to servers (the SSH agent). Passwords are not supported.",
-    "answerFailed": "The answer did not reach the setup. Close this window and start again.",
-    "auth": "Sign-in",
-    "auth_agent": "SSH agent",
-    "auth_key": "Key file",
-    "cancelNote": "Cancelling lets the step that is running finish first.",
-    "cancelled": "Setup cancelled",
-    "cancelledBody": "Nothing more was done. You can start again at any time.",
+    "advanced": "Opciones avanzadas",
+    "agentHint": "Praxi usará las claves que tu equipo ya tiene cargadas en el agente SSH para iniciar sesión en servidores. La conexión no admite contraseñas.",
+    "answerFailed": "La respuesta no llegó al asistente de configuración. Cierra esta ventana y empieza de nuevo.",
+    "auth": "Inicio de sesión",
+    "auth_agent": "Agente SSH",
+    "auth_key": "Archivo de clave",
+    "cancelNote": "Al cancelar, el paso actual termina antes de que se detenga la configuración.",
+    "cancelled": "Configuración cancelada",
+    "cancelledBody": "La configuración se detuvo en ese punto. Puedes volver a empezar cuando quieras.",
     "checks": {
       "login": {
-        "fix": "Check the user name and the key file. See the explanation below.",
-        "pass": "Signed in",
-        "pending": "Waiting",
-        "running": "Trying your key…",
-        "title": "Signing in works"
+        "fix": "Comprueba el nombre de usuario y el archivo de clave. Consulta la explicación de abajo.",
+        "pass": "Sesión iniciada",
+        "pending": "En espera",
+        "running": "Probando tu clave…",
+        "title": "Inicio de sesión disponible"
       },
       "ports": {
-        "fix": "The server must reach github.com on the internet, and its Praxi port must be free. Allow outgoing HTTPS in its firewall.",
-        "pass": "All good",
-        "pending": "Waiting",
-        "running": "Testing…",
-        "title": "Network and ports are free"
+        "fix": "El servidor debe poder conectarse a github.com y el puerto de Praxi debe estar libre. Permite las conexiones HTTPS salientes en el firewall.",
+        "pass": "Todo en orden",
+        "pending": "En espera",
+        "running": "Comprobando…",
+        "title": "Red y puertos disponibles"
       },
       "reach": {
-        "fix": "Check the address, that the server is on, and that port 22 is open in its firewall.",
-        "pass": "It answered",
-        "pending": "Waiting",
-        "running": "Knocking on the door…",
-        "title": "The server answers"
+        "fix": "Comprueba la dirección, confirma que el servidor esté encendido y revisa que el puerto 22 esté abierto en el firewall.",
+        "pass": "El servidor respondió",
+        "pending": "En espera",
+        "running": "Comprobando la conexión…",
+        "title": "El servidor responde"
       },
       "room": {
-        "fix": "Praxi needs about 1 GB of memory (more with a browser) and 8 GB of free disk. Pick a bigger server or free up space.",
-        "pass": "Enough room",
-        "pending": "Waiting",
-        "running": "Measuring…",
-        "title": "Enough memory and disk"
+        "fix": "Praxi necesita alrededor de 1 GB de memoria (más si usas un navegador) y 8 GB de disco libre. Elige un servidor con más capacidad o libera espacio.",
+        "pass": "Espacio suficiente",
+        "pending": "En espera",
+        "running": "Comprobando la capacidad…",
+        "title": "Memoria y espacio en disco suficientes"
       },
       "system": {
-        "fix": "Use Ubuntu 22.04 or newer, with administrator rights (sudo) and no password prompt for that user.",
-        "pass": "Supported",
-        "pending": "Waiting",
-        "running": "Looking at the system…",
-        "title": "The system is supported"
+        "fix": "Usa Ubuntu 22.04 o una versión posterior con un usuario que pueda ejecutar sudo sin que se le pida contraseña.",
+        "pass": "Compatible",
+        "pending": "En espera",
+        "running": "Revisando el sistema…",
+        "title": "Sistema compatible"
       },
-      "title": "Checks before installing"
+      "title": "Comprobaciones antes de instalar"
     },
     "choose": {
-      "have": "I have a server",
-      "haveHint": "Copy one line, paste it on the server, and paste the code it gives you back here.",
-      "local": "Run on this computer (recommended to start)",
-      "localHint": "Nothing to set up. Your bots already work here. You can add a server later.",
-      "need": "I need a server (free options, step by step)",
-      "needHint": "A short guide to get one: a free cloud server, a rented one, or a spare computer at home.",
-      "title": "Which of these fits you?"
+      "have": "Tengo un servidor",
+      "haveHint": "Copia el comando, pégalo en el servidor y vuelve aquí con el código que aparezca.",
+      "local": "Usar este equipo (recomendado para empezar)",
+      "localHint": "Tus bots ya funcionan aquí. Puedes añadir un servidor más adelante.",
+      "need": "Necesito un servidor (opciones gratuitas paso a paso)",
+      "needHint": "Guía rápida para conseguir un servidor gratuito en la nube, alquilar uno o usar otro equipo de casa.",
+      "title": "¿Qué opción te conviene?"
     },
-    "connect": "Connect",
-    "copied": "Details copied.",
-    "copy": "Copy details",
-    "copyFailed": "Could not copy.",
+    "connect": "Conectar",
+    "copied": "Datos copiados.",
+    "copy": "Copiar detalles",
+    "copyFailed": "No se pudo copiar.",
     "done": {
       "open": {
-        "body": "Pick the server in the computer menu at the top. Then you can chat with its bots, watch its screen, and open its terminal.",
-        "title": "How to open it"
+        "body": "Elige el servidor en el menú de equipos de arriba. Desde ahí puedes hablar con sus bots, ver su pantalla y abrir su terminal.",
+        "title": "Cómo abrirlo"
       },
       "stop": {
-        "body": "Open Servers from the computer menu. Remove forgets the server on this computer only; nothing on the server is deleted.",
-        "title": "How to stop or remove it"
+        "body": "Abre «Servidores» desde el menú de equipos. «Quitar» elimina el servidor de la lista de este equipo. Los datos del servidor se conservan.",
+        "title": "Cómo detenerlo o quitarlo"
       },
       "where": {
-        "body": "Your bots on this server run there, around the clock. This computer only shows them and lets you chat.",
-        "title": "What runs where"
+        "body": "Los bots de este servidor se ejecutan allí a toda hora. Desde este equipo puedes verlos y hablar con ellos.",
+        "title": "Dónde se ejecuta cada cosa"
       }
     },
-    "doneNoScreen": "It is in your computer list. It has no screen to watch yet.",
-    "doneScreen": "It is in your computer list. You can chat with its bots and watch its screen.",
-    "doneTitle": "{{name}} is connected",
-    "edit": "Change settings",
+    "doneNoScreen": "Ya aparece en tu lista de equipos. Todavía no tiene una pantalla que puedas ver.",
+    "doneScreen": "Ya aparece en tu lista de equipos. Puedes hablar con sus bots y ver su pantalla.",
+    "doneTitle": "{{name}} está conectado",
+    "edit": "Cambiar ajustes",
     "fail": {
       "auth": {
-        "fix": "Check the user name (Ubuntu images use ubuntu, Oracle Linux uses opc) and choose the right key file.",
-        "msg": "The server did not accept the login."
+        "fix": "Comprueba el nombre de usuario (las imágenes de Ubuntu usan ubuntu y las de Oracle Linux, opc) y elige el archivo de clave correcto.",
+        "msg": "El servidor rechazó el inicio de sesión."
       },
       "auth_agent": {
-        "fix": "Your SSH agent may be empty. Switch to Key file and choose the key you downloaded, or add it with ssh-add and try again.",
-        "msg": "The server did not accept the keys in your SSH agent."
+        "fix": "Es posible que tu agente SSH no tenga claves cargadas. Selecciona «Archivo de clave» y elige la que descargaste, o cárgala con ssh-add y vuelve a intentarlo.",
+        "msg": "El servidor rechazó las claves de tu agente SSH."
       },
       "auth_key": {
-        "fix": "This is the \"permission denied (publickey)\" message. Check three things: the user name (Ubuntu images use ubuntu, Oracle Linux uses opc, others may use root); that you picked the key file that goes with this server; and that the key was added when the server was created.",
-        "msg": "The server did not accept your key."
+        "fix": "El servidor devolvió «permission denied (publickey)». Revisa el nombre de usuario (en Ubuntu suele ser ubuntu, en Oracle Linux es opc y en otros sistemas puede ser root). Comprueba que seleccionaste la clave de este servidor y que la añadiste al crearlo.",
+        "msg": "El servidor rechazó tu clave."
       },
       "bad_address": {
-        "fix": "Check for typos. Copy the address again from your provider's page.",
-        "msg": "This address does not exist."
+        "fix": "Revisa si hay errores al escribirla. Vuelve a copiar la dirección de la página de tu proveedor.",
+        "msg": "Esta dirección no existe."
       },
       "generic": {
-        "fix": "Try again. If it keeps failing, copy the details.",
-        "msg": "Something went wrong while setting up the server."
+        "fix": "Inténtalo de nuevo. Si sigue fallando, copia los detalles.",
+        "msg": "Hubo un problema al configurar el servidor."
       },
       "health": {
-        "fix": "Wait a minute and try again; copy the details if it persists.",
-        "msg": "The server is paired but did not answer correctly."
+        "fix": "Espera un minuto e inténtalo de nuevo. Si el problema persiste, copia los detalles.",
+        "msg": "El servidor está vinculado, pero su respuesta no fue válida."
       },
       "hostkey_changed": {
-        "fix": "Its identity changed and nothing was sent. If you rebuilt the server on purpose, remove it and add it again.",
-        "msg": "This is not the server you set up before."
+        "fix": "Cambió su identidad. Praxi no envió nada. Si reinstalaste el servidor a propósito, quítalo y vuelve a añadirlo.",
+        "msg": "El servidor no coincide con el que configuraste antes."
       },
       "hostkey_declined": {
-        "fix": "Compare the fingerprint with your provider's console, then try again.",
-        "msg": "You did not trust this server."
+        "fix": "Compara la huella digital con la de la consola del proveedor y vuelve a intentarlo.",
+        "msg": "Decidiste no confiar en este servidor."
       },
       "hostkey_unreadable": {
-        "fix": "This computer's SSH program may be older than the server's. Update the OpenSSH client (Windows: Settings > Optional features, or install Git for Windows), then try again.",
-        "msg": "Praxi reached the server but could not read its identity."
+        "fix": "El cliente SSH de tu equipo podría ser más antiguo que el del servidor. En Windows, actualiza el cliente OpenSSH desde Configuración → Características opcionales o instala Git para Windows. Luego vuelve a intentarlo.",
+        "msg": "Praxi se conectó al servidor, pero no pudo leer su identidad."
       },
       "key_passphrase": {
-        "fix": "Praxi cannot type it for you. Unlock the key in your SSH agent (ssh-add) and choose SSH agent, or use a key without a passphrase.",
-        "msg": "This key is locked with a passphrase."
+        "fix": "Praxi no puede escribir la frase de contraseña por ti. Desbloquea la clave en el agente SSH con ssh-add y elige «Agente SSH», o usa una clave sin frase de contraseña.",
+        "msg": "Esta clave está protegida con una frase de contraseña."
       },
       "key_permissions": {
-        "fix": "On Mac or Linux run: chmod 600 and then the path of your key file. On Windows, right-click the file, open Properties, Security, and leave only your own user with access.",
-        "msg": "Your key file is readable by other people, so it is refused."
+        "fix": "En Mac o Linux, ejecuta chmod 600 con la ruta de tu archivo de clave. En Windows, haz clic derecho en el archivo, abre Propiedades → Seguridad y deja acceso únicamente a tu usuario.",
+        "msg": "Praxi rechazó el archivo de clave porque otros usuarios pueden leerlo."
       },
       "needs_sudo": {
-        "fix": "Use a user with passwordless sudo, such as the default cloud user.",
-        "msg": "This user cannot run administrator commands without a password."
+        "fix": "Usa un usuario que pueda ejecutar sudo sin contraseña, como el usuario predeterminado del proveedor de nube.",
+        "msg": "Este usuario necesita una contraseña para ejecutar comandos de administrador."
       },
       "network": {
-        "fix": "Check the address and port, that the server is on, and that its firewall allows SSH.",
-        "msg": "Praxi could not reach the server."
+        "fix": "Comprueba la dirección y el puerto, confirma que el servidor esté encendido y revisa que su firewall permita SSH.",
+        "msg": "Praxi no pudo conectarse al servidor."
       },
       "not_host_mode": {
-        "fix": "Switching it needs a published release, which does not exist yet. Start it in host mode on the server, then add it again.",
-        "msg": "Praxi on this server is not running as a host."
+        "fix": "Para cambiarlo hace falta una versión publicada y todavía no hay ninguna. Inicia Praxi en modo servidor en ese equipo y vuelve a añadirlo.",
+        "msg": "Praxi no está funcionando en modo servidor en este equipo."
       },
       "not_installed": {
-        "fix": "Automatic install needs a published release, which does not exist yet. Install Praxi on the server by hand, then add it again.",
-        "msg": "Praxi is not installed on this server."
+        "fix": "La instalación automática necesita una versión publicada y todavía no hay ninguna. Instala Praxi manualmente en el servidor y vuelve a añadirlo.",
+        "msg": "Praxi no está instalado en este servidor."
       },
       "pair": {
-        "fix": "Try again. If it keeps failing, copy the details and check the server's service.",
-        "msg": "Praxi could not pair this computer with the server."
+        "fix": "Inténtalo de nuevo. Si sigue fallando, copia los detalles y comprueba el servicio del servidor.",
+        "msg": "Praxi no pudo vincular este equipo con el servidor."
       },
       "password_only": {
-        "fix": "Praxi does not use passwords. Ask your provider how to add an SSH key to the server, then try again.",
-        "msg": "This server only accepts a password."
+        "fix": "Praxi no usa contraseñas. Consulta con tu proveedor cómo añadir una clave SSH al servidor y vuelve a intentarlo.",
+        "msg": "Este servidor solo acepta contraseñas."
       },
       "port_closed": {
-        "fix": "Port 22 is probably blocked. In your provider's firewall or security list, allow incoming TCP on port 22, and check the address is the public one.",
-        "msg": "The server did not answer in time."
+        "fix": "Es probable que el puerto 22 esté bloqueado. En el firewall o la lista de seguridad del proveedor, permite el tráfico TCP entrante por el puerto 22 y comprueba que estás usando la dirección pública.",
+        "msg": "El servidor no respondió a tiempo."
       },
       "port_refused": {
-        "fix": "The server is on, but the SSH service is not running there. Start it (sudo systemctl start ssh) or reinstall openssh-server.",
-        "msg": "The server said no to the connection."
+        "fix": "El servidor está encendido, pero allí no se está ejecutando el servicio SSH. Inícialo con sudo systemctl start ssh o reinstala openssh-server.",
+        "msg": "El servidor rechazó la conexión."
       },
       "preflight": {
-        "fix": "Copy the details to see which one. Praxi needs Ubuntu 22.04 or newer, enough memory and disk, and systemd.",
-        "msg": "The server does not meet a requirement."
+        "fix": "Copia los detalles para ver qué requisito falta. Praxi necesita Ubuntu 22.04 o posterior, suficiente memoria y espacio en disco, y systemd.",
+        "msg": "El servidor no cumple uno de los requisitos."
       },
       "service_down": {
-        "fix": "On the server run: sudo systemctl start praxi. Then try again.",
-        "msg": "Praxi is installed but not running on the server."
+        "fix": "Ejecuta sudo systemctl start praxi en el servidor. Luego inténtalo de nuevo.",
+        "msg": "Praxi está instalado en el servidor, pero no está en ejecución."
       },
       "ssh_client": {
-        "fix": "Install the OpenSSH client, then try again.",
-        "msg": "Praxi could not find the SSH program on this computer."
+        "fix": "Instala el cliente OpenSSH y vuelve a intentarlo.",
+        "msg": "Praxi no encontró el cliente SSH en este equipo."
       },
       "wrong_port": {
-        "fix": "You changed the port. Open Advanced and set it back to 22 unless your provider gave you another one.",
-        "msg": "Nothing is listening on that port."
+        "fix": "Cambiaste el puerto. Abre «Opciones avanzadas» y vuelve a poner 22, salvo que tu proveedor te haya indicado otro puerto.",
+        "msg": "Ningún servicio escucha en ese puerto."
       }
     },
     "guide": {
       "home": {
-        "card": "A spare computer at home",
-        "cardHint": "An old PC or mini PC that you leave switched on. No monthly cost.",
-        "lead": "Any computer that stays on can be a server. Praxi works best with Ubuntu Linux 22.04 or newer on it.",
+        "card": "Otro equipo en casa",
+        "cardHint": "Un PC antiguo o un mini PC que dejes encendido. Sin costo mensual.",
+        "lead": "Cualquier equipo que se mantenga encendido puede servir como servidor. Praxi funciona mejor con Ubuntu Linux 22.04 o posterior.",
         "step": {
           "internet": {
-            "body": "Plug it into your router with a cable if you can, and turn off sleep mode so it never goes to sleep.",
-            "title": "Keep it online"
+            "body": "Si puedes, conéctalo por cable al router. Desactiva la suspensión para que el equipo siga en funcionamiento.",
+            "title": "Mantenlo conectado"
           },
           "pc": {
-            "body": "It needs about 2 GB of memory and 10 GB of free disk, and should stay switched on.",
-            "title": "Pick the computer"
+            "body": "Necesita unos 2 GB de memoria y 10 GB de disco libre. Debe permanecer encendido.",
+            "title": "Elige el equipo"
           },
           "terminal": {
-            "body": "On that computer, open the Terminal app. You will paste one line into it, so you do not need SSH or any key file.",
-            "title": "Open a terminal on it"
+            "body": "Abre la aplicación Terminal en ese equipo. Solo tendrás que pegar un comando. No necesitas SSH ni un archivo de clave.",
+            "title": "Abre una terminal en ese equipo"
           },
           "ubuntu": {
-            "body": "Download Ubuntu Server or Desktop from ubuntu.com and follow its install guide. Choose a user name and password you will remember.",
-            "title": "Install Ubuntu on it"
+            "body": "Descarga Ubuntu Server o Desktop de ubuntu.com y sigue su guía de instalación. Elige un nombre de usuario y una contraseña que puedas recordar.",
+            "title": "Instala Ubuntu en el equipo"
           }
         },
-        "title": "Use a spare computer at home"
+        "title": "Usa otro equipo en casa"
       },
       "oracle": {
-        "card": "Oracle Cloud free tier",
-        "cardHint": "A free always-on server. Takes about 20 minutes and needs a card to prove you are a person.",
-        "lead": "Do these steps in your web browser and tick each one when it is done.",
+        "card": "Plan gratuito de Oracle Cloud",
+        "cardHint": "Un servidor gratuito que permanece encendido. Tarda unos 20 minutos y requiere una tarjeta para comprobar que eres una persona.",
+        "lead": "Sigue los pasos en tu navegador y ve marcándolos a medida que los completes.",
         "step": {
           "account": {
-            "body": "Go to oracle.com/cloud/free and sign up. A payment card only proves you are a person; the free tier is not charged.",
-            "title": "Create a free Oracle Cloud account"
+            "body": "Regístrate en oracle.com/cloud/free. La tarjeta de pago solo se usa para comprobar que eres una persona. El plan gratuito no tiene costo.",
+            "title": "Crea una cuenta gratuita en Oracle Cloud"
           },
           "console": {
-            "body": "When the instance says Running, open its page and look for Console connection or Cloud Shell. Oracle's page explains the one-time setup there. You will paste one line into that window.",
-            "title": "Open its console"
+            "body": "Cuando la instancia indique «Running» (en ejecución), abre su página y busca «Console connection» o «Cloud Shell». Sigue los pasos de Oracle para configurarla por primera vez. Luego pegarás un comando en esa ventana.",
+            "title": "Abre la consola"
           },
           "firewall": {
-            "body": "The default network already allows what Praxi needs. Do not change the network rules.",
-            "title": "Let it reach the internet"
+            "body": "La red predeterminada ya permite lo que Praxi necesita. Deja las reglas de red tal como están.",
+            "title": "Permite la conexión a internet"
           },
           "instance": {
-            "body": "In the console choose Compute, then Create instance. Pick Ubuntu 22.04 or newer and a shape marked Always Free. Let Oracle make the sign-in key; you will not need it.",
-            "title": "Create a virtual machine"
+            "body": "En la consola, elige «Compute» y luego «Create instance». Selecciona Ubuntu 22.04 o posterior y una configuración marcada como «Always Free». Deja que Oracle genere la clave de inicio de sesión. No tendrás que usarla.",
+            "title": "Crea una máquina virtual"
           }
         },
-        "title": "Get a free server from Oracle Cloud"
+        "title": "Consigue un servidor gratuito en Oracle Cloud"
       },
-      "privacy": "You do this on the provider's website. Praxi does not see your account, your password or your payment card.",
-      "ready": "My server is ready",
+      "privacy": "Estos pasos se hacen en el sitio del proveedor. Praxi no ve tu cuenta, tu contraseña ni tu tarjeta de pago.",
+      "ready": "Mi servidor está listo",
       "vps": {
-        "card": "A rented server (any provider)",
-        "cardHint": "Hetzner, DigitalOcean, OVH and similar. A small one costs a few euros a month.",
-        "lead": "Any provider works if it offers Ubuntu 22.04 or newer. Praxi needs about 2 GB of memory and 10 GB of disk.",
+        "card": "Un servidor alquilado (cualquier proveedor)",
+        "cardHint": "Hetzner, DigitalOcean, OVH y otros. Un servidor pequeño cuesta unos euros al mes.",
+        "lead": "Puedes usar cualquier proveedor que ofrezca Ubuntu 22.04 o posterior. Praxi necesita unos 2 GB de memoria y 10 GB de disco.",
         "step": {
           "console": {
-            "body": "On the server's page in the provider's website, look for a button named Console, Web console, VNC or Terminal. You will paste one line into it.",
-            "title": "Open its web console"
+            "body": "En la página del servidor, busca un botón llamado «Console», «Web console», «VNC» o «Terminal». Pegarás un comando en la ventana que se abra.",
+            "title": "Abre la consola web"
           },
           "create": {
-            "body": "Choose Ubuntu 22.04 or newer, at least 2 GB of memory, and the cheapest plan that fits. Ignore any option about SSH keys if you can.",
-            "title": "Create a server with Ubuntu"
+            "body": "Elige Ubuntu 22.04 o posterior, al menos 2 GB de memoria y el plan más barato que cumpla esos requisitos. Si puedes, omite la opción de claves SSH.",
+            "title": "Crea un servidor con Ubuntu"
           },
           "provider": {
-            "body": "Pick one you trust and create an account on its website.",
-            "title": "Choose a provider and sign up"
+            "body": "Elige uno de confianza y crea una cuenta en su sitio web.",
+            "title": "Elige un proveedor y regístrate"
           }
         },
-        "title": "Rent a server from any provider"
+        "title": "Alquila un servidor con el proveedor que prefieras"
       }
     },
     "have": {
-      "advanced": "Advanced: connect over SSH",
-      "advancedBody": "For people who already sign in to their server with an SSH key file or agent. Most people do not need this.",
-      "advancedGo": "Use SSH instead",
-      "codeBad": "That is not a valid pairing code, or it has expired. Run the command again to get a new code, then paste it here.",
-      "codeHint": "It starts with bot-pair: . You can paste everything the console printed; Praxi finds the code.",
-      "codeLabel": "Pairing code from the server",
-      "commandLabel": "Command to run on the server",
-      "copied": "Command copied. Paste it into your server's console.",
-      "copy": "Copy command",
-      "devBuild": "This copy of Praxi is not an official release, so the server may not find version {{tag}}. If the command stops while downloading, update Praxi and try again.",
-      "loading": "Preparing your command…",
-      "noCommand": "The command could not be prepared",
-      "one": "Open your server's console or terminal (the provider's website has a Console or Terminal button).",
-      "pair": "Connect",
-      "pairing": "Connecting…",
-      "safe": "The command holds no password or key. The code it prints works once and expires after {{minutes}} minutes.",
-      "three": "When it finishes it prints a pairing code. Paste that code here.",
-      "title": "Connect your server with one command",
-      "two": "Copy the command below and paste it there. It installs Praxi and checks its signature first. It takes a few minutes."
+      "advanced": "Opciones avanzadas: conectarse por SSH",
+      "advancedBody": "Para quienes ya usan un archivo de clave o un agente SSH para acceder a su servidor. En la mayoría de los casos no hace falta.",
+      "advancedGo": "Usar SSH",
+      "codeBad": "El código de vinculación no es válido o ha caducado. Vuelve a ejecutar el comando para obtener uno nuevo y pégalo aquí.",
+      "codeHint": "El código empieza por «bot-pair:». Puedes pegar todo lo que mostró la consola. Praxi encontrará el código.",
+      "codeLabel": "Código de vinculación del servidor",
+      "commandLabel": "Comando para ejecutar en el servidor",
+      "copied": "Comando copiado. Pégalo en la consola de tu servidor.",
+      "copy": "Copiar comando",
+      "devBuild": "Esta copia de Praxi no es una versión oficial, así que el servidor podría no encontrar la versión {{tag}}. Si la descarga se interrumpe, actualiza Praxi e inténtalo de nuevo.",
+      "loading": "Preparando el comando…",
+      "noCommand": "No se pudo preparar el comando",
+      "one": "Abre la consola o la terminal del servidor. En el sitio del proveedor encontrarás un botón llamado «Console» o «Terminal».",
+      "pair": "Conectar",
+      "pairing": "Conectando…",
+      "safe": "El comando no contiene contraseñas ni claves. El código que muestra solo se puede usar una vez y caduca en {{minutes}} minutos.",
+      "three": "Al terminar, aparecerá un código de vinculación. Pégalo aquí.",
+      "title": "Conecta tu servidor con un solo comando",
+      "two": "Copia el comando de abajo y pégalo allí. Primero comprueba la firma y luego instala Praxi. Tarda unos minutos."
     },
-    "host": "Server address",
-    "hostHint": "Example: 203.0.113.7 or myserver.example.com",
-    "hostKeyBody": "This is the first time this computer connects to {{host}}. The fingerprint below is a code that identifies the server. Compare it with the one in your provider's console if it shows one.",
-    "hostKeyNo": "No, stop",
-    "hostKeyTitle": "Is this your server?",
-    "hostKeyYes": "Yes, trust this server",
+    "host": "Dirección del servidor",
+    "hostHint": "Ejemplo: 203.0.113.7 o myserver.example.com",
+    "hostKeyBody": "Es la primera vez que este equipo se conecta a {{host}}. La huella digital que aparece abajo identifica al servidor. Compárala con la de la consola de tu proveedor si está disponible.",
+    "hostKeyNo": "No, detener",
+    "hostKeyTitle": "¿Es este tu servidor?",
+    "hostKeyYes": "Sí, confiar en este servidor",
     "intro": {
-      "optional": "You do not need one: it is optional, and everything already works on this computer.",
-      "title": "Do you need a server?",
-      "what": "A server is another computer that stays on day and night, so your bots keep working even when your own computer is off."
+      "optional": "Tus bots ya pueden funcionar en este equipo. Añadir un servidor es opcional.",
+      "title": "¿Necesitas un servidor?",
+      "what": "Un servidor es otro equipo que permanece encendido día y noche. Así tus bots pueden seguir trabajando aunque apagues tu equipo."
     },
-    "keyFile": "Private key file",
-    "keyHint": "Only the path is used. Praxi never copies or stores the key itself.",
-    "keysFound": "Keys found on this computer",
-    "lead": "Connect a server you rent. Praxi does the setup for you.",
+    "keyFile": "Archivo de clave privada",
+    "keyHint": "Praxi solo usa la ruta del archivo. Nunca copia ni guarda la clave.",
+    "keysFound": "Claves encontradas en este equipo",
+    "lead": "Conecta un servidor que tengas alquilado. Praxi se encarga de configurarlo.",
     "local": {
-      "body": "Your bots run on this computer. They work while the computer and Praxi are on. That is all you need to start.",
-      "done": "Got it",
-      "later": "If you later want your bots to work around the clock, open the computer menu and choose Add a server again.",
-      "title": "Good choice: nothing to set up"
+      "body": "Tus bots se ejecutan en este equipo. Funcionan mientras el equipo esté encendido y Praxi esté abierto. Con eso basta para empezar.",
+      "done": "Entendido",
+      "later": "Si más adelante quieres que tus bots trabajen a toda hora, abre el menú de equipos y elige «Añadir un servidor».",
+      "title": "Ya puedes empezar"
     },
-    "logEmpty": "Nothing to show yet.",
-    "manual": "I have a pairing ticket instead",
+    "logEmpty": "Todavía no hay nada que mostrar.",
+    "manual": "Ya tengo un ticket de vinculación",
     "need": {
-      "haveOne": "I already have one",
-      "lead": "Pick one. Each guide uses only the provider's own website; Praxi never sees your account, password or card.",
-      "title": "Get a server"
+      "haveOne": "Ya tengo un servidor",
+      "lead": "Elige una opción. Cada guía usa únicamente el sitio del proveedor. Praxi nunca ve tu cuenta, tu contraseña ni tu tarjeta.",
+      "title": "Consigue un servidor"
     },
-    "noDaemon": "The local Praxi service is not running. Restart the app and try again.",
-    "noKeys": "No key file found in your .ssh folder. Type the path of the key file you downloaded.",
+    "noDaemon": "El servicio local de Praxi no está en ejecución. Reinicia la app e inténtalo de nuevo.",
+    "noKeys": "No se encontró ningún archivo de clave en tu carpeta .ssh. Escribe la ruta de la clave que descargaste.",
     "pairChecks": {
       "models": {
-        "fix": "Not allowed yet. On the server, run: bot host admin --all-desktops . You can send models later from the server's page.",
-        "pass": "This app may send model keys to the server",
-        "pending": "Waiting",
-        "running": "Checking permission…",
-        "title": "Models can be sent"
+        "fix": "Aún falta permiso. Ejecuta bot host admin --all-desktops en el servidor. Puedes enviar modelos más adelante desde la página del servidor.",
+        "pass": "Esta app tiene permiso para enviar claves de modelos al servidor",
+        "pending": "En espera",
+        "running": "Comprobando permisos…",
+        "title": "Se pueden enviar modelos"
       },
       "reach": {
-        "fix": "Praxi could not reach it. Check that the server is on and has internet, then try again. If the code was already used, run the command again for a new one.",
-        "pass": "It answered",
-        "pending": "Waiting",
-        "running": "Calling the server…",
-        "title": "The server answers"
+        "fix": "Praxi no pudo conectarse. Comprueba que el servidor esté encendido y tenga internet. Luego inténtalo de nuevo. Si el código ya se usó, vuelve a ejecutar el comando para obtener otro.",
+        "pass": "El servidor respondió",
+        "pending": "En espera",
+        "running": "Conectando con el servidor…",
+        "title": "El servidor responde"
       },
-      "ready": "Your server is connected and ready.",
+      "ready": "Tu servidor está conectado y listo.",
       "screen": {
-        "fix": "The server has no screen yet, so you cannot watch it, but bots still work. Run the command again to add one.",
-        "pass": "You can watch the server's screen",
-        "pending": "Waiting",
-        "running": "Looking for a screen…",
-        "title": "A screen to watch"
+        "fix": "El servidor aún no tiene pantalla. Los bots pueden seguir funcionando. Vuelve a ejecutar el comando para añadir una pantalla y poder verla.",
+        "pass": "Puedes ver la pantalla del servidor",
+        "pending": "En espera",
+        "running": "Buscando una pantalla…",
+        "title": "Pantalla disponible"
       },
-      "title": "Checking your server",
+      "title": "Comprobando el servidor",
       "version": {
-        "fix": "The server runs a different version. It still works; to match it, run the command again on the server.",
-        "pass": "Both run the same version",
-        "pending": "Waiting",
-        "running": "Comparing versions…",
-        "title": "Same Praxi version"
+        "fix": "El servidor usa una versión distinta, pero sigue funcionando. Vuelve a ejecutar el comando en el servidor si quieres usar la misma versión en ambos equipos.",
+        "pass": "Ambos equipos usan la misma versión",
+        "pending": "En espera",
+        "running": "Comparando versiones…",
+        "title": "Misma versión de Praxi"
       }
     },
-    "passwordNote": "Praxi signs in with a key file, not a password, so no password is ever typed, saved or sent. If your provider only gave you a password, create a key with your provider's help page first.",
-    "port": "Port",
-    "portHint": "Almost always 22. Change it only if your provider told you to.",
+    "passwordNote": "Praxi inicia sesión con un archivo de clave. Nunca escribe, guarda ni envía contraseñas. Si tu proveedor solo te dio una contraseña, consulta su página de ayuda para crear una clave.",
+    "port": "Puerto",
+    "portHint": "Casi siempre es el 22. Cámbialo solo si tu proveedor te indicó otro.",
     "problem": {
-      "hostEmpty": "Type the server's address.",
-      "hostPort": "Leave the :port out. If your port is not 22, open Advanced.",
-      "hostScheme": "Remove the part before the address, such as ssh://. Only type the address itself.",
-      "hostSpaces": "The address cannot contain spaces.",
-      "hostUser": "Type only the address here. The user name goes in the next box.",
-      "keyEmpty": "Choose your private key file.",
-      "keyPublic": "This looks like the public key (.pub). Choose the private one: same name without .pub.",
-      "portInvalid": "The port is a number from 1 to 65535. Normally 22.",
-      "userInvalid": "Use letters, numbers, dots, dashes or underscores only."
+      "hostEmpty": "Escribe la dirección del servidor.",
+      "hostPort": "Escribe la dirección sin :port. Si el puerto no es el 22, abre «Opciones avanzadas».",
+      "hostScheme": "Quita el prefijo de la dirección, como ssh://. Escribe solo la dirección.",
+      "hostSpaces": "La dirección no puede contener espacios.",
+      "hostUser": "Aquí solo va la dirección. Escribe el nombre de usuario en el siguiente campo.",
+      "keyEmpty": "Selecciona tu archivo de clave privada.",
+      "keyPublic": "El archivo parece ser la clave pública (.pub). Elige la privada, que tiene el mismo nombre sin .pub.",
+      "portInvalid": "El puerto debe ser un número entre 1 y 65535. El habitual es 22.",
+      "userInvalid": "Usa solo letras, números, puntos, guiones o guiones bajos."
     },
-    "progress": "Setup progress",
-    "retry": "Try again",
-    "retryResume": "Try again from here",
-    "sayHello": "Say hello to your bot",
-    "showLog": "Show technical log",
+    "progress": "Progreso de la configuración",
+    "retry": "Intentar de nuevo",
+    "retryResume": "Volver a intentar desde aquí",
+    "sayHello": "Saluda a tu bot",
+    "showLog": "Ver registro técnico",
     "stage": {
-      "check": "Check the system",
-      "connect": "Connect and confirm the server",
-      "install": "Install or find Praxi",
-      "pair": "Pair this computer",
-      "verify": "Check that it works"
+      "check": "Comprobar el sistema",
+      "connect": "Conectar y confirmar la identidad del servidor",
+      "install": "Instalar o encontrar Praxi",
+      "pair": "Vincular este equipo",
+      "verify": "Comprobar que funcione"
     },
-    "startFailed": "Could not start. Check the details above and try again.",
-    "starting": "Starting…",
+    "startFailed": "No se pudo iniciar. Revisa los detalles de arriba e inténtalo de nuevo.",
+    "starting": "Iniciando…",
     "state": {
-      "done": "Done",
-      "failed": "Stopped here",
-      "pending": "Waiting",
-      "running": "Working…",
-      "skipped": "Already in place, nothing to do",
-      "waiting": "Needs your answer",
-      "warn": "Done, with a note"
+      "done": "Listo",
+      "failed": "Se detuvo aquí",
+      "pending": "En espera",
+      "running": "En curso…",
+      "skipped": "Este paso ya estaba hecho",
+      "waiting": "Necesita tu respuesta",
+      "warn": "Listo, con una observación"
     },
-    "stepOf": "Step {{n}} of 3",
-    "title": "Add a server",
-    "useServer": "Use this server",
-    "user": "User",
-    "userHint": "Oracle and Ubuntu: ubuntu. Oracle Linux: opc.",
-    "viewScreen": "View screen"
+    "stepOf": "Paso {{n}} de 3",
+    "title": "Añadir un servidor",
+    "useServer": "Usar este servidor",
+    "user": "Usuario",
+    "userHint": "Oracle y Ubuntu: ubuntu. Oracle Linux: opc.",
+    "viewScreen": "Ver pantalla"
   },
   "addSkill": {
     "apps": "Apps",
@@ -971,25 +971,25 @@
   "backdrop": {
     "names": {
       "aurora": "Aurora",
-      "contour": "Contour",
-      "curtain": "Curtain",
-      "custom": "Your own image",
-      "dawn": "Dawn",
-      "grid": "Grid",
-      "ink": "Ink",
-      "lagoon": "Lagoon",
+      "contour": "Contorno",
+      "curtain": "Cortina",
+      "custom": "Tu propia imagen",
+      "dawn": "Amanecer",
+      "grid": "Cuadrícula",
+      "ink": "Tinta",
+      "lagoon": "Laguna",
       "lava": "Lava",
-      "meadow": "Meadow",
-      "night": "Night",
-      "ocean": "Ocean",
-      "peach": "Peach",
-      "pearl": "Pearl",
-      "reed": "Reeded glass",
-      "reed2": "Reeded rose",
-      "reed3": "Reeded ice",
-      "silk": "Silk",
-      "smoke": "Smoke",
-      "sunset": "Sunset"
+      "meadow": "Pradera",
+      "night": "Noche",
+      "ocean": "Océano",
+      "peach": "Durazno",
+      "pearl": "Perla",
+      "reed": "Vidrio estriado",
+      "reed2": "Rosa estriado",
+      "reed3": "Hielo estriado",
+      "silk": "Seda",
+      "smoke": "Humo",
+      "sunset": "Atardecer"
     }
   },
   "botEdit": {
@@ -2330,151 +2330,151 @@
     "unpin": "Unpin"
   },
   "common": {
-    "back": "Back",
-    "cancel": "Cancel",
-    "close": "Close",
-    "delete": "Delete",
-    "edit": "Edit",
-    "save": "Save"
+    "back": "Volver",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "save": "Guardar"
   },
   "computerAccess": {
-    "allow": "Let the bots on {{name}} use this computer",
-    "allowOnce": "Allow once",
-    "allowSession": "Allow for this session",
-    "alwaysRead": "Don't ask before {{name}}'s bots look at the screen",
-    "alwaysReadNote": "Otherwise you are asked once per session. Praxi's own windows are never shown.",
-    "askNote": "Every action that changes something asks you first.",
-    "deny": "Deny",
-    "description": "Servers you paired can ask this computer to look at the screen and act on it, only when you allow it.",
-    "details": "Exactly",
-    "enableAction": "Enable screen and input",
-    "enableHint": "Allow {{name}} to see and control this PC’s screen. Input still asks for your approval.",
-    "enableTitle": "Turn on computer use",
-    "explain": "Off by default. When on, the server's bots can look at this computer's screen. Anything that clicks, types or opens something still asks you first, and Stop always wins.",
+    "allow": "Permitir que los bots de {{name}} usen este equipo",
+    "allowOnce": "Permitir una vez",
+    "allowSession": "Permitir durante esta sesión",
+    "alwaysRead": "Permitir que los bots de {{name}} vean la pantalla sin preguntar",
+    "alwaysReadNote": "Si dejas esta opción desactivada, Praxi te pregunta una vez por sesión. Las ventanas de Praxi nunca se muestran.",
+    "askNote": "Cualquier acción que haga cambios te pide permiso antes.",
+    "deny": "Denegar",
+    "description": "Los servidores vinculados pueden pedir acceso para ver la pantalla de este equipo y actuar en él. Solo pueden hacerlo si tú das permiso.",
+    "details": "Ver detalles",
+    "enableAction": "Activar acceso a la pantalla y al control",
+    "enableHint": "Permite que {{name}} vea y controle la pantalla de este equipo. Para hacer clic o escribir aún necesita tu aprobación.",
+    "enableTitle": "Permitir el uso de este equipo",
+    "explain": "Esta opción está desactivada de forma predeterminada. Al activarla, los bots del servidor pueden ver la pantalla de este equipo. Cualquier clic, escritura o apertura sigue requiriendo tu permiso. «Detener» siempre tiene prioridad.",
     "family": {
-      "browser": "Let the bots on {{name}} use this computer's browser",
-      "commands": "Let the bots on {{name}} run commands on this computer",
-      "files": "Let the bots on {{name}} read files on this computer",
-      "screen": "Let the bots on {{name}} use this computer's screen and input"
+      "browser": "Permitir que los bots de {{name}} usen el navegador de este equipo",
+      "commands": "Permitir que los bots de {{name}} ejecuten comandos en este equipo",
+      "files": "Permitir que los bots de {{name}} lean archivos de este equipo",
+      "screen": "Permitir que los bots de {{name}} vean la pantalla y controlen este equipo"
     },
     "familyNote": {
-      "browser": "A separate browser window with its own profile, not yours. Opening a page or typing in one asks you first.",
-      "commands": "Every command asks you first and is shown to you in full.",
-      "files": "Reading asks once per session; writing a file asks every time. Passwords, other programs' settings and Praxi's own data stay unreachable.",
-      "screen": "Look at the screen, click, type and start programs. Every action that changes something asks you first."
+      "browser": "Usan una ventana de navegador aparte, con su propio perfil. Te piden permiso antes de abrir una página o escribir en ella.",
+      "commands": "Praxi te muestra cada comando completo y te pide permiso antes de ejecutarlo.",
+      "files": "Praxi te pide permiso una vez por sesión para leer y cada vez que vaya a escribir un archivo. Las contraseñas, los ajustes de otros programas y los datos de Praxi siguen fuera de su alcance.",
+      "screen": "Pueden ver la pantalla, hacer clic, escribir e iniciar programas. Cualquier acción que haga cambios te pide permiso antes."
     },
-    "fromBotName": "(the server's bot, as it calls itself: {{name}})",
-    "fromServer": "This name comes from the server, not from this computer.",
-    "fromServerName": "(server name, as it calls itself: {{name}})",
-    "looking": "A bot on {{name}} is looking at this screen",
-    "noServer": "No server is paired yet. Add one and you can let its bots use this computer here.",
-    "readTitle": "A server's bots want to look at your screen",
-    "requestBody": "A bot on this server asks to do this on this computer:",
-    "requestTitle": "A bot wants to act on this computer",
-    "title": "Let my bots use this computer",
-    "what": "Action",
-    "where": "Goes to"
+    "fromBotName": "(nombre que indica el bot del servidor: {{name}})",
+    "fromServer": "El servidor proporciona este nombre. Este equipo no lo asignó.",
+    "fromServerName": "(nombre que indica el propio servidor: {{name}})",
+    "looking": "Un bot de {{name}} está viendo esta pantalla",
+    "noServer": "Aún no hay ningún servidor vinculado. Añade uno para poder autorizar a sus bots a usar este equipo desde aquí.",
+    "readTitle": "Los bots de un servidor quieren ver tu pantalla",
+    "requestBody": "Un bot de este servidor pide permiso para hacer lo siguiente en este equipo:",
+    "requestTitle": "Un bot quiere actuar en este equipo",
+    "title": "Permitir que mis bots usen este equipo",
+    "what": "Acción",
+    "where": "Destino"
   },
   "computerCard": {
-    "big": "Enlarge",
-    "browser": "Browser",
-    "close": "Close",
-    "connecting": "Connecting",
+    "big": "Ampliar",
+    "browser": "Navegador",
+    "close": "Cerrar",
+    "connecting": "Conectando",
     "fps": "{{fps}} fps",
-    "frameAlt": "Live screen of {{name}}",
+    "frameAlt": "Pantalla en vivo de {{name}}",
     "hint": {
-      "idle": "The picture is only made while you look",
-      "paused": "Paused because nobody looked for 3 minutes",
-      "starting": "Starting the screen…"
+      "idle": "La imagen solo se genera mientras ves la pantalla",
+      "paused": "Pausada porque nadie vio la pantalla durante 3 minutos",
+      "starting": "Iniciando la vista de pantalla…"
     },
-    "live": "LIVE",
-    "mainBot": "Main bot: {{name}}",
-    "pausedNote": "paused",
+    "live": "EN VIVO",
+    "mainBot": "Bot principal: {{name}}",
+    "pausedNote": "en pausa",
     "presence": {
-      "busy": "Working",
-      "offline": "Offline",
-      "online": "Online"
+      "busy": "Trabajando",
+      "offline": "Desconectado",
+      "online": "En línea"
     },
     "reason": {
-      "connecting": "Connecting to {{name}}…",
-      "failed": "Could not get the screen",
-      "noScreen": "No screen: {{detail}}",
-      "notPaired": "The server no longer accepts this computer",
-      "offline": "Cannot reach the server",
-      "permission": "This computer may not watch the server's screen yet",
-      "timeout": "The screen took too long to start",
-      "version": "The app and the server are on different versions"
+      "connecting": "Conectando con {{name}}…",
+      "failed": "No se pudo obtener la imagen de la pantalla",
+      "noScreen": "Pantalla no disponible: {{detail}}",
+      "notPaired": "El servidor ya no acepta este equipo",
+      "offline": "No se pudo conectar con el servidor",
+      "permission": "Este equipo aún no tiene permiso para ver la pantalla del servidor",
+      "timeout": "La vista de pantalla tardó demasiado en iniciarse",
+      "version": "La app y el servidor tienen versiones distintas"
     },
-    "resume": "Resume",
-    "retry": "Try again",
-    "show": "Show screen",
-    "sideBot": "Bot's",
-    "sideMine": "Mine",
-    "stalled": "No new picture for a moment…",
+    "resume": "Reanudar",
+    "retry": "Intentar de nuevo",
+    "show": "Mostrar pantalla",
+    "sideBot": "Del bot",
+    "sideMine": "Mía",
+    "stalled": "Por ahora no hay una imagen nueva…",
     "status": {
-      "local": "{{system}} · the bot works here",
-      "localNoSystem": "The bot works here",
-      "serverOffline": "not answering · reconnecting",
-      "serverOnline": "Server · online"
+      "local": "{{system}} · El bot trabaja aquí",
+      "localNoSystem": "El bot trabaja aquí",
+      "serverOffline": "sin respuesta · reconectando",
+      "serverOnline": "Servidor · En línea"
     },
-    "take": "Take control",
+    "take": "Tomar el control",
     "terminal": "Terminal",
-    "terminalSoon": "Coming soon",
-    "thisComputer": "This computer",
-    "title": "Computer"
+    "terminalSoon": "Próximamente",
+    "thisComputer": "Este equipo",
+    "title": "Equipo"
   },
   "computerPicker": {
-    "add": "Add server…",
-    "host": "Host",
-    "label": "Computer: {{name}}",
+    "add": "Añadir servidor…",
+    "host": "Equipo anfitrión",
+    "label": "Equipo: {{name}}",
     "link": {
-      "connected": "Connected",
-      "connecting": "Connecting…",
-      "idle": "Paired, not connected",
-      "offline": "Not answering",
-      "unreachable": "No longer paired"
+      "connected": "Conectado",
+      "connecting": "Conectando…",
+      "idle": "Vinculado, sin conexión",
+      "offline": "No responde",
+      "unreachable": "Ya no está vinculado"
     },
-    "localHint": "Runs here, on this PC",
-    "makeHome": "Make this server my bots' home…",
-    "menu": "Computer"
+    "localHint": "Se ejecuta aquí, en este equipo",
+    "makeHome": "Ejecutar mis bots en este servidor…",
+    "menu": "Equipo"
   },
   "connectionTest": {
-    "button": "Test connection",
-    "details": "Details",
-    "learnMore": "Read more in the guide",
+    "button": "Probar conexión",
+    "details": "Detalles",
+    "learnMore": "Consultar la guía",
     "outcome": {
       "bad_key": {
-        "next": "Copy the key again from the provider's website, make sure nothing is missing at the start or end, then paste and save it again.",
-        "title": "The key was not accepted."
+        "next": "Vuelve a copiar la clave del sitio del proveedor. Comprueba que no falte nada al principio ni al final y vuelve a pegarla y guardarla.",
+        "title": "El servicio rechazó la clave."
       },
       "no_network": {
-        "next": "Check your internet connection, VPN or proxy. For a program on this computer, make sure it is running, then try again.",
-        "title": "Could not reach the service."
+        "next": "Comprueba tu conexión a internet, la VPN o el proxy. Si usas un programa en este equipo, confirma que esté en ejecución e inténtalo de nuevo.",
+        "title": "No se pudo conectar con el servicio."
       },
       "ok": {
-        "next": "Nothing to do. You can close this.",
-        "title": "It works. The connection is fine."
+        "next": "Ya puedes cerrar esta ventana.",
+        "title": "La conexión funciona."
       },
       "provider_outage": {
-        "next": "This is not your fault. Try again in a few minutes, or check the provider's status page.",
-        "title": "The service has a problem right now."
+        "next": "Inténtalo de nuevo en unos minutos o consulta la página de estado del proveedor.",
+        "title": "El servicio tiene un problema en este momento."
       },
       "quota_exceeded": {
-        "next": "Wait a little and try again, or check your plan and credit on the provider's website.",
-        "title": "The key works, but its limit is used up."
+        "next": "Espera un poco e inténtalo de nuevo, o revisa tu plan y saldo en el sitio del proveedor.",
+        "title": "La clave funciona, pero alcanzó su límite de uso."
       },
       "unknown": {
-        "next": "Open the details below and compare them with the guide. If that does not help, copy the details when you ask for help.",
-        "title": "The test gave an unclear result."
+        "next": "Abre los detalles de abajo y compáralos con la guía. Si el problema continúa, copia los detalles al pedir ayuda.",
+        "title": "La prueba no dio un resultado claro."
       },
       "wrong_endpoint": {
-        "next": "Check the web address (or the command) you entered. It should be the one the service documents.",
-        "title": "The address does not look right."
+        "next": "Comprueba la dirección web o el comando que escribiste. Usa el que indica la documentación del servicio.",
+        "title": "La dirección parece incorrecta."
       }
     },
-    "savedKeys": "Test your saved keys",
-    "testProvider": "Test {{provider}}",
-    "testing": "Testing…"
+    "savedKeys": "Probar tus claves guardadas",
+    "testProvider": "Probar {{provider}}",
+    "testing": "Comprobando…"
   },
   "contextMenu": {
     "ask": "Preguntar al bot sobre esto",
@@ -2514,88 +2514,88 @@
     "userMessageLabel": "Tu mensaje"
   },
   "control": {
-    "starting": "Working…"
+    "starting": "En curso…"
   },
   "copySetup": {
-    "answerFirst": "Choose what to do with the bot that already exists on the server before moving.",
+    "answerFirst": "Antes de moverlo, decide qué hacer con el bot que ya existe en el servidor.",
     "blocked": {
-      "cli_engine": "Uses a CLI engine that stays on this computer",
-      "no_export": "Not moved yet: memory has no export"
+      "cli_engine": "Usa un motor de línea de comandos que permanece en este equipo",
+      "no_export": "La memoria queda aquí por ahora porque no se puede exportar"
     },
-    "cannotMove": "Cannot move yet: memory, app connections, and CLI sign-ins (Claude Code, Codex, agy, OpenCode sign in on the server itself). Files and attachments that chats mention are not copied; webhook secrets stay behind.",
+    "cannotMove": "Por ahora se quedan aquí la memoria y las conexiones a apps. Debes iniciar sesión en Claude Code, Codex, agy y OpenCode en el propio servidor. Praxi no copia los archivos ni los adjuntos mencionados en chats, y las credenciales de los webhooks se quedan aquí.",
     "choice": {
-      "adopt": "It is the same bot - link them",
-      "adoptWhy": "Its schedules and chats will be added to that bot on {{server}}.",
-      "separate": "Keep them separate",
-      "separateWhy": "This bot and everything that belongs to it stays here and is not moved."
+      "adopt": "Es el mismo bot: vincularlos",
+      "adoptWhy": "Las tareas programadas y los chats se añadirán a ese bot en {{server}}.",
+      "separate": "Mantenerlos separados",
+      "separateWhy": "Este bot se queda aquí con todos sus datos."
     },
     "counts": {
-      "chats": "{{count}} messages moved, {{existing}} already there, {{skipped}} left behind",
-      "schedules": "{{count}} moved, {{existing}} already there, {{skipped}} left behind"
+      "chats": "{{count}} mensajes movidos · {{existing}} ya estaban allí · {{skipped}} quedaron aquí",
+      "schedules": "{{count}} movidas · {{existing}} ya estaban allí · {{skipped}} quedaron aquí"
     },
-    "failed": "That did not work. Check that the server is connected and try again.",
-    "homeFailed": "The items moved, but the server could not be marked as your bots' home.",
+    "failed": "No se pudo completar el traslado. Comprueba que el servidor esté conectado e inténtalo de nuevo.",
+    "homeFailed": "Los elementos se movieron, pero no se pudo elegir el servidor para ejecutar tus bots.",
     "host": {
-      "host_admin_forbidden": "The server does not accept this computer.",
-      "host_admin_required": "The owner must confirm this computer on the server once. Run this on the server:",
-      "secrets_unavailable": "The server cannot store keys yet. On the server:"
+      "host_admin_forbidden": "El servidor no acepta este equipo.",
+      "host_admin_required": "El propietario debe confirmar este equipo en el servidor una vez. Ejecuta este comando en el servidor:",
+      "secrets_unavailable": "El servidor aún no puede guardar claves. Ejecuta este comando allí:"
     },
-    "keepLocal": "Nothing is deleted on this computer. Schedules that move are frozen here (they cannot be switched on again by accident) and run on the server; you can bring one back from its row on the Schedules page. You can run this again later to sync: it never duplicates.",
-    "keptSeparate": "Kept separate from the bot of the same name on {{server}}",
+    "keepLocal": "Praxi no borra nada de este equipo. Las tareas trasladadas quedan desactivadas aquí para evitar que las actives por accidente y se ejecutan en el servidor. Puedes recuperar una desde su fila en «Tareas programadas». Puedes repetir el traslado para sincronizar los cambios sin duplicar elementos.",
+    "keptSeparate": "Se mantuvo separado del bot del mismo nombre en {{server}}",
     "kind": {
       "bot": "Bot",
-      "chats": "{{count}} chats, {{messages}} messages; authors and times are kept",
-      "chatsName": "Chat history",
-      "default": "Default model",
-      "memory": "Memory",
-      "memoryName": "Memory",
-      "provider": "Model provider",
-      "providerKey": "Model provider and its key",
-      "schedules": "{{count}} on this computer; their time zones are kept, the copies here are switched off",
-      "schedulesName": "Schedules and triggers"
+      "chats": "{{count}} chats, {{messages}} mensajes. Se conservan los autores y las horas.",
+      "chatsName": "Historial de chats",
+      "default": "Modelo predeterminado",
+      "memory": "Memoria",
+      "memoryName": "Memoria",
+      "provider": "Proveedor de modelos",
+      "providerKey": "Proveedor de modelos y su clave",
+      "schedules": "{{count}} en este equipo. Se conservan sus zonas horarias y las copias de aquí quedan desactivadas.",
+      "schedulesName": "Tareas programadas y disparadores"
     },
-    "lead": "Your bots, their model keys and settings move to the server, so they keep working when this computer is off. You stay in the same app.",
-    "nameTaken": "A bot named {{name}} already exists on {{server}}.",
+    "lead": "Tus bots, las claves de sus modelos y su configuración se trasladan al servidor para que sigan funcionando aunque apagues este equipo. Puedes seguir usando la misma app.",
+    "nameTaken": "Ya hay un bot llamado {{name}} en {{server}}.",
     "result": {
-      "admin_rate_limit": "Server asked to wait; run it again to continue",
-      "bot_not_moved": "Its bot is not on the server",
-      "choice_not_saved": "Could not save your choice",
-      "cli_engine": "Stays here (CLI engine)",
-      "done": "Moved",
-      "exists": "Already on the server",
-      "failed": "Failed",
-      "freeze_failed": "Could not freeze the local copy; nothing was switched on there",
-      "host_admin_forbidden": "Refused by the server",
-      "host_admin_required": "Server needs confirmation",
-      "host_unreachable": "Server did not answer",
-      "id_in_use": "The server already has something with this id",
-      "kept_separate": "Kept separate: nothing of it moved",
-      "key_unreadable": "Key not readable here",
-      "name_taken": "A different bot with this name already exists on the server",
-      "no_default": "No default model",
-      "not_copyable": "Cannot be moved",
-      "not_found": "Not found",
-      "rejected": "Server refused it",
-      "secret_store_failed": "Server could not save it",
-      "secrets_unavailable": "Server cannot store keys",
-      "skipped": "Skipped",
-      "unreadable": "Could not be read here"
+      "admin_rate_limit": "El servidor pidió que esperes. Vuelve a ejecutar el traslado para continuar.",
+      "bot_not_moved": "Su bot no está en el servidor",
+      "choice_not_saved": "No se pudo guardar tu elección",
+      "cli_engine": "Se queda aquí (motor de línea de comandos)",
+      "done": "Se movió",
+      "exists": "Ya estaba en el servidor",
+      "failed": "Falló",
+      "freeze_failed": "No se pudo desactivar la copia local. No se activó nada en el servidor.",
+      "host_admin_forbidden": "El servidor lo rechazó",
+      "host_admin_required": "El servidor requiere confirmación",
+      "host_unreachable": "El servidor no respondió",
+      "id_in_use": "El servidor ya tiene un elemento con este identificador",
+      "kept_separate": "Se mantuvo separado con todos sus datos",
+      "key_unreadable": "No se puede leer la clave en este equipo",
+      "name_taken": "Ya existe otro bot con ese nombre en el servidor",
+      "no_default": "No hay un modelo predeterminado",
+      "not_copyable": "No se puede mover",
+      "not_found": "No se encontró",
+      "rejected": "El servidor lo rechazó",
+      "secret_store_failed": "El servidor no pudo guardarlo",
+      "secrets_unavailable": "El servidor no puede guardar claves",
+      "skipped": "Se omitió",
+      "unreadable": "No se pudo leer en este equipo"
     },
-    "send": "Move to the server",
-    "sending": "Moving…",
-    "summary": "{{done}} moved, {{skipped}} skipped, {{failed}} failed.",
-    "title": "Make this server the home of my bots"
+    "send": "Mover al servidor",
+    "sending": "Trasladando…",
+    "summary": "Se movieron {{done}} · Se omitieron {{skipped}} · Fallaron {{failed}}.",
+    "title": "Ejecutar mis bots en este servidor"
   },
   "deepLinks": {
-    "blocked": "Finish your current work before opening this link.",
-    "invalid": "This Praxi link is invalid.",
-    "missing": "This link’s destination is unavailable on the selected computer.",
-    "offline": "The selected computer is unavailable. Try the link again when it’s online."
+    "blocked": "Termina lo que estás haciendo antes de abrir este enlace.",
+    "invalid": "Este enlace de Praxi no es válido.",
+    "missing": "El destino del enlace no está disponible en el equipo seleccionado.",
+    "offline": "El equipo seleccionado no está disponible. Vuelve a abrir el enlace cuando se conecte."
   },
   "dev": {
-    "runningLabel": "Bot Run Active",
-    "sectionTitle": "Developer",
-    "simulateBotRun": "Simulate bot run"
+    "runningLabel": "Ejecución del bot en curso",
+    "sectionTitle": "Desarrollo",
+    "simulateBotRun": "Simular una ejecución del bot"
   },
   "digest": {
     "cost": "{{calls}} model calls, {{cost}}.",
@@ -3312,189 +3312,189 @@
     }
   },
   "firstRun": {
-    "back": "Back",
-    "badge": "Setup",
+    "back": "Volver",
+    "badge": "Configuración",
     "bot": {
-      "createFailed": "Your bot could not be created. Nothing was saved. Try again in a moment.",
+      "createFailed": "No se pudo crear tu bot. No se guardó nada. Inténtalo de nuevo en un momento.",
       "defaultName": "Praxi",
-      "noService": "Praxi's background service is not running yet. Wait a few seconds and try again.",
-      "recap": "Brain: {{model}} · Freedom: {{level}}",
-      "subtitle": "Give it a name and a look. You can change both later.",
-      "title": "Meet your bot",
-      "tryTitle": "Try this first",
-      "whereBody": "Your bot runs on this computer while Praxi-Bot is open. It only touches the folders you share with it.",
-      "whereLater": "Want it to keep working when your computer is off? You can add a server later in Settings. You do not need one now.",
-      "whereTitle": "Where your bot runs"
+      "noService": "El servicio en segundo plano de Praxi aún no está en ejecución. Espera unos segundos e inténtalo de nuevo.",
+      "recap": "Modelo: {{model}} · Autonomía: {{level}}",
+      "subtitle": "Ponle un nombre y elige su aspecto. Puedes cambiar ambos más adelante.",
+      "title": "Conoce a tu bot",
+      "tryTitle": "Prueba esto primero",
+      "whereBody": "Tu bot funciona en este equipo mientras Praxi-Bot está abierto. Solo accede a las carpetas que compartas con él.",
+      "whereLater": "¿Quieres que siga trabajando con el equipo apagado? Puedes añadir un servidor más adelante en Ajustes. Por ahora no hace falta.",
+      "whereTitle": "Dónde se ejecuta tu bot"
     },
     "brain": {
-      "another": "Pick a different brain",
-      "apiTitle": "Use your own AI account",
-      "apiTitleAfter": "Or use your own AI account",
-      "change": "Change",
-      "checking": "Checking…",
-      "cliReady": "{{name}} is ready",
-      "cliSub": "Your subscription · no key needed",
-      "cliSubAccount": "{{account}} · no key needed",
-      "connect": "Connect",
-      "connected": "Connected",
-      "connectedModel": "Connected · {{count}} model",
-      "connectedModels": "Connected · {{count}} models",
-      "easyTitle": "The easiest way",
-      "foundTitle": "Already on this computer",
+      "another": "Elige otro modelo",
+      "apiTitle": "Usa tu propia cuenta de IA",
+      "apiTitleAfter": "O usa tu propia cuenta de IA",
+      "change": "Cambiar",
+      "checking": "Comprobando…",
+      "cliReady": "{{name}} está listo",
+      "cliSub": "Tu suscripción · No requiere clave",
+      "cliSubAccount": "{{account}} · No requiere clave",
+      "connect": "Conectar",
+      "connected": "Conectado",
+      "connectedModel": "Conectado · {{count}} modelo",
+      "connectedModels": "Conectado · {{count}} modelos",
+      "easyTitle": "La opción más sencilla",
+      "foundTitle": "Ya disponible en este equipo",
       "freeSteps": {
-        "one": "Press “Get my key”. A Google page opens in your browser.",
-        "three": "Come back here and paste it below. Praxi-Bot checks it right away.",
-        "two": "Sign in with Google and press “Create API key”. Then copy the key."
+        "one": "Pulsa «Obtener mi clave». Se abrirá una página de Google en tu navegador.",
+        "three": "Vuelve aquí y pega la clave abajo. Praxi-Bot la comprobará enseguida.",
+        "two": "Inicia sesión con Google y pulsa «Crear clave de API». Luego copia la clave."
       },
-      "freeSub": "Google Gemini has a free plan. It takes about two minutes and you only need a Google account.",
-      "freeTitle": "Use a free model",
-      "getFreeKey": "Get my key",
-      "getKey": "Get a key",
-      "hide": "Hide key",
-      "keyHint": "Saved in your system keychain. It is never shown again.",
-      "keyLabel": "{{name}} API key",
-      "keyPlaceholder": "Paste your key here",
+      "freeSub": "Google Gemini tiene un plan gratuito. Solo necesitas una cuenta de Google y unos dos minutos.",
+      "freeTitle": "Usa un modelo gratuito",
+      "getFreeKey": "Obtener mi clave",
+      "getKey": "Obtener una clave",
+      "hide": "Ocultar clave",
+      "keyHint": "La clave se guarda en el llavero del sistema. No volverá a mostrarse.",
+      "keyLabel": "Clave de API de {{name}}",
+      "keyPlaceholder": "Pega tu clave aquí",
       "keyProblem": {
-        "address": "That looks like a web address, not a key. Go back to the key page and copy the key itself.",
-        "prefix": "This does not look like a key from this service. You can still try it, but check you copied the right one.",
-        "short": "That is too short for a key. Copy the whole key, it is a long line of letters and numbers."
+        "address": "Lo que pegaste parece una dirección web. Vuelve a la página donde obtuviste la clave y copia la clave.",
+        "prefix": "La clave no parece ser de este servicio. Puedes probarla, pero comprueba que copiaste la correcta.",
+        "short": "El texto es demasiado corto para ser una clave. Copia la línea completa de letras y números."
       },
-      "laterNote": "Not ready? Press “I will add this later” at the top. You can look around, and your bot starts answering as soon as you add a model in Settings → AI.",
+      "laterNote": "¿Todavía no tienes un modelo? Pulsa «Lo añadiré más tarde» arriba. Puedes explorar la app. Tu bot empezará a responder cuando añadas un modelo en Ajustes → IA.",
       "local": {
-        "llamacpp": "llama.cpp server",
+        "llamacpp": "Servidor de llama.cpp",
         "lmstudio": "LM Studio"
       },
-      "localSubMany": "{{count}} models installed",
-      "localSubOne": "{{count}} model installed",
-      "localTitle": "Also running on this computer",
-      "looking": "Looking for what is already on this computer…",
-      "model": "Model",
-      "paste": "Paste",
+      "localSubMany": "{{count}} modelos instalados",
+      "localSubOne": "{{count}} modelo instalado",
+      "localTitle": "También en ejecución en este equipo",
+      "looking": "Buscando qué hay disponible en este equipo…",
+      "model": "Modelo",
+      "paste": "Pegar",
       "providers": {
         "anthropic": {
           "badge": "",
           "name": "Anthropic",
-          "sub": "Claude models"
+          "sub": "Modelos Claude"
         },
         "gemini": {
-          "badge": "Free tier",
+          "badge": "Plan gratuito",
           "name": "Google Gemini",
-          "sub": "Fast, with a generous free quota"
+          "sub": "Rápido y con una cuota gratuita amplia"
         },
         "ollama": {
           "badge": "",
-          "found": "Running here",
+          "found": "En ejecución en este equipo",
           "name": "Ollama",
-          "sub": "Models on this computer, no key"
+          "sub": "Modelos en este equipo, sin clave"
         },
         "openai": {
           "badge": "",
-          "name": "OpenAI-compatible",
+          "name": "Compatible con OpenAI",
           "sub": "OpenAI, OpenRouter, DeepSeek"
         }
       },
-      "recommended": "Recommended",
-      "show": "Show key",
-      "subtitle": "This is the model that thinks for your bot. You can change it any time.",
-      "title": "Choose a brain",
-      "useCli": "Use {{name}}"
+      "recommended": "Recomendado",
+      "show": "Mostrar clave",
+      "subtitle": "Este modelo le permite a tu bot entender lo que pides y responder. Puedes cambiarlo cuando quieras.",
+      "title": "Elige un modelo",
+      "useCli": "Usar {{name}}"
     },
-    "creating": "Creating…",
+    "creating": "Creando…",
     "errors": {
-      "badKey": "{{name}} did not accept this key. Check that you copied all of it, then paste it again.",
-      "noModels": "{{name}} accepted the key but listed no models. Try again in a moment.",
-      "offline": "Could not reach {{name}}. Check your internet connection and try again.",
-      "ollamaDown": "Ollama does not seem to be running. Open the Ollama app (or run `ollama serve` in a terminal), then choose it again.",
-      "ollamaNoModels": "Ollama is running but has no models installed. In a terminal run `ollama pull {{model}}` (a small model), then choose Ollama again.",
-      "unavailable": "Keys can only be saved from the desktop app on this computer.",
-      "unknown": "Something went wrong while connecting {{name}}. Try again, or add the key later in Settings → AI."
+      "badKey": "{{name}} rechazó la clave. Comprueba que la copiaste completa y vuelve a pegarla.",
+      "noModels": "{{name}} aceptó la clave, pero no devolvió ningún modelo. Inténtalo de nuevo en un momento.",
+      "offline": "No se pudo conectar con {{name}}. Comprueba tu conexión a internet e inténtalo de nuevo.",
+      "ollamaDown": "Ollama parece estar detenido. Abre la app de Ollama o ejecuta `ollama serve` en una terminal. Luego vuelve a seleccionarlo.",
+      "ollamaNoModels": "Ollama está en ejecución, pero no tiene modelos instalados. Ejecuta `ollama pull {{model}}` en una terminal para descargar un modelo pequeño y vuelve a seleccionar Ollama.",
+      "unavailable": "Solo puedes guardar claves desde la app de escritorio en este equipo.",
+      "unknown": "Hubo un problema al conectar con {{name}}. Inténtalo de nuevo o añade la clave más adelante en Ajustes → IA."
     },
-    "finishHint": "Finish setup",
+    "finishHint": "Terminar configuración",
     "freedom": {
-      "alwaysMoney": "Payments always need your confirmation.",
-      "alwaysStop": "Press {{hotkey}} with Praxi-Bot focused, or click “Stop” in the floating widget. In the Windows desktop app, the shortcut also works while another app has focus.",
-      "alwaysTitle": "Always on, whatever you pick",
+      "alwaysMoney": "Los pagos siempre requieren tu confirmación.",
+      "alwaysStop": "Pulsa {{hotkey}} con Praxi-Bot en primer plano o elige «Detener» en el widget flotante. En la app de escritorio para Windows, el atajo funciona aunque estés usando otra aplicación.",
+      "alwaysTitle": "Siempre se aplica",
       "levels": {
         "ask": {
           "examples": [
-            "Asks before saving or editing a file",
-            "Asks before clicking or typing for you",
-            "Asks before running a command"
+            "Pide permiso antes de guardar o editar un archivo",
+            "Pide permiso antes de hacer clic o escribir por ti",
+            "Pide permiso antes de ejecutar un comando"
           ],
-          "pitch": "Checks with you before it changes anything. Good while you get to know it."
+          "pitch": "Te consulta antes de hacer cambios. Es una buena opción mientras te familiarizas con el bot."
         },
         "auto": {
           "examples": [
-            "Edits and deletes ordinary files on its own",
-            "Runs commands and sends messages on its own",
-            "Always stops for payments"
+            "Edita y elimina archivos comunes por su cuenta",
+            "Ejecuta comandos y envía mensajes por su cuenta",
+            "Siempre se detiene antes de hacer un pago"
           ],
-          "pitch": "Gets on with it. Stops only for payments and a short never-list."
+          "pitch": "Actúa por su cuenta. Solo te pide confirmación antes de un pago o de una de las acciones que siempre la requieren."
         },
         "balanced": {
           "examples": [
-            "Reads files and checks your screen without asking",
-            "Asks before deleting or sending",
-            "Shows you what it wants to do first"
+            "Lee archivos y revisa tu pantalla sin preguntar",
+            "Pide permiso antes de eliminar o enviar algo",
+            "Primero te muestra lo que quiere hacer"
           ],
-          "pitch": "Looks around on its own, asks before it changes or sends anything."
+          "pitch": "Explora por su cuenta y te pregunta antes de cambiar o enviar algo."
         }
       },
-      "recommended": "Recommended",
-      "subtitle": "Decide how much your bot may do without asking. Every bot can have its own level later.",
-      "title": "How much freedom?"
+      "recommended": "Recomendado",
+      "subtitle": "Decide qué puede hacer tu bot sin preguntar. Más adelante puedes elegir un nivel para cada bot.",
+      "title": "¿Cuánta autonomía le das?"
     },
-    "help": "Need help?",
-    "language": "Language",
-    "next": "Continue",
-    "progress": "Step {{current}} of {{total}}",
+    "help": "¿Necesitas ayuda?",
+    "language": "Idioma",
+    "next": "Continuar",
+    "progress": "Paso {{current}} de {{total}}",
     "prompts": {
-      "draft": "Help me write a short, friendly message to a neighbour",
-      "folder": "Summarise this folder",
-      "news": "Find today's top AI news",
-      "screen": "What is on my screen right now?"
+      "draft": "Ayúdame a escribirle un mensaje breve y amable a un vecino",
+      "folder": "Resume el contenido de esta carpeta",
+      "news": "Busca las noticias de IA más importantes de hoy",
+      "screen": "¿Qué hay ahora en mi pantalla?"
     },
     "service": {
-      "body": "Praxi starts it automatically. Wait a few seconds and try again; if it keeps failing, restart the app.",
-      "retry": "Try again",
-      "title": "Praxi's background service is not running yet"
+      "body": "Praxi lo inicia automáticamente. Espera unos segundos y vuelve a intentarlo. Si sigue fallando, reinicia la app.",
+      "retry": "Intentar de nuevo",
+      "title": "El servicio en segundo plano de Praxi aún no está en ejecución"
     },
-    "skip": "I will add this later",
-    "skipTip": "Look around first. You can finish the setup later from the Finish setup button.",
-    "start": "Start",
+    "skip": "Lo añadiré más tarde",
+    "skipTip": "Explora la app primero. Puedes volver con el botón «Terminar configuración».",
+    "start": "Empezar",
     "steps": {
-      "bot": "Your bot",
-      "brain": "Brain",
-      "freedom": "Freedom"
+      "bot": "Tu bot",
+      "brain": "Modelo",
+      "freedom": "Autonomía"
     }
   },
   "folderTrust": {
-    "action": "I trust this folder — don't treat {{folder}} as outside content",
-    "description": "Folders you trust are treated as your own content. Files fetched by a bot still count as outside content. Current tasks keep the content they already read.",
-    "empty": "No trusted folders yet. Trust a folder from an approval card after reading it.",
-    "ownerRequired": "Open the desktop app on this computer to change folder trust.",
-    "remove": "Remove trust for {{folder}}",
-    "saved": "Trusted: {{folder}}",
-    "title": "Trusted folders"
+    "action": "Confío en esta carpeta. No trates {{folder}} como contenido externo.",
+    "description": "Praxi trata las carpetas en las que confías como contenido tuyo. Los archivos que obtiene un bot siguen contando como contenido externo. Las tareas en curso conservan el contenido que ya leyeron.",
+    "empty": "Aún no hay carpetas de confianza. Después de leer una carpeta, puedes marcarla como confiable desde una tarjeta de aprobación.",
+    "ownerRequired": "Abre la app de escritorio en este equipo para cambiar qué carpetas son de confianza.",
+    "remove": "Dejar de confiar en {{folder}}",
+    "saved": "Carpeta de confianza: {{folder}}",
+    "title": "Carpetas de confianza"
   },
   "gettingStarted": {
-    "allDone": "You're all set. Everything here is done.",
-    "hide": "Hide from the start screen",
-    "progress": "{{done}} of {{total}} done",
-    "show": "Show on the start screen again",
-    "stateDone": "done",
-    "stateOpen": "not done yet",
-    "title": "Getting started"
+    "allDone": "Ya está todo listo.",
+    "hide": "Ocultar de la pantalla de inicio",
+    "progress": "{{done}} de {{total}} completados",
+    "show": "Volver a mostrar en la pantalla de inicio",
+    "stateDone": "completado",
+    "stateOpen": "pendiente",
+    "title": "Primeros pasos"
   },
   "health": {
-    "connected": "Local service running",
-    "connecting": "Starting the local service…",
-    "details": "Daemon {{version}} · up {{uptime}} s {{mode}}",
-    "failed": "Local service stopped",
-    "fakeProvider": "Fake provider",
-    "offline": "Local service offline",
-    "reconnecting": "Reconnecting…",
-    "retry": "Retry"
+    "connected": "Servicio local en ejecución",
+    "connecting": "Iniciando el servicio local…",
+    "details": "Servicio {{version}} · {{uptime}} s en ejecución {{mode}}",
+    "failed": "Servicio local detenido",
+    "fakeProvider": "Proveedor simulado",
+    "offline": "Servicio local desconectado",
+    "reconnecting": "Reconectando…",
+    "retry": "Intentar de nuevo"
   },
   "help": {
     "center": {
@@ -3707,68 +3707,68 @@
   },
   "hostMode": {
     "have": {
-      "bots": "Bots are ready on this server.",
-      "model": "A model is connected."
+      "bots": "Los bots de este servidor están listos.",
+      "model": "Hay un modelo conectado."
     },
-    "managedOnServer": "Keys, permissions, tools and pairing are managed on {{name}} itself. Here you can create and edit bots, chat and watch its screen.",
+    "managedOnServer": "Las claves, los permisos, las herramientas y la vinculación se gestionan en {{name}}. Desde aquí puedes crear y editar bots, hablar con ellos y ver la pantalla del servidor.",
     "missing": {
-      "bots": "No bots on this server yet.",
-      "model": "No model connected on this server yet."
+      "bots": "Todavía no hay bots en este servidor.",
+      "model": "Todavía no hay ningún modelo conectado en este servidor."
     },
     "model": {
-      "action": "Connect a model on {{name}}",
-      "afterwards": "This app picks it up on its own a few seconds later.",
-      "copy": "Copy command",
-      "fromApp": "Add the key for {{name}} here.",
-      "onServer": "For now, keys are added on the server itself, not from this app. Open a terminal on {{name}} and run:",
-      "title": "Connect a model on this server"
+      "action": "Conectar un modelo en {{name}}",
+      "afterwards": "La app detectará el cambio a los pocos segundos.",
+      "copy": "Copiar comando",
+      "fromApp": "Añade aquí la clave para {{name}}.",
+      "onServer": "Por ahora, las claves solo se añaden en el propio servidor. Abre una terminal en {{name}} y ejecuta:",
+      "title": "Conecta un modelo en este servidor"
     },
-    "newBotNeedsModel": "{{name}} has no model yet, so a bot cannot be created there. Connect a model on the server first.",
+    "newBotNeedsModel": "{{name}} aún no tiene un modelo. Conecta uno en el servidor antes de crear un bot allí.",
     "refusal": {
-      "botPermissions": "A bot's permissions and tools are managed on {{name}} itself. Name, persona and model can be changed here.",
-      "composio": "App connections are managed on this computer's owner side, not on {{name}}.",
-      "connectionTest": "Key tests run on {{name}} itself and are not available from this app.",
-      "credentials": "Email and search accounts are connected on {{name}} itself.",
-      "generic": "{{name}} did not allow this: {{reason}}",
-      "hostTransfer": "Moving the host and pairing channels is done on {{name}} itself.",
-      "knowledge": "Knowledge settings are managed on {{name}} itself.",
-      "lifecycle": "Pairing and host updates are done on {{name}} itself.",
-      "localOnly": "Only the person at {{name}} can do this, not this app.",
-      "localProviders": "Local models and coding tools belong to the computer where the bot runs. Switch to This computer to set them up.",
-      "overlay": "Only the person at {{name}} can answer that prompt.",
-      "ownerOnly": "This can only be done on {{name}} itself.",
-      "policy": "The execution policy is set on {{name}} itself, not from this app.",
-      "role": "{{name}} does not allow this computer to do that.",
-      "screenInput": "{{name}} has not allowed this computer to control its screen. Allow it in Praxi on {{name}}.",
-      "secrets": "Keys and secrets are added on {{name}} itself, not from this app.",
-      "tools": "Tool servers and skills are managed on {{name}} itself."
+      "botPermissions": "Los permisos y las herramientas de cada bot se gestionan en {{name}}. Desde aquí puedes cambiar su nombre, personalidad y modelo.",
+      "composio": "Las conexiones a apps las gestiona el propietario de este equipo. No se gestionan en {{name}}.",
+      "connectionTest": "Las claves solo se pueden probar desde {{name}}.",
+      "credentials": "Las cuentas de correo y búsqueda se conectan en {{name}}.",
+      "generic": "{{name}} rechazó esta acción: {{reason}}",
+      "hostTransfer": "El traslado del equipo anfitrión y la vinculación de canales se hacen en {{name}}.",
+      "knowledge": "Los ajustes de conocimiento se gestionan en {{name}}.",
+      "lifecycle": "La vinculación y las actualizaciones del equipo anfitrión se hacen en {{name}}.",
+      "localOnly": "Solo la persona que está en {{name}} puede hacer esto.",
+      "localProviders": "Los modelos locales y las herramientas de programación pertenecen al equipo que ejecuta el bot. Cambia a «Este equipo» para configurarlos.",
+      "overlay": "Solo la persona que está en {{name}} puede responder a ese aviso.",
+      "ownerOnly": "Esto solo se puede hacer en {{name}}.",
+      "policy": "La política de ejecución se configura únicamente en {{name}}.",
+      "role": "{{name}} no permite que este equipo haga eso.",
+      "screenInput": "{{name}} no ha autorizado a este equipo a controlar su pantalla. Concede el permiso en Praxi desde {{name}}.",
+      "secrets": "Las claves y otras credenciales solo se añaden en {{name}}.",
+      "tools": "Los servidores de herramientas y las skills se gestionan en {{name}}."
     },
     "state": {
-      "connected": "Connected",
-      "connecting": "Connecting…",
-      "mismatch": "Runs a different version than this app. Update both to the same version.",
-      "notPaired": "No longer accepts this computer. Pair again.",
-      "offline": "Not answering. Retrying on its own."
+      "connected": "Conectado",
+      "connecting": "Conectando…",
+      "mismatch": "La versión es distinta de la de esta app. Actualiza ambos a la misma versión.",
+      "notPaired": "Ya no acepta este equipo. Vuelve a vincularlo.",
+      "offline": "No responde. Se volverá a intentar automáticamente."
     },
-    "viewScreen": "View screen"
+    "viewScreen": "Ver pantalla"
   },
   "hostRecovery": {
     "remoteOffline": {
-      "hint": "Praxi cannot start a server from here. Switch the server on (or start Praxi on it), then press Retry. Your message is kept in the box.",
-      "title": "The server is offline"
+      "hint": "Praxi no puede encender el servidor desde aquí. Enciéndelo o inicia Praxi allí y pulsa «Intentar de nuevo». Tu mensaje sigue en el cuadro de texto.",
+      "title": "El servidor está desconectado"
     },
-    "starting": "Starting this computer's Praxi service… your message will be sent as soon as it is up."
+    "starting": "Iniciando el servicio de Praxi en este equipo… Tu mensaje se enviará en cuanto esté listo."
   },
   "hostState": {
-    "connecting": "Connecting to {{name}}…",
-    "noModelKey": "{{name}} has no model key yet. You can watch its screen and manage its bots, but chats cannot be answered until a key is added on the host.",
-    "notPaired": "{{name}} no longer accepts this computer. Pair again with a new ticket.",
-    "offline": "{{name}} is not answering. Its bots keep running; this app reconnects on its own.",
-    "updateApp": "Update needed: this app ({{local}}) is older than {{name}} ({{host}}). Update this app to use {{name}}.",
-    "updateHost": "Update needed: {{name}} ({{host}}) is older than this app ({{local}}). Update {{name}} to match this app.",
-    "useThisComputer": "Use this computer",
-    "versionBlocking": "This app ({{local}}) and {{name}} ({{host}}) are on different versions. Update them to the same version before using the host.",
-    "versionWarning": "This app is {{local}} and {{name}} is {{host}}: a small difference, everything should work."
+    "connecting": "Conectando con {{name}}…",
+    "noModelKey": "{{name}} aún no tiene una clave de modelo. Puedes ver su pantalla y gestionar sus bots, pero estos no podrán responder hasta que añadas una clave en el equipo anfitrión.",
+    "notPaired": "{{name}} ya no acepta este equipo. Vuelve a vincularlo con un ticket nuevo.",
+    "offline": "{{name}} no responde. Sus bots siguen funcionando y esta app intentará conectarse de nuevo por su cuenta.",
+    "updateApp": "Debes actualizar esta app ({{local}}). Su versión es anterior a la de {{name}} ({{host}}). Actualízala para usar {{name}}.",
+    "updateHost": "Debes actualizar {{name}} ({{host}}). Su versión es anterior a la de esta app ({{local}}). Actualiza {{name}} a la misma versión.",
+    "useThisComputer": "Usar este equipo",
+    "versionBlocking": "Esta app ({{local}}) y {{name}} ({{host}}) tienen versiones distintas. Pon ambos en la misma versión antes de usar el equipo anfitrión.",
+    "versionWarning": "Esta app usa la versión {{local}} y {{name}}, la {{host}}. La diferencia es pequeña y todo debería funcionar."
   },
   "humanDriving": {
     "banner": "You are driving - the bot is paused",
@@ -4057,56 +4057,56 @@
     "watchAction": "Take control"
   },
   "localInstall": {
-    "cancel": "Stop download",
-    "disclosure": "The program comes from github.com/ggml-org/llama.cpp and the model from huggingface.co. Praxi checks every file against a fixed checksum and refuses a file that does not match. You can stop at any time; a stopped download continues later.",
-    "download": "Download size: {{size}} (plus {{runtime}} for the program that runs it).",
-    "errorChecksum": "The downloaded file did not match the expected one and was deleted. Try again later.",
-    "errorDisk": "There is not enough free disk space. Free some space and try again.",
-    "errorNetwork": "The download was interrupted. Check your internet connection and try again.",
-    "errorOther": "Something went wrong while installing. Try again.",
-    "errorPortBusy": "Another program is already using port 8080. Close it and try again.",
-    "errorStartFailed": "The model could not be started. Try a smaller model.",
-    "errorUnsupported": "One-click local models are not available for this computer yet.",
-    "fitFast": "runs well",
-    "fitSlow": "runs, but slowly",
-    "install": "Install and start",
-    "intro": "Download a small AI model and run it on this computer. Nothing you write leaves this computer while you use it.",
-    "licence": "Licence: {{licence}}",
-    "noDisk": "not enough disk space",
-    "phaseCancelled": "Stopped. You can start again; the download continues where it left off.",
-    "phaseDownloadingModel": "Downloading the model… {{percent}}%",
-    "phaseDownloadingRuntime": "Downloading the program… {{percent}}%",
-    "phaseReady": "Running on this computer. Pick “llama.cpp” as your provider; Praxi finds it automatically.",
-    "phaseStarting": "Starting the model (this can take a minute)…",
-    "phaseUnpacking": "Unpacking the program…",
-    "recommended": "Suggested",
-    "stop": "Stop the local model",
-    "title": "One-click local model",
-    "tooLarge": "too big for this computer"
+    "cancel": "Detener descarga",
+    "disclosure": "El programa se descarga de github.com/ggml-org/llama.cpp y el modelo, de huggingface.co. Praxi verifica la suma de comprobación de cada archivo y rechaza los que no coinciden con el valor esperado. Puedes detener la descarga cuando quieras y reanudarla más tarde.",
+    "download": "Tamaño de la descarga: {{size}} (más {{runtime}} para el programa que ejecuta el modelo).",
+    "errorChecksum": "El archivo descargado no coincidía con el esperado y se eliminó. Inténtalo de nuevo más tarde.",
+    "errorDisk": "No hay suficiente espacio libre en disco. Libera espacio e inténtalo de nuevo.",
+    "errorNetwork": "La descarga se interrumpió. Comprueba tu conexión a internet e inténtalo de nuevo.",
+    "errorOther": "Hubo un problema durante la instalación. Inténtalo de nuevo.",
+    "errorPortBusy": "Otro programa está usando el puerto 8080. Ciérralo e inténtalo de nuevo.",
+    "errorStartFailed": "No se pudo iniciar el modelo. Prueba con uno más pequeño.",
+    "errorUnsupported": "La instalación de modelos locales con un clic aún no está disponible para este equipo.",
+    "fitFast": "funciona bien",
+    "fitSlow": "funciona, pero va lento",
+    "install": "Instalar e iniciar",
+    "intro": "Descarga un modelo pequeño de IA y ejecútalo en este equipo. Nada de lo que escribas sale de aquí mientras usas el modelo.",
+    "licence": "Licencia: {{licence}}",
+    "noDisk": "falta espacio en disco",
+    "phaseCancelled": "Descarga detenida. Puedes reanudarla desde donde quedó.",
+    "phaseDownloadingModel": "Descargando el modelo… {{percent}} %",
+    "phaseDownloadingRuntime": "Descargando el programa… {{percent}} %",
+    "phaseReady": "El modelo está en ejecución en este equipo. Elige «llama.cpp» como proveedor. Praxi lo detectará automáticamente.",
+    "phaseStarting": "Iniciando el modelo. Puede tardar un minuto…",
+    "phaseUnpacking": "Descomprimiendo el programa…",
+    "recommended": "Sugerido",
+    "stop": "Detener el modelo local",
+    "title": "Instala un modelo local con un clic",
+    "tooLarge": "demasiado grande para este equipo"
   },
   "localModels": {
-    "bestEffort": "These are estimates, not guarantees. Praxi never runs the commands for you, and this hardware information stays on this computer.",
-    "cardDescription": "What fits on this computer for Ollama or LM Studio. Best effort.",
-    "cardTitle": "Local models",
-    "copied": "Copied",
-    "copy": "Copy command",
-    "cores": "{{count}} processor threads",
-    "cores_one": "{{count}} processor thread",
-    "disk": "{{size}} free disk",
-    "fitFast": "runs well",
-    "fitSlow": "runs, but slowly",
-    "lmstudio": "In LM Studio, models up to about {{size}}B parameters should run comfortably here.",
-    "noDisk": "not enough disk space",
-    "noGpu": "none found",
-    "none": "No recommendation for this computer.",
-    "ollamaMissing": "Ollama is not installed. Install it from ollama.com, then run the command above in a terminal.",
-    "ollamaStopped": "Ollama is installed but not running. Open the Ollama app (or run `ollama serve`), then pull a model.",
-    "ramGpu": "{{ram}} memory · graphics: {{gpu}}",
-    "recommended": "Suggested for this computer: {{name}}.",
-    "title": "What this computer can run",
-    "unified": "{{ram}} shared memory (Apple silicon)",
-    "unknown": "Could not read this computer's hardware, so there is no recommendation. Start with a small model (about 4B) and go up if it runs well.",
-    "unknownValue": "unknown"
+    "bestEffort": "Estas cifras son estimaciones. Praxi nunca ejecuta los comandos por ti y los datos del hardware se quedan en este equipo.",
+    "cardDescription": "Estimación de los modelos que puedes ejecutar con Ollama o LM Studio en este equipo.",
+    "cardTitle": "Modelos locales",
+    "copied": "Copiado",
+    "copy": "Copiar comando",
+    "cores": "{{count}} hilos del procesador",
+    "cores_one": "{{count}} hilo del procesador",
+    "disk": "{{size}} libres en disco",
+    "fitFast": "funciona bien",
+    "fitSlow": "funciona, pero va lento",
+    "lmstudio": "En LM Studio deberían funcionar bien los modelos de hasta unos {{size}} mil millones de parámetros.",
+    "noDisk": "falta espacio en disco",
+    "noGpu": "no se detectó ninguna",
+    "none": "No hay una recomendación para este equipo.",
+    "ollamaMissing": "Ollama no está instalado. Instálalo desde ollama.com y luego ejecuta el comando de arriba en una terminal.",
+    "ollamaStopped": "Ollama está instalado, pero no está en ejecución. Abre su aplicación o ejecuta `ollama serve`. Luego descarga un modelo.",
+    "ramGpu": "{{ram}} de memoria · Gráficos: {{gpu}}",
+    "recommended": "Modelo sugerido para este equipo: {{name}}.",
+    "title": "Qué modelos puedes ejecutar en este equipo",
+    "unified": "{{ram}} de memoria compartida (Apple silicon)",
+    "unknown": "No se pudo leer el hardware de este equipo. Empieza con un modelo pequeño, de unos 4 mil millones de parámetros. Si funciona bien, prueba uno más grande.",
+    "unknownValue": "desconocido"
   },
   "logs": {
     "bundleNote": "Open each file to review its exact contents. The ZIP contains these four files only. It includes all recent logs, even when the search or level filter hides some. No chats or secrets are included.",
@@ -4135,19 +4135,19 @@
     "title": "View recent logs"
   },
   "main": {
-    "clearSelection": "Back to overview",
-    "daemonConnectingDescription": "Connecting to the bundled Praxi-Bot background service on this computer.",
-    "daemonConnectingTitle": "Starting local background service…",
-    "daemonOfflineDescription": "Praxi-Bot's background service is not answering. Wait a few seconds and try again. If it keeps failing, check that a firewall is not blocking Praxi-Bot, or restart the app.",
-    "daemonOfflineTitle": "Local background service is not running",
-    "daemonRetry": "Retry connection",
-    "refreshBots": "Refresh",
-    "runSetupWizard": "Run setup wizard",
-    "selectBotDescription": "Choose a bot from the sidebar to view its profile, or open settings to customize the theme, accent color, and background.",
-    "selectBotTitle": "Select a bot",
-    "selectedBotLabel": "Active Bot Profile",
-    "welcomeDescription": "A bot has a persona, models and a permission preset. Run the guided setup wizard or create a bot manually to start chatting.",
-    "welcomeTitle": "Create your first bot"
+    "clearSelection": "Volver a la vista general",
+    "daemonConnectingDescription": "Conectando con el servicio en segundo plano de Praxi-Bot incluido en este equipo.",
+    "daemonConnectingTitle": "Iniciando el servicio local en segundo plano…",
+    "daemonOfflineDescription": "El servicio en segundo plano de Praxi-Bot no responde. Espera unos segundos e inténtalo de nuevo. Si sigue fallando, comprueba que el firewall permita Praxi-Bot o reinicia la app.",
+    "daemonOfflineTitle": "El servicio local en segundo plano no está en ejecución",
+    "daemonRetry": "Reintentar conexión",
+    "refreshBots": "Actualizar",
+    "runSetupWizard": "Abrir el asistente de configuración",
+    "selectBotDescription": "Elige un bot en la barra lateral para ver su perfil. En Ajustes puedes cambiar el tema, el color de acento y el fondo.",
+    "selectBotTitle": "Selecciona un bot",
+    "selectedBotLabel": "Perfil del bot activo",
+    "welcomeDescription": "Cada bot tiene una personalidad, modelos y un nivel de permisos. Abre el asistente de configuración o crea un bot manualmente para empezar a conversar.",
+    "welcomeTitle": "Crea tu primer bot"
   },
   "memory": {
     "add": "Add memory",
@@ -4389,15 +4389,15 @@
     "today": "Today / daily limit"
   },
   "needs": {
-    "empty": "When a bot needs your OK or has a question, it shows up here.",
-    "emptyTitle": "All clear",
+    "empty": "Aquí verás las preguntas de tus bots y las acciones que necesiten tu aprobación.",
+    "emptyTitle": "Todo al día",
     "kind": {
-      "approval": "Approval",
-      "question": "Question"
+      "approval": "Aprobación",
+      "question": "Pregunta"
     },
-    "open": "Open chat",
-    "subtitle": "Approvals and questions waiting across all chats.",
-    "title": "Needs you"
+    "open": "Abrir chat",
+    "subtitle": "Aprobaciones y preguntas pendientes de todos los chats.",
+    "title": "Requiere tu atención"
   },
   "newBot": {
     "advanced": "Advanced settings",
@@ -4514,26 +4514,26 @@
   },
   "overlay": {
     "actions": {
-      "click": "Click",
-      "default": "Action",
-      "key": "Shortcut",
-      "scroll": "Scroll",
-      "type": "Type"
+      "click": "Clic",
+      "default": "Acción",
+      "key": "Atajo",
+      "scroll": "Desplazamiento",
+      "type": "Escritura"
     },
-    "humanDrivingHint": "Bot desktop actions are refused while you drive. Click Give back in the mini widget to resume.",
-    "typingPreview": "Typing",
-    "youAreInControl": "You are in control"
+    "humanDrivingHint": "Los bots no pueden actuar en el escritorio mientras tengas el control. Pulsa «Devolver el control» en el widget pequeño para reanudar.",
+    "typingPreview": "Escribiendo",
+    "youAreInControl": "Tienes el control"
   },
   "pairHost": {
-    "failed": "Pairing failed. Check that the host is on and the ticket is new.",
-    "hint": "The ticket is used once and is not saved.",
-    "lead": "Pair this computer with your always-on host to watch its screen and chat with the bots that run there.",
-    "pair": "Pair",
-    "pairing": "Pairing…",
-    "step1": "On the host, run:",
-    "step3": "Paste the ticket it prints below. It works once and expires in a few minutes.",
-    "ticket": "Pairing ticket",
-    "title": "Add a host"
+    "failed": "No se pudo vincular. Comprueba que el equipo anfitrión esté encendido y que el ticket sea reciente.",
+    "hint": "El ticket se usa una sola vez y no se guarda.",
+    "lead": "Vincula este equipo con tu anfitrión, que permanece encendido, para ver su pantalla y hablar con los bots que se ejecutan allí.",
+    "pair": "Vincular",
+    "pairing": "Vinculando…",
+    "step1": "Ejecuta este comando en el equipo anfitrión:",
+    "step3": "Pega abajo el ticket que aparezca. Solo se puede usar una vez y caduca en unos minutos.",
+    "ticket": "Ticket de vinculación",
+    "title": "Añadir un equipo anfitrión"
   },
   "palette": {
     "empty": "No matching command",
@@ -4721,45 +4721,45 @@
     "title": "Quota left"
   },
   "runLocation": {
-    "addHint": "Optional. Keeps your bots running when this computer is off.",
-    "on": "On {{name}}",
-    "serverHint": "Always on, even when this computer is off",
+    "addHint": "Es opcional. Tus bots seguirán funcionando aunque apagues este equipo.",
+    "on": "En {{name}}",
+    "serverHint": "Siempre encendido, incluso con este equipo apagado",
     "serverState": {
-      "connecting": "connecting",
-      "degraded": "limited",
-      "offline": "offline",
-      "online": "online",
-      "starting": "starting"
+      "connecting": "conectando",
+      "degraded": "funcionamiento limitado",
+      "offline": "desconectado",
+      "online": "en línea",
+      "starting": "iniciando"
     },
     "status": {
-      "connecting": "Connecting to {{name}}…",
-      "degraded": "Your bots run on {{name}} · limited",
-      "local": "Your bots run on this computer",
-      "offline": "{{name}} is offline",
-      "online": "Your bots run on {{name}} · online",
-      "starting": "Your bots run on {{name}} · starting",
-      "temporary": "Your bots run on this computer"
+      "connecting": "Conectando con {{name}}…",
+      "degraded": "Tus bots se ejecutan en {{name}} · Funcionamiento limitado",
+      "local": "Tus bots se ejecutan en este equipo",
+      "offline": "{{name}} está desconectado",
+      "online": "Tus bots se ejecutan en {{name}} · En línea",
+      "starting": "Tus bots se ejecutan en {{name}} · Iniciando",
+      "temporary": "Tus bots se ejecutan en este equipo"
     },
-    "stopAll": "Stop everything running on {{name}}",
-    "stopBody": "This stops the {{count}} runs going on {{name}} right now. Work already done is kept.",
-    "stopBody_one": "This stops the {{count}} run going on {{name}} right now. Work already done is kept.",
-    "stopConfirm": "Stop {{count}} runs",
-    "stopConfirm_one": "Stop {{count}} run",
-    "stopFailed": "Could not reach {{name}} to stop its runs.",
-    "stopHint": "{{count}} runs are going on right now",
-    "stopHint_one": "{{count}} run is going on right now",
-    "stopIdle": "Nothing is running right now",
-    "stopNone": "Nothing was running on {{name}}.",
-    "stopTitle": "Stop everything on {{name}}?",
-    "stopped": "Stopped {{count}} runs on {{name}}.",
-    "stopped_one": "Stopped {{count}} run on {{name}}.",
-    "switchBody": "{{count}} runs are still going on {{from}}. Nothing is stopped: they keep running there, and you can switch back any time.",
-    "switchBody_one": "{{count}} run is still going on {{from}}. Nothing is stopped: it keeps running there, and you can switch back any time.",
-    "switchConfirm": "Switch to {{to}}",
-    "switchTitle": "Switch to {{to}}?",
-    "thisComputer": "This computer",
-    "thisComputerHint": "Your bots run here. No server needed.",
-    "title": "Where do my bots run?"
+    "stopAll": "Detener todo lo que se ejecuta en {{name}}",
+    "stopBody": "Esto detendrá las {{count}} ejecuciones activas en {{name}}. Se conserva el trabajo ya hecho.",
+    "stopBody_one": "Esto detendrá {{count}} ejecución activa en {{name}}. Se conserva el trabajo ya hecho.",
+    "stopConfirm": "Detener {{count}} ejecuciones",
+    "stopConfirm_one": "Detener {{count}} ejecución",
+    "stopFailed": "No se pudo conectar con {{name}} para detener sus ejecuciones.",
+    "stopHint": "Hay {{count}} ejecuciones en curso",
+    "stopHint_one": "Hay {{count}} ejecución en curso",
+    "stopIdle": "No hay ejecuciones en curso",
+    "stopNone": "No había nada en ejecución en {{name}}.",
+    "stopTitle": "¿Detener todo en {{name}}?",
+    "stopped": "Se detuvieron {{count}} ejecuciones en {{name}}.",
+    "stopped_one": "Se detuvo {{count}} ejecución en {{name}}.",
+    "switchBody": "Todavía hay {{count}} ejecuciones en {{from}}. Seguirán allí y puedes volver cuando quieras.",
+    "switchBody_one": "Todavía hay {{count}} ejecución en {{from}}. Seguirá allí y puedes volver cuando quieras.",
+    "switchConfirm": "Cambiar a {{to}}",
+    "switchTitle": "¿Cambiar a {{to}}?",
+    "thisComputer": "Este equipo",
+    "thisComputerHint": "Tus bots se ejecutan aquí. Puedes empezar sin un servidor.",
+    "title": "¿Dónde se ejecutan mis bots?"
   },
   "runReport": {
     "answered": "You answered",
@@ -5013,115 +5013,115 @@
     "when": "When"
   },
   "secretRequest": {
-    "allowHint": "Leave both empty and the bot cannot use it anywhere until you add a place in Settings.",
-    "cancel": "Cancel",
-    "cancelled": "Cancelled. Nothing was saved.",
-    "closed": "This request is no longer open.",
-    "confirmUntrusted": "I understand and still want to enter it",
-    "destination": "Goes into the vault on this computer as a {{type}} named",
-    "expired": "This request ran out of time. Nothing was saved.",
-    "expiresIn": "Time left to answer",
-    "fillAll": "Fill in every field first.",
-    "hostRefused": "{{name}} did not accept this. Nothing was saved.",
-    "neverSeen": "The bot never sees what you type. It only learns whether it was saved.",
-    "notConnected": "No connection to the service. Nothing was sent and what you typed is still here.",
-    "origins": "Websites it may be typed on (optional, one per line)",
-    "password": "Password",
-    "programs": "Programs it may be typed into (optional)",
-    "purposeLabel": "Written by the bot (not checked by Praxi):",
-    "replaces": "This replaces the stored value for {{name}}.",
-    "stored": "Saved to the vault. The bot was told it is stored.",
-    "submit": "Save to vault",
-    "title": "{{bot}} needs a password or key from you",
-    "typeLogin": "login (username and password)",
-    "typeSecret": "single secret",
-    "untrusted": "This run has read content from outside. Something there may have asked for this. Do not enter a password you would not give that content directly.",
-    "username": "Username",
-    "value": "Secret value"
+    "allowHint": "Si dejas ambos campos vacíos, el bot no podrá usar el dato hasta que indiques dónde se permite en Ajustes.",
+    "cancel": "Cancelar",
+    "cancelled": "Se canceló la solicitud. No se guardó nada.",
+    "closed": "Esta solicitud ya está cerrada.",
+    "confirmUntrusted": "Entiendo y quiero introducirlo de todos modos",
+    "destination": "Se guarda en la bóveda de este equipo como {{type}} con el nombre",
+    "expired": "La solicitud caducó. No se guardó nada.",
+    "expiresIn": "Tiempo restante para responder",
+    "fillAll": "Completa primero todos los campos.",
+    "hostRefused": "{{name}} rechazó la solicitud. No se guardó nada.",
+    "neverSeen": "El bot nunca ve lo que escribes. Solo se le informa si se guardó.",
+    "notConnected": "Se perdió la conexión con el servicio. No se envió nada y lo que escribiste sigue aquí.",
+    "origins": "Sitios web donde el bot puede introducir el dato (opcional, uno por línea)",
+    "password": "Contraseña",
+    "programs": "Programas donde el bot puede introducir el dato (opcional)",
+    "purposeLabel": "Motivo escrito por el bot (Praxi no lo verifica):",
+    "replaces": "Esto reemplaza el valor guardado de {{name}}.",
+    "stored": "Se guardó en la bóveda. El bot recibió la confirmación.",
+    "submit": "Guardar en la bóveda",
+    "title": "{{bot}} necesita que le proporciones una contraseña o una clave",
+    "typeLogin": "credencial de acceso (usuario y contraseña)",
+    "typeSecret": "dato confidencial individual",
+    "untrusted": "Esta ejecución leyó contenido externo. Es posible que la solicitud venga de ahí. Si no compartirías una contraseña con la fuente de ese contenido, no la introduzcas aquí.",
+    "username": "Nombre de usuario",
+    "value": "Valor confidencial"
   },
   "serverSignIn": {
     "apiKey": {
-      "label": "API key for {{provider}}",
-      "note": "The key is stored in the server's own secret store and never shown again.",
-      "open": "Use an API key instead",
-      "placeholder": "API key",
-      "save": "Save key",
-      "saved": "Key saved on {{server}}. Bots there can use it right away."
+      "label": "Clave de API de {{provider}}",
+      "note": "La clave se guarda en el almacén de credenciales del servidor. No volverá a mostrarse.",
+      "open": "Usar una clave de API",
+      "placeholder": "Clave de API",
+      "save": "Guardar clave",
+      "saved": "La clave se guardó en {{server}}. Sus bots ya pueden usarla."
     },
-    "codeLabel": "Your one-time code",
-    "copyLink": "Copy link",
-    "done": "{{name}} is signed in on {{server}}.",
+    "codeLabel": "Tu código de un solo uso",
+    "copyLink": "Copiar enlace",
+    "done": "Se inició sesión en {{name}} en el servidor {{server}}.",
     "error": {
-      "cancelled": "The sign-in was cancelled.",
-      "device_auth_disabled": "Device sign-in is turned off for this account. Enable it in your account's security settings, then try again.",
-      "login_cli_outdated": "The server's {{name}} is too old for this sign-in. Update it on the server, then try again.",
-      "login_code_rejected": "The server's {{name}} did not accept that code. Start again and paste the new code.",
-      "login_expired": "The sign-in code expired. Start again for a new one.",
-      "login_failed": "The sign-in did not finish. Try again.",
-      "login_files_changed": "The engine's files changed since it was installed. Reinstall it on the server, then sign in.",
-      "login_not_confirmed": "The sign-in ended but the server could not confirm an account. Try again.",
-      "login_start_timeout": "{{name}} did not show a sign-in page in time. Check that it is installed and up to date on the server, then try again.",
-      "login_timed_out": "The sign-in was not finished within ten minutes. Start it again.",
-      "login_untrusted_location": "Praxi did not install this engine. Reinstall it with Install on server, or sign in over SSH.",
-      "not_installed": "{{name}} is not installed on the server yet.",
-      "spawn_failed": "{{name}} could not be started on the server.",
-      "timed_out": "The sign-in was not finished within ten minutes. Start it again."
+      "cancelled": "Se canceló el inicio de sesión.",
+      "device_auth_disabled": "El inicio de sesión desde otro dispositivo está desactivado para esta cuenta. Actívalo en los ajustes de seguridad de tu cuenta e inténtalo de nuevo.",
+      "login_cli_outdated": "La versión de {{name}} en el servidor es demasiado antigua para este método de inicio de sesión. Actualízala en el servidor e inténtalo de nuevo.",
+      "login_code_rejected": "{{name}} rechazó el código en el servidor. Vuelve a empezar y pega el código nuevo.",
+      "login_expired": "El código de inicio de sesión caducó. Vuelve a empezar para obtener otro.",
+      "login_failed": "El inicio de sesión quedó incompleto. Inténtalo de nuevo.",
+      "login_files_changed": "Los archivos del motor cambiaron después de la instalación. Reinstálalo en el servidor y luego inicia sesión.",
+      "login_not_confirmed": "El inicio de sesión terminó, pero el servidor no pudo confirmar la cuenta. Inténtalo de nuevo.",
+      "login_start_timeout": "{{name}} no mostró la página de inicio de sesión a tiempo. Comprueba que esté instalado y actualizado en el servidor y vuelve a intentarlo.",
+      "login_timed_out": "El inicio de sesión quedó incompleto después de diez minutos. Vuelve a empezarlo.",
+      "login_untrusted_location": "Este motor se instaló por fuera de Praxi. Reinstálalo con «Instalar en el servidor» o inicia sesión por SSH.",
+      "not_installed": "{{name}} aún no está instalado en el servidor.",
+      "spawn_failed": "No se pudo iniciar {{name}} en el servidor.",
+      "timed_out": "El inicio de sesión quedó incompleto después de diez minutos. Vuelve a empezarlo."
     },
-    "lead": "The sign-in runs on {{server}} itself, so its bots can use your account when this computer is off. Nothing is copied from this computer.",
+    "lead": "La sesión se inicia en {{server}}. Así sus bots pueden usar tu cuenta aunque este equipo esté apagado. Praxi no copia nada de este equipo.",
     "manual": {
-      "generic": "{{name}} cannot be signed in from this window: its login needs a browser on the server itself. Run this once over SSH on {{server}}:",
-      "opencode": "OpenCode asks which provider to connect, so it is not driven from here. Use an API key below, or run this once over SSH on {{server}}:"
+      "generic": "Para iniciar sesión en {{name}} necesitas un navegador en el propio servidor. Ejecuta este comando una vez por SSH en {{server}}:",
+      "opencode": "OpenCode te pide que elijas un proveedor. Usa una clave de API abajo o ejecuta este comando una vez por SSH en {{server}}:"
     },
-    "note": "The code you paste goes straight to the sign-in on the server. It is never saved or shown again.",
-    "openPage": "Open the page",
-    "pasteLabel": "Code from the sign-in page",
-    "pastePlaceholder": "Paste the code here",
-    "retry": "Try again",
-    "send": "Send code",
-    "starting": "Starting the sign-in on {{server}}…",
-    "step1": "1. Open this page and sign in",
-    "step2": "2. Paste the code the page shows",
-    "title": "Sign in to {{name}} on {{server}}",
-    "typeCode": "Type this code on that page.",
-    "verifying": "Checking the sign-in on the server…",
-    "waitingDevice": "Waiting for you to finish on that page. This window updates by itself."
+    "note": "El código que pegues va directamente al flujo de inicio de sesión del servidor. Nunca se guarda ni se vuelve a mostrar.",
+    "openPage": "Abrir la página",
+    "pasteLabel": "Código de la página de inicio de sesión",
+    "pastePlaceholder": "Pega el código aquí",
+    "retry": "Intentar de nuevo",
+    "send": "Enviar código",
+    "starting": "Iniciando sesión en {{server}}…",
+    "step1": "1. Abre esta página e inicia sesión",
+    "step2": "2. Pega el código que te muestra la página",
+    "title": "Inicia sesión en {{name}} en {{server}}",
+    "typeCode": "Escribe este código en esa página.",
+    "verifying": "Comprobando el inicio de sesión en el servidor…",
+    "waitingDevice": "Termina el inicio de sesión en esa página. Esta ventana se actualizará sola."
   },
   "servers": {
-    "add": "Add a server",
-    "checkNow": "Switch to it",
-    "empty": "No server yet. This is fine: your bots run on this computer.",
-    "lead": "Servers keep your bots running when this computer is off.",
-    "remove": "Remove",
-    "removeBody": "This computer forgets the server and its pairing. The server itself, its bots and its files are not touched and keep running. You can add it again later.",
-    "removeConfirm": "Remove server",
-    "removeFailed": "Could not remove the server. Try again.",
-    "removeTitle": "Remove {{name}}?",
-    "removed": "{{name}} was removed from this computer.",
+    "add": "Añadir un servidor",
+    "checkNow": "Cambiar a este servidor",
+    "empty": "Todavía no tienes un servidor. Tus bots pueden funcionar en este equipo.",
+    "lead": "Los servidores permiten que tus bots sigan trabajando aunque este equipo esté apagado.",
+    "remove": "Quitar",
+    "removeBody": "Este equipo olvidará el servidor y su vinculación. El servidor, sus bots y sus archivos quedan intactos. Los bots seguirán funcionando y podrás volver a añadir el servidor más adelante.",
+    "removeConfirm": "Quitar servidor",
+    "removeFailed": "No se pudo quitar el servidor. Inténtalo de nuevo.",
+    "removeTitle": "¿Quitar {{name}}?",
+    "removed": "Se quitó {{name}} de este equipo.",
     "status": {
-      "connected": "Online",
-      "connecting": "Connecting…",
-      "idle": "Not connected right now",
-      "offline": "Offline",
-      "unreachable": "Cannot be reached"
+      "connected": "En línea",
+      "connecting": "Conectando…",
+      "idle": "Sin conexión en este momento",
+      "offline": "Desconectado",
+      "unreachable": "No responde"
     },
-    "title": "Your servers",
-    "updateHelp": "Servers added with the app can be updated here. For any other server, Update server shows the exact commands to run on it."
+    "title": "Tus servidores",
+    "updateHelp": "Puedes actualizar aquí los servidores que añadiste con la app. Para los demás, «Actualizar servidor» muestra los comandos que debes ejecutar en ellos."
   },
   "service": {
-    "copied": "Diagnostic info copied.",
-    "copy": "Copy diagnostic info",
-    "copyFailed": "Could not copy. Try again.",
+    "copied": "Información de diagnóstico copiada.",
+    "copy": "Copiar información de diagnóstico",
+    "copyFailed": "No se pudo copiar. Inténtalo de nuevo.",
     "failed": {
-      "hint": "Praxi's background service stopped answering. Your unsaved input is kept. Restart the service below; if it keeps failing, copy the diagnostic info and send it to support.",
-      "title": "The local service did not come back"
+      "hint": "El servicio en segundo plano de Praxi dejó de responder. Se conservó lo que escribiste sin guardar. Reinicia el servicio abajo. Si sigue fallando, copia la información de diagnóstico y envíala a soporte.",
+      "title": "El servicio local no volvió a funcionar"
     },
     "reconnecting": {
-      "hint": "This usually takes a few seconds. Buttons that need the service wait; your input is kept.",
-      "title": "Reconnecting to the local service…"
+      "hint": "Suele tardar unos segundos. Los botones que necesitan el servicio quedan en espera y lo que escribiste se conserva.",
+      "title": "Reconectando con el servicio local…"
     },
     "starting": {
-      "hint": "Praxi is getting ready. This can take a moment after an update or restart.",
-      "title": "Starting the local service…"
+      "hint": "Praxi se está preparando. Puede tardar un momento después de una actualización o un reinicio.",
+      "title": "Iniciando el servicio local…"
     }
   },
   "settings": {
@@ -5922,9 +5922,9 @@
     }
   },
   "shell": {
-    "panelGrip": "Resize bot panel (arrow keys)",
-    "railGrip": "Resize sidebar (arrow keys)",
-    "skipToMain": "Skip to main content"
+    "panelGrip": "Cambiar el ancho del panel del bot (teclas de flecha)",
+    "railGrip": "Cambiar el ancho de la barra lateral (teclas de flecha)",
+    "skipToMain": "Ir al contenido principal"
   },
   "sidebar": {
     "apps": "Apps",
@@ -6128,128 +6128,128 @@
     }
   },
   "thisComputerOnly": {
-    "body": "Local models run on the computer where the bot runs. {{name}} is a server, so set them up on This computer.",
-    "switch": "Switch to this computer"
+    "body": "Los modelos locales se ejecutan donde se ejecuta el bot. {{name}} es un servidor. Para configurar modelos en este equipo, selecciona «Este equipo».",
+    "switch": "Cambiar a este equipo"
   },
   "tray": {
-    "needs": "Needs you ({n})",
-    "pauseAll": "Pause all bots",
-    "quit": "Quit",
-    "stillRunningBody": "It keeps working in the tray, next to the clock. Use the tray icon to open, pause or quit it.",
-    "stillRunningTitle": "Praxi-Bot is still running",
-    "stopAll": "Stop all",
-    "toggle": "Show / hide window",
+    "needs": "Requiere tu atención ({n})",
+    "pauseAll": "Pausar todos los bots",
+    "quit": "Salir",
+    "stillRunningBody": "La app sigue funcionando en la bandeja del sistema, junto al reloj. Usa su icono para abrirla, pausarla o salir.",
+    "stillRunningTitle": "Praxi-Bot sigue en ejecución",
+    "stopAll": "Detener todo",
+    "toggle": "Mostrar u ocultar ventana",
     "tooltip": "Praxi-Bot",
-    "tooltipNeeds": "Praxi-Bot: {n} need you"
+    "tooltipNeeds": "Praxi-Bot: {n} pendientes de tu respuesta"
   },
   "updateServer": {
-    "available": "Update available",
-    "button": "Update server",
-    "buttonAnyway": "Update anyway",
-    "checkAgain": "Check again",
-    "checking": "Checking the server's version…",
-    "commandsLabel": "Commands to run on the server",
-    "confirm": "Update server",
-    "copied": "Commands copied.",
-    "copy": "Copy commands",
-    "copyFailed": "Could not copy. Select the text and copy it by hand.",
-    "doneBody": "The server restarted and answers. Your bots and data are as you left them.",
-    "doneTitle": "{{name}} is up to date",
-    "dontClose": "This takes a few minutes. You can keep this window open; the server restarts near the end.",
+    "available": "Hay una actualización disponible",
+    "button": "Actualizar servidor",
+    "buttonAnyway": "Actualizar de todos modos",
+    "checkAgain": "Volver a comprobar",
+    "checking": "Comprobando la versión del servidor…",
+    "commandsLabel": "Comandos para ejecutar en el servidor",
+    "confirm": "Actualizar servidor",
+    "copied": "Comandos copiados.",
+    "copy": "Copiar comandos",
+    "copyFailed": "No se pudo copiar. Selecciona el texto y cópialo manualmente.",
+    "doneBody": "El servidor se reinició y ya responde. Tus bots y tus datos siguen como los dejaste.",
+    "doneTitle": "{{name}} está actualizado",
+    "dontClose": "Esto tarda unos minutos. Puedes dejar abierta esta ventana. El servidor se reinicia hacia el final.",
     "fail": {
       "generic": {
-        "body": "Something went wrong on the server. If the installer got far enough, it put the previous version back.",
-        "next": "Open the details below. You can try again, or run the commands yourself on the server.",
-        "title": "The update did not finish"
+        "body": "Hubo un problema en el servidor. Si el instalador llegó lo bastante lejos, restauró la versión anterior.",
+        "next": "Abre los detalles de abajo. Puedes volver a intentarlo o ejecutar los comandos en el servidor.",
+        "title": "La actualización quedó incompleta"
       },
       "host_key": {
-        "body": "You did not confirm the server's fingerprint (or it changed since you added the server). Nothing was changed.",
-        "next": "If you did not change anything on the server, someone may be pretending to be it: do not continue. Otherwise try again and check the fingerprint.",
-        "title": "The server's identity was not accepted"
+        "body": "No confirmaste la huella digital del servidor o esta cambió desde que lo añadiste. No se hizo ningún cambio.",
+        "next": "Si no hiciste cambios en el servidor, alguien podría estar haciéndose pasar por él. No continúes. Si tú hiciste el cambio, inténtalo de nuevo y comprueba la huella digital.",
+        "title": "No se aceptó la identidad del servidor"
       },
       "no_ssh": {
-        "body": "The program that logs in to servers (OpenSSH) was not found or could not be prepared.",
-        "next": "Install OpenSSH on this computer, or use the commands instead.",
-        "title": "Praxi-Bot cannot log in from here"
+        "body": "No se encontró OpenSSH, el programa que inicia sesión en servidores, o no se pudo preparar.",
+        "next": "Instala OpenSSH en este equipo o ejecuta los comandos por tu cuenta.",
+        "title": "Praxi-Bot no puede iniciar sesión desde aquí"
       },
       "rolled_back": {
-        "body": "The new version could not start on the server, so Praxi-Bot put the previous version back. Your data was not touched.",
-        "next": "Try again later, or open the details below and copy them when you ask for help.",
-        "title": "The update did not work, the old version is back"
+        "body": "La nueva versión no pudo iniciarse en el servidor y Praxi-Bot restauró la versión anterior. Tus datos quedaron intactos.",
+        "next": "Inténtalo de nuevo más adelante o abre los detalles de abajo y cópialos al pedir ayuda.",
+        "title": "La actualización falló y se restauró la versión anterior"
       },
       "unreachable": {
-        "body": "The server did not accept the login or did not answer. Nothing was changed.",
-        "next": "Check that the server is on and that you can still log in to it, then try again.",
-        "title": "Could not connect to the server"
+        "body": "El servidor rechazó el inicio de sesión o no respondió. No se hizo ningún cambio.",
+        "next": "Comprueba que el servidor esté encendido y que aún puedas iniciar sesión en él. Luego inténtalo de nuevo.",
+        "title": "No se pudo conectar con el servidor"
       },
       "verify": {
-        "body": "The release did not pass the signature check, so it was not installed. The server still runs the version it had before.",
-        "next": "Nothing is wrong with your data. Try again in a few minutes. If it keeps happening, do not install it by hand: ask for help.",
-        "title": "The download could not be verified"
+        "body": "La firma de la versión no pasó la comprobación y Praxi no la instaló. El servidor sigue usando su versión anterior.",
+        "next": "Tus datos están intactos. Inténtalo de nuevo en unos minutos. Si sigue pasando, no instales la versión manualmente. Pide ayuda.",
+        "title": "No se pudo verificar la descarga"
       }
     },
-    "hostKeyBody": "{{host}} identified itself with this fingerprint. Continue only if it is the one from your server provider or from the server itself.",
-    "hostKeyNo": "No, stop",
-    "hostKeyTitle": "Is this really your server?",
-    "hostKeyYes": "Yes, continue",
-    "lead": "Install the Praxi-Bot version that matches this app on your server.",
-    "logEmpty": "Nothing yet.",
-    "manualBody": "This computer has no saved login for this server (it was added another way). Log in to the server and paste the commands below. They download the release that matches this app and check its signature before installing.",
-    "manualNoSsh": "Praxi-Bot cannot log in to this server for you",
-    "manualNote": "Your data is kept. Afterwards come back here and press Check again.",
-    "manualTitle": "Run the update on the server yourself",
-    "newer": "Newer than this app",
-    "noRelease": "This app does not know which release it came from, so it cannot name the exact version. Install the latest release from the Praxi-Bot guide (Linux server page) with the --update option.",
-    "p1": "The server restarts for a few seconds.",
-    "p2": "Bots running there pause for that moment and carry on afterwards.",
-    "p3": "Your data, bots and settings are kept.",
-    "p4": "The previous program files are kept on the server in /opt/praxi.backup-<time>, and your data is saved separately before the update, so both can be put back.",
-    "p5": "Only the release that matches this app is installed, and Praxi-Bot checks its signature first. Nothing unchecked is ever run.",
-    "progress": "Update progress",
-    "retry": "Try again",
+    "hostKeyBody": "{{host}} se identificó con esta huella digital. Continúa solo si coincide con la que muestra el proveedor o el propio servidor.",
+    "hostKeyNo": "No, detener",
+    "hostKeyTitle": "¿Confirmas que es tu servidor?",
+    "hostKeyYes": "Sí, continuar",
+    "lead": "Instala en tu servidor la versión de Praxi-Bot que coincide con la de esta app.",
+    "logEmpty": "Todavía no hay detalles.",
+    "manualBody": "Este equipo no tiene guardados los datos de inicio de sesión del servidor porque lo añadiste de otra forma. Inicia sesión en el servidor y pega los comandos de abajo. Descargan la versión que coincide con esta app y comprueban su firma antes de instalarla.",
+    "manualNoSsh": "Praxi-Bot no puede iniciar sesión en este servidor por ti",
+    "manualNote": "Se conservan tus datos. Cuando termines, vuelve aquí y pulsa «Volver a comprobar».",
+    "manualTitle": "Ejecuta la actualización en el servidor",
+    "newer": "Más reciente que esta app",
+    "noRelease": "La app no puede identificar la versión exacta de la que proviene. Instala la última versión con la opción --update. Consulta la página de servidores Linux en la guía de Praxi-Bot.",
+    "p1": "El servidor se reiniciará. Tardará unos segundos.",
+    "p2": "Los bots de ese servidor se pausarán durante el reinicio y luego continuarán.",
+    "p3": "Se conservan tus datos, bots y ajustes.",
+    "p4": "El servidor conserva los archivos del programa anterior en /opt/praxi.backup-<time> y guarda tus datos por separado antes de actualizar. Así se pueden restaurar ambos.",
+    "p5": "Solo se instala la versión que coincide con esta app. Praxi-Bot verifica su firma antes de instalarla y nunca ejecuta archivos sin verificar.",
+    "progress": "Progreso de la actualización",
+    "retry": "Intentar de nuevo",
     "rows": {
       "backup": {
-        "done": "Copy saved",
-        "failed": "Could not save the copy",
-        "pending": "Waiting",
-        "running": "Saving a copy of your data…",
-        "title": "Making a safety copy"
+        "done": "Copia guardada",
+        "failed": "No se pudo guardar la copia",
+        "pending": "En espera",
+        "running": "Guardando una copia de tus datos…",
+        "title": "Creando una copia de seguridad"
       },
       "check": {
-        "done": "The server answers",
-        "failed": "The server did not answer",
-        "pending": "Waiting",
-        "running": "Asking the server for its health…",
-        "title": "Checking that it works"
+        "done": "El servidor responde",
+        "failed": "El servidor no respondió",
+        "pending": "En espera",
+        "running": "Consultando el estado del servidor…",
+        "title": "Comprobando que funcione"
       },
       "connect": {
-        "done": "Connected",
-        "failed": "Could not connect",
-        "pending": "Waiting",
-        "running": "Logging in and checking the server…",
-        "title": "Connecting to the server"
+        "done": "Conectado",
+        "failed": "No se pudo conectar",
+        "pending": "En espera",
+        "running": "Iniciando sesión y comprobando el servidor…",
+        "title": "Conectando con el servidor"
       },
       "install": {
-        "done": "New version installed",
-        "failed": "The update did not finish",
-        "pending": "Waiting",
-        "running": "Downloading the release, verifying it, installing it and restarting the server…",
-        "title": "Downloading, checking and installing"
+        "done": "Nueva versión instalada",
+        "failed": "La actualización quedó incompleta",
+        "pending": "En espera",
+        "running": "Descargando y verificando la versión, instalándola y reiniciando el servidor…",
+        "title": "Descargando, verificando e instalando"
       }
     },
-    "safe": "If something goes wrong, the server goes back to the version it had before. You will see what happened and what to do next.",
-    "showCommands": "Show the commands instead",
-    "showLog": "Show details",
-    "starting": "Starting the update…",
-    "stopped": "The update was stopped before it finished.",
-    "thisServer": "this server",
-    "title": "Update server",
-    "titleFor": "Update {{name}}",
-    "unknown": "Version unknown (the server may be off).",
-    "upToDate": "Up to date",
-    "versionLine": "Server version {{server}} · this app {{app}}",
-    "versionUnknown": "Exact version unknown (an older server)",
-    "whatHappens": "What will happen"
+    "safe": "Si algo falla, el servidor vuelve a su versión anterior. Verás qué pasó y qué puedes hacer.",
+    "showCommands": "Ver los comandos",
+    "showLog": "Ver detalles",
+    "starting": "Iniciando la actualización…",
+    "stopped": "La actualización se detuvo antes de terminar.",
+    "thisServer": "este servidor",
+    "title": "Actualizar servidor",
+    "titleFor": "Actualizar {{name}}",
+    "unknown": "Versión desconocida. El servidor podría estar apagado.",
+    "upToDate": "Actualizado",
+    "versionLine": "Servidor: versión {{server}} · Esta app: {{app}}",
+    "versionUnknown": "Versión exacta desconocida (servidor antiguo)",
+    "whatHappens": "Qué va a pasar"
   },
   "usage": {
     "bot": "Bot",
@@ -6508,8 +6508,8 @@
     "unsupported": "This system offers no speech voices."
   },
   "whatsNew": {
-    "dismiss": "Got it",
-    "label": "What's new"
+    "dismiss": "Entendido",
+    "label": "Novedades"
   },
   "widget": {
     "dismissStop": "Hide the Stop indicator (the main window keeps its status)",
@@ -6537,10 +6537,10 @@
     "takeTheWheel": "Take the wheel"
   },
   "window": {
-    "close": "Close",
-    "maximize": "Maximize",
-    "minimize": "Minimize",
-    "restore": "Restore"
+    "close": "Cerrar",
+    "maximize": "Maximizar",
+    "minimize": "Minimizar",
+    "restore": "Restaurar"
   },
   "workflow": {
     "button": "Save as workflow",
