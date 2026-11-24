@@ -16,6 +16,7 @@
 //! original wire name to disambiguate.
 
 pub mod agentmail;
+pub mod channel;
 pub mod config;
 pub mod connector;
 mod cred;
