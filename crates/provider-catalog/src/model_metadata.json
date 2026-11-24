@@ -408,18 +408,30 @@
           "recommended_rank": 1
         },
         {
+          "id": "mistral-medium-latest",
+          "display_name": "Mistral Medium",
+          "kind": "chat",
+          "recommended": true,
+          "recommended_rank": 2
+        },
+        {
           "id": "mistral-small-latest",
           "display_name": "Mistral Small",
           "kind": "chat",
           "recommended": true,
-          "recommended_rank": 2
+          "recommended_rank": 3
         },
         {
           "id": "codestral-latest",
           "display_name": "Codestral",
           "kind": "chat",
           "recommended": true,
-          "recommended_rank": 3
+          "recommended_rank": 4
+        },
+        {
+          "id": "pixtral-large-latest",
+          "display_name": "Pixtral Large",
+          "kind": "vision_capable"
         }
       ]
     },

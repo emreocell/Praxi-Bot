@@ -200,3 +200,22 @@ export function providersView(dto: ProvidersDto | null): ProvidersView {
     defaultProvider: dto.default_provider ?? null
   };
 }
+
+/** Where a provider hands out API keys, plus the plain-words note shown beside the key field. */
+export interface ProviderKeyHelp {
+  url: string;
+  /** i18n key of the note (`settings.providers.keyHelp.<id>`). */
+  noteKey: string;
+}
+
+const KEY_HELP: Record<string, ProviderKeyHelp> = {
+  mistral: {
+    url: "https://console.mistral.ai/api-keys",
+    noteKey: "settings.providers.keyHelp.mistral"
+  }
+};
+
+/** Key help for a catalog provider id, or null when there is none. */
+export function providerKeyHelp(id: string): ProviderKeyHelp | null {
+  return KEY_HELP[id] ?? null;
+}

@@ -15,10 +15,18 @@ written `provider/model`, for example `gemini/gemini-2.5-flash-lite`.
 | `openrouter` | One key, many upstream models (OpenAI-compatible) | `OPENROUTER_API_KEY` |
 | `deepseek` | DeepSeek (OpenAI-compatible) | `DEEPSEEK_API_KEY` |
 | `groq` | Groq (OpenAI-compatible, low-latency open models) | `GROQ_API_KEY` |
-| `mistral` | Mistral AI (OpenAI-compatible) | `MISTRAL_API_KEY` |
+| `mistral` | Mistral AI: Large, Medium, Small, Codestral, Pixtral (OpenAI-compatible) | `MISTRAL_API_KEY` |
 | `together` | Together AI (OpenAI-compatible serverless open models) | `TOGETHER_API_KEY` |
 | `ollama` | Local models via Ollama at `http://localhost:11434/v1` | none |
 | `lmstudio` | Local models via LM Studio at `http://localhost:1234/v1` | none |
+
+**Mistral:** you need an API key from La Plateforme
+(<https://console.mistral.ai/api-keys>). A Le Chat chat subscription is not an
+API key and cannot be used here. Mistral only accepts tool-call ids of exactly
+nine letters/digits, so Praxi-Bot rewrites other ids (for example after you
+switch a conversation from another provider) to a stable nine-character id.
+Mistral's Voxtral speech-to-text is not wired in as a dictation backend: see
+the dictation notes.
 
 Any other OpenAI-compatible server can be added as a **custom provider** with a
 base URL (see below). The catalog also carries a list of models with USD prices

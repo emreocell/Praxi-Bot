@@ -5203,6 +5203,10 @@
       "defaultModel": "Default model",
       "description": "API keys are stored in your OS keychain. Changes are picked up by the background service without a restart.",
       "disabled": "Disabled",
+      "keyHelp": {
+        "mistral": "Mistral needs an API key from La Plateforme (console.mistral.ai). A Le Chat chat subscription is not an API key and will not work here.",
+        "open": "Create a Mistral key"
+      },
       "keyHint": "The key is sent to the OS keychain and never shown again.",
       "keyStored": "key stored",
       "localDaemonOnly": "Provider setup is available for the local background service started by this app. For other connections, manage providers on the computer running the background service.",

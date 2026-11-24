@@ -16,12 +16,14 @@ import { canManageProviders } from "../lib/providerConnection";
 import {
   canTestProvider,
   isCliProvider,
+  providerKeyHelp,
   providersView
 } from "../lib/providerView";
 import { useDaemon } from "../state/DaemonContext";
 import { notifyProvidersChanged, useProviders } from "../state/useProviders";
 import styles from "./SettingsSections.module.css";
 import { humanLine } from "../lib/humanError";
+import { openExternal } from "../lib/externalLink";
 import { useBotsHome } from "../state/useBotsHome";
 import { HomeHint } from "../components/HomeHint";
 
@@ -98,6 +100,7 @@ export function ProvidersSection() {
 
   const isCustom = choice === CUSTOM;
   const id = isCustom ? customId.trim() : choice;
+  const keyHelp = isCustom ? null : providerKeyHelp(id);
   const canAdd = canManage && id !== "" && (!isCustom || baseUrl.trim() !== "") && !busy;
 
   return (
@@ -266,6 +269,14 @@ export function ProvidersSection() {
               </div>
             </div>
             <p className={formStyles.hint}>{t("settings.providers.keyHint")}</p>
+            {keyHelp ? (
+              <p className={formStyles.hint}>
+                {t(keyHelp.noteKey)}{" "}
+                <Button variant="ghost" onClick={() => openExternal(keyHelp.url)}>
+                  {t("settings.providers.keyHelp.open")}
+                </Button>
+              </p>
+            ) : null}
             <div>
               <Button
                 variant="primary"

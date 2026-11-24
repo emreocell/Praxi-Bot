@@ -41,10 +41,35 @@ fn has_image(content: &Value) -> bool {
     })
 }
 
+const ID_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+/// A stable nine-character alphanumeric id for providers that insist on one
+/// (Mistral). Ids that already fit are kept, so replies from the provider
+/// itself round-trip unchanged.
+fn short_tool_call_id(id: &str) -> String {
+    if id.len() == 9 && id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return id.to_owned();
+    }
+    // FNV-1a, 64 bit: deterministic across runs (unlike `DefaultHasher`).
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in id.bytes() {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    (0..9)
+        .map(|_| {
+            let c = ID_ALPHABET[(hash % 62) as usize] as char;
+            hash /= 62;
+            c
+        })
+        .collect()
+}
+
 fn map_message(
     m: &Message,
     role: &str,
     vision: bool,
+    short_ids: bool,
     bad_args: &HashMap<&str, &str>,
 ) -> Result<Value, ProviderError> {
     if !vision && has_image(&m.content) {
@@ -65,8 +90,13 @@ fn map_message(
             .tool_calls
             .iter()
             .map(|c| {
+                let id = if short_ids {
+                    short_tool_call_id(&c.id)
+                } else {
+                    c.id.clone()
+                };
                 let mut call = json!({
-                    "id": c.id,
+                    "id": id,
                     "type": "function",
                     "function": {"name": c.name, "arguments": sanitize_args(&c.arguments)},
                 });
@@ -84,10 +114,13 @@ fn map_message(
             text = with_args_note(&text, original);
         }
         obj.insert("content".into(), Value::String(text));
-        obj.insert(
-            "tool_call_id".into(),
-            m.tool_call_id.clone().unwrap_or_default().into(),
-        );
+        let id = m.tool_call_id.clone().unwrap_or_default();
+        let id = if short_ids {
+            short_tool_call_id(&id)
+        } else {
+            id
+        };
+        obj.insert("tool_call_id".into(), id.into());
     } else {
         obj.insert("content".into(), m.content.clone());
     }
@@ -101,6 +134,7 @@ fn map_messages(
 ) -> Result<Vec<Value>, ProviderError> {
     let flags = &entry.compat_flags;
     let bad_args = invalid_arg_calls(&req.messages);
+    let short_ids = flags.short_tool_call_ids;
 
     if flags.strip_system_role {
         let system: Vec<String> = req
@@ -117,7 +151,7 @@ fn map_messages(
             .iter()
             .filter(|m| m.role != MessageRole::System)
         {
-            let mut v = map_message(m, role_str(&m.role), vision, &bad_args)?;
+            let mut v = map_message(m, role_str(&m.role), vision, short_ids, &bad_args)?;
             if !merged && m.role == MessageRole::User {
                 prepend_text(&mut v, &system);
                 merged = true;
@@ -138,7 +172,7 @@ fn map_messages(
             } else {
                 role_str(&m.role)
             };
-            map_message(m, role, vision, &bad_args)
+            map_message(m, role, vision, short_ids, &bad_args)
         })
         .collect()
 }

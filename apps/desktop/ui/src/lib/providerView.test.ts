@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { ProvidersDto } from "../api/types.ts";
 import {
@@ -7,6 +8,7 @@ import {
   FALLBACK_CATALOG,
   isCliProvider,
   nonCliProviderIds,
+  providerKeyHelp,
   providerRoleDefaults,
   providersView
 } from "./providerView.ts";
@@ -179,4 +181,16 @@ test("providersView excludes cli catalog entries from add-provider catalog while
     }),
     "cli:claude/claude-sonnet-4-5"
   );
+});
+
+test("Mistral key help points at the API key page and says Le Chat is not a key", () => {
+  const help = providerKeyHelp("mistral");
+  assert.equal(help?.url, "https://console.mistral.ai/api-keys");
+  assert.equal(providerKeyHelp("deepseek"), null);
+  for (const locale of ["en", "tr", "de"]) {
+    const json = JSON.parse(
+      readFileSync(new URL(`../i18n/locales/${locale}.json`, import.meta.url), "utf8")
+    );
+    assert.match(json.settings.providers.keyHelp.mistral, /Le[ -]Chat/);
+  }
 });

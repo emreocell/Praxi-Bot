@@ -5203,6 +5203,10 @@
       "defaultModel": "Standardmodell",
       "description": "API-Schlüssel werden im Schlüsselbund deines Betriebssystems gespeichert. Änderungen übernimmt der Hintergrunddienst ohne Neustart.",
       "disabled": "Deaktiviert",
+      "keyHelp": {
+        "mistral": "Mistral braucht einen API-Schlüssel von La Plateforme (console.mistral.ai). Ein Le-Chat-Abo ist kein API-Schlüssel und funktioniert hier nicht.",
+        "open": "Mistral-Schlüssel erstellen"
+      },
       "keyHint": "Der Schlüssel wird an den Schlüsselbund des Betriebssystems gesendet und nie wieder angezeigt.",
       "keyStored": "Schlüssel gespeichert",
       "localDaemonOnly": "Die Anbietereinrichtung ist für den von dieser App gestarteten lokalen Hintergrunddienst verfügbar. Verwalte bei anderen Verbindungen die Anbieter auf dem Computer, auf dem der Hintergrunddienst läuft.",

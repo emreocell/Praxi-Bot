@@ -106,6 +106,10 @@ impl CapabilityOverrides {
 /// - `no_stream_usage`: do not send `stream_options.include_usage` (for
 ///   endpoints that reject unknown `stream_options`; usage is then only
 ///   reported if the server volunteers it).
+/// - `short_tool_call_ids`: the endpoint only accepts tool-call ids of exactly
+///   nine letters/digits (Mistral). Other ids in the history (from another
+///   provider, or synthetic ones) are rewritten to a stable 9-character id,
+///   the same way for the call and its result.
 /// - `tool_call_format`: reserved for dialect rewriting; currently ignored.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -118,6 +122,7 @@ pub struct CompatFlags {
     pub tools_require_strict: bool,
     pub max_tokens_field: Option<String>,
     pub no_stream_usage: bool,
+    pub short_tool_call_ids: bool,
 }
 
 /// The wire protocol / API family the provider speaks.

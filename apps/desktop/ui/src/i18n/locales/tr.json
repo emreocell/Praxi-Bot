@@ -5203,6 +5203,10 @@
       "defaultModel": "Varsayılan model",
       "description": "API anahtarları işletim sistemi anahtarlığında saklanır. Değişiklikleri arka plan servisi yeniden başlatmadan alır.",
       "disabled": "Devre dışı",
+      "keyHelp": {
+        "mistral": "Mistral, La Plateforme'dan (console.mistral.ai) alınan bir API anahtarı ister. Le Chat sohbet aboneliği bir API anahtarı değildir ve burada çalışmaz.",
+        "open": "Mistral anahtarı oluştur"
+      },
       "keyHint": "Anahtar sistem anahtarlığına gönderilir ve bir daha gösterilmez.",
       "keyStored": "anahtar kayıtlı",
       "localDaemonOnly": "Sağlayıcı kurulumu, bu uygulamanın başlattığı yerel arka plan servisi için kullanılabilir. Diğer bağlantılarda sağlayıcıları arka plan servisinin çalıştığı bilgisayarda yönet.",

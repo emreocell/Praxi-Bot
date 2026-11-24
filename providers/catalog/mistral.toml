@@ -2,6 +2,8 @@
 # Sources:
 #   https://docs.mistral.ai/api
 #   https://docs.mistral.ai/models
+# A Le Chat chat subscription is NOT an API key: keys come from La Plateforme
+#   (https://console.mistral.ai/api-keys).
 # Auth: HTTP Bearer token from MISTRAL_API_KEY (`Authorization: Bearer <key>`).
 # Rate limits: workspace-scoped RPS/RPM, TPM and monthly token caps scaled by
 # billing tier (Free Mode through Tier 4+). Responses include
@@ -21,12 +23,20 @@ json_mode = true
 
 [compat_flags]
 strip_system_role = false
+# La Plateforme rejects tool-call ids that are not exactly 9 letters/digits.
+short_tool_call_ids = true
 
 [[models]]
 id = "mistral-large-latest"
+
+[[models]]
+id = "mistral-medium-latest"
 
 [[models]]
 id = "mistral-small-latest"
 
 [[models]]
 id = "codestral-latest"
+
+[[models]]
+id = "pixtral-large-latest"

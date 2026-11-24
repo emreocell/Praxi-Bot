@@ -1124,3 +1124,86 @@ fn handover_shape_ends_on_a_user_message() {
     let b = body(&e, &r);
     assert_eq!(roles(&b), ["user", "user", "user", "user"]);
 }
+
+/// The shipped Mistral preset, pointed at a fake server.
+fn mistral_entry(base_url: &str) -> ProviderEntry {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../providers/catalog");
+    let text = std::fs::read_to_string(dir.join("mistral.toml")).unwrap();
+    let mut e: ProviderEntry = toml::from_str(&text).unwrap();
+    e.base_url = base_url.into();
+    e.models_endpoint = Some(format!("{base_url}/models"));
+    e
+}
+
+#[tokio::test]
+async fn mistral_preset_sends_key_and_nine_char_tool_ids_and_retries_429() {
+    let server = MockServer::start().await;
+    // First answer: rate limited with Retry-After; the retry must succeed.
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    // Foreign ids (another provider, or synthetic) must reach Mistral as 9
+    // letters/digits, identical for the call and its result.
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(header("authorization", "Bearer mk-test"))
+        .respond_with(sse(&[
+            r#"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#,
+            "[DONE]",
+        ]))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let p = OpenAiCompatProvider::with_api_key(
+        mistral_entry(&server.uri()),
+        fast(),
+        Some("mk-test".into()),
+    )
+    .unwrap();
+    let mut r = ChatRequest::new(
+        ModelRef("mistral/mistral-large-latest".into()),
+        vec![
+            Message::text(MessageRole::User, "hi"),
+            Message {
+                tool_calls: vec![ToolCall::new("call_01HXYZ-long-foreign-id", "t", "{}")],
+                ..Message::text(MessageRole::Assistant, "")
+            },
+            Message::tool_result("call_01HXYZ-long-foreign-id", "done"),
+        ],
+    );
+    r.tools = vec![tool()];
+    let chunks = collect(&p, r).await.unwrap();
+    assert!(matches!(&chunks[0], ChatChunk::TextDelta(t) if t == "ok"));
+
+    let sent: Value = server
+        .received_requests()
+        .await
+        .unwrap()
+        .last()
+        .unwrap()
+        .body_json()
+        .unwrap();
+    let call_id = sent["messages"][1]["tool_calls"][0]["id"].as_str().unwrap();
+    assert_eq!(call_id.len(), 9);
+    assert!(call_id.bytes().all(|b| b.is_ascii_alphanumeric()));
+    assert_eq!(sent["messages"][2]["tool_call_id"], call_id);
+}
+
+#[test]
+fn short_tool_call_ids_keep_already_valid_ids() {
+    let mut e = entry("http://x");
+    e.compat_flags.short_tool_call_ids = true;
+    let mut r = req();
+    r.messages.push(Message::tool_result("AbC123xyZ", "x"));
+    let b = body(&e, &r);
+    assert_eq!(b["messages"][1]["tool_call_id"], "AbC123xyZ");
+    // Without the flag nothing is rewritten.
+    let mut r = req();
+    r.messages.push(Message::tool_result("call_long_id", "x"));
+    let b = body(&entry("http://x"), &r);
+    assert_eq!(b["messages"][1]["tool_call_id"], "call_long_id");
+}
