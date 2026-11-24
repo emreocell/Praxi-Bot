@@ -191,7 +191,7 @@ fn bundled_skills_all_valid() {
     let idx = SkillIndex::load(SkillPaths::default());
     assert!(idx.issues().is_empty(), "{:?}", idx.issues());
     let names: Vec<_> = idx.list().into_iter().map(|s| s.name).collect();
-    assert!(names.len() >= 19, "{names:?}");
+    assert!(names.len() >= 24, "{names:?}");
     for expected in [
         "github-basics",
         "sign-in-forms",
@@ -199,6 +199,11 @@ fn bundled_skills_all_valid() {
         "web-tables-and-spreadsheets",
         "windows-save-as-dialog",
         "macos-file-dialogs",
+        "signup-to-site",
+        "lead-research",
+        "outreach-drafts",
+        "office-doc-prep",
+        "install-capability",
     ] {
         assert!(names.contains(&expected.to_string()), "missing {expected}");
     }
@@ -212,6 +217,11 @@ fn bundled_skills_all_valid() {
                 | "web-tables-and-spreadsheets"
                 | "windows-save-as-dialog"
                 | "macos-file-dialogs"
+                | "signup-to-site"
+                | "lead-research"
+                | "outreach-drafts"
+                | "office-doc-prep"
+                | "install-capability"
         ) {
             put(tmp.path(), dir_name, content);
             let report = hub::scan_dir(&tmp.path().join(dir_name)).unwrap();
@@ -619,5 +629,93 @@ fn starter_pack_passes_the_hub_scan_without_serious_findings() {
 {}",
             report.render()
         );
+    }
+}
+
+const PLAYBOOK_PACK: [(&str, &str, &str, &[&str]); 5] = [
+    (
+        "signup-to-site",
+        "please sign up on this site for me",
+        "bu siteye üye ol",
+        &["secrets_list", "browser_fill", "ask_user", "Take control"],
+    ),
+    (
+        "lead-research",
+        "find potential customers and save a leads csv",
+        "ajans için potansiyel müşteri ara",
+        &[
+            "web_search",
+            "web_extract",
+            "fs_write",
+            "leads/<campaign>.csv",
+        ],
+    ),
+    (
+        "outreach-drafts",
+        "draft emails per lead for batch review",
+        "adaylara taslak hazırla",
+        &["csv_read", "email_draft", "email_send"],
+    ),
+    (
+        "office-doc-prep",
+        "prepare a docx report and excel spreadsheet",
+        "word belgesi ve excel tablosu hazırla",
+        &["docx_write", "xlsx_write", "csv_transform", "pdf_extract"],
+    ),
+    (
+        "install-capability",
+        "we have a missing binary, install libreoffice",
+        "sunucuya araç kur",
+        &["shell_run", "ask_user", "apt install"],
+    ),
+];
+
+#[test]
+fn playbook_pack_is_bundled_matches_en_tr_and_passes_hub_scan() {
+    use crate::hub::{RiskLevel, scan_dir};
+    let idx = SkillIndex::load(SkillPaths::default());
+    assert!(idx.issues().is_empty(), "{:?}", idx.issues());
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills");
+
+    for (name, en, tr, expected_terms) in PLAYBOOK_PACK {
+        let skill = idx
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} is not bundled"));
+        assert_eq!(skill.source, Source::Bundled);
+        let body = idx.read(name, None).expect("read bundled playbook");
+        for term in expected_terms {
+            assert!(
+                body.contains(term),
+                "{name} playbook should reference {term:?}"
+            );
+        }
+        for prompt in [en, tr] {
+            let ctx = SkillContext {
+                text: Some(prompt.to_string()),
+                ..SkillContext::default()
+            };
+            assert!(skill.matches(&ctx), "{name} should match {prompt:?}");
+            let block = idx.prompt_block(&ctx);
+            assert!(
+                block.contains(&format!("[suggested] {name}:")),
+                "{name} should surface as suggested in prompt_block for {prompt:?}: {block}"
+            );
+        }
+        let unrelated = SkillContext {
+            text: Some("write me a poem about autumn".into()),
+            ..SkillContext::default()
+        };
+        assert!(
+            !skill.matches(&unrelated),
+            "{name} should not match an unrelated prompt"
+        );
+        let report = scan_dir(&root.join(name)).expect("scan");
+        assert_eq!(
+            report.risk(),
+            RiskLevel::Low,
+            "{name}:\n{}",
+            report.render()
+        );
+        assert!(report.findings.is_empty(), "{name}: {:?}", report.findings);
     }
 }

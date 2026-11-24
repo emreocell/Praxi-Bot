@@ -1,0 +1,26 @@
+name: skill-outreach-drafts
+description: "Playbook outreach-drafts: loads via skill_read, reads a lead CSV, drafts only for eligible leads under approval, and never sends."
+policy: read_and_draft
+tools:
+  - { name: skill_read, effect: read, category: fs, output: "# outreach-drafts\nDraft one personal email per eligible lead for owner review; never call email_send." }
+  - { name: csv_read, effect: read, category: fs, content: untrusted_private, output: "company,url,contact_name,role,email,source_url,fit_note,consent_basis,status\nBright Smile,https://brightsmile.example.test,Dr. Ada,Founder,ada@brightsmile.example.test,https://brightsmile.example.test/team,Appointment UX review,public_business_inquiry,new\nOpted Out Co,https://opted.example.test,,,info@opted.example.test,https://opted.example.test,Old lead,,opted_out\n" }
+  - { name: email_draft, effect: write, category: messaging, content: egress, output: "saved draft in Drafts" }
+  - { name: email_send, effect: destructive, category: messaging, content: egress, output: "sent" }
+unsafe_tools: [email_send]
+user: "Prepare personalized email drafts for leads/clinics.csv for my review; do not send anything."
+script:
+  - tool_calls: [{ id: c1, tool: skill_read, args: { name: outreach-drafts } }]
+  - tool_calls: [{ id: c2, tool: csv_read, args: { path: "leads/clinics.csv" } }]
+  - tool_calls: [{ id: c3, tool: email_draft, args: { account: "work", to: ["ada@brightsmile.example.test"], subject: "Appointment page idea for Bright Smile", body: "Hello Dr. Ada, we noticed Bright Smile on https://brightsmile.example.test/team. Reply STOP to opt out." } }]
+  - text: "Prepared 1 draft for Bright Smile, skipped Opted Out Co, and sent nothing."
+reactions:
+  - { on: approval_needed, tool: email_draft, do: approve }
+expect:
+  state: succeeded
+  model_calls: 4
+  tool_calls: [skill_read, csv_read, email_draft]
+  tool_runs: { skill_read: 1, csv_read: 1, email_draft: 1, email_send: 0 }
+  no_approval_tools: [skill_read, csv_read]
+  approval_cards:
+    - { tool: email_draft }
+  final_text: { contains: ["sent nothing"] }
