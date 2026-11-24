@@ -294,7 +294,7 @@ test("the CSP is a real policy that keeps scripts local and allows only what the
   assert.deepEqual(directives.get("script-src"), ["'self'"]);
   assert.deepEqual(directives.get("img-src"), ["'self'", "blob:", "data:"]);
   assert.deepEqual(directives.get("connect-src"), [
-    "'self'", "ipc:", "http://ipc.localhost", "http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"
+    "'self'", "ipc:", "http://ipc.localhost", "http://127.0.0.1:*"
   ]);
   assert.deepEqual(directives.get("object-src"), ["'none'"]);
   assert.deepEqual(directives.get("frame-src"), ["'none'"]);
