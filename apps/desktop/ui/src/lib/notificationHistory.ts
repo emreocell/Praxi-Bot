@@ -93,8 +93,9 @@ export function snooze(list: HistoryEntry[], id: string, until: number): History
 export function unsnooze(list: HistoryEntry[], id: string): HistoryEntry[] {
   return list.map((e) => {
     if (e.id !== id || e.snoozedUntil === undefined) return e;
-    const { snoozedUntil: _gone, ...rest } = e;
-    return rest;
+    const copy = { ...e };
+    delete copy.snoozedUntil;
+    return copy;
   });
 }
 
