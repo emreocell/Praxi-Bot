@@ -146,7 +146,12 @@ fn class_of(config: &McpServerConfig, tool: &McpTool) -> (ContentClass, Effect) 
                     effect,
                 )
             },
-            |(content, effect, _)| (content, effect),
+            |(mut content, effect, _)| {
+                // A trusted open-world hint widens egress on this branch too:
+                // navigate/evaluate leave the machine even on a local-only server.
+                content.egress |= hints.open_world;
+                (content, effect)
+            },
         )
 }
 
@@ -786,6 +791,22 @@ mod tests {
         );
         assert!(!ignored.content.egress);
         assert_eq!(ignored.effect, Effect::Destructive);
+    }
+
+    #[test]
+    fn open_world_hint_sets_egress_on_an_in_page_browser_tool_of_a_local_server() {
+        let mut cfg = McpServerConfig::stdio("srv", "x", [""; 0]);
+        cfg.local_only = true;
+        cfg.trust_hints = true;
+        cfg.browser = true;
+        let mut t = hinted(r#"{"readOnlyHint":true,"openWorldHint":true}"#);
+        t.name = "browser_navigate".into();
+        let spec = spec_of(&cfg, &t);
+        assert!(spec.content.egress && spec.content.ingests_untrusted);
+        // Without the hint a local-only server stays non-egress.
+        let mut closed = hinted(r#"{"readOnlyHint":true}"#);
+        closed.name = "browser_navigate".into();
+        assert!(!spec_of(&cfg, &closed).content.egress);
     }
 
     #[test]
