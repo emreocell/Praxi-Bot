@@ -78,6 +78,13 @@ impl AppState {
 /// by the peer router (`peer.rs`), which this table does not change.
 pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("GET", "/v1/logs/recent"),
+    // the audit trail names bots, folders and decisions: the owner's to read and export
+    ("GET", "/v1/audit"),
+    ("GET", "/v1/audit/export"),
+    ("GET", "/v1/audit/verify"),
+    ("HEAD", "/v1/audit"),
+    ("HEAD", "/v1/audit/export"),
+    ("HEAD", "/v1/audit/verify"),
     // axum also serves HEAD for a GET handler; it must cross the same guard.
     ("HEAD", "/v1/logs/recent"),
     // Full history reads and portable transcripts expose sensitive conversation data.

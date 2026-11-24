@@ -1310,6 +1310,308 @@
         ]
       }
     },
+    "/v1/audit": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Audit events, newest first, with filters and paging (owner-only).",
+        "operationId": "list",
+        "parameters": [
+          {
+            "name": "since_ms",
+            "in": "query",
+            "description": "Only events at or after this time (Unix ms).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "until_ms",
+            "in": "query",
+            "description": "Only events at or before this time (Unix ms).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Only events by this actor (`user`, `bot`, `system`, ...).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Only this kind: approval, permission, takeover, import, update, `key_use`, other.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bot",
+            "in": "query",
+            "description": "Only events of this bot (id).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive text search over action, actor and redacted details.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip (newest first).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 200 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Export format: `csv` (default) or `json`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/audit/export": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Redacted CSV or JSON export of the filtered events (owner-only).",
+        "operationId": "export",
+        "parameters": [
+          {
+            "name": "since_ms",
+            "in": "query",
+            "description": "Only events at or after this time (Unix ms).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "until_ms",
+            "in": "query",
+            "description": "Only events at or before this time (Unix ms).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Only events by this actor (`user`, `bot`, `system`, ...).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Only this kind: approval, permission, takeover, import, update, `key_use`, other.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bot",
+            "in": "query",
+            "description": "Only events of this bot (id).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive text search over action, actor and redacted details.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip (newest first).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 200 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Export format: `csv` (default) or `json`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Redacted events as CSV or JSON",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/audit/verify": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Check the log's append-only protection and look for removed rows (owner-only).",
+        "operationId": "verify",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditVerify"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/bots": {
       "get": {
         "tags": [
@@ -14894,6 +15196,159 @@
           "truncated": {
             "type": "boolean",
             "description": "Only the start of the text was given to the model."
+          }
+        }
+      },
+      "AuditEventDto": {
+        "type": "object",
+        "description": "One audit event, details redacted.",
+        "required": [
+          "id",
+          "ts_ms",
+          "actor",
+          "action",
+          "kind",
+          "detail"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Machine name of the action (for example `grant.always`)."
+          },
+          "actor": {
+            "type": "string",
+            "description": "Who acted."
+          },
+          "bot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Bot it belongs to, if known."
+          },
+          "bot_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of that bot, if it still exists."
+          },
+          "detail": {
+            "description": "Details with secrets removed."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Stable, increasing id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Plain category: approval, permission, takeover, import, update, `key_use`, other."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Run it belongs to, if any."
+          },
+          "ts_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it happened (Unix ms)."
+          }
+        }
+      },
+      "AuditPage": {
+        "type": "object",
+        "description": "A page of events.",
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit",
+          "actors"
+        ],
+        "properties": {
+          "actors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Distinct actors in the time window (for the filter list)."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditEventDto"
+            },
+            "description": "Newest first."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Page size used.",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Rows skipped.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "description": "Events matching the filters.",
+            "minimum": 0
+          }
+        }
+      },
+      "AuditVerify": {
+        "type": "object",
+        "description": "Result of the integrity check.",
+        "required": [
+          "hash_chain",
+          "entries",
+          "missing",
+          "append_only_rules",
+          "status"
+        ],
+        "properties": {
+          "append_only_rules": {
+            "type": "boolean",
+            "description": "Whether both append-only rules are in place."
+          },
+          "entries": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Events stored."
+          },
+          "first_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "First event id."
+          },
+          "hash_chain": {
+            "type": "boolean",
+            "description": "Whether the log is hash-chained. It is not: protection is the\ndatabase's own append-only rules plus the gap check below."
+          },
+          "last_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Last event id."
+          },
+          "missing": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Ids missing between first and last (rows removed behind the rules)."
+          },
+          "status": {
+            "type": "string",
+            "description": "`ok` or `problem`."
           }
         }
       },

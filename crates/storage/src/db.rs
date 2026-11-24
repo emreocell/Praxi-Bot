@@ -1780,6 +1780,54 @@ impl Storage {
             .collect::<rusqlite::Result<_>>()?)
     }
 
+    /// A user's audit entries inside an optional time window, newest first.
+    ///
+    /// # Errors
+    /// Fails on a database error.
+    pub fn list_audit_between(
+        &self,
+        user_id: UserId,
+        since_ms: Option<i64>,
+        until_ms: Option<i64>,
+    ) -> Result<Vec<AuditEntry>> {
+        let conn = self.conn();
+        let mut st = conn.prepare(
+            "SELECT id, user_id, run_id, actor, action, detail_json, ts_ms FROM audit_log WHERE user_id = ?1 AND ts_ms >= ?2 AND ts_ms <= ?3 ORDER BY id DESC",
+        )?;
+        Ok(st
+            .query_map(
+                params![
+                    user_id.to_string(),
+                    since_ms.unwrap_or(i64::MIN),
+                    until_ms.unwrap_or(i64::MAX)
+                ],
+                audit_row,
+            )?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Integrity facts about the audit log: `(rows, first_id, last_id,
+    /// protecting_triggers)`. There is no hash chain; ids come from
+    /// `AUTOINCREMENT` and are never reused, so a row removed behind the
+    /// append-only triggers shows up as a gap between `rows` and the id span.
+    ///
+    /// # Errors
+    /// Fails on a database error.
+    pub fn audit_integrity(&self) -> Result<(i64, Option<i64>, Option<i64>, i64)> {
+        let conn = self.conn();
+        let (rows, first, last) = conn.query_row(
+            "SELECT COUNT(*), MIN(id), MAX(id) FROM audit_log",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        let triggers = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'audit_log' AND name IN ('audit_log_no_update', 'audit_log_no_delete')",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok((rows, first, last, triggers))
+    }
+
     /// Audit rows of one action written at or after `since_ms` (avoids loading
     /// the whole log for per-call accounting).
     ///

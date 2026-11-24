@@ -287,6 +287,9 @@ fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> 
     if under(check_path, "/v1/logs") {
         return Some("recent logs are available only to the local owner");
     }
+    if under(check_path, "/v1/audit") {
+        return Some("the audit log is available only to the local owner");
+    }
     if under(check_path, "/v1/connection-test") {
         return Some("connection tests spend this host's stored keys and are an owner action");
     }

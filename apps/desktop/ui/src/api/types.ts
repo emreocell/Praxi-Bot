@@ -3,6 +3,9 @@ import type { components } from "./schema";
 /** Types generated from `docs/api/openapi.json` (`pnpm --filter desktop-ui gen:api`). */
 type S = components["schemas"];
 export type RecentLogs = S["RecentLogs"];
+export type AuditPage = S["AuditPage"];
+export type AuditEvent = S["AuditEventDto"];
+export type AuditVerify = S["AuditVerify"];
 export type SearchPage = S["SearchPage"];
 export type WorkflowProposal = S["WorkflowProposal"];
 export type WorkflowDefinition = S["WorkflowDto"];

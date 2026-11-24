@@ -1,0 +1,14 @@
+.root { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-5); min-width: 0; }
+.root h2, .root h3, .root p { margin: 0; }
+.root p { color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.controls, .actions { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2); }
+.controls label { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--font-size-sm); }
+.controls input, .controls select { color: var(--color-text); background: var(--color-surface-elevated); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-control); padding: var(--space-2); }
+.tableWrap { max-height: 40vh; overflow: auto; border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); }
+.table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+.table th, .table td { text-align: start; padding: var(--space-2) var(--space-3); border-bottom: var(--size-border) solid var(--color-border); vertical-align: top; }
+.table th { position: sticky; top: 0; background: var(--color-surface-elevated); color: var(--color-text-muted); }
+.selected { background: var(--color-surface-elevated); }
+.link { background: none; border: 0; padding: 0; color: var(--color-text); text-align: start; text-decoration: underline; cursor: pointer; font: inherit; }
+.drawer { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); background: var(--color-surface-elevated); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); }
+.preview { max-height: 25vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--font-size-xs); margin: 0; padding: var(--space-3); border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); }

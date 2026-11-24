@@ -13,6 +13,7 @@
 //! browser `EventSource` clients (Host / Origin still apply).
 
 mod attachment_routes;
+mod audit_routes;
 pub mod auth;
 mod bot_engine;
 mod bot_tools;
@@ -1495,6 +1496,9 @@ fn api_routes() -> Router<AppState> {
         )
         .route("/v1/doctor", get(doctor_routes::get_doctor))
         .route("/v1/logs/recent", get(logs::recent))
+        .route("/v1/audit", get(audit_routes::list))
+        .route("/v1/audit/export", get(audit_routes::export))
+        .route("/v1/audit/verify", get(audit_routes::verify))
         .route("/v1/doctor/report", get(doctor_routes::report))
         .route("/v1/doctor/repair/{id}", post(doctor_routes::repair))
         .route(

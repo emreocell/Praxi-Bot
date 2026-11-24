@@ -31,6 +31,8 @@ import type {
 } from "./types";
 import type {
   RecentLogs,
+  AuditPage,
+  AuditVerify,
   AcceptedResponse,
   AdminCliEngine,
   AdminCliInstall,
@@ -1469,6 +1471,21 @@ export class ApiClient {
   /** Owner-only, host-local redacted operational records. */
   recentLogs(): Promise<RecentLogs> {
     return this.request("GET", "/logs/recent");
+  }
+
+  /** Owner-only audit events, newest first (redacted by the daemon). */
+  auditLog(query: Query): Promise<AuditPage> {
+    return this.request("GET", "/audit", { query });
+  }
+
+  /** Owner-only redacted export of the filtered audit events. */
+  auditExport(query: Query, format: "csv" | "json"): Promise<string> {
+    return this.requestText("GET", "/audit/export", { query: { ...query, format } });
+  }
+
+  /** Owner-only integrity check of the audit log. */
+  auditVerify(): Promise<AuditVerify> {
+    return this.request("GET", "/audit/verify");
   }
 
   /** Read-only checks (`GET /v1/doctor`, at most ~10 s). */

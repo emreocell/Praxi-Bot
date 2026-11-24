@@ -16,6 +16,7 @@ import styles from "../SettingsModal.module.css";
 import { PermissionsSection } from "../SettingsSections";
 import { ComputerAccessCard } from "../../components/ComputerAccess";
 import { WebSearchCard } from "./WebSearchCard";
+import { AuditLogCard } from "./AuditLogCard";
 import { SafetyLevelsCard } from "./SafetyLevelsCard";
 import type { CardDef, SettingsBridge } from "./types";
 
@@ -128,6 +129,15 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       description: t("settingsModal.safety.description"),
       keywords: "permissions ask approve allow safe careful balanced hands-off izin onay guvenli dikkatli sorar erlauben sicher vorsichtig",
       node: <SettingsCard title={t("settingsModal.safety.title")}><SafetyLevelsCard /></SettingsCard>
+    },
+    {
+      id: "audit-log",
+      section: "computer",
+      kind: "block",
+      title: t("audit.title"),
+      description: t("audit.description"),
+      keywords: "audit log history approvals activity export aktivite gunluk gecmis onay denetim protokoll verlauf genehmigung aktivitat",
+      node: <SettingsCard title={t("audit.title")}><AuditLogCard /></SettingsCard>
     },
     {
       id: "target",

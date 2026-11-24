@@ -23,6 +23,7 @@ use crate::fake::FakeProvider;
 use crate::{AppState, DaemonConfig, router};
 
 mod attachments;
+mod audit;
 mod bot_patch;
 mod bot_tools;
 mod chat_history;

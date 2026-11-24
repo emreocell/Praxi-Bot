@@ -372,6 +372,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Audit events, newest first, with filters and paging (owner-only). */
+        get: operations["list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/audit/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Redacted CSV or JSON export of the filtered events (owner-only). */
+        get: operations["export"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/audit/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check the log's append-only protection and look for removed rows (owner-only). */
+        get: operations["verify"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bots": {
         parameters: {
             query?: never;
@@ -4286,6 +4337,78 @@ export interface components {
             size: number;
             /** @description Only the start of the text was given to the model. */
             truncated: boolean;
+        };
+        /** @description One audit event, details redacted. */
+        AuditEventDto: {
+            /** @description Machine name of the action (for example `grant.always`). */
+            action: string;
+            /** @description Who acted. */
+            actor: string;
+            /** @description Bot it belongs to, if known. */
+            bot_id?: string | null;
+            /** @description Name of that bot, if it still exists. */
+            bot_name?: string | null;
+            /** @description Details with secrets removed. */
+            detail: unknown;
+            /**
+             * Format: int64
+             * @description Stable, increasing id.
+             */
+            id: number;
+            /** @description Plain category: approval, permission, takeover, import, update, `key_use`, other. */
+            kind: string;
+            /** @description Run it belongs to, if any. */
+            run_id?: string | null;
+            /**
+             * Format: int64
+             * @description When it happened (Unix ms).
+             */
+            ts_ms: number;
+        };
+        /** @description A page of events. */
+        AuditPage: {
+            /** @description Distinct actors in the time window (for the filter list). */
+            actors: string[];
+            /** @description Newest first. */
+            items: components["schemas"]["AuditEventDto"][];
+            /** @description Page size used. */
+            limit: number;
+            /** @description Rows skipped. */
+            offset: number;
+            /** @description Events matching the filters. */
+            total: number;
+        };
+        /** @description Result of the integrity check. */
+        AuditVerify: {
+            /** @description Whether both append-only rules are in place. */
+            append_only_rules: boolean;
+            /**
+             * Format: int64
+             * @description Events stored.
+             */
+            entries: number;
+            /**
+             * Format: int64
+             * @description First event id.
+             */
+            first_id?: number | null;
+            /**
+             * @description Whether the log is hash-chained. It is not: protection is the
+             *     database's own append-only rules plus the gap check below.
+             */
+            hash_chain: boolean;
+            /**
+             * Format: int64
+             * @description Last event id.
+             */
+            last_id?: number | null;
+            /**
+             * Format: int64
+             * @description Ids missing between first and last (rows removed behind the rules).
+             */
+            missing: number;
+            /** @description `ok` or `problem`. */
+            status: string;
         };
         /** @description Catalog skill entry annotated with whether it is assigned to the bot. */
         AvailableSkillDto: {
@@ -10140,6 +10263,142 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list: {
+        parameters: {
+            query?: {
+                /** @description Only events at or after this time (Unix ms). */
+                since_ms?: number;
+                /** @description Only events at or before this time (Unix ms). */
+                until_ms?: number;
+                /** @description Only events by this actor (`user`, `bot`, `system`, ...). */
+                actor?: string;
+                /** @description Only this kind: approval, permission, takeover, import, update, `key_use`, other. */
+                kind?: string;
+                /** @description Only events of this bot (id). */
+                bot?: string;
+                /** @description Case-insensitive text search over action, actor and redacted details. */
+                q?: string;
+                /** @description Rows to skip (newest first). */
+                offset?: number;
+                /** @description Page size, 1 to 200 (default 50). */
+                limit?: number;
+                /** @description Export format: `csv` (default) or `json`. */
+                format?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditPage"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    export: {
+        parameters: {
+            query?: {
+                /** @description Only events at or after this time (Unix ms). */
+                since_ms?: number;
+                /** @description Only events at or before this time (Unix ms). */
+                until_ms?: number;
+                /** @description Only events by this actor (`user`, `bot`, `system`, ...). */
+                actor?: string;
+                /** @description Only this kind: approval, permission, takeover, import, update, `key_use`, other. */
+                kind?: string;
+                /** @description Only events of this bot (id). */
+                bot?: string;
+                /** @description Case-insensitive text search over action, actor and redacted details. */
+                q?: string;
+                /** @description Rows to skip (newest first). */
+                offset?: number;
+                /** @description Page size, 1 to 200 (default 50). */
+                limit?: number;
+                /** @description Export format: `csv` (default) or `json`. */
+                format?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redacted events as CSV or JSON */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    verify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditVerify"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
