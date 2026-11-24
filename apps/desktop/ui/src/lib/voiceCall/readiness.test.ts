@@ -13,6 +13,12 @@ test("startup explains missing keys and a mismatched provider without changing t
   assert.equal(voiceConfigNotice({ ...config, stt_provider: "whisper", stt_base_url: "http://localhost:8080/v1" }), null);
 });
 
+test("a reused provider key counts as configured unless the owner turned reuse off", () => {
+  const reuse = { ...config, use_provider_key: true, gemini_provider_key_available: true };
+  assert.equal(voiceConfigNotice(reuse), null);
+  assert.equal(voiceConfigNotice({ ...reuse, use_provider_key: false }), "voice.call.geminiKeyMissing");
+});
+
 test("owner, busy, unavailable and refused routes give distinct recovery instructions", () => {
   assert.equal(voiceFailureNotice({ status: 403 }), "voice.call.ownerRequired");
   assert.equal(voiceFailureNotice({ status: 409, code: "voice_not_configured" }), "voice.call.notConfigured");

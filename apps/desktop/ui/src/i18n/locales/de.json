@@ -6409,6 +6409,7 @@
     "speed": "Tempo",
     "stop": "Vorlesen beenden",
     "stt": {
+      "advanced": "Erweitert (Modell und Adresse)",
       "clearKey": "Schlüssel entfernen",
       "description": "Wo deine Aufnahmen transkribiert werden: ein OpenAI-kompatibler Dienst (Cloud-Anbieter oder lokaler Whisper-Server).",
       "geminiKey": "Gemini-API-Schlüssel",
@@ -6423,8 +6424,15 @@
       "providerGemini": "Gemini Live",
       "providerLocal": "Auf diesem Computer (offline)",
       "providerWhisper": "Whisper-kompatibel (OpenAI / lokal)",
+      "reuseGemini": "Meinen Gemini-Schlüssel aus „Bots & Modelle“ verwenden",
+      "reuseKey": "Meinen passenden Schlüssel aus „Bots & Modelle“ verwenden",
       "save": "Speichern",
       "saved": "Diktiereinstellungen gespeichert",
+      "statusNoGeminiKey": "Noch kein Gemini-Schlüssel. Fügen Sie ihn unter „Bots & Modelle“ hinzu oder fügen Sie unten einen ein.",
+      "statusNoKey": "Noch kein Schlüssel. Fügen Sie unten einen ein (ein lokaler Server braucht evtl. keinen).",
+      "statusOwnKey": "Bereit: Ein separat für Sprache gespeicherter Schlüssel wird verwendet.",
+      "statusReusing": "Bereit: Der bereits für diesen Dienst hinzugefügte Schlüssel wird verwendet. Er bleibt im geheimen Speicher.",
+      "statusReusingGemini": "Bereit: Der bereits hinzugefügte Gemini-Schlüssel wird verwendet. Er bleibt im geheimen Speicher.",
       "title": "Diktierdienst",
       "url": "Dienstadresse",
       "whereTitle": "Wohin Ihre Stimme geht:"

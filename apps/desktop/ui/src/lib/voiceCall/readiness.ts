@@ -1,11 +1,16 @@
 import type { CallNoticeKey } from "./callMachine.ts";
 
-export type VoiceReadinessConfig = { stt_provider: string; gemini_key_set: boolean; stt_key_set: boolean; stt_base_url: string };
+export type VoiceReadinessConfig = { stt_provider: string; gemini_key_set: boolean; stt_key_set: boolean; stt_base_url: string;
+  use_provider_key?: boolean; gemini_provider_key_available?: boolean; stt_provider_key_available?: boolean };
+
+function reusesKey(config: VoiceReadinessConfig, field: "gemini_provider_key_available" | "stt_provider_key_available"): boolean {
+  return config.use_provider_key !== false && config[field] === true;
+}
 
 /** Inspect only metadata. A stored Gemini key never silently changes the owner's chosen provider. */
 export function voiceConfigNotice(config: VoiceReadinessConfig): CallNoticeKey | null {
   if (config.stt_provider === "gemini_live") {
-    return config.gemini_key_set ? null : "voice.call.geminiKeyMissing";
+    return config.gemini_key_set || reusesKey(config, "gemini_provider_key_available") ? null : "voice.call.geminiKeyMissing";
   }
   if (config.stt_provider !== "whisper") return "voice.call.wrongProvider";
   // Local Whisper servers can intentionally run without an API key.
@@ -13,7 +18,7 @@ export function voiceConfigNotice(config: VoiceReadinessConfig): CallNoticeKey |
   try {
     local = ["127.0.0.1", "localhost", "[::1]"].includes(new URL(config.stt_base_url).hostname);
   } catch { /* An invalid endpoint needs setup too. */ }
-  if (config.stt_key_set || local) return null;
+  if (config.stt_key_set || local || reusesKey(config, "stt_provider_key_available")) return null;
   return config.gemini_key_set ? "voice.call.wrongProvider" : "voice.call.notConfigured";
 }
 

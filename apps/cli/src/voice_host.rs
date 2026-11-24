@@ -15,6 +15,7 @@ use daemon_api::voice::{
     LocalVoiceStatusDto, TranscribeOutput, VoiceConfigDto, VoiceConfigInput, VoiceControl,
     VoiceControlError, VoiceProvider,
 };
+use provider_catalog::{ProviderConfig, ProviderSettings, config_path};
 use secret_store::SecretStore;
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +25,9 @@ const GEMINI_KEY_NAME: &str = "voice/gemini";
 const DEFAULT_GEMINI_MODEL: &str = "gemini-3.5-transcribe-live";
 /// Longest accepted Gemini utterance: 120 s of 16 kHz 16-bit mono PCM.
 const MAX_GEMINI_PCM_BYTES: usize = 120 * 32_000;
+/// Catalog providers whose key is a Gemini API key.
+const GEMINI_PROVIDER_IDS: [&str; 2] = ["gemini", "gemini-openai-compat"];
+const GROQ_BASE_URL: &str = "https://api.groq.com/openai/v1";
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_MODEL: &str = "whisper-1";
 const MAX_FIELD_CHARS: usize = 300;
@@ -40,6 +44,13 @@ struct VoiceFile {
     gemini_model: String,
     #[serde(default = "default_local_model")]
     local_model: String,
+    /// Reuse a matching provider key from Bots & models (default on).
+    #[serde(default = "default_true")]
+    use_provider_key: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_local_model() -> String {
@@ -66,6 +77,7 @@ impl Default for VoiceFile {
             stt_provider: VoiceProvider::default(),
             gemini_model: default_gemini_model(),
             local_model: default_local_model(),
+            use_provider_key: true,
         }
     }
 }
@@ -141,6 +153,49 @@ impl VoiceHost {
             .filter(|k| !k.trim().is_empty())
     }
 
+    /// The key of a configured, enabled provider (Bots & models) accepted by `matches`.
+    /// Read from the secret store; callers use it only for the provider's own host.
+    fn provider_key(&self, matches: impl Fn(&ProviderSettings) -> bool) -> Option<String> {
+        let cfg = ProviderConfig::load(&config_path(&self.data_dir)).ok()?;
+        cfg.providers
+            .iter()
+            .filter(|p| p.enabled && matches(p))
+            .find_map(|p| self.secret(p.key.as_ref()?.name()))
+    }
+
+    fn gemini_provider_key(&self) -> Option<String> {
+        self.provider_key(|p| GEMINI_PROVIDER_IDS.contains(&p.id.as_str()))
+    }
+
+    /// Key of a provider whose base URL is exactly the dictation URL, so the key is only ever
+    /// sent to the host the owner gave it to.
+    fn stt_provider_key(&self, base_url: &str) -> Option<String> {
+        let want = base_url.trim_end_matches('/');
+        self.provider_key(|p| {
+            let url = match (&p.custom, p.id.as_str()) {
+                (Some(entry), _) => entry.base_url.as_str(),
+                (None, "groq") => GROQ_BASE_URL,
+                _ => return false,
+            };
+            url.trim_end_matches('/') == want
+        })
+    }
+
+    /// The Gemini key to use: the Bots & models key when reuse is on, else the voice key.
+    fn effective_gemini_key(&self, file: &VoiceFile) -> Option<String> {
+        file.use_provider_key
+            .then(|| self.gemini_provider_key())
+            .flatten()
+            .or_else(|| self.secret(GEMINI_KEY_NAME))
+    }
+
+    fn effective_stt_key(&self, file: &VoiceFile) -> Option<String> {
+        file.use_provider_key
+            .then(|| self.stt_provider_key(&file.stt_base_url))
+            .flatten()
+            .or_else(|| self.key())
+    }
+
     fn dto(&self, file: &VoiceFile) -> VoiceConfigDto {
         VoiceConfigDto {
             stt_base_url: file.stt_base_url.clone(),
@@ -150,6 +205,9 @@ impl VoiceHost {
             gemini_model: file.gemini_model.clone(),
             local_model: file.local_model.clone(),
             gemini_key_set: self.secret(GEMINI_KEY_NAME).is_some(),
+            use_provider_key: file.use_provider_key,
+            gemini_provider_key_available: self.gemini_provider_key().is_some(),
+            stt_provider_key_available: self.stt_provider_key(&file.stt_base_url).is_some(),
         }
     }
 }
@@ -274,6 +332,9 @@ impl VoiceControl for VoiceHost {
         if let Some(p) = input.stt_provider {
             file.stt_provider = p;
         }
+        if let Some(u) = input.use_provider_key {
+            file.use_provider_key = u;
+        }
         if let Some(m) = &input.gemini_model {
             let m = m.trim();
             if m.chars().count() > 100
@@ -360,7 +421,7 @@ impl VoiceControl for VoiceHost {
         }
         if file.stt_provider == VoiceProvider::GeminiLive {
             let key = self
-                .secret(GEMINI_KEY_NAME)
+                .effective_gemini_key(&file)
                 .ok_or(VoiceControlError::NotConfigured)?;
             let base = crate::voice_gemini::validate_ws_base(&self.gemini_ws_base)?;
             if mime.split(';').next().map(str::trim) != Some("audio/pcm") {
@@ -378,7 +439,7 @@ impl VoiceControl for VoiceHost {
             return Ok(TranscribeOutput { text });
         }
         let local = validate_base_url(&file.stt_base_url, self.daemon_port)?;
-        let key = self.key();
+        let key = self.effective_stt_key(&file);
         // A cloud service needs a key; a loopback server may run without one.
         if key.is_none() && local.starts_with("https://") {
             return Err(VoiceControlError::NotConfigured);
@@ -599,6 +660,86 @@ mod tests {
         );
         let st = host.local_status();
         assert!(st.models.iter().all(|m| !m.installed));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn host_with_provider_keys(tag: &str) -> (VoiceHost, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("praxi-voice-{tag}-{}", rand_u64()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = secret_store::MemoryStore::new();
+        store
+            .set("provider.gemini.api_key", "PROVIDER-GEMINI-SECRET")
+            .unwrap();
+        store
+            .set("provider.mine.api_key", "PROVIDER-WHISPER-SECRET")
+            .unwrap();
+        let mut cfg = ProviderConfig::default();
+        let mut g = ProviderSettings::new("gemini", 1);
+        g.key = Some(secret_store::SecretRef::new("provider.gemini.api_key").unwrap());
+        cfg.upsert(g);
+        let mut m = ProviderSettings::new("mine", 2);
+        m.key = Some(secret_store::SecretRef::new("provider.mine.api_key").unwrap());
+        m.custom = Some(
+            toml::from_str(
+                "id = 'mine'\nkind = 'open_ai_compatible'\nbase_url = 'https://stt.example.com/v1'\n\
+                 auth = { ApiKeyEnv = 'X' }\n[capabilities]\ntools = true\nvision = false\n\
+                 streaming = true\njson_mode = false\n[compat_flags]\n",
+            )
+            .unwrap(),
+        );
+        cfg.upsert(m);
+        cfg.save(&config_path(&dir)).unwrap();
+        (VoiceHost::new(&dir, 7000, Some(Arc::new(store))), dir)
+    }
+
+    #[tokio::test]
+    async fn voice_reuses_the_provider_key_without_exposing_it() {
+        let (host, dir) = host_with_provider_keys("reuse");
+        let dto = host.get();
+        assert!(dto.use_provider_key, "reuse is on by default");
+        assert!(dto.gemini_provider_key_available);
+        assert!(!dto.gemini_key_set, "no separate voice key was stored");
+        let file = host.load();
+        assert_eq!(
+            host.effective_gemini_key(&file).as_deref(),
+            Some("PROVIDER-GEMINI-SECRET")
+        );
+        // Nothing the API returns or logs carries the key.
+        let json = serde_json::to_string(&dto).unwrap();
+        assert!(!json.contains("SECRET"), "{json}");
+        // A separate voice key is used once the owner turns reuse off.
+        host.update(VoiceConfigInput {
+            gemini_key: Some("OWN-VOICE-KEY".into()),
+            use_provider_key: Some(false),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            host.effective_gemini_key(&host.load()).as_deref(),
+            Some("OWN-VOICE-KEY")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_provider_key_is_only_offered_to_its_own_host() {
+        let (host, dir) = host_with_provider_keys("host");
+        // Default dictation URL (OpenAI): the unrelated provider's key must not be used.
+        assert!(host.effective_stt_key(&host.load()).is_none());
+        assert!(!host.get().stt_provider_key_available);
+        let dto = host
+            .update(VoiceConfigInput {
+                stt_base_url: Some("https://stt.example.com/v1/".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(dto.stt_provider_key_available);
+        assert_eq!(
+            host.effective_stt_key(&host.load()).as_deref(),
+            Some("PROVIDER-WHISPER-SECRET")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

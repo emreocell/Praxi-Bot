@@ -6409,6 +6409,7 @@
     "speed": "Hız",
     "stop": "Okumayı durdur",
     "stt": {
+      "advanced": "Gelişmiş (model ve adres)",
       "clearKey": "Anahtarı sil",
       "description": "Kayıtların nerede yazıya çevrileceği: OpenAI uyumlu bir servis (bulut sağlayıcı ya da yerel whisper sunucusu).",
       "geminiKey": "Gemini API anahtarı",
@@ -6423,8 +6424,15 @@
       "providerGemini": "Gemini Live",
       "providerLocal": "Bu bilgisayarda (çevrimdışı)",
       "providerWhisper": "Whisper uyumlu (OpenAI / yerel)",
+      "reuseGemini": "Botlar ve modeller'deki Gemini anahtarımı kullan",
+      "reuseKey": "Botlar ve modeller'deki eşleşen anahtarımı kullan",
       "save": "Kaydet",
       "saved": "Sesle yazma ayarları kaydedildi",
+      "statusNoGeminiKey": "Henüz Gemini anahtarı yok. Botlar ve modeller'den ekleyin ya da aşağıya bir anahtar yapıştırın.",
+      "statusNoKey": "Henüz anahtar yok. Aşağıya yapıştırın (yerel bir sunucu anahtar istemeyebilir).",
+      "statusOwnKey": "Hazır: ses için kaydedilmiş ayrı bir anahtar kullanılıyor.",
+      "statusReusing": "Hazır: bu hizmet için zaten eklediğiniz anahtar kullanılıyor. Anahtar gizli depoda kalır.",
+      "statusReusingGemini": "Hazır: zaten eklediğiniz Gemini anahtarı kullanılıyor. Anahtar gizli depoda kalır.",
       "title": "Sesle yazma servisi",
       "url": "Servis adresi",
       "whereTitle": "Sesiniz nereye gider:"

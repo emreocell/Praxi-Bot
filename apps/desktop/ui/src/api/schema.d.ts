@@ -9626,6 +9626,8 @@ export interface components {
             gemini_key_set: boolean;
             /** @description Gemini Live model used for transcription (e.g. `gemini-3.5-transcribe-live`). */
             gemini_model: string;
+            /** @description A Gemini provider with a key exists under Bots & models. */
+            gemini_provider_key_available: boolean;
             /** @description Id of the on-device speech model used when the provider is `local_voice`. */
             local_model: string;
             /** @description Base URL of the OpenAI-compatible transcription service (without `/audio/transcriptions`). */
@@ -9636,6 +9638,13 @@ export interface components {
             stt_model: string;
             /** @description The active speech-to-text provider. */
             stt_provider: components["schemas"]["VoiceProvider"];
+            /** @description A provider under Bots & models has a key and the same base URL as `stt_base_url`. */
+            stt_provider_key_available: boolean;
+            /**
+             * @description Reuse the key of a matching provider from Bots & models instead of a separate voice
+             *     key (default on). The key itself never leaves the secret store.
+             */
+            use_provider_key: boolean;
         };
         /** @description Body of `PUT /v1/voice`; omitted fields keep their value. */
         VoiceConfigInput: {
@@ -9656,6 +9665,8 @@ export interface components {
             /** @description Model name. */
             stt_model?: string | null;
             stt_provider?: null | components["schemas"]["VoiceProvider"];
+            /** @description Reuse the matching provider key from Bots & models (default on). */
+            use_provider_key?: boolean | null;
         };
         /**
          * @description Which service turns speech into text.

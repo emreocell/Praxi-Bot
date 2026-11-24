@@ -2285,7 +2285,10 @@ export class MockApiClient extends ApiClient {
     stt_provider: "whisper",
     gemini_model: "gemini-3.5-transcribe-live",
     gemini_key_set: false,
-    local_model: "whisper-small"
+    local_model: "whisper-small",
+    use_provider_key: true,
+    gemini_provider_key_available: true,
+    stt_provider_key_available: false
   };
 
   private localVoice = {
@@ -2320,8 +2323,11 @@ export class MockApiClient extends ApiClient {
       local_model?: string;
       gemini_key?: string;
       clear_gemini_key?: boolean;
+      use_provider_key?: boolean;
     };
     this.voice = {
+      ...this.voice,
+      use_provider_key: b.use_provider_key ?? this.voice.use_provider_key,
       stt_provider: b.stt_provider || this.voice.stt_provider,
       gemini_model: b.gemini_model || this.voice.gemini_model,
       local_model: b.local_model || this.voice.local_model,

@@ -24,6 +24,7 @@ pub enum VoiceProvider {
 }
 
 /// Dictation configuration (`GET /v1/voice`): non-secret fields only.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct VoiceConfigDto {
     /// The active speech-to-text provider.
@@ -40,6 +41,13 @@ pub struct VoiceConfigDto {
     pub stt_model: String,
     /// Whether an API key is stored (never returned).
     pub stt_key_set: bool,
+    /// Reuse the key of a matching provider from Bots & models instead of a separate voice
+    /// key (default on). The key itself never leaves the secret store.
+    pub use_provider_key: bool,
+    /// A Gemini provider with a key exists under Bots & models.
+    pub gemini_provider_key_available: bool,
+    /// A provider under Bots & models has a key and the same base URL as `stt_base_url`.
+    pub stt_provider_key_available: bool,
 }
 
 /// Body of `PUT /v1/voice`; omitted fields keep their value.
@@ -72,6 +80,9 @@ pub struct VoiceConfigInput {
     /// Remove the stored key.
     #[serde(default)]
     pub clear_stt_key: Option<bool>,
+    /// Reuse the matching provider key from Bots & models (default on).
+    #[serde(default)]
+    pub use_provider_key: Option<bool>,
 }
 
 impl std::fmt::Debug for VoiceConfigInput {
@@ -89,6 +100,7 @@ impl std::fmt::Debug for VoiceConfigInput {
             .field("stt_model", &self.stt_model)
             .field("stt_key", &self.stt_key.as_ref().map(|_| "<redacted>"))
             .field("clear_stt_key", &self.clear_stt_key)
+            .field("use_provider_key", &self.use_provider_key)
             .finish()
     }
 }
