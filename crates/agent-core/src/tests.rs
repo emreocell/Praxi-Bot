@@ -4109,6 +4109,97 @@ async fn disabled_memory_does_nothing() {
     );
 }
 
+/// Owner switch for one bot, written into the bot row like the daemon route does.
+fn set_memory_table(env: &Env, memory: Value) {
+    let (bot, version) = env.storage.get_bot_versioned(env.bot).unwrap().unwrap();
+    let mut config = bot.config.clone();
+    config["memory"] = memory;
+    env.storage
+        .update_bot(env.bot, &bot.name, &config, version)
+        .unwrap();
+}
+
+#[tokio::test]
+async fn memory_off_for_one_bot_means_no_recall_no_extraction_and_no_tools() {
+    let env = setup();
+    let (store, mem) = memory_cfg();
+    store
+        .add(
+            &memory_store::NewMemory::new(
+                env.user,
+                None,
+                memory_store::Kind::Profile,
+                "The user loves jazz music",
+            ),
+            "test",
+        )
+        .unwrap();
+    set_memory_table(&env, json!({"mode": "off"}));
+    let fake = Fake::new(vec![text("jazz it is"), text("[]")]);
+    let mut config = cfg(Policy::full());
+    config.memory = Some(mem);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "recommend some jazz music").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    lp.flush_background().await;
+    let user = fake.request(0).messages[1]
+        .content
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        !user.contains("recalled_memory"),
+        "no recall when Off: {user}"
+    );
+    assert_eq!(fake.n_requests(), 1, "no extraction call when Off");
+    assert_eq!(
+        store
+            .list(env.user, &memory_store::ListFilter::default())
+            .unwrap()
+            .len(),
+        1
+    );
+    // The profile of an Off bot does not offer the memory tools.
+    let off = profile(
+        "[memory]
+mode = \"off\"
+",
+    );
+    let on = profile("");
+    for name in memory_store::MEMORY_TOOL_NAMES {
+        assert!(!off.tool_visible(name), "{name} hidden when Off");
+        assert!(on.tool_visible(name), "{name} visible by default");
+    }
+}
+
+#[tokio::test]
+async fn ask_before_saving_holds_extracted_memories_out_of_recall() {
+    let env = setup();
+    let (store, mem) = memory_cfg();
+    set_memory_table(&env, json!({"mode": "ask"}));
+    let extraction = json!([{
+        "kind": "profile", "content": "The user is called Ayse",
+        "quote": "I am Ayse", "hypothetical": false, "importance": 0.8
+    }])
+    .to_string();
+    let fake = Fake::new(vec![text("Nice to meet you"), text(&extraction)]);
+    let mut config = cfg(Policy::full());
+    config.memory = Some(mem);
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "I am Ayse").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    lp.flush_background().await;
+    let held = store.list_pending(env.user).unwrap();
+    assert_eq!(held.len(), 1);
+    assert!(
+        store
+            .recall(env.user, env.bot, "Ayse", 800)
+            .unwrap()
+            .is_empty(),
+        "a held memory is never recalled"
+    );
+}
+
 // ---------- discovery visibility ----------
 
 #[tokio::test]

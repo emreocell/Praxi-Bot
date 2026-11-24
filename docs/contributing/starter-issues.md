@@ -75,8 +75,8 @@ size: S · first-timer: yes
 **Context.** Parts of `docs/guide/` were written before some features landed. The MCP, release,
 Linux desktop backend and README statements have been refreshed (MCP servers are wired into the
 daemon, `v0.1.0-alpha.1` is published, `crates/desktop-linux` has an X11 and AT-SPI backend). Still
-to verify against the code and the running app: `faq.md` says memory is not enabled and that the
-node-agent is not connected, and the Linux node path has not been tried end to end. Verify each
+to verify against the code and the running app: `faq.md` says that the
+node-agent is not connected (its memory answer was refreshed), and the Linux node path has not been tried end to end. Verify each
 statement and fix or remove it.
 
 **Done when**
