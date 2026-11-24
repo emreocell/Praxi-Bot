@@ -281,7 +281,7 @@ pub(crate) async fn put_embedding(
                 config: config.profile.clone(),
                 handle: tokio::runtime::Handle::current(),
             });
-            let note = json!({ "bot": from, "consent": input.consent_send_text || local });
+            let note = consent_note(from, &config.profile, input.consent_send_text || local);
             let task_store = Arc::clone(&store);
             Box::new(move || {
                 // Remembered so a restart can bring the Smart model back.
@@ -305,6 +305,37 @@ pub(crate) async fn put_embedding(
         axum::http::StatusCode::ACCEPTED,
         Json(status_dto(status, sources(&s))),
     ))
+}
+
+/// The saved source note: the bot plus the exact destination (provider, model,
+/// endpoint, dimensions) the owner consented to send memory text to.
+fn consent_note(
+    bot: Uuid,
+    profile: &memory_store::knowledge::embedding::EmbeddingProfile,
+    consent: bool,
+) -> serde_json::Value {
+    json!({
+        "bot": bot,
+        "consent": consent,
+        "provider_id": profile.provider_id,
+        "model": profile.model,
+        "endpoint_fingerprint": profile.fingerprint().ok(),
+    })
+}
+
+/// Whether a saved note's consent applies to `profile` (same provider, model
+/// and endpoint fingerprint).  Notes without a fingerprint never match.
+fn consent_covers(
+    note: &serde_json::Value,
+    profile: &memory_store::knowledge::embedding::EmbeddingProfile,
+) -> bool {
+    let Ok(now) = profile.fingerprint() else {
+        return false;
+    };
+    note["consent"].as_bool() == Some(true)
+        && note["provider_id"].as_str() == Some(profile.provider_id.as_str())
+        && note["model"].as_str() == Some(profile.model.as_str())
+        && note["endpoint_fingerprint"].as_str() == Some(now.as_str())
 }
 
 /// Releases the "one switch at a time" guard on an early return.
@@ -341,7 +372,9 @@ pub(crate) fn restore_smart(s: &AppState) {
             let bot = state.bot_of_user(BotId(bot_id)).ok()?;
             let config = embedding_config(&bot).ok().flatten()?;
             let local = config.local_profile_id.is_some();
-            if !local && note["consent"].as_bool() != Some(true) {
+            // Consent covers the destination the owner approved, not whatever
+            // the bot's knowledge embedding points to now.
+            if !local && !consent_covers(&note, &config.profile) {
                 return None;
             }
             let provider = crate::knowledge_runtime::provider(&state, &config).ok()?;
@@ -359,4 +392,42 @@ pub(crate) fn restore_smart(s: &AppState) {
         }
         state.end_memory_switch();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use memory_store::knowledge::embedding::EmbeddingProfile;
+    use provider_catalog::EmbeddingTaskFormat;
+
+    fn profile(endpoint: &str, model: &str) -> EmbeddingProfile {
+        EmbeddingProfile {
+            provider_id: "openai-compatible".into(),
+            model: model.into(),
+            model_revision: None,
+            endpoint_identity: provider_catalog::embedding::endpoint_identity(endpoint).unwrap(),
+            dimensions: 8,
+            request_dimensions: false,
+            format: EmbeddingTaskFormat::Plain,
+        }
+    }
+
+    #[test]
+    fn consent_only_covers_the_destination_the_owner_approved() {
+        let approved = profile("https://a.example/v1", "m1");
+        let note = consent_note(Uuid::nil(), &approved, true);
+        assert!(consent_covers(&note, &approved));
+        // The bot's knowledge embedding was re-pointed: no consent any more.
+        assert!(!consent_covers(
+            &note,
+            &profile("https://b.example/v1", "m1")
+        ));
+        assert!(!consent_covers(
+            &note,
+            &profile("https://a.example/v1", "m2")
+        ));
+        // Old notes (bot + consent only) never carry over.
+        let old = json!({ "bot": Uuid::nil(), "consent": true });
+        assert!(!consent_covers(&old, &approved));
+    }
 }
