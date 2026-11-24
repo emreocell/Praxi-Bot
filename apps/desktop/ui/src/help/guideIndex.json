@@ -774,6 +774,23 @@
     "summary": "Start with bot status. It checks that the daemon is up and that your token is"
   },
   {
+    "doc": "verify-download.md",
+    "title": "Check that your Windows download is genuine",
+    "headings": [
+      "What each release contains",
+      "The easy way: one script",
+      "The manual way",
+      "1. The checksum",
+      "2. The provenance",
+      "Is the program on my PC the attested one?",
+      "The parts list (SBOM)",
+      "What these checks do not tell you",
+      "Can I rebuild it myself?",
+      "If a check fails"
+    ],
+    "summary": "Before you run an installer you downloaded, you can check two things:"
+  },
+  {
     "doc": "voice-call.md",
     "title": "Voice call mode (hands-free chat)",
     "headings": [

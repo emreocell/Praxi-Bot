@@ -90,10 +90,13 @@ Rules the workflows follow, and that any new workflow must keep:
   pull requests). It has **no checkout step** and only reads the list of changed files, so it never
   runs a fork's code. Never add a checkout, a build or a script step to it. If you must, switch to
   `pull_request` instead.
-- `installer.yml` (signing secrets) is triggered only by tags, a weekly schedule and manual runs,
-  never by pull requests; `linux-release.yml` publishes only from this repository, from a non-fork
-  run, on a tag or `main`, and the final release also needs the reviewer-gated `release`
-  environment. A fork cannot trigger either.
+- `installer.yml` (signing secrets) is triggered by tags, a weekly schedule and manual runs; a pull
+  request runs it only when it touches the installer itself, and then without secrets, without the
+  attestation job (`id-token: write`) and without the release-upload job (`contents: write`).
+  `linux-release.yml` publishes only from this repository, from a non-fork run, on a tag or
+  `main`, and the final release also needs the reviewer-gated `release` environment. A fork
+  cannot trigger either. Every action in `installer.yml` is pinned to a commit SHA and every job
+  lists its own `permissions`; `scripts/tests/test_windows_release.py` fails the build if not.
 - Workflow files are CODEOWNERS-protected; review any change to `.github/workflows/` as code that
   runs with your permissions.
 

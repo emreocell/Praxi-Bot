@@ -70,6 +70,7 @@ Seven short pages in plain words. Read them in this order:
 | --- | --- |
 | Install Praxi and run it the first time | [Install and first run](install.md) |
 | Windows installer details, upgrade, uninstall | [Installing on Windows](install-windows.md) |
+| Check that a Windows download is genuine (checksum, build proof, parts list) | [Check your download](verify-download.md) |
 | Set up an always-on Linux host (VPS / VM) | [Running on a remote host](remote-host.md) |
 | Run the always-on host in Docker | [Running Praxi in Docker](docker-host.md) |
 | Copy-paste commands for a Linux always-on host: virtual display, update, uninstall | [Linux always-on host](linux-host.md) |
