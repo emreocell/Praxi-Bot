@@ -675,7 +675,7 @@ function AppShell() {
   };
   const openNeeds = () => go({ kind: "needs" });
   const notifyHistory = useNotificationHistory();
-  const notifyUnread = unreadCount(notifyHistory);
+  const notifyUnread = unreadCount(notifyHistory, Date.now());
   // Selecting a bot: its latest chat, or the empty state when it has none.
   const goToBot = (botId: string) => go(botLanding(botId, chats));
   const startChat = async (botId: string) => {

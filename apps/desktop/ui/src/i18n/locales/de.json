@@ -4028,10 +4028,15 @@
     }
   },
   "notifyHistory": {
+    "allBots": "Alle Bots",
+    "allTypes": "Alle Arten",
     "clear": "Verlauf löschen",
     "empty": "Wenn ein Bot eine Aufgabe beendet oder dein OK braucht, siehst du es hier.",
     "emptyAction": "Ansehen, was dich braucht",
     "emptyTitle": "Nichts Neues",
+    "filterBot": "Bot",
+    "filterType": "Art",
+    "filters": "Benachrichtigungen filtern",
     "held": "Zurückgehalten (Ruhezeit)",
     "heldMuted": "Zurückgehalten (Bot stummgeschaltet)",
     "kind": {
@@ -4042,12 +4047,23 @@
       "scheduleDone": "Geplanter Auftrag fertig"
     },
     "markAllRead": "Alle als gelesen markieren",
+    "noMatch": "Keine Benachrichtigung passt zu diesen Filtern.",
+    "noMatchTitle": "Hier ist nichts",
+    "onlyUnread": "Nur ungelesene",
     "openNeeds": "„Braucht dich“ öffnen",
+    "quietNote": "{{count}} Benachrichtigungen wurden in den Ruhezeiten zurückgehalten und sind noch ungelesen.",
+    "quietNote_one": "{{count}} Benachrichtigung wurde in den Ruhezeiten zurückgehalten und ist noch ungelesen.",
+    "resetFilters": "Alles anzeigen",
+    "retention": "Wird {{days}} Tage lang aufbewahrt, höchstens {{max}} Benachrichtigungen, danach automatisch entfernt.",
+    "showSnoozed": "Zurückgestellt ({{count}})",
     "shown": "Angezeigt",
+    "snooze": "1 Std. zurückstellen",
+    "snoozeHint": "Blendet dies für eine Stunde aus. Es kommt von selbst wieder.",
     "subtitle": "Was die Bots gemeldet haben und was die Ruhezeiten zurückgehalten haben. Offene Freigaben bleiben immer unter „Braucht dich“.",
     "title": "Benachrichtigungsverlauf",
     "unread": "Ungelesen",
-    "unreadCount": "{{count}} ungelesen"
+    "unreadCount": "{{count}} ungelesen",
+    "unsnooze": "Zurückholen"
   },
   "overlay": {
     "actions": {

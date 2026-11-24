@@ -4,7 +4,9 @@ import {
   type HistoryEntry,
   markAllRead as markAll,
   markRead as markOne,
-  parseHistory
+  parseHistory,
+  snooze as snoozeOne,
+  unsnooze as unsnoozeOne
 } from "../lib/notificationHistory";
 
 /** The notification history, mirrored to localStorage (this profile only; titles, no content). */
@@ -45,6 +47,12 @@ export function markAllNotificationsRead(): void {
 }
 export function markNotificationRead(id: string): void {
   commit(markOne(load(), id));
+}
+export function snoozeNotification(id: string, until: number): void {
+  commit(snoozeOne(load(), id, until));
+}
+export function unsnoozeNotification(id: string): void {
+  commit(unsnoozeOne(load(), id));
 }
 export function clearNotificationHistory(): void {
   commit([]);

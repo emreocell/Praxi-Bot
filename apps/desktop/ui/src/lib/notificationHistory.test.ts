@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  addEntry, HISTORY_MAX, HISTORY_MAX_AGE_MS, markAllRead, markRead, parseHistory, unreadCount, type HistoryEntry
+  addEntry, HISTORY_MAX, HISTORY_MAX_AGE_MS, filterEntries, heldByQuietCount, markAllRead, markRead, NO_FILTER, snooze, unsnooze, parseHistory, unreadCount, type HistoryEntry
 } from "./notificationHistory.ts";
 
 const now = 1_800_000_000_000;
@@ -52,4 +52,29 @@ test("mark one / all read and unread count; clear is an empty list", () => {
   list = markAllRead(list);
   assert.equal(unreadCount(list), 0);
   assert.equal(markAllRead(list), list);
+});
+
+test("snoozed entries leave the badge and the inbox until the time passes, and survive reload", () => {
+  const until = now + 1000;
+  const list = snooze([e("a", now), e("b", now - 1)], "a", until);
+  assert.equal(unreadCount(list, now), 1);
+  assert.equal(unreadCount(list, until + 1), 2);
+  assert.deepEqual(filterEntries(list, NO_FILTER, now).map((x) => x.id), ["b"]);
+  assert.deepEqual(filterEntries(list, { ...NO_FILTER, snoozed: true }, now).map((x) => x.id), ["a"]);
+  assert.deepEqual(filterEntries(list, NO_FILTER, until + 1).map((x) => x.id), ["a", "b"]);
+  assert.equal(parseHistory(JSON.parse(JSON.stringify(list)), now)[0].snoozedUntil, until);
+  assert.equal(unsnooze(list, "a")[0].snoozedUntil, undefined);
+});
+
+test("filters combine: unread, type and bot; quiet-hours count only unread held entries", () => {
+  const list = [
+    e("a", now, { kind: "failed", botId: "b2", read: true }),
+    e("b", now - 1, { kind: "failed", botId: "b1" }),
+    e("c", now - 2, { kind: "needsYou", botId: "b1", heldBy: "quiet" }),
+    e("d", now - 3, { heldBy: "muted" })
+  ];
+  assert.deepEqual(filterEntries(list, { ...NO_FILTER, kind: "failed" }, now).map((x) => x.id), ["a", "b"]);
+  assert.deepEqual(filterEntries(list, { ...NO_FILTER, kind: "failed", unreadOnly: true }, now).map((x) => x.id), ["b"]);
+  assert.deepEqual(filterEntries(list, { ...NO_FILTER, botId: "b2" }, now).map((x) => x.id), ["a"]);
+  assert.equal(heldByQuietCount(list, now), 1);
 });

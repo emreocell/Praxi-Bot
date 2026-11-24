@@ -4028,10 +4028,15 @@
     }
   },
   "notifyHistory": {
+    "allBots": "All bots",
+    "allTypes": "All types",
     "clear": "Clear history",
     "empty": "When a bot finishes a job or needs your OK, you will see it here.",
     "emptyAction": "See what needs you",
     "emptyTitle": "Nothing new",
+    "filterBot": "Bot",
+    "filterType": "Type",
+    "filters": "Filter notifications",
     "held": "Held (quiet hours)",
     "heldMuted": "Held (bot muted)",
     "kind": {
@@ -4042,12 +4047,23 @@
       "scheduleDone": "Scheduled job finished"
     },
     "markAllRead": "Mark all read",
+    "noMatch": "No notification matches these filters.",
+    "noMatchTitle": "Nothing here",
+    "onlyUnread": "Only unread",
     "openNeeds": "Open Needs you",
+    "quietNote": "{{count}} notifications were held back during quiet hours and are still unread.",
+    "quietNote_one": "{{count}} notification was held back during quiet hours and is still unread.",
+    "resetFilters": "Show everything",
+    "retention": "Kept for {{days}} days, up to {{max}} notifications, then removed automatically.",
+    "showSnoozed": "Snoozed ({{count}})",
     "shown": "Shown",
+    "snooze": "Snooze 1 h",
+    "snoozeHint": "Hide this for one hour. It comes back by itself.",
     "subtitle": "What the bots announced, and what quiet hours held back. Pending approvals always stay in Needs you.",
     "title": "Notification history",
     "unread": "Unread",
-    "unreadCount": "{{count}} unread"
+    "unreadCount": "{{count}} unread",
+    "unsnooze": "Bring back"
   },
   "overlay": {
     "actions": {

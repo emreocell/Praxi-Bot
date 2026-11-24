@@ -4028,10 +4028,15 @@
     }
   },
   "notifyHistory": {
+    "allBots": "Tüm botlar",
+    "allTypes": "Tüm türler",
     "clear": "Geçmişi temizle",
     "empty": "Bir bot işini bitirdiğinde ya da onayına ihtiyaç duyduğunda burada görürsün.",
     "emptyAction": "Seni bekleyenlere bak",
     "emptyTitle": "Yeni bir şey yok",
+    "filterBot": "Bot",
+    "filterType": "Tür",
+    "filters": "Bildirimleri süz",
     "held": "Tutuldu (sessiz saatler)",
     "heldMuted": "Tutuldu (bot sessizde)",
     "kind": {
@@ -4042,12 +4047,23 @@
       "scheduleDone": "Zamanlanmış iş bitti"
     },
     "markAllRead": "Tümünü okundu say",
+    "noMatch": "Bu süzgeçlere uyan bildirim yok.",
+    "noMatchTitle": "Burada bir şey yok",
+    "onlyUnread": "Yalnızca okunmamışlar",
     "openNeeds": "Sizi bekleyenleri aç",
+    "quietNote": "{{count}} bildirim sessiz saatlerde tutuldu ve hâlâ okunmadı.",
+    "quietNote_one": "{{count}} bildirim sessiz saatlerde tutuldu ve hâlâ okunmadı.",
+    "resetFilters": "Hepsini göster",
+    "retention": "{{days}} gün boyunca, en fazla {{max}} bildirim saklanır; sonra kendiliğinden silinir.",
+    "showSnoozed": "Ertelenenler ({{count}})",
     "shown": "Gösterildi",
+    "snooze": "1 saat ertele",
+    "snoozeHint": "Bunu bir saatliğine gizle. Kendiliğinden geri gelir.",
     "subtitle": "Botların bildirdikleri ve sessiz saatlerde tutulanlar. Bekleyen onaylar her zaman Sizi bekleyenler'de kalır.",
     "title": "Bildirim geçmişi",
     "unread": "Okunmadı",
-    "unreadCount": "{{count}} okunmamış"
+    "unreadCount": "{{count}} okunmamış",
+    "unsnooze": "Geri getir"
   },
   "overlay": {
     "actions": {

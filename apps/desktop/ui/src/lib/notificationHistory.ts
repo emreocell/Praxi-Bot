@@ -21,6 +21,8 @@ export interface HistoryEntry {
   /** Why a held toast was held; absent on shown entries.  Older stored entries mean quiet hours. */
   heldBy?: HoldReason;
   read: boolean;
+  /** Hidden from the inbox (and the badge) until this time. */
+  snoozedUntil?: number;
 }
 
 const KINDS: readonly NotifyKind[] = ["needsYou", "longRun", "failed", "scheduleDone", "digest"];
@@ -51,7 +53,8 @@ export function parseHistory(raw: unknown, now: number): HistoryEntry[] {
       ts: o.ts,
       shown: o.shown === true,
       ...(o.shown === true ? {} : { heldBy: o.heldBy === "muted" ? ("muted" as const) : ("quiet" as const) }),
-      read: o.read === true
+      read: o.read === true,
+      ...(typeof o.snoozedUntil === "number" && Number.isFinite(o.snoozedUntil) ? { snoozedUntil: o.snoozedUntil } : {})
     });
   }
   return prune(out, now);
@@ -77,4 +80,45 @@ export function markRead(list: HistoryEntry[], id: string): HistoryEntry[] {
   return list.map((e) => (e.id === id && !e.read ? { ...e, read: true } : e));
 }
 
-export const unreadCount = (list: HistoryEntry[]): number => list.filter((e) => !e.read).length;
+export const isSnoozed = (e: HistoryEntry, now: number): boolean => e.snoozedUntil !== undefined && e.snoozedUntil > now;
+
+/** Unread entries; pass `now` to leave out the ones snoozed right now. */
+export const unreadCount = (list: HistoryEntry[], now?: number): number =>
+  list.filter((e) => !e.read && (now === undefined || !isSnoozed(e, now))).length;
+
+export function snooze(list: HistoryEntry[], id: string, until: number): HistoryEntry[] {
+  return list.map((e) => (e.id === id ? { ...e, snoozedUntil: until } : e));
+}
+
+export function unsnooze(list: HistoryEntry[], id: string): HistoryEntry[] {
+  return list.map((e) => {
+    if (e.id !== id || e.snoozedUntil === undefined) return e;
+    const { snoozedUntil: _gone, ...rest } = e;
+    return rest;
+  });
+}
+
+export interface HistoryFilter {
+  unreadOnly: boolean;
+  kind: NotifyKind | "all";
+  /** "" = every bot. */
+  botId: string;
+  /** Show only the snoozed entries instead of hiding them. */
+  snoozed: boolean;
+}
+
+export const NO_FILTER: HistoryFilter = { unreadOnly: false, kind: "all", botId: "", snoozed: false };
+
+export function filterEntries(list: HistoryEntry[], f: HistoryFilter, now: number): HistoryEntry[] {
+  return list.filter(
+    (e) =>
+      isSnoozed(e, now) === f.snoozed &&
+      (!f.unreadOnly || !e.read) &&
+      (f.kind === "all" || e.kind === f.kind) &&
+      (f.botId === "" || e.botId === f.botId)
+  );
+}
+
+/** Unread entries a quiet-hours window held back (their toast never showed). */
+export const heldByQuietCount = (list: HistoryEntry[], now: number): number =>
+  list.filter((e) => !e.shown && e.heldBy === "quiet" && !e.read && !isSnoozed(e, now)).length;
