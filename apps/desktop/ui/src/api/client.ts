@@ -789,8 +789,8 @@ export class ApiClient {
   }
 
   /** Upload one file for the next message of a chat; the daemon sniffs its type and size. */
-  uploadAttachment(chatId: string, file: Blob, name: string): Promise<Attachment> {
-    return this.request("POST", `/chats/${chatId}/attachments`, { raw: file, query: { name } });
+  uploadAttachment(chatId: string, file: Blob, name: string, signal?: AbortSignal): Promise<Attachment> {
+    return this.request("POST", `/chats/${chatId}/attachments`, { raw: file, query: { name }, signal });
   }
   /** The stored original of an attachment (an image to show in the message). */
   attachmentBlob(chatId: string, attachmentId: string): Promise<Blob> {
