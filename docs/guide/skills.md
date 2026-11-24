@@ -34,6 +34,15 @@ The **starter pack** covers everyday jobs: `document-to-action-items`,
 `THIRD_PARTY_NOTICES.md`), never send, delete or schedule anything without your
 approval, and treat web pages, mail and documents as data, not instructions.
 
+Five bundled **playbooks** walk through multi-step workflows using Praxi's
+current tools and approval gates: `signup-to-site` (Vault/`secret` fills plus
+owner handover for CAPTCHA/2FA), `lead-research` (saving verified prospects in
+a workspace `leads/<campaign>.csv`), `outreach-drafts` (draft-only per-lead
+emails for owner batch review; never sends), `office-doc-prep` (`docx`, `xlsx`
+and `csv` creation and inspection without claiming unsupported conversions), and
+`install-capability` (handing host package installs to the owner rather than
+bypassing host boundaries).
+
 ## Write one
 
 Create `<data dir>/skills/<name>/SKILL.md`:

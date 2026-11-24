@@ -1,0 +1,33 @@
+name: skill-signup-to-site
+description: "Playbook signup-to-site: loads via skill_read, inspects Vault entries, fills a fake sign-up form under approval/egress gates, and hands over CAPTCHA/terms via ask_user."
+policy: approve_destructive
+tools:
+  - { name: skill_read, effect: read, category: fs, output: "# signup-to-site\nUse secrets_list, browser_fill with secret, and ask_user / Take control for CAPTCHA or terms." }
+  - { name: secrets_list, effect: read, category: meta, output: "Secrets you may type:\n- login/acme: https://signup.example.test" }
+  - { name: browser_open, effect: write, category: browser, content: untrusted, output: "Opened https://signup.example.test/register. [e1] input Email [e2] input Password [e3] checkbox I agree [e4] iframe Verify you are human [e5] button Create account" }
+  - { name: browser_fill, effect: write, category: browser, content: all, output: "filled" }
+  - { name: ask_user, effect: read, category: meta, output: "Owner clicked Take control, solved the CAPTCHA, and approved account creation." }
+user: "Sign up on signup.example.test with our stored login/acme credentials."
+secrets: ["super-secret-pw-999"]
+script:
+  - tool_calls: [{ id: c1, tool: skill_read, args: { name: signup-to-site } }]
+  - tool_calls: [{ id: c2, tool: secrets_list, args: {} }]
+  - tool_calls: [{ id: c3, tool: browser_open, args: { url: "https://signup.example.test/register" } }]
+  - tool_calls: [{ id: c4, tool: browser_fill, args: { ref: "e1", text: "team@example.test" } }]
+  - tool_calls: [{ id: c5, tool: browser_fill, args: { ref: "e2", secret: "login/acme" } }]
+  - tool_calls: [{ id: c6, tool: ask_user, args: { question: "Please click Take control to solve the CAPTCHA and confirm submitting the sign-up form." } }]
+  - text: "Filled the form using Vault reference login/acme and handed over the CAPTCHA and terms submit via Take control."
+reactions:
+  - { on: approval_needed, tool: browser_open, do: approve }
+  - { on: approval_needed, tool: browser_fill, do: approve }
+expect:
+  state: succeeded
+  model_calls: 7
+  tool_calls: [skill_read, secrets_list, browser_open, browser_fill, browser_fill, ask_user]
+  tool_runs: { skill_read: 1, secrets_list: 1, browser_open: 1, browser_fill: 2, ask_user: 1 }
+  no_approval_tools: [skill_read, secrets_list, ask_user]
+  approval_cards:
+    - { tool: browser_open }
+    - { tool: browser_fill }
+    - { tool: browser_fill }
+  final_text: { contains: ["login/acme", "Take control"], not_contains: ["super-secret-pw-999"] }

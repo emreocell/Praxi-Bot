@@ -1,0 +1,24 @@
+name: skill-install-capability
+description: "Playbook install-capability: loads via skill_read, runs only a read-only binary check after approval, and hands package installation to the owner via ask_user."
+policy: approve_destructive
+tools:
+  - { name: skill_read, effect: read, category: fs, output: "# install-capability\nThe bot cannot apt install itself; check if missing and hand over to the owner." }
+  - { name: shell_run, effect: destructive, category: shell, content: untrusted, executes: true, output: "soffice: not found" }
+  - { name: ask_user, effect: read, category: meta, output: "Owner noted the package install command to run on the host." }
+user: "Install LibreOffice on the host so we can convert documents."
+script:
+  - tool_calls: [{ id: c1, tool: skill_read, args: { name: install-capability } }]
+  - tool_calls: [{ id: c2, tool: shell_run, args: { command: "command -v soffice" } }]
+  - tool_calls: [{ id: c3, tool: ask_user, args: { question: "LibreOffice is missing and the bot cannot run apt install itself. Please install libreoffice on the host with administrator privileges and reply when ready." } }]
+  - text: "Checked that soffice is missing and handed over the host package install command to the owner."
+reactions:
+  - { on: approval_needed, tool: shell_run, do: approve }
+expect:
+  state: succeeded
+  model_calls: 4
+  tool_calls: [skill_read, shell_run, ask_user]
+  tool_runs: { skill_read: 1, shell_run: 1, ask_user: 1 }
+  no_approval_tools: [skill_read, ask_user]
+  approval_cards:
+    - { tool: shell_run }
+  final_text: { contains: ["owner"] }

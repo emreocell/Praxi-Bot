@@ -83,4 +83,24 @@ pub(crate) const BUNDLED: &[(&str, &str)] = &[
         "web-tables-and-spreadsheets",
         include_str!("../../../skills/web-tables-and-spreadsheets/SKILL.md"),
     ),
+    (
+        "signup-to-site",
+        include_str!("../../../skills/signup-to-site/SKILL.md"),
+    ),
+    (
+        "lead-research",
+        include_str!("../../../skills/lead-research/SKILL.md"),
+    ),
+    (
+        "outreach-drafts",
+        include_str!("../../../skills/outreach-drafts/SKILL.md"),
+    ),
+    (
+        "office-doc-prep",
+        include_str!("../../../skills/office-doc-prep/SKILL.md"),
+    ),
+    (
+        "install-capability",
+        include_str!("../../../skills/install-capability/SKILL.md"),
+    ),
 ];

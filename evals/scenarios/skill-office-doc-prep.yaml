@@ -1,0 +1,24 @@
+name: skill-office-doc-prep
+description: "Playbook office-doc-prep: loads via skill_read, creates a docx with owner approval, and verifies it by reading back with docx_read."
+policy: approve_destructive
+tools:
+  - { name: skill_read, effect: read, category: fs, output: "# office-doc-prep\nUse docx_write, xlsx_write, csv_transform today; verify by reading back." }
+  - { name: docx_write, effect: write, category: fs, output: "wrote proposals/offer.docx" }
+  - { name: docx_read, effect: read, category: fs, content: untrusted_private, output: "# Offer Summary\nPrepared with built-in docx_write." }
+user: "Prepare proposals/offer.docx and verify what was written."
+script:
+  - tool_calls: [{ id: c1, tool: skill_read, args: { name: office-doc-prep } }]
+  - tool_calls: [{ id: c2, tool: docx_write, args: { path: "proposals/offer.docx", blocks: [{ type: "heading", level: 1, text: "Offer Summary" }] } }]
+  - tool_calls: [{ id: c3, tool: docx_read, args: { path: "proposals/offer.docx" } }]
+  - text: "Prepared and verified proposals/offer.docx using built-in docx_write."
+reactions:
+  - { on: approval_needed, tool: docx_write, do: approve }
+expect:
+  state: succeeded
+  model_calls: 4
+  tool_calls: [skill_read, docx_write, docx_read]
+  tool_runs: { skill_read: 1, docx_write: 1, docx_read: 1 }
+  no_approval_tools: [skill_read, docx_read]
+  approval_cards:
+    - { tool: docx_write }
+  final_text: { contains: ["proposals/offer.docx"] }

@@ -6410,6 +6410,7 @@
     "speed": "Speed",
     "stop": "Stop reading",
     "stt": {
+      "advanced": "Avanzado (modelo y dirección)",
       "clearKey": "Remove key",
       "description": "Where your recordings are transcribed: an OpenAI-compatible service (a cloud provider or a local whisper server).",
       "geminiKey": "Gemini API key",
@@ -6424,8 +6425,15 @@
       "providerGemini": "Gemini Live",
       "providerLocal": "On this computer (offline)",
       "providerWhisper": "Whisper-compatible (OpenAI / local)",
+      "reuseGemini": "Usar mi clave de Gemini de Bots y modelos",
+      "reuseKey": "Usar mi clave correspondiente de Bots y modelos",
       "save": "Save",
       "saved": "Dictation settings saved",
+      "statusNoGeminiKey": "Aún no hay clave de Gemini. Añade una en Bots y modelos o pega una clave abajo.",
+      "statusNoKey": "Aún no hay clave. Pega una abajo (puede que un servidor local no la necesite).",
+      "statusOwnKey": "Listo: se usa una clave aparte guardada para la voz.",
+      "statusReusing": "Listo: se usa la clave que ya añadiste para este servicio. Permanece en el almacén de secretos.",
+      "statusReusingGemini": "Listo: se usa la clave de Gemini que ya añadiste. Permanece en el almacén de secretos.",
       "title": "Dictation service",
       "url": "Service address",
       "whereTitle": "Where your voice goes:"
