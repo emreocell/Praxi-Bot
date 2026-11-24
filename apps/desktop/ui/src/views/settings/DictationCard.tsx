@@ -26,6 +26,8 @@ export function DictationCard() {
   const [localModel, setLocalModel] = useState("whisper-small");
   const [drafts, setDrafts] = useState<Partial<Record<SttProvider, string>>>({});
   const [busy, setBusy] = useState(false);
+  // The offline option is offered only when this build contains it.
+  const [localAvailable, setLocalAvailable] = useState(false);
 
   const keyInput = useRef<HTMLInputElement | null>(null);
 
@@ -41,6 +43,9 @@ export function DictationCard() {
   useEffect(() => {
     client?.getVoice().then(apply).catch(() => undefined);
   }, [client, apply]);
+  useEffect(() => {
+    client?.getLocalVoice().then((s) => setLocalAvailable(s.available)).catch(() => setLocalAvailable(false));
+  }, [client]);
 
   const gemini = provider === "gemini_live";
   const local = provider === "local_voice";
@@ -86,7 +91,10 @@ export function DictationCard() {
   const privacy = local ? t("voice.stt.localPrivacy") : gemini ? t("voice.stt.geminiPrivacy") : t("voice.stt.privacy");
   const key = provider === "local_voice" ? "" : (drafts[provider] ?? "");
   return (
-    <SettingRow stacked title={t("voice.stt.title")} description={`${t("voice.stt.description")} ${privacy}`}>
+    <SettingRow stacked title={t("voice.stt.title")} description={t("voice.stt.description")}>
+      <p role="note" data-testid="voice-where">
+        <strong>{t("voice.stt.whereTitle")}</strong> {privacy}
+      </p>
       <select
         className={formStyles.input}
         aria-label={t("voice.stt.provider")}
@@ -95,7 +103,7 @@ export function DictationCard() {
       >
         <option value="whisper">{t("voice.stt.providerWhisper")}</option>
         <option value="gemini_live">{t("voice.stt.providerGemini")}</option>
-        <option value="local_voice">{t("voice.stt.providerLocal")}</option>
+        {localAvailable || local ? <option value="local_voice">{t("voice.stt.providerLocal")}</option> : null}
       </select>
       {local ? (
         <LocalVoicePanel model={localModel} onModel={setLocalModel} />

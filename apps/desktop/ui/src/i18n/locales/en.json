@@ -3267,6 +3267,7 @@
     "closePanel": "Close the side panel",
     "dialogClose": "Close the dialog",
     "dialogFocus": "Move focus inside the dialog",
+    "dictatePtt": "Hold the push-to-talk key to dictate, release to send (turn it on in Settings > Voice)",
     "exitLiveFocus": "Leave keyboard control of the live view",
     "findInChat": "Find in this chat",
     "findNav": "Next / previous match in the find bar, close it",
@@ -5927,6 +5928,48 @@
     "description": "Reply voice and speed for the read-aloud button. Uses your system's speech engine.",
     "dictate": "Dictate",
     "dictateStop": "Stop and transcribe",
+    "input": {
+      "denied": {
+        "linux": "Open your system settings → Privacy (or Sound) and allow Praxi-Bot to use the microphone. If you use a Flatpak or Snap, allow the audio permission for it. Then restart Praxi-Bot and try again.",
+        "mac": "Open System Settings → Privacy & Security → Microphone and turn on Praxi-Bot. Then close and reopen Praxi-Bot and try again.",
+        "windows": "Open Windows Settings → Privacy & security → Microphone. Turn on Microphone access and Let desktop apps access your microphone. Then close and reopen Praxi-Bot and try again."
+      },
+      "deniedTitle": "Praxi-Bot is not allowed to use the microphone.",
+      "description": "Choose your microphone, check that it works, and decide how recording starts and stops.",
+      "mic": {
+        "default": "System default",
+        "description": "Pick which microphone to use. The level bar moves when it hears you. Nothing is recorded or sent during the test.",
+        "test": "Test microphone",
+        "testing": "Listening for 5 seconds. Say something.",
+        "title": "Microphone",
+        "unnamed": "Microphone {{n}}",
+        "verdict": {
+          "good": "The microphone works.",
+          "quiet": "A very quiet sound was heard. Speak closer to the microphone or raise its volume.",
+          "silent": "No sound was heard. Check that the right microphone is selected and not muted."
+        }
+      },
+      "ptt": {
+        "description": "Hold {{key}} to record and let go to send. Works while the Praxi-Bot window is in front. Off by default.",
+        "key": "Push-to-talk key",
+        "title": "Push-to-talk"
+      },
+      "recording": "Recording",
+      "releaseToSend": "Release {{key}} to send",
+      "silence": {
+        "description": "Recording that you started by clicking ends by itself after this much silence. With push-to-talk you decide when it ends.",
+        "off": "Off (click to stop)",
+        "seconds": "After {{count}} seconds",
+        "seconds_one": "After {{count}} second",
+        "seconds_other": "After {{count}} seconds",
+        "title": "Stop when I stop talking"
+      },
+      "stopsOnSilence": "Stops after {{count}} seconds of silence",
+      "stopsOnSilence_one": "Stops after {{count}} second of silence",
+      "stopsOnSilence_other": "Stops after {{count}} seconds of silence",
+      "title": "Microphone and push-to-talk",
+      "unsupported": "This window cannot record audio, so there is nothing to set up here."
+    },
     "local": {
       "details": "Download about {{size}} MB from {{host}} (checked against a fixed checksum). Licence: {{license}}.",
       "download": "Download ({{size}} MB)",
@@ -5968,7 +6011,8 @@
       "save": "Save",
       "saved": "Dictation settings saved",
       "title": "Dictation service",
-      "url": "Service address"
+      "url": "Service address",
+      "whereTitle": "Where your voice goes:"
     },
     "tableOmitted": "(table omitted)",
     "title": "Spoken replies",

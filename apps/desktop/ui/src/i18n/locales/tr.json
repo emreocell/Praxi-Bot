@@ -3267,6 +3267,7 @@
     "closePanel": "Yan paneli kapat",
     "dialogClose": "Pencereyi kapat",
     "dialogFocus": "Pencere içinde odağı taşı",
+    "dictatePtt": "Yazdırmak için bas-konuş tuşunu basılı tutun, göndermek için bırakın (Ayarlar > Ses'ten açın)",
     "exitLiveFocus": "Canlı görünümde klavye denetiminden çık",
     "findInChat": "Bu sohbette ara",
     "findNav": "Arama çubuğunda sonraki / önceki eşleşme, kapat",
@@ -5927,6 +5928,48 @@
     "description": "Sesli oku düğmesinin sesi ve hızı. Sistemin konuşma motorunu kullanır.",
     "dictate": "Sesle yaz",
     "dictateStop": "Durdur ve yazıya çevir",
+    "input": {
+      "denied": {
+        "linux": "Sistem ayarlarınızda Gizlilik (veya Ses) bölümünü açıp Praxi-Bot'un mikrofonu kullanmasına izin verin. Flatpak veya Snap kullanıyorsanız ses iznini verin. Sonra Praxi-Bot'u yeniden başlatıp tekrar deneyin.",
+        "mac": "Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon bölümünü açıp Praxi-Bot'u etkinleştirin. Sonra Praxi-Bot'u kapatıp yeniden açın ve tekrar deneyin.",
+        "windows": "Windows Ayarlar → Gizlilik ve güvenlik → Mikrofon bölümünü açın. Mikrofon erişimini ve Masaüstü uygulamalarının mikrofona erişmesine izin ver seçeneğini açın. Sonra Praxi-Bot'u kapatıp yeniden açın ve tekrar deneyin."
+      },
+      "deniedTitle": "Praxi-Bot'un mikrofonu kullanmasına izin verilmemiş.",
+      "description": "Mikrofonunuzu seçin, çalıştığını denetleyin ve kaydın nasıl başlayıp biteceğine karar verin.",
+      "mic": {
+        "default": "Sistem varsayılanı",
+        "description": "Hangi mikrofonun kullanılacağını seçin. Sizi duyduğunda seviye çubuğu hareket eder. Test sırasında hiçbir şey kaydedilmez veya gönderilmez.",
+        "test": "Mikrofonu test et",
+        "testing": "5 saniye dinleniyor. Bir şey söyleyin.",
+        "title": "Mikrofon",
+        "unnamed": "Mikrofon {{n}}",
+        "verdict": {
+          "good": "Mikrofon çalışıyor.",
+          "quiet": "Çok kısık bir ses duyuldu. Mikrofona yaklaşın veya ses seviyesini artırın.",
+          "silent": "Hiç ses duyulmadı. Doğru mikrofonun seçildiğini ve sessize alınmadığını kontrol edin."
+        }
+      },
+      "ptt": {
+        "description": "Kaydetmek için {{key}} tuşunu basılı tutun, göndermek için bırakın. Praxi-Bot penceresi öndeyken çalışır. Varsayılan olarak kapalıdır.",
+        "key": "Bas-konuş tuşu",
+        "title": "Bas-konuş"
+      },
+      "recording": "Kaydediliyor",
+      "releaseToSend": "Göndermek için {{key}} tuşunu bırakın",
+      "silence": {
+        "description": "Tıklayarak başlattığınız kayıt, bu kadar sessizlikten sonra kendiliğinden biter. Bas-konuşta bitişe siz karar verirsiniz.",
+        "off": "Kapalı (durdurmak için tıklayın)",
+        "seconds": "{{count}} saniye sonra",
+        "seconds_one": "{{count}} saniye sonra",
+        "seconds_other": "{{count}} saniye sonra",
+        "title": "Konuşmayı bırakınca dur"
+      },
+      "stopsOnSilence": "{{count}} saniye sessizlikten sonra durur",
+      "stopsOnSilence_one": "{{count}} saniye sessizlikten sonra durur",
+      "stopsOnSilence_other": "{{count}} saniye sessizlikten sonra durur",
+      "title": "Mikrofon ve bas-konuş",
+      "unsupported": "Bu pencere ses kaydedemiyor, bu yüzden burada ayarlanacak bir şey yok."
+    },
     "local": {
       "details": "{{host}} adresinden yaklaşık {{size}} MB iner (sabit bir sağlama toplamıyla doğrulanır). Lisans: {{license}}.",
       "download": "İndir ({{size}} MB)",
@@ -5968,7 +6011,8 @@
       "save": "Kaydet",
       "saved": "Sesle yazma ayarları kaydedildi",
       "title": "Sesle yazma servisi",
-      "url": "Servis adresi"
+      "url": "Servis adresi",
+      "whereTitle": "Sesiniz nereye gider:"
     },
     "tableOmitted": "(tablo atlandı)",
     "title": "Sesli yanıtlar",

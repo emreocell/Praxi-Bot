@@ -92,7 +92,7 @@ const DEFAULTS = { speakReplies: false, voiceName: "", voiceRate: 1, wallpaperMo
 
 test("reset to recommended restores defaults only for the page's own settings", () => {
   const voice = resetPatch("voice", DEFAULTS);
-  assert.deepEqual(Object.keys(voice ?? {}).sort(), ["speakReplies", "voiceName", "voiceRate"]);
+  assert.deepEqual(Object.keys(voice ?? {}).sort(), ["micDeviceId", "pttEnabled", "pttKey", "silenceStopSec", "speakReplies", "voiceName", "voiceRate"]);
   assert.equal(voice?.speakReplies, false);
   const appearance = resetPatch("appearance", DEFAULTS);
   assert.ok(appearance && "wallpaperMotion" in appearance);

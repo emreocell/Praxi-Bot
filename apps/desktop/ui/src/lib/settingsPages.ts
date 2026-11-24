@@ -75,6 +75,7 @@ export const CARD_META: Record<string, CardMeta> = {
   "speak-replies": { page: "voice" },
   voice: { page: "voice" },
   dictation: { page: "voice" },
+  "voice-input": { page: "voice" },
 
   knowledge: { page: "data", learn: "memory" },
   memory: { page: "data", learn: "memory", risk: "memory" },
@@ -176,7 +177,7 @@ const RESET_KEYS: Partial<Record<SettingsPageId, readonly (keyof AppSettings)[]>
     "photorealAvatars"
   ],
   notifications: ["notifyNeedsYou", "notifyLongRun", "notifyFailed", "notifyPrivate", "quietHours", "mutedBotIds", "digestTime", "digestLastDay"],
-  voice: ["voiceName", "voiceRate", "speakReplies"]
+  voice: ["voiceName", "voiceRate", "speakReplies", "pttEnabled", "pttKey", "micDeviceId", "silenceStopSec"]
 };
 
 /** The settings patch that restores a page to the recommended values (null = nothing to reset). */

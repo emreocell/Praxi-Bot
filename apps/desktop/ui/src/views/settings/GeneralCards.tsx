@@ -15,6 +15,7 @@ import { SEND_WITH_VALUES } from "../../lib/settingsPrefs";
 import { NotificationSettings } from "../NotificationSettings";
 import styles from "../SettingsModal.module.css";
 import { DictationCard } from "./DictationCard";
+import { VoiceInputSettings } from "./VoiceInputSettings";
 import { VoiceSettings } from "./VoiceSettings";
 import type { CardDef, SettingsBridge } from "./types";
 
@@ -139,6 +140,13 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
       t("voice.description"),
       <VoiceSettings settings={settings} update={update} />,
       { keywords: "ses voice speech tts sesli oku vorlesen stimme" }
+    ),
+    card(
+      "voice-input",
+      t("voice.input.title"),
+      t("voice.input.description"),
+      <VoiceInputSettings settings={settings} update={update} />,
+      { keywords: "push to talk ptt hotkey microphone mikrofon mic level test silence sessizlik stille tus bas konus sprechtaste" }
     ),
     card(
       "dictation",

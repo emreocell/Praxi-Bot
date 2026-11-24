@@ -3267,6 +3267,7 @@
     "closePanel": "Seitenpanel schließen",
     "dialogClose": "Dialog schließen",
     "dialogFocus": "Fokus im Dialog verschieben",
+    "dictatePtt": "Sprechtaste gedrückt halten zum Diktieren, loslassen zum Senden (in Einstellungen > Sprache einschalten)",
     "exitLiveFocus": "Tastatursteuerung der Live-Ansicht verlassen",
     "findInChat": "In diesem Chat suchen",
     "findNav": "Nächster / vorheriger Treffer in der Suchleiste, schließen",
@@ -5927,6 +5928,48 @@
     "description": "Stimme und Tempo für die Vorlesen-Schaltfläche. Nutzt die Sprachausgabe deines Systems.",
     "dictate": "Diktieren",
     "dictateStop": "Stoppen und transkribieren",
+    "input": {
+      "denied": {
+        "linux": "Öffnen Sie die Systemeinstellungen → Datenschutz (oder Ton) und erlauben Sie Praxi-Bot die Nutzung des Mikrofons. Bei Flatpak oder Snap erlauben Sie die Audio-Berechtigung. Starten Sie Praxi-Bot dann neu und versuchen Sie es erneut.",
+        "mac": "Öffnen Sie Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon und aktivieren Sie Praxi-Bot. Schließen Sie Praxi-Bot dann, öffnen Sie es neu und versuchen Sie es erneut.",
+        "windows": "Öffnen Sie Windows-Einstellungen → Datenschutz & Sicherheit → Mikrofon. Schalten Sie Mikrofonzugriff und Desktop-Apps den Zugriff auf Ihr Mikrofon erlauben ein. Schließen Sie Praxi-Bot dann, öffnen Sie es neu und versuchen Sie es erneut."
+      },
+      "deniedTitle": "Praxi-Bot darf das Mikrofon nicht verwenden.",
+      "description": "Wählen Sie Ihr Mikrofon, prüfen Sie, ob es funktioniert, und legen Sie fest, wie die Aufnahme startet und endet.",
+      "mic": {
+        "default": "Systemstandard",
+        "description": "Wählen Sie, welches Mikrofon verwendet wird. Der Pegelbalken bewegt sich, wenn es Sie hört. Beim Test wird nichts aufgezeichnet oder gesendet.",
+        "test": "Mikrofon testen",
+        "testing": "Es wird 5 Sekunden zugehört. Sagen Sie etwas.",
+        "title": "Mikrofon",
+        "unnamed": "Mikrofon {{n}}",
+        "verdict": {
+          "good": "Das Mikrofon funktioniert.",
+          "quiet": "Es war nur ein sehr leises Geräusch zu hören. Sprechen Sie näher am Mikrofon oder erhöhen Sie die Lautstärke.",
+          "silent": "Es war nichts zu hören. Prüfen Sie, ob das richtige Mikrofon gewählt und nicht stummgeschaltet ist."
+        }
+      },
+      "ptt": {
+        "description": "Halten Sie {{key}} zum Aufnehmen gedrückt und lassen Sie zum Senden los. Funktioniert, solange das Praxi-Bot-Fenster im Vordergrund ist. Standardmäßig aus.",
+        "key": "Sprechtaste",
+        "title": "Sprechtaste"
+      },
+      "recording": "Aufnahme läuft",
+      "releaseToSend": "{{key}} loslassen zum Senden",
+      "silence": {
+        "description": "Eine per Klick gestartete Aufnahme endet nach so viel Stille von selbst. Bei der Sprechtaste bestimmen Sie das Ende.",
+        "off": "Aus (zum Beenden klicken)",
+        "seconds": "Nach {{count}} Sekunden",
+        "seconds_one": "Nach {{count}} Sekunde",
+        "seconds_other": "Nach {{count}} Sekunden",
+        "title": "Stoppen, wenn ich aufhöre zu sprechen"
+      },
+      "stopsOnSilence": "Endet nach {{count}} Sekunden Stille",
+      "stopsOnSilence_one": "Endet nach {{count}} Sekunde Stille",
+      "stopsOnSilence_other": "Endet nach {{count}} Sekunden Stille",
+      "title": "Mikrofon und Sprechtaste",
+      "unsupported": "Dieses Fenster kann kein Audio aufnehmen, deshalb gibt es hier nichts einzustellen."
+    },
     "local": {
       "details": "Download von etwa {{size}} MB von {{host}} (wird mit einer festen Prüfsumme kontrolliert). Lizenz: {{license}}.",
       "download": "Herunterladen ({{size}} MB)",
@@ -5968,7 +6011,8 @@
       "save": "Speichern",
       "saved": "Diktiereinstellungen gespeichert",
       "title": "Diktierdienst",
-      "url": "Dienstadresse"
+      "url": "Dienstadresse",
+      "whereTitle": "Wohin Ihre Stimme geht:"
     },
     "tableOmitted": "(Tabelle ausgelassen)",
     "title": "Gesprochene Antworten",
