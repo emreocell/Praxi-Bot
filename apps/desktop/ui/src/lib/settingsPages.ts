@@ -41,6 +41,7 @@ export const CARD_META: Record<string, CardMeta> = {
   times: { page: "general" },
   autostart: { page: "general" },
   keepInTray: { page: "general" },
+  quickAsk: { page: "general" },
   hotkey: { page: "general", advanced: true },
   onboarding: { page: "general" },
 
@@ -155,7 +156,7 @@ export function isCardShown(meta: CardMeta, mode: DetailMode, searching: boolean
 
 /** The app-held settings each page can reset; daemon-held state (permissions) resets separately. */
 const RESET_KEYS: Partial<Record<SettingsPageId, readonly (keyof AppSettings)[]>> = {
-  general: ["sendWith", "messageTimes", "autostart", "keepInTray", "stopHotkey"],
+  general: ["sendWith", "messageTimes", "autostart", "keepInTray", "quickAskEnabled", "quickAskHotkey", "stopHotkey"],
   appearance: [
     "themeMode",
     "accentColor",

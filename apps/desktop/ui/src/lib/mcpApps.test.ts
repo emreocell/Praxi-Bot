@@ -166,6 +166,26 @@ test("connectCatalogEntry asks only for required secrets", async () => {
   assert.ok(isConnected(entry("brave-search"), api.servers));
 });
 
+test("a server is added without trust unless the owner chose it", async () => {
+  // Catalog app: no trust_hints key at all by default (the stored default is "no").
+  assert.equal("trust_hints" in configFromCatalog(entry("fetch")), false);
+  assert.equal(configFromCatalog(entry("fetch"), undefined, true).trust_hints, true);
+  const api = new MockApiClient();
+  const safe = await connectCatalogEntry(api, entry("fetch"), {});
+  assert.equal(safe.trust_hints, false);
+  const trusted = await connectCatalogEntry(api, entry("brave-search"), { BRAVE_API_KEY: "k" }, undefined, true);
+  assert.equal(trusted.trust_hints, true);
+  // Own server: same rule.
+  const form = { name: "mine", transport: "http" as const, command: "", url: "https://x.example/mcp", env: "" };
+  const plain = customServerConfig(form);
+  assert.ok(plain.ok && !("trust_hints" in plain.config));
+  const yes = customServerConfig(form, [], { mode: "all" }, true);
+  assert.ok(yes.ok && yes.config.trust_hints === true);
+  // Changing it later goes through the normal update.
+  const back = await api.updateMcpServer("fetch", { trust_hints: true });
+  assert.equal(back.trust_hints, true);
+});
+
 test("splitArgs honours quotes", () => {
   assert.deepEqual(splitArgs(`npx -y "my pkg" 'a b' c`), [
     "npx",

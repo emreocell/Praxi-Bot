@@ -828,6 +828,17 @@
       "label": "Botların kullanabileceği araçlar",
       "restricted": "Bazı araçlar özel bir izin listesiyle sınırlı; sunucu ayarlarından düzenle."
     },
+    "trust": {
+      "badgeAsks": "Hep sorar",
+      "badgeTrusted": "Etiketlere güveniliyor",
+      "explain": "Bir sunucu her aracı salt okunur olarak işaretleyebilir ya da işaretlemeyebilir. Hayır derseniz her işlem önce size sorar. Evet derseniz yalnızca salt okunur işaretli araçlar sormadan çalışır; bir şeyi değiştiren veya silen her işlem yine sorar. Bunu sonra uygulamanın ayarlarından değiştirebilirsiniz.",
+      "learn": "Daha fazla bilgi",
+      "no": "Hayır, her işlem için bana sor",
+      "question": "Bu sunucunun kendi araçlarını dürüstçe tarif ettiğine güveniyor musunuz?",
+      "savedNo": "{{name}}: her işlem yeniden size sorar.",
+      "savedYes": "{{name}}: salt okunur araçları artık sormadan çalışır.",
+      "yes": "Evet, yalnızca okuyan araçları sormadan çalışsın"
+    },
     "usedBy": "Kullananlar"
   },
   "backdrop": {
@@ -1515,15 +1526,35 @@
     },
     "attach": {
       "add": "Dosya veya görsel ekle",
-      "failed": "Bu dosya eklenemedi",
+      "command": "Dosyaları normal bir mesajla gönderin. Eğik çizgi komutu kullanmadan önce dosyaları kaldırın.",
+      "delivery": "Yeni dosyalar Gönder’e basana kadar bu tarayıcıda kalır. Gönder, dosyaları sohbetin çalıştığı bilgisayara kopyalar; görselleri veya çıkarılan metni seçili yapay zekâ sağlayıcısına iletir.",
+      "details": "Dosyaların gönderileceği yer ve boyut sınırları",
+      "documentHelp": "Belge metni talimat olarak değil, güvenilmeyen veri olarak ele alınır. Taranmış PDF’lerde okunabilir metin bulunmayabilir. Hareketli görsel küçültülürse ilk karesi kullanılır.",
+      "empty": "Bu dosya boş. İçeriği olan bir dosya seçin.",
+      "failed": "Bu dosya eklenemedi. Kaldırıp yeniden deneyin.",
+      "footer": "Göndermeden önce hatalı dosyaları düzeltin veya kaldırın. Önceden kopyalanan dosyalar buradan kaldırılsa da sohbetin çalıştığı bilgisayarda kalır.",
+      "imageFailed": "Bu görsel hazırlanamadı. Daha küçük bir PNG, JPEG, GIF veya WebP görseli deneyin.",
+      "imageTooLarge": "Görsel küçültüldükten sonra da çok büyük. 5 MB altındaki bir görsel seçin.",
+      "limits": "En fazla 6 dosya; dosya başına 15 MB, metinlerde 1 MB, hazırlanan görsellerde 5 MB. 2048 pikseli aşan görseller küçültülür.",
       "list": "Eklenen dosyalar",
+      "local": "Bu tarayıcıda hazır",
+      "localNotice": "Yeni dosyalar Gönder’e basana kadar bu tarayıcıda kalır.",
       "pastedName": "Yapıştırılan dosya",
+      "preparing": "Bu tarayıcıda hazırlanıyor…",
+      "providerImage": "Yapay zekâya: bu görsel",
+      "providerText": "Yapay zekâya: çıkarılan metin (güvenilmeyen)",
+      "ready": "Gönderilmeye hazır",
       "remove": "{{name}} dosyasını kaldır",
+      "resized": "Görsel küçültüldü",
+      "retry": "{{name}} dosyasını yeniden göndermek için hazırla",
+      "stored": "Sohbetin çalıştığı bilgisayara kaydedildi",
+      "textTooLarge": "Metin dosyaları en fazla 1 MB olabilir. Daha küçük bir dosya seçin.",
       "tooLarge": "Çok büyük (en fazla 15 MB)",
       "tooMany": "Bir mesajda en fazla 6 dosya olabilir",
       "truncated": "Dosyanın yalnızca başı okundu",
-      "unsupported": "Bu dosya türü desteklenmiyor. Görsel, PDF, Word, Excel, PowerPoint veya metin dosyası kullan.",
-      "uploading": "Yükleniyor"
+      "unsupported": "PNG, JPEG, GIF, WebP, PDF, DOCX, XLSX, PPTX veya UTF-8 metin dosyası kullanın. Ses, video ve diğer ikili dosyalar desteklenmiyor.",
+      "untrusted": "Güvenilmeyen dosya içeriği",
+      "uploading": "Sohbetin çalıştığı bilgisayara kopyalanıyor…"
     },
     "chain": {
       "details": "Ayrıntılar",
@@ -2639,6 +2670,10 @@
         "hint": "Kartı yenile ve karar vermeden önce yeni metni oku. Hiçbir şey onaylanmadı.",
         "title": "Uygulama bu aracı yeniden değiştirdi"
       },
+      "memory_owner_only": {
+        "hint": "Botun bellek ayarlarını, botun çalıştığı bilgisayardaki uygulamadan değiştir.",
+        "title": "Bunu yalnızca sahibi değiştirebilir"
+      },
       "message_not_editable": {
         "hint": "Yalnızca kendi son mesajınız düzenlenebilir veya yeniden oluşturulabilir, o da bot işini bitirdikten sonra.",
         "title": "Bu mesaj düzenlenemez"
@@ -3243,6 +3278,15 @@
     "saved": "Güveniliyor: {{folder}}",
     "title": "Güvenilen klasörler"
   },
+  "gettingStarted": {
+    "allDone": "Hazırsın. Buradaki her şey tamam.",
+    "hide": "Başlangıç ekranından gizle",
+    "progress": "{{total}} adımın {{done}} tanesi tamam",
+    "show": "Başlangıç ekranında yeniden göster",
+    "stateDone": "tamam",
+    "stateOpen": "henüz yapılmadı",
+    "title": "Başlangıç"
+  },
   "health": {
     "connected": "Yerel servis çalışıyor",
     "connecting": "Yerel servis başlatılıyor…",
@@ -3834,15 +3878,20 @@
     "addTitle": "Hafıza kaydı ekle",
     "addedNotice": "Hafıza kaydı eklendi.",
     "allKinds": "Tüm kategoriler",
+    "approve": "Onayla",
+    "approvedNotice": "Onaylandı. Bot artık kullanabilir.",
     "bot": "Bot",
     "botOnly": "Yalnızca bu bota özel kayıtlar",
     "content": "Hatırlanacak bilgi",
     "contentPlaceholder": "Kısa bir bilgi veya tercih yaz…",
     "description": "Her botun geçmiş sohbetlerden ne hatırladığını gör, herhangi bir kaydı düzenle veya unut, değişiklikleri geri al ve bir sonraki tura ne gireceğini önizle.",
+    "discard": "At",
+    "discardedNotice": "Atıldı.",
     "edit": "Düzenle",
     "editLabel": "Hafıza metni",
     "empty": "Botun burada adın gibi işe yarar bilgileri hatırlar. Bir sohbette ona bir şey söyle ya da aşağıdan kendin ekle.",
     "emptyTitle": "Henüz kayıt yok",
+    "expires": "{{date}} tarihinde sona erer",
     "forget": "Unut",
     "forgottenBadge": "Unutuldu",
     "forgottenNotice": "Hafıza kaydı unutuldu.",
@@ -3857,6 +3906,8 @@
       "profile": "Kullanıcı profili"
     },
     "noBot": "Hafıza kayıtlarını görmek veya eklemek için bir bot oluştur.",
+    "pendingHint": "Bunlar web sayfalarından, dosyalardan veya araçlardan alındı ya da her şeyi onaylamak istedin. Sen onaylayana kadar bot bunları kullanmaz.",
+    "pendingTitle": "Onayın gerekiyor",
     "previewEmpty": "Bu mesaj için hiçbir hafıza kaydı çağrılmaz.",
     "previewHint": "Tura eklenecek hatırlanan kayıtlar veri bloğunu görmek için örnek bir mesaj gir.",
     "previewPlaceholder": "ör. Sürüm notlarını ne zaman hazırlıyoruz?",
@@ -3879,6 +3930,46 @@
     "undo": "Geri al",
     "undoneNotice": "Son değişiklik geri alındı.",
     "updatedNotice": "Hafıza kaydı güncellendi."
+  },
+  "memoryRecall": {
+    "consent": "Anılarımın arama verisine çevrilmek üzere {{provider}} sağlayıcısına gönderilmesini kabul ediyorum",
+    "disable": "Temel moda dön",
+    "enable": "Akıllı moda geç",
+    "explain": {
+      "basic": "Bir anı, mesajınla aynı kelimeleri içeriyorsa bulunur. Hiçbir şey bu bilgisayardan çıkmaz.",
+      "smart": "Seçtiğin gömme modeli sayesinde bir anı, farklı kelimeler kullanılsa bile anlamına göre bulunur."
+    },
+    "failed": "Akıllı mod açılamadı, bu yüzden Temel mod kullanılıyor. Hiçbir şey kaybolmadı. Modeli kontrol edip tekrar dene.",
+    "noSource": "Akıllı mod, bir botun bilgi kaynakları için kurduğun gömme modelini kullanır. Etkinleştirmek için önce orada bir tane kur.",
+    "progress": "{{total}} anıdan {{done}} tanesi yeniden dizinleniyor",
+    "source": "Kullanılacak model",
+    "state": {
+      "basic": "Temel (kelime eşleşmesi)",
+      "smart": "Akıllı (anlam)"
+    },
+    "title": "Anılar nasıl bulunur",
+    "waiting": "model başlıyor; bu sırada kelimeler kullanılıyor"
+  },
+  "memorySettings": {
+    "advanced": "Gelişmiş",
+    "budget": "Bir yanıta okunan bellek: yaklaşık {{words}} kelime",
+    "budgetHint": "Daha fazla bellek bota daha çok arka plan bilgisi verir ama her yanıtı biraz yavaşlatır ve pahalılaştırır. Varsayılan yaklaşık 600 kelimedir.",
+    "budgetLabel": "Yanıt başına bellek boyutu",
+    "mode": {
+      "ask": "Kaydetmeden önce sor",
+      "off": "Kapalı",
+      "on": "Açık"
+    },
+    "modeHint": {
+      "ask": "Her yeni anı, sen onaylayana kadar \"Onayın gerekiyor\" listesinde bekler.",
+      "off": "Hiçbir şey öğrenmez, hatırlamaz ve bellek araçları yoktur. Mevcut anılar saklanır ama kullanılmaz.",
+      "on": "Söylediklerinden öğrenir. Web sayfalarından, dosyalardan veya araçlardan aldığı her şey önce senin onayını bekler."
+    },
+    "sectionHint": "Bu botun sohbetlerinden öğrenip öğrenmeyeceğini ve öğrendiklerini kullanıp kullanmayacağını seç.",
+    "sectionTitle": "Bellek",
+    "share": "Öğrendiklerimi diğer botlarımla paylaş",
+    "shareHint": "Açık: seninle ve geçmiş olaylarla ilgili bilgiler tüm botlarının kullanımına açılır. Kapalı: bu bot öğrendiği her şeyi kendine saklar.",
+    "title": "Bellek"
   },
   "messageInfo": {
     "label": "Mesaj bilgisi",
@@ -3960,6 +4051,55 @@
     "switchedDefault": "Varsayılan model {{model}} olarak ayarlandı",
     "thinking": "Düşünme",
     "title": "Model"
+  },
+  "myBots": {
+    "all": "Tüm durumlar",
+    "clear": "Filtreleri temizle",
+    "costHint": "Botun yerel gününde günlük limite sayılan ABD doları tutarıdır. Eksik kullanım tahmin edilebilir; fiyatı bilinmeyen modeller dahil edilmez. Diğer günlük, haftalık ve aylık limitler de geçerli olabilir.",
+    "costLimit": "{{cost}} / {{limit}}",
+    "costNoLimit": "{{cost}} / günlük para limiti yok",
+    "costUnavailable": "Maliyet alınamadı",
+    "count": "{{total}} bottan {{shown}} tanesi gösteriliyor",
+    "dailyLimit": "{{name}} için günlük harcama",
+    "emptyHint": "Araştırma, günlük işler veya kendi fikirleriniz için size yardımcı olacak bir bot oluşturun.",
+    "emptyTitle": "İlk botunuzu oluşturun",
+    "filter": "Durum",
+    "grid": "Kart görünümü",
+    "lastActivity": "Son etkinlik",
+    "layout": "Bot görünümü",
+    "list": "Kompakt liste",
+    "loading": "Maliyet yükleniyor…",
+    "newBot": "Bot oluştur",
+    "newChat": "Yeni sohbet",
+    "noActivity": "Henüz etkinlik yok",
+    "noMatches": "Eşleşen bot yok",
+    "noMatchesHint": "Başka bir ad veya durum deneyin.",
+    "pause": "Duraklat",
+    "pauseUnavailable": "Bu bilgisayarı kontrol eden bot duraklatılabilir. Diğer çalışmaları kendi sohbetlerinden durdurabilirsiniz.",
+    "refresh": "Botları yenile",
+    "resume": "Devam et",
+    "review": "İsteği incele",
+    "schedule": "Zamanla",
+    "scope": "{{place}} üzerindeki botlar. Başka bir konum seçerek oradaki botları görebilirsiniz.",
+    "search": "Bot bul",
+    "server": "Sunucu",
+    "settings": "Ayarlar",
+    "sort": "Sıralama",
+    "sortBy": {
+      "activity": "Son etkinlik",
+      "cost": "Bugün en çok harcayan",
+      "name": "Ad"
+    },
+    "stale": "Canlı güncellemeler kesildi. Son bilinen bilgiler gösteriliyor; değişiklik yapmadan önce yeniden bağlanın.",
+    "status": {
+      "approval": "Yanıtınızı bekliyor",
+      "idle": "Boşta",
+      "paused": "Duraklatıldı",
+      "running": "Çalışıyor"
+    },
+    "thisComputer": "Bu bilgisayar",
+    "title": "Botlarım",
+    "today": "Bugün / günlük limit"
   },
   "needs": {
     "empty": "Bir bot onayına ihtiyaç duyduğunda ya da bir sorusu olduğunda burada görünür.",
@@ -4048,10 +4188,15 @@
     }
   },
   "notifyHistory": {
+    "allBots": "Tüm botlar",
+    "allTypes": "Tüm türler",
     "clear": "Geçmişi temizle",
     "empty": "Bir bot işini bitirdiğinde ya da onayına ihtiyaç duyduğunda burada görürsün.",
     "emptyAction": "Seni bekleyenlere bak",
     "emptyTitle": "Yeni bir şey yok",
+    "filterBot": "Bot",
+    "filterType": "Tür",
+    "filters": "Bildirimleri süz",
     "held": "Tutuldu (sessiz saatler)",
     "heldMuted": "Tutuldu (bot sessizde)",
     "kind": {
@@ -4062,12 +4207,23 @@
       "scheduleDone": "Zamanlanmış iş bitti"
     },
     "markAllRead": "Tümünü okundu say",
+    "noMatch": "Bu süzgeçlere uyan bildirim yok.",
+    "noMatchTitle": "Burada bir şey yok",
+    "onlyUnread": "Yalnızca okunmamışlar",
     "openNeeds": "Sizi bekleyenleri aç",
+    "quietNote": "{{count}} bildirim sessiz saatlerde tutuldu ve hâlâ okunmadı.",
+    "quietNote_one": "{{count}} bildirim sessiz saatlerde tutuldu ve hâlâ okunmadı.",
+    "resetFilters": "Hepsini göster",
+    "retention": "{{days}} gün boyunca, en fazla {{max}} bildirim saklanır; sonra kendiliğinden silinir.",
+    "showSnoozed": "Ertelenenler ({{count}})",
     "shown": "Gösterildi",
+    "snooze": "1 saat ertele",
+    "snoozeHint": "Bunu bir saatliğine gizle. Kendiliğinden geri gelir.",
     "subtitle": "Botların bildirdikleri ve sessiz saatlerde tutulanlar. Bekleyen onaylar her zaman Sizi bekleyenler'de kalır.",
     "title": "Bildirim geçmişi",
     "unread": "Okunmadı",
-    "unreadCount": "{{count}} okunmamış"
+    "unreadCount": "{{count}} okunmamış",
+    "unsnooze": "Geri getir"
   },
   "overlay": {
     "actions": {
@@ -4096,6 +4252,7 @@
     "empty": "Eşleşen komut yok",
     "go": {
       "home": "Genel bakışa git",
+      "myBots": "Botlarım",
       "needs": "Senden bekleyenlere git",
       "schedules": "Zamanlanmış görevlere git",
       "settings": "Ayarları aç",
@@ -4245,6 +4402,31 @@
     "label": "Sırada.",
     "remove": "Sıradaki mesajı kaldır",
     "sendNow": "Şimdi gönder"
+  },
+  "quickAsk": {
+    "bot": "Bot",
+    "clipboardEmpty": "Panoda kullanılabilir bir şey yok.",
+    "clipboardOff": "Buna basmazsan panon kullanılmaz.",
+    "close": "Kapat",
+    "failed": "Olmadı. Lütfen tekrar dene.",
+    "hints": "Enter gönderir · Esc kapatır",
+    "includeClipboard": "Panoyu ekle",
+    "needsYou": "Bunun için onayın gerekiyor. Karar vermek için uygulamada aç.",
+    "noBots": "Henüz bot yok. Önce uygulamada bir tane oluştur.",
+    "noService": "Praxi-Bot henüz hazır değil: {{reason}}",
+    "openInApp": "Uygulamada aç",
+    "placeholder": "Bir şey sor ve Enter'a bas",
+    "problem": {
+      "in_use": "Başka bir program bu kısayolu zaten kullanıyor. Başka bir tane seç.",
+      "invalid": "Bu kısayol geçerli değil. Örnek: Ctrl+Alt+Space.",
+      "needs_modifier": "Kısayola Ctrl veya Alt ekle; yoksa normal yazmayı engeller.",
+      "reserved": "Windows ve çoğu uygulama bu kısayolu zaten kullanıyor. Başka bir tane seç.",
+      "same_as_stop": "Bu zaten Durdur kısayolun. Başka bir tane seç.",
+      "shift_only": "Tek başına Shift yetmez. Ctrl veya Alt ekle."
+    },
+    "send": "Gönder",
+    "thinking": "Düşünüyor…",
+    "title": "Hızlı sor"
   },
   "quota": {
     "remaining": "{{label}}: %{{pct}} kaldı",
@@ -4802,6 +4984,12 @@
       "restartManual": "Değişikliğin geçerli olması için arka plan servisini kendin yeniden başlat (bu uygulama başlatmadı).",
       "test": "Bağlantıyı test et",
       "title": "Model sağlayıcıları"
+    },
+    "quickAsk": {
+      "description": "Varsayılan olarak kapalı. Açıkken, herhangi bir programdan bir klavye kısayoluyla küçük bir kutu açılır; soruyu yazıp Enter'a basarsın. Her soru, seçtiğin botla yeni bir sohbet başlatır.",
+      "hotkey": "Hızlı sor kısayol tuşları",
+      "privacy": "Kutudaki \"Panoyu ekle\"ye basmadıkça pano ve ekranın asla okunmaz.",
+      "title": "Hızlı sor kısayolu"
     },
     "quiet": {
       "allowUrgent": "Bir bot beni beklerken yine de bildir",
@@ -5776,6 +5964,16 @@
     "exportCsv": "CSV indir",
     "exportDone": "Kullanım CSV dosyası indirildi.",
     "exportFailed": "Kullanım CSV dosyası indirilemedi",
+    "insights": {
+      "noChat": "Açılacak sohbet yok",
+      "openRun": "Aç",
+      "openRunLabel": "{{when}} tarihinde {{bot}} botunun çalıştırmasının sohbetini aç",
+      "priceUnknown": "Fiyat bilinmiyor",
+      "title": "Para nereye gidiyor",
+      "tokensShort": "{{amount}} token",
+      "topRuns": "En pahalı çalıştırmalar",
+      "unknownPriceNote": "\"Bilinmiyor\" yazan satırlar fiyatı bilinmeyen bir model kullanır: token sayıları hesaba katılır, maliyetleri katılmaz."
+    },
     "limit": {
       "clear": "Limiti kaldır",
       "forecast": "Ay sonu tahmini",
@@ -5824,15 +6022,27 @@
     "tokens": "Token",
     "total": "Toplam",
     "trend": {
+      "alertKey": "%80 uyarısı ({{amount}})",
       "ariaLabel": "{{days}} günlük {{metric}} eğilimi",
       "dayReadout": "{{day}} · {{calls}} çağrı · {{amount}} token · {{cost}}",
+      "forecast": "Bu ay harcanan: {{spent}}. Bu hızla ay yaklaşık {{forecast}} ile biter.",
+      "forecastNone": "Bu ay tahmin için henüz yeterli fiyatlı kullanım yok.",
+      "forecastPartial": "{{count}} çağrının fiyatı bilinmiyor ve hesaba katılmadı.",
+      "granularities": {
+        "day": "Günlük",
+        "month": "Aylık",
+        "week": "Haftalık"
+      },
+      "granularity": "Gruplama",
       "hoverHint": "Toplamlarını görmek için bir günün üzerine gelin veya odaklanın.",
+      "limitKey": "Aylık limit ({{amount}})",
       "metric": "Grafik ölçütü",
       "metrics": {
         "calls": "Çağrılar",
         "cost": "Maliyet",
         "tokens": "Token"
       },
+      "prorated": "Çizgiler, aylık limitinizin bir gün veya bir hafta için eşit payını gösterir.",
       "showTable": "Günlük döküm tablosunu göster",
       "timeZone": "Yerel günler ({{tz}})",
       "title": "Günlük eğilim"

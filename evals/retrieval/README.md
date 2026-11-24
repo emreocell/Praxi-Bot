@@ -53,11 +53,13 @@ The token comparison counts **complete serialized search responses**, including
 citations, provenance and escaping, with the embedded `cl100k_base` reference BPE.
 It also reports the runtime `ceil(Unicode scalars / 4)` estimate and UTF-8 bytes.
 The comparison baseline concatenates this whole corpus as hypothetical memory
-context. Today's shipped default has memory disabled, so it costs zero memory
-tokens. The benchmark must never be described as measured production savings
-over that default, or as the billed token count of a Gemini model. Agent-core
+context. A loop **without** a memory store (safe mode, or a library user who passes
+`memory: None`) costs zero memory tokens; the shipped `bot serve` opens `memory.db`
+and has recall on for every bot unless the owner sets that bot's memory to Off. The
+benchmark must never be described as measured production savings over a no-memory
+loop, or as the billed token count of a Gemini model. Agent-core
 also measures complete serialized requests with `cl100k_base` and `o200k_base`:
-the shipped zero-memory default, actual enabled `MemoryConfig` recall through
+a loop with no memory store, actual enabled `MemoryConfig` recall through
 `with_recall`/`render_recall_block`, and both requests in an explicit retrieval
 turn. The retrieval totals include tool schema, model-issued call, citations and
 JSON escaping. Legacy background extraction/consolidation model calls are outside
@@ -84,14 +86,14 @@ quality gates are asserted independently.
 
 | Request path | cl100k_base | o200k_base |
 | --- | ---: | ---: |
-| Default, no enabled memory or knowledge source | 112 | 114 |
+| No memory store and no knowledge source (safe mode / library default) | 112 | 114 |
 | Legacy enabled recall, actual first request, 800 estimated-token recall budget | 811 | 813 |
 | Explicit knowledge retrieval, first planning request including tool schema | 308 | 318 |
 | Explicit knowledge retrieval, second request including call and cited results | 1,038 | 1,052 |
 | Explicit knowledge retrieval, total input across both requests | 1,346 | 1,370 |
 
-**This run does not show token savings over either the shipped zero-memory
-default or the optional legacy recall path.** Explicit retrieval pays for a
+**This run does not show token savings over either a no-memory loop or the
+legacy recall path (which `bot serve` enables, 800-token default budget, adjustable per bot).** Explicit retrieval pays for a
 model-issued tool call and a second request. Legacy background extraction and
 consolidation are outside the first-request recall comparison, and provider
 output tokens, caching and billing are not measured here. A missing/disabled

@@ -19,6 +19,7 @@ deutsche Seite, wenn es sie gibt.
 | [Einstellungen](settings.md) | Die Einstellungsseiten, die Suche, Sicherheitsstufen und „Auf Empfehlung zurücksetzen“. |
 | [Geplante Jobs](schedules.md) | Einen Bot zu bestimmten Zeiten von selbst arbeiten lassen. |
 | [Ausgabenlimits für Bots](bot-spending-limits.md) | Tages-, Wochen- und Monatslimits. |
+| [Gedächtnis](memory.md) | Sieh, korrigiere, vergiss und schalte aus, woran sich deine Bots erinnern. |
 | [Telegram](telegram.md) | Mit deinen Bots vom Handy aus sprechen. |
 | [Kalender](calendar.md) | Bots lesen und erstellen Termine in einem CalDAV-Kalender. |
 | [Home Assistant](home-assistant.md) | Bots lesen und steuern Geräte im Haus. |

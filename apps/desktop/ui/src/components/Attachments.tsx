@@ -1,4 +1,4 @@
-import { FileText, Loader2, TriangleAlert, X } from "lucide-react";
+import { FileText, Loader2, RotateCcw, TriangleAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ApiClient } from "../api/client";
@@ -7,13 +7,17 @@ import { type PendingFile, formatBytes } from "../lib/attachments";
 import styles from "./Attachments.module.css";
 
 /** The files waiting in the composer: a chip each, with a spinner, an error or a remove button. */
-export function ComposerFiles({ files, onRemove }: { files: PendingFile[]; onRemove: (key: string) => void }) {
+export function ComposerFiles({ files, onRemove, onRetry, disabled }: {
+  files: PendingFile[]; onRemove: (key: string) => void; onRetry: (key: string) => void; disabled: boolean;
+}) {
   const { t } = useTranslation();
   if (files.length === 0) {
     return null;
   }
   return (
-    <ul className={styles.chips} aria-label={t("chat.attach.list")}>
+    <div data-no-composer-focus>
+    <p className={styles.notice}>{t("chat.attach.localNotice")}</p>
+    <ul className={styles.chips} tabIndex={0} aria-label={t("chat.attach.list")} aria-live="polite" aria-relevant="additions text">
       {files.map((f) => (
         <li key={f.key} className={styles.chip} data-state={f.state} title={f.errorKey ? t(f.errorKey) : f.name}>
           {f.preview ? (
@@ -23,14 +27,23 @@ export function ComposerFiles({ files, onRemove }: { files: PendingFile[]; onRem
           ) : (
             <FileText aria-hidden="true" />
           )}
-          <span className={styles.name}>{f.name}</span>
-          <span className={styles.meta}>
-            {f.state === "uploading" ? <Loader2 className={styles.spin} aria-label={t("chat.attach.uploading")} /> : null}
-            {f.state === "failed" && f.errorKey ? t(f.errorKey) : f.state === "ready" ? formatBytes(f.size) : null}
+          <span className={styles.details}>
+            <span className={styles.name}>{f.name}</span>
+            <span className={styles.meta}>
+              {f.state === "uploading" || f.state === "preparing" ? <Loader2 className={styles.spin} aria-hidden="true" /> : null}
+              {f.state === "failed" && f.errorKey ? t(f.errorKey) : f.state === "ready" ? `${formatBytes(f.size)} · ${t(f.id ? "chat.attach.stored" : "chat.attach.local")}` : t(`chat.attach.${f.state}`)}
+            </span>
+            {f.resized ? <span className={styles.meta}>{t("chat.attach.resized")}</span> : null}
+            {f.truncated ? <span className={styles.meta}>{t("chat.attach.truncated")}</span> : null}
+            {f.kind ? <span className={styles.meta}>{t(f.kind === "image" ? "chat.attach.providerImage" : "chat.attach.providerText")}</span> : null}
           </span>
+          {f.state === "failed" && f.blob ? <button type="button" className={styles.remove} disabled={disabled}
+            aria-label={t("chat.attach.retry", { name: f.name })} title={t("chat.attach.retry", { name: f.name })}
+            onClick={() => onRetry(f.key)}><RotateCcw aria-hidden="true" /></button> : null}
           <button
             type="button"
             className={styles.remove}
+            disabled={disabled}
             aria-label={t("chat.attach.remove", { name: f.name })} title={t("chat.attach.remove", { name: f.name })}
             onClick={() => onRemove(f.key)}
           >
@@ -39,6 +52,14 @@ export function ComposerFiles({ files, onRemove }: { files: PendingFile[]; onRem
         </li>
       ))}
     </ul>
+    <details className={styles.notice}>
+      <summary>{t("chat.attach.details")}</summary>
+      <p>{t("chat.attach.delivery")}</p>
+      <p>{t("chat.attach.documentHelp")}</p>
+      <p>{t("chat.attach.limits")}</p>
+      <p>{t("chat.attach.footer")}</p>
+    </details>
+    </div>
   );
 }
 
@@ -98,6 +119,7 @@ export function MessageFiles({
             <FileText aria-hidden="true" />
             <span className={styles.name}>{a.name}</span>
             <span className={styles.meta}>{formatBytes(a.size)}</span>
+            <span className={styles.meta}>{t("chat.attach.untrusted")}</span>
             {a.truncated ? <span className={styles.meta}>{t("chat.attach.truncated")}</span> : null}
           </span>
         )

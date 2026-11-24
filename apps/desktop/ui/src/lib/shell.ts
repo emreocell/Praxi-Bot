@@ -106,6 +106,34 @@ export async function setKeepInTray(
   }
 }
 
+/** The shell's reasons for refusing a Quick ask hotkey (stable codes from `quick_ask.rs`). */
+export const QUICK_ASK_PROBLEMS = [
+  "invalid",
+  "needs_modifier",
+  "shift_only",
+  "reserved",
+  "same_as_stop",
+  "in_use"
+] as const;
+export type QuickAskProblem = (typeof QUICK_ASK_PROBLEMS)[number];
+
+export type QuickAskResult = { ok: true; hotkey: string | null } | { ok: false; problem: QuickAskProblem };
+
+/** Turn the Quick ask hotkey on or off in the shell; a refusal says why in a stable code. */
+export async function configureQuickAsk(enabled: boolean, hotkey: string): Promise<QuickAskResult> {
+  if (!isTauriRuntime()) {
+    return { ok: true, hotkey: enabled ? hotkey : null };
+  }
+  try {
+    const canonical = await invoke<string | null>("quick_ask_configure", { enabled, hotkey });
+    return { ok: true, hotkey: canonical };
+  } catch (e) {
+    const code = String(e);
+    const problem = (QUICK_ASK_PROBLEMS as readonly string[]).includes(code) ? (code as QuickAskProblem) : "invalid";
+    return { ok: false, problem };
+  }
+}
+
 /** Listen to a shell event; returns the unsubscribe. */
 export function onShellEvent<T>(
   name: string,

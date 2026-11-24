@@ -23,7 +23,9 @@ use utoipa::IntoParams;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::dto::{BotUsage, DailyUsage, ModelUsage, ProviderUsage, UsageSummary, UsageTotals};
+use crate::dto::{
+    BotUsage, DailyUsage, ModelUsage, ProviderUsage, TopRunUsage, UsageSummary, UsageTotals,
+};
 use crate::error::{ApiError, ErrorBody};
 
 /// Maximum number of local calendar days returned in the daily trend series.
@@ -191,8 +193,12 @@ struct Accumulator {
     by_model: BTreeMap<String, Bucket>,
     by_provider: BTreeMap<String, Bucket>,
     by_day: BTreeMap<NaiveDate, Bucket>,
+    by_run: BTreeMap<Uuid, (Bucket, TopRunUsage)>,
     csv_rows: BTreeMap<CsvKey, Bucket>,
 }
+
+/// Number of runs in the "most expensive runs" list.
+const TOP_RUNS: usize = 5;
 
 impl Accumulator {
     #[allow(clippy::too_many_arguments)]
@@ -200,13 +206,14 @@ impl Accumulator {
         &mut self,
         ctx: &AggregateCtx<'_>,
         tz: Tz,
-        bot_id: Uuid,
+        run: &Run,
         bot_label: &str,
         raw_model: &str,
         purpose: &str,
         tokens: Option<Usage>,
         ts_ms: i64,
     ) {
+        let bot_id = run.bot_id.0;
         let model = normalize_model(raw_model, ctx.redact);
         let cost = tokens.and_then(|u| {
             (ctx.price_for)(raw_model)
@@ -232,6 +239,21 @@ impl Accumulator {
             .or_default()
             .record(tokens, cost);
         self.by_day.entry(day).or_default().record(tokens, cost);
+        let entry = self.by_run.entry(run.id.0).or_insert_with(|| {
+            (
+                Bucket::default(),
+                TopRunUsage {
+                    run_id: run.id.0,
+                    bot_id,
+                    chat_id: run.chat_id.map(|c| c.0),
+                    created_at_ms: run.created_at_ms,
+                    totals: UsageTotals::default(),
+                    calls_without_usage: 0,
+                    calls_without_cost: 0,
+                },
+            )
+        });
+        entry.0.record(tokens, cost);
         self.csv_rows
             .entry(CsvKey {
                 day: day_str,
@@ -277,7 +299,7 @@ impl Accumulator {
                 self.record(
                     ctx,
                     tz,
-                    bot_id,
+                    run,
                     &bot_label,
                     &rec.call.model,
                     rec.call.purpose.as_str(),
@@ -324,16 +346,7 @@ impl Accumulator {
                 .finished_at_ms
                 .filter(|&t| t > 0)
                 .unwrap_or(fallback_ts);
-            self.record(
-                ctx,
-                tz,
-                bot_id,
-                &bot_label,
-                raw_model,
-                purpose,
-                Some(u),
-                ts_ms,
-            );
+            self.record(ctx, tz, run, &bot_label, raw_model, purpose, Some(u), ts_ms);
         }
         Ok(())
     }
@@ -371,6 +384,7 @@ fn aggregate(ctx: &AggregateCtx<'_>, q: &UsageQuery) -> Result<Aggregated, ApiEr
     }
 
     let daily = build_daily_series(&acc.by_day, q, today, tz);
+    let top_runs = top_runs_of(acc.by_run);
     let summary = UsageSummary {
         runs: acc.runs,
         total: acc.total.totals,
@@ -402,6 +416,7 @@ fn aggregate(ctx: &AggregateCtx<'_>, q: &UsageQuery) -> Result<Aggregated, ApiEr
             })
             .collect(),
         daily,
+        top_runs,
         calls_without_usage: acc.total.calls_without_usage,
         calls_without_cost: acc.total.calls_without_cost,
         time_zone: tz.name().to_owned(),
@@ -411,6 +426,36 @@ fn aggregate(ctx: &AggregateCtx<'_>, q: &UsageQuery) -> Result<Aggregated, ApiEr
         summary,
         csv_rows: acc.csv_rows,
     })
+}
+
+/// The most expensive runs: known cost first (highest first), then runs whose
+/// price is unknown ranked by tokens; ties keep the newest run first.
+fn top_runs_of(by_run: BTreeMap<Uuid, (Bucket, TopRunUsage)>) -> Vec<TopRunUsage> {
+    let mut runs: Vec<TopRunUsage> = by_run
+        .into_values()
+        .map(|(b, mut r)| {
+            r.totals = b.totals;
+            r.calls_without_usage = b.calls_without_usage;
+            r.calls_without_cost = b.calls_without_cost;
+            r
+        })
+        .collect();
+    let tokens = |r: &TopRunUsage| r.totals.prompt_tokens + r.totals.completion_tokens;
+    runs.sort_by(|a, b| {
+        let (ca, cb) = (a.totals.cost_usd, b.totals.cost_usd);
+        cb.is_some()
+            .cmp(&ca.is_some())
+            .then_with(|| {
+                cb.unwrap_or(0.0)
+                    .partial_cmp(&ca.unwrap_or(0.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| tokens(b).cmp(&tokens(a)))
+            .then_with(|| b.created_at_ms.cmp(&a.created_at_ms))
+    });
+    runs.retain(|r| r.totals.model_calls > 0);
+    runs.truncate(TOP_RUNS);
+    runs
 }
 
 fn build_daily_series(
@@ -826,6 +871,12 @@ mod tests {
         assert_eq!(gpt.calls_without_usage, 1);
         assert_eq!(gpt.calls_without_cost, 1);
         assert!(gpt.totals.cost_usd.is_some());
+
+        // Top runs: the priced parent run (gpt-4o) outranks the cheaper child run.
+        assert_eq!(s.top_runs.len(), 2);
+        assert_eq!(s.top_runs[0].run_id, parent_run.0);
+        assert!(s.top_runs[0].totals.cost_usd.is_some());
+        assert_eq!(s.top_runs[1].run_id, child_run.0);
 
         // Subagent counted once, never doubled by run.usage_summary.
         assert_eq!(s.by_purpose["subagent"].model_calls, 1);

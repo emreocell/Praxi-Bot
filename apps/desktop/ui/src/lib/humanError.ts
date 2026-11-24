@@ -67,6 +67,7 @@ export const DAEMON_ERROR_CODES = [
   "mcp_approval_timeout",
   "mcp_rate_limit",
   "mcp_tool_changed_again",
+  "memory_owner_only",
   "message_not_editable",
   "message_not_last",
   "modified_since",

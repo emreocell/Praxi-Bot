@@ -1,6 +1,7 @@
 {
   "ignoreFiles": [
     "**/tokens.css",
+    "site/**",
     "**/node_modules/**",
     "**/dist/**",
     "**/target/**"
@@ -29,5 +30,15 @@
       "rem",
       "em"
     ]
-  }
+  },
+  "overrides": [
+    {
+      "files": [
+        "site/**/*.css"
+      ],
+      "rules": {
+        "unit-disallowed-list": null
+      }
+    }
+  ]
 }

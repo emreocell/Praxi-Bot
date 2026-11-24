@@ -828,6 +828,17 @@
       "label": "Tools bots may use",
       "restricted": "Some tools are limited by a custom allow-list; edit it in the server settings."
     },
+    "trust": {
+      "badgeAsks": "Always asks",
+      "badgeTrusted": "Labels trusted",
+      "explain": "A server labels each tool as read-only or not. If you answer No, every action asks first. If you answer Yes, only tools it marks read-only run without asking; anything that changes or deletes still asks. You can change this later in the app's settings.",
+      "learn": "Learn more",
+      "no": "No, ask me for every action",
+      "question": "Do you trust this server to describe its own tools honestly?",
+      "savedNo": "{{name}}: every action asks again.",
+      "savedYes": "{{name}}: its read-only tools now run without asking.",
+      "yes": "Yes, let its read-only tools run without asking"
+    },
     "usedBy": "Used by"
   },
   "backdrop": {
@@ -1515,15 +1526,35 @@
     },
     "attach": {
       "add": "Attach files or images",
-      "failed": "Could not attach this file",
+      "command": "Send files with a regular message. Remove them before using a slash command.",
+      "delivery": "New files stay in this browser until Send. Send copies them to the chat’s computer and includes the images or extracted text in the selected AI provider’s input.",
+      "details": "Where files go and size limits",
+      "documentHelp": "Document text is treated as untrusted data, never instructions. Scanned PDFs may have no readable text. Resizing an animated image uses its first frame.",
+      "empty": "This file is empty. Choose a file with content.",
+      "failed": "Could not attach this file. Remove it and try again.",
+      "footer": "Fix or remove failed files before sending. Files already copied stay on the chat’s computer even if removed here.",
+      "imageFailed": "This image could not be prepared. Try a smaller PNG, JPEG, GIF or WebP image.",
+      "imageTooLarge": "The image is still too large after resizing. Choose an image under 5 MB.",
+      "limits": "Up to 6 files; 15 MB each, text 1 MB, prepared images 5 MB. Images over 2048 pixels are reduced.",
       "list": "Attached files",
+      "local": "Ready in this browser",
+      "localNotice": "New files stay in this browser until Send.",
       "pastedName": "Pasted file",
+      "preparing": "Preparing in this browser…",
+      "providerImage": "To AI: this image",
+      "providerText": "To AI: extracted text (untrusted)",
+      "ready": "Ready to send",
       "remove": "Remove {{name}}",
+      "resized": "Image reduced",
+      "retry": "Prepare {{name}} for another send attempt",
+      "stored": "Saved on the chat’s computer",
+      "textTooLarge": "Text files can be at most 1 MB. Choose a smaller file.",
       "tooLarge": "Too large (15 MB at most)",
       "tooMany": "At most 6 files per message",
       "truncated": "Only the start of this file was read",
-      "unsupported": "This file type is not supported. Use an image, PDF, Word, Excel, PowerPoint or a text file.",
-      "uploading": "Uploading"
+      "unsupported": "Use PNG, JPEG, GIF, WebP, PDF, DOCX, XLSX, PPTX or a UTF-8 text file. Audio, video and other binary files are not supported.",
+      "untrusted": "Untrusted file content",
+      "uploading": "Copying to the chat’s computer…"
     },
     "chain": {
       "details": "Details",
@@ -2639,6 +2670,10 @@
         "hint": "Reload the card and read the new wording before you decide. Nothing was approved.",
         "title": "The app changed this tool again"
       },
+      "memory_owner_only": {
+        "hint": "Change a bot's memory settings in the app on the computer that runs the bot.",
+        "title": "Only the owner can change this"
+      },
       "message_not_editable": {
         "hint": "Only your own latest message can be edited or regenerated, and only once the bot has finished.",
         "title": "This message can't be edited"
@@ -3243,6 +3278,15 @@
     "saved": "Trusted: {{folder}}",
     "title": "Trusted folders"
   },
+  "gettingStarted": {
+    "allDone": "You're all set. Everything here is done.",
+    "hide": "Hide from the start screen",
+    "progress": "{{done}} of {{total}} done",
+    "show": "Show on the start screen again",
+    "stateDone": "done",
+    "stateOpen": "not done yet",
+    "title": "Getting started"
+  },
   "health": {
     "connected": "Local service running",
     "connecting": "Starting the local service…",
@@ -3834,15 +3878,20 @@
     "addTitle": "Add a memory",
     "addedNotice": "Memory added.",
     "allKinds": "All categories",
+    "approve": "Approve",
+    "approvedNotice": "Approved. The bot can use it now.",
     "bot": "Bot",
     "botOnly": "Only memories specific to this bot",
     "content": "What to remember",
     "contentPlaceholder": "Write a concise fact or preference…",
     "description": "See what each bot remembers from past conversations, edit or forget any item, undo changes, and preview what enters the next turn.",
+    "discard": "Discard",
+    "discardedNotice": "Discarded.",
     "edit": "Edit",
     "editLabel": "Memory text",
     "empty": "Your bot remembers useful facts here, like your name. Tell it something in a chat, or add one yourself below.",
     "emptyTitle": "No memories yet",
+    "expires": "expires {{date}}",
     "forget": "Forget",
     "forgottenBadge": "Forgotten",
     "forgottenNotice": "Memory forgotten.",
@@ -3857,6 +3906,8 @@
       "profile": "User profile"
     },
     "noBot": "Create a bot to view or add memories.",
+    "pendingHint": "These were picked up from web pages, files or tools, or you asked to approve everything. The bot does not use them until you approve.",
+    "pendingTitle": "Needs your OK",
     "previewEmpty": "No memories would be recalled for this message.",
     "previewHint": "Enter a sample message to see the exact recalled-memory data block that will be prepended to the turn.",
     "previewPlaceholder": "e.g. When do we draft release notes?",
@@ -3879,6 +3930,46 @@
     "undo": "Undo",
     "undoneNotice": "Last change undone.",
     "updatedNotice": "Memory updated."
+  },
+  "memoryRecall": {
+    "consent": "I agree that my memories are sent to {{provider}} to be turned into search data",
+    "disable": "Switch back to Basic",
+    "enable": "Switch to Smart",
+    "explain": {
+      "basic": "A memory is found when it shares words with your message. Nothing leaves this computer.",
+      "smart": "A memory is found by what it means, even with different words, using the embedding model you chose."
+    },
+    "failed": "Smart mode could not be switched on, so Basic is used. Nothing was lost. Check the model and try again.",
+    "noSource": "Smart mode reuses an embedding model you set up for a bot's knowledge. Set one up there first to enable it.",
+    "progress": "re-indexing {{done}} of {{total}} memories",
+    "source": "Model to use",
+    "state": {
+      "basic": "Basic (word match)",
+      "smart": "Smart (meaning)"
+    },
+    "title": "How memories are found",
+    "waiting": "the model is starting; words are used meanwhile"
+  },
+  "memorySettings": {
+    "advanced": "Advanced",
+    "budget": "Memory read into one answer: about {{words}} words",
+    "budgetHint": "More memory gives the bot more background but makes every answer a little slower and costlier. The default is about 600 words.",
+    "budgetLabel": "Memory size per answer",
+    "mode": {
+      "ask": "Ask before saving",
+      "off": "Off",
+      "on": "On"
+    },
+    "modeHint": {
+      "ask": "Every new memory waits in \"Needs your OK\" until you approve it.",
+      "off": "Learns nothing, remembers nothing and has no memory tools. Existing memories stay stored but are not used.",
+      "on": "Learns from what you say. Anything it picks up from web pages, files or tools waits for your OK first."
+    },
+    "sectionHint": "Choose whether this bot learns from your chats and uses what it learned.",
+    "sectionTitle": "Memory",
+    "share": "Share what I learn with my other bots",
+    "shareHint": "On: facts about you and past events are available to all your bots. Off: this bot keeps everything it learns to itself.",
+    "title": "Memory"
   },
   "messageInfo": {
     "label": "Message info",
@@ -3960,6 +4051,55 @@
     "switchedDefault": "Default model set to {{model}}",
     "thinking": "Thinking",
     "title": "Model"
+  },
+  "myBots": {
+    "all": "All statuses",
+    "clear": "Clear filters",
+    "costHint": "USD counted toward the daily limit in the bot’s local day. Missing usage may be estimated; models with no known price are not included. Other daily, weekly and monthly limits may also apply.",
+    "costLimit": "{{cost}} / {{limit}}",
+    "costNoLimit": "{{cost}} / no daily money limit",
+    "costUnavailable": "Cost unavailable",
+    "count": "Showing {{shown}} of {{total}} bots",
+    "dailyLimit": "Daily spending for {{name}}",
+    "emptyHint": "Create a bot to help with research, everyday tasks, or your own ideas.",
+    "emptyTitle": "Your first bot starts here",
+    "filter": "Status",
+    "grid": "Card grid",
+    "lastActivity": "Last activity",
+    "layout": "Bot layout",
+    "list": "Compact list",
+    "loading": "Loading cost…",
+    "newBot": "Create a bot",
+    "newChat": "New chat",
+    "noActivity": "No activity yet",
+    "noMatches": "No bots match",
+    "noMatchesHint": "Try another name or status.",
+    "pause": "Pause",
+    "pauseUnavailable": "Pause is available for the bot controlling this computer. Other runs can be stopped from their chat.",
+    "refresh": "Refresh bots",
+    "resume": "Resume",
+    "review": "Review request",
+    "schedule": "Schedule",
+    "scope": "Bots on {{place}}. Choose another location to see its bots.",
+    "search": "Find a bot",
+    "server": "Server",
+    "settings": "Settings",
+    "sort": "Sort by",
+    "sortBy": {
+      "activity": "Last activity",
+      "cost": "Highest cost today",
+      "name": "Name"
+    },
+    "stale": "Updates are disconnected. These are the last known details; reconnect before making changes.",
+    "status": {
+      "approval": "Needs your input",
+      "idle": "Idle",
+      "paused": "Paused",
+      "running": "Running"
+    },
+    "thisComputer": "This computer",
+    "title": "My bots",
+    "today": "Today / daily limit"
   },
   "needs": {
     "empty": "When a bot needs your OK or has a question, it shows up here.",
@@ -4048,10 +4188,15 @@
     }
   },
   "notifyHistory": {
+    "allBots": "All bots",
+    "allTypes": "All types",
     "clear": "Clear history",
     "empty": "When a bot finishes a job or needs your OK, you will see it here.",
     "emptyAction": "See what needs you",
     "emptyTitle": "Nothing new",
+    "filterBot": "Bot",
+    "filterType": "Type",
+    "filters": "Filter notifications",
     "held": "Held (quiet hours)",
     "heldMuted": "Held (bot muted)",
     "kind": {
@@ -4062,12 +4207,23 @@
       "scheduleDone": "Scheduled job finished"
     },
     "markAllRead": "Mark all read",
+    "noMatch": "No notification matches these filters.",
+    "noMatchTitle": "Nothing here",
+    "onlyUnread": "Only unread",
     "openNeeds": "Open Needs you",
+    "quietNote": "{{count}} notifications were held back during quiet hours and are still unread.",
+    "quietNote_one": "{{count}} notification was held back during quiet hours and is still unread.",
+    "resetFilters": "Show everything",
+    "retention": "Kept for {{days}} days, up to {{max}} notifications, then removed automatically.",
+    "showSnoozed": "Snoozed ({{count}})",
     "shown": "Shown",
+    "snooze": "Snooze 1 h",
+    "snoozeHint": "Hide this for one hour. It comes back by itself.",
     "subtitle": "What the bots announced, and what quiet hours held back. Pending approvals always stay in Needs you.",
     "title": "Notification history",
     "unread": "Unread",
-    "unreadCount": "{{count}} unread"
+    "unreadCount": "{{count}} unread",
+    "unsnooze": "Bring back"
   },
   "overlay": {
     "actions": {
@@ -4096,6 +4252,7 @@
     "empty": "No matching command",
     "go": {
       "home": "Go to overview",
+      "myBots": "My bots",
       "needs": "Go to Needs you",
       "schedules": "Go to scheduled tasks",
       "settings": "Open settings",
@@ -4245,6 +4402,31 @@
     "label": "Queued.",
     "remove": "Remove this queued message",
     "sendNow": "Send now"
+  },
+  "quickAsk": {
+    "bot": "Bot",
+    "clipboardEmpty": "Nothing usable on the clipboard.",
+    "clipboardOff": "Your clipboard is not used unless you press this.",
+    "close": "Close",
+    "failed": "That did not work. Please try again.",
+    "hints": "Enter sends · Esc closes",
+    "includeClipboard": "Include clipboard",
+    "needsYou": "This needs your approval. Open it in the app to decide.",
+    "noBots": "No bots yet. Create one in the app first.",
+    "noService": "Praxi-Bot is not ready yet: {{reason}}",
+    "openInApp": "Open in app",
+    "placeholder": "Ask something and press Enter",
+    "problem": {
+      "in_use": "Another program already uses this shortcut. Pick another.",
+      "invalid": "This shortcut is not valid. Example: Ctrl+Alt+Space.",
+      "needs_modifier": "Add Ctrl or Alt to the shortcut, otherwise it would block normal typing.",
+      "reserved": "Windows and most apps already use this shortcut. Pick another.",
+      "same_as_stop": "This is already your Stop shortcut. Pick another.",
+      "shift_only": "Shift alone is not enough. Add Ctrl or Alt."
+    },
+    "send": "Send",
+    "thinking": "Thinking…",
+    "title": "Quick ask"
   },
   "quota": {
     "remaining": "{{label}}: {{pct}}% left",
@@ -4802,6 +4984,12 @@
       "restartManual": "Restart the background service yourself so it picks up the change (it was not started by this app).",
       "test": "Test connection",
       "title": "Model providers"
+    },
+    "quickAsk": {
+      "description": "Off by default. When on, a keyboard shortcut works from any program and opens a small box where you type a question and press Enter. Each question starts a new chat with the bot you pick.",
+      "hotkey": "Quick ask shortcut keys",
+      "privacy": "The clipboard and your screen are never read unless you press \"Include clipboard\" in the box.",
+      "title": "Quick ask shortcut"
     },
     "quiet": {
       "allowUrgent": "Still notify when a bot is blocked on me",
@@ -5776,6 +5964,16 @@
     "exportCsv": "Download CSV",
     "exportDone": "Usage CSV downloaded.",
     "exportFailed": "Could not download usage CSV",
+    "insights": {
+      "noChat": "No chat to open",
+      "openRun": "Open",
+      "openRunLabel": "Open the chat of the run by {{bot}} on {{when}}",
+      "priceUnknown": "Price unknown",
+      "title": "Where the money goes",
+      "tokensShort": "{{amount}} tokens",
+      "topRuns": "Most expensive runs",
+      "unknownPriceNote": "Entries marked \"Unknown\" use a model without a known price: their tokens are counted, their cost is not."
+    },
     "limit": {
       "clear": "Remove limit",
       "forecast": "Forecast for month end",
@@ -5824,15 +6022,27 @@
     "tokens": "Tokens",
     "total": "Total",
     "trend": {
+      "alertKey": "Alert at 80% ({{amount}})",
       "ariaLabel": "Daily {{metric}} trend over {{days}} days",
       "dayReadout": "{{day}} · {{calls}} calls · {{amount}} tokens · {{cost}}",
+      "forecast": "Spent this month: {{spent}}. At this pace the month ends at about {{forecast}}.",
+      "forecastNone": "Not enough priced usage this month yet for a forecast.",
+      "forecastPartial": "{{count}} calls had no known price and are not counted.",
+      "granularities": {
+        "day": "Per day",
+        "month": "Per month",
+        "week": "Per week"
+      },
+      "granularity": "Group by",
       "hoverHint": "Hover or focus a day to see its totals.",
+      "limitKey": "Monthly limit ({{amount}})",
       "metric": "Chart metric",
       "metrics": {
         "calls": "Calls",
         "cost": "Cost",
         "tokens": "Tokens"
       },
+      "prorated": "Lines show the even share of your monthly limit for one day or week.",
       "showTable": "Show daily breakdown table",
       "timeZone": "Local days ({{tz}})",
       "title": "Daily trend"

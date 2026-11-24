@@ -15,11 +15,24 @@ pub trait Embedder: Send + Sync {
     /// # Errors
     /// Fails if the model cannot run.
     fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
+
+    /// Embed search queries.  Models that treat queries and documents
+    /// differently (e5, Gemini) override this; the default is the same as
+    /// [`embed`](Self::embed).
+    ///
+    /// # Errors
+    /// Fails if the model cannot run.
+    fn embed_queries(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        self.embed(texts)
+    }
 }
 
 /// Deterministic feature-hashing bag-of-words embedder.  No model files, no
-/// network: used by the tests and as a degraded fallback (lexical-ish
-/// similarity only, no semantics).
+/// network.  **This is what ships** (`MemoryConfig::open_default`): it only
+/// finds memories that share words with the query (lexical similarity, no
+/// meaning), shown to users as "Basic (word match)".  "Smart (meaning)" swaps in
+/// a real model through [`MemoryStore::enable_smart`](crate::MemoryStore::enable_smart);
+/// the `fastembed` feature is an optional local model that no app build enables.
 #[derive(Debug, Clone)]
 pub struct HashEmbedder {
     dim: usize,

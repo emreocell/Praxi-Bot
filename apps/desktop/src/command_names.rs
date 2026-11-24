@@ -49,4 +49,8 @@ pub const COMMAND_NAMES: &[&str] = &[
     "update_check",
     "update_install",
     "update_rollback",
+    "quick_ask_configure",
+    "quick_ask_connect",
+    "quick_ask_hide",
+    "quick_ask_open_in_app",
 ];

@@ -40,6 +40,7 @@ mod knowledge_brain;
 mod logs;
 mod mcp;
 mod memory;
+mod memory_controls;
 mod model_catalog;
 mod peer_knowledge;
 mod profile_share;
@@ -4467,6 +4468,7 @@ async fn usage_purpose_totals_are_additive_and_preserve_the_legacy_shape() {
         "by_model",
         "by_provider",
         "daily",
+        "top_runs",
         "calls_without_usage",
         "calls_without_cost",
         "time_zone",

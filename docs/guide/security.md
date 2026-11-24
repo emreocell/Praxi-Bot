@@ -137,6 +137,15 @@ Shell, scripts, desktop typing, launching programs, sending mail and money
 keep their floors; MCP servers that are not browsers, external agents and the
 MCP server mode keep their stricter rules.
 
+**12aa. A server's own tool labels.** MCP tools describe themselves with
+labels (read-only, destructive, idempotent, open-world). Praxi never believes
+them on its own: a tool without labels, or any tool of a server you did not
+mark as trusted, asks. For a server you marked trusted only read-only tools run
+without asking, an open-world tool counts as able to send data out, and a label
+that changes after you approved the tool sends it back to approval. See
+[MCP servers](mcp-servers.md) and the
+[policy table](../design/mcp-annotations.md).
+
 **12b. Approval scopes.** When a card for an MCP tool cannot be avoided it can
 offer: **Allow once**; **Allow for this task**, the same server and tool for
 the rest of this run only (never persisted, never another tool, not given to
