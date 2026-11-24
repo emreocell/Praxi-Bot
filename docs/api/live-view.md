@@ -162,6 +162,9 @@ Computer runs share a run-lifetime slot (default one); children share the root's
 slot. `BOT_MAX_COMPUTER_RUNS` overrides that limit. Managed Chromium closes after
 120 seconds without real bot work (a run that used the computer and is still
 active counts as work); `BOT_BROWSER_IDLE_SECONDS` overrides it.
+Pointer movement and scrolling of the managed browser follow `human_like` (`off`, `auto`, `high`;
+`host.toml` `[browser] human_like`, or `BOT_BROWSER_HUMAN_LIKE`): `auto` moves smoothly only while a
+viewer is subscribed or the window is visible.
 The adapter must call `CdpDriver::set_takeover_pin` for active takeover only.
 
 The global event stream (`GET /v1/events`, not replayed) carries

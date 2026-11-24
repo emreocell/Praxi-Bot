@@ -1992,6 +1992,11 @@
         "failed": "Didn't fill in a field",
         "running": "Filling in a field"
       },
+      "browser_hover": {
+        "done": "Hovered over something on a page",
+        "failed": "Couldn't hover on a page",
+        "running": "Hovering over something on a page"
+      },
       "browser_open": {
         "done": "Opened a page",
         "failed": "Didn't open a page",
@@ -2006,6 +2011,11 @@
         "done": "Chose an option on a page",
         "failed": "Didn't choose an option",
         "running": "Choosing an option on a page"
+      },
+      "browser_select_text": {
+        "done": "Selected text on a page",
+        "failed": "Didn't select text on a page",
+        "running": "Selecting text on a page"
       },
       "browser_view": {
         "done": "Looked at a page",

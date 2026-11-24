@@ -1992,6 +1992,11 @@
         "failed": "Ein Feld wurde nicht ausgefüllt",
         "running": "Füllt ein Feld aus"
       },
+      "browser_hover": {
+        "done": "Mit der Maus über etwas auf einer Seite gefahren",
+        "failed": "Konnte nicht über etwas fahren",
+        "running": "Fährt mit der Maus über etwas auf einer Seite"
+      },
       "browser_open": {
         "done": "Eine Seite geöffnet",
         "failed": "Eine Seite wurde nicht geöffnet",
@@ -2006,6 +2011,11 @@
         "done": "Eine Option auf einer Seite gewählt",
         "failed": "Keine Option gewählt",
         "running": "Wählt eine Option auf einer Seite"
+      },
+      "browser_select_text": {
+        "done": "Text auf einer Seite markiert",
+        "failed": "Text nicht markiert",
+        "running": "Markiert Text auf einer Seite"
       },
       "browser_view": {
         "done": "Eine Seite betrachtet",

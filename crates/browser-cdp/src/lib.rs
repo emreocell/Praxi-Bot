@@ -28,6 +28,7 @@ pub mod diff;
 pub mod dom;
 pub mod error;
 pub mod host;
+pub mod human;
 pub mod launch;
 pub mod live_view;
 pub mod page;
@@ -39,6 +40,7 @@ pub use actions::{
     ActionResult, FieldTarget, FrameIdentity, KeySpec, ScreenshotOptions, ScreenshotTarget,
     StepGuard, WaitCondition, parse_key,
 };
+pub use actions::{ScrollRequest, ScrollTo, SelectUnit, TextSelection};
 pub use browser::{Browser, TargetInfo};
 pub use client::{
     CdpClient, CdpClientConfig, CdpEvent, DEFAULT_MAX_SCREENCAST_EVENT_BYTES,
@@ -49,6 +51,7 @@ pub use destination::{
 };
 pub use diff::{SnapshotDiff, diff, diff_text};
 pub use error::{Error, Result};
+pub use human::{Feel, HumanLike};
 pub use launch::{LaunchOptions, find_browser};
 pub use live_view::{
     BROWSER_INPUT_LIMITATION, BrowserFrameSource, BrowserInputSink, BrowserViewConfig,

@@ -58,6 +58,7 @@ const KNOWN_READS: &[&str] = &[
     "desktop_scroll",
     "browser_snapshot",
     "browser_scroll",
+    "browser_hover",
     "browser_wait",
     "browser_tabs",
     "browser_screenshot",

@@ -40,7 +40,9 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // that includes `prompt_text` as egress.
         "browser_snapshot" | "browser_screenshot" | "browser_wait" | "desktop_get_state"
         | "desktop_list_apps" | "desktop_wait" | "desktop_focus" | "desktop_click"
-        | "desktop_scroll" | "browser_scroll" => ContentClass::untrusted_private(),
+        | "desktop_scroll" | "browser_scroll" | "browser_hover" => {
+            ContentClass::untrusted_private()
+        }
         // The user's own files and the list of their own windows: private, and not untrusted
         // by themselves (nothing in them was written by an outsider). A file that ARRIVED from
         // outside (Downloads, attachments, mail) is marked untrusted per call by the loop
@@ -67,8 +69,16 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // terminal or a save dialog turns them into a launcher, so they count.
         "shell_run" | "script_run" | "desktop_launch" | "desktop_type" | "desktop_set_value"
         | "desktop_key" | "desktop_drag" => ContentClass::all().executes(),
-        "browser_open" | "browser_back" | "browser_click" | "browser_fill" | "browser_select"
-        | "browser_press" | "browser_eval" | "browser_tabs" | "browser_act" => ContentClass::all(),
+        "browser_open"
+        | "browser_back"
+        | "browser_click"
+        | "browser_fill"
+        | "browser_select"
+        | "browser_press"
+        | "browser_eval"
+        | "browser_tabs"
+        | "browser_act"
+        | "browser_select_text" => ContentClass::all(),
         // A created or edited bot acts later on a persona written now, like a
         // schedule; the call always asks with the complete resulting profile.
         "schedule_create" | "schedule_update" | "schedule_resume" | "bot_create" | "bot_update" => {

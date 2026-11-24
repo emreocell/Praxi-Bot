@@ -299,10 +299,25 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
             format!("mailbox {}", str_field("folder").unwrap_or("INBOX"))
         }
         "web_search" => format!("page {}", str_field("query").unwrap_or("a search")),
-        "web_extract" | "web_feed" | "web_sitemap" | "web_metadata" | "browser_open"
-        | "browser_back" | "browser_snapshot" | "browser_screenshot" | "browser_click"
-        | "browser_fill" | "browser_select" | "browser_press" | "browser_scroll"
-        | "browser_wait" | "browser_tabs" | "browser_eval" | "browser_act" => {
+        "web_extract"
+        | "web_feed"
+        | "web_sitemap"
+        | "web_metadata"
+        | "browser_open"
+        | "browser_back"
+        | "browser_snapshot"
+        | "browser_screenshot"
+        | "browser_click"
+        | "browser_fill"
+        | "browser_select"
+        | "browser_press"
+        | "browser_scroll"
+        | "browser_hover"
+        | "browser_select_text"
+        | "browser_wait"
+        | "browser_tabs"
+        | "browser_eval"
+        | "browser_act" => {
             format!("page {}", str_field("url").unwrap_or("the browser"))
         }
         "skill_read" | "skill_list" | "skill_write" | "skill_publish" => {
@@ -377,10 +392,17 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
         }
         "shell_run" => ("the shell".to_owned(), "body"),
         "script_run" => ("a script".to_owned(), "body"),
-        "browser_fill" | "browser_press" | "browser_select" | "browser_click"
-        | "browser_scroll" | "browser_tabs" | "browser_back" | "browser_eval" | "browser_act" => {
-            ("the browser".to_owned(), "body")
-        }
+        "browser_fill"
+        | "browser_press"
+        | "browser_select"
+        | "browser_click"
+        | "browser_scroll"
+        | "browser_hover"
+        | "browser_select_text"
+        | "browser_tabs"
+        | "browser_back"
+        | "browser_eval"
+        | "browser_act" => ("the browser".to_owned(), "body"),
         "schedule_create" | "schedule_update" | "schedule_resume" => {
             ("this bot's scheduler".to_owned(), "body")
         }

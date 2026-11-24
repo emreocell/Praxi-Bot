@@ -472,7 +472,12 @@ mod tests {
                 "{name} sends data off the machine"
             );
         }
-        for name in ["desktop_click", "desktop_scroll", "browser_scroll"] {
+        for name in [
+            "desktop_click",
+            "desktop_scroll",
+            "browser_scroll",
+            "browser_hover",
+        ] {
             let class = crate::util::classify(name).unwrap();
             assert!(!class.egress, "{name} cannot carry data off the machine");
         }
@@ -529,6 +534,8 @@ mod tests {
             ("browser_select", W, B),
             ("browser_press", W, B),
             ("browser_scroll", R, B),
+            ("browser_hover", R, B),
+            ("browser_select_text", W, B),
             ("browser_wait", R, B),
             ("browser_back", W, B),
             ("browser_tabs", W, B),
@@ -1123,7 +1130,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 37 + 6 + 2 + 2);
+        assert_eq!(added, 39 + 6 + 2 + 2);
 
         // Verification of email tools and their effects
         let send_tool = reg

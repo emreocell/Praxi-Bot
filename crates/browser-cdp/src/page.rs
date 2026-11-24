@@ -144,6 +144,8 @@ pub(crate) struct Shared {
     pub live_view_action_hooks: StdMutex<Vec<std::sync::Weak<dyn Fn() + Send + Sync>>>,
     /// Strong owner anchors removed if/when needed; callers hold their own `Arc` or register strong hooks.
     pub live_view_strong_hooks: StdMutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+    /// Where the pointer last was (top-level viewport coordinates), so the next move starts there.
+    pub pointer: StdMutex<Option<(f64, f64)>>,
 }
 
 impl Default for Shared {
@@ -167,6 +169,7 @@ impl Default for Shared {
             live_view_close_hooks: StdMutex::default(),
             live_view_action_hooks: StdMutex::default(),
             live_view_strong_hooks: StdMutex::default(),
+            pointer: StdMutex::default(),
         }
     }
 }

@@ -1992,6 +1992,11 @@
         "failed": "Alan doldurulmadı",
         "running": "Alan dolduruluyor"
       },
+      "browser_hover": {
+        "done": "Sayfada bir öğenin üzerine gelindi",
+        "failed": "Sayfada üzerine gelinemedi",
+        "running": "Sayfada bir öğenin üzerine geliniyor"
+      },
       "browser_open": {
         "done": "Sayfa açıldı",
         "failed": "Sayfa açılmadı",
@@ -2006,6 +2011,11 @@
         "done": "Seçenek seçildi",
         "failed": "Seçenek seçilmedi",
         "running": "Seçenek seçiliyor"
+      },
+      "browser_select_text": {
+        "done": "Sayfada metin seçildi",
+        "failed": "Sayfada metin seçilemedi",
+        "running": "Sayfada metin seçiliyor"
       },
       "browser_view": {
         "done": "Sayfaya bakıldı",
