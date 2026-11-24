@@ -38,6 +38,7 @@ import { brandIcon } from "../lib/brandIcons";
 import { modelGroups } from "../lib/modelPicker";
 import { modelLine } from "../lib/modelName";
 import { BotAvatarUploadField } from "./BotAdvancedFields";
+import { BotMemorySettings } from "./BotMemorySettings";
 import styles from "./BotEditorFields.module.css";
 import { BrandMark } from "./BrandMark";
 import { CharacterColorRow, CharacterShapeGrid } from "./CharacterPicker";
@@ -559,7 +560,8 @@ export function AdvancedFields({
   deleteBlocked,
   chatCount,
   runCount,
-  onDelete
+  onDelete,
+  memoryBotId
 }: {
   draft: BotDraft;
   customText: CustomText;
@@ -573,10 +575,21 @@ export function AdvancedFields({
   runCount: number;
   /** Absent for a bot that does not exist yet. */
   onDelete?: () => void;
+  /** Existing bot: shows its memory switch (On / Ask before saving / Off). */
+  memoryBotId?: string;
 }) {
   const { t } = useTranslation();
   return (
     <>
+      {memoryBotId ? (
+        <section className={dialogStyles.block}>
+          <div className={dialogStyles.blockHead}>
+            <h3 className={dialogStyles.blockTitle}>{t("memorySettings.sectionTitle")}</h3>
+            <p className={dialogStyles.blockLead}>{t("memorySettings.sectionHint")}</p>
+          </div>
+          <BotMemorySettings botId={memoryBotId} />
+        </section>
+      ) : null}
       <section className={dialogStyles.block}>
         <div className={dialogStyles.blockHead}>
           <h3 className={dialogStyles.blockTitle}>{t("botEdit.customTitle")}</h3>

@@ -2619,6 +2619,10 @@
         "hint": "Reload the card and read the new wording before you decide. Nothing was approved.",
         "title": "The app changed this tool again"
       },
+      "memory_owner_only": {
+        "hint": "Change a bot's memory settings in the app on the computer that runs the bot.",
+        "title": "Only the owner can change this"
+      },
       "message_not_editable": {
         "hint": "Only your own latest message can be edited or regenerated, and only once the bot has finished.",
         "title": "This message can't be edited"
@@ -3814,15 +3818,20 @@
     "addTitle": "Add a memory",
     "addedNotice": "Memory added.",
     "allKinds": "All categories",
+    "approve": "Approve",
+    "approvedNotice": "Approved. The bot can use it now.",
     "bot": "Bot",
     "botOnly": "Only memories specific to this bot",
     "content": "What to remember",
     "contentPlaceholder": "Write a concise fact or preference…",
     "description": "See what each bot remembers from past conversations, edit or forget any item, undo changes, and preview what enters the next turn.",
+    "discard": "Discard",
+    "discardedNotice": "Discarded.",
     "edit": "Edit",
     "editLabel": "Memory text",
     "empty": "Your bot remembers useful facts here, like your name. Tell it something in a chat, or add one yourself below.",
     "emptyTitle": "No memories yet",
+    "expires": "expires {{date}}",
     "forget": "Forget",
     "forgottenBadge": "Forgotten",
     "forgottenNotice": "Memory forgotten.",
@@ -3837,6 +3846,8 @@
       "profile": "User profile"
     },
     "noBot": "Create a bot to view or add memories.",
+    "pendingHint": "These were picked up from web pages, files or tools, or you asked to approve everything. The bot does not use them until you approve.",
+    "pendingTitle": "Needs your OK",
     "previewEmpty": "No memories would be recalled for this message.",
     "previewHint": "Enter a sample message to see the exact recalled-memory data block that will be prepended to the turn.",
     "previewPlaceholder": "e.g. When do we draft release notes?",
@@ -3859,6 +3870,46 @@
     "undo": "Undo",
     "undoneNotice": "Last change undone.",
     "updatedNotice": "Memory updated."
+  },
+  "memoryRecall": {
+    "consent": "I agree that my memories are sent to {{provider}} to be turned into search data",
+    "disable": "Switch back to Basic",
+    "enable": "Switch to Smart",
+    "explain": {
+      "basic": "A memory is found when it shares words with your message. Nothing leaves this computer.",
+      "smart": "A memory is found by what it means, even with different words, using the embedding model you chose."
+    },
+    "failed": "Smart mode could not be switched on, so Basic is used. Nothing was lost. Check the model and try again.",
+    "noSource": "Smart mode reuses an embedding model you set up for a bot's knowledge. Set one up there first to enable it.",
+    "progress": "re-indexing {{done}} of {{total}} memories",
+    "source": "Model to use",
+    "state": {
+      "basic": "Basic (word match)",
+      "smart": "Smart (meaning)"
+    },
+    "title": "How memories are found",
+    "waiting": "the model is starting; words are used meanwhile"
+  },
+  "memorySettings": {
+    "advanced": "Advanced",
+    "budget": "Memory read into one answer: about {{words}} words",
+    "budgetHint": "More memory gives the bot more background but makes every answer a little slower and costlier. The default is about 600 words.",
+    "budgetLabel": "Memory size per answer",
+    "mode": {
+      "ask": "Ask before saving",
+      "off": "Off",
+      "on": "On"
+    },
+    "modeHint": {
+      "ask": "Every new memory waits in \"Needs your OK\" until you approve it.",
+      "off": "Learns nothing, remembers nothing and has no memory tools. Existing memories stay stored but are not used.",
+      "on": "Learns from what you say. Anything it picks up from web pages, files or tools waits for your OK first."
+    },
+    "sectionHint": "Choose whether this bot learns from your chats and uses what it learned.",
+    "sectionTitle": "Memory",
+    "share": "Share what I learn with my other bots",
+    "shareHint": "On: facts about you and past events are available to all your bots. Off: this bot keeps everything it learns to itself.",
+    "title": "Memory"
   },
   "messageInfo": {
     "label": "Message info",
