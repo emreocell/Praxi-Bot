@@ -41,6 +41,7 @@ impl Endpoint {
 
 /// Owner-only access for lock/discovery files (Windows DACL; a no-op elsewhere,
 /// where the data directory's own mode applies).
+#[cfg_attr(not(windows), allow(clippy::unnecessary_wraps))]
 fn protect_file(path: &Path) -> io::Result<()> {
     #[cfg(windows)]
     return crate::windows::owner_only_file(path);
