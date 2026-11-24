@@ -3223,6 +3223,15 @@
     "saved": "Vertrauenswürdig: {{folder}}",
     "title": "Vertrauenswürdige Ordner"
   },
+  "gettingStarted": {
+    "allDone": "Alles bereit. Hier ist alles erledigt.",
+    "hide": "Auf dem Startbildschirm ausblenden",
+    "progress": "{{done}} von {{total}} erledigt",
+    "show": "Auf dem Startbildschirm wieder anzeigen",
+    "stateDone": "erledigt",
+    "stateOpen": "noch nicht erledigt",
+    "title": "Erste Schritte"
+  },
   "health": {
     "connected": "Lokaler Dienst läuft",
     "connecting": "Der lokale Dienst wird gestartet …",

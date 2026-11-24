@@ -3223,6 +3223,15 @@
     "saved": "Trusted: {{folder}}",
     "title": "Trusted folders"
   },
+  "gettingStarted": {
+    "allDone": "You're all set. Everything here is done.",
+    "hide": "Hide from the start screen",
+    "progress": "{{done}} of {{total}} done",
+    "show": "Show on the start screen again",
+    "stateDone": "done",
+    "stateOpen": "not done yet",
+    "title": "Getting started"
+  },
   "health": {
     "connected": "Local service running",
     "connecting": "Starting the local service…",

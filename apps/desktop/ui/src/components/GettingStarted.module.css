@@ -1,0 +1,123 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-elevated);
+  text-align: start;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.title {
+  margin: var(--space-0);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.count {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.bar {
+  height: var(--space-1);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-border);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  background-color: var(--color-accent);
+  transition: width var(--motion-duration-slow) var(--motion-easing-standard);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-0);
+  padding: var(--space-0);
+  list-style: none;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.mark {
+  flex: none;
+  width: var(--size-icon-md);
+  height: var(--size-icon-md);
+  color: var(--color-text-muted);
+}
+
+.done .mark {
+  color: var(--color-success);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: var(--space-0);
+}
+
+.stepTitle {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}
+
+.done .stepTitle {
+  color: var(--color-text-muted);
+}
+
+.body {
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-muted);
+}
+
+.srOnly {
+  position: absolute;
+  width: var(--size-border);
+  height: var(--size-border);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.calm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.calm svg {
+  width: var(--size-icon-md);
+  height: var(--size-icon-md);
+  color: var(--color-success);
+}

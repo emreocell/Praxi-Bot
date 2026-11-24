@@ -3223,6 +3223,15 @@
     "saved": "Güveniliyor: {{folder}}",
     "title": "Güvenilen klasörler"
   },
+  "gettingStarted": {
+    "allDone": "Hazırsın. Buradaki her şey tamam.",
+    "hide": "Başlangıç ekranından gizle",
+    "progress": "{{total}} adımın {{done}} tanesi tamam",
+    "show": "Başlangıç ekranında yeniden göster",
+    "stateDone": "tamam",
+    "stateOpen": "henüz yapılmadı",
+    "title": "Başlangıç"
+  },
   "health": {
     "connected": "Yerel servis çalışıyor",
     "connecting": "Yerel servis başlatılıyor…",

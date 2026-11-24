@@ -54,6 +54,8 @@ import { HealthIndicator } from "./components/HealthIndicator";
 import { ServiceBanner } from "./components/ServiceBanner";
 import { ServiceStateProvider } from "./state/ServiceState";
 import { HelpModal } from "./components/HelpModal";
+import { GettingStarted } from "./components/GettingStarted";
+import type { StepTarget } from "./lib/gettingStarted";
 import { DemoModal } from "./demo/DemoModal";
 import { type DemoTaskId, offerDemo } from "./demo/demoEngine";
 import { useProviders } from "./state/useProviders";
@@ -674,6 +676,15 @@ function AppShell() {
     go({ kind: "chat", chatId, botId: chat?.bot_id ?? "", messageId, jumpRequestId: messageId ? Date.now() : undefined });
   };
   const openNeeds = () => go({ kind: "needs" });
+  /** Where a "Getting started" step's button leads: always an existing screen, never a new flow. */
+  const openGettingStartedTarget = (target: StepTarget, botId: string | undefined) => {
+    if (target === "ai") setSettingsOpen("ai");
+    else if (target === "computer") setSettingsOpen("computer");
+    else if (target === "apps") setAppsOpen(true);
+    else if (target === "schedules") go({ kind: "schedules" });
+    else if (botId) void startChat(botId);
+    else setNewBotOpen(true);
+  };
   const notifyHistory = useNotificationHistory();
   const notifyUnread = unreadCount(notifyHistory);
   // Selecting a bot: its latest chat, or the empty state when it has none.
@@ -1172,6 +1183,15 @@ function AppShell() {
             onGoFirst={goToBot}
             onCreateBot={() => setNewBotOpen(true)}
             onDemo={showDemoOffer ? (task) => setDemo({ task }) : undefined}
+            extra={
+              <GettingStarted
+                variant="start"
+                hidden={settings.gettingStartedHidden}
+                onAction={(target) => openGettingStartedTarget(target, route.botId)}
+                onHide={() => updateSettings({ gettingStartedHidden: true })}
+                onShow={() => updateSettings({ gettingStartedHidden: false })}
+              />
+            }
           />
         ) : null}
         {route.kind === "chat" && !hostEmpty ? (
@@ -1302,6 +1322,18 @@ function AppShell() {
           setHelpOpen(false);
           setDemo({ task: null });
         }}
+        gettingStarted={
+          <GettingStarted
+            variant="help"
+            hidden={settings.gettingStartedHidden}
+            onAction={(target) => {
+              setHelpOpen(false);
+              openGettingStartedTarget(target, selectedBot?.id ?? bots[0]?.id);
+            }}
+            onHide={() => updateSettings({ gettingStartedHidden: true })}
+            onShow={() => updateSettings({ gettingStartedHidden: false })}
+          />
+        }
       />
       <DemoModal
         open={demo !== null}
