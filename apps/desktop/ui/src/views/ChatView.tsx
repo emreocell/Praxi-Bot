@@ -60,6 +60,8 @@ import { detectSecrets, kindsToWarn, planStore, removeSecrets } from "../lib/sec
 import { chatTitleLabel } from "../lib/chatTitle";
 import { pendingForChat } from "../lib/pendingDecisions";
 import { ChatFindBar } from "../components/ChatFindBar";
+import { useChatContextMenu } from "../components/useChatContextMenu";
+import { askDraft, draftWithQuote, quoteLines } from "../lib/contextMenu";
 import { Markdown } from "../components/Markdown";
 import { runEndAnnouncement } from "../lib/replyAnnounce";
 import { FoldedBody } from "../components/UserBubble";
@@ -386,6 +388,8 @@ export function ChatView({
   );
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [findOpen, setFindOpen] = useState(false);
+  /** Text the find bar starts with (a selection sent from the right-click menu); `n` re-seeds an open bar. */
+  const [findSeed, setFindSeed] = useState({ q: "", n: 0 });
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
@@ -1118,6 +1122,36 @@ export function ChatView({
   };
   /** Nothing may be running, paused, queued or waiting for an answer while the last turn is redone. */
   const canResend = turn?.resendable === true && !running && !pausedRunId && queue.length === 0 && !awaitingApproval;
+  // Right-click menus of the timeline.  Quote / Ask only fill the composer; nothing is sent.
+  const prefillComposer = (next: string) => {
+    setText(next);
+    setCaret(next.length);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(next.length, next.length);
+      }
+    });
+  };
+  const lastAnswerKey = canResend && turn?.answered ? ([...entries].reverse().find((e) => e.kind === "assistant" && !e.live)?.key ?? null) : null;
+  const chatMenu = useChatContextMenu({
+    rootRef: timelineRef,
+    entries,
+    chatId,
+    client,
+    botId: chat?.bot_id,
+    editableMsgId: canResend ? (turn?.user.id ?? null) : null,
+    regenerateKey: lastAnswerKey,
+    onQuote: (quoted) => prefillComposer(draftWithQuote(draftRef.current, quoteLines(quoted))),
+    onAsk: (quoted) => prefillComposer(askDraft(draftRef.current, t("contextMenu.askIntro"), quoted)),
+    onFind: (phrase) => {
+      setFindSeed((s) => ({ q: phrase, n: s.n + 1 }));
+      setFindOpen(true);
+    },
+    onEdit: setEditingId,
+    onRegenerate: () => void resendTurn()
+  });
   const wasActive = useRef(active);
   useEffect(() => {
     const was = wasActive.current;
@@ -1455,7 +1489,7 @@ export function ChatView({
 
       <div className={styles.scrollWrap}>
       {findOpen ? (
-        <ChatFindBar rootRef={timelineRef} contentKey={entries} onClose={() => setFindOpen(false)} />
+        <ChatFindBar key={findSeed.n} rootRef={timelineRef} contentKey={entries} initialQuery={findSeed.q} onClose={() => setFindOpen(false)} />
       ) : null}
       <div
         className={styles.scroller}
@@ -1466,7 +1500,9 @@ export function ChatView({
         aria-label={t("chat.timelineLabel")}
         aria-live="off"
         tabIndex={0}
+        {...chatMenu.bind}
       >
+        {chatMenu.menu}
         <div
           ref={timelineRef}
           className={[

@@ -89,9 +89,9 @@ function MessageImage({ client, chatId, att }: { client: ApiClient | null; chatI
     };
   }, [client, chatId, att.id]);
   return src ? (
-    <img className={styles.image} src={src} alt={att.name} />
+    <img className={styles.image} src={src} alt={att.name} data-attachment-id={att.id} />
   ) : (
-    <span className={styles.imageHolder} aria-label={att.name} />
+    <span className={styles.imageHolder} aria-label={att.name} data-attachment-id={att.id} />
   );
 }
 
@@ -115,7 +115,7 @@ export function MessageFiles({
         a.kind === "image" ? (
           <MessageImage key={a.id} client={client} chatId={chatId} att={a} />
         ) : (
-          <span key={a.id} className={styles.file} title={a.truncated ? t("chat.attach.truncated") : a.name}>
+          <span key={a.id} className={styles.file} title={a.truncated ? t("chat.attach.truncated") : a.name} data-attachment-id={a.id}>
             <FileText aria-hidden="true" />
             <span className={styles.name}>{a.name}</span>
             <span className={styles.meta}>{formatBytes(a.size)}</span>

@@ -72,6 +72,9 @@ import { editorSection } from "./lib/botEditor";
 import { BOT_COLORS, botView, draftFromBot } from "./lib/botProfile";
 import { isBotMuted, setBotMuted } from "./lib/botMute";
 import { makeBotMain } from "./lib/botOrder";
+import { botRowMenu } from "./lib/contextMenu";
+import { SEARCH_ALL_CHATS_EVENT } from "./lib/chatSearchRequest";
+import { useContextMenu, useMenuTranslate } from "./components/ContextMenu";
 import { filterBots } from "./lib/botSearch";
 import {
   backFromChatOpensPanel,
@@ -747,6 +750,15 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   const notifyUnread = unreadCount(notifyHistory, Date.now());
   // Selecting a bot: its latest chat, or the empty state when it has none.
   const goToBot = (botId: string) => go(botLanding(botId, chats));
+  // Right-click on a bot in the rail.  The profile and settings dialogs belong to the selected bot
+  // (another bot closes them), so for a bot that is not selected they open once it is.
+  const botMenu = useContextMenu();
+  const menuT = useMenuTranslate();
+  const [pendingBotDialog, setPendingBotDialog] = useState<{ botId: string; dialog: "profile" | "edit" } | null>(null);
+  const openBotDialog = (botId: string, dialog: "profile" | "edit") => {
+    if (selectedBot?.id !== botId || !botInView) goToBot(botId);
+    setPendingBotDialog({ botId, dialog });
+  };
   const startChat = async (botId: string) => {
     if (!client || newChatBusy) {
       return;
@@ -803,6 +815,18 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     }
     lastDialogBot.current = dialogBotId;
   }, [dialogBotId, requestedBotEdit]);
+  useEffect(() => {
+    if (!pendingBotDialog || dialogBotId !== pendingBotDialog.botId) return;
+    if (pendingBotDialog.dialog === "profile") setBotProfileOpen(true);
+    else setBotEditOpen(true);
+    setPendingBotDialog(null);
+  }, [pendingBotDialog, dialogBotId]);
+  // "Search all chats" from a right-click menu needs the bot panel on screen.
+  useEffect(() => {
+    const open = () => setPanelOpen(true);
+    window.addEventListener(SEARCH_ALL_CHATS_EVENT, open);
+    return () => window.removeEventListener(SEARCH_ALL_CHATS_EVENT, open);
+  }, []);
   const panelVisible = panelOpen && botInView;
   const float = isFloatShell(shellSettings.uiStyle, backdropIsActive(shellSettings.backdrop, shellSettings.backgroundUrl));
   const panelWidth = Math.min(layout.panel, panelMax(viewportWidth, layout.rail, float));
@@ -1050,7 +1074,17 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
               const canReorder = botSearch === null || botSearch === "";
               const drag = reorder.drag;
               const dropEdge = drag && drag.id !== bot.id && drag.over === index ? (drag.over < drag.from ? "before" : "after") : undefined;
-              return <div key={bot.id} className={styles.botRow} data-dragging={drag?.id === bot.id ? "true" : undefined} data-drop={dropEdge} {...(canReorder ? reorder.rowProps(bot.id) : { "data-bot-id": bot.id })}>
+              const rowMenu = botMenu.bind(() => botRowMenu({
+                t: menuT,
+                name: view.name,
+                muted: isBotMuted(settings.mutedBotIds, bot.id),
+                onOpen: () => goToBot(bot.id),
+                onToggleMute: () => updateSettings({ mutedBotIds: setBotMuted(settings.mutedBotIds, bot.id, !isBotMuted(settings.mutedBotIds, bot.id)) }),
+                onMakeMain: botIds.length > 1 && index !== 0 ? () => saveBotOrder(makeBotMain(botIds, bot.id)) : undefined,
+                onProfile: () => openBotDialog(bot.id, "profile"),
+                onSettings: () => openBotDialog(bot.id, "edit")
+              }));
+              return <div key={bot.id} onContextMenu={rowMenu.onContextMenu} onKeyDown={rowMenu.onKeyDown} className={styles.botRow} data-dragging={drag?.id === bot.id ? "true" : undefined} data-drop={dropEdge} {...(canReorder ? reorder.rowProps(bot.id) : { "data-bot-id": bot.id })}>
                 <SidebarItem className={styles.railItem} active={routeBotId === bot.id} title={view.name} aria-label={mini ? view.name : undefined} onClick={() => goToBot(bot.id)}>
                   <BotAvatar bot={view} size="md" state={avatarState} decorative />
                   <div className={`${styles.botMeta} ${styles.railText}`}><span className={styles.botName}><span className={styles.botNameText}>{view.name}</span>{index === 0 && botIds.length > 1 ? <span className={styles.mainMark} role="img" title={t("sidebar.mainBotHint")} aria-label={t("sidebar.mainBotHint")}><Star aria-hidden="true" /></span> : null}</span><span className={styles.botRole}>{(isMockMode() ? config.bot?.preview : undefined) ?? chatTitleLabel(latest?.title, t("bots.newChat"))}</span></div>
@@ -1059,6 +1093,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
                 {canReorder && !mini && botIds.length > 1 ? <button type="button" className={styles.grip} aria-label={t("sidebar.reorderBot", { name: view.name })} title={t("sidebar.reorderHint")} {...reorder.gripProps(bot.id)}><GripVertical aria-hidden="true" /></button> : null}
               </div>;
             })}
+            {botMenu.menu}
             </div>
           </SidebarSection>
 

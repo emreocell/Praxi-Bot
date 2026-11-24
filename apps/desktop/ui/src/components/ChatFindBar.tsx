@@ -19,15 +19,18 @@ import styles from "./ChatFindBar.module.css";
 export function ChatFindBar({
   rootRef,
   contentKey,
+  initialQuery = "",
   onClose
 }: {
   rootRef: RefObject<HTMLElement | null>;
   contentKey: unknown;
+  /** Text to look for right away (a selection sent here from the right-click menu). */
+  initialQuery?: string;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [current, setCurrent] = useState(-1);
   const [ranges, setRanges] = useState<Range[]>([]);
   const total = ranges.length;

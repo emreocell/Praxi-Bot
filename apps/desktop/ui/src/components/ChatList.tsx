@@ -24,6 +24,8 @@ import { EmptyState } from "./EmptyState";
 import { chatTitleLabel } from "../lib/chatTitle";
 import { Callout, ConfirmDialog } from "./DialogParts";
 import { Popover } from "./Popover";
+import { useContextMenu, useMenuTranslate } from "./ContextMenu";
+import { chatRowMenu } from "../lib/contextMenu";
 import styles from "./ChatList.module.css";
 
 export interface ChatListItem {
@@ -75,6 +77,9 @@ export function ChatList({
   const [renameError, setRenameError] = useState<string | null>(null);
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ChatListItem | null>(null);
+  // Right-click on a row: the same actions and handlers as its "..." menu.
+  const menuT = useMenuTranslate();
+  const rowMenu = useContextMenu();
 
   const triggerRefs = useRef(new Map<string, HTMLButtonElement | null>());
   const anchorRef = useRef<HTMLButtonElement | null>(null);
@@ -197,6 +202,7 @@ export function ChatList({
         data-pinned={c.pinned ? "true" : undefined}
         data-archived={c.archived ? "true" : undefined}
         data-busy={busy ? "true" : undefined}
+        data-chat-id={c.id}
         data-testid={`chat-row-${variant}`}
       >
         <button
@@ -259,8 +265,28 @@ export function ChatList({
   const deleteActiveRun = deleteTarget ? chatHasActiveRun(deleteTarget.id, runs) : false;
   const deleteTitle = deleteTarget ? chatTitleLabel(deleteTarget.title, t("botPanel.untitled")) : "";
 
+  const rowHandlers = rowMenu.bind((target) => {
+    const chat = chats.find((c) => c.id === target.closest<HTMLElement>("[data-chat-id]")?.dataset.chatId);
+    if (!chat) return null;
+    return chatRowMenu({
+      t: menuT,
+      title: chatTitleLabel(chat.title, t("botPanel.untitled")),
+      pinned: chat.pinned === true,
+      archived: chat.archived === true,
+      busy: pendingIds.has(chat.id),
+      canExport: !!client,
+      onOpen: () => onOpenChat(chat.id),
+      onRename: () => beginRename(chat),
+      onPin: () => void onPatchChat(chat.id, { pinned: !chat.pinned }),
+      onExport: () => setExportTarget(chat),
+      onArchive: () => void onPatchChat(chat.id, { archived: !chat.archived }),
+      onRequestDelete: () => setDeleteTarget(chat)
+    });
+  });
+
   return (
-    <div className={styles.wrap}>
+    <div className={styles.wrap} {...rowHandlers}>
+      {rowMenu.menu}
       {chats.length === 0 ? (
         !searchActive ? <EmptyState icon={MessageSquare} title={t("chatManage.emptyTitle")} testId="chat-list-empty">{t("chatManage.empty")}</EmptyState> : null
       ) : active.length === 0 && !searchActive ? (

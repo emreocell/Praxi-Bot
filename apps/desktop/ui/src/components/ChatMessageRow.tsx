@@ -70,7 +70,7 @@ export const AssistantMessageRow = memo(function AssistantMessageRow({
   const gv = guest ? botView(guest) : null;
   return (
     <div id={id} tabIndex={-1} className={styles.assistantRow} data-message-row="assistant">
-      <div className={styles.assistantBubble}>
+      <div className={styles.assistantBubble} data-message-body>
         {source?.startsWith("imported") ? <span className={styles.importedBadge}>{t("chat.imported")}</span> : null}
         {gv ? (
           <span className={styles.authorName} style={{ "--mention-color": gv.color } as CSSProperties} data-testid="guest-author">

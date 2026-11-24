@@ -12,7 +12,7 @@ import {
   X,
   Zap
 } from "lucide-react";
-import { type CSSProperties, Fragment, useState } from "react";
+import { type CSSProperties, Fragment, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, type BotAvatarState, type BotIdentity } from "ui";
 import type { UpdateChatInput } from "../api/types";
@@ -37,6 +37,7 @@ import { BotPanelMail } from "./BotPanelMail";
 import { BotPanelSkills } from "./BotPanelSkills";
 import { BrandMark } from "./BrandMark";
 import { ChatHistorySearch } from "./ChatHistorySearch";
+import { SEARCH_ALL_CHATS_EVENT, type SearchRequest, takeSearchRequest } from "../lib/chatSearchRequest";
 import { ChatList } from "./ChatList";
 import { QuotaBlock } from "./QuotaRings";
 import { SubagentDetail } from "./SubagentDetail";
@@ -173,6 +174,20 @@ export function BotPanel({
   const { events, refreshRuns } = useDaemon();
   const [tab, setTab] = useState<"activity" | "library">("activity");
   const [openSub, setOpenSub] = useState<string | null>(null);
+  // "Search all chats" from a right-click menu lands on the chats list with the phrase filled in.
+  const [historySeed, setHistorySeed] = useState<SearchRequest | null>(null);
+  useEffect(() => {
+    const take = () => {
+      const request = takeSearchRequest();
+      if (request) {
+        setTab("library");
+        setHistorySeed(request);
+      }
+    };
+    take();
+    window.addEventListener(SEARCH_ALL_CHATS_EVENT, take);
+    return () => window.removeEventListener(SEARCH_ALL_CHATS_EVENT, take);
+  }, []);
   const [chatQuery, setChatQuery] = useState("");
   const visibleChats = filterChats(chats, chatQuery, t("botPanel.untitled"));
   const chatItems = visibleChats.map((c) => ({
@@ -380,7 +395,7 @@ export function BotPanel({
         <h3 className={styles.label} id="bot-panel-chats">
           {t("botPanel.chats")}
         </h3>
-        <ChatHistorySearch onOpenChat={onOpenChat} />
+        <ChatHistorySearch onOpenChat={onOpenChat} seed={historySeed} />
         {chats.length >= CHAT_SEARCH_MIN_CHATS ? (
           <input
             type="search"

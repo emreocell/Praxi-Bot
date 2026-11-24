@@ -1,5 +1,6 @@
 import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { SearchRequest } from "../lib/chatSearchRequest";
 import { useTranslation } from "react-i18next";
 import type { SearchPage } from "../api/types";
 import { fetchHistoryPage, groupHistoryHits, historySnippetParts } from "../lib/chatHistory";
@@ -8,7 +9,11 @@ import { useDaemon } from "../state/DaemonContext";
 import styles from "./ChatHistorySearch.module.css";
 
 /** Explicit searches across all stored chats, including archived chats and other bots. */
-export function ChatHistorySearch({ onOpenChat }: { onOpenChat: (chatId: string, messageId?: string) => void }) {
+export function ChatHistorySearch({ onOpenChat, seed }: {
+  onOpenChat: (chatId: string, messageId?: string) => void;
+  /** A phrase sent here from a right-click menu: it is filled in and searched at once. */
+  seed?: SearchRequest | null;
+}) {
   const { t, i18n } = useTranslation();
   const { client } = useDaemon();
   const [query, setQuery] = useState("");
@@ -18,12 +23,13 @@ export function ChatHistorySearch({ onOpenChat }: { onOpenChat: (chatId: string,
   const [error, setError] = useState<string | null>(null);
   const active = useRef<AbortController | null>(null);
   useEffect(() => () => active.current?.abort(), []);
-  const search = async (offset = 0) => {
-    if (!client || !query.trim()) return;
+  const search = async (offset = 0, override?: string) => {
+    const typed = override ?? query;
+    if (!client || !typed.trim()) return;
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
-    const phrase = offset ? searched : query.trim();
+    const phrase = offset ? searched : typed.trim();
     setBusy(true);
     setError(null);
     if (!offset) { setPage(null); setSearched(phrase); }
@@ -36,6 +42,12 @@ export function ChatHistorySearch({ onOpenChat }: { onOpenChat: (chatId: string,
       if (!controller.signal.aborted) setBusy(false);
     }
   };
+  useEffect(() => {
+    if (!seed) return;
+    setQuery(seed.query);
+    void search(0, seed.query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.n, client]);
   return <div className={styles.root}>
     <form className={styles.form} onSubmit={(e) => { e.preventDefault(); void search(); }}>
       <input type="search" maxLength={200} value={query} placeholder={t("chatHistory.search")}
