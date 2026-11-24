@@ -368,7 +368,7 @@ impl EmbeddingHub {
                     .and_then(|m| m.free_tier)
                     .unwrap_or_default()
             });
-            let key = cfg.key_ref.as_deref().and_then(|r| keys(r));
+            let key = cfg.key_ref.as_deref().and_then(keys);
             let local = if cfg.kind == ProviderType::Local {
                 locals.get(&cfg.id).cloned()
             } else {

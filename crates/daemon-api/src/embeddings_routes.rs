@@ -91,6 +91,7 @@ impl From<LimitsDto> for Limits {
 
 /// One configured provider.
 #[derive(Debug, Serialize, ToSchema)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct EmbeddingProviderDto {
     /// Short id.
     pub id: String,
@@ -323,10 +324,7 @@ fn dto(s: &AppState) -> Result<EmbeddingsDto, ApiError> {
                 limits: p.limits.and_then(limits_dto),
                 state: st.map_or_else(|| "ok".to_owned(), |x| outcome_name(x.state)),
                 retry_in_secs: st.map_or(0, |x| x.retry_in_secs),
-                usage: st.map_or_else(
-                    || empty_usage().into(),
-                    |x| x.usage.into(),
-                ),
+                usage: st.map_or_else(|| empty_usage().into(), |x| x.usage.into()),
                 remote: p.kind.is_remote(),
             }
         })
@@ -392,9 +390,9 @@ fn catalog_dto(c: &EmbeddingCatalog) -> EmbeddingCatalogDto {
 
 /// The chat provider `gemini` (when it has a stored key) can lend its key.
 fn reusable_keys(s: &AppState) -> Vec<String> {
-    let Ok(cfg) = provider_catalog::ProviderConfig::load(&provider_catalog::config_path(
-        &s.data_dir(),
-    )) else {
+    let Ok(cfg) =
+        provider_catalog::ProviderConfig::load(&provider_catalog::config_path(&s.data_dir()))
+    else {
         return Vec::new();
     };
     cfg.providers
@@ -474,7 +472,7 @@ pub(crate) async fn put_embeddings(
         let new_key = match (&p.api_key, &p.reuse_key_from) {
             (Some(k), None) if !k.trim().is_empty() => Some(k.trim().to_owned()),
             (None, Some(from)) => Some(reused_key(&s, from)?),
-            (None, None) | (Some(_), None) => None,
+            (None | Some(_), None) => None,
             (Some(_), Some(_)) => {
                 return Err(ApiError::bad_request(
                     "give either a key or a provider to reuse, not both",
@@ -588,7 +586,7 @@ fn helper_file(s: &AppState) -> std::path::PathBuf {
     s.data_dir().join(agent_core::decider::FILE)
 }
 
-fn helper_dto(s: &AppState) -> Result<DecisionHelperDto, ApiError> {
+fn helper_dto(s: &AppState) -> DecisionHelperDto {
     let settings = agent_core::decider::Settings::load(&s.data_dir());
     let (enabled, custom_file) = match &settings {
         Ok(cfg) => {
@@ -602,14 +600,14 @@ fn helper_dto(s: &AppState) -> Result<DecisionHelperDto, ApiError> {
         .decision_models
         .iter()
         .find(|m| format!("{}/{}", m.provider, m.model) == HELPER_MODEL);
-    Ok(DecisionHelperDto {
+    DecisionHelperDto {
         available: !reusable_keys(s).is_empty(),
         enabled,
         custom_file,
         model: HELPER_MODEL.to_owned(),
         free_tier: model.and_then(|m| m.free_tier).map(Into::into),
         last_reviewed: model.map(|m| m.last_reviewed.clone()).unwrap_or_default(),
-    })
+    }
 }
 
 /// The optional decision helper (Gemini Decisions) and its state.
@@ -618,7 +616,7 @@ fn helper_dto(s: &AppState) -> Result<DecisionHelperDto, ApiError> {
 pub(crate) async fn get_decision_helper(
     State(s): State<AppState>,
 ) -> Result<Json<DecisionHelperDto>, ApiError> {
-    Ok(Json(helper_dto(&s)?))
+    Ok(Json(helper_dto(&s)))
 }
 
 /// Switch the decision helper on or off (owner only). It only ever gives
@@ -630,7 +628,7 @@ pub(crate) async fn put_decision_helper(
     State(s): State<AppState>,
     ApiJson(input): ApiJson<DecisionHelperInput>,
 ) -> Result<Json<DecisionHelperDto>, ApiError> {
-    let current = helper_dto(&s)?;
+    let current = helper_dto(&s);
     if current.custom_file {
         return Err(ApiError::bad_request(
             "decider.toml has settings you wrote by hand; edit that file instead",
@@ -653,5 +651,5 @@ pub(crate) async fn put_decision_helper(
     if s.provider_host().is_some() {
         crate::routes::reload_from_host(&s).await?;
     }
-    Ok(Json(helper_dto(&s)?))
+    Ok(Json(helper_dto(&s)))
 }

@@ -1,7 +1,7 @@
 //! `MemoryStore`: connection, schema, CRUD and journaling.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use protocol::{BotId, ChatId, UserId};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -32,7 +32,7 @@ pub(crate) fn now_ms() -> i64 {
 /// an internal mutex.
 pub struct MemoryStore {
     conn: Mutex<Connection>,
-    pub(crate) embedder: Arc<dyn Embedder>,
+    pub(crate) embedder: RwLock<Arc<dyn Embedder>>,
     pub(crate) config: RecallConfig,
 }
 
@@ -160,7 +160,7 @@ impl MemoryStore {
         ))?;
         Ok(Self {
             conn: Mutex::new(conn),
-            embedder,
+            embedder: RwLock::new(embedder),
             config: RecallConfig::default(),
         })
     }
@@ -178,15 +178,23 @@ impl MemoryStore {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    pub(crate) fn embedder(&self) -> Arc<dyn Embedder> {
+        self.embedder
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     pub(crate) fn embed_one(&self, text: &str) -> Result<Vec<f32>> {
-        let mut out = self.embedder.embed(&[text])?;
+        let embedder = self.embedder();
+        let mut out = embedder.embed(&[text])?;
         let mut v = out
             .pop()
             .ok_or_else(|| MemoryError::Embed("embedder returned no vector".into()))?;
-        if v.len() != self.embedder.dim() {
+        if v.len() != embedder.dim() {
             return Err(MemoryError::Embed(format!(
                 "expected {} dims, got {}",
-                self.embedder.dim(),
+                embedder.dim(),
                 v.len()
             )));
         }

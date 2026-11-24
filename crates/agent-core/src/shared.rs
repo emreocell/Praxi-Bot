@@ -282,9 +282,11 @@ impl Providers {
     pub(crate) fn with_redactor(mut self, redactor: Option<SharedRedactor>) -> Self {
         if let Some(hub) = &self.embedding_hub {
             // Texts sent to an embedding provider pass the same live redactor.
-            hub.set_redactor(redactor.clone().map(|r| {
-                Arc::new(move |t: &str| r.redact(t)) as embedding_hub::hub::Redactor
-            }));
+            hub.set_redactor(
+                redactor
+                    .clone()
+                    .map(|r| Arc::new(move |t: &str| r.redact(t)) as embedding_hub::hub::Redactor),
+            );
         }
         self.redactor = redactor;
         self
@@ -532,9 +534,9 @@ pub fn build_providers(
             .get(&embedding_hub::Purpose::Router)
             .is_some_and(|c| !c.is_empty())
         {
-            providers = providers.with_embedder(Arc::new(crate::embedding::HubRouterEmbedder::new(
-                Arc::clone(&hub),
-            )));
+            providers = providers.with_embedder(Arc::new(
+                crate::embedding::HubRouterEmbedder::new(Arc::clone(&hub)),
+            ));
         }
         providers.embedding_hub = Some(hub);
     }

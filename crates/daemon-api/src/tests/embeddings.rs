@@ -19,9 +19,7 @@ const KEY: &str = "AIza-embedding-writeonly-secret";
 fn setup_hub() -> (T, Arc<secret_store::MemoryStore>) {
     let dir = tempfile::tempdir().unwrap();
     let storage = Arc::new(Storage::open(dir.path()).unwrap());
-    let hub = Arc::new(
-        EmbeddingHub::new(EmbeddingConfig::default(), &|_| None, None).unwrap(),
-    );
+    let hub = Arc::new(EmbeddingHub::new(EmbeddingConfig::default(), &|_| None, None).unwrap());
     let agent = AgentLoop::new(
         Arc::clone(&storage),
         ToolRegistry::new(),
@@ -63,7 +61,10 @@ async fn default_has_no_provider_and_lists_the_dated_catalog() {
         .find(|m| m["model"] == "gemini-embedding-001")
         .unwrap();
     assert_eq!(g["free_tier"]["rpm"], 100);
-    assert_eq!(v["catalog"]["decision_models"][0]["free_tier"]["rpd"], 10_000);
+    assert_eq!(
+        v["catalog"]["decision_models"][0]["free_tier"]["rpd"],
+        10_000
+    );
 }
 
 #[tokio::test]
@@ -75,7 +76,12 @@ async fn saving_is_owner_only_and_the_key_never_comes_back() {
     assert_eq!(r.json()["error"]["code"], "owner_key_required");
 
     let r = call(&t, Method::PUT, "/v1/embeddings", Some(body)).await;
-    assert_eq!(r.status, StatusCode::OK, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(
+        r.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&r.body)
+    );
     let text = String::from_utf8_lossy(&r.body).to_string();
     assert!(!text.contains(KEY));
     let v = r.json();
@@ -84,7 +90,11 @@ async fn saving_is_owner_only_and_the_key_never_comes_back() {
     assert_eq!(v["chains"]["memory"], json!(["gemini-free"]));
     // The key is in the secret store; the settings file only names it.
     assert_eq!(
-        store.get("embedding-gemini-free").unwrap().unwrap().expose(),
+        store
+            .get("embedding-gemini-free")
+            .unwrap()
+            .unwrap()
+            .expose(),
         KEY
     );
     let file = std::fs::read_to_string(t.state.data_dir().join("embeddings.json")).unwrap();
@@ -95,10 +105,16 @@ async fn saving_is_owner_only_and_the_key_never_comes_back() {
 #[tokio::test]
 async fn invalid_setups_and_unconsented_tests_are_refused_in_plain_words() {
     let (t, _) = setup_hub();
-    let bad = json!({"providers": [{"id": "mine", "kind": "compatible", "model": "m", "dimensions": 8}]});
+    let bad =
+        json!({"providers": [{"id": "mine", "kind": "compatible", "model": "m", "dimensions": 8}]});
     let r = call(&t, Method::PUT, "/v1/embeddings", Some(bad)).await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
-    assert!(r.json()["error"]["message"].as_str().unwrap().contains("endpoint"));
+    assert!(
+        r.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("endpoint")
+    );
 
     let ok = json!({"providers": [provider(false)]});
     call(&t, Method::PUT, "/v1/embeddings", Some(ok)).await;

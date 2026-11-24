@@ -30,6 +30,7 @@ fn provider(id: &str, kind: ProviderType, url: &str, dims: usize) -> ProviderCon
     }
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn keys(_: &str) -> Option<String> {
     Some("test-key".to_owned())
 }

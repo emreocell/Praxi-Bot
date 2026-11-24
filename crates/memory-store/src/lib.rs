@@ -15,6 +15,7 @@ mod error;
 mod manage;
 mod pipeline;
 mod recall;
+mod reembed;
 mod render;
 mod secrets;
 mod sessions;
