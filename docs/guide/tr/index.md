@@ -18,6 +18,7 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 | [Ayarlar](settings.md) | Ayarlar sayfaları, arama, güvenlik düzeyleri ve "Önerilene sıfırla". |
 | [Zamanlanmış işler](schedules.md) | Bir botun belirli zamanlarda kendiliğinden çalışması. |
 | [Bot harcama sınırları](bot-spending-limits.md) | Günlük, haftalık ve aylık sınırlar. |
+| [Bellek](memory.md) | Botların neyi hatırladığını gör, düzelt, unutturup kapat. |
 | [Telegram](telegram.md) | Botlarınla telefonundan konuşmak. |
 | [Takvim](calendar.md) | Botların CalDAV takviminde etkinlik okuması ve eklemesi. |
 | [Home Assistant](home-assistant.md) | Botların evdeki cihazları okuması ve yönetmesi. |

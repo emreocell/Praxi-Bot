@@ -357,6 +357,9 @@ fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> 
     {
         return Some("personal memory is managed by the local owner");
     }
+    if is_bot_memory_settings_path(check_path) && *method != Method::GET {
+        return Some("a bot's memory settings can only be changed at this computer");
+    }
     if is_bot_engine_path(check_path) && *method != Method::GET {
         return Some("a bot's engine settings can only be changed at this computer");
     }
@@ -400,6 +403,13 @@ fn stop_refused(method: &Method, check_path: &str, role: PeerRole) -> bool {
 // File contents and host restores require a desktop user.
 fn host_file_review(path: &str) -> bool {
     path.starts_with("/v1/runs/") && path.split('/').nth(4) == Some("changes")
+}
+
+/// `/v1/bots/{id}/memory/settings`: whether and how a bot remembers.
+fn is_bot_memory_settings_path(path: &str) -> bool {
+    path.strip_prefix("/v1/bots/")
+        .and_then(|rest| rest.strip_suffix("/memory/settings"))
+        .is_some_and(|id| !id.is_empty() && !id.contains('/'))
 }
 
 /// `/v1/bots/{id}/engine[...]` decides who runs a bot's files and shell.

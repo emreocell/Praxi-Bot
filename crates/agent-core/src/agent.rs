@@ -566,6 +566,12 @@ impl AgentLoop {
         runs.len()
     }
 
+    /// Drop the cached profile of `bot_id` so the next run reads the bot row
+    /// again (used after the owner changes the bot's memory settings).
+    pub fn forget_profile(&self, bot_id: BotId) {
+        self.sh.profiles.write().remove(&bot_id);
+    }
+
     /// Register the profile used by `bot_id` (otherwise the bot row's JSON
     /// `config` is parsed as a profile).
     pub fn add_profile(&self, bot_id: BotId, profile: BotProfile) {
@@ -2348,7 +2354,13 @@ impl AgentLoop {
         };
         self.sh.storage.insert_message(&msg)?;
         self.sh.storage.set_message_source(id, source)?;
-        if let Some(m) = self.sh.cfg.memory.as_ref().filter(|m| m.enabled) {
+        if let Some(m) = self.sh.cfg.memory.as_ref().filter(|m| m.enabled)
+            && self
+                .sh
+                .storage
+                .get_run(run_id)?
+                .is_none_or(|r| self.sh.memory_settings(r.bot_id).enabled())
+        {
             let _ = m.store.index_message(&msg);
         }
         Ok(content)
@@ -2712,7 +2724,9 @@ impl AgentLoop {
                 exposure_sources: exposure.map(|t| t.sources().to_vec()).unwrap_or_default(),
             };
             let _ = self.sh.storage.insert_message(&msg);
-            if let Some(m) = self.sh.cfg.memory.as_ref().filter(|m| m.enabled) {
+            if let Some(m) = self.sh.cfg.memory.as_ref().filter(|m| m.enabled)
+                && self.sh.memory_settings(run.bot_id).enabled()
+            {
                 let _ = m.store.index_message(&msg);
             }
             self.enqueue_memory(run, &text);
@@ -2823,7 +2837,9 @@ impl AgentLoop {
 
     /// Hand the finished exchange to the memory pipeline (background task).
     fn enqueue_memory(&self, run: &storage::Run, final_text: &str) {
-        if !self.sh.cfg.memory.as_ref().is_some_and(|m| m.enabled) {
+        if !self.sh.cfg.memory.as_ref().is_some_and(|m| m.enabled)
+            || !self.sh.memory_settings(run.bot_id).enabled()
+        {
             return;
         }
         if let Some(ex) = crate::memory::Exchange::of(&self.sh, run, final_text) {
