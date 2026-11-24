@@ -783,9 +783,10 @@ async fn daemon_connect(
 /// `x-praxi-owner-key` on owner-only requests. Main window only.
 #[tauri::command]
 #[allow(clippy::needless_pass_by_value)] // tauri hands the window over by value
-fn owner_key(window: Window) -> Result<String, String> {
+fn owner_key(window: Window, daemon: State<'_, Arc<DaemonHandle>>) -> Result<String, String> {
     require_window(&window, MAIN_ONLY)?;
-    daemon::owner_key().map(str::to_owned)
+    // Only for the socket that is verified right now (see `daemon::verified_owner_key`).
+    daemon::verified_owner_key(&daemon).map(str::to_owned)
 }
 
 /// Stop a daemon this app started, then start it again (e.g. to pick up new
@@ -2029,6 +2030,9 @@ mod acl_tests {
              object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
         );
         assert!(!csp.contains("unsafe-eval"));
+        // The secrets go to the verified 127.0.0.1 socket only: `localhost` can resolve to
+        // `[::1]`, a different socket, so neither may be reachable from the webview.
+        assert!(!csp.contains("localhost:*") && !csp.contains("[::1]"));
         let script_src = csp
             .split("; ")
             .find(|d| d.starts_with("script-src "))

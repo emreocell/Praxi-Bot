@@ -1362,7 +1362,17 @@ fn make_client(cli: &Cli, data_dir: &std::path::Path) -> Result<Client> {
     } else {
         None
     };
-    Ok(Client::new(&base, token).with_owner_key(owner_key))
+    let mut client = Client::new(&base, token).with_owner_key(owner_key);
+    if is_verified {
+        // The proof above can go stale (the daemon may die and its port be rebound):
+        // repeat it right before every request that carries the token or owner key.
+        let dir = data_dir.to_path_buf();
+        let url = base.clone();
+        client = client.with_guard(std::sync::Arc::new(
+            move || matches!(recorded_daemon(&dir), Ok(Some(e)) if e.url() == url),
+        ));
+    }
+    Ok(client)
 }
 
 fn no_verified_daemon() -> Box<dyn std::error::Error> {

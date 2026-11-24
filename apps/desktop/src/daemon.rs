@@ -379,28 +379,23 @@ fn base_url() -> Result<String, String> {
     }
 }
 
-/// Accepts `http://127.0.0.1:PORT`, `http://localhost:PORT` and `http://[::1]:PORT`
-/// (optionally with a path, which is dropped); everything else is an error.
+/// Accepts `http://127.0.0.1:PORT` and `http://localhost:PORT` (optionally with a path,
+/// which is dropped) and returns the literal `http://127.0.0.1:PORT`: the socket the
+/// owner check verifies is the only one the webview and its secrets may ever reach, and
+/// `localhost` can resolve to `[::1]`, which is a different socket. `[::1]` is refused.
 fn validate_bot_url(url: &str) -> Result<String, String> {
-    let url = url.trim_end_matches('/');
-    let loopback = host_port(url)
-        .and_then(|hp| {
-            hp.rsplit_once(':')
-                .map(|(h, p)| (h.to_owned(), p.to_owned()))
+    loopback_port(url.trim_end_matches('/'))
+        .map(canonical_url)
+        .ok_or_else(|| {
+            format!(
+                "BOT_URL must be http://127.0.0.1:PORT or http://localhost:PORT              (got {url}): the desktop app only connects to a daemon on this machine's              IPv4 loopback, because its content security policy blocks every other origin"
+            )
         })
-        .is_some_and(|(host, port)| {
-            matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]")
-                && port.parse::<u16>().is_ok()
-        });
-    if loopback {
-        Ok(url.to_owned())
-    } else {
-        Err(format!(
-            "BOT_URL must be http://127.0.0.1:PORT, http://localhost:PORT or http://[::1]:PORT \
-             (got {url}): the desktop app only connects to a daemon on this machine, \
-             because its content security policy blocks every other origin"
-        ))
-    }
+}
+
+/// The one URL secrets are ever sent to for `port`.
+fn canonical_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
 }
 
 /// `BOT_DATA_DIR`, else the OS data directory (same resolver as the CLI).
@@ -617,6 +612,28 @@ pub fn owner_key() -> Result<&'static str, String> {
     Ok(KEY.get_or_init(|| key))
 }
 
+/// The owner key for the main window, only after the socket it will be sent to
+/// (`http://127.0.0.1:PORT`) was just proven to belong to the daemon this app
+/// trusts; otherwise an error and no key.
+///
+/// # Errors
+/// The daemon URL is not the IPv4 loopback, the listener cannot be verified, or the
+/// OS offers no randomness.
+pub fn verified_owner_key(handle: &DaemonHandle) -> Result<&'static str, String> {
+    let url = base_url()?;
+    verified_owner_key_for(handle, &url, listener::verify)
+}
+
+fn verified_owner_key_for(
+    handle: &DaemonHandle,
+    url: &str,
+    verify: impl FnOnce(u16, Expect) -> Result<(), String>,
+) -> Result<&'static str, String> {
+    let (port, expect) = listener_expectation(handle, url, false)?;
+    verify(port, expect).map_err(|e| format!("{e}; refusing to send the owner key to {url}"))?;
+    owner_key()
+}
+
 fn spawn_daemon(handle: &DaemonHandle, data_dir: &Path, fake: bool) -> Result<Child, String> {
     let mut cmd = bot_command();
     cmd.arg("serve").arg("--port").arg(port().to_string());
@@ -780,7 +797,7 @@ fn child_pid(handle: &DaemonHandle) -> Option<u32> {
 /// IPv4 loopback port of `url`; every other host (including `[::1]`) is `None`
 /// and is refused, because the socket-owner check only covers 127.0.0.1.
 fn loopback_port(url: &str) -> Option<u16> {
-    let hp = host_port(url)?;
+    let hp = host_port(url.trim_end_matches('/'))?;
     let (host, port) = hp.rsplit_once(':')?;
     matches!(host, "127.0.0.1" | "localhost")
         .then(|| port.parse().ok())
@@ -849,18 +866,20 @@ async fn check_listener(handle: &DaemonHandle, url: &str, after_spawn: bool) -> 
         .map_err(|e| format!("{e}; refusing to send the API token to {url}"))
 }
 
-fn connection(handle: &DaemonHandle, url: String, data: &Path) -> Result<Connection, String> {
+fn connection(handle: &DaemonHandle, url: &str, data: &Path) -> Result<Connection, String> {
     // Re-check immediately before the token is read: the earlier async check may be
     // stale (the record or the listener can change in between).  The webview later
     // sends the owner key to exactly this verified `url`.
-    let (port, expect) = listener_expectation(handle, &url, false)?;
+    let (port, expect) = listener_expectation(handle, url, false)?;
     listener::verify(port, expect)
         .map_err(|e| format!("{e}; refusing to send the API token to {url}"))?;
     let token = read_token(data)?;
     ensure_logging(data);
     support_logs::tracing::info!(target: "praxi_support", phase = "ready");
     Ok(Connection {
-        base_url: url,
+        // Never the caller's spelling (`localhost` may resolve to `[::1]`): exactly
+        // the socket that was just verified.
+        base_url: canonical_url(port),
         token,
         started_by_app: handle.started_by_app(),
         fake_provider: *handle.fake.lock(),
@@ -992,7 +1011,7 @@ async fn connect_locked(handle: &DaemonHandle) -> Result<Connection, String> {
     {
         check_listener(handle, &url, false).await?;
         handle.set_stage(Stage::Ready, None);
-        return connection(handle, url, &data);
+        return connection(handle, &url, &data);
     }
     // A previously started child that died is dropped first.
     if !handle.started_by_app() {
@@ -1040,7 +1059,7 @@ async fn connect_locked(handle: &DaemonHandle) -> Result<Connection, String> {
                 check_listener(handle, &url, false).await?;
                 handle.stop_for("reuse daemon that won the startup lock");
                 handle.set_stage(Stage::Ready, None);
-                return connection(handle, url, &data);
+                return connection(handle, &url, &data);
             }
             if handle
                 .tail
@@ -1074,7 +1093,7 @@ async fn connect_locked(handle: &DaemonHandle) -> Result<Connection, String> {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     handle.set_stage(Stage::Ready, None);
-    connection(handle, url, &data)
+    connection(handle, &url, &data)
 }
 
 /// Record that the child ended with `code` and word it.
@@ -1286,18 +1305,18 @@ mod tests {
 
     #[test]
     fn bot_url_must_be_a_loopback_http_origin() {
-        for ok in [
-            "http://127.0.0.1:47821",
-            "http://localhost:9000/",
-            "http://[::1]:47821",
-        ] {
-            assert!(validate_bot_url(ok).is_ok(), "{ok}");
-        }
+        assert_eq!(
+            validate_bot_url("http://127.0.0.1:47821").as_deref(),
+            Ok("http://127.0.0.1:47821")
+        );
+        // `localhost` may resolve to `[::1]` (another socket): it is normalised to the
+        // literal verified IPv4 endpoint.
         assert_eq!(
             validate_bot_url("http://localhost:9000/").as_deref(),
-            Ok("http://localhost:9000")
+            Ok("http://127.0.0.1:9000")
         );
         for bad in [
+            "http://[::1]:47821",
             "http://example.com:47821",
             "http://192.168.1.5:47821",
             "http://0.0.0.0:47821",
@@ -1310,6 +1329,39 @@ mod tests {
             let err = validate_bot_url(bad).expect_err(bad);
             assert!(err.contains("BOT_URL must be"), "{bad}: {err}");
         }
+    }
+
+    #[test]
+    fn owner_key_is_refused_unless_the_socket_verifies() {
+        let handle = DaemonHandle::default();
+        // No child and no verified record: refused before the verifier even runs.
+        let mut called = false;
+        let r = verified_owner_key_for(&handle, "http://127.0.0.1:1", |_, _| {
+            called = true;
+            Ok(())
+        });
+        assert!(r.is_err() && !called, "{r:?}");
+        // IPv6 / foreign hosts never get a key.
+        assert!(verified_owner_key_for(&handle, "http://[::1]:1", |_, _| Ok(())).is_err());
+        // A running child but a failing verification: no key.
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "ping -n 30 127.0.0.1 >NUL"]);
+            c
+        } else {
+            let mut c = Command::new("sleep");
+            c.arg("30");
+            c
+        };
+        *handle.child.lock() = Some(cmd.stdout(Stdio::null()).spawn().unwrap());
+        let err = verified_owner_key_for(&handle, "http://localhost:1", |_, _| {
+            Err("not the daemon".to_owned())
+        })
+        .unwrap_err();
+        assert!(err.contains("refusing to send the owner key"), "{err}");
+        // Control: a passing verification yields the key.
+        assert!(verified_owner_key_for(&handle, "http://localhost:1", |_, _| Ok(())).is_ok());
+        handle.stop();
     }
 
     #[test]

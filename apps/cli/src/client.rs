@@ -69,8 +69,14 @@ pub struct Client {
     /// The owner key of this data dir (the `owner-key` file), sent on the
     /// owner-only routes (`daemon_api::owner::OWNER_ROUTES`) and nowhere else.
     owner_key: Option<String>,
+    /// Re-proves the daemon owns the loopback socket; run before EVERY request that
+    /// carries the token or owner key (the earlier proof can go stale).
+    guard: Option<PeerGuard>,
     http: reqwest::Client,
 }
+
+/// Fail-closed check that the peer behind `base` is still the verified daemon.
+pub type PeerGuard = std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
 
 impl Client {
     /// A scoped MCP connection is loopback-only and never follows redirects.
@@ -101,6 +107,7 @@ impl Client {
             base: base.trim_end_matches('/').to_owned(),
             token,
             owner_key: None,
+            guard: None,
             http: reqwest::Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
@@ -173,6 +180,7 @@ impl Client {
             base: base.trim_end_matches('/').to_owned(),
             token,
             owner_key: None,
+            guard: None,
             http: reqwest::Client::new(),
         }
     }
@@ -182,6 +190,23 @@ impl Client {
     pub fn with_owner_key(mut self, key: Option<String>) -> Self {
         self.owner_key = key;
         self
+    }
+
+    /// Re-prove the peer immediately before a request carries a secret.
+    #[must_use]
+    pub fn with_guard(mut self, guard: PeerGuard) -> Self {
+        self.guard = Some(guard);
+        self
+    }
+
+    fn verify_peer(&self) -> Result<()> {
+        match &self.guard {
+            Some(g) if !g() => Err(fail(
+                exit::AUTH,
+                "the daemon behind this connection is no longer the verified Praxi daemon;                  refusing to send the API token",
+            )),
+            _ => Ok(()),
+        }
     }
 
     fn unreachable(&self, e: &reqwest::Error) -> Box<dyn std::error::Error> {
@@ -248,6 +273,7 @@ impl Client {
     /// Send a request and return the raw body. Chat export answers with
     /// Markdown or JSON, so its response cannot go through [`Self::request`].
     pub async fn request_bytes(&self, method: Method, path: &str) -> Result<Vec<u8>> {
+        self.verify_peer()?;
         let owner_key = self
             .owner_key
             .as_deref()
@@ -288,6 +314,7 @@ impl Client {
         body: Option<Value>,
         owner_key: Option<&str>,
     ) -> Result<Value> {
+        self.verify_peer()?;
         let owner_key = owner_key.or_else(|| {
             self.owner_key
                 .as_deref()
@@ -343,6 +370,7 @@ impl Client {
     /// # Errors
     /// Daemon errors.
     pub async fn open_events(&self) -> Result<reqwest::Response> {
+        self.verify_peer()?;
         let resp = self
             .http
             .get(format!("{}/v1/events", self.base))
@@ -392,6 +420,7 @@ impl Client {
             let current = if let Some(r) = resp.take() {
                 r
             } else {
+                self.verify_peer()?;
                 let mut rb = self
                     .http
                     .get(format!("{}/v1/events", self.base))
@@ -465,6 +494,7 @@ impl Client {
         let mut last: Option<u64> = None;
         let mut failures = 0u32;
         loop {
+            self.verify_peer()?;
             let mut rb = self
                 .http
                 .get(format!("{}/v1/events?run_id={run_id}", self.base))
@@ -707,6 +737,22 @@ mod tests {
         assert_eq!(b.next_block(), None, "the third block is incomplete");
         b.push(b"ta: c\n\n");
         assert_eq!(b.next_block().as_deref(), Some("id: 3\ndata: c\n\n"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_peer_guard_stops_the_request_before_any_secret_is_sent() {
+        // Nothing listens on port 1: if the guard did not stop the request the error
+        // would be "unreachable", not the guard's refusal.
+        let client = Client::new("http://127.0.0.1:1", "t".repeat(64))
+            .with_owner_key(Some("k".to_owned()))
+            .with_guard(std::sync::Arc::new(|| false));
+        let err = client
+            .request(Method::GET, "/v1/chats", None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no longer the verified"), "{err}");
+        assert!(client.open_events().await.is_err());
     }
 
     #[tokio::test]
