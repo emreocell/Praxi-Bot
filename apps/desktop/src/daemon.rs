@@ -189,9 +189,10 @@ fn append_log(data_dir: &Path, who: &str, line: &str) {
     // Never retain arbitrary child stderr, UI restart reasons or OS errors.
     let safe = support_logs::safe_stderr(line);
     if who == "app" {
-        let phase = if line.starts_with("starting") {
-            "spawning"
-        } else if line.starts_with("started") || line.starts_with("daemon spawned") {
+        let phase = if line.starts_with("starting")
+            || line.starts_with("started")
+            || line.starts_with("daemon spawned")
+        {
             "spawning"
         } else if line.starts_with("restart") {
             "stopping"

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Health } from "../api/types.ts";
-import { filterLogs, supportFiles, supportZip } from "./supportBundle.ts";
+import { MAX_SUPPORT_ZIP_BYTES, filterLogs, supportFiles, supportZip } from "./supportBundle.ts";
 
 test("search and level filters select exactly the text to copy", () => {
   const lines = ['{"level":"warn","fields":{"status":"409"}}', '{"level":"error","fields":{"status":"503"}}'];
@@ -31,4 +31,8 @@ test("bundle allowlist excludes host identity and secrets; ZIP saves the exact p
   assert.equal(view.getUint32(zip.length - 22, true), 0x06054b50);
   assert.equal(view.getUint16(zip.length - 12, true), 4);
   assert.throws(() => supportZip([{ name: "chats.json", text: "private" }]));
+});
+
+test("ZIP writer refuses a payload above the byte cap", () => {
+  assert.throws(() => supportZip([{ name: "doctor.md", text: "x".repeat(MAX_SUPPORT_ZIP_BYTES + 1) }]), /too large/);
 });

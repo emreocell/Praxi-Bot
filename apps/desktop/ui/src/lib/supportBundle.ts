@@ -32,6 +32,9 @@ export function supportFiles(health: Health, appVersion: string, doctor: string,
   ];
 }
 
+/** Upper bound for the bundle's uncompressed payload (the preview is already log-capped). */
+export const MAX_SUPPORT_ZIP_BYTES = 8 * 1024 * 1024;
+
 function crc32(bytes: Uint8Array): number {
   let crc = 0xffffffff;
   for (const b of bytes) {
@@ -49,10 +52,13 @@ export function supportZip(files: readonly SupportFile[]): Uint8Array<ArrayBuffe
   const central: Uint8Array[] = [];
   let offset = 0;
   let centralSize = 0;
+  let total = 0;
   for (const file of files) {
     if (!["versions.json", "diagnostics.json", "recent-logs.jsonl", "doctor.md"].includes(file.name)) throw new Error("Unexpected support file");
     const name = encoder.encode(file.name);
     const data = encoder.encode(file.text);
+    total += data.length;
+    if (total > MAX_SUPPORT_ZIP_BYTES) throw new Error("Support bundle is too large");
     const crc = crc32(data);
     const header = new Uint8Array(30 + name.length);
     const view = new DataView(header.buffer);
