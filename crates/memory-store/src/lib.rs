@@ -19,6 +19,7 @@ mod render;
 mod secrets;
 mod sessions;
 mod store;
+mod tombstones;
 mod types;
 mod vec;
 
@@ -41,4 +42,6 @@ pub use secrets::{contains_secret, redact};
 pub use sessions::SessionHit;
 pub use store::MemoryStore;
 pub use tools::MEMORY_TOOL_NAMES;
-pub use types::{JournalEntry, JournalOp, Kind, ListFilter, Memory, MemoryPatch, NewMemory, Trust};
+pub use types::{
+    JournalEntry, JournalOp, Kind, ListFilter, Memory, MemoryPatch, NewMemory, Tombstone, Trust,
+};

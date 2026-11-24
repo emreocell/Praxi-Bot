@@ -104,6 +104,9 @@ pub(crate) struct Exchange {
     pub bot_id: BotId,
     pub chat_id: ChatId,
     pub excerpt: String,
+    /// The user's own messages of the excerpt (redacted like it): the only
+    /// text a memory quote may come from.
+    pub user_messages: Vec<String>,
     /// The turn was not a plain human conversation (channel/schedule/subagent
     /// initiator) or it used a tool that can bring in outside content (web,
     /// browser, files, MCP, workflows, subagents): everything extracted from
@@ -185,6 +188,7 @@ impl Exchange {
                 "User: {}\nAssistant: {final_text}",
                 users.join("\nUser: ")
             )),
+            user_messages: users.iter().map(|m| sh.redact(m.clone())).collect(),
             untrusted,
         })
     }
@@ -217,6 +221,7 @@ pub(crate) async fn extract(sh: Arc<Shared>, ex: Exchange) {
         chat_id: ex.chat_id,
         message_id: None,
         excerpt: ex.excerpt,
+        user_messages: ex.user_messages,
         untrusted: ex.untrusted,
     };
     let _ = Pipeline::new(&store, &model).ingest(&ctx).await;

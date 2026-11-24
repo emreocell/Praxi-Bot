@@ -15,8 +15,13 @@ use crate::types::{JournalEntry, JournalOp, Kind, Memory, MemoryPatch, NewMemory
 use crate::vec::{register, to_blob};
 
 /// Embedded migrations; version = index + 1.
-const MIGRATIONS: &[(&str, &str)] =
-    &[("0001_memory", include_str!("../migrations/0001_memory.sql"))];
+const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_memory", include_str!("../migrations/0001_memory.sql")),
+    (
+        "0002_tombstones",
+        include_str!("../migrations/0002_tombstones.sql"),
+    ),
+];
 
 pub(crate) const COLS: &str = "rowid, id, user_id, bot_id, kind, content, source_quote, \
     source_chat_id, source_message_id, trust, importance, created_ms, last_used_ms, \
@@ -103,7 +108,8 @@ impl MemoryStore {
         migrate(&mut conn)?;
         conn.prepare(&format!("SELECT {COLS} FROM memories"))?;
         conn.prepare("SELECT key, value FROM meta")?;
-        conn.prepare("SELECT id, memory_id, user_id, op, before_json, after_json, reason, ts_ms, undone FROM memory_journal")?;
+        conn.prepare("SELECT id, memory_id, user_id, op, before_json, after_json, reason, ts_ms, undone, redacted FROM memory_journal")?;
+        conn.prepare("SELECT id, user_id, bot_id, memory_id, kind, fingerprint, tokens, embedding, label, erased, created_ms FROM memory_tombstones")?;
         conn.prepare("SELECT rowid, message_id, user_id, chat_id, role, content, created_ms FROM session_msgs")?;
         conn.prepare("SELECT rowid, content FROM memories_fts")?;
         conn.prepare("SELECT rowid, content FROM session_fts")?;
@@ -134,6 +140,9 @@ impl MemoryStore {
 
     fn init(mut conn: Connection, embedder: Arc<dyn Embedder>) -> Result<Self> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // Freed pages are overwritten, so a forgotten or erased text does not
+        // linger in the database file.
+        conn.pragma_update(None, "secure_delete", "ON")?;
         migrate(&mut conn)?;
         let dim = embedder.dim();
         let stored: Option<String> = conn
@@ -242,6 +251,9 @@ impl MemoryStore {
         )?;
         let rowid = tx.last_insert_rowid();
         index(&tx, rowid, &mem.content, &emb)?;
+        // Adding a statement on purpose lifts its tombstone: the extraction
+        // pipeline refuses forgotten statements itself, before it gets here.
+        crate::tombstones::clear_matching(&tx, mem.user_id, mem.bot_id, &mem.content)?;
         journal_insert(&tx, &mem, JournalOp::Add, None, Some(&mem), reason)?;
         tx.commit()?;
         Ok(mem)
@@ -336,7 +348,8 @@ impl MemoryStore {
         Ok(Some(after))
     }
 
-    /// Soft-delete a live memory owned by `user_id`.
+    /// Soft-delete a live memory owned by `user_id` and leave a tombstone so
+    /// extraction does not store the same statement again.
     ///
     /// # Errors
     /// `NotFound` if missing/already deleted/not owned.
@@ -346,6 +359,9 @@ impl MemoryStore {
         let (rowid, before) = live_owned(&tx, user_id, id)?;
         let mut after = before.clone();
         after.deleted = true;
+        // A correction must hold: remember that this statement was forgotten.
+        let emb = self.embed_one(&before.content)?;
+        crate::tombstones::write(&tx, &before, &emb, false)?;
         write_snapshot(&tx, &after)?;
         unindex(&tx, rowid)?;
         journal_insert(
@@ -386,7 +402,7 @@ impl MemoryStore {
                 "only the newest active journal entry of a memory can be undone".into(),
             ));
         }
-        let (rowid, _) = get_in(&tx, entry.memory_id)?
+        let (rowid, current) = get_in(&tx, entry.memory_id)?
             .ok_or_else(|| MemoryError::NotFound(entry.memory_id.to_string()))?;
         let target = match (entry.op, entry.before) {
             (JournalOp::Add, _) => {
@@ -409,6 +425,22 @@ impl MemoryStore {
         tx.execute(
             "UPDATE memory_journal SET undone = 1 WHERE id = ?1",
             [journal_id],
+        )?;
+        if current.deleted && !target.deleted {
+            // Restoring a forgotten memory lifts its tombstone.
+            crate::tombstones::remove_for_memory(&tx, current.id)?;
+        }
+        // The undo is itself recorded (born "undone" so the undo stack keeps
+        // its shape: the next undo still reaches the entry below).
+        journal_insert_flags(
+            &tx,
+            &target,
+            JournalOp::Undo,
+            Some(&current),
+            Some(&target),
+            &format!("undo of journal entry {journal_id}"),
+            true,
+            false,
         )?;
         tx.commit()?;
         Ok(target)
@@ -478,7 +510,7 @@ fn index(conn: &Connection, rowid: i64, content: &str, emb: &[f32]) -> Result<()
     Ok(())
 }
 
-fn unindex(conn: &Connection, rowid: i64) -> Result<()> {
+pub(crate) fn unindex(conn: &Connection, rowid: i64) -> Result<()> {
     conn.execute("DELETE FROM memories_fts WHERE rowid = ?1", [rowid])?;
     conn.execute("DELETE FROM memories_vec WHERE rowid = ?1", [rowid])?;
     Ok(())
@@ -492,9 +524,23 @@ fn journal_insert(
     after: Option<&Memory>,
     reason: &str,
 ) -> Result<()> {
+    journal_insert_flags(conn, m, op, before, after, reason, false, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn journal_insert_flags(
+    conn: &Connection,
+    m: &Memory,
+    op: JournalOp,
+    before: Option<&Memory>,
+    after: Option<&Memory>,
+    reason: &str,
+    undone: bool,
+    redacted: bool,
+) -> Result<()> {
     conn.execute(
-        "INSERT INTO memory_journal (memory_id, user_id, op, before_json, after_json, reason, ts_ms) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        "INSERT INTO memory_journal (memory_id, user_id, op, before_json, after_json, reason, ts_ms, undone, redacted) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![
             m.id.to_string(),
             m.user_id.0.to_string(),
@@ -503,6 +549,8 @@ fn journal_insert(
             after.map(serde_json::to_string).transpose()?,
             reason,
             now_ms(),
+            i64::from(undone),
+            i64::from(redacted),
         ],
     )?;
     Ok(())
@@ -512,7 +560,7 @@ fn journal_insert(
 pub(crate) fn journal_get(conn: &Connection, id: i64) -> Result<Option<(UserId, JournalEntry)>> {
     let row = conn
         .query_row(
-            "SELECT id, memory_id, user_id, op, before_json, after_json, reason, ts_ms, undone \
+            "SELECT id, memory_id, user_id, op, before_json, after_json, reason, ts_ms, undone, redacted \
              FROM memory_journal WHERE id = ?1",
             [id],
             journal_row,
@@ -531,6 +579,7 @@ type RawJournal = (
     Option<String>,
     i64,
     i64,
+    i64,
 );
 
 pub(crate) fn journal_row(r: &Row<'_>) -> rusqlite::Result<RawJournal> {
@@ -544,11 +593,12 @@ pub(crate) fn journal_row(r: &Row<'_>) -> rusqlite::Result<RawJournal> {
         r.get(6)?,
         r.get(7)?,
         r.get(8)?,
+        r.get(9)?,
     ))
 }
 
 pub(crate) fn journal_decode(r: RawJournal) -> Result<(UserId, JournalEntry)> {
-    let (id, memory_id, user_id, op, before, after, reason, ts_ms, undone) = r;
+    let (id, memory_id, user_id, op, before, after, reason, ts_ms, undone, redacted) = r;
     let bad = |what: &str| MemoryError::Invalid(format!("corrupt journal {what}"));
     Ok((
         UserId(Uuid::parse_str(&user_id).map_err(|_| bad("user"))?),
@@ -561,6 +611,7 @@ pub(crate) fn journal_decode(r: RawJournal) -> Result<(UserId, JournalEntry)> {
             reason,
             ts_ms,
             undone: undone != 0,
+            redacted: redacted != 0,
         },
     ))
 }
@@ -581,4 +632,53 @@ fn migrate(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_2_keeps_existing_journal_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        // A database as 0001 left it, with one journal row.
+        conn.execute_batch(MIGRATIONS[0].1).unwrap();
+        conn.execute_batch("PRAGMA user_version = 1").unwrap();
+        conn.execute(
+            "INSERT INTO memory_journal (memory_id, user_id, op, before_json, after_json, reason, ts_ms, undone) \
+             VALUES ('m','u','delete','{\"a\":1}',NULL,'why',7,1)",
+            [],
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let (op, before, ts, undone, redacted): (String, String, i64, i64, i64) = conn
+            .query_row(
+                "SELECT op, before_json, ts_ms, undone, redacted FROM memory_journal",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (op.as_str(), before.as_str(), ts, undone, redacted),
+            ("delete", "{\"a\":1}", 7, 1, 0)
+        );
+        // New ops are accepted and ids keep counting up.
+        conn.execute(
+            "INSERT INTO memory_journal (memory_id, user_id, op, ts_ms) VALUES ('m','u','undo',8)",
+            [],
+        )
+        .unwrap();
+        let ids: Vec<i64> = conn
+            .prepare("SELECT id FROM memory_journal ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(ids, vec![1, 2]);
+        let v: u32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 2);
+    }
 }

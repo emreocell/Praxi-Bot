@@ -72,6 +72,7 @@ fn ctx(user: UserId, bot: BotId, excerpt: &str) -> ExtractionContext {
         chat_id: ChatId::new(),
         message_id: Some(Uuid::now_v7()),
         excerpt: excerpt.into(),
+        user_messages: vec![excerpt.into()],
         untrusted: false,
     }
 }
@@ -463,10 +464,16 @@ fn export_contains_memories_and_journal() {
         .add(&NewMemory::new(u, None, Kind::Profile, "Likes jazz"), "t")
         .unwrap();
     s.delete(u, m.id, "t").unwrap();
+    // A forgotten text does not travel in a default export, nor in its journal.
     let v = s.export_json(u).unwrap();
-    assert_eq!(v["memories"].as_array().unwrap().len(), 1);
-    assert_eq!(v["memories"][0]["deleted"], true);
-    assert_eq!(v["journal"].as_array().unwrap().len(), 2);
+    assert!(v["memories"].as_array().unwrap().is_empty());
+    assert!(v["journal"].as_array().unwrap().is_empty());
+    assert!(!v.to_string().contains("jazz"));
+    // A full local backup can ask for them.
+    let full = s.export_json_with(u, true).unwrap();
+    assert_eq!(full["memories"].as_array().unwrap().len(), 1);
+    assert_eq!(full["memories"][0]["deleted"], true);
+    assert_eq!(full["journal"].as_array().unwrap().len(), 2);
     assert!(s.list(u, &ListFilter::default()).unwrap().is_empty());
 }
 
@@ -609,4 +616,336 @@ fn semantic_recall_not_crowded_out_by_other_users_rows() {
         .unwrap();
     let got = s.find_similar(u, b, "query", 5).unwrap();
     assert!(got.iter().any(|m| m.id == mine.id), "{got:?}");
+}
+
+// ---- corrections hold, undo is recorded, erase is real ----
+
+async fn extract(s: &MemoryStore, u: UserId, b: BotId, content: &str, quote: &str) -> Vec<Outcome> {
+    let model = FakeModel::with(vec![cand(content, Some(quote))]);
+    Pipeline::new(s, &model)
+        .ingest(&ctx(u, b, quote))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn store_forget_reextract_stores_nothing() {
+    let s = store();
+    let (u, b) = (UserId::new(), BotId::new());
+    let out = extract(&s, u, b, "User lives in Berlin", "I live in Berlin").await;
+    let [Outcome::Added(m)] = out.as_slice() else {
+        panic!("{out:?}")
+    };
+    s.delete(u, m.id, "user forget").unwrap();
+
+    // The same statement, a re-phrasing with the same words and a near-duplicate
+    // are all refused...
+    for (content, quote) in [
+        ("User lives in Berlin", "I live in Berlin"),
+        ("user LIVES in berlin!", "I live in Berlin"),
+        ("User lives in Berlin, Germany", "I live in Berlin"),
+    ] {
+        let out = extract(&s, u, b, content, quote).await;
+        assert_eq!(
+            out,
+            vec![Outcome::Rejected(RejectReason::Forgotten)],
+            "{content}"
+        );
+    }
+    assert!(s.list(u, &ListFilter::default()).unwrap().is_empty());
+
+    // ...but a different fact about the same topic is not blocked.
+    let out = extract(&s, u, b, "User lives in Paris", "I live in Paris").await;
+    assert!(matches!(out.as_slice(), [Outcome::Added(_)]), "{out:?}");
+
+    // Another user is unaffected.
+    let out = extract(
+        &s,
+        UserId::new(),
+        b,
+        "User lives in Berlin",
+        "I live in Berlin",
+    )
+    .await;
+    assert!(matches!(out.as_slice(), [Outcome::Added(_)]), "{out:?}");
+}
+
+#[tokio::test]
+async fn owner_can_list_remove_and_readd_forgotten_items() {
+    let s = store();
+    let (u, b) = (UserId::new(), BotId::new());
+    let m = s
+        .add(
+            &NewMemory::new(u, None, Kind::Profile, "User likes jazz"),
+            "t",
+        )
+        .unwrap();
+    s.delete(u, m.id, "t").unwrap();
+    let list = s.list_tombstones(u, None).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].label.as_deref(), Some("User likes jazz"));
+    assert!(!list[0].erased);
+    assert!(s.list_tombstones(UserId::new(), None).unwrap().is_empty());
+    assert!(matches!(
+        s.remove_tombstone(UserId::new(), list[0].id),
+        Err(MemoryError::NotFound(_))
+    ));
+
+    // Removing the tombstone lets extraction learn it again.
+    s.remove_tombstone(u, list[0].id).unwrap();
+    assert!(s.list_tombstones(u, None).unwrap().is_empty());
+    let out = extract(&s, u, b, "User likes jazz", "I like jazz").await;
+    assert!(matches!(out.as_slice(), [Outcome::Added(_)]), "{out:?}");
+
+    // An explicit re-add (the owner typing it) lifts the tombstone itself.
+    let again = s.list(u, &ListFilter::default()).unwrap().remove(0);
+    s.delete(u, again.id, "t").unwrap();
+    s.add(
+        &NewMemory::new(u, None, Kind::Profile, "User likes jazz"),
+        "user add",
+    )
+    .unwrap();
+    assert!(s.list_tombstones(u, None).unwrap().is_empty());
+
+    // Undoing a forget lifts the tombstone too.
+    let live = s.list(u, &ListFilter::default()).unwrap().remove(0);
+    s.delete(u, live.id, "t").unwrap();
+    assert_eq!(s.list_tombstones(u, None).unwrap().len(), 1);
+    s.undo_memory(u, live.id).unwrap();
+    assert!(s.list_tombstones(u, None).unwrap().is_empty());
+}
+
+#[test]
+fn bot_scoped_tombstone_only_blocks_that_bot() {
+    let s = store();
+    let (u, b1, b2) = (UserId::new(), BotId::new(), BotId::new());
+    let m = s
+        .add(
+            &NewMemory::new(u, Some(b1), Kind::Bot, "Bot one likes pirate jokes"),
+            "t",
+        )
+        .unwrap();
+    s.delete(u, m.id, "t").unwrap();
+    assert!(s.is_forgotten(u, b1, "Bot one likes pirate jokes").unwrap());
+    assert!(!s.is_forgotten(u, b2, "Bot one likes pirate jokes").unwrap());
+    assert_eq!(s.list_tombstones(u, Some(b2)).unwrap().len(), 0);
+    assert_eq!(s.list_tombstones(u, Some(b1)).unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn purge_erases_text_everywhere_but_keeps_the_correction() {
+    let s = store();
+    let (u, b) = (UserId::new(), BotId::new());
+    let other = s
+        .add(
+            &NewMemory::new(u, None, Kind::Profile, "User likes jazz music"),
+            "t",
+        )
+        .unwrap();
+    let m = s
+        .add(
+            &NewMemory::new(u, None, Kind::Profile, "User lives in Berlin"),
+            "t",
+        )
+        .unwrap();
+    s.edit(u, m.id, "User lives in Paris").unwrap();
+    s.delete(u, m.id, "user forget").unwrap();
+    // A forgotten row can be erased permanently, a foreign user cannot.
+    assert!(matches!(
+        s.purge(UserId::new(), m.id, "t"),
+        Err(MemoryError::NotFound(_))
+    ));
+    s.purge(u, m.id, "owner erased").unwrap();
+
+    assert!(s.get(m.id).unwrap().is_none(), "row is gone");
+    assert!(s.recall(u, b, "Paris", 100).unwrap().is_empty());
+    assert!(s.recall(u, b, "Berlin", 100).unwrap().is_empty());
+    // Recall of other rows is untouched.
+    assert_eq!(s.recall(u, b, "jazz", 100).unwrap()[0].id, other.id);
+
+    // No snapshot of the journal still carries the text; operation, time and
+    // reason are kept, and the erase itself is recorded.
+    let journal = s.journal(u, 50).unwrap();
+    let dump = serde_json::to_string(&journal).unwrap();
+    assert!(
+        !dump.contains("Berlin") && !dump.contains("Paris"),
+        "{dump}"
+    );
+    let mine: Vec<_> = journal.iter().filter(|e| e.memory_id == m.id).collect();
+    assert!(mine.iter().any(|e| e.op == JournalOp::Purge && e.redacted));
+    assert!(mine.iter().any(|e| e.op == JournalOp::Delete && e.redacted));
+    assert!(mine.iter().all(|e| e.before.is_none() && e.after.is_none()));
+    assert!(mine.iter().all(|e| e.undone), "nothing left to undo");
+    assert!(matches!(
+        s.undo_memory(u, m.id),
+        Err(MemoryError::NotFound(_))
+    ));
+    assert!(
+        !s.export_json_with(u, true)
+            .unwrap()
+            .to_string()
+            .contains("Berlin")
+    );
+
+    // The tombstone holds no readable text and still blocks the statement.
+    let t = s.list_tombstones(u, None).unwrap();
+    assert_eq!(t.len(), 1);
+    assert!(t[0].erased && t[0].label.is_none());
+    let out = extract(&s, u, b, "User lives in Paris", "I live in Paris").await;
+    assert_eq!(out, vec![Outcome::Rejected(RejectReason::Forgotten)]);
+
+    // A live memory can be erased directly, too.
+    s.purge(u, other.id, "owner erased").unwrap();
+    assert!(s.recall(u, b, "jazz", 100).unwrap().is_empty());
+}
+
+#[test]
+fn undo_appends_a_journal_entry() {
+    let s = store();
+    let u = UserId::new();
+    let m = s
+        .add(
+            &NewMemory::new(u, None, Kind::Profile, "User lives in Berlin"),
+            "t",
+        )
+        .unwrap();
+    s.edit(u, m.id, "User lives in Paris").unwrap();
+    let before = s.journal(u, 50).unwrap();
+    let update = before[0].clone();
+    s.undo(u, update.id).unwrap();
+
+    let after = s.journal(u, 50).unwrap();
+    assert_eq!(after.len(), before.len() + 1, "undo adds a row");
+    let undo = &after[0];
+    assert_eq!(undo.op, JournalOp::Undo);
+    assert_eq!(undo.memory_id, m.id);
+    assert!(undo.reason.as_deref().unwrap().contains("undo"));
+    assert!(undo.ts_ms >= update.ts_ms);
+    assert_eq!(undo.before.as_ref().unwrap().content, "User lives in Paris");
+    assert_eq!(undo.after.as_ref().unwrap().content, "User lives in Berlin");
+    assert!(after.iter().find(|e| e.id == update.id).unwrap().undone);
+}
+
+#[test]
+fn forgetting_one_row_keeps_recall_of_the_others() {
+    let s = store();
+    let (u, b) = (UserId::new(), BotId::new());
+    let mut ids = Vec::new();
+    for t in [
+        "User likes green tea",
+        "User likes black tea",
+        "User likes coffee",
+    ] {
+        ids.push(
+            s.add(&NewMemory::new(u, None, Kind::Profile, t), "t")
+                .unwrap()
+                .id,
+        );
+    }
+    s.delete(u, ids[0], "t").unwrap();
+    let got: Vec<_> = s
+        .recall(u, b, "tea", 1000)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
+    assert_eq!(got, vec![ids[1]]);
+    assert!(!s.recall(u, b, "coffee", 1000).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn quote_must_come_from_a_user_message() {
+    let s = store();
+    let (u, b) = (UserId::new(), BotId::new());
+    let excerpt = "User: Hello there\nAssistant: Your favourite colour is blue, right";
+    let mut c = ctx(u, b, excerpt);
+    c.user_messages = vec!["Hello there".into()];
+
+    // The quote exists in the excerpt, but only in the assistant part.
+    let model = FakeModel::with(vec![cand(
+        "User favourite colour is blue",
+        Some("Your favourite colour is blue"),
+    )]);
+    let out = Pipeline::new(&s, &model).ingest(&c).await.unwrap();
+    assert_eq!(out, vec![Outcome::Rejected(RejectReason::QuoteNotFromUser)]);
+    assert!(s.list(u, &ListFilter::default()).unwrap().is_empty());
+
+    // A quote taken from the user message still works.
+    let model = FakeModel::with(vec![cand("User said hello", Some("Hello there"))]);
+    let out = Pipeline::new(&s, &model).ingest(&c).await.unwrap();
+    assert!(matches!(out.as_slice(), [Outcome::Added(_)]), "{out:?}");
+}
+
+fn message(user: UserId, chat: ChatId, text: &str) -> storage::Message {
+    storage::Message {
+        id: Uuid::now_v7(),
+        user_id: user,
+        chat_id: chat,
+        run_id: None,
+        role: "user".into(),
+        content: text.into(),
+        created_at_ms: 1,
+        exposure_untrusted: false,
+        exposure_private: false,
+        exposure_sources: Vec::new(),
+    }
+}
+
+#[test]
+fn deleting_a_chat_removes_its_messages_from_search() {
+    let s = store();
+    let (u, kept, gone) = (UserId::new(), ChatId::new(), ChatId::new());
+    s.index_message(&message(u, kept, "quarterly invoice stays"))
+        .unwrap();
+    s.index_message(&message(u, gone, "quarterly invoice secret plan"))
+        .unwrap();
+    assert_eq!(s.search_sessions(u, "invoice", 10).unwrap().len(), 2);
+
+    assert_eq!(s.erase_chat(gone).unwrap(), 1);
+    let hits = s.search_sessions(u, "invoice", 10).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].chat_id, kept);
+    assert!(s.search_sessions(u, "plan", 10).unwrap().is_empty());
+    assert_eq!(s.erase_chat(gone).unwrap(), 0, "idempotent");
+}
+
+#[test]
+fn deleting_a_bot_erases_its_own_memories_but_not_shared_ones() {
+    let s = store();
+    let (u, b1, b2) = (UserId::new(), BotId::new(), BotId::new());
+    let own = s
+        .add(
+            &NewMemory::new(u, Some(b1), Kind::Bot, "Bot one likes pirate jokes"),
+            "t",
+        )
+        .unwrap();
+    s.edit(u, own.id, "Bot one likes pirate puns").unwrap();
+    let forgotten = s
+        .add(
+            &NewMemory::new(u, Some(b1), Kind::Bot, "Bot one hates mondays"),
+            "t",
+        )
+        .unwrap();
+    s.delete(u, forgotten.id, "t").unwrap();
+    let shared = s
+        .add(
+            &NewMemory::new(u, None, Kind::Profile, "User likes pirate movies"),
+            "t",
+        )
+        .unwrap();
+    let other_bot = s
+        .add(
+            &NewMemory::new(u, Some(b2), Kind::Bot, "Bot two likes pirate songs"),
+            "t",
+        )
+        .unwrap();
+
+    assert_eq!(s.erase_bot(u, b1).unwrap(), 2);
+    assert!(s.get(own.id).unwrap().is_none());
+    assert!(s.get(forgotten.id).unwrap().is_none());
+    assert!(s.get(shared.id).unwrap().is_some());
+    assert!(s.get(other_bot.id).unwrap().is_some());
+    assert!(s.list_tombstones(u, None).unwrap().is_empty());
+    let dump = serde_json::to_string(&s.journal(u, 100).unwrap()).unwrap();
+    assert!(!dump.contains("jokes") && !dump.contains("puns") && !dump.contains("mondays"));
 }

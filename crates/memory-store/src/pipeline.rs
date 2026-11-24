@@ -75,8 +75,11 @@ pub struct ExtractionContext {
     pub chat_id: ChatId,
     /// Message the excerpt ends at, if known.
     pub message_id: Option<Uuid>,
-    /// The text handed to the model (and the only text quotes may come from).
+    /// The text handed to the model.
     pub excerpt: String,
+    /// The user-authored messages of the excerpt: the only text a quote may
+    /// come from (never the assistant's part, a tool output or a web page).
+    pub user_messages: Vec<String>,
     /// The excerpt is (or embeds) web/file/tool content: everything stored
     /// from it is `trust = untrusted`.
     pub untrusted: bool,
@@ -91,6 +94,10 @@ pub enum RejectReason {
     NoQuote,
     /// Quote is not a span of the excerpt.
     QuoteNotInSource,
+    /// Quote is in the excerpt but not in something the user wrote.
+    QuoteNotFromUser,
+    /// The owner forgot this statement (or a near-duplicate): not learned again.
+    Forgotten,
     /// Question / hypothetical, not a fact.
     Question,
     /// Looks like a credential.
@@ -151,6 +158,11 @@ impl<'a> Pipeline<'a> {
         }
         let untrusted = ctx.untrusted || c.untrusted;
         let content = c.content.trim();
+        // A correction holds: a statement the owner forgot is not stored again
+        // (only the owner can re-add it).
+        if self.store.is_forgotten(ctx.user_id, ctx.bot_id, content)? {
+            return Ok(Outcome::Rejected(RejectReason::Forgotten));
+        }
         let similar = self
             .store
             .find_similar(ctx.user_id, ctx.bot_id, content, self.similar_k)?;
@@ -244,8 +256,14 @@ fn validate(ctx: &ExtractionContext, c: &Candidate) -> Option<RejectReason> {
     let Some(quote) = quote else {
         return Some(RejectReason::NoQuote);
     };
-    if !norm(&ctx.excerpt).contains(&norm(quote)) {
+    let nq = norm(quote);
+    if !norm(&ctx.excerpt).contains(&nq) {
         return Some(RejectReason::QuoteNotInSource);
+    }
+    // Like the save tool: the supporting quote must be something the user
+    // wrote, not the assistant's reply echoing or inventing a statement.
+    if !ctx.user_messages.iter().any(|m| norm(m).contains(&nq)) {
+        return Some(RejectReason::QuoteNotFromUser);
     }
     if c.hypothetical
         || looks_like_question_or_hypothetical(quote)

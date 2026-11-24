@@ -87,6 +87,40 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Remove every indexed message of a deleted chat (rows and search
+    /// entries), so the text of a chat the user deleted cannot be found again.
+    /// Returns the number of messages removed.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn erase_chat(&self, chat: ChatId) -> Result<usize> {
+        let n = {
+            let mut conn = self.conn();
+            let tx = conn.transaction()?;
+            let rowids: Vec<i64> = {
+                let mut st = tx.prepare("SELECT rowid FROM session_msgs WHERE chat_id = ?1")?;
+                st.query_map([chat.0.to_string()], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?
+            };
+            for rowid in &rowids {
+                tx.execute("DELETE FROM session_fts WHERE rowid = ?1", [rowid])?;
+                tx.execute("DELETE FROM session_msgs WHERE rowid = ?1", [rowid])?;
+            }
+            if !rowids.is_empty() {
+                tx.execute(
+                    "INSERT INTO session_fts(session_fts) VALUES ('optimize')",
+                    [],
+                )?;
+            }
+            tx.commit()?;
+            rowids.len()
+        };
+        if n > 0 {
+            self.checkpoint();
+        }
+        Ok(n)
+    }
+
     /// Index all not-yet-indexed messages of a chat from `bot.db`.  Returns
     /// the number newly indexed.
     ///

@@ -56,6 +56,10 @@ str_enum!(
         Update = "update",
         /// Memory soft-deleted.
         Delete = "delete",
+        /// A journal entry was reverted (records the reverted state change).
+        Undo = "undo",
+        /// Memory erased permanently; its text is gone from the journal.
+        Purge = "purge",
     }
 );
 
@@ -171,6 +175,28 @@ pub struct JournalEntry {
     pub ts_ms: i64,
     /// Already undone.
     pub undone: bool,
+    /// The snapshots were erased on purpose (permanent erase): the entry only
+    /// keeps the operation, time and reason.
+    pub redacted: bool,
+}
+
+/// A forgotten statement that extraction must not store again.  Holds no
+/// readable text beyond a short label that is dropped when the item is
+/// erased permanently.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Tombstone {
+    /// Tombstone id.
+    pub id: Uuid,
+    /// Scope the statement was forgotten in (`None` = every bot).
+    pub bot_id: Option<BotId>,
+    /// Category of the forgotten memory.
+    pub kind: Kind,
+    /// Short preview for the owner; `None` once erased permanently.
+    pub label: Option<String>,
+    /// Erased permanently (text gone everywhere).
+    pub erased: bool,
+    /// When it was forgotten (ms).
+    pub created_ms: i64,
 }
 
 /// Partial update for [`MemoryStore::update`](crate::MemoryStore::update); `None` = keep.

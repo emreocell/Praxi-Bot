@@ -63,7 +63,7 @@ impl MemoryStore {
     pub fn journal(&self, user: UserId, limit: usize) -> Result<Vec<JournalEntry>> {
         let conn = self.conn();
         let mut st = conn.prepare(
-            "SELECT id, memory_id, user_id, op, before_json, after_json, reason, ts_ms, undone \
+            "SELECT id, memory_id, user_id, op, before_json, after_json, reason, ts_ms, undone, redacted \
              FROM memory_journal WHERE user_id = ?1 ORDER BY id DESC LIMIT ?2",
         )?;
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
@@ -75,24 +75,40 @@ impl MemoryStore {
             .collect()
     }
 
-    /// Export everything the user has (memories incl. soft-deleted, journal)
-    /// as JSON.
+    /// Export what the user has as JSON.  Forgotten (soft-deleted) and erased
+    /// items are NOT included: a forgotten text must not travel in an export.
+    /// Their journal entries are left out as well, because the snapshots in
+    /// them carry the text.
     ///
     /// # Errors
     /// SQLite or JSON failure.
     pub fn export_json(&self, user: UserId) -> Result<Value> {
+        self.export_json_with(user, false)
+    }
+
+    /// Like [`export_json`](Self::export_json); `include_deleted` adds the
+    /// forgotten items and their journal (a full local backup, never a share).
+    ///
+    /// # Errors
+    /// SQLite or JSON failure.
+    pub fn export_json_with(&self, user: UserId, include_deleted: bool) -> Result<Value> {
         let memories = self.list(
             user,
             &ListFilter {
-                include_deleted: true,
+                include_deleted,
                 ..ListFilter::default()
             },
         )?;
-        let journal = self.journal(user, usize::MAX >> 1)?;
+        let mut journal = self.journal(user, usize::MAX >> 1)?;
+        if !include_deleted {
+            let live: std::collections::HashSet<Uuid> = memories.iter().map(|m| m.id).collect();
+            journal.retain(|e| live.contains(&e.memory_id));
+        }
         Ok(json!({
             "version": 1,
             "exported_ms": now_ms(),
             "user_id": user,
+            "include_deleted": include_deleted,
             "memories": memories,
             "journal": journal,
         }))
