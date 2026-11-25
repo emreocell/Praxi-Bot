@@ -953,19 +953,16 @@ async fn edit_throttling_caps_edits_to_at_most_one_per_second() {
     assert_eq!(edits_after[1]["text"], "ABCD");
 }
 
-/// Drain run events until `count` messages were sent (or 10 s pass), then return
-/// every message sent. Use it instead of assuming one drain pass finishes a run.
-async fn drain_until_sent(
-    channel: &TelegramChannel,
-    server: &MockServer,
-    count: usize,
-) -> Vec<Value> {
+/// Drain run events until every followed run has finished (or 10 s pass). Use it
+/// instead of assuming one drain pass, which stops after `MAX_DRAIN_TIME`, finishes
+/// a run.
+async fn drain_until_runs_finish(channel: &TelegramChannel) {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        let sends = sent_messages(&server.received_requests().await.unwrap());
-        if sends.len() >= count || std::time::Instant::now() >= deadline {
-            return sends;
-        }
+    while channel.active_runs_for_test() > 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "runs still active after 10 s"
+        );
         channel.drain_runs_for_test().await.unwrap();
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -1029,10 +1026,16 @@ async fn redacts_stored_secrets_bot_token_and_api_key_shapes_in_all_outputs() {
     channel.handle_update(u).await.unwrap();
     // One drain pass stops after `MAX_DRAIN_TIME`; on a busy machine the run's
     // four events can take more than one pass.
-    let sends = drain_until_sent(&channel, &server, 3).await;
-    assert_eq!(sends.len(), 3);
+    drain_until_runs_finish(&channel).await;
 
-    for m in &sends {
+    let reqs = server.received_requests().await.unwrap();
+    let sends = sent_messages(&reqs);
+    assert_eq!(sends.len(), 3);
+    // The final answer reaches Telegram as an edit of the streamed message.
+    let edits = edited_messages(&reqs);
+    assert!(!edits.is_empty(), "the final answer was never edited in");
+
+    for m in sends.iter().chain(&edits) {
         let text = m["text"].as_str().unwrap();
         assert!(
             !text.contains(custom_secret),
