@@ -86,7 +86,7 @@ png = "0.18"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "json"] }
 schemars = { version = "0.8", features = ["uuid1"] }
 thiserror = "2"
-toml = "0.8"
+toml = "1.2"
 windows = "0.62"
 directories = "5"
 rusqlite = { version = "0.41", default-features = false, features = ["bundled", "cache"] }

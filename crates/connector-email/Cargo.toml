@@ -38,7 +38,7 @@ tool-registry = { path = "../tool-registry", version = "0.1.0" }
 webpki-roots = "1"
 
 [dev-dependencies]
-toml = "0.8"
+toml = "1.2"
 tempfile.workspace = true
 wiremock.workspace = true
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
