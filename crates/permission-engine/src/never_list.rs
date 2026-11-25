@@ -824,7 +824,7 @@ impl CliStores {
         for home in &homes {
             roots.extend(HOME_STORES.iter().map(|s| format!("{home}/{s}")));
         }
-        for key in ["CODEX_HOME", "CLAUDE_CONFIG_DIR"] {
+        for key in ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "VIBE_HOME"] {
             roots.extend(env_dir(key));
         }
         if let Some(dir) = env_dir("XDG_CONFIG_HOME") {

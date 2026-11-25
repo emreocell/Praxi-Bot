@@ -1326,6 +1326,7 @@ fn cli_home_override(path: &[String]) -> bool {
         "GEMINI_CLI_HOME",
         "OPENCODE_CONFIG_DIR",
         "OPENCODE_CONFIG",
+        "VIBE_HOME",
     ]
     .iter()
     .any(|key| {
@@ -1462,9 +1463,11 @@ fn native_cli_authority_roots() -> Vec<PathBuf> {
             home.join(".codex"),
             home.join(".claude"),
             home.join(".claude.json"),
+            // Mistral Vibe loads its config, agents, prompts and hooks from here.
+            home.join(".vibe"),
         ]);
     }
-    for variable in ["CODEX_HOME", "CLAUDE_CONFIG_DIR"] {
+    for variable in ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "VIBE_HOME"] {
         if let Some(root) = std::env::var_os(variable).filter(|root| !root.is_empty()) {
             roots.push(PathBuf::from(root));
         }
@@ -4510,6 +4513,7 @@ mod tests {
             "GEMINI_CLI_HOME",
             "OPENCODE_CONFIG_DIR",
             "OPENCODE_CONFIG",
+            "VIBE_HOME",
         ];
         if let Some(root) = std::env::var_os(FIXTURE) {
             let root = PathBuf::from(root);
