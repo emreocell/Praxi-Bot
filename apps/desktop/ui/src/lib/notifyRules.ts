@@ -1,8 +1,8 @@
 import type { GlobalEnvelope } from "../api/types.ts";
 import type { RunState, ToolItem } from "../state/timeline.ts";
 import { isBatchable } from "./approvalBatch.ts";
-import { approvalHeadline, isAlwaysBlockedAction, type T } from "./approvalPlain.ts";
-import { isSendTool, resolveToolCall } from "./toolLabels.ts";
+import { isAlwaysBlockedAction } from "./approvalPlain.ts";
+import { describeTool, hostOf, isSendTool, resolveToolCall } from "./toolLabels.ts";
 
 /** A run that took longer than this notifies when it finishes (unfocused). */
 export const LONG_RUN_MS = 30_000;
@@ -203,12 +203,20 @@ export interface NotificationText {
   actions?: { id: NotifyActionId; label: string }[];
   /** The approval the buttons decide. */
   callId?: string;
+  /** Epoch ms when an automatic retry is scheduled, when reported by the error. */
+  retryAtMs?: number;
 }
 
 type AppName = (server: string) => string | null;
 
+/** `mcp:playwright/browser_evaluate` and `playwright.browser_evaluate` are the same call. */
+function canonicalTool(name: string): string {
+  const m = /^mcp:([^/]+)\/(.+)$/.exec(name);
+  return m ? `${m[1]}.${m[2]}` : name;
+}
+
 /**
- * One human sentence for an approval ("Atlas: Open example.com"):
+ * One short human sentence for an approval ("Praxi needs your OK to open webioo.com.tr"):
  * never the raw summary, the arguments, a device id or the `pc:` prefix.
  */
 export function approvalSentence(
@@ -217,24 +225,128 @@ export function approvalSentence(
   t: Translate,
   brandName?: AppName
 ): string {
-  const short = approvalHeadline(
-    a.toolName,
-    a.input,
-    a.details,
-    { computer: null, serverName: null },
-    t as unknown as T,
-    brandName
-  );
-  return `${botName}: ${short}`;
+  const canonical = canonicalTool(a.toolName);
+  const call = resolveToolCall(canonical, a.input);
+  const rec = isObject(call.input) ? call.input : {};
+  const site = typeof rec.url === "string" ? hostOf(rec.url) : null;
+
+  if (call.name === "browser_open" || call.name === "pc_browser_open") {
+    return site
+      ? t("notify.approval.openSite", { bot: botName, site })
+      : t("notify.approval.openPage", { bot: botName });
+  }
+  if (
+    site &&
+    (call.name === "web_extract" ||
+      call.name === "web_feed" ||
+      call.name === "web_metadata" ||
+      call.name === "web_sitemap")
+  ) {
+    return t("notify.approval.readSite", { bot: botName, site });
+  }
+
+  const label = describeTool(canonical, a.input, brandName);
+  if (label.key.startsWith("chat.step.mcp")) {
+    if (
+      site &&
+      (call.name.endsWith(".browser_navigate") ||
+        call.name.endsWith(".browser_tab_new") ||
+        call.name.endsWith(".browser_open"))
+    ) {
+      return t("notify.approval.openSite", { bot: botName, site });
+    }
+    return t("notify.approval.mcp", {
+      bot: botName,
+      app: String(label.values.app ?? ""),
+      action: String(label.values.action ?? "")
+    });
+  }
+
+  if (call.name === "shell_run" || call.name === "pc_shell_run" || call.name === "script_run") {
+    return t("notify.approval.runCommand", { bot: botName });
+  }
+  if (call.name === "fs_delete") {
+    return t("notify.approval.deleteFile", { bot: botName });
+  }
+  if (call.name === "fs_write" || call.name === "fs_edit" || call.name === "pc_fs_write") {
+    return t("notify.approval.saveFile", { bot: botName });
+  }
+  if (call.name === "email_send") {
+    return t("notify.approval.sendEmail", { bot: botName });
+  }
+  if (call.name.startsWith("schedule_")) {
+    return t("notify.approval.schedule", { bot: botName });
+  }
+
+  return t("notify.approval.other", {
+    bot: botName,
+    what: t(`${label.key}.running`, label.values)
+  });
 }
 
 type Translate = (key: string, values?: Record<string, string>) => string;
 
 const MAX_BODY = 140;
 
-function clip(text: string): string {
+function clip(text: string, max = MAX_BODY): string {
   const one = text.replace(/\s+/g, " ").trim();
-  return one.length > MAX_BODY ? `${one.slice(0, MAX_BODY - 1)}…` : one;
+  return one.length > max ? `${one.slice(0, max - 1)}…` : one;
+}
+
+function redactSummary(text: string): string {
+  return text
+    .replace(/\bBearer\s+[A-Za-z0-9._\-~+/]+=*/gi, "Bearer [redacted]")
+    .replace(/\b(?:sk|pk|ghp|gho|glpat|xoxb|xoxp)-[A-Za-z0-9_-]{8,}/g, "[redacted]")
+    .replace(/([?&][^=\s]+=)[^\s&]+/g, "$1[redacted]");
+}
+
+export interface FailedNotification {
+  text: string;
+  retryInSeconds?: number;
+  retryAtMs?: number;
+}
+
+/** Turn a run failure string into short human wording ("Run failed: model is busy, retrying in 46 s"). */
+export function formatFailedDetail(
+  rawError: string,
+  t: Translate,
+  nowMs?: number
+): FailedNotification {
+  const clean = redactSummary(rawError)
+    .replace(/^(?:error:\s*)?(?:step\s+'[^']+'\s+failed:\s*)?(?:execution error:\s*)?(?:provider error\s*\(\d+\):\s*)?/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const retryMatch = /(?:retrying|retry)\s+in\s+(\d+)\s*s(?:ec(?:ond)?s?)?/i.exec(clean);
+  const retryInSeconds = retryMatch ? Math.max(1, Number(retryMatch[1])) : undefined;
+  const retryAtMs =
+    retryInSeconds !== undefined && nowMs !== undefined
+      ? nowMs + retryInSeconds * 1000
+      : undefined;
+
+  let reason: string;
+  if (/model is busy|overloaded|provider(?: is)? busy|too many requests|rate.?limit|\b429\b|\b503\b/i.test(clean)) {
+    reason = t("notify.failed.reasonBusy");
+  } else if (/timed?\s*out|etimedout/i.test(clean)) {
+    reason = t("notify.failed.reasonTimeout");
+  } else if (/failed to fetch|networkerror|econnrefused|enotfound|connection (?:refused|reset|lost)|unreachable/i.test(clean)) {
+    reason = t("notify.failed.reasonNetwork");
+  } else if (/quota|usage limit|signed out|unauthorized|api key/i.test(clean)) {
+    reason = t("notify.failed.reasonAuth");
+  } else {
+    const stripped = clean
+      .replace(/,?\s*(?:retrying|retry)\s+in\s+\d+\s*s(?:ec(?:ond)?s?)?\.?$/i, "")
+      .trim();
+    reason = clip(stripped, 90);
+  }
+
+  if (!reason) {
+    return { text: t("notify.generic.failed"), retryInSeconds, retryAtMs };
+  }
+  const text =
+    retryInSeconds !== undefined
+      ? t("notify.failed.retrying", { reason, seconds: String(retryInSeconds) })
+      : t("notify.failed.withReason", { reason });
+  return { text, retryInSeconds, retryAtMs };
 }
 
 /**
@@ -246,10 +358,11 @@ export function notificationText(
   botName: string,
   privateMode: boolean,
   t: Translate,
-  brandName?: AppName
+  brandName?: AppName,
+  nowMs?: number
 ): NotificationText {
   const generic = t(`notify.generic.${d.kind}`);
-  if (privateMode || !d.detail) {
+  if (privateMode) {
     return { title: botName, body: generic };
   }
   if (d.approval) {
@@ -262,6 +375,17 @@ export function notificationText(
       body: approvalSentence(d.approval, botName, t, brandName),
       ...(actions.length > 0 ? { actions, callId: d.approval.callId } : {})
     };
+  }
+  if (d.kind === "failed" && d.detail) {
+    const failed = formatFailedDetail(d.detail, t, nowMs);
+    return {
+      title: botName,
+      body: failed.text,
+      ...(failed.retryAtMs !== undefined ? { retryAtMs: failed.retryAtMs } : {})
+    };
+  }
+  if (!d.detail) {
+    return { title: botName, body: generic };
   }
   return {
     title: botName,

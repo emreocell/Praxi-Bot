@@ -66,3 +66,18 @@ On each job you can press **Run now**, **Edit** or **Delete**. A job that failed
 - Spending limits you set also apply to jobs.
 
 More: [Scheduled jobs in plain words](schedules.md) and the [technical reference](scheduled-tasks.md).
+
+## Start a bot from outside
+
+A **webhook** starts this bot when something else calls an address: GitHub, a form, or a switch at home.
+
+1. Open the bot panel and choose **Automation**.
+2. Name the webhook and, if you want, write what the bot should do with the data. Press **Create webhook**.
+3. Copy the secret immediately. Praxi shows it only this once.
+4. Praxi listens only on this computer. Point a tunnel you choose (Cloudflare Tunnel, or ssh) at `127.0.0.1`. Do not open a new port on your router.
+
+Each call sends the time in `X-Webhook-Timestamp` and `X-Signature-256: sha256=` plus the HMAC of that time, a dot, and the raw body. The same signed call works once, and only within 5 minutes. The body can be at most 64 KB. More than 30 calls a minute are refused. The text is data, never an order. The bot still asks before it acts, and that question shows up as a notification.
+
+**Send a test** starts one run from the app. It does not use the outside rate limit.
+
+More: [Incoming webhooks](incoming-webhooks.md).

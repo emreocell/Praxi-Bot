@@ -103,8 +103,30 @@ creating the tag. [Release administrator setup and dry run](../guide/remote-host
 
 ### Windows installer
 
-**Windows Installer** produces an Actions artifact for the tag. Download and extract the NSIS
-`*-setup.exe` from that run. If you publish the pre-release with the installer before Linux
+**Windows Installer** builds the NSIS `*-setup.exe` for the tag and, for every tag push or manual
+run on `main` in this repository, attests everything it publishes (SLSA build provenance through
+`actions/attest-build-provenance`). Its artifacts:
+
+| Artifact | Contents |
+| --- | --- |
+| `praxi-bot-windows-installer` | the `*-setup.exe` only (as before) |
+| `praxi-bot-windows-release` | the installer, the `bot` sidecar it contains, three CycloneDX SBOMs, `build-info.txt`, `verify-windows.ps1` and `SHA256SUMS.txt` |
+| `praxi-bot-windows-provenance` | `praxi-bot-windows.sigstore.json`, the attestation bundle for every file of the release artifact |
+
+For a **pre-release tag** (`v1.2.3-alpha.1`) the last job, *Attach to the pre-release*, uploads
+that set to the tag's GitHub release **if the release already exists**. It never creates a release
+and never replaces an asset: a file already on the release must be byte-identical or the job
+fails. If the release does not exist yet, the job summary prints the `gh run download` and
+`gh release create` commands that create it with the full set. For a **final tag** nothing is
+attached automatically: download both artifacts and attach them yourself with the same commands
+after the review. Do not attach only the installer: users are told to verify it with
+`SHA256SUMS.txt` and the bundle ([Check your download](../guide/verify-download.md)).
+
+No signing certificate exists, so the installer itself is unsigned; provenance and checksums are
+the only integrity signal today. Builds are not bit-for-bit reproducible (see the page above for
+what is pinned and what is not).
+
+If you publish the pre-release with the installer before Linux
 publication, create it using the reviewed tag and previous tag from the rehearsal. Leave
 `previous_tag` empty if the rehearsal had no baseline.
 
@@ -114,16 +136,18 @@ publication, create it using the reviewed tag and previous tag from the rehearsa
   repo=emreocell/Praxi-Bot
   tag=v0.1.0-alpha.4
   previous_tag=''  # Set to the previous tag printed by the rehearsal, if any.
-  installer=./path/to/Praxi-Bot-setup.exe
+  # After `gh run download <run-id> --name praxi-bot-windows-release --name praxi-bot-windows-provenance --dir release-files`
+  files=(./release-files/*)
   notes_flags=(--generate-notes)
   if [[ -n "$previous_tag" ]]; then
     notes_flags+=(--notes-start-tag "$previous_tag")
   fi
-  gh release create "$tag" "$installer" --repo "$repo" --verify-tag --prerelease "${notes_flags[@]}"
+  gh release create "$tag" "${files[@]}" --repo "$repo" --verify-tag --prerelease "${notes_flags[@]}"
 )
 ```
 
 The Linux publisher can add its verified assets to that release and preserves the existing body.
-If Linux creates the release first, upload the Windows installer to the existing release with
-`gh release upload "$tag" "$installer" --repo emreocell/Praxi-Bot`, using the exact tag and
-installer path. Both paths preserve existing assets. [GitHub CLI release documentation](https://cli.github.com/manual/gh_release_create)
+If Linux creates the release first, upload the Windows files to the existing release with
+`gh release upload "$tag" ./release-files/* --repo emreocell/Praxi-Bot`, using the exact tag
+(the installer workflow's *Attach to the pre-release* job does this by itself for pre-release
+tags). Both paths preserve existing assets. [GitHub CLI release documentation](https://cli.github.com/manual/gh_release_create)

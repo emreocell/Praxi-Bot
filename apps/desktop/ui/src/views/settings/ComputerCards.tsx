@@ -128,8 +128,12 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       kind: "block",
       title: t("settingsModal.safety.title"),
       description: t("settingsModal.safety.description"),
-      keywords: "permissions ask approve allow safe careful balanced hands-off izin onay guvenli dikkatli sorar erlauben sicher vorsichtig",
-      node: <SettingsCard title={t("settingsModal.safety.title")}><SafetyLevelsCard /></SettingsCard>
+      keywords: "safety permissions ask approve allow safe careful balanced hands-off guvenlik izin onay guvenli dikkatli sorar sicherheit erlaubnis genehmigen vorsichtig",
+      node: (
+        <SettingsCard title={t("settingsModal.safety.title")} description={t("settingsModal.safety.description")}>
+          <SafetyLevelsCard />
+        </SettingsCard>
+      )
     },
     {
       id: "audit-log",
@@ -137,8 +141,12 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       kind: "block",
       title: t("audit.title"),
       description: t("audit.description"),
-      keywords: "audit log history approvals activity export aktivite gunluk gecmis onay denetim protokoll verlauf genehmigung aktivitat",
-      node: <SettingsCard title={t("audit.title")}><AuditLogCard /></SettingsCard>
+      keywords: "audit log history approvals activity export aktivite gunluk gecmis onay denetim protokoll verlauf genehmigung aktivitat aktivität",
+      node: (
+        <SettingsCard title={t("audit.title")} description={t("audit.description")}>
+          <AuditLogCard />
+        </SettingsCard>
+      )
     },
     {
       id: "target",
@@ -146,18 +154,20 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       kind: "block",
       title: t("settingsModal.computer.target.title"),
       description: t("settingsModal.computer.target.description"),
-      keywords: "this pc browser remote host server off bilgisayar tarayici uzak",
+      keywords: "this pc browser remote host server computer off bilgisayar hedef tarayici uzak sunucu rechner ziel fern",
       node: (
-        <div className={styles.blockStack}>
-          <p className={styles.blockIntro}>
-            {t("settingsModal.computer.target.description")}
-          </p>
-          <ComputerTargetBlock
-            value={b.settings.computerTarget}
-            onChange={(computerTarget) => b.update({ computerTarget })}
-          />
-          <OpenLiveViewerRow />
-        </div>
+        <SettingsCard
+          title={t("settingsModal.computer.target.title")}
+          description={t("settingsModal.computer.target.description")}
+        >
+          <div className={styles.blockStack}>
+            <ComputerTargetBlock
+              value={b.settings.computerTarget}
+              onChange={(computerTarget) => b.update({ computerTarget })}
+            />
+            <OpenLiveViewerRow />
+          </div>
+        </SettingsCard>
       )
     },
     {
@@ -166,8 +176,12 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       kind: "block",
       title: t("computerAccess.title"),
       description: t("computerAccess.description"),
-      keywords: "bots use computer server host bilgisayar sunucu botlarim izin",
-      node: <SettingsCard title={t("computerAccess.title")}><ComputerAccessCard /></SettingsCard>
+      keywords: "bots use computer screen control access server host bilgisayar erisim ekran sunucu botlarim izin zugriff bildschirm",
+      node: (
+        <SettingsCard title={t("computerAccess.title")} description={t("computerAccess.description")}>
+          <ComputerAccessCard />
+        </SettingsCard>
+      )
     },
     {
       id: "trusted-folders",
@@ -175,8 +189,12 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       kind: "block",
       title: t("folderTrust.title"),
       description: t("folderTrust.description"),
-      keywords: "trust folder repository klasor guven depo",
-      node: <SettingsCard title={t("folderTrust.title")}><TrustedFolders /></SettingsCard>
+      keywords: "trust folder directory repository path klasor guven dizin depo ordner vertrauen verzeichnis",
+      node: (
+        <SettingsCard title={t("folderTrust.title")}>
+          <TrustedFolders />
+        </SettingsCard>
+      )
     },
     {
       id: "allowed-grants",
@@ -184,7 +202,7 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       kind: "block",
       title: t("settingsModal.safety.allowedGrants.title"),
       description: t("settingsModal.safety.allowedGrants.description"),
-      keywords: "always allow site domain action revoke izin verilen siteler islemler kaldir her zaman izinli eylem site alan",
+      keywords: "always allow site domain action revoke izin verilen siteler islemler kaldir her zaman izinli eylem site alan seite domain berechtigung widerrufen immer erlauben",
       node: <SettingsCard title={t("settingsModal.safety.allowedGrants.title")} description={t("settingsModal.safety.allowedGrants.description")}><AllowedGrantsCard /></SettingsCard>
     },
     {
@@ -193,7 +211,7 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       kind: "block",
       title: t("settings.permissions.title"),
       description: t("settings.permissions.description"),
-      keywords: "policy permission izin",
+      keywords: "policy permission rules allow deny ask delete sil kural izin politika regeln erlaubnis löschen",
       node: <PermissionsSection />
     },
     {
@@ -202,8 +220,12 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       kind: "block",
       title: t("settingsModal.webSearch.title"),
       description: t("settingsModal.webSearch.description"),
-      keywords: "web search searxng brave tavily duckduckgo bing arama internet",
-      node: <SettingsCard title={t("settingsModal.webSearch.title")} description={t("settingsModal.webSearch.description")}><WebSearchCard /></SettingsCard>
+      keywords: "web search internet searxng brave tavily duckduckgo bing arama internet websuche suche",
+      node: (
+        <SettingsCard title={t("settingsModal.webSearch.title")} description={t("settingsModal.webSearch.description")}>
+          <WebSearchCard />
+        </SettingsCard>
+      )
     }
   ];
 }

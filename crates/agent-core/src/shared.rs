@@ -691,13 +691,22 @@ pub(crate) struct Pending {
     /// A tool-wide standing grant ("always for this bot") is refused for this card: an MCP
     /// tool in a run that has read something private.
     pub always_refused: bool,
+    /// The run that parked this card, so Stop can close every card of a run.
+    pub run_id: RunId,
+    /// The persisted approval row of this park.
+    pub approval_id: uuid::Uuid,
 }
 
 /// Browser actions that act on the page open right now: their allowance is bound to its origin.
 pub(crate) fn is_page_action(name: &str) -> bool {
     matches!(
         name,
-        "browser_fill" | "browser_press" | "browser_click" | "browser_select" | "browser_act"
+        "browser_fill"
+            | "browser_press"
+            | "browser_click"
+            | "browser_select"
+            | "browser_select_text"
+            | "browser_act"
     )
 }
 
@@ -1077,6 +1086,13 @@ pub(crate) struct Shared {
     /// What a schedule-started run does instead of asking the model, until its
     /// first step has been planned (afterwards it lives in the step's input).
     pub directives: Mutex<HashMap<RunId, ScheduleWork>>,
+    /// Runs the owner stopped. An approval abandoned by that stop is a denial,
+    /// not a timeout. Cleared when the run is concluded.
+    pub user_stopped: Mutex<HashSet<RunId>>,
+    /// Runs whose terminal bookkeeping has started. A second conclude (the
+    /// drive task waking after the stop supervisor already finished the run)
+    /// must not emit another `run_finished` or start a queued turn.
+    pub concluded: Mutex<HashSet<RunId>>,
     /// Runs that paused because nobody answered an approval in time.
     pub approval_paused: Mutex<HashSet<RunId>>,
     /// Runs left paused because this boot could not read the local identity.
@@ -1104,6 +1120,10 @@ pub(crate) struct Shared {
     /// pre-tool deny recheck.
     #[cfg(test)]
     pub exec_commit_hook: Mutex<Option<ExecCommitHook>>,
+    /// Test-only: invoked at the end of `deny_open_for_stop`, after the run's cards
+    /// were released.
+    #[cfg(test)]
+    pub stop_split_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Hosts the owner approved a navigation to (any scope), newest last, bounded. A favicon may
     /// be fetched for these and for hosts with a standing / chat grant, never for anything else.
     pub approved_hosts: Mutex<VecDeque<String>>,
@@ -1254,6 +1274,12 @@ pub fn initiator_of(kind: &str) -> InitiatorKind {
         Some("channel") => InitiatorKind::Channel,
         Some("subagent") => InitiatorKind::Subagent,
         Some(s) if s == "external_schedule" || s.starts_with("external_schedule:") => {
+            InitiatorKind::ExternalSchedule
+        }
+        // An incoming webhook is external data. It must not fall through to
+        // Human: that would let the router and `call:` lines treat the payload
+        // as the owner's own instructions.
+        Some(s) if s == "incoming_webhook" || s.starts_with("incoming_webhook:") => {
             InitiatorKind::ExternalSchedule
         }
         Some(s) if s == "schedule" || s.starts_with("schedule:") => InitiatorKind::Schedule,
@@ -1769,6 +1795,12 @@ impl Shared {
             }
         }
         absorb_run_history(&mut taint, self, run.id, 0);
+        // The body of a signed webhook call is untrusted data from the first
+        // model call on: the run is tainted like one that read a web page.
+        if crate::history::is_webhook_run(run) {
+            taint.exposure.observe(true, false);
+            taint.note_label("incoming webhook body");
+        }
         // A subagent does not see the chat. A top-level turn, including a
         // scheduled one, does: provenance rides on the messages that enter
         // the context. Dropped by the history bound means the bytes are not

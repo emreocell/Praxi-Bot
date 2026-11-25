@@ -432,7 +432,7 @@ Focus Assist can hold notifications back.
 **macOS and Linux.** The notification plugin cannot show action buttons there,
 so the notification is plain text; open the app to answer on the card.
 
-**Quiet hours and history.** In Settings > Notifications you can set quiet hours
+**Quiet hours and history.** In Settings > General > Notifications you can set quiet hours
 (days, from/until, time zone). During them no toast is shown; the notification is
 kept silently in the **Notifications** list in the sidebar (what, when, which bot,
 shown or held; click to open the chat). An overnight window such as 22:00-07:00

@@ -32,7 +32,7 @@ async fn test_all_missing() {
 
     let detected = detector.detect(false).await;
     // Gemini CLI is retired: never listed unless it is already installed.
-    assert_eq!(detected.len(), 9);
+    assert_eq!(detected.len(), 10);
     assert!(detected.iter().all(|cli| cli.id != "gemini"));
 
     for cli in &detected {
@@ -312,6 +312,27 @@ async fn kiro_sign_in_stays_unverified() {
 }
 
 #[tokio::test]
+async fn qoder_sign_in_comes_from_its_status_json() {
+    let temp = fixture_dir();
+    install_fake(temp.path(), "qodercli");
+
+    // The fake answers `status -o json` like 1.1.97 (`logged_in`); an ambient token is not
+    // forwarded and is not evidence.
+    let env = PathEnv::for_test(temp.path().to_path_buf())
+        .with_env_var("QODER_PERSONAL_ACCESS_TOKEN", "qoder_secret_token");
+    let detected = Detector::with_env(env).detect(true).await;
+    let qoder = detected.iter().find(|c| c.id == "qoder").unwrap();
+    assert!(qoder.installed);
+    assert_eq!(qoder.auth, AuthState::SignedIn);
+    assert!(!format!("{qoder:?}").contains("qoder_secret_token"));
+
+    let env = PathEnv::for_test(temp.path().to_path_buf()).with_env_var("FAKE_SIGNED_OUT", "1");
+    let detected = Detector::with_env(env).detect(true).await;
+    let qoder = detected.iter().find(|c| c.id == "qoder").unwrap();
+    assert_eq!(qoder.auth, AuthState::SignedOut);
+}
+
+#[tokio::test]
 async fn kimi_sign_in_is_credential_file_metadata_only() {
     let temp = fixture_dir();
     install_fake(temp.path(), "kimi");
@@ -545,6 +566,7 @@ async fn only_installed_claude_is_runnable() {
         "kiro-cli",
         "copilot",
         "kimi",
+        "qodercli",
     ] {
         install_fake(temp.path(), name);
     }
@@ -719,7 +741,7 @@ fn cli_engines_catalog_marks_only_claude_runnable() {
         ids,
         [
             "claude", "codex", "cursor", "opencode", "gemini", "agy", "qwen", "copilot", "kiro",
-            "kimi",
+            "kimi", "qoder",
         ]
     );
     let claude = cli_provider::engine_spec("claude").expect("claude spec");
@@ -727,7 +749,7 @@ fn cli_engines_catalog_marks_only_claude_runnable() {
     assert_eq!(claude.command, "claude");
 
     for id in [
-        "codex", "cursor", "opencode", "gemini", "agy", "qwen", "copilot", "kiro", "kimi",
+        "codex", "cursor", "opencode", "gemini", "agy", "qwen", "copilot", "kiro", "kimi", "qoder",
     ] {
         let spec = cli_provider::engine_spec(id).expect("spec exists");
         assert!(!spec.runnable, "{id} must not be runnable");

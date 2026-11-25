@@ -76,7 +76,7 @@ test("helpers", () => {
 });
 
 test("a family prefix never turns an unlisted tool into a read or \"used\" line", () => {
-  for (const name of ["browser_hover", "desktop_frob", "memory_store", "skill_publish", "email_archive", "fs_chmod", "web_post"]) {
+  for (const name of ["browser_frob", "desktop_frob", "memory_store", "skill_publish", "email_archive", "fs_chmod", "web_post"]) {
     assert.equal(describeTool(name, {}).key, "chat.step.generic", name);
   }
 });
@@ -86,6 +86,9 @@ test("writing, scripting and typing tools are not worded as reads or generic use
   assert.notEqual(describeTool("email_mark_read", {}).key, describeTool("email_read", {}).key);
   const keys = ["browser_eval", "browser_fill", "browser_scroll"].map((n) => describeTool(n, {}).key);
   assert.equal(new Set(keys).size, 3);
+  // The pointer tools have their own wording, not "looked at a page".
+  assert.equal(describeTool("browser_hover", {}).key, "chat.step.browser_hover");
+  assert.equal(describeTool("browser_select_text", {}).key, "chat.step.browser_select_text");
   assert.notEqual(describeTool("skill_write", {}).key, describeTool("skill_read", {}).key);
   assert.notEqual(describeTool("memory_save", {}).key, describeTool("memory_search", {}).key);
   assert.notEqual(describeTool("memory_forget", {}).key, describeTool("memory_search", {}).key);

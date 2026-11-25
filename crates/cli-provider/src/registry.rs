@@ -290,6 +290,25 @@ pub const CLI_ENGINES: &[CliEngineSpec] = &[
         login: "kimi login",
         docs_url: "https://moonshotai.github.io/kimi-code/",
     },
+    // Qoder CLI (Alibaba). Runs with its own tools through `qodercli --acp` (a hidden flag:
+    // "Starts the agent in ACP mode"). Interface read from the npm package 1.1.97 (`--help`,
+    // `status -o json`, an unauthenticated ACP `initialize` and `session/new`), not from a
+    // signed-in run.
+    CliEngineSpec {
+        id: "qoder",
+        display_name: "Qoder CLI",
+        command: "qodercli",
+        aliases: &[],
+        runnable: false,
+        version_args: &["--version"],
+        auth_args: &["status", "-o", "json"],
+        minimum_version: None,
+        install_windows: npm(&["install", "-g", "@qoder-ai/qodercli"], false),
+        install_unix: npm(&["install", "-g", "@qoder-ai/qodercli"], false),
+        models: &["default"],
+        login: "qodercli login",
+        docs_url: "https://qoder.com/cli",
+    },
 ];
 
 #[must_use]

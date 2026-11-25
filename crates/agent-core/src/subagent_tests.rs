@@ -2067,3 +2067,96 @@ async fn control_grant_is_not_inherited_by_a_subagent() {
     assert!(ty.guards.lock()[0].is_some());
     assert!(ty.guards.lock()[1].is_none());
 }
+
+/// A tool that blocks its worker thread and never polls the cancel token.
+struct BlockTool {
+    spec: tool_registry::ToolSpec,
+    started: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait]
+impl Tool for BlockTool {
+    fn spec(&self) -> &tool_registry::ToolSpec {
+        &self.spec
+    }
+    async fn call(
+        &self,
+        _: &tool_registry::ToolContext,
+        _: Value,
+    ) -> Result<tool_registry::ToolOutput, tool_registry::ToolError> {
+        self.started.store(true, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_secs(5));
+        Ok(tool_registry::ToolOutput::text("late"))
+    }
+}
+
+/// Stop must end every run the stopped run started, even a child stuck in a
+/// tool that never polls the cancel token, after the parent already reached
+/// `Cancelled` (so the parent's own supervisor has nothing left to abort).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stop_force_stops_a_child_blocked_in_a_non_polling_tool() {
+    let env = setup();
+    let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let block = Arc::new(BlockTool {
+        spec: tool_registry::ToolSpec {
+            name: "t_block".into(),
+            description: "blocks".into(),
+            input_schema: json!({"type": "object"}),
+            effect: Effect::Read,
+            category: PermissionCategory::Fs,
+            platforms: vec![tool_registry::Platform::All],
+            content: ContentClass::none(),
+        },
+        started: Arc::clone(&started),
+    });
+    let brain = Brain::new(|req| {
+        if is_child(req) {
+            if results(req).is_empty() {
+                call(&[("k1", "t_block", json!({}))])
+            } else {
+                say("late")
+            }
+        } else if results(req).is_empty() {
+            call(&[(
+                "c1",
+                "spawn_subagent",
+                json!({"task": "a", "tools": ["t_block"]}),
+            )])
+        } else {
+            say("fin")
+        }
+    });
+    let tools: Vec<Arc<dyn Tool>> = vec![block];
+    let lp = make(
+        &env.storage,
+        env.bot,
+        &brain,
+        &tools,
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let parent = lp.run_turn(env.chat, "go").unwrap();
+    for _ in 0..500 {
+        if started.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(started.load(Ordering::SeqCst), "the child tool started");
+    let kid = children(&env, parent)[0].id;
+    lp.cancel(parent).unwrap();
+    assert_eq!(lp.wait(parent).await.unwrap(), RunState::Cancelled);
+    let deadline = std::time::Instant::now() + Duration::from_millis(2500);
+    loop {
+        let state = lp.runtime().state(kid).unwrap();
+        if state.is_terminal() {
+            assert_eq!(state, RunState::Cancelled);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the child kept running after Stop: {state:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}

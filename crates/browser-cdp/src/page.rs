@@ -144,6 +144,8 @@ pub(crate) struct Shared {
     pub live_view_action_hooks: StdMutex<Vec<std::sync::Weak<dyn Fn() + Send + Sync>>>,
     /// Strong owner anchors removed if/when needed; callers hold their own `Arc` or register strong hooks.
     pub live_view_strong_hooks: StdMutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+    /// Where the pointer last was (top-level viewport coordinates), so the next move starts there.
+    pub pointer: StdMutex<Option<(f64, f64)>>,
 }
 
 impl Default for Shared {
@@ -167,6 +169,7 @@ impl Default for Shared {
             live_view_close_hooks: StdMutex::default(),
             live_view_action_hooks: StdMutex::default(),
             live_view_strong_hooks: StdMutex::default(),
+            pointer: StdMutex::default(),
         }
     }
 }
@@ -937,12 +940,26 @@ impl Page {
     }
 
     /// Wait for the next of `methods` on the main session.
+    ///
+    /// Dropping this wait (Stop while a navigation is in flight) tells the page
+    /// to stop loading. A timeout is a normal return: the load is left alone.
     pub(crate) async fn wait_events(
         &self,
         rx: &mut broadcast::Receiver<CdpEvent>,
         methods: &[&str],
         timeout: Duration,
     ) -> Result<()> {
+        let client = Arc::clone(&self.client);
+        let session = self.session.clone();
+        let mut stop = StopOnDrop::arm(move || {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = client
+                        .send_on(Some(&session), "Page.stopLoading", json!({}))
+                        .await;
+                });
+            }
+        });
         let fut = async {
             loop {
                 match rx.recv().await {
@@ -957,9 +974,9 @@ impl Page {
                 }
             }
         };
-        tokio::time::timeout(timeout, fut)
-            .await
-            .map_err(|_| Error::Timeout("page load".into()))?
+        let timed = tokio::time::timeout(timeout, fut).await;
+        stop.disarm();
+        timed.map_err(|_| Error::Timeout("page load".into()))?
     }
 
     /// The action that started at `since` caused network activity or a navigation
@@ -1326,6 +1343,32 @@ fn busy_count_younger_than(shared: &Shared, since: Option<Instant>, max_age: Dur
     })
 }
 
+/// Fires `on_drop` only when dropped still armed. A finished wait disarms it,
+/// including a load timeout, so a snapshot after a slow page is unchanged.
+struct StopOnDrop<F: FnOnce()> {
+    on_drop: Option<F>,
+}
+
+impl<F: FnOnce()> StopOnDrop<F> {
+    fn arm(on_drop: F) -> Self {
+        Self {
+            on_drop: Some(on_drop),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.on_drop.take();
+    }
+}
+
+impl<F: FnOnce()> Drop for StopOnDrop<F> {
+    fn drop(&mut self) {
+        if let Some(on_drop) = self.on_drop.take() {
+            on_drop();
+        }
+    }
+}
+
 fn touch(shared: &Shared) {
     if let Ok(mut l) = shared.last_net.lock() {
         *l = Some(Instant::now());
@@ -1334,7 +1377,55 @@ fn touch(shared: &Shared) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicBool;
+
     use super::*;
+
+    #[test]
+    fn stop_on_drop_fires_only_when_the_wait_is_dropped() {
+        let fired = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&fired);
+        let mut guard = StopOnDrop::arm(move || flag.store(true, Ordering::SeqCst));
+        guard.disarm();
+        drop(guard);
+        assert!(
+            !fired.load(Ordering::SeqCst),
+            "a finished wait must not stop the load"
+        );
+
+        let fired = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&fired);
+        let guard = StopOnDrop::arm(move || flag.store(true, Ordering::SeqCst));
+        drop(guard);
+        assert!(
+            fired.load(Ordering::SeqCst),
+            "dropping the wait stops the load"
+        );
+    }
+
+    #[tokio::test]
+    async fn dropping_an_in_flight_wait_fires_stop() {
+        let fired = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&fired);
+        {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let wait = async move {
+                let _guard = StopOnDrop::arm(move || flag.store(true, Ordering::SeqCst));
+                let _ = tx.send(());
+                std::future::pending::<()>().await;
+            };
+            tokio::pin!(wait);
+            tokio::select! {
+                biased;
+                () = &mut wait => {}
+                _ = rx => {}
+            }
+        }
+        assert!(
+            fired.load(Ordering::SeqCst),
+            "Stop dropping the navigation wait must stop the load"
+        );
+    }
 
     #[tokio::test(start_paused = true)]
     async fn target_close_notification_is_latched_before_worker_parks() {

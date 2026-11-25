@@ -151,7 +151,7 @@ LM Studio. It is best effort and read-only:
   largest model that fits and has room on disk; with unknown memory or an empty catalog it is
   null ("no recommendation"). The `ollama pull <id>` command is only built from plain ids and is
   shown for copying; Praxi never runs it.
-- **Where it shows.** First-run wizard (when Ollama is chosen), Settings > AI > Local models,
+- **Where it shows.** First-run wizard (when Ollama is chosen), Settings > AI models > Local models,
   and `bot doctor` (an informational line computed in-process). `GET /v1/doctor` deliberately
   omits it: the hardware fingerprint is owner-only.
 - **Privacy.** The hardware summary stays on this computer: it is never sent to a model, a

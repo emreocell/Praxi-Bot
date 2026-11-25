@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Brain } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button, Card } from "ui";
+import { Button } from "ui";
+import { SettingsCard } from "../../components/SettingsUi";
 import type { ForgottenItem, MemoryItem, MemoryKind, MemoryPreview } from "../../api/types";
 import { ConfirmDialog } from "../../components/DialogParts";
 import form from "../../components/Form.module.css";
@@ -155,9 +156,12 @@ export function MemoryCard() {
     id ? (bots.find((b) => b.id === id)?.name ?? id) : t("memory.scopeShared");
 
   return (
-    <Card padding="md" className={styles.root} data-testid="memory-card">
-      <h3 className={styles.heading}>{t("memory.title")}</h3>
-      <p className={form.hint}>{t("memory.description")}</p>
+    <SettingsCard
+      title={t("memory.title")}
+      description={t("memory.description")}
+      testId="memory-card"
+    >
+      <div className={styles.root}>
       <label className={form.field}>
         {t("memory.bot")}
         <select
@@ -487,6 +491,7 @@ export function MemoryCard() {
         onCancel={() => setErasing(null)}
         onConfirm={() => erasing && void erase(erasing)}
       />
-    </Card>
+      </div>
+    </SettingsCard>
   );
 }

@@ -11,16 +11,18 @@
 }
 
 .toast {
+  pointer-events: auto;
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border: var(--size-border) solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-control);
   background-color: var(--color-surface-elevated);
   box-shadow: var(--shadow-card);
   color: var(--color-text);
   font-size: var(--font-size-sm);
+  line-height: var(--line-height-tight);
   animation: toast-in var(--motion-duration-normal) var(--motion-easing-standard);
 }
 
@@ -57,12 +59,88 @@
   }
 }
 
+.icon {
+  flex-shrink: 0;
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  color: var(--color-text-muted);
+}
+
+.success .icon {
+  color: var(--color-success);
+}
+
+.danger .icon {
+  color: var(--color-danger);
+}
+
+.text {
+  flex: 1;
+  min-width: var(--space-0);
+}
+
+.actionBtn {
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-2);
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface);
+  color: var(--color-accent-text);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.actionBtn:hover {
+  background-color: var(--color-surface-active);
+}
+
+.actionBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.closeBtn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  padding: var(--space-0);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.closeBtn:hover {
+  color: var(--color-text);
+  background-color: var(--color-surface-active);
+}
+
+.closeBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.closeBtn > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .toast {
     animation: none;
   }
-}
 
-.icon { flex-shrink: 0; width: var(--size-icon-sm); height: var(--size-icon-sm); margin-top: var(--space-1); color: var(--color-text-muted); }
-.success .icon { color: var(--color-success); }
-.danger .icon { color: var(--color-danger); }
+  .actionBtn,
+  .closeBtn {
+    transition: none;
+  }
+}

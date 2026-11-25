@@ -8,17 +8,22 @@ export interface SettingsTarget {
   field: string;
 }
 
-/** Where the transcription service and its API key live (Settings → Voice → Dictation service). */
-export const VOICE_KEY_TARGET: SettingsTarget = { page: "voice", card: "dictation", field: "voice-key" };
+/** Where the transcription service and its API key live (Settings → General → Voice dictation). */
+export const VOICE_KEY_TARGET: SettingsTarget = { page: "general", card: "dictation", field: "voice-key" };
 
 export const OPEN_SETTINGS_EVENT = "praxi:open-settings";
 
 let pending: SettingsTarget | null = null;
 
-/** Opens Settings on the target's page; the card focuses the field once it is on screen. */
+/** Opens Settings on the target's page, scrolls the card into view, flashes it, and focuses the field. */
 export function openSettingsTarget(target: SettingsTarget): void {
   pending = target;
   window.dispatchEvent(new CustomEvent<SettingsTarget>(OPEN_SETTINGS_EVENT, { detail: target }));
+}
+
+/** Read without consuming the pending target (used by SettingsModal to scroll & flash the card). */
+export function peekPendingTarget(): SettingsTarget | null {
+  return pending;
 }
 
 /** True once for the field a deep link asked to focus. */

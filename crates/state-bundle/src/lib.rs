@@ -240,6 +240,7 @@ pub async fn export(
         &mut manifest,
         &mut bytes,
         opts.progress.as_ref(),
+        matches!(opts.secrets, SecretSelection::All),
     )
     .await?;
     let mut names = match opts.secrets {

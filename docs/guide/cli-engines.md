@@ -16,6 +16,7 @@ An unrelated `agent` on PATH cannot hide Cursor's vendor-directory alias.
 | Antigravity | `agy` | None: no status command (sign-in shows at the first turn) | none known | Runs with its own tools (`agy acp`); models from `agy models` |
 | Qwen Code | `qwen` | Credential-file metadata only (`~/.qwen/oauth_creds.json`); contents never opened | `npm install -g @qwen-code/qwen-code` (**unverified**, copy only) | Runs with its own tools (`qwen --acp`, experimental); minimum unverified |
 | Kiro CLI | `kiro-cli` | None: `whoami` exit codes are undocumented; `KIRO_API_KEY` is not evidence | Unix: `curl -fsSL https://cli.kiro.dev/install \| bash` (**unverified**, copy only) | Runs with its own tools (`kiro-cli acp --agent-engine v3`, experimental); minimum unverified |
+| Qoder CLI | `qodercli` | `status -o json` (`logged_in`) | `npm install -g @qoder-ai/qodercli` (**unverified**, copy only) | Runs with its own tools (`qodercli --acp`, experimental); minimum unverified |
 | GitHub Copilot CLI | `copilot` | None: no status command (sign-in is `copilot login`, kept in the OS credential store; a GitHub token in the environment is not evidence) | `npm install -g @github/copilot` (**unverified**, copy only) | Runs with its own tools (`copilot --acp`, experimental); minimum unverified |
 | Kimi Code CLI | `kimi` | Credential-file metadata only (`~/.kimi-code/credentials/kimi-code.json`); contents never opened | `npm install -g @moonshot-ai/kimi-code` (**unverified**, copy only) | Runs with its own tools (`kimi acp`, experimental); minimum unverified. The Python `kimi-cli` 1.x is its retired predecessor |
 | OpenCode | `opencode` | Credential-file metadata only; contents never opened | `npm install -g opencode-ai` (verified local reference) | Detect/install only: inspected CLI has no switch to disable native tools |
@@ -143,6 +144,7 @@ a bot to native tools needs a consent too; both are recorded in the audit log.
 | Antigravity (`agy acp`, experimental) | `default` mode | `accept-edits` mode | `auto` mode; Full: `--dangerously-skip-permissions` |
 | Qwen Code (`--acp`, experimental) | `--approval-mode default` | `--approval-mode auto-edit` | `--approval-mode auto` | `--approval-mode yolo` |
 | Kiro CLI (`acp`, experimental) | default permissions | runs as Ask | runs as Ask | requests approved automatically |
+| Qoder CLI (`--acp`, experimental) | mode `default` | mode `acceptEdits` | mode `auto` | mode `yolo` |
 | GitHub Copilot CLI (`--acp`, experimental) | default | `--allow-tool write` | runs as Ask | requests approved automatically (never `--allow-all-tools`) |
 | Kimi Code CLI (`kimi acp`, experimental) | Windows: mode `default` (Always Ask). Linux and macOS: not offered, because that mode approves edits inside a git repository | runs as Ask | mode `yolo` (Ask When Needed) | mode `auto` (Never Ask) |
 

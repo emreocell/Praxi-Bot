@@ -145,8 +145,8 @@ async fn a_stopped_run_leaves_no_pending_approval_behind() {
         env.storage.list_approvals(run).unwrap()[0]
             .decision
             .as_deref(),
-        Some("expired"),
-        "the dead run's card is not pending any more"
+        Some("denied"),
+        "Stop is the owner saying no, not a timeout"
     );
     assert!(lp.sh.pending.lock().is_empty() && lp.sh.parked.lock().is_empty());
 }

@@ -417,7 +417,10 @@
 
 .tabs {
   display: inline-flex;
+  flex-wrap: wrap;
   align-self: center;
+  justify-content: center;
+  max-width: 100%;
   padding: var(--size-border-thick);
   border-radius: var(--radius-control);
   background-color: var(--color-surface-elevated);

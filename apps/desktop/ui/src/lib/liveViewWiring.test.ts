@@ -69,6 +69,9 @@ test("every global Stop call site is one ledger Stop; the takeover override is d
   assert.doesNotMatch(host, /ledger\.(stopAll|applyList|attachClient|onNativeSnapshot)\(/, "no host logic outside the runtime");
   const chat = read("../views/ChatView.tsx");
   assert.match(chat, /cancelRun\(activeRunId, hard/);
+  assert.match(chat, /activeRunAfterCancel\(/);
+  assert.match(chat, /composerButton\(/);
+  assert.doesNotMatch(chat, /stopping:\s*false/);
   assert.doesNotMatch(chat, /client\.cancelRun\(/);
   const widget = read("../overlay/WidgetWindow.tsx");
   assert.doesNotMatch(widget, /setControlState/, "every widget snapshot goes through reduceWidget");

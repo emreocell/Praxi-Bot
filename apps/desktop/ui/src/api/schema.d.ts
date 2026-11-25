@@ -459,6 +459,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bots/{bot}/incoming-webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a bot's webhooks. Secrets are not included. */
+        get: operations["list_webhooks"];
+        put?: never;
+        /** Create a webhook. The secret is returned once. */
+        post: operations["create_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bots/{bot}/incoming-webhooks/{hook}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a webhook. Runs it already started stay. */
+        delete: operations["delete_webhook"];
+        options?: never;
+        head?: never;
+        /** Rename a webhook, change its instruction, or turn it on or off. */
+        patch: operations["update_webhook"];
+        trace?: never;
+    };
+    "/v1/bots/{bot}/incoming-webhooks/{hook}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a run with a fixed test payload. The payload is still untrusted data. */
+        post: operations["test_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bots/{bot}/knowledge/email-captures": {
         parameters: {
             query?: never;
@@ -2487,6 +2540,23 @@ export interface paths {
         get: operations["hosts_version"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/incoming-webhooks/{hook}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept a signed call and start a run. No bearer token: the signature is the credential. */
+        post: operations["receive_webhook"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6987,6 +7057,85 @@ export interface components {
         ImportSchedulesReport: {
             items: components["schemas"]["ImportScheduleResult"][];
         };
+        /** @description A call was accepted. The run continues in the background. */
+        IncomingWebhookAccepted: {
+            /**
+             * Format: uuid
+             * @description New chat the run lives in.
+             */
+            chat_id: string;
+            /**
+             * Format: uuid
+             * @description Run that was started.
+             */
+            run_id: string;
+            /** @description Always `accepted`. */
+            status: string;
+            /**
+             * Format: uuid
+             * @description Webhook that fired.
+             */
+            webhook_id: string;
+        };
+        /** @description Answer of create: the webhook, plus the secret, which is shown this once. */
+        IncomingWebhookCreated: {
+            /** @description HMAC secret. Copy it now; later reads do not return it. */
+            secret: string;
+            /** @description The webhook, without the secret repeated inside it. */
+            webhook: components["schemas"]["IncomingWebhookDto"];
+        };
+        /** @description A webhook as the owner sees it. The signing secret is not here. */
+        IncomingWebhookDto: {
+            /**
+             * Format: uuid
+             * @description Bot the call starts.
+             */
+            bot_id: string;
+            /**
+             * Format: int64
+             * @description Creation time (Unix ms).
+             */
+            created_at_ms: number;
+            /** @description Whether calls are accepted. */
+            enabled: boolean;
+            /**
+             * Format: uuid
+             * @description Id used in the public address.
+             */
+            id: string;
+            /** @description What the owner wants done with the data. */
+            instruction: string;
+            /**
+             * Format: int64
+             * @description Last accepted call, if any.
+             */
+            last_fired_at_ms?: number | null;
+            /** @description Name the owner chose. */
+            name: string;
+            /** @description `POST` path on this daemon. */
+            path: string;
+            /**
+             * Format: int64
+             * @description Last edit (Unix ms).
+             */
+            updated_at_ms: number;
+        };
+        /** @description Body of `POST /v1/bots/{bot}/incoming-webhooks`. */
+        IncomingWebhookInput: {
+            /** @description What the bot should do with the data. Blank uses a safe default. */
+            instruction?: string | null;
+            /** @description Short name, shown on the chat. */
+            name: string;
+        };
+        /** @description Body of `PATCH /v1/bots/{bot}/incoming-webhooks/{hook}`. */
+        IncomingWebhookPatch: {
+            /** @description Turn calls on or off. */
+            enabled?: boolean | null;
+            /** @description New instruction. Blank restores the default. */
+            instruction?: string | null;
+            /** @description New name. */
+            name?: string | null;
+        };
         InputBatch: {
             /** Format: int64 */
             control_epoch: number;
@@ -11075,6 +11224,194 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_webhooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bot id */
+                bot: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomingWebhookDto"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bot id */
+                bot: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncomingWebhookInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomingWebhookCreated"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bot id */
+                bot: string;
+                /** @description Webhook id */
+                hook: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bot id */
+                bot: string;
+                /** @description Webhook id */
+                hook: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncomingWebhookPatch"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomingWebhookDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bot id */
+                bot: string;
+                /** @description Webhook id */
+                hook: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomingWebhookAccepted"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the webhook is off, or this installation is standby */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15807,6 +16144,80 @@ export interface operations {
                 };
             };
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    receive_webhook: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Unix milliseconds. The signature covers `{timestamp}.{body}` and the timestamp must be within 5 minutes. */
+                "X-Webhook-Timestamp": string;
+                /** @description `sha256=<hex>` HMAC-SHA256 of `{timestamp}.{raw body}` */
+                "X-Signature-256": string;
+            };
+            path: {
+                /** @description Webhook id */
+                hook: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/plain": string;
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomingWebhookAccepted"];
+                };
+            };
+            /** @description timestamp missing or not a number */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description bad signature, unknown webhook, stale timestamp, or replay */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description turned off, safe mode, or standby */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description body larger than 64 KB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description too many calls or too many failed calls this minute */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

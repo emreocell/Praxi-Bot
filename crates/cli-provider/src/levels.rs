@@ -108,6 +108,8 @@ pub enum Driver {
     Copilot,
     /// Kimi Code CLI (`kimi acp`).
     Kimi,
+    /// Qoder CLI (`qodercli --acp`).
+    Qoder,
 }
 
 /// How far a driver's interface was checked.
@@ -132,7 +134,7 @@ pub enum Transport {
 }
 
 impl Driver {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Claude,
         Self::Codex,
         Self::Cursor,
@@ -143,9 +145,10 @@ impl Driver {
         Self::Copilot,
         Self::Kiro,
         Self::Kimi,
+        Self::Qoder,
     ];
 
-    /// Registry id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `kimi`).
+    /// Registry id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `kimi`, `qoder`).
     #[must_use]
     pub const fn id(self) -> &'static str {
         match self {
@@ -159,6 +162,7 @@ impl Driver {
             Self::Kiro => "kiro",
             Self::Copilot => "copilot",
             Self::Kimi => "kimi",
+            Self::Qoder => "qoder",
         }
     }
 
@@ -180,6 +184,7 @@ impl Driver {
             Self::Kiro => "Kiro CLI",
             Self::Copilot => "GitHub Copilot CLI",
             Self::Kimi => "Kimi Code CLI",
+            Self::Qoder => "Qoder CLI",
         }
     }
 
@@ -195,7 +200,8 @@ impl Driver {
             | Self::Qwen
             | Self::Copilot
             | Self::Kiro
-            | Self::Kimi => Transport::Acp,
+            | Self::Kimi
+            | Self::Qoder => Transport::Acp,
         }
     }
 
@@ -210,7 +216,8 @@ impl Driver {
             | Self::Qwen
             | Self::Copilot
             | Self::Kiro
-            | Self::Kimi => Support::Experimental,
+            | Self::Kimi
+            | Self::Qoder => Support::Experimental,
             _ => Support::Verified,
         }
     }
@@ -444,6 +451,26 @@ pub fn level_plan(driver: Driver, level: ApprovalLevel) -> LevelPlan {
                 ..plan(level, Full, "every permission request approved")
             },
         },
+        // Qoder CLI 1.1.97 (`qodercli --acp`, a hidden flag): the ACP mode is sent with
+        // `session/set_mode` after `session/new`, because a new session starts in the
+        // permission mode of the user's settings. Its ACP modes are `default` ("Prompts for
+        // approval"), `acceptEdits` ("Auto-approves edit tools"), `auto` (an approval
+        // classifier), `dontAsk` (refuses instead of prompting, unused) and `yolo` ("Auto-
+        // approves all tools"). The session's mode is re-read from the CLI after every change,
+        // so a mode set here is the one that applies.
+        Driver::Qoder => {
+            let (mode, native) = match level {
+                Ask => ("default", "mode default"),
+                AcceptEdits => ("acceptEdits", "mode acceptEdits"),
+                Auto => ("auto", "mode auto"),
+                Full => ("yolo", "mode yolo"),
+            };
+            LevelPlan {
+                acp_mode: Some(mode),
+                acp_allow_all: level == Full,
+                ..plan(level, level, native)
+            }
+        }
         // Kimi Code CLI 2.7.3 (`kimi acp`): the ACP mode is sent with `session/set_mode`
         // after `session/new`, because a new session otherwise starts in the
         // `defaultPermissionMode` of `config.toml`. The ACP mode list describes `auto` as
@@ -501,6 +528,9 @@ pub fn acp_args(driver: Driver, plan: &LevelPlan, model: Option<&str>) -> Option
         // Kimi: `-m` is a top-level option that `kimi acp` does not take; the model is
         // chosen with `session/set_model` after `session/new`.
         Driver::OpenCode | Driver::Kimi => args.push("acp".into()),
+        // Qoder: the model is chosen with `session/set_model` after `session/new`, like the
+        // mode, so a model the CLI does not list is refused instead of guessed.
+        Driver::Qoder => args.push("--acp".into()),
         Driver::Gemini | Driver::Qwen => {
             args.push("--acp".into());
             args.extend(own(plan.flags));
@@ -706,6 +736,16 @@ mod tests {
                 "every permission request approved",
                 KIRO_ARGV,
             ),
+            (Driver::Qoder, Ask, Ask, "mode default", &["--acp"]),
+            (
+                Driver::Qoder,
+                AcceptEdits,
+                AcceptEdits,
+                "mode acceptEdits",
+                &["--acp"],
+            ),
+            (Driver::Qoder, Auto, Auto, "mode auto", &["--acp"]),
+            (Driver::Qoder, Full, Full, "mode yolo", &["--acp"]),
             (Driver::Kimi, Ask, Ask, KIMI_ASK, &["acp"]),
             (Driver::Kimi, AcceptEdits, Ask, KIMI_ASK, &["acp"]),
             (
@@ -770,6 +810,25 @@ mod tests {
         assert_eq!(
             acp_args(Driver::Kiro, &level_plan(Driver::Kiro, Ask), Some("x")).unwrap(),
             KIRO_ARGV
+        );
+        // Qoder CLI: the mode always goes through `session/set_mode`; only Full is `yolo`.
+        assert_eq!(Driver::Qoder.support(), Support::Experimental);
+        let qoder: Vec<_> = ApprovalLevel::ALL
+            .into_iter()
+            .map(|l| level_plan(Driver::Qoder, l).acp_mode)
+            .collect();
+        assert_eq!(
+            qoder,
+            [
+                Some("default"),
+                Some("acceptEdits"),
+                Some("auto"),
+                Some("yolo")
+            ]
+        );
+        assert_eq!(
+            acp_args(Driver::Qoder, &level_plan(Driver::Qoder, Ask), Some("auto")).unwrap(),
+            ["--acp"]
         );
         // Kimi Code CLI: the mode always goes through `session/set_mode`, and the CLI's
         // `yolo` ("Ask When Needed") is Auto while its `auto` ("Never Ask") is Full.

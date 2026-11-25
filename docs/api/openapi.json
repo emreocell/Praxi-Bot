@@ -1829,6 +1829,318 @@
         ]
       }
     },
+    "/v1/bots/{bot}/incoming-webhooks": {
+      "get": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "List a bot's webhooks. Secrets are not included.",
+        "operationId": "list_webhooks",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Bot id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IncomingWebhookDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Create a webhook. The secret is returned once.",
+        "operationId": "create_webhook",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Bot id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncomingWebhookInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomingWebhookCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/bots/{bot}/incoming-webhooks/{hook}": {
+      "delete": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Delete a webhook. Runs it already started stay.",
+        "operationId": "delete_webhook",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Bot id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "hook",
+            "in": "path",
+            "description": "Webhook id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "deleted"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Rename a webhook, change its instruction, or turn it on or off.",
+        "operationId": "update_webhook",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Bot id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "hook",
+            "in": "path",
+            "description": "Webhook id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncomingWebhookPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomingWebhookDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/bots/{bot}/incoming-webhooks/{hook}/test": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Start a run with a fixed test payload. The payload is still untrusted data.",
+        "operationId": "test_webhook",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Bot id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "hook",
+            "in": "path",
+            "description": "Webhook id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomingWebhookAccepted"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the webhook is off, or this installation is standby",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/bots/{bot}/knowledge/email-captures": {
       "get": {
         "tags": [
@@ -8898,6 +9210,110 @@
             "bearer": []
           }
         ]
+      }
+    },
+    "/v1/incoming-webhooks/{hook}": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Accept a signed call and start a run. No bearer token: the signature is the credential.",
+        "operationId": "receive_webhook",
+        "parameters": [
+          {
+            "name": "hook",
+            "in": "path",
+            "description": "Webhook id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Webhook-Timestamp",
+            "in": "header",
+            "description": "Unix milliseconds. The signature covers `{timestamp}.{body}` and the timestamp must be within 5 minutes.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Signature-256",
+            "in": "header",
+            "description": "`sha256=<hex>` HMAC-SHA256 of `{timestamp}.{raw body}`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomingWebhookAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "timestamp missing or not a number",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "bad signature, unknown webhook, stale timestamp, or replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "turned off, safe mode, or standby",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "body larger than 64 KB"
+          },
+          "429": {
+            "description": "too many calls or too many failed calls this minute",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/local-install": {
@@ -22146,6 +22562,164 @@
             }
           }
         }
+      },
+      "IncomingWebhookAccepted": {
+        "type": "object",
+        "description": "A call was accepted. The run continues in the background.",
+        "required": [
+          "status",
+          "webhook_id",
+          "run_id",
+          "chat_id"
+        ],
+        "properties": {
+          "chat_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "New chat the run lives in."
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Run that was started."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `accepted`."
+          },
+          "webhook_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Webhook that fired."
+          }
+        }
+      },
+      "IncomingWebhookCreated": {
+        "type": "object",
+        "description": "Answer of create: the webhook, plus the secret, which is shown this once.",
+        "required": [
+          "webhook",
+          "secret"
+        ],
+        "properties": {
+          "secret": {
+            "type": "string",
+            "description": "HMAC secret. Copy it now; later reads do not return it."
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/IncomingWebhookDto",
+            "description": "The webhook, without the secret repeated inside it."
+          }
+        }
+      },
+      "IncomingWebhookDto": {
+        "type": "object",
+        "description": "A webhook as the owner sees it. The signing secret is not here.",
+        "required": [
+          "id",
+          "bot_id",
+          "name",
+          "instruction",
+          "enabled",
+          "path",
+          "created_at_ms",
+          "updated_at_ms"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Bot the call starts."
+          },
+          "created_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Creation time (Unix ms)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether calls are accepted."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id used in the public address."
+          },
+          "instruction": {
+            "type": "string",
+            "description": "What the owner wants done with the data."
+          },
+          "last_fired_at_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Last accepted call, if any."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name the owner chose."
+          },
+          "path": {
+            "type": "string",
+            "description": "`POST` path on this daemon."
+          },
+          "updated_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Last edit (Unix ms)."
+          }
+        }
+      },
+      "IncomingWebhookInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/bots/{bot}/incoming-webhooks`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "instruction": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the bot should do with the data. Blank uses a safe default."
+          },
+          "name": {
+            "type": "string",
+            "description": "Short name, shown on the chat."
+          }
+        },
+        "additionalProperties": false
+      },
+      "IncomingWebhookPatch": {
+        "type": "object",
+        "description": "Body of `PATCH /v1/bots/{bot}/incoming-webhooks/{hook}`.",
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Turn calls on or off."
+          },
+          "instruction": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New instruction. Blank restores the default."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New name."
+          }
+        },
+        "additionalProperties": false
       },
       "InputBatch": {
         "type": "object",

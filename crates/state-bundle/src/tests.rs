@@ -2091,3 +2091,97 @@ async fn imported_bots_lose_engine_settings_and_consent() {
     );
     assert!(config.contains("\"model\":\"fake\""));
 }
+
+const WEBHOOK_SECRET: &str = "whsec-test-0123456789abcdef";
+const SCHEDULE_WEBHOOK_SECRET: &str = "schedsec-test-fedcba9876543210";
+
+fn webhook_source(dir: &Path) {
+    database(dir, true);
+    Connection::open(dir.join("bot.db")).unwrap().execute_batch(&format!(
+        "INSERT INTO incoming_webhooks (id, user_id, bot_id, name, instruction, secret, enabled, created_at_ms, updated_at_ms) VALUES ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'hook', 'do it', '{WEBHOOK_SECRET}', 1, 1, 1);
+         INSERT INTO incoming_webhook_seen VALUES ('00000000-0000-0000-0000-0000000000a1', 'sig-replay', 99999999999999);"
+    )).unwrap();
+    drop(scheduler::ScheduleStore::open(dir).unwrap());
+    Connection::open(dir.join("schedules.db")).unwrap().execute_batch(&format!(
+        "INSERT INTO schedules (id, bot_id, name, spec_json, payload_json, enabled, created_at_ms) VALUES ('s1', 'b', 'n', '{{}}', '{{}}', 1, 1);
+         INSERT INTO schedule_triggers (schedule_id, trigger_json, created_at_ms) VALUES ('s1', '{{\"kind\":\"webhook\",\"secret\":\"{SCHEDULE_WEBHOOK_SECRET}\"}}', 1);"
+    )).unwrap();
+}
+
+fn contains(haystack: &[u8], needle: &str) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|w| w == needle.as_bytes())
+}
+
+#[tokio::test]
+async fn webhook_secrets_never_travel_unless_all_is_chosen_and_import_disables_hooks() {
+    let source = tempfile::tempdir().unwrap();
+    webhook_source(source.path());
+    // Default (SecretSelection::None): no webhook secret byte anywhere in the file.
+    let bytes = bundle(source.path()).await;
+    assert!(
+        !contains(&bytes, WEBHOOK_SECRET),
+        "incoming webhook secret leaked"
+    );
+    assert!(
+        !contains(&bytes, SCHEDULE_WEBHOOK_SECRET),
+        "schedule webhook secret leaked"
+    );
+    assert!(!contains(&bytes, "sig-replay"), "replay table leaked");
+    // The live source is untouched by an export.
+    let live: String = Connection::open(source.path().join("bot.db"))
+        .unwrap()
+        .query_row("SELECT secret FROM incoming_webhooks", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(live, WEBHOOK_SECRET);
+    // Explicit All keeps the secrets in the file (documented opt-in).
+    let mut all = Vec::new();
+    export(
+        source.path(),
+        &MemoryStore::new(),
+        ExportOptions {
+            secrets: SecretSelection::All,
+            ..Default::default()
+        },
+        &mut all,
+    )
+    .await
+    .unwrap();
+    assert!(contains(&all, WEBHOOK_SECRET));
+    // Import, from either bundle, always lands disabled with no secret.
+    for bytes in [bytes, all] {
+        let target = tempfile::tempdir().unwrap();
+        import(
+            target.path(),
+            &MemoryStore::new(),
+            bytes.as_slice(),
+            ImportOptions::default(),
+        )
+        .await
+        .unwrap();
+        let conn = Connection::open(target.path().join("bot.db")).unwrap();
+        let (secret, enabled): (String, i64) = conn
+            .query_row("SELECT secret, enabled FROM incoming_webhooks", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((secret.as_str(), enabled), ("", 0));
+        let seen: i64 = conn
+            .query_row("SELECT COUNT(*) FROM incoming_webhook_seen", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(seen, 0);
+        let conn = Connection::open(target.path().join("schedules.db")).unwrap();
+        let (trigger, enabled): (String, i64) = conn
+            .query_row(
+                "SELECT t.trigger_json, s.enabled FROM schedule_triggers t JOIN schedules s ON s.id = t.schedule_id",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!(!trigger.contains(SCHEDULE_WEBHOOK_SECRET));
+        assert_eq!(enabled, 0);
+    }
+}

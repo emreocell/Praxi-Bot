@@ -261,6 +261,21 @@ impl Runtime {
         Ok(())
     }
 
+    /// Signal the cancel token of a live run without touching its state (the
+    /// drive loop finishes it). Returns `false` when the run is not live. A
+    /// caller that is about to release something the run waits on (an approval)
+    /// calls this first, so the woken step can never be taken for a finished
+    /// one and followed by another model call.
+    pub fn signal_cancel(&self, run_id: RunId) -> bool {
+        let tokens = self.tokens.lock();
+        let Some(token) = tokens.get(&run_id) else {
+            return false;
+        };
+        self.pausing.lock().remove(&run_id);
+        token.cancel();
+        true
+    }
+
     /// Finish a run whose drive task was aborted (a hard stop): its token is
     /// dropped, unfinished steps become `Interrupted` and a non-terminal run is
     /// set to `Cancelled` without waiting for the task. Returns `true` when the
@@ -316,6 +331,25 @@ impl Runtime {
 
     /// Terminal-or-paused state a stopped live run moves to: `Paused` after
     /// [`Runtime::request_pause`], else `Cancelled`.
+    /// Move a stopped run to [`Self::stop_state`]. If a hard stop already
+    /// marked it terminal, keep that state instead of failing the transition.
+    fn finish_stopped(&self, run_id: RunId) -> Result<RunState> {
+        let to = self.stop_state(run_id);
+        match self.transition(run_id, to, None) {
+            Err(RuntimeError::IllegalTransition { .. }) => {
+                let run = self.require_run(run_id)?;
+                let state =
+                    RunState::parse(&run.state).ok_or(RuntimeError::UnknownState(run.state))?;
+                if state.is_terminal() {
+                    Ok(state)
+                } else {
+                    Err(RuntimeError::IllegalTransition { from: state, to })
+                }
+            }
+            other => other,
+        }
+    }
+
     fn stop_state(&self, run_id: RunId) -> RunState {
         if self.pausing.lock().contains(&run_id) {
             RunState::Paused
@@ -474,9 +508,22 @@ impl Runtime {
                             None,
                             true,
                         )?;
-                        return self.transition(run_id, self.stop_state(run_id), None);
+                        return self.finish_stopped(run_id);
                     }
                     Some(Ok(output)) => {
+                        // The step finished on a worker that never polled the
+                        // token (a blocking sleep). Stop still wins.
+                        if token.is_cancelled() {
+                            st.update_step(
+                                step_id,
+                                StepStatus::Interrupted.as_str(),
+                                attempt,
+                                None,
+                                None,
+                                true,
+                            )?;
+                            return self.finish_stopped(run_id);
+                        }
                         st.update_step(
                             step_id,
                             StepStatus::Succeeded.as_str(),
@@ -488,6 +535,20 @@ impl Runtime {
                         break;
                     }
                     Some(Err(e)) => {
+                        // Stop landed between the two arms of the select above:
+                        // the step saw the token first and reported its
+                        // cancellation as an error. That is a stop, not a failure.
+                        if token.is_cancelled() {
+                            st.update_step(
+                                step_id,
+                                StepStatus::Interrupted.as_str(),
+                                attempt,
+                                None,
+                                None,
+                                true,
+                            )?;
+                            return self.finish_stopped(run_id);
+                        }
                         st.update_step(
                             step_id,
                             StepStatus::Failed.as_str(),
@@ -543,6 +604,8 @@ mod tests {
     enum Block {
         Pending,
         UntilCancel,
+        /// Stop lands inside the step, which reports its own cancellation as an error.
+        CancelThenFail,
         Sleep(u64),
     }
 
@@ -604,6 +667,10 @@ mod tests {
                     Block::Pending => std::future::pending::<()>().await,
                     Block::UntilCancel => {
                         cancel.cancelled().await;
+                        return Err(ExecError("cancelled".into()));
+                    }
+                    Block::CancelThenFail => {
+                        cancel.cancel();
                         return Err(ExecError("cancelled".into()));
                     }
                     Block::Sleep(ms) => tokio::time::sleep(Duration::from_millis(*ms)).await,
@@ -855,6 +922,21 @@ mod tests {
             vec![("a".into(), "interrupted".into(), 1)]
         );
         assert!(rt.cancel(run).is_err(), "already terminal");
+    }
+
+    #[tokio::test]
+    async fn a_step_error_after_stop_is_a_cancel_not_a_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, u, b) = setup(dir.path());
+        let ex = Arc::new(Fake::new(vec![spec("a", true)]).blocking("a", Block::CancelThenFail));
+        let rt = Arc::new(Runtime::new(st.clone(), ex.clone()));
+        let run = rt.create_run(u, b, None, "turn").unwrap();
+        assert_eq!(rt.start(run).await.unwrap(), RunState::Cancelled);
+        assert_eq!(
+            statuses(&st, run),
+            vec![("a".into(), "interrupted".into(), 1)]
+        );
+        assert_eq!(ex.executed.lock().len(), 1, "no retry after Stop");
     }
 
     struct Planning {

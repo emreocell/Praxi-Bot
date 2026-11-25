@@ -17,7 +17,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BotAvatar, Button, Card } from "ui";
+import { BotAvatar, Button } from "ui";
+import { SettingsCard } from "../../components/SettingsUi";
 import { BrandIcon } from "../../components/BrandIcon";
 import { botView } from "../../lib/botProfile";
 import { MAIL_CHANGED_EVENT, nextStep } from "../../lib/botMail";
@@ -852,11 +853,12 @@ export function EmailCard() {
   const editing = typeof mode === "object" ? list.find((a) => a.name === mode.edit) : undefined;
 
   return (
-    <Card padding="md" className={styles.root} data-testid="email-card">
-      <div className={styles.info}>
-        <h2 className={styles.heading}>{t("settingsModal.email.title")}</h2>
-        <p className={formStyles.hint}>{t("settingsModal.email.description")}</p>
-      </div>
+    <SettingsCard
+      title={t("settingsModal.email.title")}
+      description={t("settingsModal.email.description")}
+      testId="email-card"
+    >
+      <div className={styles.root}>
       <p className={styles.note}>
         <Info aria-hidden="true" />
         <span>{t("settingsModal.email.note")}</span>
@@ -922,6 +924,7 @@ export function EmailCard() {
           }}
         />
       )}
-    </Card>
+      </div>
+    </SettingsCard>
   );
 }

@@ -284,6 +284,9 @@ fn normalize_deny_path(path: &str) -> String {
 /// Why `method path` is refused to every paired peer role, if it is: the
 /// host-local provider management, MCP management and diagnostics endpoints.
 fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> {
+    if is_incoming_webhook_path(check_path) {
+        return Some("incoming webhooks are managed on this computer by the owner");
+    }
     if under(check_path, "/v1/logs") {
         return Some("recent logs are available only to the local owner");
     }
@@ -428,6 +431,20 @@ fn is_bot_engine_path(path: &str) -> bool {
         .is_some_and(|(id, tail)| {
             !id.is_empty() && !id.contains('/') && (tail.is_empty() || tail == "/kill")
         })
+}
+
+/// Incoming webhook management and the signed ingress. Peers never call either:
+/// a tunnel the owner chooses hits loopback, not the peer router.
+fn is_incoming_webhook_path(path: &str) -> bool {
+    if under(path, "/v1/incoming-webhooks") {
+        return true;
+    }
+    let mut parts = path.split('/');
+    parts.next() == Some("")
+        && parts.next() == Some("v1")
+        && parts.next() == Some("bots")
+        && parts.next().is_some_and(|id| !id.is_empty())
+        && parts.next() == Some("incoming-webhooks")
 }
 
 /// `/v1/bots/{id}/spend-limits`: the cap a bot (or a peer) must not lift.
