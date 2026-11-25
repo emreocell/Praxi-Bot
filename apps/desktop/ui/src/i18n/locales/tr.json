@@ -1379,6 +1379,7 @@
     "switcher": "Hangi bilgisayar gösterilsin",
     "tabs": {
       "activity": "Etkinlik",
+      "automation": "Otomasyon",
       "label": "Panel bölümleri",
       "library": "Kitaplık"
     },
@@ -1390,6 +1391,33 @@
       "title": "Yaklaşanlar",
       "toggle": "{{name}} açık/kapalı",
       "trigger": "Bir olay olunca"
+    },
+    "webhooks": {
+      "copied": "Kopyalandı",
+      "copySecret": "Sırrı kopyala",
+      "copyUrl": "Adresi kopyala",
+      "create": "Webhook oluştur",
+      "creating": "Oluşturuluyor…",
+      "empty": "Henüz webhook yok. GitHub, bir form ya da evdeki bir anahtar bu botu başlatacaksa bir tane oluştur.",
+      "enabled": "Açık",
+      "instruction": "Bot bu veriyle ne yapsın?",
+      "instructionHint": "Bu senin talimatın. Gelen metin veridir, emir değildir. Bot bir şey yapmadan önce yine sorar.",
+      "intro": "Bir webhook, bir şey adresini çağırınca bu botu başlatır. Praxi imzayı kontrol eder ve metni güvenilmeyen veri olarak görür.",
+      "loadError": "Webhook'lar yüklenemedi.",
+      "name": "Ad",
+      "namePlaceholder": "GitHub, giriş kapısı, bir form",
+      "off": "Kapalı",
+      "remove": "Kaldır",
+      "removed": "Webhook kaldırıldı",
+      "secretLabel": "İmza sırrı",
+      "secretOnce": "Bu sırrı şimdi kopyala. Praxi onu bir daha göstermez.",
+      "sign": "Her çağrı iki başlık gönderir. X-Webhook-Timestamp, milisaniye cinsinden zamandır. X-Signature-256, sha256= ile başlar ve bu zamanın, bir noktanın ve ham gövdenin HMAC'idir; sır ile imzalanır. Aynı imzalı çağrı bir kez geçerlidir ve yalnızca zaman 5 dakika içindeyse. Gövde en fazla 64 KB olabilir. Dakikada 30'dan fazla çağrı reddedilir.",
+      "test": "Deneme gönder",
+      "testStarted": "Deneme başladı. Bot bunu güvenilmeyen veri sayar. Bir soru yine bildirim olarak görünür.",
+      "testing": "Gönderiliyor…",
+      "title": "Webhook'lar",
+      "tunnel": "Praxi yalnız bu bilgisayarı dinler. GitHub, bir form ya da ev otomasyonu bu adresi çağıracaksa, kendi seçtiğin bir tüneli (örneğin Cloudflare Tunnel ya da ssh) 127.0.0.1 adresine yönelt. Yönlendiricide yeni bir kapı açma.",
+      "urlLabel": "Adres"
     }
   },
   "botProfile": {
@@ -4467,57 +4495,101 @@
       "deny": "Reddet"
     },
     "approval": {
-      "mcp": "{{bot}}, {{app}} uygulamasını kullanmak istiyor ({{action}})",
-      "other": "{{bot}} devam etmek istiyor: {{what}}",
-      "title": "Onayınız gerekiyor"
+      "deleteFile": "{{bot}} bir dosyayı silmek için onayını istiyor",
+      "mcp": "{{bot}}, {{app}} kullanmak için onayını istiyor ({{action}})",
+      "openPage": "{{bot}} bir sayfayı açmak için onayını istiyor",
+      "openSite": "{{bot}}, {{site}} sitesini açmak için onayını istiyor",
+      "other": "{{bot}} onayını bekliyor: {{what}}",
+      "readSite": "{{bot}}, {{site}} sayfasını okumak için onayını istiyor",
+      "runCommand": "{{bot}} bir komut çalıştırmak için onayını istiyor",
+      "saveFile": "{{bot}} bir dosyayı kaydetmek için onayını istiyor",
+      "schedule": "{{bot}} zamanlanmış görev için onayını istiyor",
+      "sendEmail": "{{bot}} bir e-posta göndermek için onayını istiyor",
+      "title": "Onayın gerekiyor"
     },
     "detail": {
-      "failed": "Başarısız: {{detail}}",
+      "failed": "Çalışma başarısız: {{detail}}",
       "longRun": "{{detail}}",
       "needsYou": "{{detail}}",
       "scheduleDone": "{{detail}}"
     },
+    "failed": {
+      "reasonAuth": "model ayarlarını kontrol et",
+      "reasonBusy": "model meşgul",
+      "reasonNetwork": "bağlantı koptu",
+      "reasonTimeout": "zaman aşımına uğradı",
+      "retrying": "Çalışma başarısız: {{reason}}, {{seconds}} sn sonra yeniden denenecek",
+      "withReason": "Çalışma başarısız: {{reason}}"
+    },
     "generic": {
-      "failed": "Bir çalışma başarısız oldu.",
-      "longRun": "Uzun bir görev bitti.",
-      "needsYou": "Dikkatin gerekiyor.",
-      "scheduleDone": "Zamanlanmış bir iş bitti."
+      "failed": "Çalışma başarısız",
+      "longRun": "Uzun görev bitti",
+      "needsYou": "Dikkatin gerekiyor",
+      "scheduleDone": "Zamanlanmış görev bitti"
+    },
+    "question": {
+      "title": "{{bot}} bir soru sordu"
     }
   },
   "notifyHistory": {
-    "allBots": "Tüm botlar",
-    "allTypes": "Tüm türler",
-    "clear": "Geçmişi temizle",
-    "empty": "Bir bot işini bitirdiğinde ya da onayına ihtiyaç duyduğunda burada görürsün.",
+    "approvedToast": "İzin verildi",
+    "askedTimes": "{{bot}} {{count}} kez sordu",
+    "clear": "Temizle",
+    "clearedToast": "Bildirimler temizlendi",
+    "deniedToast": "Reddedildi",
+    "dismiss": "Kapat",
+    "empty": "Bot bir işini bitirdiğinde ya da onayına ihtiyaç duyduğunda burada görürsün.",
     "emptyAction": "Seni bekleyenlere bak",
     "emptyTitle": "Yeni bir şey yok",
-    "filterBot": "Bot",
-    "filterType": "Tür",
+    "filterChip": {
+      "all": "Tümü",
+      "errors": "Hatalar",
+      "needsYou": "Seni bekliyor",
+      "runs": "Çalışmalar"
+    },
     "filters": "Bildirimleri süz",
+    "groups": {
+      "earlier": "Daha önce",
+      "needsYou": "Seni bekliyor",
+      "updates": "Güncellemeler"
+    },
     "held": "Tutuldu (sessiz saatler)",
     "heldMuted": "Tutuldu (bot sessizde)",
-    "kind": {
-      "digest": "Günlük özet",
-      "failed": "Çalışma başarısız",
-      "longRun": "Uzun çalışma bitti",
-      "needsYou": "Sizi bekliyor",
-      "scheduleDone": "Zamanlanmış iş bitti"
-    },
+    "heldMutedShort": "Sessizde",
+    "heldShort": "Sessiz saatler",
     "markAllRead": "Tümünü okundu say",
+    "markRead": "Okundu say",
     "noMatch": "Bu süzgeçlere uyan bildirim yok.",
     "noMatchTitle": "Burada bir şey yok",
-    "onlyUnread": "Yalnızca okunmamışlar",
+    "onlyUnread": "Okunmamış",
     "openNeeds": "Sizi bekleyenleri aç",
     "quietNote": "{{count}} bildirim sessiz saatlerde tutuldu ve hâlâ okunmadı.",
     "quietNote_one": "{{count}} bildirim sessiz saatlerde tutuldu ve hâlâ okunmadı.",
+    "repeatedTimes": "{{count}} kez",
     "resetFilters": "Hepsini göster",
+    "resolved": {
+      "answered": "Yanıtlandı",
+      "approved": "İzin verildi",
+      "denied": "Reddedildi",
+      "expired": "Süresi doldu",
+      "retried": "Yeniden denendi"
+    },
     "retention": "{{days}} gün boyunca, en fazla {{max}} bildirim saklanır; sonra kendiliğinden silinir.",
+    "retriedToast": "Sohbette yeniden deneniyor",
+    "retry": "Yeniden dene",
     "showSnoozed": "Ertelenenler ({{count}})",
-    "shown": "Gösterildi",
     "snooze": "1 saat ertele",
     "snoozeHint": "Bunu bir saatliğine gizle. Kendiliğinden geri gelir.",
-    "subtitle": "Botların bildirdikleri ve sessiz saatlerde tutulanlar. Bekleyen onaylar her zaman Sizi bekleyenler'de kalır.",
-    "title": "Bildirim geçmişi",
+    "subtitle": "Botların bekleyen onayları, biten işleri ve hataları.",
+    "systemBot": "Praxi",
+    "time": {
+      "hoursAgo": "{{count}} sa önce",
+      "justNow": "Az önce",
+      "minutesAgo": "{{count}} dk önce",
+      "yesterday": "Dün"
+    },
+    "title": "Bildirimler",
+    "undo": "Geri al",
     "unread": "Okunmadı",
     "unreadCount": "{{count}} okunmamış",
     "unsnooze": "Geri getir"

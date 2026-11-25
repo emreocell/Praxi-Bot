@@ -10,7 +10,10 @@ import {
 } from "../lib/notifyRules";
 import { holdReason } from "../lib/botMute";
 import type { QuietHours } from "../lib/quietHours";
-import { recordNotification } from "../store/notificationHistoryStore";
+import {
+  recordNotification,
+  resolveNotificationByCallId
+} from "../store/notificationHistoryStore";
 import { brandIcon } from "../lib/brandIcons";
 import { useDecisionActions } from "../components/PendingDecisions";
 import {
@@ -133,6 +136,14 @@ export function ShellBridgeHost({
     return onDaemonEvent((env) => {
       index(env);
       const e = env.event;
+      if (e.type === "tool_call_approved") {
+        resolveNotificationByCallId(e.call_id, "approved");
+        return;
+      }
+      if (e.type === "tool_call_denied") {
+        resolveNotificationByCallId(e.call_id, "denied");
+        return;
+      }
       const runId = "run_id" in e && typeof e.run_id === "string" ? e.run_id : "";
       const run = runId ? runs.get(runId) : undefined;
       // A cheap pre-check keeps the async focus probe off the hot path.
@@ -157,23 +168,35 @@ export function ShellBridgeHost({
         }
         const bot = botsRef.current.find((b) => b.id === d.botId);
         const name = bot?.name ?? "Praxi-Bot";
-        const text = notificationText(d, name, s.notifyPrivate, (k, v) =>
-          tRef.current(k, v),
-          appName
+        const now = new Date();
+        const text = notificationText(
+          d,
+          name,
+          s.notifyPrivate,
+          (k, v) => tRef.current(k, v),
+          appName,
+          now.getTime()
         );
         // Quiet hours or a bot mute hold the toast; it still lands in the history, and a
         // pending approval stays in "Needs you" regardless (a mute never holds one).
-        const now = new Date();
         const held = holdReason(now, s.quietHours, d.kind, d.botId, s.mutedBotIds);
         const hold = held !== null;
+        const callId = !s.notifyPrivate
+          ? d.approval?.callId ?? (e.type === "question_asked" ? e.call_id : undefined)
+          : undefined;
+        const isQuestion = !s.notifyPrivate && e.type === "question_asked";
         recordNotification({
           id: `${env.ts_ms}-${d.runId}-${d.kind}-${d.approval?.callId ?? ""}`,
           kind: d.kind,
-          title: text.title,
-          body: text.body,
+          title: isQuestion ? tRef.current("notify.question.title", { bot: name }) : text.body,
+          body: isQuestion ? text.body : "",
           botId: d.botId,
           botName: name,
           chatId: d.chatId,
+          ...(!s.notifyPrivate && d.runId ? { runId: d.runId } : {}),
+          ...(callId ? { callId } : {}),
+          ...(text.retryAtMs !== undefined ? { retryAtMs: text.retryAtMs } : {}),
+          ...(!s.notifyPrivate && d.kind === "failed" && d.chatId ? { retryable: true } : {}),
           ts: now.getTime(),
           shown: !hold,
           ...(held ? { heldBy: held } : {}),
@@ -266,6 +289,10 @@ export function ShellBridgeHost({
               }
               try {
                 await decideRef.current(press.call_id)(res.decision, res.scope);
+                resolveNotificationByCallId(
+                  press.call_id,
+                  res.decision === "approve" ? "approved" : "denied"
+                );
               } catch {
                 openNeedsRef.current();
               }

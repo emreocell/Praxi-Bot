@@ -296,6 +296,23 @@
   text-align: center;
 }
 
+.notifyBadge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--space-5);
+  height: var(--space-5);
+  padding: var(--space-0) var(--space-2);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-accent-subtle);
+  color: var(--color-accent-text);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
 .unreadDot {
   flex-shrink: 0;
   width: var(--space-2);

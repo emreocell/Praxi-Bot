@@ -9,6 +9,7 @@ Start here, then pick the page for what you want to do. The top-level
 - [Architecture tour](architecture.md): crates, the path of one message, security boundaries, where tests live, how to add a tool, route, eval, UI string or channel
 - [Starter issues](starter-issues.md)
 - [Avoiding merge conflicts in shared files](avoiding-merge-conflicts.md)
+- [Keeping debug and test builds light on memory](build-memory.md)
 
 ## Adding things
 

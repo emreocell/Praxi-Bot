@@ -1272,6 +1272,12 @@ pub fn initiator_of(kind: &str) -> InitiatorKind {
         Some(s) if s == "external_schedule" || s.starts_with("external_schedule:") => {
             InitiatorKind::ExternalSchedule
         }
+        // An incoming webhook is external data. It must not fall through to
+        // Human: that would let the router and `call:` lines treat the payload
+        // as the owner's own instructions.
+        Some(s) if s == "incoming_webhook" || s.starts_with("incoming_webhook:") => {
+            InitiatorKind::ExternalSchedule
+        }
         Some(s) if s == "schedule" || s.starts_with("schedule:") => InitiatorKind::Schedule,
         Some(s) if s == "external_agent" || s.starts_with("external_agent:") => {
             InitiatorKind::ExternalAgent
@@ -1785,6 +1791,12 @@ impl Shared {
             }
         }
         absorb_run_history(&mut taint, self, run.id, 0);
+        // The body of a signed webhook call is untrusted data from the first
+        // model call on: the run is tainted like one that read a web page.
+        if crate::history::is_webhook_run(run) {
+            taint.exposure.observe(true, false);
+            taint.note_label("incoming webhook body");
+        }
         // A subagent does not see the chat. A top-level turn, including a
         // scheduled one, does: provenance rides on the messages that enter
         // the context. Dropped by the history bound means the bytes are not

@@ -343,8 +343,9 @@ pub(crate) async fn guard(State(state): State<AppState>, mut req: Request, next:
     }
     // `GET /v1/health`, and the webhooks, which carry an HMAC of the body
     // instead of the bearer token (the route verifies it).
-    let public =
-        (req.method() == Method::GET && req.uri().path() == "/v1/health") || is_webhook_route(&req);
+    let public = (req.method() == Method::GET && req.uri().path() == "/v1/health")
+        || is_webhook_route(&req)
+        || is_incoming_webhook(&req);
     if !public {
         let presented = match bearer(req.headers()) {
             Some(t) => Some(t),
@@ -387,6 +388,18 @@ pub(crate) async fn guard(State(state): State<AppState>, mut req: Request, next:
 
 fn is_webhook_route(req: &Request) -> bool {
     req.method() == Method::POST && req.uri().path().starts_with("/v1/webhooks/")
+}
+
+/// `POST /v1/incoming-webhooks/{id}` only. Management lives under `/v1/bots/…`.
+fn is_incoming_webhook(req: &Request) -> bool {
+    if req.method() != Method::POST {
+        return false;
+    }
+    let path = req.uri().path().trim_end_matches('/');
+    let Some(id) = path.strip_prefix("/v1/incoming-webhooks/") else {
+        return false;
+    };
+    !id.is_empty() && !id.contains('/')
 }
 
 fn is_events_route(req: &Request) -> bool {

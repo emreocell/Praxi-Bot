@@ -1031,6 +1031,26 @@ impl AgentLoop {
             .map(|r| r.id))
     }
 
+    /// Start a run from an incoming webhook. `envelope` is data (a JSON
+    /// string), not a tool directive. The kind is `incoming_webhook`, which
+    /// [`initiator_of`](crate::shared::initiator_of) treats as an external
+    /// schedule: the router does not parse it, and tool approvals stay
+    /// once-only.
+    ///
+    /// The chat must be empty. Each delivery uses its own chat.
+    ///
+    /// # Errors
+    /// Existing chat history or any other run-start error.
+    pub fn run_incoming_webhook(
+        &self,
+        chat_id: ChatId,
+        hook_id: Uuid,
+        envelope: &str,
+    ) -> Result<RunId> {
+        let kind = format!("turn:incoming_webhook:{hook_id}:{}", Uuid::now_v7());
+        self.start_turn_from(chat_id, envelope, &kind, None, None, "incoming_webhook")
+    }
+
     /// Start an externally supplied scheduled run in a new, isolated chat.
     /// The durable initiator survives resume and is inherited by all children.
     ///

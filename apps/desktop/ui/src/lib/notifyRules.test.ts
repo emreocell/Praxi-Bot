@@ -8,6 +8,7 @@ import {
   type NotifyContext,
   alwaysOffered,
   approvalActions,
+  formatFailedDetail,
   notificationText,
   resolveNotificationAction
 } from "./notifyRules.ts";
@@ -40,8 +41,8 @@ const approval: DaemonEvent = {
   type: "approval_needed",
   run_id: "r1",
   call_id: "k1",
-  tool_name: "shell",
-  input: {},
+  tool_name: "shell_run",
+  input: { command: "rm -rf build" },
   summary: "Run rm -rf build"
 };
 
@@ -123,17 +124,60 @@ test("failed run notifies; a cancellation and a child run do not", () => {
 
 test("private mode keeps only bot name and generic text", () => {
   const t = (k: string, v?: Record<string, string>) =>
-    v ? `${k}:${v.detail}` : k;
+    v ? `${k}:${JSON.stringify(v)}` : k;
   const d = decideNotification(env(approval, 11_000), ctx());
   assert.ok(d);
   const open = notificationText(d, "Atlas", false, t);
-  // an approval is worded plainly from the tool/headline, prefixed by bot name
-  assert.ok(open.body.startsWith("Atlas: "));
+  // an approval is worded from the tool, never from the raw summary or command arguments
+  assert.ok(open.body.startsWith("notify.approval.runCommand"));
   assert.ok(!open.body.includes("rm -rf"));
   const question = notificationText({ ...d, approval: undefined }, "Atlas", false, t);
-  assert.equal(question.body, "notify.detail.needsYou:Run rm -rf build");
+  assert.equal(question.body, 'notify.detail.needsYou:{"detail":"Run rm -rf build"}');
   const priv = notificationText(d, "Atlas", true, t);
   assert.deepEqual(priv, { title: "Atlas", body: "notify.generic.needsYou" });
+});
+
+test("browser_open formats a short site approval without leaking path or query", () => {
+  const t = (k: string, v?: Record<string, string>) =>
+    k === "notify.approval.openSite"
+      ? `${v?.bot} needs your OK to open ${v?.site}`
+      : k;
+  const d = decideNotification(
+    env(
+      {
+        type: "approval_needed",
+        run_id: "r1",
+        call_id: "k-web",
+        tool_name: "browser_open",
+        input: { url: "https://www.webioo.com.tr/secret?token=abc" },
+        summary: "raw summary"
+      },
+      11_000
+    ),
+    ctx()
+  );
+  assert.ok(d);
+  const text = notificationText(d, "Praxi", false, t);
+  assert.equal(text.body, "Praxi needs your OK to open webioo.com.tr");
+  assert.ok(!text.body.includes("token"));
+  assert.ok(!text.body.includes("secret"));
+});
+
+test("failed run formats busy retry countdown and redacts secrets", () => {
+  const t = (k: string, v?: Record<string, string>) => {
+    if (k === "notify.failed.reasonBusy") return "model is busy";
+    if (k === "notify.failed.retrying") return `Run failed: ${v?.reason}, retrying in ${v?.seconds} s`;
+    if (k === "notify.failed.withReason") return `Run failed: ${v?.reason}`;
+    return k;
+  };
+  const now = 1_800_000_000_000;
+  const busy = formatFailedDetail("Error: step 'model' failed: provider error (503): model is busy, retrying in 46 s", t, now);
+  assert.equal(busy.text, "Run failed: model is busy, retrying in 46 s");
+  assert.equal(busy.retryInSeconds, 46);
+  assert.equal(busy.retryAtMs, now + 46_000);
+
+  const secret = formatFailedDetail("Bearer sk-secret-token-12345678 failed", t, now);
+  assert.ok(!secret.text.includes("sk-secret-token"));
 });
 
 // ---- approval toast: human sentence and buttons
@@ -158,7 +202,7 @@ test("approval toast says one human sentence, never the raw summary, json or ids
     approval: appr()
   };
   const text = notificationText(d, "Praxi", false, tr);
-  assert.ok(text.body.startsWith("Praxi: "));
+  assert.ok(text.body.startsWith("notify.approval.mcp"));
   assert.ok(text.body.includes('"app":"Playwright"'));
   assert.ok(text.body.includes('"action":"browser evaluate"'));
   assert.ok(!text.body.includes("function") && !text.body.includes("ca99609c") && !text.body.includes("pc:"));

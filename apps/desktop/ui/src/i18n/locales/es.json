@@ -1379,6 +1379,7 @@
     "switcher": "Which computer to show",
     "tabs": {
       "activity": "Activity",
+      "automation": "Automatización",
       "label": "Panel sections",
       "library": "Library"
     },
@@ -1390,6 +1391,33 @@
       "title": "Upcoming",
       "toggle": "Turn {{name}} on or off",
       "trigger": "When something happens"
+    },
+    "webhooks": {
+      "copied": "Copiado",
+      "copySecret": "Copiar secreto",
+      "copyUrl": "Copiar dirección",
+      "create": "Crear webhook",
+      "creating": "Creando…",
+      "empty": "Aún no hay webhooks. Crea uno cuando algo externo, como GitHub, un formulario o un interruptor de casa, deba iniciar este bot.",
+      "enabled": "Activado",
+      "instruction": "¿Qué debe hacer el bot con los datos?",
+      "instructionHint": "Esta es tu instrucción. El texto entrante son datos, nunca una orden, y el bot sigue preguntando antes de actuar.",
+      "intro": "Un webhook inicia este bot cuando algo llama a su dirección. Praxi comprueba una firma y luego trata el texto como datos no fiables.",
+      "loadError": "No se pudieron cargar los webhooks.",
+      "name": "Nombre",
+      "namePlaceholder": "GitHub, la puerta de entrada, un formulario",
+      "off": "Desactivado",
+      "remove": "Quitar",
+      "removed": "Webhook eliminado",
+      "secretLabel": "Secreto de firma",
+      "secretOnce": "Copia este secreto ahora. Praxi no volverá a mostrarlo.",
+      "sign": "Cada llamada envía dos cabeceras. X-Webhook-Timestamp es la hora en milisegundos. X-Signature-256 es sha256= seguido del HMAC de esa hora, un punto y el cuerpo sin modificar, firmado con el secreto. La misma llamada firmada funciona una sola vez, y solo si la hora está dentro de 5 minutos. El cuerpo puede ocupar como máximo 64 KB, y se rechazan más de 30 llamadas por minuto.",
+      "test": "Enviar una prueba",
+      "testStarted": "Prueba iniciada. El bot la trata como datos no fiables y una pregunta sigue apareciendo como notificación.",
+      "testing": "Enviando…",
+      "title": "Webhooks",
+      "tunnel": "Praxi solo escucha en este equipo. Para que GitHub, un formulario o la domótica llamen a esta dirección, apunta un túnel que elijas (por ejemplo Cloudflare Tunnel o ssh) a 127.0.0.1. No abras un puerto nuevo en tu router.",
+      "urlLabel": "Dirección"
     }
   },
   "botProfile": {
@@ -4462,65 +4490,109 @@
   },
   "notify": {
     "action": {
-      "allow": "Allow",
-      "always": "Always allow",
-      "deny": "Deny"
+      "allow": "Permitir",
+      "always": "Permitir siempre",
+      "deny": "Denegar"
     },
     "approval": {
-      "mcp": "{{bot}} wants to use {{app}} ({{action}})",
-      "other": "{{bot}} wants to continue: {{what}}",
-      "title": "Approval needed"
+      "deleteFile": "{{bot}} necesita tu permiso para eliminar un archivo",
+      "mcp": "{{bot}} necesita tu permiso para usar {{app}} ({{action}})",
+      "openPage": "{{bot}} necesita tu permiso para abrir una página",
+      "openSite": "{{bot}} necesita tu permiso para abrir {{site}}",
+      "other": "{{bot}} necesita tu permiso: {{what}}",
+      "readSite": "{{bot}} necesita tu permiso para leer {{site}}",
+      "runCommand": "{{bot}} necesita tu permiso para ejecutar un comando",
+      "saveFile": "{{bot}} necesita tu permiso para guardar un archivo",
+      "schedule": "{{bot}} necesita tu permiso para una tarea programada",
+      "sendEmail": "{{bot}} necesita tu permiso para enviar un correo",
+      "title": "Necesita tu permiso"
     },
     "detail": {
-      "failed": "Failed: {{detail}}",
+      "failed": "Error en la ejecución: {{detail}}",
       "longRun": "{{detail}}",
       "needsYou": "{{detail}}",
       "scheduleDone": "{{detail}}"
     },
+    "failed": {
+      "reasonAuth": "revisa la configuración del modelo",
+      "reasonBusy": "el modelo está ocupado",
+      "reasonNetwork": "conexión perdida",
+      "reasonTimeout": "tiempo agotado",
+      "retrying": "Error en la ejecución: {{reason}}, reintentando en {{seconds}} s",
+      "withReason": "Error en la ejecución: {{reason}}"
+    },
     "generic": {
-      "failed": "A run failed.",
-      "longRun": "Finished a long task.",
-      "needsYou": "Needs your attention.",
-      "scheduleDone": "A scheduled job finished."
+      "failed": "Error en la ejecución",
+      "longRun": "Tarea larga completada",
+      "needsYou": "Necesita tu atención",
+      "scheduleDone": "Tarea programada completada"
+    },
+    "question": {
+      "title": "{{bot}} tiene una pregunta"
     }
   },
   "notifyHistory": {
-    "allBots": "All bots",
-    "allTypes": "All types",
-    "clear": "Clear history",
-    "empty": "When a bot finishes a job or needs your OK, you will see it here.",
-    "emptyAction": "See what needs you",
-    "emptyTitle": "Nothing new",
-    "filterBot": "Bot",
-    "filterType": "Type",
-    "filters": "Filter notifications",
-    "held": "Held (quiet hours)",
-    "heldMuted": "Held (bot muted)",
-    "kind": {
-      "digest": "Daily summary",
-      "failed": "Run failed",
-      "longRun": "Long run finished",
-      "needsYou": "Needs you",
-      "scheduleDone": "Scheduled job finished"
+    "approvedToast": "Permitido",
+    "askedTimes": "{{bot}} preguntó {{count}} veces",
+    "clear": "Limpiar",
+    "clearedToast": "Notificaciones borradas",
+    "deniedToast": "Denegado",
+    "dismiss": "Cerrar",
+    "empty": "Cuando un bot termine una tarea o necesite tu permiso, lo verás aquí.",
+    "emptyAction": "Ver qué te necesita",
+    "emptyTitle": "Nada nuevo",
+    "filterChip": {
+      "all": "Todas",
+      "errors": "Errores",
+      "needsYou": "Te necesita",
+      "runs": "Ejecuciones"
     },
-    "markAllRead": "Mark all read",
-    "noMatch": "No notification matches these filters.",
-    "noMatchTitle": "Nothing here",
-    "onlyUnread": "Only unread",
-    "openNeeds": "Open Needs you",
-    "quietNote": "{{count}} notifications were held back during quiet hours and are still unread.",
-    "quietNote_one": "{{count}} notification was held back during quiet hours and is still unread.",
-    "resetFilters": "Show everything",
-    "retention": "Kept for {{days}} days, up to {{max}} notifications, then removed automatically.",
-    "showSnoozed": "Snoozed ({{count}})",
-    "shown": "Shown",
-    "snooze": "Snooze 1 h",
-    "snoozeHint": "Hide this for one hour. It comes back by itself.",
-    "subtitle": "What the bots announced, and what quiet hours held back. Pending approvals always stay in Needs you.",
-    "title": "Notification history",
-    "unread": "Unread",
-    "unreadCount": "{{count}} unread",
-    "unsnooze": "Bring back"
+    "filters": "Filtrar notificaciones",
+    "groups": {
+      "earlier": "Anteriores",
+      "needsYou": "Te necesita",
+      "updates": "Novedades"
+    },
+    "held": "Retenida (horas de silencio)",
+    "heldMuted": "Retenida (bot silenciado)",
+    "heldMutedShort": "Silenciado",
+    "heldShort": "Horas de silencio",
+    "markAllRead": "Marcar todo como leído",
+    "markRead": "Marcar como leída",
+    "noMatch": "Ninguna notificación coincide con estos filtros.",
+    "noMatchTitle": "Nada por aquí",
+    "onlyUnread": "No leídas",
+    "openNeeds": "Abrir Te necesita",
+    "quietNote": "{{count}} notificaciones fueron retenidas durante las horas de silencio y siguen sin leerse.",
+    "quietNote_one": "{{count}} notificación fue retenida durante las horas de silencio y sigue sin leerse.",
+    "repeatedTimes": "{{count}} veces",
+    "resetFilters": "Mostrar todo",
+    "resolved": {
+      "answered": "Respondida",
+      "approved": "Permitida",
+      "denied": "Denegada",
+      "expired": "Caducada",
+      "retried": "Reintentada"
+    },
+    "retention": "Se guardan durante {{days}} días, hasta {{max}} notificaciones, y luego se eliminan automáticamente.",
+    "retriedToast": "Reintentando en el chat",
+    "retry": "Reintentar",
+    "showSnoozed": "Pospuestas ({{count}})",
+    "snooze": "Posponer 1 h",
+    "snoozeHint": "Oculta esto durante una hora. Vuelve por sí solo.",
+    "subtitle": "Aprobaciones, tareas terminadas y errores de tus bots.",
+    "systemBot": "Praxi",
+    "time": {
+      "hoursAgo": "hace {{count}} h",
+      "justNow": "Ahora mismo",
+      "minutesAgo": "hace {{count}} min",
+      "yesterday": "Ayer"
+    },
+    "title": "Notificaciones",
+    "undo": "Deshacer",
+    "unread": "No leída",
+    "unreadCount": "{{count}} sin leer",
+    "unsnooze": "Recuperar"
   },
   "overlay": {
     "actions": {

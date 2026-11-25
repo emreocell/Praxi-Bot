@@ -1379,6 +1379,7 @@
     "switcher": "Welcher Computer angezeigt wird",
     "tabs": {
       "activity": "Aktivität",
+      "automation": "Automatisierung",
       "label": "Panel-Bereiche",
       "library": "Bibliothek"
     },
@@ -1390,6 +1391,33 @@
       "title": "Anstehend",
       "toggle": "{{name}} ein- oder ausschalten",
       "trigger": "Wenn etwas passiert"
+    },
+    "webhooks": {
+      "copied": "Kopiert",
+      "copySecret": "Geheimnis kopieren",
+      "copyUrl": "Adresse kopieren",
+      "create": "Webhook anlegen",
+      "creating": "Wird angelegt…",
+      "empty": "Noch keine Webhooks. Lege einen an, wenn etwas von außen, etwa GitHub, ein Formular oder ein Schalter zu Hause, diesen Bot starten soll.",
+      "enabled": "An",
+      "instruction": "Was soll der Bot mit den Daten tun?",
+      "instructionHint": "Das ist deine Anweisung. Der eingehende Text ist Daten, nie ein Befehl, und der Bot fragt weiter, bevor er handelt.",
+      "intro": "Ein Webhook startet diesen Bot, wenn etwas seine Adresse aufruft. Praxi prüft die Signatur und behandelt den Text als nicht vertrauenswürdige Daten.",
+      "loadError": "Webhooks konnten nicht geladen werden.",
+      "name": "Name",
+      "namePlaceholder": "GitHub, die Haustür, ein Formular",
+      "off": "Aus",
+      "remove": "Entfernen",
+      "removed": "Webhook entfernt",
+      "secretLabel": "Signatur-Geheimnis",
+      "secretOnce": "Kopiere dieses Geheimnis jetzt. Praxi zeigt es nicht wieder an.",
+      "sign": "Jeder Aufruf sendet zwei Header. X-Webhook-Timestamp ist die Zeit in Millisekunden. X-Signature-256 beginnt mit sha256= und ist der HMAC aus dieser Zeit, einem Punkt und dem Rohtext, signiert mit dem Geheimnis. Derselbe signierte Aufruf gilt einmal und nur, wenn die Zeit innerhalb von 5 Minuten liegt. Der Text darf höchstens 64 KB groß sein. Mehr als 30 Aufrufe pro Minute werden abgelehnt.",
+      "test": "Test senden",
+      "testStarted": "Test gestartet. Der Bot behandelt ihn als nicht vertrauenswürdige Daten, und eine Frage erscheint weiter als Benachrichtigung.",
+      "testing": "Wird gesendet…",
+      "title": "Eingehende Webhooks",
+      "tunnel": "Praxi hört nur auf diesem Computer. Damit GitHub, ein Formular oder die Hausautomation diese Adresse aufrufen kann, leite einen Tunnel deiner Wahl (zum Beispiel Cloudflare Tunnel oder ssh) auf 127.0.0.1. Öffne keinen neuen Port am Router.",
+      "urlLabel": "Adresse"
     }
   },
   "botProfile": {
@@ -4467,57 +4495,101 @@
       "deny": "Ablehnen"
     },
     "approval": {
-      "mcp": "{{bot}} möchte {{app}} verwenden ({{action}})",
-      "other": "{{bot}} möchte fortfahren: {{what}}",
-      "title": "Genehmigung erforderlich"
+      "deleteFile": "{{bot}} braucht dein OK zum Löschen einer Datei",
+      "mcp": "{{bot}} braucht dein OK für {{app}} ({{action}})",
+      "openPage": "{{bot}} braucht dein OK zum Öffnen einer Seite",
+      "openSite": "{{bot}} braucht dein OK zum Öffnen von {{site}}",
+      "other": "{{bot}} braucht dein OK: {{what}}",
+      "readSite": "{{bot}} braucht dein OK zum Lesen von {{site}}",
+      "runCommand": "{{bot}} braucht dein OK für einen Befehl",
+      "saveFile": "{{bot}} braucht dein OK zum Speichern einer Datei",
+      "schedule": "{{bot}} braucht dein OK für eine geplante Aufgabe",
+      "sendEmail": "{{bot}} braucht dein OK zum Senden einer E-Mail",
+      "title": "Dein OK wird gebraucht"
     },
     "detail": {
-      "failed": "Fehlgeschlagen: {{detail}}",
+      "failed": "Lauf fehlgeschlagen: {{detail}}",
       "longRun": "{{detail}}",
       "needsYou": "{{detail}}",
       "scheduleDone": "{{detail}}"
     },
+    "failed": {
+      "reasonAuth": "Modelleinstellungen prüfen",
+      "reasonBusy": "Modell ist ausgelastet",
+      "reasonNetwork": "Verbindung unterbrochen",
+      "reasonTimeout": "Zeitüberschreitung",
+      "retrying": "Lauf fehlgeschlagen: {{reason}}, neuer Versuch in {{seconds}} s",
+      "withReason": "Lauf fehlgeschlagen: {{reason}}"
+    },
     "generic": {
-      "failed": "Ein Lauf ist fehlgeschlagen.",
-      "longRun": "Eine lange Aufgabe abgeschlossen.",
-      "needsYou": "Braucht deine Aufmerksamkeit.",
-      "scheduleDone": "Ein geplanter Auftrag ist fertig."
+      "failed": "Lauf fehlgeschlagen",
+      "longRun": "Lange Aufgabe abgeschlossen",
+      "needsYou": "Braucht deine Aufmerksamkeit",
+      "scheduleDone": "Geplante Aufgabe fertig"
+    },
+    "question": {
+      "title": "{{bot}} hat eine Frage"
     }
   },
   "notifyHistory": {
-    "allBots": "Alle Bots",
-    "allTypes": "Alle Arten",
-    "clear": "Verlauf löschen",
+    "approvedToast": "Erlaubt",
+    "askedTimes": "{{bot}} hat {{count}}-mal gefragt",
+    "clear": "Leeren",
+    "clearedToast": "Benachrichtigungen gelöscht",
+    "deniedToast": "Abgelehnt",
+    "dismiss": "Schließen",
     "empty": "Wenn ein Bot eine Aufgabe beendet oder dein OK braucht, siehst du es hier.",
     "emptyAction": "Ansehen, was dich braucht",
     "emptyTitle": "Nichts Neues",
-    "filterBot": "Bot",
-    "filterType": "Art",
+    "filterChip": {
+      "all": "Alle",
+      "errors": "Fehler",
+      "needsYou": "Braucht dich",
+      "runs": "Läufe"
+    },
     "filters": "Benachrichtigungen filtern",
+    "groups": {
+      "earlier": "Früher",
+      "needsYou": "Braucht dich",
+      "updates": "Neuigkeiten"
+    },
     "held": "Zurückgehalten (Ruhezeit)",
     "heldMuted": "Zurückgehalten (Bot stummgeschaltet)",
-    "kind": {
-      "digest": "Tageszusammenfassung",
-      "failed": "Lauf fehlgeschlagen",
-      "longRun": "Langer Lauf beendet",
-      "needsYou": "Braucht dich",
-      "scheduleDone": "Geplanter Auftrag fertig"
-    },
+    "heldMutedShort": "Stumm",
+    "heldShort": "Ruhezeit",
     "markAllRead": "Alle als gelesen markieren",
+    "markRead": "Als gelesen markieren",
     "noMatch": "Keine Benachrichtigung passt zu diesen Filtern.",
     "noMatchTitle": "Hier ist nichts",
-    "onlyUnread": "Nur ungelesene",
+    "onlyUnread": "Ungelesen",
     "openNeeds": "„Braucht dich“ öffnen",
     "quietNote": "{{count}} Benachrichtigungen wurden in den Ruhezeiten zurückgehalten und sind noch ungelesen.",
     "quietNote_one": "{{count}} Benachrichtigung wurde in den Ruhezeiten zurückgehalten und ist noch ungelesen.",
+    "repeatedTimes": "{{count}}-mal",
     "resetFilters": "Alles anzeigen",
+    "resolved": {
+      "answered": "Beantwortet",
+      "approved": "Erlaubt",
+      "denied": "Abgelehnt",
+      "expired": "Abgelaufen",
+      "retried": "Erneut versucht"
+    },
     "retention": "Wird {{days}} Tage lang aufbewahrt, höchstens {{max}} Benachrichtigungen, danach automatisch entfernt.",
+    "retriedToast": "Wird im Chat erneut versucht",
+    "retry": "Erneut versuchen",
     "showSnoozed": "Zurückgestellt ({{count}})",
-    "shown": "Angezeigt",
     "snooze": "1 Std. zurückstellen",
     "snoozeHint": "Blendet dies für eine Stunde aus. Es kommt von selbst wieder.",
-    "subtitle": "Was die Bots gemeldet haben und was die Ruhezeiten zurückgehalten haben. Offene Freigaben bleiben immer unter „Braucht dich“.",
-    "title": "Benachrichtigungsverlauf",
+    "subtitle": "Freigaben, abgeschlossene Aufgaben und Fehler deiner Bots.",
+    "systemBot": "Praxi",
+    "time": {
+      "hoursAgo": "vor {{count}} Std.",
+      "justNow": "Gerade eben",
+      "minutesAgo": "vor {{count}} Min.",
+      "yesterday": "Gestern"
+    },
+    "title": "Benachrichtigungen",
+    "undo": "Rückgängig",
     "unread": "Ungelesen",
     "unreadCount": "{{count}} ungelesen",
     "unsnooze": "Zurückholen"

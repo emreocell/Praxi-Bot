@@ -37,6 +37,7 @@ mod fill_secrets;
 mod host;
 mod host_admin;
 mod host_slice;
+mod incoming_webhook;
 mod knowledge;
 mod knowledge_brain;
 mod logs;

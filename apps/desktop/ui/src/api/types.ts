@@ -39,6 +39,42 @@ export type MemoryEmbeddingInput = S["MemoryEmbeddingInput"];
 export type Bot = S["BotDto"];
 export type BotInput = S["BotInput"];
 export type BotPatchInput = S["BotPatchInput"];
+
+/** A webhook that starts this bot. The secret is never in this object. */
+export interface IncomingWebhook {
+  id: string;
+  bot_id: string;
+  name: string;
+  instruction: string;
+  enabled: boolean;
+  path: string;
+  created_at_ms: number;
+  updated_at_ms: number;
+  last_fired_at_ms: number | null;
+}
+
+export interface IncomingWebhookCreated {
+  webhook: IncomingWebhook;
+  secret: string;
+}
+
+export interface IncomingWebhookInput {
+  name: string;
+  instruction?: string;
+}
+
+export interface IncomingWebhookPatch {
+  name?: string;
+  instruction?: string;
+  enabled?: boolean;
+}
+
+export interface IncomingWebhookAccepted {
+  status: string;
+  webhook_id: string;
+  run_id: string;
+  chat_id: string;
+}
 export type Chat = S["ChatDto"];
 export type UpdateChatInput = S["UpdateChat"];
 export type Message = S["MessageDto"];
