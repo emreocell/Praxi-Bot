@@ -48,6 +48,13 @@ const SCREENS = [
   { name: 'chat-empty', query: 'screen=empty', ready: '[data-testid="bot-chip"]' },
   { name: 'chat-run', query: '', ready: '[data-testid="bot-chip"]' },
   { name: 'settings', query: 'screen=settings&section=general', ready: '[role="dialog"]' },
+  { name: 'settings-models', query: 'screen=settings&section=models', ready: '[role="dialog"]' },
+  { name: 'settings-where', query: 'screen=settings&section=where', ready: '[role="dialog"]' },
+  { name: 'settings-safety', query: 'screen=settings&section=safety', ready: '[role="dialog"]' },
+  { name: 'settings-search', query: 'screen=settings&section=general', ready: '[role="dialog"]', act: async (page) => {
+    await page.getByTestId('settings-search').fill('key');
+    await page.getByTestId('settings-result-keys').waitFor({ timeout: 15000 });
+  } },
   { name: 'add-server', query: '', act: async (page) => {
     await page.getByTestId('computer-picker').click();
     await page.getByTestId('computer-add').click();

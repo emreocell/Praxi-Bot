@@ -3,7 +3,7 @@
 You do not need any of this to use Praxi. With no keys, Praxi uses a simple
 offline method to match words, and **nothing leaves your computer**.
 
-Open **Settings > Models > Helpers (optional)** to add more.
+Open **Settings > AI models > Smart search & helper** to add more.
 
 ## What are embeddings?
 

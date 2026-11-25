@@ -20,16 +20,16 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // Questions, todos, schedule lifecycle, a local write, or a listing
         // of the bot's own bookkeeping. A write does not bring content in:
         // the model already had the bytes, and the result is not a private read.
+        // `secrets_list` / `account_list` show names, sites and logins the owner
+        // chose or the bot made: no value and no text a page wrote, so they neither
+        // taint nor leave the machine (tainting would also stop an owner's standing
+        // grant from covering the very fill the list exists for). `bot_delete` and
+        // `account_discard` are bookkeeping (no content in); `account_discard` always asks.
         "ask_user" | "todo_write" | "schedule_pause" | "schedule_delete" | "fs_write"
-        | "fs_move" | "fs_delete" | "checkpoint_list" | "checkpoint_restore" | "schedule_list" => {
+        | "fs_move" | "fs_delete" | "checkpoint_list" | "checkpoint_restore" | "schedule_list"
+        | "secrets_list" | "secret_request" | "bot_delete" | "account_list" | "account_discard" => {
             ContentClass::none()
         }
-        // The names and allowed origins the owner chose for typed secrets. No
-        // value and no text a run or a page wrote, so it neither taints nor
-        // leaves the machine. Tainting it would also stop an owner's standing
-        // grant from covering the very fill the list exists for.
-        // Removing bots this bot made is bookkeeping (no content in).
-        "secrets_list" | "secret_request" | "bot_delete" => ContentClass::none(),
         // Pure helpers: only the clock and the model's own short text go in.
         "time_now" | "calculate" => ContentClass::declared(false, false, false),
         // Editing reads old content and reports match counts, including no-op edits.
@@ -81,9 +81,11 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         | "browser_select_text" => ContentClass::all(),
         // A created or edited bot acts later on a persona written now, like a
         // schedule; the call always asks with the complete resulting profile.
-        "schedule_create" | "schedule_update" | "schedule_resume" | "bot_create" | "bot_update" => {
-            ContentClass::egress()
-        }
+        // `account_register` creates a standing credential and a site identity (login,
+        // mailbox) chosen by the model, so a run that read untrusted content asks like a
+        // created bot; it also always asks on its own and never takes a standing grant.
+        "schedule_create" | "schedule_update" | "schedule_resume" | "bot_create" | "bot_update"
+        | "account_register" => ContentClass::egress(),
         // A bot's name and persona are text any bot with `manage_bots` can write, so a
         // listing brings possibly untrusted text in.
         "bot_list" => ContentClass::untrusted(),

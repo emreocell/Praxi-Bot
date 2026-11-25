@@ -11,7 +11,8 @@
       "Saati sözlerle söyle",
       "Bilgisayar kapalıysa",
       "Şimdi çalıştır, düzenle, duraklat, sil",
-      "Güvenlik"
+      "Güvenlik",
+      "Botu dışarıdan başlat"
     ],
     "summary": "Aynı listede Gelen kutusu ayıklama ve Yedekleme hatırlatması da var."
   },
@@ -170,6 +171,17 @@
       "Güvenlik"
     ],
     "summary": "Botlar Home Assistant varlıklarını okuyabilir ve servisleri çağırabilir (ışığı açmak, termostatı ayarlamak gibi)."
+  },
+  {
+    "doc": "tr/incoming-webhooks.md",
+    "title": "Gelen webhook'lar",
+    "headings": [
+      "Ne ayarlarsın",
+      "Çağıran ne gönderir",
+      "Bot metinle ne yapar",
+      "Ne yazılır"
+    ],
+    "summary": "Bir webhook, dışarıdaki bir şey bir adresi çağırınca botlarından birini başlatır. Bunu GitHub, bir form ya da evdeki bir anahtar yapabilir. Webhook'u bot panelinde, Otomasyon sekmesinde oluşturursun."
   },
   {
     "doc": "tr/index.md",

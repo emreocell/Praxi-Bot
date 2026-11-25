@@ -1120,6 +1120,10 @@ pub(crate) struct Shared {
     /// pre-tool deny recheck.
     #[cfg(test)]
     pub exec_commit_hook: Mutex<Option<ExecCommitHook>>,
+    /// Test-only: invoked at the end of `deny_open_for_stop`, after the run's cards
+    /// were released.
+    #[cfg(test)]
+    pub stop_split_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Hosts the owner approved a navigation to (any scope), newest last, bounded. A favicon may
     /// be fetched for these and for hosts with a standing / chat grant, never for anything else.
     pub approved_hosts: Mutex<VecDeque<String>>,
@@ -1270,6 +1274,12 @@ pub fn initiator_of(kind: &str) -> InitiatorKind {
         Some("channel") => InitiatorKind::Channel,
         Some("subagent") => InitiatorKind::Subagent,
         Some(s) if s == "external_schedule" || s.starts_with("external_schedule:") => {
+            InitiatorKind::ExternalSchedule
+        }
+        // An incoming webhook is external data. It must not fall through to
+        // Human: that would let the router and `call:` lines treat the payload
+        // as the owner's own instructions.
+        Some(s) if s == "incoming_webhook" || s.starts_with("incoming_webhook:") => {
             InitiatorKind::ExternalSchedule
         }
         Some(s) if s == "schedule" || s.starts_with("schedule:") => InitiatorKind::Schedule,
@@ -1785,6 +1795,12 @@ impl Shared {
             }
         }
         absorb_run_history(&mut taint, self, run.id, 0);
+        // The body of a signed webhook call is untrusted data from the first
+        // model call on: the run is tainted like one that read a web page.
+        if crate::history::is_webhook_run(run) {
+            taint.exposure.observe(true, false);
+            taint.note_label("incoming webhook body");
+        }
         // A subagent does not see the chat. A top-level turn, including a
         // scheduled one, does: provenance rides on the messages that enter
         // the context. Dropped by the history bound means the bytes are not

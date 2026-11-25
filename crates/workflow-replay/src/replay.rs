@@ -1153,6 +1153,9 @@ impl Replayer {
                         "this step types the secret `{name}` but the owner has no secret with that name (it may have been deleted); add it again or edit the workflow"
                     )));
                 }
+                // Refuse another bot's account before any card is offered.
+                s.check_bot(name, self.opts.bot_id.as_deref())
+                    .map_err(|e| Stop::Failed(e.to_string()))?;
                 Some(s)
             }
             None => None,
@@ -1236,10 +1239,17 @@ impl Replayer {
             let driver = Arc::clone(&driver);
             let secrets = Arc::clone(secrets);
             let name = name.clone();
+            let bot = self.opts.bot_id.clone();
             permit
                 .protect(async move {
-                    builtin_tools::browser::fill_with_secret(driver.as_ref(), &secrets, &r, &name)
-                        .await
+                    builtin_tools::browser::fill_with_secret(
+                        driver.as_ref(),
+                        &secrets,
+                        &r,
+                        &name,
+                        bot.as_deref(),
+                    )
+                    .await
                 })
                 .await
                 .map_err(Stop::Failed)?

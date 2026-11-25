@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BotAvatar, Button, Card } from "ui";
+import { BotAvatar, Button } from "ui";
+import { SettingsCard } from "../components/SettingsUi";
 import { MOCK_BASE_URL } from "../api/mockMode";
 import {
   type Bot,
@@ -104,11 +105,11 @@ export function ProvidersSection() {
   const canAdd = canManage && id !== "" && (!isCustom || baseUrl.trim() !== "") && !busy;
 
   return (
-    <Card padding="md" className={styles.card}>
-      <div className={styles.info}>
-        <h2 className={styles.heading}>{t("settings.providers.title")} <HomeHint /></h2>
-        <p className={formStyles.hint}>{t("settings.providers.description")}</p>
-      </div>
+    <SettingsCard
+      title={t("settings.providers.title")}
+      description={t("settings.providers.description")}
+    >
+      <HomeHint />
       {!canView ? (
         <p className={formStyles.hint}>{t("settings.providers.nativeOnly")}</p>
       ) : (
@@ -202,6 +203,7 @@ export function ProvidersSection() {
                 </label>
                 <select
                   id="prov-choice"
+                  data-settings-field="prov-choice"
                   className={formStyles.select}
                   value={choice}
                   onChange={(e) => setChoice(e.target.value)}
@@ -328,7 +330,7 @@ export function ProvidersSection() {
           ) : null}
         </>
       )}
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -577,17 +579,16 @@ export function PermissionsSection() {
   const { t } = useTranslation();
   const { bots } = useDaemon();
   return (
-    <Card padding="md" className={styles.card}>
-      <div className={styles.info}>
-        <h2 className={styles.heading}>{t("settings.permissions.title")}</h2>
-        <p className={formStyles.hint}>{t("settings.permissions.description")}</p>
-      </div>
+    <SettingsCard
+      title={t("settings.permissions.title")}
+      description={t("settings.permissions.description")}
+    >
       <WorkspacePolicy />
       {bots.length === 0 ? (
         <p className={formStyles.hint}>{t("settings.permissions.noBots")}</p>
       ) : (
         bots.map((b) => <BotPermissions key={b.id} bot={b} />)
       )}
-    </Card>
+    </SettingsCard>
   );
 }

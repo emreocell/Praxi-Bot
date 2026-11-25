@@ -43,6 +43,8 @@ mod tool_guidance;
 pub mod usage;
 
 #[cfg(test)]
+mod account_register_tests;
+#[cfg(test)]
 mod approval_expiry_tests;
 #[cfg(test)]
 mod bot_limit_tests;

@@ -77,10 +77,10 @@ test("settings notices offer Open settings; others do not", () => {
   assert.equal(noticeNeedsSettings(null), false);
 });
 
-test("messages name the real settings place (Voice page, Dictation service card) in every language", () => {
+test("messages name the real settings place (General page, Voice dictation card) in every language", () => {
   for (const l of ["en", "tr", "de"]) {
     const d = JSON.parse(readFileSync(new URL(`../../i18n/locales/${l}.json`, import.meta.url), "utf8"));
-    const page: string = d.settingsModal.pages.voice.name;
+    const page: string = d.settingsModal.pages.general.name;
     const card: string = d.voice.stt.title;
     for (const k of ["geminiKeyMissing", "notConfigured", "serviceRefused", "wrongProvider"]) {
       assert.ok(d.voice.call[k].includes(`${page} → ${card}`), `${l}.voice.call.${k}`);

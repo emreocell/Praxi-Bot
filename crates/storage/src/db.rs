@@ -236,7 +236,8 @@ impl Storage {
         &self.data_dir
     }
 
-    fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+    /// The open database. Other modules in this crate use it; callers outside do not.
+    pub(crate) fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.conn
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

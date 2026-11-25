@@ -169,3 +169,57 @@ async fn stop_between_approve_and_start_runs_no_tool_and_mints_no_grant() {
         "no standing grant for a stopped run"
     );
 }
+
+/// Stop lands while an approval is open. Releasing the card wakes the step on
+/// another worker; the token must already be cancelled by then, otherwise the
+/// step finishes as "denied", the drive loop plans a second model call and the
+/// run ends `succeeded`/`failed` instead of `cancelled`. The hook holds Stop
+/// between "token signalled" and "cards released" until the drive task could
+/// have run on (bounded wait, no sleep-for-effect on the passing path).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stop_never_lets_the_woken_step_start_another_model_call() {
+    let env = setup();
+    let write = Arc::new(tool("t.write", tool_registry::Effect::Write, "ran"));
+    let fake = Fake::new(vec![
+        crate::tests::calls(&[("c1", "t.write", json!({}))]),
+        text("must not be reached"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[crate::tests::t(&write)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    let probe = Arc::clone(&fake);
+    *lp.sh.stop_split_hook.lock() = Some(Arc::new(move || {
+        // On a broken order the woken step reaches the next model call here.
+        for _ in 0..300 {
+            if probe.n_requests() >= 2 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }));
+    lp.cancel(run).unwrap();
+    for _ in 0..200 {
+        if lp
+            .runtime()
+            .state(run)
+            .is_ok_and(task_runtime::RunState::is_terminal)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        lp.runtime().state(run).unwrap(),
+        task_runtime::RunState::Cancelled
+    );
+    assert_eq!(fake.n_requests(), 1, "no model call after Stop");
+    assert_eq!(write.count.load(Ordering::SeqCst), 0);
+}

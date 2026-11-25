@@ -1,8 +1,9 @@
 import { Check, KeyRound } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MOCK_BASE_URL } from "../../api/mockMode";
 import { BrandIcon } from "../../components/BrandIcon";
+import { SettingsCard } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import {
   detectKeyProvider,
@@ -12,6 +13,7 @@ import {
   scrubSecret
 } from "../../lib/apiKey";
 import { canManageProviders } from "../../lib/providerConnection";
+import { openSettingsTarget, takePendingFocus } from "../../lib/settingsLink";
 import { isTauriRuntime } from "../../overlay/events";
 import { useDaemon } from "../../state/DaemonContext";
 import { notifyProvidersChanged, useProviders } from "../../state/useProviders";
@@ -23,16 +25,9 @@ import { HomeHint } from "../../components/HomeHint";
 import { useServiceState } from "../../state/ServiceState";
 import { ConnectionTestButton } from "../../components/ConnectionTest";
 
-/** Open the collapsed "advanced providers" block (custom OpenAI-compatible servers). */
+/** Open the custom OpenAI-compatible servers card under More options. */
 function openAdvanced() {
-  const d = document.getElementById("ai-advanced-providers");
-  if (d instanceof HTMLDetailsElement) {
-    d.open = true;
-    const instant =
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    d.scrollIntoView({ block: "nearest", behavior: instant ? "instant" : "smooth" });
-  }
+  openSettingsTarget({ page: "models", card: "providers", field: "prov-choice" });
 }
 
 /**
@@ -59,6 +54,13 @@ export function ApiKeyPaste() {
   const [picked, setPicked] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const keyInput = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (takePendingFocus("api-key")) {
+      keyInput.current?.focus();
+    }
+  }, []);
 
   const targets = useMemo(() => keyTargets(dto?.catalog ?? []), [dto]);
   const detected = detectKeyProvider(value);
@@ -106,9 +108,16 @@ export function ApiKeyPaste() {
   );
 
   return (
-    <section className={styles.sec} data-testid="api-key-paste" aria-labelledby="ai-key-h">
+    <SettingsCard
+      title={t("settingsModal.ai.keys.title")}
+      description={
+        home.target === "host"
+          ? t("settingsModal.ai.keys.hostDescription", { name: serverName })
+          : t("settingsModal.ai.keys.description")
+      }
+      testId="api-key-paste"
+    >
       <div className={styles.head}>
-        <h3 id="ai-key-h">{t("settingsModal.ai.keys.title")}</h3>
         <HomeHint />
       </div>
       <form
@@ -120,6 +129,8 @@ export function ApiKeyPaste() {
       >
         <span className={styles.lead}>{lead}</span>
         <input
+          ref={keyInput}
+          data-settings-field="api-key"
           className={styles.keyInput}
           type="password"
           name="praxi-api-key"
@@ -201,18 +212,12 @@ export function ApiKeyPaste() {
         <p className={styles.hint} data-testid="key-unknown">
           {t("settingsModal.ai.keys.unknown")}
         </p>
-      ) : (
-        <p className={styles.hint} data-testid="key-where">
-          {home.target === "host"
-            ? t("settingsModal.ai.keys.hostDescription", { name: serverName })
-            : t("settingsModal.ai.keys.description")}
-        </p>
-      )}
+      ) : null}
       {error ? (
         <p className={styles.error} role="alert">
           {error}
         </p>
       ) : null}
-    </section>
+    </SettingsCard>
   );
 }

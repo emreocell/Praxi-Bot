@@ -555,7 +555,7 @@
     },
     "photorealAvatars": {
       "description": "Botlar kendi renklerine boyanmış, yumuşak ve fotogerçekçi kil gövdeler kullanır. Daha hafif çizim kil stili için kapatın.",
-      "title": "Fotogerçekçi kil avatarlar"
+      "title": "Gerçekçi avatarlar"
     },
     "style": {
       "blur": "Bulanıklık",
@@ -1379,6 +1379,7 @@
     "switcher": "Hangi bilgisayar gösterilsin",
     "tabs": {
       "activity": "Etkinlik",
+      "automation": "Otomasyon",
       "label": "Panel bölümleri",
       "library": "Kitaplık"
     },
@@ -1390,6 +1391,33 @@
       "title": "Yaklaşanlar",
       "toggle": "{{name}} açık/kapalı",
       "trigger": "Bir olay olunca"
+    },
+    "webhooks": {
+      "copied": "Kopyalandı",
+      "copySecret": "Sırrı kopyala",
+      "copyUrl": "Adresi kopyala",
+      "create": "Webhook oluştur",
+      "creating": "Oluşturuluyor…",
+      "empty": "Henüz webhook yok. GitHub, bir form ya da evdeki bir anahtar bu botu başlatacaksa bir tane oluştur.",
+      "enabled": "Açık",
+      "instruction": "Bot bu veriyle ne yapsın?",
+      "instructionHint": "Bu senin talimatın. Gelen metin veridir, emir değildir. Bot bir şey yapmadan önce yine sorar.",
+      "intro": "Bir webhook, bir şey adresini çağırınca bu botu başlatır. Praxi imzayı kontrol eder ve metni güvenilmeyen veri olarak görür.",
+      "loadError": "Webhook'lar yüklenemedi.",
+      "name": "Ad",
+      "namePlaceholder": "GitHub, giriş kapısı, bir form",
+      "off": "Kapalı",
+      "remove": "Kaldır",
+      "removed": "Webhook kaldırıldı",
+      "secretLabel": "İmza sırrı",
+      "secretOnce": "Bu sırrı şimdi kopyala. Praxi onu bir daha göstermez.",
+      "sign": "Her çağrı iki başlık gönderir. X-Webhook-Timestamp, milisaniye cinsinden zamandır. X-Signature-256, sha256= ile başlar ve bu zamanın, bir noktanın ve ham gövdenin HMAC'idir; sır ile imzalanır. Aynı imzalı çağrı bir kez geçerlidir ve yalnızca zaman 5 dakika içindeyse. Gövde en fazla 64 KB olabilir. Dakikada 30'dan fazla çağrı reddedilir.",
+      "test": "Deneme gönder",
+      "testStarted": "Deneme başladı. Bot bunu güvenilmeyen veri sayar. Bir soru yine bildirim olarak görünür.",
+      "testing": "Gönderiliyor…",
+      "title": "Webhook'lar",
+      "tunnel": "Praxi yalnız bu bilgisayarı dinler. GitHub, bir form ya da ev otomasyonu bu adresi çağıracaksa, kendi seçtiğin bir tüneli (örneğin Cloudflare Tunnel ya da ssh) 127.0.0.1 adresine yönelt. Yönlendiricide yeni bir kapı açma.",
+      "urlLabel": "Adres"
     }
   },
   "botProfile": {
@@ -3631,7 +3659,7 @@
     },
     "test": "Bağlantıyı dene",
     "testOk": "Bağlantı çalışıyor",
-    "title": "Yardımcılar (isteğe bağlı)",
+    "title": "Akıllı arama ve yardımcı",
     "usage": {
       "noLimit": "{{used}} kullanıldı",
       "of": "{{used}} / {{limit}}",
@@ -3889,7 +3917,7 @@
     "settings": "Arama ayarları",
     "skippedFiles": "{{count}} dosya atlandı",
     "skippedFiles_one": "{{count}} dosya atlandı",
-    "title": "Bilgi kaynakları ve ortak beyin",
+    "title": "Bilgi ve dosyalar",
     "url": "Kaydedilmiş sayfanın adresi"
   },
   "liveView": {
@@ -4467,57 +4495,101 @@
       "deny": "Reddet"
     },
     "approval": {
-      "mcp": "{{bot}}, {{app}} uygulamasını kullanmak istiyor ({{action}})",
-      "other": "{{bot}} devam etmek istiyor: {{what}}",
-      "title": "Onayınız gerekiyor"
+      "deleteFile": "{{bot}} bir dosyayı silmek için onayını istiyor",
+      "mcp": "{{bot}}, {{app}} kullanmak için onayını istiyor ({{action}})",
+      "openPage": "{{bot}} bir sayfayı açmak için onayını istiyor",
+      "openSite": "{{bot}}, {{site}} sitesini açmak için onayını istiyor",
+      "other": "{{bot}} onayını bekliyor: {{what}}",
+      "readSite": "{{bot}}, {{site}} sayfasını okumak için onayını istiyor",
+      "runCommand": "{{bot}} bir komut çalıştırmak için onayını istiyor",
+      "saveFile": "{{bot}} bir dosyayı kaydetmek için onayını istiyor",
+      "schedule": "{{bot}} zamanlanmış görev için onayını istiyor",
+      "sendEmail": "{{bot}} bir e-posta göndermek için onayını istiyor",
+      "title": "Onayın gerekiyor"
     },
     "detail": {
-      "failed": "Başarısız: {{detail}}",
+      "failed": "Çalışma başarısız: {{detail}}",
       "longRun": "{{detail}}",
       "needsYou": "{{detail}}",
       "scheduleDone": "{{detail}}"
     },
+    "failed": {
+      "reasonAuth": "model ayarlarını kontrol et",
+      "reasonBusy": "model meşgul",
+      "reasonNetwork": "bağlantı koptu",
+      "reasonTimeout": "zaman aşımına uğradı",
+      "retrying": "Çalışma başarısız: {{reason}}, {{seconds}} sn sonra yeniden denenecek",
+      "withReason": "Çalışma başarısız: {{reason}}"
+    },
     "generic": {
-      "failed": "Bir çalışma başarısız oldu.",
-      "longRun": "Uzun bir görev bitti.",
-      "needsYou": "Dikkatin gerekiyor.",
-      "scheduleDone": "Zamanlanmış bir iş bitti."
+      "failed": "Çalışma başarısız",
+      "longRun": "Uzun görev bitti",
+      "needsYou": "Dikkatin gerekiyor",
+      "scheduleDone": "Zamanlanmış görev bitti"
+    },
+    "question": {
+      "title": "{{bot}} bir soru sordu"
     }
   },
   "notifyHistory": {
-    "allBots": "Tüm botlar",
-    "allTypes": "Tüm türler",
-    "clear": "Geçmişi temizle",
-    "empty": "Bir bot işini bitirdiğinde ya da onayına ihtiyaç duyduğunda burada görürsün.",
+    "approvedToast": "İzin verildi",
+    "askedTimes": "{{bot}} {{count}} kez sordu",
+    "clear": "Temizle",
+    "clearedToast": "Bildirimler temizlendi",
+    "deniedToast": "Reddedildi",
+    "dismiss": "Kapat",
+    "empty": "Bot bir işini bitirdiğinde ya da onayına ihtiyaç duyduğunda burada görürsün.",
     "emptyAction": "Seni bekleyenlere bak",
     "emptyTitle": "Yeni bir şey yok",
-    "filterBot": "Bot",
-    "filterType": "Tür",
+    "filterChip": {
+      "all": "Tümü",
+      "errors": "Hatalar",
+      "needsYou": "Seni bekliyor",
+      "runs": "Çalışmalar"
+    },
     "filters": "Bildirimleri süz",
+    "groups": {
+      "earlier": "Daha önce",
+      "needsYou": "Seni bekliyor",
+      "updates": "Güncellemeler"
+    },
     "held": "Tutuldu (sessiz saatler)",
     "heldMuted": "Tutuldu (bot sessizde)",
-    "kind": {
-      "digest": "Günlük özet",
-      "failed": "Çalışma başarısız",
-      "longRun": "Uzun çalışma bitti",
-      "needsYou": "Sizi bekliyor",
-      "scheduleDone": "Zamanlanmış iş bitti"
-    },
+    "heldMutedShort": "Sessizde",
+    "heldShort": "Sessiz saatler",
     "markAllRead": "Tümünü okundu say",
+    "markRead": "Okundu say",
     "noMatch": "Bu süzgeçlere uyan bildirim yok.",
     "noMatchTitle": "Burada bir şey yok",
-    "onlyUnread": "Yalnızca okunmamışlar",
+    "onlyUnread": "Okunmamış",
     "openNeeds": "Sizi bekleyenleri aç",
     "quietNote": "{{count}} bildirim sessiz saatlerde tutuldu ve hâlâ okunmadı.",
     "quietNote_one": "{{count}} bildirim sessiz saatlerde tutuldu ve hâlâ okunmadı.",
+    "repeatedTimes": "{{count}} kez",
     "resetFilters": "Hepsini göster",
+    "resolved": {
+      "answered": "Yanıtlandı",
+      "approved": "İzin verildi",
+      "denied": "Reddedildi",
+      "expired": "Süresi doldu",
+      "retried": "Yeniden denendi"
+    },
     "retention": "{{days}} gün boyunca, en fazla {{max}} bildirim saklanır; sonra kendiliğinden silinir.",
+    "retriedToast": "Sohbette yeniden deneniyor",
+    "retry": "Yeniden dene",
     "showSnoozed": "Ertelenenler ({{count}})",
-    "shown": "Gösterildi",
     "snooze": "1 saat ertele",
     "snoozeHint": "Bunu bir saatliğine gizle. Kendiliğinden geri gelir.",
-    "subtitle": "Botların bildirdikleri ve sessiz saatlerde tutulanlar. Bekleyen onaylar her zaman Sizi bekleyenler'de kalır.",
-    "title": "Bildirim geçmişi",
+    "subtitle": "Botların bekleyen onayları, biten işleri ve hataları.",
+    "systemBot": "Praxi",
+    "time": {
+      "hoursAgo": "{{count}} sa önce",
+      "justNow": "Az önce",
+      "minutesAgo": "{{count}} dk önce",
+      "yesterday": "Dün"
+    },
+    "title": "Bildirimler",
+    "undo": "Geri al",
     "unread": "Okunmadı",
     "unreadCount": "{{count}} okunmamış",
     "unsnooze": "Geri getir"
@@ -5155,7 +5227,7 @@
       "enable": "Otomatik başlatmayı aç",
       "enabled": "Açık",
       "error": "Windows otomatik başlatma ayarı güncellenemedi.",
-      "title": "Oturum açtığımda Praxi-Bot'u başlat"
+      "title": "Oturum açılışında başlat"
     },
     "background": {
       "blur": "Arka plan bulanıklığı",
@@ -5199,7 +5271,7 @@
     },
     "keepInTray": {
       "description": "Varsayılan olarak kapalıdır: pencereyi kapatmak Praxi-Bot'u kapatır. Açık olduğunda pencereyi kapatmak onu yalnızca gizler ve botların çalışmaya devam eder. Praxi-Bot simgesini tepside (saatin yanında) görürsün; açmak, duraklatmak veya kapatmak için kullan. Bu ilk kez olduğunda bir kez bilgilendirileceksin.",
-      "title": "Pencere kapatılınca tepside çalışmaya devam et"
+      "title": "Sistem tepsisinde çalışmaya devam et"
     },
     "language": {
       "de": "Deutsch",
@@ -5291,7 +5363,7 @@
       "restartHint": "Değişikliğin geçerli olması için arka plan servisini yeniden başlat.",
       "restartManual": "Değişikliğin geçerli olması için arka plan servisini kendin yeniden başlat (bu uygulama başlatmadı).",
       "test": "Bağlantıyı test et",
-      "title": "Model sağlayıcıları"
+      "title": "Özel yapay zekâ sunucuları"
     },
     "quickAsk": {
       "description": "Varsayılan olarak kapalı. Açıkken, herhangi bir programdan bir klavye kısayoluyla küçük bir kutu açılır; soruyu yazıp Enter'a basarsın. Her soru, seçtiğin botla yeni bir sohbet başlatır.",
@@ -5398,7 +5470,7 @@
         "saved": "{{provider}} anahtarı kaydedildi",
         "savedOn": "{{provider}} anahtarı {{name}} üzerine kaydedildi",
         "stored": "Anahtar kayıtlı",
-        "title": "API anahtarıyla ekle",
+        "title": "Erişim anahtarları",
         "unknown": "Bu anahtarın hangi sağlayıcıya ait olduğunu anlayamadık. Aşağıdan birini seç."
       }
     },
@@ -5531,7 +5603,7 @@
         "unsupported": "Kullanılamaz",
         "warn": "Kontrol et"
       },
-      "title": "Tanılama"
+      "title": "Sağlık kontrolü"
     },
     "email": {
       "add": "Posta kutusu ekle",
@@ -5657,7 +5729,7 @@
     "general": {
       "account": {
         "description": "Kenar çubuğundaki hesap menüsünde görünür.",
-        "title": "Hesap adı"
+        "title": "Adın"
       },
       "frame": {
         "description": "Uygulamanın kendi pencere düğmeleri yerine sistem başlık çubuğunu göster.",
@@ -5681,11 +5753,6 @@
         "seconds": "Saniyeyle",
         "title": "Mesaj saatlerini göster"
       }
-    },
-    "groups": {
-      "account": "Hesap",
-      "appearance": "Görünüm",
-      "behavior": "Davranış"
     },
     "learn": {
       "guide": "Rehberde devamını oku",
@@ -5718,13 +5785,8 @@
       }
     },
     "mode": {
-      "advanced": "Gelişmiş",
-      "advancedOn": "Gelişmiş ayarlar gösteriliyor. İstediğin zaman Basit görünüme dönebilirsin.",
-      "hidden": "Uzmanlara yönelik {{count}} ayarı daha göster",
-      "hidden_one": "Uzmanlara yönelik {{count}} ayarı daha göster",
-      "hidden_other": "Uzmanlara yönelik {{count}} ayarı daha göster",
-      "label": "Ne kadar gösterilsin",
-      "simple": "Basit"
+      "moreHint": "İnce ayar için ek seçenekler",
+      "moreOptions": "Diğer seçenekler"
     },
     "navGroups": {
       "app": "Uygulama",
@@ -5733,49 +5795,33 @@
     },
     "noResults": "Eşleşen ayar yok.",
     "pages": {
-      "advanced": {
-        "description": "Sağlık kontrolü, onarım ve sürüm. Çoğu kişinin bu sayfaya hiç ihtiyacı olmaz.",
-        "name": "Gelişmiş"
-      },
       "appearance": {
-        "description": "Renkler, arka plan ve uygulamanın görünüşü.",
+        "description": "Renkler, arka plan ve okunabilirlik.",
         "name": "Görünüm"
       },
       "apps": {
-        "description": "Botlarının kullanabileceği e-posta ve web araması.",
-        "name": "Uygulamalar ve bağlantılar"
-      },
-      "data": {
-        "description": "Botların neyi hatırladığı, neyi bildiği ve ne kadar kullandığın.",
-        "name": "Veriler ve yedek"
+        "description": "Botlarının kullanabileceği web araması ve e-posta.",
+        "name": "Posta ve web"
       },
       "general": {
-        "description": "Adın, dilin ve mesaj gönderme ayarları.",
+        "description": "Adın, dilin, bildirimler ve ses ayarları.",
         "name": "Genel"
       },
-      "help": {
-        "description": "Son olayları incele ve güvenli bir destek raporu hazırla.",
-        "name": "Yardım"
-      },
       "models": {
-        "description": "Botların hangi yapay zekâyla düşündüğü ve neleri hatırlayabildiği.",
-        "name": "Botlar ve modeller"
-      },
-      "notifications": {
-        "description": "Uygulamanın seni ne zaman uyaracağı.",
-        "name": "Bildirimler"
+        "description": "Botlarının düşündüğü modeller ve hatırladıkları.",
+        "name": "Modeller"
       },
       "safety": {
-        "description": "Botların kendi başına neler yapabileceği ve neleri önce sana soracağı.",
-        "name": "Güvenlik ve izinler"
+        "description": "Botların kendi başına yapabilecekleri, güvenilen klasörler ve etkinlik günlüğü.",
+        "name": "Güvenlik"
       },
-      "voice": {
-        "description": "Yanıtları sesli dinle ya da yazmak yerine konuş.",
-        "name": "Ses"
+      "system": {
+        "description": "Kullanım, depolama alanı, güncellemeler ve sağlık kontrolleri.",
+        "name": "Sistem"
       },
       "where": {
-        "description": "Botlarının çalıştığı bilgisayar.",
-        "name": "Botlar nerede çalışır"
+        "description": "Botlarının hangi bilgisayarda çalıştığı.",
+        "name": "Bilgisayarlar"
       }
     },
     "reset": {
@@ -5877,7 +5923,7 @@
         "title": "Güncellemede bir sorun çıktı",
         "working": "Geri dönülüyor…"
       },
-      "title": "Güncellemeler",
+      "title": "Güncellemeler ve sürüm",
       "unknown": "Bilinmiyor",
       "upToDate": "En son sürümü kullanıyorsunuz."
     },
@@ -6381,7 +6427,7 @@
       "close": "Kapat",
       "daemonUnavailable": "Ses hizmeti kullanılamıyor. Bu bilgisayardaki arka plan hizmetine yeniden bağlanıp tekrar deneyin; ses desteği yoksa hizmeti güncelleyin.",
       "end": "Aramayı bitir",
-      "geminiKeyMissing": "Ayarlar → Ses → Sesle yazma servisi bölümünde bir Gemini API anahtarı ekleyin, ardından tekrar deneyin.",
+      "geminiKeyMissing": "Ayarlar → Genel → Sesli dikte bölümünden bir Gemini anahtarı ekle, ardından tekrar dene.",
       "holdToTalk": "Konuşmak için basılı tut",
       "interrupt": "Sözünü kes",
       "micMuted": "Mikrofon susturuldu",
@@ -6389,7 +6435,7 @@
       "micTimeout": "Mikrofon yanıt vermedi. Mikrofon izni istemini onaylayın. Windows Ayarları → Gizlilik ve güvenlik → Mikrofon bölümünde mikrofon erişimine ve masaüstü uygulamalarına izin verip tekrar deneyin.",
       "mute": "Mikrofonu sustur",
       "noSpeech": "Konuşma algılanmadı. Dinlemeye devam ediyorum.",
-      "notConfigured": "Ayarlar → Ses → Sesle yazma servisi bölümünde bir Gemini anahtarı ekleyip Gemini Live sağlayıcısını seçin veya Whisper uyumlu bir hizmet yapılandırın.",
+      "notConfigured": "Ayarlar → Genel → Sesli dikte bölümünden bir Gemini anahtarı ekleyip Gemini Live'ı seç ya da Whisper uyumlu bir hizmet ayarla.",
       "openSettings": "Ayarları aç",
       "ownerRequired": "Sahip yetkilendirmesi eksik. Bu bilgisayarda Praxi-Bot uygulamasını açıp yerel arka plan hizmetine yeniden bağlanın, ardından tekrar deneyin.",
       "phase": {
@@ -6405,7 +6451,7 @@
       "replyFailed": "Bot yanıt veremedi. Lütfen tekrar deneyin.",
       "retry": "Tekrar dene",
       "runActive": "Bir bot çalışıyor. Tamamlanmasını bekleyin veya sohbetten durdurun, ardından sesli sohbeti tekrar başlatın. Mikrofon kapalı.",
-      "serviceRefused": "Dikte hizmeti isteği reddetti. Ayarlar → Ses → Sesle yazma servisi bölümünde sağlayıcıyı, API anahtarını, modeli ve kotayı kontrol edin.",
+      "serviceRefused": "Yazıya dökme hizmeti isteği reddetti. Ayarlar → Genel → Sesli dikte bölümünden seçili hizmeti, anahtarı, modeli ve kotayı kontrol et.",
       "simulate": "Konuşmayı simüle et (sahte)",
       "start": "Sesli sohbeti başlat",
       "stepTimeout": "Başlatma çok uzun sürdüğü için arama durduruldu. İnternet bağlantını ve arka plan servisinin çalıştığını kontrol edip tekrar dene.",
@@ -6413,7 +6459,7 @@
       "transcribeFailed": "Bu yazıya çevrilemedi. Lütfen tekrar söyleyin.",
       "unmute": "Mikrofonu aç",
       "unsupported": "Bu pencere ses kaydedemiyor.",
-      "wrongProvider": "Gemini anahtarınızı kullanmak için Ayarlar → Ses → Sesle yazma servisi bölümünde Gemini Live sağlayıcısını seçin veya seçili Whisper hizmetini yapılandırın."
+      "wrongProvider": "Gemini anahtarını kullanmak için Ayarlar → Genel → Sesli dikte bölümünden Gemini Live'ı seç ya da seçili Whisper hizmetini ayarla."
     },
     "codeOmitted": "(kod atlandı)",
     "description": "Sesli oku düğmesinin sesi ve hızı. Sistemin konuşma motorunu kullanır.",
@@ -6475,7 +6521,7 @@
     "micBusy": "Mikrofon başka bir uygulama tarafından kullanılıyor. Onu kapatıp tekrar dene.",
     "micDenied": "Praxi-Bot için mikrofon erişimine izin verin. Windows Ayarları → Gizlilik ve güvenlik → Mikrofon bölümünde Mikrofon erişimi ve Masaüstü uygulamalarının mikrofonunuza erişmesine izin ver seçeneklerini açın. Ardından Praxi-Bot uygulamasını yeniden başlatıp tekrar deneyin.",
     "micMissing": "Mikrofon bulunamadı. Bir mikrofon bağlayıp tekrar dene.",
-    "notConfigured": "Sesle yazma henüz kurulu değil. Ayarlar → Ses → Sesle yazma servisi bölümünden bir yazıya çevirme servisi ekle.",
+    "notConfigured": "Dikte henüz ayarlanmadı. Ayarlar → Genel → Sesli dikte bölümünden bir yazıya dökme hizmeti ekle.",
     "online": "çevrimiçi",
     "speak": "Sesli oku",
     "speakAuto": {
@@ -6509,7 +6555,7 @@
       "statusOwnKey": "Hazır: ses için kaydedilmiş ayrı bir anahtar kullanılıyor.",
       "statusReusing": "Hazır: bu hizmet için zaten eklediğiniz anahtar kullanılıyor. Anahtar gizli depoda kalır.",
       "statusReusingGemini": "Hazır: zaten eklediğiniz Gemini anahtarı kullanılıyor. Anahtar gizli depoda kalır.",
-      "title": "Sesle yazma servisi",
+      "title": "Sesli dikte",
       "url": "Servis adresi",
       "whereTitle": "Sesiniz nereye gider:"
     },

@@ -1595,6 +1595,13 @@ impl Shared {
     /// `pending`, so no later approve/answer can reach them, and their waits
     /// end without a verdict.
     pub(crate) fn deny_open_for_stop(&self, run_id: RunId) {
+        // Cancel the run's token BEFORE its waits are released. Releasing a
+        // card wakes the step; if the token were still live the step could
+        // finish as "denied", the drive loop would plan the next model call and
+        // only then see the cancel (a second model call after Stop).
+        if let Some(rt) = self.rt.get().and_then(Weak::upgrade) {
+            rt.signal_cancel(run_id);
+        }
         let drained: Vec<(ToolCallId, Pending)> = {
             let mut pending = self.pending.lock();
             let ids: Vec<ToolCallId> = pending
@@ -1609,6 +1616,13 @@ impl Shared {
         for (call_id, p) in drained {
             self.secret_requests.lock().remove(&call_id);
             self.record_stop_denial(run_id, call_id, p.approval_id);
+        }
+        #[cfg(test)]
+        {
+            let hook = self.stop_split_hook.lock().clone();
+            if let Some(hook) = hook {
+                hook();
+            }
         }
     }
 

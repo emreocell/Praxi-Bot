@@ -1,0 +1,155 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-0);
+  font-size: var(--font-size-ui-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}
+
+.title svg {
+  width: var(--space-4);
+  height: var(--space-4);
+}
+
+.intro,
+.note,
+.empty,
+.error {
+  margin: var(--space-0);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-sm);
+  line-height: var(--line-height-normal);
+}
+
+.form,
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--color-text);
+  font-size: var(--font-size-ui-sm);
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  padding: var(--space-2);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-elevated);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.field textarea {
+  min-height: calc(var(--space-8) * 2);
+  resize: vertical;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-0);
+  padding: var(--space-0);
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.name {
+  margin: var(--space-0);
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
+}
+
+.secret,
+.url {
+  margin: var(--space-0);
+  padding: var(--space-2);
+  overflow-wrap: anywhere;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-elevated);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.primary,
+.quiet,
+.danger {
+  min-height: var(--space-8);
+  padding: var(--space-0) var(--space-3);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  cursor: pointer;
+}
+
+.primary {
+  border: none;
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+.quiet,
+.danger {
+  border: var(--size-border) solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+}
+
+.danger {
+  color: var(--color-danger);
+}
+
+.primary:disabled,
+.quiet:disabled,
+.danger:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.primary:focus-visible,
+.quiet:focus-visible,
+.danger:focus-visible,
+.field input:focus-visible,
+.field textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}

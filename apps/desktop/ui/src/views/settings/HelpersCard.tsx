@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ShieldAlert, Sparkles, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button, Card } from "ui";
+import { Button } from "ui";
+import { SettingsCard } from "../../components/SettingsUi";
 import type { DecisionHelper, EmbeddingProviderInput, EmbeddingProviderRow, EmbeddingsSetup } from "../../api/types";
 import form from "../../components/Form.module.css";
 import { humanLine } from "../../lib/humanError";
@@ -206,7 +207,11 @@ export function HelpersCard() {
     (reuse || apiKey.trim() !== "" || kind === "compatible");
 
   return (
-    <Card padding="md" data-testid="helpers-card">
+    <SettingsCard
+      title={t("helpers.title")}
+      description={t("helpers.description")}
+      testId="helpers-card"
+    >
       <p className={form.hint}>
         <Sparkles size={14} aria-hidden /> {t("helpers.keyOptional")}{" "}
         <a href={`${DOCS_BASE_URL}embeddings.md`} target="_blank" rel="noreferrer">
@@ -391,6 +396,6 @@ export function HelpersCard() {
           {error}
         </p>
       ) : null}
-    </Card>
+    </SettingsCard>
   );
 }

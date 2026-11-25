@@ -433,21 +433,31 @@ impl Shared {
         &self,
         run_id: &str,
         name: &str,
+        bot: Option<&str>,
     ) -> Result<WindowFacts, ToolError> {
         let secrets = self.fill_secrets()?;
         let facts = self.live_window(run_id).await?;
         secrets
-            .check_desktop(name, facts.identity.as_deref())
+            .check_desktop(name, facts.identity.as_deref(), bot)
             .map_err(|e| refused(&e))?;
         Ok(facts)
     }
 
     /// The secret's value, after the live program check.
-    async fn secret_for_window(&self, run_id: &str, name: &str) -> Result<SecretValue, ToolError> {
-        self.verify_window_program(run_id, name).await?;
-        self.fill_secrets()?
-            .resolve_value(name)
-            .map_err(|e| refused(&e))
+    async fn secret_for_window(
+        &self,
+        run_id: &str,
+        name: &str,
+        bot: Option<&str>,
+    ) -> Result<SecretValue, ToolError> {
+        self.verify_window_program(run_id, name, bot).await?;
+        let secrets = self.fill_secrets()?;
+        let value = secrets
+            .resolve_value_for(name, bot)
+            .map_err(|e| refused(&e))?;
+        // Read for typing: counted as used (conservative; never "unused" after this).
+        let _ = secrets.mark_used(name);
+        Ok(value)
     }
 
     /// Resolve a reference against the caller's run state. `expect_gen` is required
@@ -1373,11 +1383,12 @@ impl DesktopTool {
         run_id: &str,
         input: Value,
         guard: Option<ActGuard>,
+        bot: Option<&str>,
     ) -> Result<String, ToolError> {
         let observing = matches!(self.op, Op::ListApps | Op::GetState | Op::Wait);
         let gate = self.shared.control.clone();
         let epoch = gate.as_ref().map(|g| g.observation_epoch());
-        let text = self.run_inner(run_id, input, guard.as_ref()).await?;
+        let text = self.run_inner(run_id, input, guard.as_ref(), bot).await?;
         if let (Some(gate), Some(epoch)) = (gate, epoch) {
             if observing
                 && (gate.observation_epoch() != epoch || gate.observation_refused().is_some())
@@ -1400,6 +1411,7 @@ impl DesktopTool {
         run_id: &str,
         input: Value,
         guard: Option<&ActGuard>,
+        bot: Option<&str>,
     ) -> Result<String, ToolError> {
         let sh = &self.shared;
         if matches!(self.op, Op::ListApps | Op::GetState | Op::Wait)
@@ -1671,7 +1683,7 @@ impl DesktopTool {
                 // live program check), held in memory and wiped on drop.
                 let secret = match &what {
                     Source::Text(_) => None,
-                    Source::Secret(name) => Some(sh.secret_for_window(run_id, name).await?),
+                    Source::Secret(name) => Some(sh.secret_for_window(run_id, name, bot).await?),
                 };
                 // Focus the element with a real click, then type into the focus.
                 let typed = async {
@@ -1690,7 +1702,7 @@ impl DesktopTool {
                         (Source::Secret(name), Some(v)) => {
                             // The program that owns the window is verified again
                             // right before the keys are sent.
-                            sh.verify_window_program(run_id, name).await?;
+                            sh.verify_window_program(run_id, name, bot).await?;
                             v.expose().to_owned()
                         }
                         (Source::Secret(_), None) => String::new(),
@@ -1729,7 +1741,7 @@ impl DesktopTool {
                 }
                 let secret = match &what {
                     Source::Text(_) => None,
-                    Source::Secret(name) => Some(sh.secret_for_window(run_id, name).await?),
+                    Source::Secret(name) => Some(sh.secret_for_window(run_id, name, bot).await?),
                 };
                 let set = async {
                     let value = match (&what, &secret) {
@@ -1926,7 +1938,9 @@ impl Tool for DesktopTool {
         let (label, _) = sh.describe(&ctx.run_id, r)?;
         // Refuse here, BEFORE any approval is offered, when the receiving
         // program is not one the owner allowed for this secret.
-        let facts = sh.verify_window_program(&ctx.run_id, &name).await?;
+        let facts = sh
+            .verify_window_program(&ctx.run_id, &name, ctx.bot_id.as_deref())
+            .await?;
         Ok(Some(json!({
             "kind": "secret_fill",
             "tool": self.spec.name,
@@ -1948,7 +1962,7 @@ impl Tool for DesktopTool {
             None
         };
         let text = self
-            .run(&ctx.run_id, input, guard)
+            .run(&ctx.run_id, input, guard, ctx.bot_id.as_deref())
             .instrument(tracing::info_span!(
                 "desktop.tool",
                 tool = %self.spec.name,

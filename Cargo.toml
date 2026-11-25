@@ -104,6 +104,16 @@ uuid = { version = "1", features = ["v7", "serde"] }
 atspi = { version = "0.30", default-features = false, features = ["connection", "proxies", "tokio", "zbus"] }
 x11rb = { version = "0.14", features = ["xtest", "randr"] }
 
+# Debug builds and test binaries keep file:line information (panic backtraces, `RUST_BACKTRACE`)
+# but not the full PDB type information. On Windows the MSVC linker's peak memory is dominated by
+# that type information (a cli-provider test binary linked with ~3.1 GB at the default `debug = true`
+# and ~0.5 GB with this setting), and the target directory shrinks by about a third. CI already
+# builds this way (`CARGO_PROFILE_DEV_DEBUG` in .github/workflows/ci.yml). `[profile.test]` inherits
+# from `dev`. To get full debugger variable inspection locally, build with
+# `CARGO_PROFILE_DEV_DEBUG=true cargo build`. The release profile is untouched.
+[profile.dev]
+debug = "line-tables-only"
+
 # The secret vault derives its key with Argon2id (19 MiB, 2 passes) on every read. At opt-level 0
 # that takes seconds, so a daemon built for tests (the real-app smoke, `cargo test`) stalled on
 # `GET /v1/providers`, which re-reads the vault once per provider. Optimise only the KDF crates.

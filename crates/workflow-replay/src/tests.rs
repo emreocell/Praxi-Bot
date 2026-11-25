@@ -1478,6 +1478,93 @@ mod secret_steps {
         assert!(browser.typed_secrets.lock().is_empty());
     }
 
+    fn account_rig(acting_bot: Option<&str>) -> (Arc<FakeBrowser>, Replayer, String) {
+        let (browser, secrets, _) = rig(GITHUB);
+        secrets
+            .register_account(&secret_store::NewAccount {
+                name: "login/github.com-aaaa1111",
+                site: GITHUB,
+                login_id: "me",
+                email_account: None,
+                bot_id: "bot-a",
+                note: None,
+                password_len: 20,
+                symbols: true,
+            })
+            .unwrap();
+        let pw = secrets
+            .resolve_value_for("login/github.com-aaaa1111", Some("bot-a"))
+            .unwrap()
+            .expose()
+            .to_owned();
+        let mut opts = ReplayOptions::instant();
+        opts.fill_secrets = Some(secrets);
+        opts.bot_id = acting_bot.map(str::to_owned);
+        let h = handles(None, Some(browser.clone()));
+        (browser, replayer(h, opts), pw)
+    }
+
+    /// Guard: a workflow of bot B cannot type bot A's generated account password.
+    #[tokio::test]
+    async fn replay_by_another_bot_cannot_type_a_bot_scoped_account() {
+        for acting in [Some("bot-b"), None] {
+            let (browser, rp, pw) = account_rig(acting);
+            let gate = RecordingGate::default();
+            let report = rp
+                .replay(
+                    &wf(secret_step("login/github.com-aaaa1111")),
+                    &params(&json!({})),
+                    &gate,
+                )
+                .await
+                .unwrap();
+            assert!(!report.is_completed(), "{report:?}");
+            assert!(browser.typed_secrets.lock().is_empty());
+            assert!(gate.requests.lock().is_empty(), "no card for a refused use");
+            let text = format!("{report:?}");
+            assert!(text.contains("belongs to another bot"), "{text}");
+            assert!(!text.contains(&pw));
+        }
+    }
+
+    /// Guard: the owning bot's replay still types its own account.
+    #[tokio::test]
+    async fn replay_by_the_owning_bot_types_its_account() {
+        let (browser, rp, pw) = account_rig(Some("bot-a"));
+        let report = rp
+            .replay(
+                &wf(secret_step("login/github.com-aaaa1111")),
+                &params(&json!({})),
+                &RecordingGate::default(),
+            )
+            .await
+            .unwrap();
+        assert!(report.is_completed(), "{report:?}");
+        assert_eq!(browser.typed_secrets.lock().as_slice(), [pw]);
+    }
+
+    /// Guard: an owner-made (global) secret works for any acting bot.
+    #[tokio::test]
+    async fn replay_types_an_owner_secret_for_any_bot() {
+        let (browser, _s, _) = rig(GITHUB);
+        let (browser2, secrets, _) = rig(GITHUB);
+        let _ = browser;
+        let mut opts = ReplayOptions::instant();
+        opts.fill_secrets = Some(secrets);
+        opts.bot_id = Some("bot-b".into());
+        let rp = replayer(handles(None, Some(browser2.clone())), opts);
+        let report = rp
+            .replay(
+                &wf(secret_step("login/github")),
+                &params(&json!({})),
+                &RecordingGate::default(),
+            )
+            .await
+            .unwrap();
+        assert!(report.is_completed(), "{report:?}");
+        assert_eq!(browser2.typed_secrets.lock().as_slice(), [VALUE]);
+    }
+
     /// Guard: a refused gate (the owner said no) types nothing.
     #[tokio::test]
     async fn replay_types_nothing_when_the_gate_refuses() {
