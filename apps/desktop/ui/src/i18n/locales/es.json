@@ -5644,6 +5644,30 @@
         "saved": "{{name}} saved"
       }
     },
+    "emailChannel": {
+      "account": "Buzón que se vigila",
+      "approve": "Enviar exactamente esto",
+      "bot": "Bot que recibe el correo",
+      "choose": "Elegir…",
+      "deny": "No enviar",
+      "description": "Deja que un bot vea el correo nuevo de una carpeta de tu buzón.",
+      "enable": "Activar el canal de correo",
+      "folder": "Carpeta que se vigila",
+      "folderHint": "Normalmente INBOX. Solo se pasa el correo que llega después de activarlo.",
+      "full": "Mostrar al bot el texto completo de cada correo, no solo un resumen",
+      "noAccount": "Primero añade un buzón arriba.",
+      "note": "El correo lo escriben otras personas, así que el bot lo trata como información, nunca como órdenes. Por defecto solo ve el remitente, el asunto y las primeras líneas. Los adjuntos no se abren nunca. No se envía nada a menos que permitas las respuestas y apruebes cada una aquí.",
+      "replies": "Permitir que el bot sugiera respuestas (tú apruebas cada una antes de enviarla)",
+      "running": "En marcha",
+      "save": "Guardar",
+      "saved": "Guardado.",
+      "sent": "Correo enviado.",
+      "stopped": "Detenido",
+      "subject": "Asunto: {{subject}}",
+      "title": "Correo para un bot",
+      "to": "Para: {{to}}",
+      "waiting": "Respuestas pendientes de tu visto bueno"
+    },
     "general": {
       "account": {
         "description": "Shown in the sidebar account menu.",
