@@ -844,6 +844,23 @@ mod tests {
         (bot, chat)
     }
 
+    /// How long a test waits for something a run should produce (an approval, a
+    /// question). Far above normal, but a hang fails with a reason instead of never.
+    const POLL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+    /// The run's last few events, to explain a poll that ran out of time.
+    fn last_events(dir: &std::path::Path, run: &str) -> Vec<String> {
+        let Ok(id) = run.parse::<uuid::Uuid>() else {
+            return vec![format!("not a run id: {run}")];
+        };
+        let log = storage::read_event_log(dir, protocol::RunId(id)).unwrap_or_default();
+        let skip = log.len().saturating_sub(5);
+        log.iter()
+            .skip(skip)
+            .map(|e| format!("{:?}", e.event).chars().take(160).collect())
+            .collect()
+    }
+
     async fn send_text(c: &Client, chat: &str, text: &str) -> String {
         let sent = c
             .request(
@@ -873,11 +890,17 @@ mod tests {
             json!({ "path": target, "content": "hi" })
         );
         let run = send_text(&c, &chat, &msg).await;
+        let deadline = std::time::Instant::now() + POLL_DEADLINE;
         let call_id = loop {
             let p = c.request(Method::GET, "/v1/approvals", None).await.unwrap();
             if let Some(a) = p.as_array().and_then(|a| a.first()) {
                 break a["call_id"].as_str().unwrap().to_owned();
             }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no approval appeared; last events: {:#?}",
+                last_events(dir.path(), &run)
+            );
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         };
         for scope in ["always_category", "always"] {
@@ -936,6 +959,7 @@ mod tests {
         )
         .await;
         let id: uuid::Uuid = run.parse().unwrap();
+        let deadline = std::time::Instant::now() + POLL_DEADLINE;
         let question = loop {
             let log = storage::read_event_log(dir.path(), protocol::RunId(id)).unwrap();
             if let Some(q) = log.iter().find_map(|e| match &e.event {
@@ -944,6 +968,11 @@ mod tests {
             }) {
                 break q;
             }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no question was asked; last events: {:#?}",
+                last_events(dir.path(), &run)
+            );
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         };
         out.clear();
