@@ -3962,7 +3962,8 @@
       "view_quota": "Sunucuda çok fazla ekran oturumu açık. Kullanmadığın bir ekranı kapat veya biraz sonra yeniden dene."
     },
     "expand": "Büyük görünümü aç",
-    "focusTrapHint": "Shift+Esc ekran klavye odağını Bitirdim düğmesine taşır.",
+    "expandScreen": "Tam ekran",
+    "focusTrapHint": "Klavye ekrana gider. Çıkmak için Shift+Esc.",
     "globalPauseNotice": "Devralma veya durdurma işlemi tüm bot çalışmalarını genel olarak duraklatır.",
     "handBackAction": "Geri ver",
     "hostLabel": "Sunucu: {{host}}",
@@ -4060,6 +4061,7 @@
     "retryingDone": "Kontrol geri veriliyor…",
     "reviewApprovals": "Sohbete dön",
     "stageAlt": "{{target}} için canlı ekran önizlemesi",
+    "stageFocusPrompt": "Yazmak için ekrana tıkla.",
     "stageHint": "Etkileşimli ekran alanı. Odaklamak için tıkla, denetim çubuğuna dönmek için Shift+Esc kullan.",
     "states": {
       "acquiring": "Kontrol alınıyor…",

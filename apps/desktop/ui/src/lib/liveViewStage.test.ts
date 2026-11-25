@@ -230,8 +230,12 @@ test("IME composition commits text once and emits no key events while composing"
 test("focus scope: moving focus onto a toolbar button inside the stage is not leaving it", () => {
   const inside = new Set(["textarea", "toolbarButton"]);
   const container = { contains: (n: unknown) => inside.has(n as string) };
+  const hintInside = new Set(["captureTab", "releaseFocus"]);
+  const hintBar = { contains: (n: unknown) => hintInside.has(n as string) };
   assert.equal(focusLeftScope("toolbarButton", container), false);
   assert.equal(focusLeftScope("textarea", container), false);
-  assert.equal(focusLeftScope("chatInput", container), true);
-  assert.equal(focusLeftScope(null, container), true);
+  assert.equal(focusLeftScope("captureTab", container, hintBar), false);
+  assert.equal(focusLeftScope("releaseFocus", container, hintBar), false);
+  assert.equal(focusLeftScope("chatInput", container, hintBar), true);
+  assert.equal(focusLeftScope(null, container, hintBar), true);
 });

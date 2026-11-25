@@ -13,6 +13,58 @@
   backdrop-filter: blur(var(--blur-glass)) saturate(1.25);
 }
 
+.dockedRoot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: var(--space-0);
+  min-height: var(--space-0);
+  background-color: var(--color-background);
+  color: var(--color-text);
+  border-left: var(--size-border) solid var(--color-border);
+}
+
+.dockedRoot .header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  gap: var(--space-2);
+}
+
+.dockedRoot .headerLeft,
+.dockedRoot .headerRight {
+  flex-shrink: 0;
+}
+
+.dockedRoot .targetPicker {
+  flex: 1 1 auto;
+  min-width: var(--space-0);
+  overflow: hidden;
+}
+
+.dockedRoot .moreBtn {
+  display: inline-grid;
+}
+
+.dockedRoot .tools {
+  display: none;
+  position: absolute;
+  inset-block-start: calc(100% + var(--space-2));
+  inset-inline-end: var(--space-0);
+  z-index: 5;
+  flex-wrap: wrap;
+  padding: var(--space-2);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated);
+  box-shadow: var(--shadow-overlay);
+}
+
+.dockedRoot .tools[data-open="true"] {
+  display: flex;
+}
+
 .header {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -43,6 +95,7 @@
   align-items: center;
   gap: var(--space-2);
   min-width: var(--space-0);
+  white-space: nowrap;
 }
 
 /* Quality selector and link chip: inline when there is room, a dropdown behind "..." when not. */
@@ -58,6 +111,48 @@
 
 /* stylelint-disable-next-line unit-disallowed-list -- window width where the toolbar no longer fits in one row */
 @media (width <= 60em) {
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .headerLeft,
+  .headerRight {
+    flex-shrink: 0;
+  }
+
+  .header .targetPicker {
+    flex: 1 1 auto;
+    min-width: var(--space-0);
+    overflow: hidden;
+  }
+
+  .header .stateBadge {
+    display: none;
+  }
+
+  .viewerFooter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3) var(--space-3);
+  }
+
+  .footerSpacer {
+    display: none;
+  }
+
+  .bottomDock {
+    border-radius: var(--radius-card);
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+
   .moreBtn {
     display: inline-grid;
   }
@@ -190,28 +285,44 @@
   background-color: var(--color-warning);
 }
 
+.statusSlot {
+  height: var(--space-8);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-0) var(--space-5);
+  overflow: hidden;
+}
+
 .statusLine {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
   gap: var(--space-3);
-  padding: var(--space-1) var(--space-5);
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-  flex-shrink: 0;
 }
 
 .approvalBar {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: var(--space-5);
+  z-index: 62;
+  width: min(var(--size-content-max), calc(100% - var(--space-10)));
+  max-height: 28vh;
+  overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-5);
-  border-bottom: var(--size-border) solid var(--color-warning);
-  background-color: var(--color-accent-subtle);
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: var(--size-border) solid var(--color-warning);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated);
+  box-shadow: var(--shadow-overlay);
   font-size: var(--font-size-sm);
   color: var(--color-text);
-  flex-shrink: 0;
 }
 
 .approvalHead {
@@ -304,19 +415,31 @@
   height: var(--space-1);
 }
 
+/* Fixed-height reserved slot below stageFrame so focus controls never overlay or resize the screen. */
+.focusSlot {
+  height: var(--space-10);
+  flex-shrink: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.focusIdleHint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
 .focusOverlayBar {
-  position: absolute;
-  top: var(--space-3);
-  left: var(--space-3);
-  z-index: 4;
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
+  justify-content: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-pill);
   border: var(--size-border) solid var(--color-border-strong);
-  background-color: color-mix(in srgb, var(--color-background) 88%, transparent);
+  background-color: var(--color-surface-elevated);
   font-size: var(--font-size-xs);
   color: var(--color-text);
 }
@@ -408,7 +531,7 @@
   max-width: 100%;
   margin: var(--space-0);
   font-size: var(--font-size-xs);
-  color: var(--color-text-faint);
+  color: var(--color-text-secondary);
   flex-shrink: 0;
 }
 
@@ -424,10 +547,29 @@
   white-space: nowrap;
 }
 
+.viewerFooter {
+  position: relative;
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5) var(--space-4);
+}
+
+.footerSpacer {
+  min-width: var(--space-0);
+}
+
+.footerRight {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: var(--space-0);
+}
+
 .bottomDock {
   position: relative;
-  align-self: center;
-  margin: var(--space-2) var(--space-4) var(--space-5);
   flex-shrink: 0;
   z-index: 61;
   display: flex;
@@ -498,24 +640,43 @@
   min-height: var(--space-8);
 }
 
-/* In the flow under the stream (never over it): a compact pill while collapsed. */
+/* Footer trigger bar stays fixed-height; drawer floats upward without resizing the stage. */
 .chatOverlay {
   position: relative;
-  z-index: 4;
-  align-self: flex-end;
-  flex-shrink: 0;
+  z-index: 62;
+  display: inline-flex;
+  align-items: center;
+}
+
+.chatDrawer {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  right: var(--space-0);
+  z-index: 62;
   display: grid;
-  width: auto;
-  max-width: min(var(--size-content-max), 100%);
+  width: min(var(--size-content-max), 86vw);
+  max-height: 36vh;
+  overflow: auto;
   gap: var(--space-2);
-  padding: var(--space-2);
+  padding: var(--space-3);
   border: var(--size-border) solid var(--color-border);
   border-radius: var(--radius-card);
   background: var(--color-surface-elevated);
   box-shadow: var(--shadow-overlay);
 }
 
-.chatOverlayBar,
+.chatOverlayBar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-elevated);
+  box-shadow: var(--shadow-overlay);
+  white-space: nowrap;
+}
+
 .chatApproval {
   display: flex;
   align-items: center;
@@ -542,8 +703,4 @@
 .chatApproval > span {
   overflow-wrap: anywhere;
   font-size: var(--font-size-sm);
-}
-
-.chatOverlay[data-open="true"] {
-  width: min(var(--size-content-max), 100%);
 }

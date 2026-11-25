@@ -248,6 +248,30 @@ export function switchesOf(host: {
   };
 }
 
+const LEFTOVER_VIEW_SESSIONS_KEY = "praxi.leftoverViewSessions";
+
+/** A page that closes may lose its DELETE: remember the id so the next page of this tab can end it. */
+function rememberLeftoverViewSession(id: string): void {
+  try {
+    const ids = new Set<string>(JSON.parse(sessionStorage.getItem(LEFTOVER_VIEW_SESSIONS_KEY) ?? "[]") as string[]);
+    ids.add(id);
+    sessionStorage.setItem(LEFTOVER_VIEW_SESSIONS_KEY, JSON.stringify([...ids].slice(-8)));
+  } catch {
+    /* no storage: the daemon's lease reaps it */
+  }
+}
+
+function takeLeftoverViewSessions(): string[] {
+  try {
+    const raw = sessionStorage.getItem(LEFTOVER_VIEW_SESSIONS_KEY);
+    sessionStorage.removeItem(LEFTOVER_VIEW_SESSIONS_KEY);
+    const ids: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export class ApiClient {
   listKnowledgeEmailCaptures(bot: string): Promise<KnowledgeEmailCapture[]> {
     return this.request("GET", `/bots/${encodeURIComponent(bot)}/knowledge/email-captures`);
@@ -431,7 +455,7 @@ export class ApiClient {
   protected async request<T>(
     method: string,
     path: string,
-    opts: { body?: unknown; query?: Query; auth?: boolean; signal?: AbortSignal; headers?: Record<string, string>; raw?: Blob } = {}
+    opts: { body?: unknown; query?: Query; auth?: boolean; signal?: AbortSignal; headers?: Record<string, string>; raw?: Blob; keepalive?: boolean } = {}
   ): Promise<T> {
     const res = await this.send(method, path, opts);
     if (res.status === 204) {
@@ -470,6 +494,8 @@ export class ApiClient {
       headers?: Record<string, string>;
       /** A file body, sent as is (the attachment upload); `body` stays JSON. */
       raw?: Blob;
+      /** Let the request finish while the page is closing or reloading. */
+      keepalive?: boolean;
     } = {}
   ): Promise<Response> {
     const url = new URL(`${this.baseUrl}/v1${path}`);
@@ -501,6 +527,7 @@ export class ApiClient {
         method,
         headers,
         body: opts.raw ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body)),
+        ...(opts.keepalive ? { keepalive: true } : {}),
         signal: AbortSignal.any([
           this.life.signal,
           ...(opts.signal ? [opts.signal] : []),
@@ -1226,11 +1253,13 @@ export class ApiClient {
     try {
       return await create();
     } catch (err) {
-      if (!(err instanceof ApiError) || err.code !== "view_quota" || this.staleViewSessions.size === 0) {
+      if (!(err instanceof ApiError) || err.code !== "view_quota") {
         throw err;
       }
-      // Retry only DELETEs for sessions this client has already abandoned.
-      await Promise.allSettled([...this.staleViewSessions].map((id) => this.deleteViewSession(id)));
+      // Retry only DELETEs for sessions this client has already abandoned (also those a reload
+      // left behind: a closing page may not get its DELETE through).
+      const ids = new Set([...this.staleViewSessions, ...takeLeftoverViewSessions()]);
+      await Promise.allSettled([...ids].map((id) => this.deleteViewSession(id)));
       return create();
     }
   }
@@ -1257,15 +1286,16 @@ export class ApiClient {
       { body: input }
     );
   }
-  async deleteViewSession(id: string): Promise<void> {
+  async deleteViewSession(id: string, opts: { keepalive?: boolean } = {}): Promise<void> {
     this.staleViewSessions.add(id);
+    if (opts.keepalive) rememberLeftoverViewSession(id);
     // The daemon reaps dormant sessions after their lease. Bound local tracking as well.
     if (this.staleViewSessions.size > 8) {
       const oldest = this.staleViewSessions.values().next().value;
       if (oldest) this.staleViewSessions.delete(oldest);
     }
     try {
-      await this.request("DELETE", `/view/sessions/${encodeURIComponent(id)}`);
+      await this.request("DELETE", `/view/sessions/${encodeURIComponent(id)}`, opts.keepalive ? { keepalive: true } : {});
       this.staleViewSessions.delete(id);
     } catch (err) {
       if (err instanceof ApiError && (err.status === 404 || err.status === 410)) {

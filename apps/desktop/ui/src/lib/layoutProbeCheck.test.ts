@@ -72,3 +72,12 @@ test("a closed expectation does not need the panel boxes", () => {
   p.panelDescendants = 0;
   assert.deepEqual(validateProbe(p, { open: false, theme: "clay" }), []);
 });
+
+test("an overlay panel may cover the right edge of main without failing overlap, unless it overlaps rail", () => {
+  const p = good();
+  p.panelMode = "overlay";
+  p.main = box(288, 1388);
+  assert.deepEqual(validateProbe(p, open), []);
+  p.panel = box(200, 1388);
+  assert.ok(validateProbe(p, open).some((v) => /overlay panel overlaps rail/.test(v)));
+});

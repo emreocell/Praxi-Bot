@@ -103,11 +103,16 @@ function targetOptionHint(
  */
 export function LiveViewer({
   source = "home",
+  variant = "overlay",
+  onExpand,
   onChatSlots
 }: {
   source?: "home" | "local";
+  variant?: "overlay" | "docked";
+  onExpand?: () => void;
   onChatSlots?: (slots: LiveChatSlots | null) => void;
 } = {}) {
+  const isDocked = variant === "docked";
   const { t } = useTranslation();
   const { bots, needs } = useDaemon();
   const questionCount = needs.filter((item) => item.kind === "question").length;
@@ -129,6 +134,7 @@ export function LiveViewer({
     panelAction,
     recoveryPrompt,
     closeViewer,
+    openViewer,
     selectTarget,
     refreshTargets,
     requestTakeover,
@@ -163,6 +169,7 @@ export function LiveViewer({
   });
 
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const focusBarRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const imeInputRef = useRef<HTMLTextAreaElement | null>(null);
   const doneButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -181,9 +188,12 @@ export function LiveViewer({
     [bots]
   );
 
+  const active = isDocked || viewerOpen;
+  const overlayOpen = !isDocked && viewerOpen;
+
   // Measure rendered container so contained panel overlays align accurately.
   useEffect(() => {
-    if (!viewerOpen || !stageRef.current) {
+    if (!active || !stageRef.current) {
       return undefined;
     }
     const el = stageRef.current;
@@ -198,7 +208,7 @@ export function LiveViewer({
     const obs = new ResizeObserver(updateSize);
     obs.observe(el);
     return () => obs.disconnect();
-  }, [viewerOpen, frameUrl]);
+  }, [active, frameUrl]);
 
   // Reset captured pointer/key state if stage ceases to allow input.
   const inputGate = canSendLiveInput(state, Date.now());
@@ -219,9 +229,9 @@ export function LiveViewer({
     }
   }, [isInteractive, stageController]);
 
-  // Allow Escape to close viewer only when not actively driving remote screen.
+  // Allow Escape to close overlay viewer only when not actively driving remote screen.
   useEffect(() => {
-    if (!viewerOpen) {
+    if (!overlayOpen) {
       return undefined;
     }
     const onGlobalKey = (e: globalThis.KeyboardEvent) => {
@@ -269,7 +279,7 @@ export function LiveViewer({
     };
     window.addEventListener("keydown", onGlobalKey);
     return () => window.removeEventListener("keydown", onGlobalKey);
-  }, [viewerOpen, isInteractive, stageFocused, closeViewer, helpOpen, moreOpen]);
+  }, [overlayOpen, isInteractive, stageFocused, closeViewer, helpOpen, moreOpen]);
 
   const mapPointer = useCallback(
     (clientX: number, clientY: number, clamp: boolean) => {
@@ -312,16 +322,16 @@ export function LiveViewer({
     clearImeBuffer: () => setImeBuffer("")
   };
 
-  // Register as a layer so a Modal/Popover opened above (z-index 50/60) keeps
+  // Register overlay viewer as a layer so a Modal/Popover opened above (z-index 50/60) keeps
   // Esc/Tab to itself, and trap Tab inside the viewer while it is topmost.
-  if (viewerOpen && layerSeqRef.current === 0) {
+  if (overlayOpen && layerSeqRef.current === 0) {
     layerSeqRef.current = layerStack.next();
   }
-  if (!viewerOpen) {
+  if (!overlayOpen) {
     layerSeqRef.current = 0;
   }
   useEffect(() => {
-    if (!viewerOpen) {
+    if (!overlayOpen) {
       return undefined;
     }
     const seq = layerSeqRef.current;
@@ -345,14 +355,14 @@ export function LiveViewer({
       }
       const first = items[0];
       const last = items[items.length - 1];
-      const active = document.activeElement;
-      if (!node.contains(active)) {
+      const activeEl = document.activeElement;
+      if (!node.contains(activeEl)) {
         e.preventDefault();
         first.focus();
-      } else if (e.shiftKey && active === first) {
+      } else if (e.shiftKey && activeEl === first) {
         e.preventDefault();
         last.focus();
-      } else if (!e.shiftKey && active === last) {
+      } else if (!e.shiftKey && activeEl === last) {
         e.preventDefault();
         first.focus();
       }
@@ -362,9 +372,9 @@ export function LiveViewer({
       document.removeEventListener("keydown", onKey, true);
       layerStack.remove(seq);
     };
-  }, [viewerOpen]);
+  }, [overlayOpen]);
 
-  if (!viewerOpen || typeof document === "undefined") {
+  if (!active || typeof document === "undefined") {
     return null;
   }
 
@@ -459,12 +469,12 @@ export function LiveViewer({
 
   const KindIcon = selectedTarget?.kind === "browser" ? Globe : Monitor;
 
-  return createPortal(
+  const content = (
     <div
-      className={styles.backdrop}
-      role="dialog"
+      className={isDocked ? styles.dockedRoot : styles.backdrop}
+      role={isDocked ? "region" : "dialog"}
       aria-label={t("liveView.title")}
-      data-testid="live-viewer"
+      data-testid={isDocked ? "live-viewer-docked" : "live-viewer"}
       ref={backdropRef}
     >
       <header className={styles.header}>
@@ -472,22 +482,36 @@ export function LiveViewer({
           {announceKey ? t(`liveView.announce.${announceKey}`) : ""}
         </div>
         <div className={styles.headerLeft}>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void closeViewer()}
-            title={
-              isReleasing
-                ? t("liveView.dismissKeepsControl")
-                : ownsActive
-                  ? t("liveView.releaseOnClose")
-                  : undefined
-            }
-            data-testid="live-viewer-close"
-          >
-            <ArrowLeft />
-            <span>{t("liveView.backToChat")}</span>
-          </Button>
+          {isDocked ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => (onExpand ? onExpand() : openViewer())}
+              title={t("liveView.expandScreen")}
+              aria-label={t("liveView.expandScreen")}
+              data-testid="live-viewer-expand"
+            >
+              <Maximize2 />
+              <span>{t("liveView.expandScreen")}</span>
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void closeViewer()}
+              title={
+                isReleasing
+                  ? t("liveView.dismissKeepsControl")
+                  : ownsActive
+                    ? t("liveView.releaseOnClose")
+                    : undefined
+              }
+              data-testid="live-viewer-close"
+            >
+              <ArrowLeft />
+              <span>{t("liveView.backToChat")}</span>
+            </Button>
+          )}
         </div>
 
         <div className={styles.targetPicker}>
@@ -591,14 +615,16 @@ export function LiveViewer({
               </div>
             ) : null}
           </div>
-          <span
-            className={styles.stateBadge}
-            data-tone={tone}
-            data-testid="live-viewer-state-badge"
-          >
-            <i className={styles.stateDot} aria-hidden="true" />
-            <span>{badgeLabel}</span>
-          </span>
+          {!isDocked ? (
+            <span
+              className={styles.stateBadge}
+              data-tone={tone}
+              data-testid="live-viewer-state-badge"
+            >
+              <i className={styles.stateDot} aria-hidden="true" />
+              <span>{badgeLabel}</span>
+            </span>
+          ) : null}
           {actions.includes("stop") ? (
             <Button
               variant="danger"
@@ -615,58 +641,38 @@ export function LiveViewer({
         </div>
       </header>
 
-      {otherOwner || state.lastError || viewFailure || state.disconnected || state.needsResync || state.streamStale ? (
-        <div className={styles.statusLine} role="status">
-          {otherOwner ? (
-            <strong>{t("liveView.otherOwner", { owner: otherOwner })}</strong>
-          ) : null}
-          {state.lastError || viewFailure ? (
-            <span className={styles.errorInline} role="alert">
-              {liveViewErrorText(state.lastError ?? viewFailure)}
-              {viewFailure && !frameUrl ? (
-                <Button variant="secondary" size="sm" onClick={() => {
-                  retryStream();
-                  void refreshTargets();
-                }}>
-                  {t("computerCard.retry")}
-                </Button>
-              ) : null}
-            </span>
-          ) : state.disconnected ? (
-            <span className={styles.errorInline}>{t("liveView.reconnecting")}</span>
-          ) : state.streamStale ? (
-            <span className={styles.errorInline} data-testid="live-viewer-stalled">
-              {t("computerCard.stalled")}
-            </span>
-          ) : state.needsResync ? (
-            <span className={styles.errorInline}>
-              {t("liveView.reasons.resync_required")}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-
-      {questionCount > 0 ? (
-        <div
-          className={styles.approvalBar}
-          role="status"
-          data-testid="live-viewer-approvals"
-        >
-          <div className={styles.approvalHead}>
-            <span>{t("liveView.approvalsWaiting", { count: questionCount })}</span>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void closeViewer()}
-              data-testid="live-viewer-approvals-open"
-            >
-              {t("liveView.reviewApprovals")}
-            </Button>
+      <div className={styles.statusSlot}>
+        {otherOwner || state.lastError || viewFailure || state.disconnected || state.needsResync || state.streamStale ? (
+          <div className={styles.statusLine} role="status">
+            {otherOwner ? (
+              <strong>{t("liveView.otherOwner", { owner: otherOwner })}</strong>
+            ) : null}
+            {state.lastError || viewFailure ? (
+              <span className={styles.errorInline} role="alert">
+                {liveViewErrorText(state.lastError ?? viewFailure)}
+                {viewFailure && !frameUrl ? (
+                  <Button variant="secondary" size="sm" onClick={() => {
+                    retryStream();
+                    void refreshTargets();
+                  }}>
+                    {t("computerCard.retry")}
+                  </Button>
+                ) : null}
+              </span>
+            ) : state.disconnected ? (
+              <span className={styles.errorInline}>{t("liveView.reconnecting")}</span>
+            ) : state.streamStale ? (
+              <span className={styles.errorInline} data-testid="live-viewer-stalled">
+                {t("computerCard.stalled")}
+              </span>
+            ) : state.needsResync ? (
+              <span className={styles.errorInline}>
+                {t("liveView.reasons.resync_required")}
+              </span>
+            ) : null}
           </div>
-          {/* The chat beside the screen holds the approvals; the questions are answered right here. */}
-          <PendingDecisions entries={needs.filter((item) => item.kind === "question")} />
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       <div className={styles.stageArea} data-fit={fit}>
         <div
@@ -708,7 +714,7 @@ export function LiveViewer({
                 }
               }}
               onBlur={(e: FocusEvent<HTMLDivElement>) => {
-                if (focusLeftScope(e.relatedTarget, stageRef.current)) {
+                if (focusLeftScope(e.relatedTarget, stageRef.current, focusBarRef.current)) {
                   setStageFocused(false);
                   stageController.reset();
                   resetInputState(true);
@@ -738,31 +744,6 @@ export function LiveViewer({
                   onChange={(e) => setImeBuffer(e.target.value)}
                   {...stageController.ime}
                 />
-              ) : null}
-
-              {isInteractive && stageFocused ? (
-                <div
-                  className={styles.focusOverlayBar}
-                  data-testid="live-viewer-focus-bar"
-                  {...stageController.toolbar}
-                >
-                  <span>{t("liveView.focusTrapHint")}</span>
-                  <button
-                    type="button"
-                    className={styles.tabToggle}
-                    aria-pressed={captureTab}
-                    onClick={() => setCaptureTab((v) => !v)}
-                  >
-                    {t("liveView.captureTab")}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.tabToggle}
-                    onClick={exitKeyboardFocus}
-                  >
-                    {t("liveView.releaseFocus")}
-                  </button>
-                </div>
               ) : null}
 
               {actionOverlayStyle && panelAction ? (
@@ -813,6 +794,44 @@ export function LiveViewer({
             </div>
           )}
         </div>
+        <div
+          ref={focusBarRef}
+          className={styles.focusSlot}
+          aria-live="polite"
+          data-testid="live-viewer-focus-slot"
+        >
+          {isInteractive && stageFocused ? (
+            <div
+              className={styles.focusOverlayBar}
+              data-testid="live-viewer-focus-bar"
+              {...stageController.toolbar}
+            >
+              <span>{t("liveView.focusTrapHint")}</span>
+              <button
+                type="button"
+                className={styles.tabToggle}
+                aria-pressed={captureTab}
+                onClick={() => {
+                  setCaptureTab((v) => !v);
+                  imeInputRef.current?.focus({ preventScroll: true });
+                }}
+              >
+                {t("liveView.captureTab")}
+              </button>
+              <button
+                type="button"
+                className={styles.tabToggle}
+                onClick={exitKeyboardFocus}
+              >
+                {t("liveView.releaseFocus")}
+              </button>
+            </div>
+          ) : isInteractive ? (
+            <span className={styles.focusIdleHint} data-testid="live-viewer-focus-idle">
+              {t("liveView.stageFocusPrompt")}
+            </span>
+          ) : null}
+        </div>
         <p
           className={styles.privacyHint}
           title={t("liveView.globalPauseNotice")}
@@ -821,10 +840,34 @@ export function LiveViewer({
           <Info aria-hidden="true" />
           <span>{t("liveView.privacyNotice")}</span>
         </p>
-        <LiveViewerChat onChatSlots={onChatSlots} />
       </div>
 
-      <div className={styles.bottomDock} data-testid="live-view-bar">
+      <div className={styles.viewerFooter}>
+        {!isDocked && questionCount > 0 ? (
+          <div
+            className={styles.approvalBar}
+            role="status"
+            data-testid="live-viewer-approvals"
+          >
+            <div className={styles.approvalHead}>
+              <span>{t("liveView.approvalsWaiting", { count: questionCount })}</span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void closeViewer()}
+                data-testid="live-viewer-approvals-open"
+              >
+                {t("liveView.reviewApprovals")}
+              </Button>
+            </div>
+            {/* The chat beside the screen holds the approvals; the questions are answered right here. */}
+            <PendingDecisions entries={needs.filter((item) => item.kind === "question")} />
+          </div>
+        ) : null}
+
+        <div className={styles.footerSpacer} aria-hidden="true" />
+
+        <div className={styles.bottomDock} data-testid="live-view-bar">
         {actions.includes("bitirdim") || actions.includes("retry_bitirdim") ? (
           <>
             <span className={styles.dockStatus}>
@@ -962,8 +1005,14 @@ export function LiveViewer({
             ) : null}
           </>
         )}
+        </div>
+
+        <div className={styles.footerRight}>
+          {!isDocked ? <LiveViewerChat onChatSlots={onChatSlots} /> : null}
+        </div>
       </div>
-    </div>,
-    document.body
+    </div>
   );
+
+  return isDocked ? content : createPortal(content, document.body);
 }

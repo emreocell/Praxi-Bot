@@ -20,6 +20,8 @@ export interface ShellInput {
   panel: number;
   /** The panel's DOM state (`data-open`). */
   panelOpen: boolean;
+  /** Whether the panel is docked in flow or overlays the main pane. Default: docked. */
+  panelMode?: "docked" | "overlay";
   float: boolean;
   /** Slide progress of the panel's width/margin transition, 0 = closed width, 1 = open width. Default: settled. */
   progress?: number;
@@ -49,7 +51,8 @@ export const APP_FNS: ShellFns = { panelMax, fitRail };
 
 export function shellBoxes(input: ShellInput, model: ShellModel, fns: ShellFns = APP_FNS): ShellBoxes {
   const { vw, float, panelOpen } = input;
-  const reserve = input.reserve ?? panelOpen;
+  const overlay = input.panelMode === "overlay";
+  const reserve = overlay ? false : (input.reserve ?? panelOpen);
   const pad = float ? model.floatPad : 0;
   const gap = float ? model.floatGap : 0;
   // Target width (what the app writes into --panel-w), also while the panel is closed or closing.
@@ -57,20 +60,22 @@ export function shellBoxes(input: ShellInput, model: ShellModel, fns: ShellFns =
   const railW = fns.fitRail ? fns.fitRail(vw, input.rail, targetW, float, reserve) : input.rail;
   const openKey: StateKey = float ? "floatOpen" : "plainOpen";
   const closedKey: StateKey = float ? "floatClosed" : "plainClosed";
-  const key = panelOpen ? openKey : closedKey;
+  const key = overlay ? openKey : panelOpen ? openKey : closedKey;
   const state = model.states[key];
   const p = input.progress ?? (panelOpen ? 1 : 0);
-  // Slide: width and margin move together from the closed to the open value.
+  // Slide: width and margin move together from the closed to the open value in docked mode;
+  // in overlay mode the panel keeps its open width and translates over the right edge.
   const openW = model.states[openKey].width(targetW);
   const closedW = model.states[closedKey].width(targetW);
-  const panelW = panelOpen && p === 1 ? state.width(targetW) : closedW + (openW - closedW) * p;
-  const margin =
-    model.states[closedKey].marginLeft + (model.states[openKey].marginLeft - model.states[closedKey].marginLeft) * p;
+  const panelW = overlay ? openW : panelOpen && p === 1 ? state.width(targetW) : closedW + (openW - closedW) * p;
+  const margin = overlay
+    ? 0
+    : model.states[closedKey].marginLeft + (model.states[openKey].marginLeft - model.states[closedKey].marginLeft) * p;
   const content = { left: pad, right: vw - pad };
   const rail = { left: content.left, right: content.left + railW };
-  const mainRight = content.right - panelW - margin - gap;
+  const mainRight = overlay ? content.right : content.right - panelW - margin - gap;
   const main = { left: rail.right + gap, right: mainRight };
-  const panelLeft = mainRight + gap + margin;
+  const panelLeft = overlay ? content.right - panelW : mainRight + gap + margin;
   const panel = { left: panelLeft, right: panelLeft + panelW };
   const innerW = model.innerWidth(targetW, key);
   const innerLeft = panel.left + state.borderLeft;
@@ -178,6 +183,20 @@ export function checkMatrix(model: ShellModel, fns: ShellFns = APP_FNS, options:
             const cell = `vw=${vw} rail=${rail} panel=${panelCase} float=${float ? "on" : "off"} opening progress=${progress} (transition)`;
             const g = shellBoxes({ vw, rail, panel: panelCase, panelOpen: true, float, progress, reserve: true }, model, fns);
             common(cell, g, vw, pad, progress > 0);
+          }
+          // Overlay mode: opening never shrinks main or overlaps rail, and inner column stays unclipped.
+          cells++;
+          const overlayCell = `vw=${vw} rail=${rail} panel=${panelCase} float=${float ? "on" : "off"} mode=overlay`;
+          const go = shellBoxes({ vw, rail, panel: panelCase, panelOpen: true, panelMode: "overlay", float }, model, fns);
+          const closedMain = shellBoxes({ vw, rail, panel: PANEL_MIN, panelOpen: false, float }, model, fns).main;
+          if (Math.abs((go.main.right - go.main.left) - (closedMain.right - closedMain.left)) > EPS) {
+            add(overlayCell, `overlay changed main width from ${closedMain.right - closedMain.left} to ${go.main.right - go.main.left}`);
+          }
+          if (go.rail.right > go.panel.left + EPS) {
+            add(overlayCell, `overlay panel [${go.panel.left}, ${go.panel.right}] overlaps rail [${go.rail.left}, ${go.rail.right}]`);
+          }
+          if (go.panelInner.right > go.panelContentRight + EPS) {
+            add(overlayCell, `overlay panelInner.right ${go.panelInner.right} > panel content right ${go.panelContentRight}`);
           }
         }
       }

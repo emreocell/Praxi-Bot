@@ -57,6 +57,8 @@ const FILE = {
 
 const FLOAT = ':global(:root[data-float="on"])';
 const OPEN = '.panel[data-open="true"]';
+const OVERLAY = '.panel[data-mode="overlay"]';
+const OVERLAY_OPEN = '.panel[data-mode="overlay"][data-open="true"]';
 
 /** Reviewed selectors that may set geometry properties, in specificity order for the panel. */
 const REVIEWED = new Set([
@@ -70,6 +72,10 @@ const REVIEWED = new Set([
   OPEN,
   `${FLOAT} .panel`,
   `${FLOAT} ${OPEN}`,
+  OVERLAY,
+  OVERLAY_OPEN,
+  `${FLOAT} ${OVERLAY}`,
+  `${FLOAT} ${OVERLAY_OPEN}`,
   ".panelInner"
 ]);
 const PANEL_ORDER: Record<StateKey, string[]> = {
@@ -81,12 +87,13 @@ const PANEL_ORDER: Record<StateKey, string[]> = {
 
 const CONTRACTED = /\.(foregroundContainer|mainPane|sidebar|panelInner|panel)\b/;
 const GEOMETRY =
-  /^(width|min-width|max-width|flex|flex-shrink|flex-grow|flex-basis|margin(-.*)?|padding(-.*)?|gap|row-gap|column-gap|border(-.*)?|box-sizing|overflow|overflow-x|position|left|right|inset(-.*)?|transform|translate|display|--panel-edge|--panel-w|--size-sidebar-width)$/;
+  /^(width|min-width|max-width|flex|flex-shrink|flex-grow|flex-basis|margin(-.*)?|padding(-.*)?|gap|row-gap|column-gap|border(-.*)?|box-sizing|overflow|overflow-x|position|top|bottom|left|right|inset(-.*)?|transform|translate|display|--panel-edge|--panel-w|--size-sidebar-width)$/;
 const SUPPORTED = new Set([
   "width", "min-width", "flex", "flex-shrink", "margin", "margin-left", "padding", "gap",
   "border", "border-left", "border-right", "border-top", "border-bottom", "border-width",
   "border-left-width", "border-right-width", "border-style", "border-left-style",
-  "border-right-style", "box-sizing", "overflow", "position", "display", "--panel-edge"
+  "border-right-style", "box-sizing", "overflow", "position", "top", "bottom", "right",
+  "transform", "display", "--panel-edge"
 ]);
 
 /** Comments become blanks of the same length (newlines kept), so line numbers stay true. */
@@ -463,6 +470,23 @@ export function readShellContract(
   for (const prop of ["width", "margin"]) {
     if (!new RegExp(`(^|,)\\s*${prop}\\s+var\\(--motion-duration-slow\\)`).test(transition)) {
       fail(FILE.sidebar, `.panel transition ${prop}`, `${prop} var(--motion-duration-slow) (the duration the rail reserve follows)`, transition);
+    }
+  }
+  const normalMs = parseDurationMs(vars.get("--motion-duration-normal"));
+  if (normalMs === undefined || normalMs < 180 || normalMs > 240) {
+    fail(FILE.tokens, "--motion-duration-normal", "180ms..240ms for overlay panel slide", vars.get("--motion-duration-normal"));
+  }
+  const overlayRules = pick([OVERLAY]);
+  if (ev.last(overlayRules, "position") !== "absolute") {
+    fail(FILE.sidebar, `${OVERLAY} position`, "absolute (overlay never reflows chat or screen)", ev.last(overlayRules, "position"));
+  }
+  if (ev.last(overlayRules, "width") !== "var(--panel-w)") {
+    fail(FILE.sidebar, `${OVERLAY} width`, "var(--panel-w)", ev.last(overlayRules, "width"));
+  }
+  const overlayTrans = ev.last(overlayRules, "transition") ?? "";
+  for (const prop of ["transform", "opacity"]) {
+    if (!new RegExp(`(^|,)\\s*${prop}\\s+var\\(--motion-duration-normal\\)`).test(overlayTrans)) {
+      fail(FILE.sidebar, `${OVERLAY} transition ${prop}`, `${prop} var(--motion-duration-normal)`, overlayTrans);
     }
   }
   if (!/@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*transition:\s*none\s*!important/.test(stripComments(src.globalCss))) {

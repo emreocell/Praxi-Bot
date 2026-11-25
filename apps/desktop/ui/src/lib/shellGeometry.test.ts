@@ -84,3 +84,12 @@ test("the rail reserve keeps the chat above its minimum at every frame of the cl
   // Review numbers: 760 px, float, stored rail 440, panel 260: the chat is squeezed while the panel still slides.
   assert.ok(immediate.violations.some((v) => /vw=760 rail=440 panel=260 float=on closing t=0ms progress=1\.00 \(transition\): main 4\d(\.\d+)?px/.test(v)));
 });
+
+test("overlay panel keeps main column width identical to closed state", () => {
+  const { model } = readShellContract(sources, { floatPad: FLOAT_PAD, floatGap: FLOAT_GAP });
+  const closed = shellBoxes({ vw: 1280, rail: 264, panel: 320, panelOpen: false, float: true }, model);
+  const overlay = shellBoxes({ vw: 1280, rail: 264, panel: 320, panelOpen: true, panelMode: "overlay", float: true }, model);
+  assert.equal(overlay.main.left, closed.main.left);
+  assert.equal(overlay.main.right, closed.main.right);
+  assert.equal(overlay.panel.right, 1280 - FLOAT_PAD);
+});

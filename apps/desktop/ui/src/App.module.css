@@ -344,6 +344,30 @@
   overflow: clip;
 }
 
+/* Fixed side-by-side workspace: chat stays on the left, docked big screen on the right. */
+.workspaceSplit {
+  flex: 1;
+  display: flex;
+  min-width: var(--space-0);
+  min-height: var(--space-0);
+}
+
+.chatColumn {
+  flex: 0.9 1 0;
+  min-width: calc(var(--space-16) * 5);
+  min-height: var(--space-0);
+  display: flex;
+  flex-direction: column;
+}
+
+.screenColumn {
+  flex: 1.15 1 0;
+  min-width: var(--space-0);
+  min-height: var(--space-0);
+  display: flex;
+  flex-direction: column;
+}
+
 /* Transparent chat area: a theme-tinted scrim under the reading column and the title
    row.  Its strength comes from the surface model (--center-scrim): over a dark backdrop it is gone,
    over a bright one it keeps text at 7:1.  The mask feathers the edges so no box shows. */

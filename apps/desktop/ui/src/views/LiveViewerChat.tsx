@@ -66,35 +66,52 @@ export function LiveViewerChat({
 
   if (!onChatSlots && (!client || approvals.length === 0)) return null;
 
+  const hasDrawer = Boolean((client && approvals.length > 0) || (onChatSlots && expanded));
+
   return (
-    <section className={styles.chatOverlay} data-open={expanded ? "true" : "false"} data-testid="live-viewer-chat" aria-label={t("liveView.chat.title")}>
-      {client && approvals.length ? (
-        <ul className={styles.chatApprovals} aria-label={t("liveView.approvalsWaiting", { count: approvals.length })} data-testid="live-viewer-approvals">
-          {approvals.map((approval) => <PendingApproval key={approval.callId} approval={approval} client={client} />)}
-        </ul>
+    <section
+      className={styles.chatOverlay}
+      data-open={expanded ? "true" : "false"}
+      data-testid="live-viewer-chat"
+      aria-label={t("liveView.chat.title")}
+    >
+      {hasDrawer ? (
+        <div className={styles.chatDrawer}>
+          {client && approvals.length ? (
+            <ul
+              className={styles.chatApprovals}
+              aria-label={t("liveView.approvalsWaiting", { count: approvals.length })}
+              data-testid="live-viewer-approvals"
+            >
+              {approvals.map((approval) => (
+                <PendingApproval key={approval.callId} approval={approval} client={client} />
+              ))}
+            </ul>
+          ) : null}
+          {onChatSlots && expanded ? (
+            <div ref={composer} id="live-viewer-chat-body" data-testid="live-viewer-composer" />
+          ) : null}
+        </div>
       ) : null}
       {onChatSlots ? (
-        <>
-          <div className={styles.chatOverlayBar}>
-            <Button
-              size="sm"
-              variant="secondary"
-              aria-expanded={expanded}
-              aria-controls="live-viewer-chat-body"
-              onClick={() =>
-                setExpanded((open) => {
-                  saveChatOpen(!open);
-                  return !open;
-                })
-              }
-            >
-              <MessageSquare aria-hidden="true" />
-              {t(expanded ? "liveView.chat.collapse" : "liveView.chat.title")}
-            </Button>
-            <div ref={status} className={styles.chatStatusSlot} />
-          </div>
-          {expanded ? <div ref={composer} id="live-viewer-chat-body" data-testid="live-viewer-composer" /> : null}
-        </>
+        <div className={styles.chatOverlayBar}>
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-expanded={expanded}
+            aria-controls="live-viewer-chat-body"
+            onClick={() =>
+              setExpanded((open) => {
+                saveChatOpen(!open);
+                return !open;
+              })
+            }
+          >
+            <MessageSquare aria-hidden="true" />
+            {t(expanded ? "liveView.chat.collapse" : "liveView.chat.title")}
+          </Button>
+          <div ref={status} className={styles.chatStatusSlot} />
+        </div>
       ) : null}
     </section>
   );

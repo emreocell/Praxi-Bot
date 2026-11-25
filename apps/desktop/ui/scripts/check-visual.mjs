@@ -63,7 +63,15 @@ const SCREENS = [
   { name: 'schedules', query: 'screen=schedules' },
   { name: 'approval', query: 'screen=approval', ready: '[data-testid^="approval"], [class*="approval"]' },
   { name: 'popover-command', query: 'screen=empty', act: composerMenu('/') },
-  { name: 'popover-mention', query: 'screen=empty', act: composerMenu('@') }
+  { name: 'popover-mention', query: 'screen=empty', act: composerMenu('@') },
+  { name: 'panel-overlay', query: 'panel=1', ready: '[data-shell-part="panel"][data-open="true"]' },
+  { name: 'live-hint-bar', query: 'lv=open', act: async (page) => {
+    await page.getByTestId('live-view-takeover').waitFor({ timeout: 30000 });
+    await page.getByTestId('live-view-takeover').click();
+    await page.locator('[data-testid="live-viewer-stage"][data-interactive="true"]').waitFor({ timeout: 30000 });
+    await page.getByTestId('live-viewer-stage').click();
+    await page.getByTestId('live-viewer-focus-bar').waitFor({ timeout: 30000 });
+  } }
 ];
 const cases = [];
 for (const s of SCREENS) for (const theme of THEMES) for (const v of VIEWPORTS) {

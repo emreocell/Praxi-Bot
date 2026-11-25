@@ -48,6 +48,14 @@ import {
   stepPanel,
   type ShellLayout
 } from "./lib/shellLayout";
+import {
+  deriveSidePanelState,
+  hasUnanswerableNeed,
+  PANEL_DOCK_MIN_WIDTH,
+  SCREEN_SPLIT_MIN_WIDTH,
+  type LiveViewPresence,
+  type SidePanelMode
+} from "./lib/sidePanelState";
 import { useMcp } from "./state/useMcp";
 import { AccountMenu, type AccountAction } from "./components/AccountMenu";
 import { Popover } from "./components/Popover";
@@ -232,7 +240,12 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     initialComputer,
     isActiveComputer
   } = useDaemon();
-  const { openViewer } = useLiveView();
+  const {
+    openViewer,
+    viewerOpen,
+    setDockedDemand,
+    state: liveState
+  } = useLiveView();
   const readState = useReadState(client?.baseUrl ?? "");
   const unreadBots = useMemo(() => unreadBotIds(chats, runs, needs, readState), [chats, runs, needs, readState]);
   const [settings, setSettings] = useState<AppSettings>(() => loadSettingsSync() ?? DEFAULT_SETTINGS);
@@ -963,10 +976,53 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     window.addEventListener(SEARCH_ALL_CHATS_EVENT, open);
     return () => window.removeEventListener(SEARCH_ALL_CHATS_EVENT, open);
   }, []);
-  const panelVisible = panelOpen && botInView;
   const float = isFloatShell(shellSettings.uiStyle, backdropIsActive(shellSettings.backdrop, shellSettings.backgroundUrl));
   const panelWidth = Math.min(layout.panel, panelMax(viewportWidth, layout.rail, float));
-  const panelReserve = usePanelReserve(panelVisible);
+  const bigScreenDocked = route.kind === "chat" && !hostEmpty && viewportWidth >= SCREEN_SPLIT_MIN_WIDTH;
+  const liveViewStatus: LiveViewPresence =
+    liveState.viewState === "active" || liveState.viewState === "acquiring" || Boolean(liveState.session && liveState.latestFrame)
+      ? "live"
+      : liveState.pendingRequest !== null || (liveState.viewState === "watch" && Boolean(liveState.session))
+        ? "starting"
+        : "idle";
+  const needAttentionKey = needs
+    .filter((n) => n.botId === selectedBot?.id)
+    .map((n) => n.callId)
+    .sort()
+    .join(",");
+  const [dismissedNeedKey, setDismissedNeedKey] = useState("");
+  const unanswerableNeed = hasUnanswerableNeed({
+    routeKind: route.kind,
+    selectedBotId: selectedBot?.id,
+    activeChatId: route.kind === "chat" ? route.chatId : undefined,
+    needs
+  });
+  const attentionDismissed = dismissedNeedKey !== "" && dismissedNeedKey === needAttentionKey;
+  const panelState = deriveSidePanelState({
+    botInView,
+    ownerOpen: panelOpen,
+    unanswerableNeed,
+    attentionDismissed,
+    liveViewState: liveViewStatus,
+    bigScreenDocked,
+    viewportWidth,
+    storedPanelWidth: panelWidth,
+    railWidth: RAIL_MIN,
+    float
+  });
+  const panelVisible = panelState.visible;
+  const panelDocked = panelState.mode === "docked";
+  const lastPanelModeRef = useRef<Exclude<SidePanelMode, "hidden">>("overlay");
+  if (panelState.mode !== "hidden") {
+    lastPanelModeRef.current = panelState.mode;
+  }
+  const panelRenderMode: Exclude<SidePanelMode, "hidden"> =
+    panelState.mode !== "hidden"
+      ? panelState.mode
+      : bigScreenDocked || viewportWidth < PANEL_DOCK_MIN_WIDTH
+        ? "overlay"
+        : lastPanelModeRef.current;
+  const panelReserve = usePanelReserve(panelDocked);
   const railWidth = fitRail(viewportWidth, layout.rail, panelWidth, float, panelReserve);
   const fitStored = (candidate: number) => fitRail(viewportWidth, candidate, panelWidth, float, panelReserve);
   const search = searchPlan(layout.rail, railWidth, botSearch !== null);
@@ -1005,13 +1061,74 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   const showWhatsNew = whatsNewStep === "show" && !whatsNewDone && route.kind !== "onboarding" && !dialogOpen;
   const mini = isMiniRail(railWidth);
 
+  useEffect(() => {
+    setDockedDemand(bigScreenDocked && !viewerOpen, selectedBot?.id ?? null);
+    return () => setDockedDemand(false, null);
+  }, [setDockedDemand, bigScreenDocked, viewerOpen, selectedBot?.id]);
+
   // The computer card asks for the screen itself, only when the owner presses "show screen".
   const closePanel = () =>
     leave.attempt(() => {
       setPanelOpen(false);
+      if (unanswerableNeed && needAttentionKey) {
+        setDismissedNeedKey(needAttentionKey);
+      }
       chipRef.current?.focus();
     });
-  const togglePanel = () => (panelOpen ? closePanel() : setPanelOpen(true));
+  const dismissOverlayPanel = useCallback(() => {
+    leave.attempt(() => {
+      setPanelOpen(false);
+      if (unanswerableNeed && needAttentionKey) {
+        setDismissedNeedKey(needAttentionKey);
+      }
+    });
+  }, [leave, unanswerableNeed, needAttentionKey]);
+  const togglePanel = () => (panelVisible ? closePanel() : setPanelOpen(true));
+
+  // Overlay panel closes on click-away or Escape without reflowing the workspace.
+  useEffect(() => {
+    if (!panelVisible || panelRenderMode !== "overlay" || viewerOpen || dialogOpen || demo !== null) {
+      return undefined;
+    }
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Element | null;
+      if (!target) return;
+      if (target.closest('[data-shell-part="panel"]') || chipRef.current?.contains(target)) {
+        return;
+      }
+      dismissOverlayPanel();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented && botSearch === null && !helpOpen) {
+        e.preventDefault();
+        leave.attempt(() => {
+          setPanelOpen(false);
+          if (unanswerableNeed && needAttentionKey) {
+            setDismissedNeedKey(needAttentionKey);
+          }
+          chipRef.current?.focus();
+        });
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [
+    panelVisible,
+    panelRenderMode,
+    viewerOpen,
+    dialogOpen,
+    demo,
+    botSearch,
+    helpOpen,
+    dismissOverlayPanel,
+    leave,
+    unanswerableNeed,
+    needAttentionKey
+  ]);
   const panelBotView = selectedBot ? botView(selectedBot) : undefined;
   const panelChats = selectedBot
     ? botChats(chats, selectedBot.id).map((c) => ({
@@ -1092,6 +1209,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
       aside={
         <SidePanel
           open={panelVisible}
+          mode={panelRenderMode}
           width={panelWidth}
           aria-label={t("botPanel.toggle")}
           onKeyDown={(e) => {
@@ -1426,24 +1544,54 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
           />
         ) : null}
         {route.kind === "chat" && !hostEmpty ? (
-          <ChatView
-            key={route.chatId}
-            chatId={route.chatId}
-            external={route.external}
-            jumpMessageId={route.messageId}
-            jumpRequestId={route.jumpRequestId}
-            onBack={() => {
-              // There is no bot page to go back to: the chat list lives in the right panel.
-              if (backFromChatOpensPanel(panelOpen)) setPanelOpen(true);
-            }}
-            control={controlState}
-            onControl={setControlState}
-            onSwitchChat={openChat}
-            showAgentRoute={settings.showAgentRoute}
-            sendWith={settings.sendWith}
-            messageTimes={settings.messageTimes}
-            liveChatSlots={localChatSlots ?? homeChatSlots}
-          />
+          bigScreenDocked ? (
+            <div className={styles.workspaceSplit} data-testid="workspace-split">
+              <div className={styles.chatColumn} data-testid="chat-column">
+                <ChatView
+                  key={route.chatId}
+                  chatId={route.chatId}
+                  external={route.external}
+                  jumpMessageId={route.messageId}
+                  jumpRequestId={route.jumpRequestId}
+                  onBack={() => {
+                    // There is no bot page to go back to: the chat list lives in the right panel.
+                    if (backFromChatOpensPanel(panelOpen)) setPanelOpen(true);
+                  }}
+                  control={controlState}
+                  onControl={setControlState}
+                  onSwitchChat={openChat}
+                  showAgentRoute={settings.showAgentRoute}
+                  sendWith={settings.sendWith}
+                  messageTimes={settings.messageTimes}
+                  liveChatSlots={localChatSlots ?? homeChatSlots}
+                />
+              </div>
+              <div className={styles.screenColumn} data-testid="screen-column">
+                {!viewerOpen ? (
+                  <LiveViewer variant="docked" onExpand={() => openViewer()} />
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <ChatView
+              key={route.chatId}
+              chatId={route.chatId}
+              external={route.external}
+              jumpMessageId={route.messageId}
+              jumpRequestId={route.jumpRequestId}
+              onBack={() => {
+                // There is no bot page to go back to: the chat list lives in the right panel.
+                if (backFromChatOpensPanel(panelOpen)) setPanelOpen(true);
+              }}
+              control={controlState}
+              onControl={setControlState}
+              onSwitchChat={openChat}
+              showAgentRoute={settings.showAgentRoute}
+              sendWith={settings.sendWith}
+              messageTimes={settings.messageTimes}
+              liveChatSlots={localChatSlots ?? homeChatSlots}
+            />
+          )
         ) : null}
         {route.kind === "needs" ? <NeedsYouView onOpenChat={openChat} /> : null}
         {route.kind === "notifications" ? <NotificationHistoryView onOpenChat={openChat} onOpenNeeds={openNeeds} privateMode={settings.notifyPrivate} /> : null}
