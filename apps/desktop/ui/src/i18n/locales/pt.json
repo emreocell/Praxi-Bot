@@ -1689,6 +1689,15 @@
         }
       },
       "reasonPlaceholder": "Reason for denying (optional)",
+      "risk": {
+        "allowDelete": "Allow delete",
+        "allowSend": "Allow send",
+        "change": "Makes changes",
+        "delete": "Deletes",
+        "read": "Looks only",
+        "run": "Runs a command",
+        "send": "Sends something out"
+      },
       "runTool": "Allow for this task",
       "schedule": {
         "allowed": "Allowed without asking: {{list}}.",
@@ -1864,6 +1873,9 @@
       "undoFile": "Undo",
       "undoUndo": "Undo this undo",
       "viaLink": "Via link {{path}}"
+    },
+    "composerMenu": {
+      "label": "Add or attach"
     },
     "conversationLabel": "Today",
     "copyMessage": "Copy message",
