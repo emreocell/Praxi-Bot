@@ -66,3 +66,18 @@ Bei jedem Job kannst du **Jetzt ausführen**, **Bearbeiten** oder **Löschen** d
 - Ausgabenlimits, die du gesetzt hast, gelten auch für Jobs.
 
 Mehr: [Geplante Jobs, einfach erklärt](schedules.md) und die [technische Referenz](../scheduled-tasks.md).
+
+## Einen Bot von außen starten
+
+Ein **Webhook** startet diesen Bot, wenn etwas anderes eine Adresse aufruft: GitHub, ein Formular oder ein Schalter zu Hause.
+
+1. Öffne das Bot-Panel und wähle **Automatisierung**.
+2. Gib dem Webhook einen Namen und schreibe, wenn du willst, was der Bot mit den Daten tun soll. Drücke **Webhook anlegen**.
+3. Kopiere das Geheimnis sofort. Praxi zeigt es nur dieses eine Mal.
+4. Praxi hört nur auf diesem Computer. Leite einen Tunnel deiner Wahl (Cloudflare Tunnel oder ssh) auf `127.0.0.1`. Öffne keinen neuen Port am Router.
+
+Jeder Aufruf sendet die Zeit in `X-Webhook-Timestamp` und `X-Signature-256: sha256=` plus den HMAC aus dieser Zeit, einem Punkt und dem Rohtext. Derselbe signierte Aufruf gilt einmal und nur innerhalb von 5 Minuten. Der Text darf höchstens 64 KB groß sein. Mehr als 30 Aufrufe pro Minute werden abgelehnt. Der Text ist Daten, nie ein Befehl. Der Bot fragt weiter, bevor er handelt, und die Frage erscheint als Benachrichtigung.
+
+**Test senden** startet einen Lauf aus der App. Er verbraucht nicht das Limit von außen.
+
+Mehr: [Eingehende Webhooks](../incoming-webhooks.md).

@@ -56,7 +56,8 @@
       "Say the time in words",
       "If the computer was off",
       "Run now, edit, pause, delete",
-      "Safety"
+      "Safety",
+      "Start a bot from outside"
     ],
     "summary": "A scheduled job lets a bot do something by itself at the times you choose. For example: \"every morning, tell me what is on my plate today\". You set it up once. After that it runs on its own."
   },
@@ -402,6 +403,18 @@
       "Troubleshooting"
     ],
     "summary": "Day-to-day operation of the always-on Linux host (systemd, unprivileged user"
+  },
+  {
+    "doc": "incoming-webhooks.md",
+    "title": "Incoming webhooks",
+    "headings": [
+      "What you set up",
+      "What the caller sends",
+      "What the bot does with the text",
+      "What is written down",
+      "Moving to another computer"
+    ],
+    "summary": "A webhook starts one of your bots when something outside calls an address. GitHub, a form, or a switch at home can do that. You create the webhook in the bot panel, on the Automation tab."
   },
   {
     "doc": "index.md",

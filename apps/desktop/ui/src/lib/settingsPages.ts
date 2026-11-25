@@ -1,10 +1,17 @@
+/**
+ * How to add a settings card:
+ * 1. Build a CardDef `{ id, section, title, description, keywords, kind, node }` in `views/settings/*Cards.tsx`.
+ * 2. Register `{ page, advanced?, risk?, learn? }` in `CARD_META` below (missing entries fall back via `SECTION_PAGE`).
+ * 3. Add any new i18n keys to `en.json`, `tr.json`, `de.json`, and `es.json` and run `pnpm --dir apps/desktop/ui sort:i18n`.
+ * 4. Add the new card id to `FROZEN_CARD_IDS` in `lib/settingsPages.test.ts` so nothing silently vanishes.
+ */
 import type { AppSettings } from "../store/settingsStore.ts";
 import { foldText } from "./searchText.ts";
 import type { SettingsSectionId } from "../views/settings/types.ts";
 
 /**
- * The settings, as a non-programmer sees them: plainly named pages.  The cards keep their
- * old technical `section`; this module decides which page each card is shown on.
+ * The settings, as a non-programmer sees them: at most 7 plainly named pages.
+ * Cards keep their old technical `section` for fallback; `CARD_META` places each card here.
  */
 export const SETTINGS_PAGES = [
   "general",
@@ -13,11 +20,7 @@ export const SETTINGS_PAGES = [
   "where",
   "apps",
   "safety",
-  "notifications",
-  "voice",
-  "data",
-  "help",
-  "advanced"
+  "system"
 ] as const;
 export type SettingsPageId = (typeof SETTINGS_PAGES)[number];
 
@@ -26,67 +29,77 @@ export type LearnTerm = "apiKey" | "permissions" | "folders" | "memory" | "provi
 
 export interface CardMeta {
   page: SettingsPageId;
-  /** Hidden until "Show advanced settings" is on (or the user searches for it). */
+  /** Hidden behind "More options" until expanded (or when searching / targeted by a deep link). */
   advanced?: boolean;
   /** i18n key suffix of a one-line "what happens if you change this" warning. */
   risk?: string;
   learn?: LearnTerm;
 }
 
-/** Where every settings card lives.  A card missing here lands on "Advanced" (and a test fails). */
+/** Where every settings card lives. A card missing here falls back via its legacy `section`. */
 export const CARD_META: Record<string, CardMeta> = {
+  // General (You): 6 basic, 8 under "More options"
   account: { page: "general" },
   language: { page: "general" },
   send: { page: "general" },
-  times: { page: "general" },
-  autostart: { page: "general" },
-  keepInTray: { page: "general" },
-  quickAsk: { page: "general" },
+  notifications: { page: "general" },
+  "speak-replies": { page: "general" },
+  dictation: { page: "general" },
+  voice: { page: "general", advanced: true },
+  "voice-input": { page: "general", advanced: true },
+  times: { page: "general", advanced: true },
+  autostart: { page: "general", advanced: true },
+  keepInTray: { page: "general", advanced: true },
+  quickAsk: { page: "general", advanced: true },
   hotkey: { page: "general", advanced: true },
-  onboarding: { page: "general" },
+  onboarding: { page: "general", advanced: true },
 
-  // Appearance: theme, accent, backdrop and the wallpaper (with its Cloud motion control) stay in
-  // the simple view; the finer shape and chrome options move behind "Advanced".
+  // Appearance (You): 5 basic, 7 under "More options"
+  theme: { page: "appearance" },
+  accent: { page: "appearance" },
+  backdrop: { page: "appearance" },
+  wallpaper: { page: "appearance" },
+  accessibility: { page: "appearance" },
   style: { page: "appearance", advanced: true },
-  corners: { page: "appearance", advanced: true },
-  bubbles: { page: "appearance", advanced: true },
   clearChat: { page: "appearance", advanced: true },
   photorealAvatars: { page: "appearance", advanced: true },
+  corners: { page: "appearance", advanced: true },
+  bubbles: { page: "appearance", advanced: true },
   background: { page: "appearance", advanced: true },
   frame: { page: "appearance", advanced: true },
-  accessibility: { page: "appearance" },
 
-  detectedAccounts: { page: "models" },
-  keys: { page: "models", learn: "apiKey" },
+  // AI models (Your bots): 5 basic, 3 under "More options"
   defaultModel: { page: "models", learn: "provider" },
+  keys: { page: "models", learn: "apiKey" },
+  detectedAccounts: { page: "models" },
+  memory: { page: "models", learn: "memory", risk: "memory" },
+  knowledge: { page: "models", learn: "memory" },
   localModels: { page: "models", advanced: true },
+  helpers: { page: "models", advanced: true },
   providers: { page: "models", advanced: true, risk: "providers", learn: "provider" },
 
+  // Computers (Your bots): 2 basic
   target: { page: "where" },
   "my-computer": { page: "where" },
+
+  // Mail & web (Your bots): 2 basic
   "web-search": { page: "apps" },
   email: { page: "apps", risk: "email" },
 
+  // Safety (Your bots): 4 basic, 2 under "More options"
   "safety-levels": { page: "safety", learn: "permissions" },
-  "allowed-grants": { page: "safety", learn: "permissions" },
-  permissions: { page: "safety", advanced: true, risk: "permissions", learn: "permissions" },
   "trusted-folders": { page: "safety", risk: "folders", learn: "folders" },
-  "safe-mode": { page: "safety", learn: "safeMode" },
+  "allowed-grants": { page: "safety", learn: "permissions" },
+  "audit-log": { page: "safety" },
+  permissions: { page: "safety", advanced: true, risk: "permissions", learn: "permissions" },
+  "safe-mode": { page: "safety", advanced: true, learn: "safeMode" },
 
-  notifications: { page: "notifications" },
-
-  "speak-replies": { page: "voice" },
-  voice: { page: "voice" },
-  dictation: { page: "voice" },
-  "voice-input": { page: "voice" },
-
-  knowledge: { page: "data", learn: "memory" },
-  memory: { page: "data", learn: "memory", risk: "memory" },
-  usage: { page: "data" },
-
-  diagnostics: { page: "advanced" },
-  logs: { page: "help" },
-  version: { page: "advanced" }
+  // System (App & data): 3 basic, 2 under "More options"
+  usage: { page: "system" },
+  data: { page: "system" },
+  version: { page: "system" },
+  diagnostics: { page: "system", advanced: true },
+  logs: { page: "system", advanced: true }
 };
 
 const SECTION_PAGE: Record<SettingsSectionId, SettingsPageId> = {
@@ -95,24 +108,40 @@ const SECTION_PAGE: Record<SettingsSectionId, SettingsPageId> = {
   ai: "models",
   computer: "where",
   mail: "apps",
-  usage: "data",
-  diagnostics: "advanced",
-  updates: "advanced"
+  usage: "system",
+  diagnostics: "system",
+  updates: "system"
+};
+
+/** Legacy section ids and retired page ids resolve to one of the 7 current pages. */
+export const PAGE_ALIASES: Record<string, SettingsPageId> = {
+  ...SECTION_PAGE,
+  notifications: "general",
+  voice: "general",
+  models: "models",
+  where: "where",
+  apps: "apps",
+  safety: "safety",
+  data: "system",
+  help: "system",
+  advanced: "system"
 };
 
 export function pageOfSection(section: SettingsSectionId): SettingsPageId {
   return SECTION_PAGE[section];
 }
 
-/** Old `?section=` values and `initialSection` props still work: they map to a page. */
+/** Old `?section=` values, retired page ids and `initialSection` props still work. */
 export function parsePage(raw: string | null | undefined): SettingsPageId {
-  if ((SETTINGS_PAGES as readonly string[]).includes(raw ?? "")) return raw as SettingsPageId;
-  if (raw && raw in SECTION_PAGE) return SECTION_PAGE[raw as SettingsSectionId];
+  if (!raw) return "general";
+  if ((SETTINGS_PAGES as readonly string[]).includes(raw)) return raw as SettingsPageId;
+  if (raw in PAGE_ALIASES) return PAGE_ALIASES[raw];
   return "general";
 }
 
 export function metaOfCard(card: { id: string; section: SettingsSectionId }): CardMeta {
-  return CARD_META[card.id] ?? { page: pageOfSection(card.section) };
+  const m = CARD_META[card.id];
+  return m ? { ...m, page: parsePage(m.page) } : { page: pageOfSection(card.section) };
 }
 
 /** The pages in the left list, grouped; every page appears once. */
@@ -120,12 +149,12 @@ export const SETTINGS_PAGE_GROUPS: ReadonlyArray<{
   id: "you" | "bots" | "app";
   pages: readonly SettingsPageId[];
 }> = [
-  { id: "you", pages: ["general", "appearance", "notifications", "voice"] },
+  { id: "you", pages: ["general", "appearance"] },
   { id: "bots", pages: ["models", "where", "apps", "safety"] },
-  { id: "app", pages: ["data", "help", "advanced"] }
+  { id: "app", pages: ["system"] }
 ];
 
-// ---------------------------------------------------------------- simple / advanced
+// ---------------------------------------------------------------- simple / more options
 
 export type DetailMode = "simple" | "advanced";
 export const DETAIL_MODE_KEY = "praxi.settings.detailMode";
@@ -150,16 +179,39 @@ export function saveDetailMode(mode: DetailMode, storage?: Pick<Storage, "setIte
   }
 }
 
-/** A card shows when it is not advanced, or Advanced is on, or the user is searching for it. */
+/** A card shows when it is not advanced, or "More options" is open, or the user is searching for it. */
 export function isCardShown(meta: CardMeta, mode: DetailMode, searching: boolean): boolean {
-  return !meta.advanced || mode === "advanced" || searching || meta.page === "advanced";
+  return !meta.advanced || mode === "advanced" || searching;
 }
 
 // ---------------------------------------------------------------- reset to recommended
 
 /** The app-held settings each page can reset; daemon-held state (permissions) resets separately. */
 const RESET_KEYS: Partial<Record<SettingsPageId, readonly (keyof AppSettings)[]>> = {
-  general: ["sendWith", "messageTimes", "autostart", "keepInTray", "quickAskEnabled", "quickAskHotkey", "stopHotkey"],
+  general: [
+    "sendWith",
+    "messageTimes",
+    "autostart",
+    "keepInTray",
+    "quickAskEnabled",
+    "quickAskHotkey",
+    "stopHotkey",
+    "notifyNeedsYou",
+    "notifyLongRun",
+    "notifyFailed",
+    "notifyPrivate",
+    "quietHours",
+    "mutedBotIds",
+    "digestTime",
+    "digestLastDay",
+    "voiceName",
+    "voiceRate",
+    "speakReplies",
+    "pttEnabled",
+    "pttKey",
+    "micDeviceId",
+    "silenceStopSec"
+  ],
   appearance: [
     "themeMode",
     "accentColor",
@@ -184,9 +236,7 @@ const RESET_KEYS: Partial<Record<SettingsPageId, readonly (keyof AppSettings)[]>
     "reduceMotion",
     "reduceTransparency",
     "focusRing"
-  ],
-  notifications: ["notifyNeedsYou", "notifyLongRun", "notifyFailed", "notifyPrivate", "quietHours", "mutedBotIds", "digestTime", "digestLastDay"],
-  voice: ["voiceName", "voiceRate", "speakReplies", "pttEnabled", "pttKey", "micDeviceId", "silenceStopSec"]
+  ]
 };
 
 /** The settings patch that restores a page to the recommended values (null = nothing to reset). */

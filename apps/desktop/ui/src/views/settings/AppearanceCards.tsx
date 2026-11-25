@@ -311,7 +311,7 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
           onChange={update}
         />
       ),
-      { keywords: "dark light mode tema karanlik aydinlik theme" }
+      { keywords: "dark light mode tema karanlik aydinlik koyu acik theme design dunkel hell" }
     ),
     card(
       "accent",
@@ -359,7 +359,7 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
           <p className={pickerStyles.hint}>{accentHint}</p>
         </div>
       ),
-      { keywords: "color renk vurgu accent" }
+      { keywords: "color renk vurgu accent akzent farbe" }
     ),
     card(
       "style",
@@ -379,7 +379,7 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
           <SurfaceControls b={b} t={t} />
         </div>
       ),
-      { keywords: "glass solid tinted line cam duz renkli cizgi stil panel saydam transparent blur bulanik" }
+      { keywords: "glass solid tinted line cam duz renkli cizgi stil panel saydam transparent blur bulanik glas transparenz" }
     ),
     card(
       "clearChat",
@@ -459,7 +459,7 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
         />,
         false
       ),
-      { keywords: "radius round sharp koseler" }
+      { keywords: "radius round sharp koseler ecken" }
     ),
     card(
       "bubbles",
@@ -500,7 +500,7 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
       >
         <BackgroundControls b={b} t={t} />
       </SettingRow>,
-      { keywords: "wallpaper image arka plan" }
+      { keywords: "wallpaper image arka plan resim hintergrundbild" }
     ),
     card(
       "accessibility",
@@ -580,7 +580,7 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
           onChange={b.onWindowFrame}
         />
       </SettingRow>,
-      { keywords: "window title bar pencere cerceve" }
+      { keywords: "window title bar pencere cerceve fenster" }
     )
   ];
 }

@@ -9,6 +9,8 @@ import { MockLiveViewService } from "./mockLiveView.ts";
 import { longChatEvents, longChatMessages } from "./mockLongChat.ts";
 import type {
   BotSpendLimits,
+  IncomingWebhook,
+  IncomingWebhookCreated,
   Bot,
   BotSkills,
   Chat,
@@ -730,6 +732,7 @@ const DOCTOR_CHECKS: DoctorCheck[] = [
  * the UI and its tests exercise the real request paths.
  */
 export class MockApiClient extends ApiClient {
+  private readonly incomingWebhooks = new Map<string, IncomingWebhook[]>();
   private readonly knowledgeSources = new Map<string, KnowledgeSource[]>();
   private readonly knowledgeSettings = new Map<string, KnowledgeSettings>();
   private readonly knowledgeApprovals = new Map<string, { bot: string; card: KnowledgeEmbeddingApproval; revision?: number }>();
@@ -1069,6 +1072,9 @@ export class MockApiClient extends ApiClient {
     await Promise.resolve();
     const ok = (v: unknown) => v as T;
     const seg = path.split("/").filter(Boolean).map(decodeURIComponent);
+    if (seg[0] === "bots" && seg[2] === "incoming-webhooks") {
+      return ok(this.incomingWebhookRoute(method, seg, opts.body));
+    }
     if (seg[0] === "hosts" && seg[1] === "setup") {
       const body = opts.body as { host: string; accept: boolean };
       if (!seg[2] && method === "POST") return ok(this.hostSetup.start(opts.body as never));
@@ -1490,6 +1496,9 @@ export class MockApiClient extends ApiClient {
           this.messages.set(seg[1], [...previous, { id: crypto.randomUUID(), chat_id: seg[1], role: "user", content: input.text ?? "", created_at_ms: Date.now() } as Message]);
           return ok({ delivery: "started", run_id: crypto.randomUUID() });
         }
+        if (seg[2] === "resend") {
+          return ok({ run_id: crypto.randomUUID(), message_id: crypto.randomUUID() });
+        }
         const id = crypto.randomUUID();
         const created = { id, chat_id: id, bot_id: input.bot_id ?? ATLAS, title: input.title ?? "Yeni sohbet", created_at_ms: Date.now(), pinned: false, archived: false };
         this.chats.push(created);
@@ -1653,6 +1662,8 @@ export class MockApiClient extends ApiClient {
               },
               summary: "webioo.com.tr sitesini aç"
             }]
+          : typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "notifications"
+          ? [{ call_id: "mock-open-webioo", run_id: "mock-live", requested_at_ms: Date.now() - 45_000, decision: null, tool_name: "browser_open", input: { url: "https://webioo.com.tr" }, summary: "Open webioo.com.tr" }]
           : typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen")?.startsWith("approval-schedule")
           ? [{ call_id: "mock-sch", run_id: "mock-live", requested_at_ms: Date.now() - 3000, decision: null, tool_name: "schedule_create", summary: "Create a schedule" }]
           : []);
@@ -2195,6 +2206,60 @@ export class MockApiClient extends ApiClient {
     throw new ApiError(404, "not_found", "unknown skills route");
   }
 
+  /** Offline demo for the Automation tab. The secret is returned only on create. */
+  private incomingWebhookRoute(method: string, seg: string[], body: unknown): unknown {
+    const botId = seg[1] ?? "";
+    if (!this.bots.some((b) => b.id === botId)) throw new ApiError(404, "not_found", "bot");
+    const rows = this.incomingWebhooks.get(botId) ?? [];
+    const hookId = seg[3];
+    if (method === "GET" && !hookId) return rows.map((row) => ({ ...row }));
+    if (method === "POST" && !hookId) {
+      const input = body as { name?: string; instruction?: string };
+      const name = (input.name ?? "").trim();
+      if (!name || [...name].length > 80) throw new ApiError(400, "bad_request", "name must be 1 to 80 characters");
+      const now = Date.now();
+      const id = crypto.randomUUID();
+      const row: IncomingWebhook = {
+        id,
+        bot_id: botId,
+        name,
+        instruction: (input.instruction ?? "").trim() || "Summarize this webhook for the owner.",
+        enabled: true,
+        path: `/v1/incoming-webhooks/${id}`,
+        created_at_ms: now,
+        updated_at_ms: now,
+        last_fired_at_ms: null
+      };
+      this.incomingWebhooks.set(botId, [...rows, row]);
+      const created: IncomingWebhookCreated = { webhook: row, secret: "ab".repeat(32) };
+      return created;
+    }
+    const row = rows.find((item) => item.id === hookId);
+    if (!row) throw new ApiError(404, "not_found", "webhook");
+    if (method === "PATCH") {
+      const input = body as { name?: string; instruction?: string; enabled?: boolean };
+      if (input.name !== undefined) row.name = input.name.trim();
+      if (input.instruction !== undefined) row.instruction = input.instruction.trim() || row.instruction;
+      if (input.enabled !== undefined) row.enabled = input.enabled;
+      row.updated_at_ms = Date.now();
+      return { ...row };
+    }
+    if (method === "DELETE") {
+      this.incomingWebhooks.set(botId, rows.filter((item) => item.id !== hookId));
+      return undefined;
+    }
+    if (method === "POST" && seg[4] === "test") {
+      if (!row.enabled) throw new ApiError(409, "conflict", "webhook is off");
+      return {
+        status: "accepted",
+        webhook_id: row.id,
+        run_id: crypto.randomUUID(),
+        chat_id: crypto.randomUUID()
+      };
+    }
+    throw new ApiError(404, "not_found", `mock: ${method} incoming-webhooks`);
+  }
+
   private getBotSkillsState(botId: string): BotSkills {
     if (!this.bots.some((b) => b.id === botId)) {
       throw new ApiError(404, "not_found", `bot ${botId} not found`);
@@ -2678,7 +2743,7 @@ export class MockApiClient extends ApiClient {
 function mockLiveRunId(): string | null {
   if (typeof window === "undefined") return null;
   const screen = new URLSearchParams(window.location.search).get("screen");
-  return screen === "working" || screen === "approval" || screen === "approval-site" || screen === "subagents" ? "mock-live" : null;
+  return screen === "working" || screen === "approval" || screen === "approval-site" || screen === "subagents" || screen === "notifications" ? "mock-live" : null;
 }
 
 /** Review-state events for `?mock=1&screen=...` (approval, streaming, default run). */
@@ -2686,12 +2751,17 @@ export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["even
   const out: { ts_ms: number; event: GlobalEnvelope["event"] }[] = [];
   const screen = new URLSearchParams(window.location.search).get("screen");
   if (screen === "long-chat") return longChatEvents();
-  if (screen === "approval" || screen === "approval-site" || screen?.startsWith("approval-schedule") || screen === "streaming" || screen === "working" || screen === "subagents") {
+  if (screen === "approval" || screen === "approval-site" || screen?.startsWith("approval-schedule") || screen === "streaming" || screen === "working" || screen === "subagents" || screen === "notifications") {
     const bot_id = "11111111-1111-4111-8111-111111111111";
     const chat_id = "33333333-3333-4333-8333-333333333333";
     const events: GlobalEnvelope["event"][] = [
       { type: "run_started", run_id: "mock-live", bot_id, chat_id },
-      { type: "message_delta", run_id: "mock-live", text: screen === "approval" ? "Raporu hazırladım. Paylaşmadan önce eski taslakları temizlemem gerekiyor." : screen === "approval-site" ? "Panelden güncel sipariş durumunu kontrol edeceğim." : "Taslağı oluşturuyorum, önce kaynakları karşılaştırıyorum…" },
+      ...(screen === "notifications" ? [
+        { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-open-webioo", tool_name: "browser_open", input: { url: "https://webioo.com.tr" } },
+        { type: "approval_needed", run_id: "mock-live", call_id: "mock-open-webioo", tool_name: "browser_open", input: { url: "https://webioo.com.tr" }, summary: "Open webioo.com.tr" }
+      ] as GlobalEnvelope["event"][] : ([
+        { type: "message_delta", run_id: "mock-live", text: screen === "approval" ? "Raporu hazırladım. Paylaşmadan önce eski taslakları temizlemem gerekiyor." : screen === "approval-site" ? "Panelden güncel sipariş durumunu kontrol edeceğim." : "Taslağı oluşturuyorum, önce kaynakları karşılaştırıyorum…" },
+      ] as GlobalEnvelope["event"][])),
       ...(screen === "working" ? [
         { type: "tool_call_requested", run_id: "mock-live", call_id: "mock-w1", tool_name: "web_search", input: { query: "cpu llm benchmark 2026" } },
         { type: "tool_call_completed", run_id: "mock-live", call_id: "mock-w1", error: null },

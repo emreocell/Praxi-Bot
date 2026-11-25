@@ -66,3 +66,18 @@ Her işte **Şimdi çalıştır**'a, **Düzenle**'ye ya da **Sil**'e basabilirsi
 - Koyduğun harcama limitleri işler için de geçerlidir.
 
 Daha fazlası: [Zamanlanmış işler, sade sözlerle](schedules.md) ve [teknik başvuru](../scheduled-tasks.md).
+
+## Botu dışarıdan başlat
+
+Bir **webhook**, başka bir şey bir adresi çağırınca bu botu başlatır: GitHub, bir form ya da evdeki bir anahtar.
+
+1. Bot panelini aç ve **Otomasyon**'u seç.
+2. Webhook'a bir ad ver. İstersen botun veriyle ne yapacağını yaz. **Webhook oluştur**'a bas.
+3. Gizli anahtarı hemen kopyala. Praxi onu yalnızca bu kez gösterir.
+4. Praxi yalnızca bu bilgisayarı dinler. Kendi seçtiğin bir tüneli (Cloudflare Tunnel ya da ssh) `127.0.0.1` adresine yönelt. Yönlendiricide yeni bir kapı açma.
+
+Her çağrı `X-Webhook-Timestamp` başlığında zamanı ve `X-Signature-256: sha256=` ile o zamanın, bir noktanın ve ham metnin HMAC imzasını gönderir. Aynı imzalı çağrı bir kez geçerlidir ve yalnızca 5 dakika içinde. Metin en fazla 64 KB olabilir. Dakikada 30 çağrıdan fazlası reddedilir. Metin veridir, emir değildir. Bot yine harekete geçmeden önce sorar; soru bir bildirim olarak görünür.
+
+**Test gönder**, uygulamadan bir çalışma başlatır. Dışarıdaki hız sınırını kullanmaz.
+
+Daha fazlası: [Gelen webhook'lar](../incoming-webhooks.md).

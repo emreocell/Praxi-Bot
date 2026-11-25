@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
-import { Card } from "ui";
+import { SettingsCard } from "../components/SettingsUi";
 import formStyles from "../components/Form.module.css";
 import { type QuietHours } from "../lib/quietHours";
 import type { AppSettings } from "../store/settingsStore";
@@ -60,13 +60,10 @@ export function NotificationSettings({
   );
 
   return (
-    <Card padding="md" className={styles.card}>
-      <div className={styles.info}>
-        <h2 className={styles.heading}>{t("settings.notifications.title")}</h2>
-        <p className={formStyles.hint}>
-          {t("settings.notifications.description")}
-        </p>
-      </div>
+    <SettingsCard
+      title={t("settings.notifications.title")}
+      description={t("settings.notifications.description")}
+    >
       <div className={styles.group}>{NOTIFY_TOGGLES.map(row)}</div>
       <div className={styles.group}>{row("notifyPrivate")}</div>
       <div className={styles.group} data-testid="quiet-hours">
@@ -197,6 +194,6 @@ export function NotificationSettings({
         <h3 className={styles.subHeading}>{t("settings.route.title")}</h3>
         {row("showAgentRoute")}
       </div>
-    </Card>
+    </SettingsCard>
   );
 }

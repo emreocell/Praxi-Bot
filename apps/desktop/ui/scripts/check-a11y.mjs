@@ -26,7 +26,7 @@ const chromePath = CHROMES.find((p) => existsSync(p));
 if (!chromePath) { process.stdout.write('check:a11y needs Chrome (set CHROME_BIN)\n'); process.exit(1); }
 
 // Screens (mock review states, see README "Mock mode").  Settings sections are separate screens.
-const SETTINGS = ['general', 'appearance', 'ai', 'computer', 'mail', 'usage', 'diagnostics', 'updates'];
+const SETTINGS = ['general', 'appearance', 'models', 'where', 'apps', 'safety', 'system'];
 const screens = [
   { name: 'home', query: 'screen=home' },
   { name: 'my-bots', query: 'screen=myBots', expect: '[data-testid=my-bots]' },

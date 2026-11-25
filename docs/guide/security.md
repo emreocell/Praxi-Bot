@@ -30,8 +30,11 @@ checked for a loopback `Host` header, a browser `Origin` check blocks web pages
 from calling it (only the desktop app and origins you list in
 `BOT_ALLOWED_ORIGINS` pass), and calls need a bearer token: 256 random bits in
 `<data dir>/api-token`, readable only by your user (`0600` on Unix, restricted
-with `icacls` on Windows; the daemon warns if that fails). The one route without
-the token, `POST /v1/webhooks/{id}`, requires a valid HMAC signature.
+with `icacls` on Windows; the daemon warns if that fails). Two routes skip the
+token and require a valid HMAC signature instead: `POST /v1/webhooks/{id}`
+(a scheduled job) and `POST /v1/incoming-webhooks/{id}` (a bot webhook). The
+incoming webhook also requires a fresh timestamp, accepts that signature once,
+and treats the body as untrusted data. See [Incoming webhooks](incoming-webhooks.md).
 
 **6. Secrets stay out of files and logs.** API keys and the Telegram token are in
 the OS keychain or an encrypted file, never in `providers.toml` or on a command

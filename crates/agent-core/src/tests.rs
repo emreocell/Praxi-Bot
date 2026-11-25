@@ -7775,6 +7775,8 @@ async fn pre_058_paused_run_with_unknown_origin_fails_closed_after_migration() {
             DROP TABLE IF EXISTS file_provenance;
             DROP TABLE trusted_folders;
             DROP TABLE bot_spend_limits;
+            DROP TABLE incoming_webhook_seen;
+            DROP TABLE incoming_webhooks;
             DROP TRIGGER chat_search_insert;
             DROP TRIGGER chat_search_delete;
             DROP TRIGGER chat_search_update;

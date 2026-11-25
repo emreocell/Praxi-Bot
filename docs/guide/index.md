@@ -60,6 +60,7 @@ Seven short pages in plain words. Read them in this order:
 | [Keep your bot safe](keep-your-bot-safe.md) | The permission levels, approvals, and what leaves your computer. |
 | [Run it on this computer or on a server](local-or-server.md) | Why you do not need a server, and how to add one if you want. |
 | [Automate things](automate.md) | Scheduled jobs, with three examples you can copy. |
+| [Incoming webhooks](incoming-webhooks.md) | Start a bot from GitHub, a form, or home automation. |
 | [Connect your apps](connect-your-apps.md) | Apps, what each permission means, and who may use them. |
 | [Fix common problems](fix-common-problems.md) | The 12 most likely problems and what to do next. |
 | [Quick answers](quick-faq.md) | Short answers to the questions people ask first. |
