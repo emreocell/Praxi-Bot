@@ -479,7 +479,11 @@ impl MailboxProvider for AgentMailProvider {
         let raw = self.list(&query).await?;
         let messages: Vec<_> = raw.iter().map(MessageWire::summary).collect();
         let total = messages.len();
-        Ok(Found { messages, total })
+        Ok(Found {
+            messages,
+            total,
+            uid_validity: None,
+        })
     }
 
     async fn get_message(

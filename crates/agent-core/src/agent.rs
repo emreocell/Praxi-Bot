@@ -1053,6 +1053,20 @@ impl AgentLoop {
         self.start_turn_from(chat_id, envelope, &kind, None, None, "incoming_webhook")
     }
 
+    /// Start a run for one received e-mail in its own new chat. Like a signed
+    /// webhook: `envelope` is JSON `{"instruction", "payload"}`; the instruction
+    /// is the owner's channel instruction (the only task text) and the payload
+    /// is the mail, delivered as an untrusted data block. The run is tainted
+    /// from its first model call and uses the external-schedule rules (every
+    /// tool asks, no standing grants).
+    ///
+    /// # Errors
+    /// Existing chat history or any other run-start error.
+    pub fn run_incoming_email(&self, chat_id: ChatId, envelope: &str) -> Result<RunId> {
+        let kind = format!("turn:incoming_email:{}", Uuid::now_v7());
+        self.start_turn_from(chat_id, envelope, &kind, None, None, "incoming_email")
+    }
+
     /// Start an externally supplied scheduled run in a new, isolated chat.
     /// The durable initiator survives resume and is inherited by all children.
     ///

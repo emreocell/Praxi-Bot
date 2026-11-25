@@ -335,6 +335,8 @@ pub(crate) enum ConnectStage {
 pub struct ImapSession {
     session: async_imap::Session<Stream>,
     password: String,
+    /// UIDVALIDITY the server reported when the last search selected its folder.
+    uid_validity: Option<u32>,
     _trace: ImapTraceGuard,
 }
 
@@ -405,6 +407,7 @@ impl ImapSession {
             )
         })?;
         Ok(Self {
+            uid_validity: None,
             session,
             password: password.to_owned(),
             _trace: trace,
@@ -465,6 +468,13 @@ impl ImapSession {
             .collect())
     }
 
+    /// UIDVALIDITY of the folder the last [`Self::search`] selected, when the
+    /// server reported one. UIDs are only comparable while it is unchanged.
+    #[must_use]
+    pub fn uid_validity(&self) -> Option<u32> {
+        self.uid_validity
+    }
+
     /// Search a folder read-only; newest (highest UID) first. Returns the
     /// summaries and the total number of matches.
     ///
@@ -479,10 +489,12 @@ impl ImapSession {
         let wire_name = wire_mailbox_name(folder)?;
         let criteria = query.to_imap()?;
         enforce_imap_trace_ceiling();
-        self.session
+        let mailbox = self
+            .session
             .examine(wire_name)
             .await
             .map_err(|e| self.fail("examine", &e))?;
+        self.uid_validity = mailbox.uid_validity;
         let mut uids: Vec<u32> = self
             .session
             .uid_search(&criteria)

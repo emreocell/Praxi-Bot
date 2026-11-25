@@ -2232,3 +2232,61 @@ async fn webhook_secrets_never_travel_unless_all_is_chosen_and_import_disables_h
         assert_eq!(enabled, 0);
     }
 }
+
+/// The e-mail channel's files (settings, poll state with sender addresses) and
+/// the mailbox credentials never travel in a default (`SecretSelection::None`)
+/// export; nothing of a mailbox is switched on by importing a bundle.
+#[tokio::test]
+async fn email_channel_files_and_mailbox_credentials_never_travel_in_a_default_export() {
+    let source = tempfile::tempdir().unwrap();
+    database(source.path(), true);
+    std::fs::write(
+        source.path().join("email-channel.toml"),
+        "enabled = true\naccount = \"mail-account-marker\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        source.path().join("email-channel-state.json"),
+        r#"{"last_uid":9,"known":["sender-marker@example.com"]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        source.path().join("email.toml"),
+        "[[account]]\nname = \"mail-account-marker\"\n",
+    )
+    .unwrap();
+    let store = MemoryStore::new();
+    store
+        .set("email/mail-account-marker/password", "mailbox-pw-marker")
+        .unwrap();
+    let mut bytes = Vec::new();
+    export(
+        source.path(),
+        &store,
+        ExportOptions {
+            secrets: SecretSelection::None,
+            ..Default::default()
+        },
+        &mut bytes,
+    )
+    .await
+    .unwrap();
+    for marker in [
+        "mailbox-pw-marker",
+        "sender-marker@example.com",
+        "mail-account-marker",
+    ] {
+        assert!(!contains(&bytes, marker), "{marker} leaked into the bundle");
+    }
+    let target = tempfile::tempdir().unwrap();
+    import(
+        target.path(),
+        &MemoryStore::new(),
+        bytes.as_slice(),
+        ImportOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert!(!target.path().join("email-channel.toml").exists());
+    assert!(!target.path().join("email-channel-state.json").exists());
+}

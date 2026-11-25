@@ -48,6 +48,12 @@ const SEARCH_LIMIT: usize = 100;
 /// Most sender addresses remembered for the reply rule.
 const KNOWN_SENDERS: usize = 200;
 
+/// The UID an event carries (`message_id` is the decimal UID).
+#[must_use]
+pub fn uid_of(m: &IncomingMessage) -> Option<u32> {
+    m.message_id.as_deref()?.parse().ok()
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -58,6 +64,9 @@ fn now_ms() -> u64 {
 struct State {
     /// Highest UID already handled; `None` before the first poll.
     last_uid: Option<u32>,
+    /// UIDVALIDITY the folder had when `last_uid` was recorded.
+    #[serde(default)]
+    uid_validity: Option<u32>,
     folder: String,
     known: VecDeque<String>,
 }
@@ -143,13 +152,41 @@ impl Core {
         }
     }
 
+    /// Look once for new mail, hand every mail back and treat it as delivered
+    /// (the position moves to the newest). For a caller that must not lose a
+    /// mail when handing it over fails, use [`Self::poll_pending`] and
+    /// [`Self::commit`].
+    ///
+    /// # Errors
+    /// The mailbox could not be searched.
+    pub async fn poll_once(&self) -> Result<Vec<IncomingMessage>, EmailError> {
+        let out = self.poll_pending().await?;
+        if let Some(uid) = out.iter().filter_map(uid_of).max() {
+            self.commit(uid);
+        }
+        Ok(out)
+    }
+
+    /// Record that every mail up to `uid` was handed to the bot. Until then a
+    /// mail is offered again by the next [`Self::poll_pending`].
+    pub fn commit(&self, uid: u32) {
+        let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if st.last_uid.is_none_or(|l| uid > l) {
+            st.last_uid = Some(uid);
+        }
+        self.save(&st);
+    }
+
     /// Look once for new mail and return what to hand to the bot, oldest
-    /// first. The first call only remembers where the mailbox stands.
+    /// first, WITHOUT moving the position (see [`Self::commit`]). The first
+    /// call, and the first one after the folder's UIDVALIDITY changed, only
+    /// remember where the mailbox stands: old UIDs mean other mail now, so
+    /// nothing is replayed and nothing old is delivered again.
     ///
     /// # Errors
     /// The mailbox could not be searched (nothing is lost: the position only
-    /// moves after a successful search).
-    pub async fn poll_once(&self) -> Result<Vec<IncomingMessage>, EmailError> {
+    /// moves on a successful search or a commit).
+    pub async fn poll_pending(&self) -> Result<Vec<IncomingMessage>, EmailError> {
         let query = SearchQuery {
             unread: Some(true),
             ..SearchQuery::default()
@@ -164,7 +201,12 @@ impl Core {
             .await?;
         let last = {
             let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-            if st.last_uid.is_none() {
+            let changed =
+                matches!((st.uid_validity, found.uid_validity), (Some(a), Some(b)) if a != b);
+            if found.uid_validity.is_some() {
+                st.uid_validity = found.uid_validity;
+            }
+            if st.last_uid.is_none() || changed {
                 st.last_uid = Some(found.messages.iter().map(|m| m.uid).max().unwrap_or(0));
                 self.save(&st);
                 return Ok(Vec::new());
@@ -231,9 +273,11 @@ impl Core {
                 ),
             ));
         }
-        let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        st.last_uid = Some(newest);
-        self.save(&st);
+        if out.is_empty() {
+            // Only mail that is not ours to deliver (own address, not an
+            // allowed sender): nothing to hand over, so move on.
+            self.commit(newest);
+        }
         Ok(out)
     }
 
@@ -343,6 +387,20 @@ impl EmailChannel {
     /// The mailbox could not be searched.
     pub async fn poll_once(&self) -> Result<Vec<IncomingMessage>, EmailError> {
         self.core.poll_once().await
+    }
+
+    /// Like [`Self::poll_once`] but the position only moves when the caller
+    /// confirms each mail with [`Self::commit`] after handing it over.
+    ///
+    /// # Errors
+    /// The mailbox could not be searched.
+    pub async fn poll_pending(&self) -> Result<Vec<IncomingMessage>, EmailError> {
+        self.core.poll_pending().await
+    }
+
+    /// Mark every mail up to `uid` as handed over.
+    pub fn commit(&self, uid: u32) {
+        self.core.commit(uid);
     }
 
     /// Replies waiting for the owner.

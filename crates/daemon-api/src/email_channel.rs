@@ -174,3 +174,55 @@ pub(crate) async fn deny_reply(
     control(&s)?.deny(&id)?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+impl AppState {
+    /// Start a run for one received e-mail, for the in-process e-mail channel
+    /// only. There is deliberately no HTTP route and no message-source hint for
+    /// this: an API client cannot make a chat message count as "e-mail", and
+    /// cannot start one. Each mail gets its own chat (titled with a fixed
+    /// word, never with the subject) and a run that is tainted from its first
+    /// model call: `instruction` is the only task text, `mail` rides beside it
+    /// as an untrusted data block and every tool asks.
+    ///
+    /// # Errors
+    /// Safe mode, or any run-start error.
+    pub fn deliver_email(
+        &self,
+        bot: protocol::BotId,
+        instruction: &str,
+        mail: &str,
+    ) -> Result<protocol::RunId, ApiError> {
+        if self.safe_mode() {
+            return Err(ApiError::conflict(
+                "the e-mail channel is paused in safe mode",
+            ));
+        }
+        let envelope = serde_json::to_string(&serde_json::json!({
+            "instruction": instruction,
+            "payload": mail,
+        }))
+        .map_err(|_| ApiError::internal("could not store the mail"))?;
+        let chat = storage::Chat {
+            id: protocol::ChatId::new(),
+            user_id: self.user_id(),
+            bot_id: bot,
+            title: "E-mail".to_owned(),
+            created_at_ms: storage::now_ms(),
+        };
+        self.storage().insert_chat(&chat)?;
+        let started = self
+            .leader()
+            .with_active(|| self.agent().run_incoming_email(chat.id, &envelope));
+        match started {
+            Ok(Ok(run)) => Ok(run),
+            Ok(Err(err)) => {
+                let _ = self.storage().delete_chat(chat.id);
+                Err(err.into())
+            }
+            Err(err) => {
+                let _ = self.storage().delete_chat(chat.id);
+                Err(err)
+            }
+        }
+    }
+}

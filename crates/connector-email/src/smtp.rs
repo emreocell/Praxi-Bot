@@ -104,7 +104,7 @@ fn compose_message(
     if mail.body.len() > MAX_BODY_BYTES {
         return Err(EmailError::Input("body is too large".into()));
     }
-    if mail.subject.contains(['\r', '\n']) {
+    if mail.subject.chars().any(char::is_control) {
         return Err(EmailError::Input("subject must be a single line".into()));
     }
     let from = mailbox(from)?;
@@ -204,6 +204,26 @@ mod tests {
         let raw = String::from_utf8(m.formatted()).unwrap();
         assert!(raw.contains("Subject: Hello"));
         assert!(raw.contains("bob@example.com"));
+    }
+
+    #[test]
+    fn cr_lf_and_nul_in_to_cc_and_subject_are_refused() {
+        for bad in [
+            "a\rb",
+            "a\nb",
+            "a\0b",
+            "x@example.com\r\nBcc: evil@example.com",
+        ] {
+            let mut m = mail();
+            m.subject = bad.into();
+            assert!(compose("me@example.com", &m).is_err(), "subject {bad:?}");
+            let mut m = mail();
+            m.to = vec![bad.into()];
+            assert!(compose("me@example.com", &m).is_err(), "to {bad:?}");
+            let mut m = mail();
+            m.cc = vec![bad.into()];
+            assert!(compose("me@example.com", &m).is_err(), "cc {bad:?}");
+        }
     }
 
     #[test]

@@ -113,10 +113,19 @@ impl MailboxProvider for ImapSmtpProvider {
         let folder = req.folder.to_owned();
         let query = req.query.clone();
         let limit = req.limit;
-        let (messages, total) = self
-            .with_imap(move |s, _| Box::pin(async move { s.search(&folder, &query, limit).await }))
+        let (messages, total, uid_validity) = self
+            .with_imap(move |s, _| {
+                Box::pin(async move {
+                    let (messages, total) = s.search(&folder, &query, limit).await?;
+                    Ok((messages, total, s.uid_validity()))
+                })
+            })
             .await?;
-        Ok(Found { messages, total })
+        Ok(Found {
+            messages,
+            total,
+            uid_validity,
+        })
     }
 
     async fn get_message(

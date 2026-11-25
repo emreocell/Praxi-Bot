@@ -1488,15 +1488,13 @@ pub fn serve(
         let leader = state.leader().clone();
         let channel_state = state.clone();
         let channel_data = data_dir.to_path_buf();
-        let email_channel_token = api_token.clone();
         let prepare_channels = async move {
             // The e-mail channel: off until the owner turns it on; never in safe mode.
             if let Some(email) = email_for_channel.filter(|_| !safe_mode) {
                 let host = crate::email_channel_host::EmailChannelHost::new(
                     &channel_data,
                     email,
-                    &format!("http://{addr}"),
-                    &email_channel_token,
+                    channel_state.clone(),
                 );
                 channel_state
                     .set_email_channel(host.clone() as Arc<dyn daemon_api::EmailChannelControl>);

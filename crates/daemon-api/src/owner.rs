@@ -231,6 +231,7 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/secret-requests/{}"),
     ("POST", "/v1/secret-requests/{}/cancel"),
     // the e-mail channel: settings, and replies that go out in the owner's name
+    ("GET", "/v1/email/channel"),
     ("PUT", "/v1/email/channel"),
     ("GET", "/v1/email/channel/replies"),
     ("POST", "/v1/email/channel/replies/{}/approve"),

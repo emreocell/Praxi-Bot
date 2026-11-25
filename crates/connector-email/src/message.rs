@@ -289,6 +289,31 @@ Content-Transfer-Encoding: base64\r\n\r\nJVBERg==\r\n--B--\r\n";
     }
 
     #[test]
+    fn deeply_nested_and_malformed_mime_is_bounded_and_never_panics() {
+        let mut raw = String::from("Subject: x\r\nFrom: a@example.com\r\n");
+        for i in 0..400 {
+            raw.extend([
+                "Content-Type: multipart/mixed; boundary=\"b",
+                &i.to_string(),
+                "\"\r\n\r\n--b",
+                &i.to_string(),
+                "\r\n",
+            ]);
+        }
+        raw.push_str("Content-Type: text/plain\r\n\r\ndeep body\r\n");
+        for garbage in [
+            raw.as_str(),
+            "Content-Type: multipart/mixed; boundary=\r\n\r\n--\r\n--",
+            "\0\0\0 not mime at all",
+            "Content-Transfer-Encoding: base64\r\n\r\n!!!not base64!!!",
+        ] {
+            if let Ok(d) = parse_detail(1, garbage.as_bytes(), false, Some(100), 500) {
+                assert!(d.body_text.chars().count() <= 501, "body is capped");
+            }
+        }
+    }
+
+    #[test]
     fn oversized_payload_is_refused_before_parse() {
         let mut raw = b"Subject: hi\r\n\r\n".to_vec();
         let extra = usize::try_from(MAX_MESSAGE_BYTES).unwrap_or(1024 * 1024);

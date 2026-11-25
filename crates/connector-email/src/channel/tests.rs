@@ -16,6 +16,7 @@ struct Fake {
     unread: Mutex<Vec<MessageSummary>>,
     sent: Mutex<Vec<OutgoingMail>>,
     fail_get: bool,
+    validity: Mutex<Option<u32>>,
 }
 
 fn summary(uid: u32, from: &str, subject: &str) -> MessageSummary {
@@ -37,6 +38,7 @@ impl Fake {
             unread: Mutex::new(unread),
             sent: Mutex::new(Vec::new()),
             fail_get: false,
+            validity: Mutex::new(Some(7)),
         })
     }
     fn arrive(&self, m: MessageSummary) {
@@ -70,7 +72,11 @@ impl MailboxProvider for Fake {
         let mut m = self.unread.lock().unwrap().clone();
         m.sort_by_key(|m| std::cmp::Reverse(m.uid));
         let total = m.len();
-        Ok(Found { messages: m, total })
+        Ok(Found {
+            messages: m,
+            total,
+            uid_validity: *self.validity.lock().unwrap(),
+        })
     }
     async fn get_message(
         &self,
@@ -132,10 +138,7 @@ fn text(m: &IncomingMessage) -> &str {
 async fn only_mail_after_switch_on_arrives_once_as_untrusted_summary() {
     let f = Fake::new(vec![summary(3, "old@example.com", "Old")]);
     let ch = channel(&f, false, &[]);
-    assert!(
-        ch.poll_once().await.unwrap().is_empty(),
-        "old mail is not replayed"
-    );
+    assert_eq!(ch.poll_once().await.unwrap().len(), 0);
     f.arrive(summary(
         4,
         "Ann <Ann@Example.com>",
@@ -153,10 +156,7 @@ async fn only_mail_after_switch_on_arrives_once_as_untrusted_summary() {
         t.chars().count() < UNTRUSTED_BANNER.len() + 300 + 200,
         "summary is short"
     );
-    assert!(
-        ch.poll_once().await.unwrap().is_empty(),
-        "no second delivery"
-    );
+    assert_eq!(ch.poll_once().await.unwrap().len(), 0);
 }
 
 #[tokio::test]
@@ -351,4 +351,45 @@ async fn works_over_a_fake_tls_imap_and_smtp_server() {
     ch.approve_reply(&id).await.unwrap();
     let wire = String::from_utf8(smtp.messages.lock().unwrap()[0].clone()).unwrap();
     assert!(wire.contains("ann@example.com") && wire.contains("Thanks!"));
+}
+
+#[tokio::test]
+async fn a_mail_that_could_not_be_handed_over_is_offered_again() {
+    let f = Fake::new(vec![summary(3, "old@example.com", "Old")]);
+    let ch = channel(&f, false, &[]);
+    assert_eq!(ch.poll_pending().await.unwrap().len(), 0);
+    f.arrive(summary(4, "a@example.com", "first"));
+    f.arrive(summary(5, "b@example.com", "second"));
+    // Delivery of both failed: nothing is committed, so nothing is lost.
+    assert_eq!(ch.poll_pending().await.unwrap().len(), 2);
+    let again = ch.poll_pending().await.unwrap();
+    assert_eq!(again.len(), 2, "still pending after a failed hand-over");
+    // The first was handed over, the second not: only the second comes back.
+    ch.commit(uid_of(&again[0]).unwrap());
+    let rest = ch.poll_pending().await.unwrap();
+    assert_eq!(rest.len(), 1);
+    assert_eq!(rest[0].sender.id, "b@example.com");
+    ch.commit(uid_of(&rest[0]).unwrap());
+    assert_eq!(ch.poll_pending().await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn changed_uidvalidity_resets_the_position_without_replaying_mail() {
+    let f = Fake::new(vec![summary(90, "old@example.com", "Old")]);
+    let ch = channel(&f, false, &[]);
+    assert_eq!(ch.poll_once().await.unwrap().len(), 0);
+    f.arrive(summary(91, "a@example.com", "new"));
+    assert_eq!(ch.poll_once().await.unwrap().len(), 1);
+    // The server renumbered the folder: small UIDs now, all of them old mail.
+    *f.validity.lock().unwrap() = Some(8);
+    f.unread.lock().unwrap().clear();
+    f.arrive(summary(1, "x@example.com", "renumbered"));
+    f.arrive(summary(2, "y@example.com", "renumbered"));
+    assert_eq!(ch.poll_once().await.unwrap().len(), 0);
+    // ...and mail that arrives afterwards is delivered although its UID is
+    // far below the old position.
+    f.arrive(summary(3, "z@example.com", "really new"));
+    let got = ch.poll_once().await.unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].sender.id, "z@example.com");
 }

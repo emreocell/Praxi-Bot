@@ -1282,6 +1282,10 @@ pub fn initiator_of(kind: &str) -> InitiatorKind {
         Some(s) if s == "incoming_webhook" || s.starts_with("incoming_webhook:") => {
             InitiatorKind::ExternalSchedule
         }
+        // Likewise a received e-mail: someone else's text, never the owner's.
+        Some(s) if s == "incoming_email" || s.starts_with("incoming_email:") => {
+            InitiatorKind::ExternalSchedule
+        }
         Some(s) if s == "schedule" || s.starts_with("schedule:") => InitiatorKind::Schedule,
         Some(s) if s == "external_agent" || s.starts_with("external_agent:") => {
             InitiatorKind::ExternalAgent
@@ -1800,6 +1804,11 @@ impl Shared {
         if crate::history::is_webhook_run(run) {
             taint.exposure.observe(true, false);
             taint.note_label("incoming webhook body");
+        }
+        // The same for a received e-mail: untrusted from step 0.
+        if crate::history::is_email_run(run) {
+            taint.exposure.observe(true, false);
+            taint.note_label("incoming e-mail");
         }
         // A subagent does not see the chat. A top-level turn, including a
         // scheduled one, does: provenance rides on the messages that enter

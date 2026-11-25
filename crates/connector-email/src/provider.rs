@@ -125,6 +125,9 @@ pub struct Found {
     pub messages: Vec<MessageSummary>,
     /// Total matches when the provider knows it, else the returned count.
     pub total: usize,
+    /// IMAP UIDVALIDITY of the folder when known. A changed value means every
+    /// stored UID refers to different mail.
+    pub uid_validity: Option<u32>,
 }
 
 fn unsupported<T>(what: &str) -> Result<T, EmailError> {
