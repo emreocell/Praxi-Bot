@@ -57,12 +57,17 @@ fn fake_pdftoppm(dir: &Path) -> PathBuf {
 /// A config whose converters are exactly the given fakes; `None` means "not installed",
 /// whatever the host has.
 fn cfg_with(soffice: Option<PathBuf>, ppm: Option<PathBuf>) -> DocToolsConfig {
+    // These tests exercise the plumbing with fakes that live in /tmp; the real network
+    // sandbox is covered by its own test below.
+    crate::convert_sandbox::force_no_sandbox(true);
     DocToolsConfig {
         convert: ConvertConfig {
             soffice_path: Some(soffice.unwrap_or_else(|| PathBuf::from("/nonexistent/soffice"))),
             pdftoppm_path: Some(ppm.unwrap_or_else(|| PathBuf::from("/nonexistent/pdftoppm"))),
             timeout: Duration::from_secs(20),
             read_guard: Some(WriteGuard::new(|_| Ok(()))),
+            allow_unsandboxed_convert: true,
+            convert_enabled_on_windows: true,
             ..ConvertConfig::default()
         },
         ..DocToolsConfig::default()
@@ -343,7 +348,10 @@ fn documents_with_external_references_are_refused_before_soffice_starts() {
         let src = work.path().join(name);
         fs::write(&src, bytes).unwrap();
         let err = convert(&cfg, json!({"path": src.to_str().unwrap(), "to": "pdf"})).unwrap_err();
-        assert!(err.to_string().contains("external"), "{name}: {err}");
+        assert!(
+            err.to_string().contains("not plain enough"),
+            "{name}: {err}"
+        );
         assert!(!log.exists(), "{name}: soffice must not have been started");
     }
     // A clean document (and an ODF file with only internal links) still converts.
@@ -742,4 +750,166 @@ fn path_lookup_ignores_empty_relative_and_current_directory_entries() {
         None,
         "the working directory must not be searched"
     );
+}
+
+// ------------------------------------------------- design: sandbox, paths, plain-only
+
+#[test]
+fn unc_and_device_input_paths_are_refused_before_any_filesystem_call() {
+    let tools = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let log = tools.path().join("args.txt");
+    let cfg = cfg_in(work.path(), Some(fake_soffice(tools.path(), &log)), None);
+    for bad in [
+        r"\\attacker.invalid\share\a.docx",
+        "//attacker.invalid/share/a.docx",
+        r"\\?\UNC\attacker.invalid\share\a.docx",
+        r"\\.\pipe\x.docx",
+    ] {
+        let err = convert(&cfg, json!({"path": bad, "to": "pdf"})).unwrap_err();
+        let msg = err.to_string();
+        assert!(!msg.contains("cannot stat"), "{bad}: {msg}");
+        assert!(msg.contains("not allowed"), "{bad}: {msg}");
+        let err = run_preview(&cfg, json!({"path": bad})).unwrap_err();
+        assert!(err.to_string().contains("not allowed"), "{bad}: {err}");
+    }
+    // The output side is guarded the same way.
+    let src = work.path().join("a.docx");
+    fs::write(&src, docx_bytes()).unwrap();
+    let err = convert(
+        &cfg,
+        json!({"path": src.to_str().unwrap(), "to": "pdf", "output_path": "//attacker.invalid/s/a.pdf"}),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("not allowed"), "{err}");
+    assert!(!log.exists());
+}
+
+#[test]
+fn rtf_input_is_not_supported() {
+    let tools = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let log = tools.path().join("args.txt");
+    let cfg = cfg_in(work.path(), Some(fake_soffice(tools.path(), &log)), None);
+    let rtf = work.path().join("a.rtf");
+    fs::write(&rtf, br"{\rtf1 hi}").unwrap();
+    let err = convert(&cfg, json!({"path": rtf.to_str().unwrap(), "to": "pdf"})).unwrap_err();
+    assert!(err.to_string().contains("cannot convert"), "{err}");
+    let err = run_preview(&cfg, json!({"path": rtf.to_str().unwrap()})).unwrap_err();
+    assert!(err.to_string().contains("cannot preview"), "{err}");
+    assert!(!log.exists());
+}
+
+#[test]
+fn plain_only_vetting_runs_before_soffice_for_the_new_rules() {
+    let tools = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let log = tools.path().join("args.txt");
+    let cfg = cfg_in(work.path(), Some(fake_soffice(tools.path(), &log)), None);
+    let hyperlink_rel = "<Relationships><Relationship Id=\"r1\" Type=\"x/hyperlink\" Target=\"http://attacker.invalid/p.png\" TargetMode=\"External\"/></Relationships>";
+    let evil: Vec<(&str, Vec<u8>)> = vec![
+        (
+            "hyperlink-rel.docx",
+            zip_with(&[
+                ("word/document.xml", "<w:document/>"),
+                ("word/_rels/document.xml.rels", hyperlink_rel),
+            ]),
+        ),
+        (
+            "cdata-field.docx",
+            zip_with(&[(
+                "word/document.xml",
+                "<w:instrText><![CDATA[INCLUDEPICTURE \"x\"]]></w:instrText>",
+            )]),
+        ),
+        (
+            "webservice.xlsx",
+            zip_with(&[(
+                "xl/worksheets/sheet1.xml",
+                "<worksheet><c><f>WEBSERVICE(\"http://127.0.0.1:1/\")</f></c></worksheet>",
+            )]),
+        ),
+        (
+            "blip-link.pptx",
+            zip_with(&[("ppt/slides/slide1.xml", "<a:blip r:link=\"rId2\"/>")]),
+        ),
+        (
+            "embedded.docx",
+            zip_with(&[("word/embeddings/oleObject1.bin", "x")]),
+        ),
+        (
+            "altchunk.docx",
+            zip_with(&[("word/document.xml", "<w:altChunk r:id=\"rId5\"/>")]),
+        ),
+    ];
+    for (name, bytes) in evil {
+        let src = work.path().join(name);
+        fs::write(&src, bytes).unwrap();
+        let err = convert(&cfg, json!({"path": src.to_str().unwrap(), "to": "pdf"})).unwrap_err();
+        assert!(
+            err.to_string().contains("not plain enough"),
+            "{name}: {err}"
+        );
+        assert!(!log.exists(), "{name}: soffice must not have been started");
+    }
+}
+
+/// Floods the profile / TMP folder (not `out/`): the whole temp folder is capped too.
+#[cfg(unix)]
+#[test]
+fn a_converter_that_fills_its_profile_folder_is_stopped() {
+    let tools = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let flood = fake(
+        tools.path(),
+        "soffice",
+        "#!/bin/sh\nyes x | head -c 400000 > \"$TMPDIR/flood.tmp\"\nsleep 30\n",
+        "",
+    );
+    let mut cfg = cfg_in(work.path(), Some(flood), None);
+    cfg.max_output_bytes = 1000;
+    cfg.max_input_bytes = 1000;
+    cfg.convert.timeout = Duration::from_secs(25);
+    let src = work.path().join("a.docx");
+    fs::write(&src, docx_bytes()).unwrap();
+    let started = Instant::now();
+    let err = convert(&cfg, json!({"path": src.to_str().unwrap(), "to": "pdf"})).unwrap_err();
+    assert!(err.to_string().contains("limit"), "{err}");
+    assert!(started.elapsed() < Duration::from_secs(15));
+}
+
+/// A fake converter that tries to open a TCP connection to a listener on the host's
+/// loopback: inside the network sandbox it must not get through. Skipped (visibly) where
+/// no sandbox works, e.g. a CI runner that forbids user namespaces and has no bubblewrap.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_converter_cannot_open_a_socket_inside_the_sandbox() {
+    use std::net::TcpListener;
+    if crate::convert_sandbox::detect().is_none() || !Path::new("/bin/bash").exists() {
+        eprintln!("SKIPPED: no network sandbox (bwrap / unshare) or no bash on this host");
+        return;
+    }
+    // /var/tmp is not hidden by bubblewrap's private /tmp.
+    let tools = tempfile::Builder::new().tempdir_in("/var/tmp").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let soffice = fake(
+        tools.path(),
+        "soffice",
+        &format!(
+            "#!/bin/bash\nfor a in \"$@\"; do case \"$prev\" in --outdir) out=\"$a\";; esac; prev=\"$a\"; done\nif (exec 3<>/dev/tcp/127.0.0.1/{port}) 2>/dev/null; then echo CONNECTED > \"$out/input.pdf\"; else echo ISOLATED > \"$out/input.pdf\"; fi\n"
+        ),
+        "",
+    );
+    let mut cfg = cfg_in(work.path(), Some(soffice), None);
+    crate::convert_sandbox::force_no_sandbox(false);
+    cfg.convert.allow_unsandboxed_convert = false;
+    let src = work.path().join("a.docx");
+    fs::write(&src, docx_bytes()).unwrap();
+    convert(&cfg, json!({"path": src.to_str().unwrap(), "to": "pdf"})).unwrap();
+    let made = fs::read_to_string(work.path().join("a.pdf")).unwrap();
+    assert_eq!(made.trim(), "ISOLATED", "the converter reached the network");
+    assert!(listener.accept().is_err(), "the listener saw a connection");
 }

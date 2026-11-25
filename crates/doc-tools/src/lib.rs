@@ -37,6 +37,13 @@
 //! with such a configuration yet; `DocToolsConfig::default()` leaves both unset, so the
 //! tools exist in the registry but refuse every call until the wiring sets them.
 //!
+//! Network isolation is mandatory too: on Linux the converters run in a network-less
+//! sandbox (bubblewrap or `unshare`) and the tools fail closed when none works, unless the
+//! owner sets [`ConvertConfig::allow_unsandboxed_convert`] (UNSAFE for untrusted
+//! documents). On Windows conversion is off unless
+//! [`ConvertConfig::convert_enabled_on_windows`] is set (NTLM / SMB leak risk). Before
+//! wiring, run `scripts/check_soffice_no_network.py` against a real LibreOffice.
+//!
 //! # Wiring
 //!
 //! ```ignore
@@ -52,6 +59,7 @@
 
 mod common;
 mod convert;
+mod convert_sandbox;
 #[cfg(test)]
 mod convert_tests;
 mod convert_vet;

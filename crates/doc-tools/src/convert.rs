@@ -24,6 +24,11 @@
 //! - `output_root` and `read_guard` are mandatory: without them both tools fail closed.
 //!   The input must not be a symlink / junction, and a link anywhere above it may not lead
 //!   out of `output_root`;
+//! - NETWORK ISOLATION is the real control (see `convert_sandbox`): on Linux the converters
+//!   run in a network-less namespace (bubblewrap, `unshare -rn` / `-n`), and without one
+//!   the tools fail closed unless the owner sets `allow_unsandboxed_convert`. On Windows
+//!   conversion is off unless `convert_enabled_on_windows` is set. Vetting (`convert_vet`)
+//!   is a small deny-by-default list on top of that, not a substitute for it;
 //! - one conversion runs at a time (a global slot), previews are pixel-, page- and
 //!   byte-bounded, and the converter is killed when it floods its output folder.
 //!
@@ -48,6 +53,7 @@ use serde_json::{Value, json};
 use tool_registry::{Effect, ToolError, ToolSpec};
 
 use crate::common::{Reply, exec, invalid, parse, parse_ranges, read_limited, write_file};
+use crate::convert_sandbox;
 use crate::convert_vet::vet_source;
 use crate::{DocToolsConfig, WriteGuard};
 
@@ -74,6 +80,14 @@ pub struct ConvertConfig {
     pub preview_dpi: u32,
     /// Most preview bytes returned inline to the model (default 1.5 MiB).
     pub preview_inline_bytes: usize,
+    /// Run the converters even when no network sandbox is available (Linux without
+    /// bubblewrap / user namespaces, macOS). UNSAFE for untrusted documents: a crafted
+    /// file may make the converter contact a server. Default `false`: fail closed.
+    pub allow_unsandboxed_convert: bool,
+    /// Windows has no network sandbox, so conversion is off there unless this is set.
+    /// Enabling it exposes the daemon to NTLM / SMB leaks from crafted documents that
+    /// the vetting misses; use it only for documents you trust. Default `false`.
+    pub convert_enabled_on_windows: bool,
 }
 
 impl Default for ConvertConfig {
@@ -87,6 +101,8 @@ impl Default for ConvertConfig {
             preview_max_pages: 5,
             preview_dpi: 110,
             preview_inline_bytes: 1536 * 1024,
+            allow_unsandboxed_convert: false,
+            convert_enabled_on_windows: false,
         }
     }
 }
@@ -104,6 +120,7 @@ enum Family {
 
 fn family(ext: &str) -> Option<Family> {
     Some(match ext {
+        // `rtf` is an output format only; RTF input is refused (see `convert_vet`).
         "docx" | "odt" | "rtf" => Family::Writer,
         "xlsx" | "ods" => Family::Calc,
         "pptx" | "odp" => Family::Impress,
@@ -138,7 +155,7 @@ fn pair_supported(from: &str, to: &str) -> bool {
     let (Some(f), Some(t)) = (family(from), family(to)) else {
         return false;
     };
-    if from == to {
+    if from == to || from == "rtf" {
         return false;
     }
     match (f, t) {
@@ -328,7 +345,12 @@ fn kill_tree(id: u32) {
 
 #[cfg(windows)]
 fn kill_tree(id: u32) {
-    let _ = Command::new("taskkill")
+    // Absolute path: a bare name would be looked up in the current folder / `PATH`.
+    // `/T` walks the live parent's children, so it only works while the parent exists;
+    // the converter is the parent here and is killed first on every path that matters.
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    let exe = Path::new(&root).join("System32").join("taskkill.exe");
+    let _ = Command::new(exe)
         .args(["/PID", &id.to_string(), "/T", "/F"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -364,14 +386,14 @@ fn dir_bytes(dir: &Path) -> u64 {
 const STDERR_CAP: u64 = 4 * 1024 * 1024;
 
 /// Run `cmd` with no stdin and a deadline. On a timeout, or when it writes more than
-/// `out_cap` bytes into `out_dir`, the whole process tree is killed. On Unix the tree is
+/// the byte limit of any `limits` folder, the whole process tree is killed. On Unix the tree is
 /// killed after a normal exit as well, so a lingering helper (`soffice.bin`) cannot
 /// outlive the call. Returns the tail of stderr when the command fails.
 fn run_limited(
     mut cmd: Command,
     work: &Path,
     timeout: Duration,
-    out: Option<(&Path, u64)>,
+    limits: &[(&Path, u64)],
 ) -> Result<(), String> {
     let err_path = work.join("stderr.txt");
     let err_file = fs::File::create(&err_path).map_err(|e| format!("temp file: {e}"))?;
@@ -420,13 +442,13 @@ fn run_limited(
             Ok(None) => {
                 tick = tick.wrapping_add(1);
                 if tick.is_multiple_of(8) {
-                    if let Some((dir, cap)) = out
-                        && dir_bytes(dir) > cap
-                    {
-                        stop(&mut child);
-                        return Err(format!(
-                            "the converter wrote more than the {cap} byte limit and was stopped"
-                        ));
+                    for (dir, cap) in limits {
+                        if dir_bytes(dir) > *cap {
+                            stop(&mut child);
+                            return Err(format!(
+                                "the converter wrote more than the {cap} byte limit and was stopped"
+                            ));
+                        }
                     }
                     if fs::metadata(&err_path).is_ok_and(|m| m.len() > STDERR_CAP) {
                         stop(&mut child);
@@ -457,6 +479,7 @@ fn workspace(cfg: &DocToolsConfig) -> Result<PathBuf, ToolError> {
 
 /// Both mandatory settings, before anything else happens.
 fn require_setup(cfg: &DocToolsConfig) -> Result<PathBuf, ToolError> {
+    convert_sandbox::platform_gate(cfg)?;
     let root = workspace(cfg)?;
     if cfg.convert.read_guard.is_none() {
         return Err(exec(
@@ -478,6 +501,8 @@ fn plain(p: &Path) -> String {
 /// Refuse an input that is a link, that leads out of the workspace through a linked
 /// folder, or that the read guard (same rule as `fs_read`) protects.
 fn check_input(cfg: &DocToolsConfig, root: &Path, path: &str) -> Result<(), ToolError> {
+    // First, by text alone: any filesystem call on a UNC / device path is a network call.
+    convert_sandbox::guard_path(path)?;
     let p = Path::new(path);
     let meta = fs::symlink_metadata(p).map_err(|e| exec(format!("cannot stat {path}: {e}")))?;
     if meta.file_type().is_symlink() {
@@ -507,6 +532,7 @@ fn check_input(cfg: &DocToolsConfig, root: &Path, path: &str) -> Result<(), Tool
 
 /// Refuse `path` unless it is inside the bot workspace.
 fn confine(cfg: &DocToolsConfig, path: &str) -> Result<(), ToolError> {
+    convert_sandbox::guard_path(path)?;
     let root = workspace(cfg)?;
     let p = Path::new(path);
     if p.components().any(|c| matches!(c, Component::ParentDir)) {
@@ -595,6 +621,23 @@ impl Sandbox {
     }
 }
 
+/// Room for a converter's own profile and caches beyond the input and the output cap.
+const WORK_SLACK: u64 = if cfg!(test) {
+    64 * 1024
+} else {
+    256 * 1024 * 1024
+};
+
+/// Size limits of one run: the output folder, and the whole temp folder (profile, caches
+/// and scratch files included) so a converter cannot fill the disk through them.
+fn limits(cfg: &DocToolsConfig, sb: &Sandbox) -> [(PathBuf, u64); 2] {
+    let cap = cfg.max_output_bytes as u64;
+    let whole = cap
+        .saturating_add(cfg.max_input_bytes)
+        .saturating_add(WORK_SLACK);
+    [(sb.out(), cap), (sb.work().to_path_buf(), whole)]
+}
+
 /// Run LibreOffice on `input`, producing `input.<out_ext>` in the sandbox `out` folder.
 fn run_soffice(
     cfg: &DocToolsConfig,
@@ -605,7 +648,7 @@ fn run_soffice(
     out_ext: &str,
     pdf_source: bool,
 ) -> Result<PathBuf, ToolError> {
-    let mut cmd = Command::new(exe);
+    let mut cmd = convert_sandbox::command(cfg, exe, sb.work())?;
     cmd.arg(format!(
         "-env:UserInstallation={}",
         percent_path_url(&sb.work().join("profile"))
@@ -629,7 +672,13 @@ fn run_soffice(
         .current_dir(sb.work());
     clean_env(&mut cmd, &sb.work().join("profile"));
     let cap = cfg.max_output_bytes as u64;
-    run_limited(cmd, sb.work(), cfg.convert.timeout, Some((&sb.out(), cap))).map_err(exec)?;
+    run_limited(
+        cmd,
+        sb.work(),
+        cfg.convert.timeout,
+        &limits(cfg, sb).each_ref().map(|(p, c)| (p.as_path(), *c)),
+    )
+    .map_err(exec)?;
     let produced = sb.out().join(format!("input.{out_ext}"));
     let meta = fs::symlink_metadata(&produced).map_err(|_| {
         exec("the converter finished but produced no file (is the document damaged?)")
@@ -664,7 +713,7 @@ struct ConvertIn {
 pub fn convert_spec() -> ToolSpec {
     crate::mk_spec(
         "doc_convert",
-        "Convert a document between Office formats and PDF with LibreOffice: docx/odt/rtf, xlsx/ods and pptx/odp to pdf or to their sibling formats, and pdf to docx/odt. Needs the office pack; PDF to DOCX also works without it (plain text only). Macro files and old .doc/.xls/.ppt are refused. Never overwrites unless overwrite:true; the result must stay in the bot workspace. Example: {\"path\":\"offer.docx\",\"to\":\"pdf\"}",
+        "Convert a document between Office formats and PDF with LibreOffice: docx/odt, xlsx/ods and pptx/odp to pdf or to their sibling formats (rtf only as an output), and pdf to docx/odt. Needs the office pack; PDF to DOCX also works without it (plain text only). Macro files and old .doc/.xls/.ppt are refused. Never overwrites unless overwrite:true; the result must stay in the bot workspace. Example: {\"path\":\"offer.docx\",\"to\":\"pdf\"}",
         json!({"type":"object","properties":{
             "path":{"type":"string","description":"Source document."},
             "to":{"type":"string","enum":["pdf","docx","xlsx","pptx","odt","ods","odp","rtf"],"description":"Target format."},
@@ -677,6 +726,11 @@ pub fn convert_spec() -> ToolSpec {
 
 pub fn run_convert(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolError> {
     let i: ConvertIn = parse(input)?;
+    // Textual path guard before ANY filesystem call (UNC / device paths hit the network).
+    convert_sandbox::guard_path(&i.path)?;
+    if let Some(o) = &i.output_path {
+        convert_sandbox::guard_path(o)?;
+    }
     let root = require_setup(cfg)?;
     let from = ext_of(&i.path);
     let to = i.to.trim().trim_start_matches('.').to_ascii_lowercase();
@@ -685,7 +739,7 @@ pub fn run_convert(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolErro
     }
     if !pair_supported(&from, &to) {
         return Err(invalid(format!(
-            "cannot convert .{from} to .{to}; supported: docx/odt/rtf, xlsx/ods and pptx/odp to pdf or a sibling format, and pdf to docx/odt"
+            "cannot convert .{from} to .{to}; supported: docx/odt, xlsx/ods and pptx/odp to pdf or a sibling format, and pdf to docx/odt"
         )));
     }
     let out_path = i
@@ -782,7 +836,7 @@ pub fn preview_spec() -> ToolSpec {
         "doc_preview",
         "Render the first pages of a PDF or Office document as PNG images so you can look at the real layout. Saves <name>-p<N>.png files (default: next to the document) and returns the images. Needs pdftoppm (docs pack) and/or LibreOffice (office pack). Example: {\"path\":\"offer.docx\",\"pages\":\"1-2\"}",
         json!({"type":"object","properties":{
-            "path":{"type":"string","description":"PDF, docx/odt/rtf, xlsx/ods or pptx/odp file."},
+            "path":{"type":"string","description":"PDF, docx/odt, xlsx/ods or pptx/odp file."},
             "pages":{"type":"string","description":"1-based pages, e.g. \"1-3\". Default: the first pages."},
             "dpi":{"type":"integer","minimum":50,"maximum":200,"description":"Resolution (default 110)."},
             "output_dir":{"type":"string","description":"Folder for the PNG files (default: the document's folder)."},
@@ -871,12 +925,16 @@ fn runs(pages: &[u32]) -> Vec<(u32, u32)> {
 
 pub fn run_preview(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolError> {
     let i: PreviewIn = parse(input)?;
+    convert_sandbox::guard_path(&i.path)?;
+    if let Some(o) = &i.output_dir {
+        convert_sandbox::guard_path(o)?;
+    }
     let root = require_setup(cfg)?;
     let from = ext_of(&i.path);
     if let Some(why) = is_macro_or_legacy(&from) {
         return Err(invalid(why));
     }
-    if family(&from).is_none() {
+    if family(&from).is_none() || from == "rtf" {
         return Err(invalid(format!("cannot preview .{from} files")));
     }
     let max_pages = cfg.convert.preview_max_pages.clamp(1, HARD_MAX_PAGES);
@@ -942,7 +1000,7 @@ pub fn run_preview(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolErro
                     cfg.convert.timeout.as_secs()
                 )));
             }
-            let mut cmd = Command::new(&ppm);
+            let mut cmd = convert_sandbox::command(cfg, &ppm, sb.work())?;
             cmd.args([
                 "-png",
                 "-scale-to",
@@ -956,7 +1014,13 @@ pub fn run_preview(cfg: &DocToolsConfig, input: Value) -> Result<Reply, ToolErro
             .arg(sb.out().join(format!("r{run_no}")))
             .current_dir(sb.work());
             clean_env(&mut cmd, sb.work());
-            run_limited(cmd, sb.work(), left, Some((&sb.out(), cap))).map_err(exec)?;
+            run_limited(
+                cmd,
+                sb.work(),
+                left,
+                &limits(cfg, &sb).each_ref().map(|(p, c)| (p.as_path(), *c)),
+            )
+            .map_err(exec)?;
         }
         for entry in fs::read_dir(sb.out()).map_err(|e| exec(format!("preview folder: {e}")))? {
             let entry = entry.map_err(|e| exec(format!("preview folder: {e}")))?;
