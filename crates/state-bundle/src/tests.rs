@@ -1230,6 +1230,53 @@ async fn all_does_not_carry_mailbox_passwords_unless_named() {
     assert_eq!(manifest.secret_names, ["email/work/password"]);
 }
 
+/// A Vault fill secret (a bot-generated account password included) is in no
+/// bundle exported with `None` or `All`, and its metadata file is not bundled.
+#[tokio::test]
+async fn a_vault_fill_secret_never_travels_in_a_none_or_all_bundle() {
+    let dir = tempfile::tempdir().unwrap();
+    database(dir.path(), false);
+    let store = MemoryStore::new();
+    store.set("provider/key", "k").unwrap();
+    store
+        .set("fill/login/example.com-aaaa1111", "VAULT-SENTINEL-pw-0123")
+        .unwrap();
+    std::fs::write(
+        dir.path().join("fill-secrets.json"),
+        br#"{"secrets":{"login/example.com-aaaa1111":{}}}"#,
+    )
+    .unwrap();
+    for secrets in [SecretSelection::None, SecretSelection::All] {
+        let mut bytes = Vec::new();
+        let manifest = export(
+            dir.path(),
+            &store,
+            ExportOptions {
+                secrets,
+                ..Default::default()
+            },
+            &mut bytes,
+        )
+        .await
+        .unwrap();
+        assert!(
+            !manifest.secret_names.iter().any(|n| n.starts_with("fill/")),
+            "{:?}",
+            manifest.secret_names
+        );
+        assert!(
+            !bytes.windows(12).any(|w| w == b"VAULT-SENTIN"),
+            "a vault password is in the bundle"
+        );
+        assert!(
+            !manifest
+                .files
+                .iter()
+                .any(|f| f.path.contains("fill-secrets"))
+        );
+    }
+}
+
 async fn rejected_host_alias_import(bytes: &[u8], name: &str) {
     let forged = replace_payload(
         bytes,

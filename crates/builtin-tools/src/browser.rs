@@ -1882,6 +1882,7 @@ pub async fn fill_with_secret(
     secrets: &FillSecrets,
     r: &str,
     name: &str,
+    bot: Option<&str>,
 ) -> Result<String, String> {
     let target = driver.field_target(r).await?;
     secrets
@@ -1889,18 +1890,26 @@ pub async fn fill_with_secret(
             name,
             target.frame_origin.as_deref(),
             target.top_origin.as_deref(),
+            bot,
         )
         .map_err(|e| e.to_string())?;
-    let value = secrets.resolve_value(name).map_err(|e| e.to_string())?;
+    let value = secrets
+        .resolve_value_for(name, bot)
+        .map_err(|e| e.to_string())?;
     let top = target.top_origin.clone();
     let accept = |origin: Option<String>| {
         secrets
-            .check_browser_in(name, origin.as_deref(), top.as_deref())
+            .check_browser_in(name, origin.as_deref(), top.as_deref(), bot)
             .is_ok()
     };
     let result = driver.fill_secret(r, value.expose(), &accept).await;
     let shown = match result {
-        Ok(text) => Ok(scrub(&text, &value)),
+        Ok(text) => {
+            // An account's password is now on a page: it is no longer "unused".
+            // A failed bookkeeping write never fails the fill that already ran.
+            let _ = secrets.mark_used(name);
+            Ok(scrub(&text, &value))
+        }
         Err(e) => Err(scrub(&e, &value)),
     };
     drop(value);
@@ -2000,6 +2009,7 @@ impl BrowserTool {
                 &name,
                 target.frame_origin.as_deref(),
                 target.top_origin.as_deref(),
+                ctx.bot_id.as_deref(),
             )
             .map_err(|e| refused(&e))?;
         Ok(Some((name, target, grant)))
@@ -2080,7 +2090,12 @@ impl BrowserTool {
 
     /// Observation tools discard their result if control changed while they
     /// ran (a screenshot, a wait or a tab list that straddles a takeover).
-    async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
+    async fn run(
+        &self,
+        run_id: &str,
+        input: Value,
+        bot: Option<&str>,
+    ) -> Result<String, ToolError> {
         let observing = match self.op {
             Op::Snapshot | Op::Wait | Op::Screenshot => true,
             Op::Tabs => input.get("switch_to").is_none_or(Value::is_null),
@@ -2088,7 +2103,7 @@ impl BrowserTool {
         };
         let gate = self.shared.control.clone();
         let epoch = gate.as_ref().map(|g| g.observation_epoch());
-        let text = self.run_inner(run_id, input).await?;
+        let text = self.run_inner(run_id, input, bot).await?;
         if let (Some(gate), Some(epoch)) = (gate, epoch) {
             if observing
                 && (gate.observation_epoch() != epoch || gate.observation_refused().is_some())
@@ -2106,7 +2121,12 @@ impl BrowserTool {
         Ok(text)
     }
 
-    async fn run_inner(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
+    async fn run_inner(
+        &self,
+        run_id: &str,
+        input: Value,
+        bot: Option<&str>,
+    ) -> Result<String, ToolError> {
         let observing = match self.op {
             Op::Snapshot | Op::Wait | Op::Screenshot => true,
             Op::Tabs => input.get("switch_to").is_none_or(Value::is_null),
@@ -2270,9 +2290,17 @@ impl BrowserTool {
                         .map_err(exec_err)?,
                     Source::Secret(name) => {
                         let secrets = self.fill_secrets()?;
+                        let bot = bot.map(str::to_owned);
                         permit
                             .protect(async move {
-                                fill_with_secret(d.as_ref(), &secrets, &i.r#ref, &name).await
+                                fill_with_secret(
+                                    d.as_ref(),
+                                    &secrets,
+                                    &i.r#ref,
+                                    &name,
+                                    bot.as_deref(),
+                                )
+                                .await
                             })
                             .await
                             .map_err(exec_err)?
@@ -2508,7 +2536,7 @@ impl BrowserTool {
                 let path = save_file(&self.shared.data_dir.join("screenshots"), ext, &bytes)?;
                 Ok(format!("screenshot: {path}"))
             }
-            Op::Act => return self.run_act(run_id, input).await,
+            Op::Act => return self.run_act(run_id, input, bot).await,
             Op::Eval => {
                 let i: EvalIn = parse(input)?;
                 let label: String = i.js.trim().chars().take(80).collect();
@@ -2677,7 +2705,7 @@ impl BrowserTool {
         let text = EXPECTED_PAGE_ORIGIN
             .scope(
                 ctx.expected_origin.clone(),
-                selected.run(&ctx.run_id, input),
+                selected.run(&ctx.run_id, input, ctx.bot_id.as_deref()),
             )
             .await?;
         let view = selected.shared.driver.live_view_attached();

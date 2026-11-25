@@ -58,7 +58,8 @@ use desktop_api::DesktopBackend;
 use tool_registry::{Tool, ToolRegistry};
 
 pub use account_register::{
-    ACCOUNT_LIST, ACCOUNT_REGISTER, AccountRegisterConfig, account_list_tool, account_register_tool,
+    ACCOUNT_DISCARD, ACCOUNT_LIST, ACCOUNT_REGISTER, AccountRegisterConfig, account_discard_tool,
+    account_list_tool, account_register_tool,
 };
 pub use bots::{
     BOT_PRESETS, BOT_TOOL_NAMES, BotCaller, BotChange, BotHost, BotPreview, BotRequest, BotView,
@@ -266,6 +267,7 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
             cfg.account_register,
         ));
         all.push(account_register::account_list_tool(Arc::clone(secrets)));
+        all.push(account_register::account_discard_tool(Arc::clone(secrets)));
         if cfg.secret_requests {
             all.push(secret_request::secret_request_tool(Arc::clone(secrets)));
         }

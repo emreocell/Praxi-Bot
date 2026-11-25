@@ -101,7 +101,8 @@ fn is_mailbox_password(name: &str) -> bool {
 
 /// Select secrets explicitly; the safe default is none.
 /// `All` leaves out mailbox secrets (`email/<account>/password`, `email/<account>/api_key`); they are
-/// exported only when named in `Names`.  MCP OAuth records (`mcp/<server>/oauth`,
+/// exported only when named in `Names`.  Vault fill secrets (`fill/...`, including
+/// passwords a bot's `account_register` generated) are skipped by `All` too.  MCP OAuth records (`mcp/<server>/oauth`,
 /// access and refresh tokens) never leave the secret store: `All` skips them
 /// and naming one is an error (there is no opt-in; sign in again on the
 /// other machine).
@@ -255,6 +256,10 @@ pub async fn export(
                     && !secret_store::is_reserved_name(n)
                     && !secret_store::is_managed_oauth_name(n)
                     && !secret_store::is_host_credential(n)
+                    // Vault fill secrets (owner-made and bot-generated site
+                    // passwords): their metadata file is not part of a bundle, so
+                    // the values would arrive as unusable orphans.
+                    && !secret_store::is_fill_name(n)
             })
             .collect(),
         SecretSelection::Names(names) => names,

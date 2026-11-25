@@ -30,6 +30,8 @@ use crate::util::{parse, spec};
 pub const ACCOUNT_REGISTER: &str = "account_register";
 /// Name of the listing tool.
 pub const ACCOUNT_LIST: &str = "account_list";
+/// Name of the tool that drops a bot-made account.
+pub const ACCOUNT_DISCARD: &str = "account_discard";
 
 const SHOWN_CAP: usize = 80;
 const LIST_CAP: usize = 50;
@@ -284,10 +286,12 @@ impl Tool for AccountList {
                     .as_deref()
                     .map(|m| format!(", mailbox {}", plain(m, SHOWN_CAP)))
                     .unwrap_or_default(),
-                if a.has_value {
-                    ""
-                } else {
+                if !a.has_value {
                     " (no password stored)"
+                } else if a.unused {
+                    " (password never typed yet: account_discard removes it if the sign-up failed)"
+                } else {
+                    ""
                 },
             );
         }
@@ -295,6 +299,94 @@ impl Tool for AccountList {
             let _ = writeln!(out, "... and {} more", list.len() - LIST_CAP);
         }
         Ok(ToolOutput::text(out))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiscardIn {
+    name: String,
+}
+
+struct AccountDiscard {
+    spec: ToolSpec,
+    secrets: Arc<FillSecrets>,
+}
+
+/// The `account_discard` tool: remove an account this bot made (for example
+/// after a failed sign-up), so `account_register` can be tried again. Asks the
+/// owner every time. The password is never shown.
+#[must_use]
+pub fn account_discard_tool(secrets: Arc<FillSecrets>) -> Arc<dyn Tool> {
+    Arc::new(AccountDiscard {
+        spec: spec(
+            ACCOUNT_DISCARD,
+            "Remove a website account entry YOU created with account_register, together with its stored password, for example because the sign-up failed and you want to try again. The owner is asked first. Only for entries from `account_list`; never for an account that already works. Example: {\"name\":\"login/example.com-1a2b3c4d\"}",
+            json!({"type":"object","properties":{
+                "name":{"type":"string","description":"Secret name from account_list."}
+            },"required":["name"]}),
+            Effect::Write,
+            PermissionCategory::Meta,
+        ),
+        secrets,
+    })
+}
+
+#[async_trait]
+impl Tool for AccountDiscard {
+    fn spec(&self) -> &ToolSpec {
+        &self.spec
+    }
+
+    fn always_ask(&self) -> bool {
+        true
+    }
+
+    async fn approval_details(
+        &self,
+        ctx: &ToolContext,
+        input: &Value,
+    ) -> Result<Option<Value>, ToolError> {
+        let i: DiscardIn = parse(input.clone())?;
+        let bot = ctx.bot_id.as_deref();
+        // Refused before any card for another bot's or an owner-made secret.
+        self.secrets
+            .check_bot(&i.name, bot)
+            .map_err(|e| refused(&e))?;
+        let info = self
+            .secrets
+            .accounts(bot)
+            .map_err(|e| ToolError::Execution(e.to_string()))?
+            .into_iter()
+            .find(|a| a.name == i.name && a.created_by == "bot")
+            .ok_or_else(|| {
+                ToolError::InvalidInput("there is no account of yours with that name".into())
+            })?;
+        let warn = if info.unused {
+            "Its password was never typed anywhere."
+        } else {
+            "Its password WAS typed on the site; if the account exists there, removing it loses the password."
+        };
+        Ok(Some(json!({
+            "kind": "account_discard",
+            "tool": ACCOUNT_DISCARD,
+            "secret": plain(&info.name, SHOWN_CAP),
+            "site": plain(&info.site, SHOWN_CAP),
+            "login_id": plain(&info.login_id, SHOWN_CAP),
+            "unused": info.unused,
+            "note": format!("The account entry for {} (login {}) and its stored password will be deleted. {warn}", plain(&info.site, SHOWN_CAP), plain(&info.login_id, SHOWN_CAP)),
+        })))
+    }
+
+    async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        let i: DiscardIn = parse(input)?;
+        self.secrets
+            .discard_account(&i.name, ctx.bot_id.as_deref())
+            .map_err(|e| refused(&e))?;
+        Ok(ToolOutput::text(format!(
+            "Account entry {} removed. account_register can create a new one.",
+            plain(&i.name, SHOWN_CAP)
+        )))
     }
 }
 
@@ -336,7 +428,9 @@ mod tests {
         let out = tool.call(&c, input).await.unwrap();
         let text = format!("{out:?}");
         let name = "login/example.com-botaaaa1";
-        let pw = secrets.resolve_value(name).unwrap();
+        let pw = secrets
+            .resolve_value_for(name, Some("bot-aaaa-1111"))
+            .unwrap();
         let pw = pw.expose().to_owned();
         assert!(pw.len() >= 20);
         // The model-facing result and the approval card hold the name, not the password.
@@ -411,6 +505,65 @@ mod tests {
             tool.call(&c, input).await,
             Err(ToolError::InvalidInput(_))
         ));
+    }
+
+    /// A sign-up whose typing fails leaves the account stored (password written
+    /// BEFORE any typing) and clearly "unused"; the retry is refused with
+    /// `Exists` until the bot discards it, and the discard frees the name.
+    #[tokio::test]
+    async fn a_failed_sign_up_leaves_an_unused_account_the_bot_can_discard() {
+        let (secrets, _) = rig();
+        let reg = account_register_tool(Arc::clone(&secrets), AccountRegisterConfig::default());
+        let discard = account_discard_tool(Arc::clone(&secrets));
+        let c = ctx(Some("bot-aaaa-1111"));
+        let input: Value = serde_json::from_str(IN).unwrap();
+        reg.call(&c, input.clone()).await.unwrap();
+        let name = "login/example.com-botaaaa1";
+        // Stored before anything was typed, and flagged unused.
+        let acct = secrets.accounts(Some("bot-aaaa-1111")).unwrap().remove(0);
+        assert!(acct.has_value && acct.unused);
+        let listed = account_list_tool(Arc::clone(&secrets))
+            .call(&c, json!({}))
+            .await
+            .unwrap();
+        assert!(format!("{listed:?}").contains("never typed"), "{listed:?}");
+        // The retry is blocked...
+        assert!(matches!(
+            reg.call(&c, input.clone()).await,
+            Err(ToolError::InvalidInput(_))
+        ));
+        // ...another bot cannot discard it, and no owner-made secret can be discarded.
+        let din = json!({"name": name});
+        let other = ctx(Some("bot-bbbb-2222"));
+        assert!(discard.always_ask());
+        assert!(discard.approval_details(&other, &din).await.is_err());
+        assert!(discard.call(&other, din.clone()).await.is_err());
+        secrets
+            .upsert("login/owner-made", Some("x"), None, None)
+            .unwrap();
+        assert!(
+            discard
+                .call(&c, json!({"name": "login/owner-made"}))
+                .await
+                .is_err()
+        );
+        assert!(secrets.exists("login/owner-made"));
+        // The owning bot discards it after a card, then registers again.
+        let card = discard.approval_details(&c, &din).await.unwrap().unwrap();
+        assert_eq!(card["unused"], true);
+        let pw = secrets
+            .resolve_value_for(name, Some("bot-aaaa-1111"))
+            .unwrap()
+            .expose()
+            .to_owned();
+        assert!(!card.to_string().contains(&pw));
+        let out = discard.call(&c, din).await.unwrap();
+        assert!(!format!("{out:?}").contains(&pw));
+        assert!(!secrets.exists(name));
+        reg.call(&c, input).await.unwrap();
+        // Typing it once marks it used (the discard card then warns).
+        secrets.mark_used(name).unwrap();
+        assert!(!secrets.accounts(None).unwrap()[0].unused);
     }
 
     #[test]
