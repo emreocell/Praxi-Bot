@@ -3962,7 +3962,8 @@
       "view_quota": "Auf dem Server sind zu viele Bildschirmsitzungen offen. Schließe eine unbenutzte Ansicht oder versuche es gleich erneut."
     },
     "expand": "Große Ansicht öffnen",
-    "focusTrapHint": "Umschalt+Esc verlässt den Bildschirm-Tastaturfokus zur Schaltfläche „Ich bin fertig“.",
+    "expandScreen": "Vergrößern",
+    "focusTrapHint": "Eingabe geht an den Bildschirm. Umschalt+Esc zum Verlassen.",
     "globalPauseNotice": "Das Übernehmen der Kontrolle oder das Pausieren gilt global für alle Bots.",
     "handBackAction": "Zurückgeben",
     "hostLabel": "Server: {{host}}",
@@ -4060,6 +4061,7 @@
     "retryingDone": "Wird zurückgegeben …",
     "reviewApprovals": "Zurück zum Chat",
     "stageAlt": "Live-Bildschirmvorschau für {{target}}",
+    "stageFocusPrompt": "Zum Tippen in den Bildschirm klicken.",
     "stageHint": "Interaktive Bildschirmfläche. Klicke hinein, um zu fokussieren; Umschalt+Esc kehrt zu den Symbolleisten-Steuerelementen zurück.",
     "states": {
       "acquiring": "Kontrolle wird übernommen …",

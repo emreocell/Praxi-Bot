@@ -55,6 +55,7 @@ function measure() {
     main: box(part("main")),
     panel: panelBox,
     panelOpenAttr: panel?.getAttribute("data-open") ?? null,
+    panelMode: panel?.getAttribute("data-mode") ?? null,
     panelDescendants: inner
       ? Array.from(inner.querySelectorAll("*")).filter((e) => e.getBoundingClientRect().width > 0).length
       : 0,

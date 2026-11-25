@@ -146,16 +146,27 @@ export interface SidePanelProps extends Omit<HTMLAttributes<HTMLElement>, "child
   open: boolean;
   /** Width in px while open. */
   width: number;
+  /** Docked takes flow width next to mainPane; overlay slides over mainPane from the right. */
+  mode?: "docked" | "overlay";
   children: ReactNode;
 }
 
 /** Right-hand panel: slides open to `width`, inert and out of the tab order while closed. */
-export function SidePanel({ open, width, className, style, children, ...props }: SidePanelProps) {
+export function SidePanel({
+  open,
+  width,
+  mode = "docked",
+  className,
+  style,
+  children,
+  ...props
+}: SidePanelProps) {
   const classes = [styles.panel, className ?? ""].filter(Boolean).join(" ");
   return (
     <aside
       className={classes}
       data-open={open}
+      data-mode={mode}
       aria-hidden={!open}
       inert={!open}
       data-shell-part="panel"

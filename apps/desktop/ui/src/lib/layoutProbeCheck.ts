@@ -25,6 +25,7 @@ export interface ProbeData {
   main: ProbeBox | null;
   panel: ProbeBox | null;
   panelOpenAttr: string | null;
+  panelMode?: string | null;
   panelBorders: { left: number; right: number; top: number; bottom: number } | null;
   panelContentRight: number | null;
   panelInner: ProbeBox | null;
@@ -88,7 +89,9 @@ export function validateProbe(p: ProbeData | null | undefined, expect: ProbeExpe
   }
   if (doc.scrollWidth > doc.clientWidth + EPS) out.push(`document scrolls horizontally (${doc.scrollWidth} > ${doc.clientWidth})`);
   if (rail.right > main.left + EPS) out.push("rail overlaps main");
-  if (open && panel && main.right > panel.left + EPS) out.push("main overlaps panel");
+  const isOverlay = p.panelMode === "overlay";
+  if (open && panel && !isOverlay && main.right > panel.left + EPS) out.push("main overlaps panel");
+  if (open && panel && isOverlay && panel.left < rail.right - EPS) out.push("overlay panel overlaps rail");
   if (vw >= 900 && main.width < 320 - EPS) out.push(`main ${main.width.toFixed(1)} < 320`);
   if (main.width < 280 - EPS) out.push(`main ${main.width.toFixed(1)} < 280`);
   if (open && panel && inner) {

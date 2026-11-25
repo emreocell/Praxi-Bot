@@ -3928,7 +3928,7 @@
     },
     "approvalsWaiting": "{{count}} item(s) are waiting for your decision. Decide below or in the chat.",
     "backToChat": "Back",
-    "captureTab": "Capture Tab",
+    "captureTab": "Tab key capture",
     "chat": {
       "approve": "Approve",
       "collapse": "Collapse chat",
@@ -3962,7 +3962,8 @@
       "view_quota": "The server has too many screen sessions. Close an unused viewer or try again in a moment."
     },
     "expand": "Open large viewer",
-    "focusTrapHint": "Shift+Esc exits screen keyboard focus to the “I'm done” button.",
+    "expandScreen": "Expand",
+    "focusTrapHint": "Keyboard goes to the screen. Shift+Esc to leave.",
     "globalPauseNotice": "Taking control or pausing applies globally across all bots.",
     "handBackAction": "Hand back",
     "hostLabel": "Host: {{host}}",
@@ -4054,12 +4055,13 @@
     "reconnecting": "Reconnecting to the screen stream…",
     "recoverAction": "Clear pause (the bot can run again)",
     "refresh": "Refresh targets",
-    "releaseFocus": "Exit keyboard",
+    "releaseFocus": "Leave keyboard",
     "releaseOnClose": "Closing hands control back to the bot first.",
     "retryDone": "Retry hand-back",
     "retryingDone": "Handing back…",
     "reviewApprovals": "Back to the chat",
     "stageAlt": "Live screen preview for {{target}}",
+    "stageFocusPrompt": "Click the screen to type into it.",
     "stageHint": "Interactive screen canvas. Click inside to focus, Shift+Esc to return to toolbar controls.",
     "states": {
       "acquiring": "Acquiring control…",

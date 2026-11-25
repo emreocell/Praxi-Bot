@@ -47,7 +47,7 @@ export function TargetPicker({
         ref={trigger}
         type="button"
         className={styles.trigger}
-        aria-label={label}
+        aria-label={`${label}: ${current?.label ?? placeholder}`}
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={inactive}

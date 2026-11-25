@@ -114,12 +114,16 @@ export interface StageHandlers {
 /** True when focus moved to something outside `container` (or to nothing). */
 export function focusLeftScope(
   related: unknown,
-  container: { contains(node: never): boolean } | null
+  container: { contains(node: never): boolean } | null,
+  ...extraContainers: Array<{ contains(node: never): boolean } | null | undefined>
 ): boolean {
   if (!related || !container) {
     return true;
   }
-  return !container.contains(related as never);
+  if (container.contains(related as never)) {
+    return false;
+  }
+  return !extraContainers.some((extra) => extra?.contains(related as never) ?? false);
 }
 
 export function createStageController(getDeps: () => StageDeps): StageHandlers {

@@ -237,6 +237,53 @@
   backdrop-filter: var(--shell-filter);
 }
 
+/* Adaptive overlay panel: slides in right-to-left over the workspace without reflowing chat or screen. */
+.panel[data-mode="overlay"] {
+  position: absolute;
+  /* Starts below the window controls and the chat title bar (bot chip, computer picker, Settings)
+     so the overlay never hides them. */
+  top: calc(var(--titlebar-h, var(--space-0)) + var(--space-12) + var(--space-1));
+  right: var(--space-0);
+  bottom: var(--space-0);
+  z-index: 25;
+  width: var(--panel-w);
+  margin-left: var(--space-0);
+  border-left: var(--size-border) solid var(--color-border);
+  --panel-edge: var(--size-border);
+  transform: translateX(calc(100% + var(--space-4)));
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform var(--motion-duration-normal) var(--motion-easing-standard),
+    opacity var(--motion-duration-normal) ease-out,
+    visibility var(--motion-duration-normal) step-end;
+}
+
+.panel[data-mode="overlay"][data-open="true"] {
+  transform: translateX(var(--space-0));
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition-timing-function: var(--motion-easing-standard), ease-out, step-start;
+  background-color: var(--color-background);
+  box-shadow: var(--shadow-overlay);
+}
+
+:global(:root[data-float="on"]) .panel[data-mode="overlay"] {
+  top: calc(var(--titlebar-h, var(--space-0)) + var(--space-12) + var(--space-1));
+  right: var(--space-3);
+  bottom: var(--space-3);
+  margin-left: var(--space-0);
+  border: var(--size-border) solid var(--shell-border);
+  --panel-edge: calc(var(--size-border) * 2);
+  border-radius: var(--radius-shell);
+}
+
+:global(:root[data-float="on"]) .panel[data-mode="overlay"][data-open="true"] {
+  box-shadow: var(--shell-highlight), var(--shell-shadow);
+}
+
 /* Integrated window controls (native frame off: Windows / Linux default): the first --titlebar-h of
    the window is a reserved strip (drag area + minimize / maximize / close, WindowControls) and the
    layout's content box starts below it, so the panels never cover the controls at any width or panel

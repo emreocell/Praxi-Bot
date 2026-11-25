@@ -20,7 +20,7 @@ test("App derives float from the settings and passes it to every panel clamp", (
 });
 
 test("App renders the FITTED rail width, reserved while the panel settles", () => {
-  assert.match(app, /const panelReserve = usePanelReserve\(panelVisible\);/);
+  assert.match(app, /const panelReserve = usePanelReserve\(panelDocked\);/);
   assert.match(app, /const railWidth = fitRail\(viewportWidth, layout\.rail, panelWidth, float, panelReserve\);/);
   assert.match(app, /"--size-sidebar-width": `\$\{railWidth\}px`/);
   assert.match(app, /data-rail-tier=\{railTier\(railWidth\)\}/);
