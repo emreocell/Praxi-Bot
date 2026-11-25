@@ -953,6 +953,24 @@ async fn edit_throttling_caps_edits_to_at_most_one_per_second() {
     assert_eq!(edits_after[1]["text"], "ABCD");
 }
 
+/// Drain run events until `count` messages were sent (or 10 s pass), then return
+/// every message sent. Use it instead of assuming one drain pass finishes a run.
+async fn drain_until_sent(
+    channel: &TelegramChannel,
+    server: &MockServer,
+    count: usize,
+) -> Vec<Value> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let sends = sent_messages(&server.received_requests().await.unwrap());
+        if sends.len() >= count || std::time::Instant::now() >= deadline {
+            return sends;
+        }
+        channel.drain_runs_for_test().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 #[tokio::test]
 async fn redacts_stored_secrets_bot_token_and_api_key_shapes_in_all_outputs() {
     let server = MockServer::start().await;
@@ -1009,9 +1027,9 @@ async fn redacts_stored_secrets_bot_token_and_api_key_shapes_in_all_outputs() {
     let u: Update =
         serde_json::from_value(text_update(1, PAIRED_USER_ID, TEST_CHAT_ID, "run check")).unwrap();
     channel.handle_update(u).await.unwrap();
-
-    let reqs = server.received_requests().await.unwrap();
-    let sends = sent_messages(&reqs);
+    // One drain pass stops after `MAX_DRAIN_TIME`; on a busy machine the run's
+    // four events can take more than one pass.
+    let sends = drain_until_sent(&channel, &server, 3).await;
     assert_eq!(sends.len(), 3);
 
     for m in &sends {

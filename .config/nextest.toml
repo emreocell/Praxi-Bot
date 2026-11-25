@@ -6,16 +6,20 @@
 # No retries: a flaky test must turn the pull request check red, as with `cargo test`.
 retries = 0
 fail-fast = false
-# Report tests running longer than 60 s; never kill them (the step has its own limit).
-slow-timeout = { period = "60s" }
+# Report tests running longer than 60 s, and kill one that is still running after
+# 10 minutes (the slowest test takes about 2.5): a hang then fails by name instead
+# of running into the step's time limit.
+slow-timeout = { period = "60s", terminate-after = 10 }
 failure-output = "immediate-final"
 
 [profile.ci-report]
 # A test that fails and then passes on a retry is reported as flaky.
 retries = 2
 fail-fast = false
-# Report tests running longer than 60 s; never kill them (the job has its own limit).
-slow-timeout = { period = "60s" }
+# Report tests running longer than 60 s, and kill one that is still running after
+# 10 minutes (the slowest test takes about 2.5): a hang then fails by name instead
+# of running into the step's time limit.
+slow-timeout = { period = "60s", terminate-after = 10 }
 failure-output = "final"
 success-output = "never"
 status-level = "retry"

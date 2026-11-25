@@ -2077,6 +2077,12 @@ impl TelegramChannel {
 
     /// Drain a bounded pass. No runtime lock is held while awaiting a stream,
     /// Telegram HTTP, retries, final-edit throttles, or daemon subscriptions.
+    /// Drain run events once more, for tests that wait for a run to finish.
+    #[cfg(test)]
+    pub(crate) async fn drain_runs_for_test(&self) -> Result<usize> {
+        self.drain_active_runs().await
+    }
+
     async fn drain_active_runs(&self) -> Result<usize> {
         let _guard = self.inner.drain_gate.lock().await;
         let runs = std::mem::take(&mut self.inner.runtime.lock().active_runs);
