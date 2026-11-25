@@ -33,7 +33,8 @@ const CLI_LABELS: Record<string, string> = {
   qwen: "Qwen Code",
   kiro: "Kiro",
   copilot: "GitHub Copilot",
-  kimi: "Kimi Code"
+  kimi: "Kimi Code",
+  qoder: "Qoder"
 };
 
 function pretty(id: string): string {

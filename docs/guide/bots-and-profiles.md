@@ -110,13 +110,26 @@ wildcards. The built-in tool groups:
 | --- | --- |
 | Files | `fs_read`, `fs_list`, `fs_search`, `fs_write`, `fs_edit`, `fs_move`, `fs_delete`, `checkpoint_list`, `checkpoint_restore` |
 | Shell | `shell_run` |
-| Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_wait`, `browser_back`, `browser_tabs`, `browser_screenshot`, `browser_eval` |
+| Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_wait`, `browser_back`, `browser_tabs`, `browser_screenshot`, `browser_eval` |
 | Web (read-only, no browser) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata` (see [Web tools](web.md)) |
 | Schedules (General preset only) | `schedule_list`, `schedule_create`, `schedule_update`, `schedule_pause`, `schedule_resume`, `schedule_delete` (see [Scheduled tasks](scheduled-tasks.md)) |
 | Desktop (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
 | Scripts | `script_run` |
 | Agent-internal | `ask_user`, `todo_write`, `spawn_subagent` |
 | Skills and workflows | `skill_list`, `skill_read`, `skill_write`, `skill_hint`, `workflow_list`, `workflow_run` |
+
+### How the browser moves
+
+The assistant's own browser can move like a person, so that you can follow it in the
+live view and so that menus that only open while the pointer is over them can open:
+
+- `browser_hover` moves the pointer over an element and rests there; the result shows what appeared (read-like, like `browser_scroll`).
+- `browser_select_text` marks a sentence, a word (double click) or a paragraph (triple click) with the mouse (input-like, asks like `browser_click`, and is only allowed on the page you approved it for).
+- `browser_scroll` can go by screens (`pages`), to the top or bottom (`to`), or bring an element into view (`ref` with `into_view`), and says where on the page you are now. A longer scroll is made of small steps with short pauses.
+- Clicks glide the pointer to the element and pause briefly before and while pressing; typing into a field is still set in one step on the approved field (so a page cannot steal what is typed), after a short pause.
+
+The setting is `human_like` and has three values: `off` (instant, no pauses), `auto` (the default: natural movement only while somebody can watch, that is a visible browser window or an open live view) and `high` (slower and more deliberate, always, for demos and recordings). Set it in `host.toml` (`[browser]` `human_like = "auto"`) or with `BOT_BROWSER_HUMAN_LIKE`; the environment wins.
+This is for a watchable, demo-quality feel. It does not hide that the browser is automated and is not a way around bot detection.
 
 When many tools are registered (more than 40) the model sees a small discovery
 interface (`find_tool`, `get_tool_details`, `use_tool`) instead of the whole list.

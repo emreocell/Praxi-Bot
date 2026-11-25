@@ -1,20 +1,15 @@
 import {
-  AppWindow,
-  Bell,
   BrainCircuit,
   Check,
-  CircleHelp,
-  Database,
+  Globe,
   LoaderCircle,
   Monitor,
-  Mic,
   Palette,
   RotateCcw,
   Search,
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
-  TriangleAlert,
   X
 } from "lucide-react";
 import {
@@ -30,14 +25,19 @@ import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../components/DialogParts";
 import { LearnMore } from "../components/LearnMore";
 import { Modal } from "../components/Modal";
-import { Segmented, SettingGroup } from "../components/SettingsUi";
+import {
+  SettingGroup,
+  SettingsCardFooter,
+  SettingsDisclosure
+} from "../components/SettingsUi";
 import { humanLine } from "../lib/humanError";
 import { matchesQuery } from "../lib/searchText";
+import { peekPendingTarget } from "../lib/settingsLink";
 import {
+  CARD_META,
   canReset,
   type DetailMode,
   highlightParts,
-  isCardShown,
   loadDetailMode,
   metaOfCard,
   parsePage,
@@ -60,19 +60,18 @@ import { POLICY_CHANGED_EVENT } from "./settings/SafetyLevelsCard";
 import type { CardDef, SettingsBridge, SettingsSectionId } from "./settings/types";
 import styles from "./SettingsModal.module.css";
 
-const PAGE_ICONS = {
+const PAGE_ICONS: Record<SettingsPageId, typeof Settings2> = {
   general: Settings2,
   appearance: Palette,
   models: BrainCircuit,
   where: Monitor,
-  apps: AppWindow,
+  apps: Globe,
   safety: ShieldCheck,
-  notifications: Bell,
-  voice: Mic,
-  data: Database,
-  help: CircleHelp,
-  advanced: SlidersHorizontal
-} as const;
+  system: SlidersHorizontal
+};
+
+const CARD_ORDER = new Map(Object.keys(CARD_META).map((id, i) => [id, i]));
+const FLASH_MS = 220;
 
 /** A card with its page, plus the plain-words extras (consequence line, "what is this?"). */
 interface PlacedCard {
@@ -83,7 +82,14 @@ interface PlacedCard {
   learn?: ReturnType<typeof metaOfCard>["learn"];
 }
 
-/** Marks the words of `query` in `text` (used for card titles in search results). */
+export interface SettingsTargetRequest {
+  page: SettingsSectionId | SettingsPageId;
+  card?: string;
+  field?: string;
+  seq?: number;
+}
+
+/** Marks the words of `query` in `text` (used for card titles and page tags in search results). */
 function Marked({ text, query }: { text: string; query: string }) {
   return (
     <>
@@ -97,20 +103,23 @@ function Marked({ text, query }: { text: string; query: string }) {
 /** Consecutive `row` cards share one rounded group; `block` cards stand alone. */
 function renderCards(
   cards: PlacedCard[],
-  groupLabel: (key: string) => string,
-  extras: (p: PlacedCard) => ReactNode
+  extras: (p: PlacedCard) => ReactNode,
+  flashCard: string | null
 ): ReactNode[] {
   const out: ReactNode[] = [];
   let run: PlacedCard[] = [];
   const flush = () => {
     if (run.length > 0) {
       const first = run[0].card.id;
-      const group = first === "account" ? "account" : first === "language" ? "behavior" : null;
-      if (group) out.push(<h3 key={`label-${first}`} className={styles.sectionLabel}>{groupLabel(group)}</h3>);
       out.push(
         <SettingGroup key={`group-${first}`}>
           {run.map((p) => (
-            <div key={p.card.id} className={styles.cardSlot} data-card={p.card.id}>
+            <div
+              key={p.card.id}
+              className={styles.cardSlot}
+              data-card={p.card.id}
+              data-flash={flashCard === p.card.id ? "true" : undefined}
+            >
               {p.card.node}
               {extras(p)}
             </div>
@@ -121,13 +130,17 @@ function renderCards(
     }
   };
   for (const p of cards) {
-    if (p.card.id === "language") flush();
     if (p.card.kind === "row") {
       run.push(p);
     } else {
       flush();
       out.push(
-        <div key={p.card.id} className={styles.blockSlot} data-card={p.card.id}>
+        <div
+          key={p.card.id}
+          className={styles.blockSlot}
+          data-card={p.card.id}
+          data-flash={flashCard === p.card.id ? "true" : undefined}
+        >
           {p.card.node}
           {extras(p)}
         </div>
@@ -138,21 +151,40 @@ function renderCards(
   return out;
 }
 
+function isEditableElement(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    document.documentElement.hasAttribute("data-reduce-motion") ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
 type SaveState = "idle" | "saving" | "saved";
 
 /**
- * Settings as a modal: ten plainly named pages, a search over every setting, Simple / Advanced,
- * a clear saved indicator and a per-page "Reset to recommended".
+ * Settings modal: 7 plainly named grouped pages, fast search across every setting with
+ * keyboard navigation, one consistent per-page "More options" disclosure, real deep links
+ * (scroll + flash + focus), saved status and per-page "Reset to recommended".
  */
 export function SettingsModal({
   open,
   initialSection = "general",
+  initialTarget,
   onClose,
   bridge
 }: {
   open: boolean;
-  /** A page id, or an old section id (those still open the right page). */
+  /** A page id, or an old section id (resolved via alias table). */
   initialSection?: SettingsSectionId | SettingsPageId;
+  /** Optional card/field deep link to scroll to, flash and focus when opening. */
+  initialTarget?: SettingsTargetRequest | null;
   onClose: () => void;
   bridge: SettingsBridge;
 }) {
@@ -166,19 +198,79 @@ export function SettingsModal({
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetDone, setResetDone] = useState(false);
+  const [flashCard, setFlashCard] = useState<string | null>(null);
+  const [pendingReveal, setPendingReveal] = useState<{ card: string; field?: string; seq: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const timer = useRef<number | undefined>(undefined);
+  const flashTimer = useRef<number | undefined>(undefined);
+  const revealSeq = useRef(0);
+
+  const changeMode = useCallback((m: DetailMode) => {
+    setMode(m);
+    saveDetailMode(m);
+  }, []);
 
   useEffect(() => {
-    if (open) {
-      setPage(parsePage(initialSection));
-      setQuery("");
-      setSave("idle");
-      setResetDone(false);
+    if (!open) return;
+    const target = initialTarget ?? (peekPendingTarget() ? { ...peekPendingTarget()! } : null);
+    const cardId = target?.card;
+    const cardMeta = cardId ? CARD_META[cardId] : undefined;
+    setPage(cardMeta ? parsePage(cardMeta.page) : parsePage(target?.page ?? initialSection));
+    setQuery("");
+    setSave("idle");
+    setResetDone(false);
+    if (cardMeta?.advanced) {
+      changeMode("advanced");
     }
-  }, [open, initialSection]);
+    if (cardId) {
+      setPendingReveal({ card: cardId, field: target?.field, seq: ++revealSeq.current });
+    } else {
+      setPendingReveal(null);
+    }
+  }, [open, initialSection, initialTarget, changeMode]);
 
-  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(timer.current);
+      window.clearTimeout(flashTimer.current);
+    },
+    []
+  );
+
+  // Scroll target card into view, flash it briefly (respecting reduced motion), and focus target field.
+  useEffect(() => {
+    if (!open || !pendingReveal) return undefined;
+    const { card, field } = pendingReveal;
+    let cancelled = false;
+    const raf = window.requestAnimationFrame(() => {
+      if (cancelled) return;
+      const root = scrollRef.current;
+      const slot = root?.querySelector<HTMLElement>(`[data-card="${card}"]`);
+      if (!slot) return;
+      const instant = prefersReducedMotion();
+      slot.scrollIntoView?.({ block: "center", behavior: instant ? "instant" : "smooth" });
+      if (!instant) {
+        window.clearTimeout(flashTimer.current);
+        setFlashCard(card);
+        flashTimer.current = window.setTimeout(() => setFlashCard(null), FLASH_MS);
+      }
+      const fieldEl = field
+        ? slot.querySelector<HTMLElement>(`[data-settings-field="${field}"]`)
+        : null;
+      const fallbackEl =
+        fieldEl ??
+        slot.querySelector<HTMLElement>(
+          'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+      fallbackEl?.focus({ preventScroll: true });
+      setPendingReveal(null);
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+    };
+  }, [open, pendingReveal, page, mode]);
 
   const markSaved = useCallback((deferred: boolean) => {
     window.clearTimeout(timer.current);
@@ -207,32 +299,72 @@ export function SettingsModal({
         ...computerCards(wrapped, t),
         ...mailCards(t),
         ...otherCards(t)
-      ].map((card) => {
-        const m = metaOfCard(card);
-        return { card, page: m.page, advanced: m.advanced === true, risk: m.risk, learn: m.learn };
-      }),
+      ]
+        .map((card, index) => {
+          const m = metaOfCard(card);
+          return {
+            card,
+            page: m.page,
+            advanced: m.advanced === true,
+            risk: m.risk,
+            learn: m.learn,
+            order: CARD_ORDER.get(card.id) ?? 1000 + index
+          };
+        })
+        .sort((a, b) => a.order - b.order),
     // `bridge` changes on every settings update: cards must follow it.
     [wrapped, t]
   );
 
   const searching = query.trim() !== "";
-  const matches = (p: PlacedCard) =>
-    matchesQuery(
-      query,
-      p.card.title,
-      p.card.description,
-      p.card.keywords,
-      t(`settingsModal.pages.${p.page}.name`)
-    );
-  const pagesWithHits = new Set(placed.filter(matches).map((p) => p.page));
-  const onPage = placed.filter((p) => p.page === page);
-  const visible = searching
-    ? placed.filter(matches)
-    : onPage.filter((p) => isCardShown({ page: p.page, advanced: p.advanced }, mode, false));
-  const hiddenCount = searching ? 0 : onPage.length - visible.length;
-  const hasAdvancedHere = onPage.some((p) => p.advanced) && page !== "advanced";
-  const enabledPages = SETTINGS_PAGE_GROUPS.flatMap((g) => g.pages).filter(
-    (s) => !(searching && !pagesWithHits.has(s))
+  const matches = useCallback(
+    (p: PlacedCard) =>
+      matchesQuery(
+        query,
+        p.card.title,
+        p.card.description,
+        p.card.keywords,
+        t(`settingsModal.pages.${p.page}.name`)
+      ),
+    [query, t]
+  );
+
+  const searchHits = useMemo(
+    () => (searching ? placed.filter(matches) : []),
+    [searching, placed, matches]
+  );
+  const pagesWithHits = useMemo(
+    () => new Set(searchHits.map((p) => p.page)),
+    [searchHits]
+  );
+  const onPage = useMemo(
+    () => placed.filter((p) => p.page === page),
+    [placed, page]
+  );
+  const basicOnPage = useMemo(() => onPage.filter((p) => !p.advanced), [onPage]);
+  const advancedOnPage = useMemo(() => onPage.filter((p) => p.advanced), [onPage]);
+  const moreOpen = mode === "advanced";
+
+  const enabledPages = useMemo(
+    () =>
+      SETTINGS_PAGE_GROUPS.flatMap((g) => g.pages).filter(
+        (s) => !(searching && !pagesWithHits.has(s))
+      ),
+    [searching, pagesWithHits]
+  );
+
+  const jumpToCard = useCallback(
+    (cardId: string) => {
+      const hit = placed.find((p) => p.card.id === cardId);
+      if (!hit) return;
+      setQuery("");
+      setPage(hit.page);
+      if (hit.advanced) {
+        changeMode("advanced");
+      }
+      setPendingReveal({ card: cardId, seq: ++revealSeq.current });
+    },
+    [placed, changeMode]
   );
 
   // Highlight the matched words inside the cards without touching React's DOM.
@@ -265,7 +397,7 @@ export function SettingsModal({
     return () => {
       css.highlights?.delete("settings-search");
     };
-  }, [query, open, visible.length, page, mode]);
+  }, [query, open, searchHits.length, page, mode]);
 
   const onNavKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
@@ -286,9 +418,36 @@ export function SettingsModal({
     e.currentTarget.querySelector<HTMLElement>(`[data-testid="settings-nav-${next}"]`)?.focus();
   };
 
-  const changeMode = (m: DetailMode) => {
-    setMode(m);
-    saveDetailMode(m);
+  const onShellKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !isEditableElement(e.target)) {
+      e.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    }
+  };
+
+  const onSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" && searching && searchHits.length > 0) {
+      e.preventDefault();
+      scrollRef.current?.querySelector<HTMLElement>("[data-settings-result]")?.focus();
+    } else if (e.key === "Enter" && searching && searchHits.length > 0) {
+      e.preventDefault();
+      jumpToCard(searchHits[0].card.id);
+    }
+  };
+
+  const onResultKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const buttons = [...(scrollRef.current?.querySelectorAll<HTMLElement>("[data-settings-result]") ?? [])];
+    const idx = buttons.indexOf(e.currentTarget);
+    if (idx === -1) return;
+    e.preventDefault();
+    if (e.key === "ArrowUp" && idx === 0) {
+      searchRef.current?.focus();
+      return;
+    }
+    const nextIdx = e.key === "ArrowDown" ? Math.min(buttons.length - 1, idx + 1) : Math.max(0, idx - 1);
+    buttons[nextIdx]?.focus();
   };
 
   const doReset = async () => {
@@ -315,35 +474,42 @@ export function SettingsModal({
   };
 
   const extras = (p: PlacedCard): ReactNode => {
-    const showRisk = p.risk !== undefined;
-    if (!showRisk && !p.learn) return null;
+    if (!p.risk && !p.learn) return null;
     return (
-      <div className={styles.cardNote}>
-        {showRisk ? (
-          <p className={styles.risk}>
-            <TriangleAlert aria-hidden="true" />
-            <span>{t(`settingsModal.risk.${p.risk}`)}</span>
-          </p>
-        ) : null}
-        {p.learn ? <LearnMore term={p.learn} /> : null}
-      </div>
+      <SettingsCardFooter
+        risk={p.risk ? t(`settingsModal.risk.${p.risk}`) : undefined}
+        action={p.learn ? <LearnMore term={p.learn} /> : undefined}
+      />
     );
   };
 
   const pageName = (id: SettingsPageId) => t(`settingsModal.pages.${id}.name`);
   const resettable = !searching && canReset(page);
-  const grouped = searching
-    ? enabledPages.filter((s) => visible.some((p) => p.page === s))
-    : [page];
 
   return (
-    <Modal open={open} onClose={onClose} label={t("settingsModal.title")}>
-      <div className={styles.shell}>
+    <Modal
+      open={open}
+      onClose={onClose}
+      onEscape={() => {
+        if (query !== "") {
+          setQuery("");
+          searchRef.current?.focus();
+          return true;
+        }
+        return false;
+      }}
+      label={t("settingsModal.title")}
+    >
+      <div className={styles.shell} onKeyDown={onShellKeyDown}>
         <nav className={styles.nav} aria-label={t("settingsModal.title")}>
-          <div className={styles.navHeading}><Settings2 aria-hidden="true" />{t("settingsModal.title")}</div>
+          <div className={styles.navHeading}>
+            <Settings2 aria-hidden="true" />
+            <span>{t("settingsModal.title")}</span>
+          </div>
           <div className={styles.searchWrap}>
             <Search aria-hidden="true" />
             <input
+              ref={searchRef}
               className={styles.search}
               type="search"
               data-autofocus
@@ -352,12 +518,16 @@ export function SettingsModal({
               placeholder={t("settingsModal.search")}
               aria-label={t("settingsModal.search")}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onSearchKeyDown}
             />
+            {!query ? <kbd className={styles.searchHint} aria-hidden="true">/</kbd> : null}
           </div>
           <div className={styles.navScroll} onKeyDown={onNavKeyDown}>
             {SETTINGS_PAGE_GROUPS.map((g) => (
               <div key={g.id} className={styles.navList} role="group" aria-label={t(`settingsModal.navGroups.${g.id}`)}>
-                <span className={styles.navGroupLabel} aria-hidden="true">{t(`settingsModal.navGroups.${g.id}`)}</span>
+                <span className={styles.navGroupLabel} aria-hidden="true">
+                  {t(`settingsModal.navGroups.${g.id}`)}
+                </span>
                 {g.pages.map((s) => {
                   const PageIcon = PAGE_ICONS[s];
                   const dim = searching && !pagesWithHits.has(s);
@@ -374,7 +544,8 @@ export function SettingsModal({
                         setPage(s);
                       }}
                     >
-                      <PageIcon aria-hidden="true" />{pageName(s)}
+                      <PageIcon aria-hidden="true" />
+                      <span>{pageName(s)}</span>
                     </button>
                   );
                 })}
@@ -382,6 +553,7 @@ export function SettingsModal({
             ))}
           </div>
         </nav>
+
         <div className={styles.content}>
           <header className={styles.header}>
             <div className={styles.headerText}>
@@ -390,11 +562,29 @@ export function SettingsModal({
               </h2>
               <p className={styles.subtitle}>
                 {searching
-                  ? t("settingsModal.resultsCount", { count: visible.length })
+                  ? t("settingsModal.resultsCount", { count: searchHits.length })
                   : t(`settingsModal.pages.${page}.description`)}
               </p>
             </div>
             <div className={styles.headerTools}>
+              {resetDone ? (
+                <span className={styles.resetDone} role="status">{t("settingsModal.reset.done")}</span>
+              ) : null}
+              {resettable ? (
+                <button
+                  type="button"
+                  className={styles.resetButton}
+                  data-testid="settings-reset"
+                  title={t("settingsModal.reset.button")}
+                  onClick={() => {
+                    setResetError(null);
+                    setConfirmReset(true);
+                  }}
+                >
+                  <RotateCcw aria-hidden="true" />
+                  <span>{t("settingsModal.reset.button")}</span>
+                </button>
+              ) : null}
               <span
                 className={[styles.saveState, save === "saved" ? styles.saveOk : ""].filter(Boolean).join(" ")}
                 role="status"
@@ -415,84 +605,64 @@ export function SettingsModal({
               </button>
             </div>
           </header>
-          {!searching ? (
-            <div className={styles.toolbar}>
-              <Segmented<DetailMode>
-                label={t("settingsModal.mode.label")}
-                value={mode}
-                onChange={changeMode}
-                options={[
-                  { value: "simple", label: t("settingsModal.mode.simple"), testId: "settings-mode-simple" },
-                  { value: "advanced", label: t("settingsModal.mode.advanced"), testId: "settings-mode-advanced" }
-                ]}
-              />
-              {resettable ? (
-                <button
-                  type="button"
-                  className={styles.resetButton}
-                  data-testid="settings-reset"
-                  onClick={() => {
-                    setResetError(null);
-                    setConfirmReset(true);
-                  }}
-                >
-                  <RotateCcw aria-hidden="true" />
-                  {t("settingsModal.reset.button")}
-                </button>
-              ) : null}
-              {resetDone ? (
-                <span className={styles.resetDone} role="status">{t("settingsModal.reset.done")}</span>
-              ) : null}
-            </div>
-          ) : null}
+
           <div className={styles.scroll} ref={scrollRef}>
-            {visible.length === 0 ? (
-              <p className={styles.empty}><Search aria-hidden="true" />{t("settingsModal.noResults")}</p>
+            {searching ? (
+              searchHits.length === 0 ? (
+                <p className={styles.empty}>
+                  <Search aria-hidden="true" />
+                  <span>{t("settingsModal.noResults")}</span>
+                </p>
+              ) : (
+                <div className={styles.resultsList}>
+                  {searchHits.map((p) => (
+                    <div key={p.card.id} className={styles.resultCard}>
+                      <button
+                        type="button"
+                        className={styles.resultHead}
+                        data-settings-result
+                        data-testid={`settings-result-${p.card.id}`}
+                        onClick={() => jumpToCard(p.card.id)}
+                        onKeyDown={onResultKeyDown}
+                      >
+                        <span className={styles.resultTitle}>
+                          <Marked text={p.card.title} query={query} />
+                        </span>
+                        <span className={styles.resultMeta}>
+                          <span className={styles.pageTag}>
+                            <Marked text={pageName(p.page)} query={query} />
+                          </span>
+                          {p.advanced ? (
+                            <span className={styles.advTag}>{t("settingsModal.mode.moreOptions")}</span>
+                          ) : null}
+                        </span>
+                      </button>
+                      {renderCards([p], extras, flashCard)}
+                    </div>
+                  ))}
+                </div>
+              )
             ) : (
-              grouped.map((s) => (
-                <section key={s} className={styles.section}>
-                  {searching ? (
-                    <h3 className={styles.sectionLabel}>
-                      <Marked text={pageName(s)} query={query} />
-                    </h3>
-                  ) : null}
-                  {searching
-                    ? visible
-                        .filter((p) => p.page === s)
-                        .map((p) => (
-                          <div key={p.card.id} className={styles.resultCard}>
-                            <h4 className={styles.resultTitle}>
-                              <Marked text={p.card.title} query={query} />
-                              {p.advanced ? <span className={styles.advTag}>{t("settingsModal.mode.advanced")}</span> : null}
-                            </h4>
-                            {renderCards([p], (k) => t(`settingsModal.groups.${k}`), extras)}
-                          </div>
-                        ))
-                    : renderCards(
-                        visible.filter((p) => p.page === s),
-                        (k) => t(`settingsModal.groups.${k}`),
-                        extras
-                      )}
-                </section>
-              ))
+              <div className={styles.section}>
+                {renderCards(basicOnPage, extras, flashCard)}
+                {advancedOnPage.length > 0 ? (
+                  <SettingsDisclosure
+                    open={moreOpen}
+                    count={advancedOnPage.length}
+                    label={t("settingsModal.mode.moreOptions")}
+                    hint={t("settingsModal.mode.moreHint")}
+                    testId="settings-show-advanced"
+                    onToggle={() => changeMode(moreOpen ? "simple" : "advanced")}
+                  >
+                    {renderCards(advancedOnPage, extras, flashCard)}
+                  </SettingsDisclosure>
+                ) : null}
+              </div>
             )}
-            {hiddenCount > 0 ? (
-              <button
-                type="button"
-                className={styles.moreAdvanced}
-                data-testid="settings-show-advanced"
-                onClick={() => changeMode("advanced")}
-              >
-                <SlidersHorizontal aria-hidden="true" />
-                {t("settingsModal.mode.hidden", { count: hiddenCount })}
-              </button>
-            ) : null}
-            {!searching && mode === "advanced" && hasAdvancedHere ? (
-              <p className={styles.advancedNote}>{t("settingsModal.mode.advancedOn")}</p>
-            ) : null}
           </div>
         </div>
       </div>
+
       <ConfirmDialog
         open={confirmReset}
         title={t("settingsModal.reset.title", { page: pageName(page) })}

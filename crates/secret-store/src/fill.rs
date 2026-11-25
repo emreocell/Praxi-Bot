@@ -123,8 +123,33 @@ pub struct FillSecretInfo {
     pub updated_at_ms: u64,
 }
 
+/// Account facts of a secret a bot registered. Absent on older entries, which
+/// stay usable by every bot.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct AccountMeta {
+    site: String,
+    login_id: String,
+    kind: String,
+    /// Bots that may use it. Empty = none.
+    #[serde(default)]
+    bot_ids: Vec<String>,
+    created_by: String,
+    #[serde(default)]
+    email_account: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    created_at_ms: u64,
+    /// When the password was first typed anywhere (`None` = never: a sign-up
+    /// that failed before typing leaves the account in this state).
+    #[serde(default)]
+    first_used_at_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Entry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    account: Option<AccountMeta>,
     #[serde(default)]
     origins: Vec<String>,
     #[serde(default)]
@@ -141,6 +166,105 @@ struct Meta {
     secrets: BTreeMap<String, Entry>,
     #[serde(default)]
     grants: Vec<FillGrant>,
+}
+
+/// What the owner and the bot may know about one site account. Never the password.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountInfo {
+    /// Secret name (what `browser_fill` takes as `secret`).
+    pub name: String,
+    /// Canonical origin of the site.
+    pub site: String,
+    /// The login id (not secret).
+    pub login_id: String,
+    /// `password`.
+    pub kind: String,
+    /// `bot` (made by `account_register`) or `owner`.
+    pub created_by: String,
+    /// The mail identity used to open it, if any.
+    pub email_account: Option<String>,
+    /// Bots allowed to use it.
+    pub bot_ids: Vec<String>,
+    /// Short note the bot left.
+    pub note: Option<String>,
+    /// Whether the store holds the password.
+    pub has_value: bool,
+    /// Creation time, ms since the epoch.
+    pub created_at_ms: u64,
+    /// The password was never typed anywhere (a failed or abandoned sign-up).
+    /// The owner can delete such an account, and its bot can discard it.
+    pub unused: bool,
+}
+
+/// A new account for [`FillSecrets::register_account`].
+#[derive(Debug, Clone)]
+pub struct NewAccount<'a> {
+    /// Secret name to store under.
+    pub name: &'a str,
+    /// Site origin, such as `https://example.com`.
+    pub site: &'a str,
+    /// The login id the form takes.
+    pub login_id: &'a str,
+    /// Mail identity used to open it.
+    pub email_account: Option<&'a str>,
+    /// The bot that owns the account.
+    pub bot_id: &'a str,
+    /// Short note.
+    pub note: Option<&'a str>,
+    /// Password length (clamped to [`PASSWORD_MIN_LEN`]..=[`PASSWORD_MAX_LEN`]).
+    pub password_len: usize,
+    /// Allow symbols in the password (some sites refuse them).
+    pub symbols: bool,
+}
+
+/// Shortest generated password.
+pub const PASSWORD_MIN_LEN: usize = 12;
+/// Longest generated password.
+pub const PASSWORD_MAX_LEN: usize = 64;
+
+/// One uniformly random index below `n` from the OS CSPRNG (rejection sampling).
+fn random_below(n: usize) -> Result<usize, FillError> {
+    let limit = 65536 - (65536 % n);
+    loop {
+        let mut b = [0u8; 2];
+        getrandom::fill(&mut b).map_err(|_| unavailable("no randomness available"))?;
+        let v = usize::from(u16::from_le_bytes(b));
+        if v < limit {
+            return Ok(v % n);
+        }
+    }
+}
+
+/// A random password from the OS CSPRNG with at least one lower-case letter,
+/// upper-case letter and digit (and one symbol when `symbols`). Look-alike
+/// characters are left out.
+///
+/// # Errors
+/// [`FillError::Unavailable`] when the OS has no randomness.
+pub fn generate_password(len: usize, symbols: bool) -> Result<SecretValue, FillError> {
+    const LOWER: &[u8] = b"abcdefghijkmnopqrstuvwxyz";
+    const UPPER: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const DIGIT: &[u8] = b"23456789";
+    const SYMBOL: &[u8] = b"!#$%&*+-=?@^_";
+    let len = len.clamp(PASSWORD_MIN_LEN, PASSWORD_MAX_LEN);
+    let mut classes: Vec<&[u8]> = vec![LOWER, UPPER, DIGIT];
+    if symbols {
+        classes.push(SYMBOL);
+    }
+    let all: Vec<u8> = classes.iter().flat_map(|c| c.iter().copied()).collect();
+    let mut out: Vec<u8> = Vec::with_capacity(len);
+    for c in &classes {
+        out.push(c[random_below(c.len())?]);
+    }
+    while out.len() < len {
+        out.push(all[random_below(all.len())?]);
+    }
+    // Fisher-Yates, so the guaranteed characters are not always up front.
+    for i in (1..out.len()).rev() {
+        out.swap(i, random_below(i + 1)?);
+    }
+    // Every byte is ASCII.
+    Ok(SecretValue::new(String::from_utf8_lossy(&out).into_owned()))
 }
 
 /// Called with every fill value as it is stored or read, so the production
@@ -544,6 +668,200 @@ impl FillSecrets {
         Ok(replaced)
     }
 
+    /// Create a site account: the DAEMON generates the password, stores it under
+    /// `new.name` limited to `new.site` and to `new.bot_id`, and keeps the login
+    /// facts for the Vault screen. The password is not returned; it goes only
+    /// into the store and the redaction hook.
+    ///
+    /// # Errors
+    /// Invalid name / site, the name already exists ([`FillError::Exists`]), a
+    /// limit, or a backend failure. Nothing is left behind on failure.
+    pub fn register_account(&self, new: &NewAccount<'_>) -> Result<AccountInfo, FillError> {
+        validate_fill_name(new.name)?;
+        let site = canonical_origin(new.site)?;
+        let login = new.login_id.trim();
+        if login.is_empty() || login.len() > 200 || login.chars().any(char::is_control) {
+            return Err(FillError::Invalid(
+                "the login id is 1 to 200 printable characters".into(),
+            ));
+        }
+        if new.bot_id.is_empty() {
+            return Err(FillError::Invalid(
+                "an account belongs to a bot; there is no bot in this call".into(),
+            ));
+        }
+        let password = generate_password(new.password_len, new.symbols)?;
+        let mut meta = self.meta.lock();
+        if meta.secrets.contains_key(new.name) {
+            return Err(FillError::Exists(new.name.to_owned()));
+        }
+        if meta.secrets.len() >= MAX_SECRETS {
+            return Err(FillError::Invalid("too many fill secrets".into()));
+        }
+        let before = meta.clone();
+        self.store
+            .set(&store_key(new.name), password.expose())
+            .map_err(|_| unavailable("the secret store rejected the write"))?;
+        self.registered(password.expose());
+        let now = now_ms();
+        let entry = Entry {
+            account: Some(AccountMeta {
+                site: site.clone(),
+                login_id: login.to_owned(),
+                kind: "password".into(),
+                bot_ids: vec![new.bot_id.to_owned()],
+                created_by: "bot".into(),
+                email_account: new.email_account.map(|e| sanitize_label(e, 120)),
+                note: new.note.map(|n| sanitize_label(n, 200)),
+                created_at_ms: now,
+                first_used_at_ms: None,
+            }),
+            origins: vec![site],
+            programs: Vec::new(),
+            updated_at_ms: now,
+        };
+        meta.secrets.insert(new.name.to_owned(), entry.clone());
+        if let Err(e) = self.persist(&meta) {
+            *meta = before;
+            let _ = self.store.delete(&store_key(new.name));
+            return Err(e);
+        }
+        let present = self.present_in_store()?;
+        Self::account_info(new.name, &entry, &present)
+            .ok_or_else(|| unavailable("the account was not recorded"))
+    }
+
+    fn account_info(name: &str, e: &Entry, present: &BTreeSet<String>) -> Option<AccountInfo> {
+        let a = e.account.as_ref()?;
+        Some(AccountInfo {
+            name: name.to_owned(),
+            site: a.site.clone(),
+            login_id: a.login_id.clone(),
+            kind: a.kind.clone(),
+            created_by: a.created_by.clone(),
+            email_account: a.email_account.clone(),
+            bot_ids: a.bot_ids.clone(),
+            note: a.note.clone(),
+            has_value: present.contains(&store_key(name)),
+            created_at_ms: a.created_at_ms,
+            unused: a.first_used_at_ms.is_none(),
+        })
+    }
+
+    /// Record that the password of account `name` was typed. Idempotent; a no-op
+    /// for secrets without account facts.
+    ///
+    /// # Errors
+    /// A write failure.
+    pub fn mark_used(&self, name: &str) -> Result<(), FillError> {
+        let mut meta = self.meta.lock();
+        let before = meta.clone();
+        let Some(a) = meta
+            .secrets
+            .get_mut(name)
+            .and_then(|e| e.account.as_mut())
+            .filter(|a| a.first_used_at_ms.is_none())
+        else {
+            return Ok(());
+        };
+        a.first_used_at_ms = Some(now_ms());
+        if let Err(e) = self.persist(&meta) {
+            *meta = before;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Delete an account its own bot made, with its password and grants (a
+    /// failed sign-up must not block the retry for ever). The owner's own
+    /// secrets and other bots' accounts are refused.
+    ///
+    /// # Errors
+    /// Unknown name, not this bot's bot-made account, or a backend failure.
+    pub fn discard_account(&self, name: &str, bot: Option<&str>) -> Result<(), FillError> {
+        validate_fill_name(name)?;
+        {
+            let meta = self.meta.lock();
+            let e = meta
+                .secrets
+                .get(name)
+                .ok_or_else(|| FillError::Unknown(name.to_owned()))?;
+            Self::scope_check(name, e, bot)?;
+            if e.account.as_ref().is_none_or(|a| a.created_by != "bot") {
+                return Err(FillError::NotAllowed(format!(
+                    "the secret `{}` was not made by a bot; only the owner can remove it",
+                    sanitize_label(name, 80)
+                )));
+            }
+        }
+        self.delete(name).map(|_| ())
+    }
+
+    /// Whether `bot` may use the secret. Entries without account facts (the
+    /// owner's own secrets) stay open to every bot as before; an account is open
+    /// only to the bots listed on it, never to a caller without a bot id.
+    fn bot_may_use(e: &Entry, bot: Option<&str>) -> bool {
+        match &e.account {
+            None => true,
+            Some(a) => bot.is_some_and(|b| a.bot_ids.iter().any(|x| x == b)),
+        }
+    }
+
+    /// Refuse use of a bot-scoped account by a bot that does not own it.
+    ///
+    /// # Errors
+    /// [`FillError::NotAllowed`] (names the secret, nothing else).
+    pub fn check_bot(&self, name: &str, bot: Option<&str>) -> Result<(), FillError> {
+        let meta = self.meta.lock();
+        match meta.secrets.get(name) {
+            Some(e) => Self::scope_check(name, e, bot),
+            None => Ok(()),
+        }
+    }
+
+    fn scope_check(name: &str, e: &Entry, bot: Option<&str>) -> Result<(), FillError> {
+        if Self::bot_may_use(e, bot) {
+            Ok(())
+        } else {
+            Err(FillError::NotAllowed(format!(
+                "the secret `{}` belongs to another bot",
+                sanitize_label(name, 80)
+            )))
+        }
+    }
+
+    /// Secrets `bot` may use (what `secrets_list` shows it).
+    ///
+    /// # Errors
+    /// The store cannot be listed.
+    pub fn list_for_bot(&self, bot: Option<&str>) -> Result<Vec<FillSecretInfo>, FillError> {
+        let present = self.present_in_store()?;
+        Ok(self
+            .meta
+            .lock()
+            .secrets
+            .iter()
+            .filter(|(_, e)| Self::bot_may_use(e, bot))
+            .map(|(n, e)| Self::info(n, e, &present))
+            .collect())
+    }
+
+    /// The site accounts `bot` may use (`bot = None`: every account, for the owner).
+    ///
+    /// # Errors
+    /// The store cannot be listed.
+    pub fn accounts(&self, bot: Option<&str>) -> Result<Vec<AccountInfo>, FillError> {
+        let present = self.present_in_store()?;
+        Ok(self
+            .meta
+            .lock()
+            .secrets
+            .iter()
+            .filter(|(_, e)| bot.is_none() || Self::bot_may_use(e, bot))
+            .filter_map(|(n, e)| Self::account_info(n, e, &present))
+            .collect())
+    }
+
     /// Every secret with its allow-lists. Never reads a value.
     ///
     /// # Errors
@@ -658,9 +976,10 @@ impl FillSecrets {
         name: &str,
         frame_origin: Option<&str>,
         top_origin: Option<&str>,
+        bot: Option<&str>,
     ) -> Result<Option<String>, FillError> {
-        let grant = self.check_browser(name, frame_origin)?;
-        self.check_browser(name, top_origin)?;
+        let grant = self.check_browser(name, frame_origin, bot)?;
+        self.check_browser(name, top_origin, bot)?;
         let same = matches!(
             (frame_origin.map(canonical_origin), top_origin.map(canonical_origin)),
             (Some(Ok(a)), Some(Ok(b))) if a == b
@@ -675,11 +994,13 @@ impl FillSecrets {
     ///
     /// # Errors
     /// [`FillError::NotAllowed`] / [`FillError::Unknown`]: refuse before any
-    /// approval is offered.
+    /// approval is offered. `bot` is the acting bot; a bot-scoped account is
+    /// refused for any other bot and for `None` (see [`Self::check_bot`]).
     pub fn check_browser(
         &self,
         name: &str,
         live_origin: Option<&str>,
+        bot: Option<&str>,
     ) -> Result<Option<String>, FillError> {
         validate_fill_name(name)?;
         let meta = self.meta.lock();
@@ -687,6 +1008,7 @@ impl FillSecrets {
             .secrets
             .get(name)
             .ok_or_else(|| FillError::Unknown(name.to_owned()))?;
+        Self::scope_check(name, entry, bot)?;
         let origin = live_origin
             .and_then(|o| canonical_origin(o).ok())
             .ok_or_else(|| {
@@ -713,13 +1035,19 @@ impl FillSecrets {
     ///
     /// # Errors
     /// [`FillError::NotAllowed`] / [`FillError::Unknown`].
-    pub fn check_desktop(&self, name: &str, program: Option<&str>) -> Result<(), FillError> {
+    pub fn check_desktop(
+        &self,
+        name: &str,
+        program: Option<&str>,
+        bot: Option<&str>,
+    ) -> Result<(), FillError> {
         validate_fill_name(name)?;
         let meta = self.meta.lock();
         let entry = meta
             .secrets
             .get(name)
             .ok_or_else(|| FillError::Unknown(name.to_owned()))?;
+        Self::scope_check(name, entry, bot)?;
         let Some(program) = program else {
             return Err(FillError::NotAllowed(format!(
                 "refused: this desktop backend cannot verify which program owns the field, so `{name}` is not typed there"
@@ -734,15 +1062,23 @@ impl FillSecrets {
         }
     }
 
-    /// The only read path to a value: `fill/<name>` for a secret the owner
-    /// registered. Call after the approval, hold the result in memory only.
+    /// The only read path to a value: `fill/<name>`. Call after the approval,
+    /// hold the result in memory only. `bot` is the acting bot: a bot-scoped
+    /// account is refused for any other bot and for `None`, so no caller can
+    /// read or type a secret scoped to another bot. Owner-made secrets without
+    /// account facts stay open to every caller.
     ///
     /// # Errors
-    /// Unknown name, no stored value, or a backend failure.
-    pub fn resolve_value(&self, name: &str) -> Result<SecretValue, FillError> {
+    /// Unknown name, another bot's account, no stored value, or a backend failure.
+    pub fn resolve_value_for(
+        &self,
+        name: &str,
+        bot: Option<&str>,
+    ) -> Result<SecretValue, FillError> {
         validate_fill_name(name)?;
-        if !self.meta.lock().secrets.contains_key(name) {
-            return Err(FillError::Unknown(name.to_owned()));
+        match self.meta.lock().secrets.get(name) {
+            None => return Err(FillError::Unknown(name.to_owned())),
+            Some(e) => Self::scope_check(name, e, bot)?,
         }
         let value = self
             .store
@@ -910,14 +1246,14 @@ mod tests {
         let listing = serde_json::to_string(&s.list().unwrap()).unwrap();
         assert!(!listing.contains("hunter2-correct"));
         assert_eq!(
-            s.resolve_value("login/github").unwrap().expose(),
+            s.resolve_value_for("login/github", None).unwrap().expose(),
             "hunter2-correct"
         );
         // Update keeps the value when none is given.
         s.upsert("login/github", None, Some(&o("https://gitlab.com")), None)
             .unwrap();
         assert_eq!(
-            s.resolve_value("login/github").unwrap().expose(),
+            s.resolve_value_for("login/github", None).unwrap().expose(),
             "hunter2-correct"
         );
     }
@@ -927,11 +1263,14 @@ mod tests {
         let (store, s) = svc();
         store.set("composio/gmail", "composio-token-123").unwrap();
         for name in ["composio/gmail", "fill/../composio/gmail", "x"] {
-            assert!(s.resolve_value(name).is_err(), "{name}");
+            assert!(s.resolve_value_for(name, None).is_err(), "{name}");
         }
         // Even a registered name only ever reads `fill/<name>`.
         s.upsert("work/a", Some("a-value-123"), None, None).unwrap();
-        assert_eq!(s.resolve_value("work/a").unwrap().expose(), "a-value-123");
+        assert_eq!(
+            s.resolve_value_for("work/a", None).unwrap().expose(),
+            "a-value-123"
+        );
     }
 
     #[test]
@@ -945,7 +1284,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            s.check_browser("login/github", Some("https://github.com"))
+            s.check_browser("login/github", Some("https://github.com"), None)
                 .unwrap()
                 .is_none()
         );
@@ -960,14 +1299,14 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    s.check_browser("login/github", live),
+                    s.check_browser("login/github", live, None),
                     Err(FillError::NotAllowed(_))
                 ),
                 "{live:?}"
             );
         }
         assert!(matches!(
-            s.check_browser("login/other", Some("https://github.com")),
+            s.check_browser("login/other", Some("https://github.com"), None),
             Err(FillError::Unknown(_))
         ));
     }
@@ -993,15 +1332,18 @@ mod tests {
         assert!(s.grant_create("a/one", "https://other.test").is_err());
         let g = s.grant_create("a/one", "https://one.test").unwrap();
         assert_eq!(
-            s.check_browser("a/one", Some("https://one.test")).unwrap(),
+            s.check_browser("a/one", Some("https://one.test"), None)
+                .unwrap(),
             Some(g.id.clone())
         );
         assert_eq!(
-            s.check_browser("a/one", Some("https://two.test")).unwrap(),
+            s.check_browser("a/one", Some("https://two.test"), None)
+                .unwrap(),
             None
         );
         assert_eq!(
-            s.check_browser("a/two", Some("https://one.test")).unwrap(),
+            s.check_browser("a/two", Some("https://one.test"), None)
+                .unwrap(),
             None
         );
         // Dropping the origin from the allow-list drops its grant.
@@ -1012,7 +1354,8 @@ mod tests {
         assert!(s.grant_revoke(&g.id).unwrap());
         assert!(!s.grant_revoke(&g.id).unwrap());
         assert_eq!(
-            s.check_browser("a/one", Some("https://two.test")).unwrap(),
+            s.check_browser("a/one", Some("https://two.test"), None)
+                .unwrap(),
             None
         );
         // Delete removes grants too.
@@ -1031,12 +1374,13 @@ mod tests {
             Some(&["win:sha256:abc".into()]),
         )
         .unwrap();
-        s.check_desktop("app/vpn", Some("win:sha256:abc")).unwrap();
+        s.check_desktop("app/vpn", Some("win:sha256:abc"), None)
+            .unwrap();
         assert!(
-            s.check_desktop("app/vpn", Some("win:sha256:other"))
+            s.check_desktop("app/vpn", Some("win:sha256:other"), None)
                 .is_err()
         );
-        assert!(s.check_desktop("app/vpn", None).is_err());
+        assert!(s.check_desktop("app/vpn", None, None).is_err());
     }
 
     #[test]
@@ -1065,6 +1409,78 @@ mod tests {
         assert!(FillSecrets::open(Arc::new(MemoryStore::new()), dir.path()).is_err());
     }
 
+    fn registered_account(s: &FillSecrets) -> &'static str {
+        let name = "login/example.com-aaaa1111";
+        s.register_account(&NewAccount {
+            name,
+            site: "https://example.com",
+            login_id: "me",
+            email_account: None,
+            bot_id: "bot-a",
+            note: None,
+            password_len: 20,
+            symbols: true,
+        })
+        .unwrap();
+        name
+    }
+
+    #[test]
+    fn the_bot_scope_is_enforced_inside_every_read_and_check() {
+        let s = FillSecrets::in_memory(Arc::new(MemoryStore::new()));
+        let name = registered_account(&s);
+        // The owner may later allow a program; another bot still must not use it.
+        s.upsert(name, None, None, Some(&["win:sha256:abc".to_owned()]))
+            .unwrap();
+        let site = Some("https://example.com");
+        for bot in [Some("bot-b"), None] {
+            let errs = [
+                s.resolve_value_for(name, bot).map(|_| ()).unwrap_err(),
+                s.check_browser(name, site, bot).map(|_| ()).unwrap_err(),
+                s.check_browser_in(name, site, site, bot)
+                    .map(|_| ())
+                    .unwrap_err(),
+                s.check_desktop(name, Some("win:sha256:abc"), bot)
+                    .unwrap_err(),
+            ];
+            for e in errs {
+                assert!(matches!(e, FillError::NotAllowed(_)), "{e}");
+                let text = e.to_string();
+                let pw = s.resolve_value_for(name, Some("bot-a")).unwrap();
+                assert!(!text.contains(pw.expose()));
+            }
+        }
+        assert!(s.resolve_value_for(name, Some("bot-a")).is_ok());
+        assert!(s.check_browser(name, site, Some("bot-a")).is_ok());
+        assert!(
+            s.check_desktop(name, Some("win:sha256:abc"), Some("bot-a"))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn owner_made_secrets_stay_global() {
+        let s = FillSecrets::in_memory(Arc::new(MemoryStore::new()));
+        s.upsert(
+            "login/owner",
+            Some("owner-value-123"),
+            Some(&["https://example.com".to_owned()]),
+            Some(&["win:sha256:abc".to_owned()]),
+        )
+        .unwrap();
+        for bot in [Some("bot-a"), Some("bot-b"), None] {
+            assert!(s.resolve_value_for("login/owner", bot).is_ok());
+            assert!(
+                s.check_browser("login/owner", Some("https://example.com"), bot)
+                    .is_ok()
+            );
+            assert!(
+                s.check_desktop("login/owner", Some("win:sha256:abc"), bot)
+                    .is_ok()
+            );
+        }
+    }
+
     #[test]
     fn the_value_hook_sees_stored_and_resolved_values() {
         let n = Arc::new(AtomicUsize::new(0));
@@ -1076,7 +1492,7 @@ mod tests {
         }));
         s.upsert("h/one", Some("hooked-value-1"), None, None)
             .unwrap();
-        s.resolve_value("h/one").unwrap();
+        s.resolve_value_for("h/one", None).unwrap();
         assert_eq!(n.load(Ordering::SeqCst), 2);
     }
 

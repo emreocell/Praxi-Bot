@@ -105,15 +105,15 @@ test("focus rings use --shadow-focus / --color-focus across themes and interacti
 
 test("reduced-motion guards disable smooth scrolling and CSS animations when prefers-reduced-motion: reduce is set", () => {
   const chatView = read("../views/ChatView.tsx");
-  const apiKeyPaste = read("../views/settings/ApiKeyPaste.tsx");
+  const settingsModal = read("../views/SettingsModal.tsx");
   const popoverCss = read("../components/Popover.module.css");
   const gripCss = read("../components/ResizeGrip.module.css");
   const appearanceCss = read("../components/AppearancePicker.module.css");
 
   assert.doesNotMatch(chatView, /scrollIntoView\(\{[^}]*behavior:\s*"smooth"/);
   assert.match(chatView, /behavior:\s*instant\s*\?\s*"instant"\s*:\s*"smooth"/);
-  assert.doesNotMatch(apiKeyPaste, /scrollIntoView\(\{[^}]*behavior:\s*"smooth"/);
-  assert.match(apiKeyPaste, /behavior:\s*instant\s*\?\s*"instant"\s*:\s*"smooth"/);
+  assert.doesNotMatch(settingsModal, /scrollIntoView\(\{[^}]*behavior:\s*"smooth"/);
+  assert.match(settingsModal, /behavior:\s*instant\s*\?\s*"instant"\s*:\s*"smooth"/);
   assert.match(popoverCss, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(gripCss, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(appearanceCss, /@media \(prefers-reduced-motion: reduce\)/);

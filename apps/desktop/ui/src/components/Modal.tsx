@@ -17,6 +17,7 @@ const FOCUSABLE =
 export function Modal({
   open,
   onClose,
+  onEscape,
   label,
   describedBy,
   size = "lg",
@@ -24,6 +25,8 @@ export function Modal({
 }: {
   open: boolean;
   onClose: () => void;
+  /** Optional Escape handler; return true to keep the modal open. */
+  onEscape?: () => boolean;
   /** Accessible name of the dialog. */
   label: string;
   /** Id of the element that explains the dialog (its subtitle or lead text). */
@@ -37,7 +40,11 @@ export function Modal({
   if (open && seqRef.current === 0) seqRef.current = modalStack.next();
   if (!open) seqRef.current = 0;
   const closeRef = useRef(onClose);
-  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+  const escapeRef = useRef(onEscape);
+  useEffect(() => {
+    closeRef.current = onClose;
+    escapeRef.current = onEscape;
+  }, [onClose, onEscape]);
 
   useEffect(() => {
     if (!open) {
@@ -53,6 +60,7 @@ export function Modal({
       if (!modalStack.isTop(seq)) return;
       if (e.key === "Escape") {
         e.stopPropagation();
+        if (escapeRef.current?.()) return;
         closeRef.current();
         return;
       }

@@ -621,21 +621,30 @@ impl AgentLoop {
     /// Cancel every unfinished descendant of `run_id`.  Live ones finish as
     /// `Cancelled` through their own drive task; idle (paused) ones are
     /// cancelled here and reported to the parent's stream.
-    pub(crate) fn cancel_descendants(&self, run_id: RunId) {
+    ///
+    /// `supervise` arms the one-second hard stop for every live descendant too:
+    /// a child blocked in a tool that never polls the token is aborted even when
+    /// its parent already reached `Cancelled`.
+    pub(crate) fn cancel_descendants(&self, run_id: RunId, supervise: bool) {
         let Ok(kids) = self.sh.storage.list_child_runs(run_id) else {
             return;
         };
         for kid in kids {
-            self.cancel_descendants(kid.id);
+            self.cancel_descendants(kid.id, supervise);
             let Some(state) = RunState::parse(&kid.state) else {
                 continue;
             };
             if state.is_terminal() {
                 continue;
             }
+            self.sh.user_stopped.lock().insert(kid.id);
+            self.sh.deny_open_for_stop(kid.id);
             let live = self.rt.active_runs().contains(&kid.id);
             if self.rt.cancel(kid.id).is_ok() {
                 crate::usage::finish(&self.sh, kid.id);
+                if live && supervise {
+                    self.arm_stop_supervisor(kid.id);
+                }
                 if !live && let Some(pctx) = self.ctx_of(run_id) {
                     self.sh.emit(
                         &pctx,

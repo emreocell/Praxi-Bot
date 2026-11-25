@@ -128,7 +128,7 @@ async fn the_owner_submits_and_the_value_only_reaches_the_vault() {
 
     assert_eq!(
         r.secrets
-            .resolve_value("login/example/password")
+            .resolve_value_for("login/example/password", None)
             .unwrap()
             .expose(),
         CANARY
@@ -179,7 +179,7 @@ async fn cancel_leaves_nothing_and_an_existing_name_is_not_replaced_silently() {
     assert_eq!(clash.json()["error"]["code"], "secret_request_exists");
     assert_eq!(
         r.secrets
-            .resolve_value("login/example/password")
+            .resolve_value_for("login/example/password", None)
             .unwrap()
             .expose(),
         "older-value-123"
@@ -267,7 +267,13 @@ async fn a_failed_login_replace_keeps_the_old_username_and_password() {
     store.fail_at.store(store.sets.load(SeqCst) + 1, SeqCst);
     let failed = call(&r.t, Method::POST, &path, Some(body.clone())).await;
     assert_ne!(failed.status, StatusCode::OK);
-    let get = |n: &str| r.secrets.resolve_value(n).unwrap().expose().to_owned();
+    let get = |n: &str| {
+        r.secrets
+            .resolve_value_for(n, None)
+            .unwrap()
+            .expose()
+            .to_owned()
+    };
     assert_eq!(get("login/example/username"), "old-user");
     assert_eq!(get("login/example/password"), "old-pass-123");
     let state = call(&r.t, Method::GET, &format!("/v1/runs/{run}"), None).await;

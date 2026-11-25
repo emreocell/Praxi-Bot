@@ -607,6 +607,51 @@ async fn observe(t: &[Arc<dyn Tool>], ctx: &ToolContext) {
         .unwrap();
 }
 
+/// A bot-owned account is typed into a desktop program only by its own bot,
+/// even when the owner allowed that program for it. Fails without the bot scope
+/// inside `FillSecrets::check_desktop` / `resolve_value_for`.
+#[tokio::test]
+async fn another_bots_account_is_not_typed_into_a_desktop_program() {
+    let (_d, fake, secrets, t) = desktop_rig(Some("win:sha256:abc"), &["win:sha256:abc"]);
+    secrets
+        .register_account(&secret_store::NewAccount {
+            name: "login/acct-a",
+            site: GITHUB,
+            login_id: "a@example.org",
+            email_account: None,
+            bot_id: "bot-a",
+            note: None,
+            password_len: 20,
+            symbols: true,
+        })
+        .unwrap();
+    secrets
+        .upsert(
+            "login/acct-a",
+            None,
+            None,
+            Some(&["win:sha256:abc".to_owned()]),
+        )
+        .unwrap();
+    let input = json!({"index": 3, "gen": 1, "secret": "login/acct-a"});
+    let ctx_for = |bot: Option<&str>| ToolContext {
+        run_id: "run-d".into(),
+        bot_id: bot.map(str::to_owned),
+        ..ToolContext::default()
+    };
+    observe(&t, &ctx_for(None)).await;
+    let ty = tool(&t, "desktop_type");
+    for bot in [Some("bot-b"), None] {
+        let ctx = ctx_for(bot);
+        let e = ty.approval_details(&ctx, &input).await.unwrap_err();
+        assert!(e.to_string().contains("belongs to another bot"), "{e}");
+        assert!(ty.call(&ctx, input.clone()).await.is_err());
+    }
+    assert!(fake.typed.lock().is_empty());
+    ty.call(&ctx_for(Some("bot-a")), input).await.unwrap();
+    assert_eq!(fake.typed.lock().len(), 20);
+}
+
 /// Guard: a desktop secret is typed only into a program with a verified
 /// identity on the allow-list; none supplied / another identity -> refused
 /// before a card; the card names window and program; the output is scrubbed.
@@ -683,4 +728,38 @@ async fn a_desktop_secret_needs_a_verified_allow_listed_program() {
         .is_err()
     );
     assert!(sv.call(&ctx, json!({"index":3,"gen":1})).await.is_err());
+}
+
+/// A bot-owned account is typed only by its own bot. Fails without the
+/// `check_bot` calls in the browser tool.
+#[tokio::test]
+async fn another_bots_account_is_not_typed() {
+    let r = rig();
+    r.secrets
+        .register_account(&secret_store::NewAccount {
+            name: "login/acct-a",
+            site: GITHUB,
+            login_id: "a@example.org",
+            email_account: None,
+            bot_id: "bot-a",
+            note: None,
+            password_len: 20,
+            symbols: true,
+        })
+        .unwrap();
+    let input = json!({"ref": "e5", "secret": "login/acct-a"});
+    let fill = tool(&r.tools, "browser_fill");
+    let other = ToolContext {
+        bot_id: Some("bot-b".into()),
+        ..ToolContext::default()
+    };
+    assert!(fill.call(&other, input.clone()).await.is_err());
+    assert!(fill.approval_details(&other, &input).await.is_err());
+    assert!(r.fake.typed_secrets.lock().is_empty());
+    let owner = ToolContext {
+        bot_id: Some("bot-a".into()),
+        ..ToolContext::default()
+    };
+    fill.call(&owner, input).await.unwrap();
+    assert_eq!(r.fake.typed_secrets.lock().len(), 1);
 }

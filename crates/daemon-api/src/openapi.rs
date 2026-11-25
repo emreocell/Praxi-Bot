@@ -33,6 +33,7 @@ use crate::host_copy;
 use crate::host_import;
 use crate::host_links;
 use crate::host_setup;
+use crate::incoming_webhook;
 use crate::knowledge;
 use crate::knowledge_settings;
 use crate::live_view;
@@ -360,6 +361,12 @@ impl Modify for Security {
         voice_routes::update_voice,
         bot_limits_routes::get_bot_spend_limits,
         bot_limits_routes::put_bot_spend_limits,
+        incoming_webhook::create_webhook,
+        incoming_webhook::delete_webhook,
+        incoming_webhook::list_webhooks,
+        incoming_webhook::receive_webhook,
+        incoming_webhook::test_webhook,
+        incoming_webhook::update_webhook,
         data_routes::get_data_usage,
         data_routes::post_clear_cache,
         embeddings_routes::get_embeddings,
@@ -719,6 +726,11 @@ impl Modify for Security {
         voice::TranscribeOutput,
         voice::VoiceConfigDto,
         voice::VoiceConfigInput,
+        incoming_webhook::IncomingWebhookAccepted,
+        incoming_webhook::IncomingWebhookCreated,
+        incoming_webhook::IncomingWebhookDto,
+        incoming_webhook::IncomingWebhookInput,
+        incoming_webhook::IncomingWebhookPatch,
         bot_limits_routes::BotLimitUsageDto,
         bot_limits_routes::BotLimitsDto,
         bot_limits_routes::BotSpendLimitsDto,

@@ -15,8 +15,9 @@ something goes wrong. For the first-run wizard see [Install and first run](insta
   and start Praxi again.
 - **SmartScreen.** Releases are not code-signed yet, so Windows may show
   "Windows protected your PC". Choose **More info**, then **Run anyway**. To be
-  safe, compare the SHA-256 published next to the download with
-  `Get-FileHash .\Praxi-...-setup.exe`.
+  safe, check the download before you run it: compare its SHA-256 with
+  `SHA256SUMS.txt` on the release page and ask GitHub to confirm who built it. One
+  script does both; see [Check your download](verify-download.md).
 
 ## What gets installed
 

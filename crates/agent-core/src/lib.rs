@@ -43,11 +43,15 @@ mod tool_guidance;
 pub mod usage;
 
 #[cfg(test)]
+mod account_register_tests;
+#[cfg(test)]
 mod approval_expiry_tests;
 #[cfg(test)]
 mod bot_limit_tests;
 #[cfg(test)]
 mod browser_mcp_tests;
+#[cfg(test)]
+mod cancel_supervisor;
 #[cfg(test)]
 mod control_grant_tests;
 #[cfg(test)]
@@ -64,6 +68,8 @@ mod scoped_tests;
 mod server_computer_tests;
 #[cfg(test)]
 mod spend_tests;
+#[cfg(test)]
+mod stop_approval_tests;
 #[cfg(test)]
 mod subagent_tests;
 #[cfg(test)]

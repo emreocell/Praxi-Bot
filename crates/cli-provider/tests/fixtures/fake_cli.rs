@@ -225,6 +225,11 @@ fn main() {
                 println!(r#"{{"status": "authenticated"}}"#);
             }
         }
+        // Qoder CLI 1.1.97 `status -o json`.
+        "status -o json" => {
+            let signed_in = std::env::var("FAKE_SIGNED_OUT").is_err();
+            println!(r#"{{"logged_in": {signed_in}, "version": "1.1.97", "allow_byok": 0}}"#);
+        }
         "status" => {
             if let Ok(text) = std::env::var("FAKE_CURSOR_TEXT") {
                 println!("{text}");

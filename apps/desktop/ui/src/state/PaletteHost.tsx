@@ -161,9 +161,9 @@ export function PaletteHost({
     for (const page of settingsPageIds()) {
       out.push({
         id: `settings-${page}`,
-        title: t("palette.settingsPage", { name: t(`settings.pages.${page}.name`) }),
+        title: t("palette.settingsPage", { name: t(`settingsModal.pages.${page}.name`) }),
         group: t("palette.group.settings"),
-        keywords: [t(`settings.pages.${page}.description`)],
+        keywords: [t(`settingsModal.pages.${page}.description`)],
         run: () => onSettingsPage(page)
       });
     }

@@ -1,7 +1,8 @@
+import { ChevronDown, TriangleAlert } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
 import styles from "./SettingsUi.module.css";
 
-/** One setting: title and description on the left, the control on the right. */
+/** One setting: icon-less title and one-line description on the left, control on the right. */
 export function SettingRow({
   title,
   description,
@@ -15,7 +16,7 @@ export function SettingRow({
   stacked?: boolean;
 }) {
   return (
-    <div className={[styles.row, stacked ? styles.stacked : ""].join(" ")}>
+    <div className={[styles.row, stacked ? styles.stacked : ""].filter(Boolean).join(" ")}>
       <div className={styles.rowText}>
         <h3 className={styles.rowTitle}>{title}</h3>
         {description ? <p className={styles.rowDesc}>{description}</p> : null}
@@ -109,7 +110,8 @@ export function Switch({
       type="button"
       role="switch"
       aria-checked={checked}
-      aria-label={label} title={label}
+      aria-label={label}
+      title={label}
       disabled={disabled}
       className={[styles.switch, checked ? styles.switchOn : ""]
         .filter(Boolean)
@@ -123,27 +125,99 @@ export function Switch({
 
 /**
  * A titled card for settings blocks that bring their own body (lists, forms).
+ * Icon-less title, one-line plain description, unified surface and spacing.
  * `tone="danger"` marks a danger zone: destructive actions live apart, with a red edge.
  */
 export function SettingsCard({
   title,
   description,
   tone = "default",
+  testId,
   children
 }: {
   title: string;
   description?: string;
   tone?: "default" | "danger";
+  testId?: string;
   children: ReactNode;
 }) {
   return (
-    <section className={[styles.card, tone === "danger" ? styles.cardDanger : ""].join(" ")}>
+    <section
+      className={[styles.card, tone === "danger" ? styles.cardDanger : ""].filter(Boolean).join(" ")}
+      data-testid={testId}
+    >
       <header className={styles.cardHead}>
         <h3 className={styles.cardTitle}>{title}</h3>
         {description ? <p className={styles.rowDesc}>{description}</p> : null}
       </header>
       {children}
     </section>
+  );
+}
+
+/** Unified consequence note and optional "What is this?" popover row beneath a setting or card. */
+export function SettingsCardFooter({
+  risk,
+  action
+}: {
+  risk?: string;
+  action?: ReactNode;
+}) {
+  if (!risk && !action) return null;
+  return (
+    <div className={styles.cardFooter}>
+      {risk ? (
+        <p className={styles.riskNote}>
+          <TriangleAlert aria-hidden="true" />
+          <span>{risk}</span>
+        </p>
+      ) : (
+        <span />
+      )}
+      {action}
+    </div>
+  );
+}
+
+/** Collapsible progressive-disclosure section for expert settings on a page. */
+export function SettingsDisclosure({
+  open,
+  count,
+  label,
+  hint,
+  onToggle,
+  testId,
+  children
+}: {
+  open: boolean;
+  count: number;
+  label: string;
+  hint?: string;
+  onToggle: () => void;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={styles.disclosure}>
+      <button
+        type="button"
+        className={styles.disclosureBtn}
+        aria-expanded={open}
+        data-testid={testId}
+        onClick={onToggle}
+      >
+        <span className={styles.disclosureLeft}>
+          <span className={styles.disclosureTitle}>{label}</span>
+          <span className={styles.disclosureCount}>{count}</span>
+          {hint && !open ? <span className={styles.disclosureHint}>{hint}</span> : null}
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className={[styles.disclosureChev, open ? styles.disclosureChevOpen : ""].filter(Boolean).join(" ")}
+        />
+      </button>
+      {open ? <div className={styles.disclosureBody}>{children}</div> : null}
+    </div>
   );
 }
 

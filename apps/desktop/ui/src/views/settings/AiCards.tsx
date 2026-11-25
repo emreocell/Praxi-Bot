@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MOCK_BASE_URL } from "../../api/mockMode";
 import { ModelPicker } from "../../components/ModelPicker";
+import { SettingGroup, SettingRow, SettingsCard } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { modelGroups } from "../../lib/modelPicker";
 import { defaultModelRef } from "../../lib/providerView";
@@ -10,7 +11,6 @@ import { canManageProviders } from "../../lib/providerConnection";
 import { isTauriRuntime } from "../../overlay/events";
 import { useDaemon } from "../../state/DaemonContext";
 import { useProviders } from "../../state/useProviders";
-import pageStyles from "./AiPage.module.css";
 import { ProvidersSection } from "../SettingsSections";
 import { ApiKeyPaste } from "./ApiKeyPaste";
 import { LocalInstallCard } from "../../components/LocalInstallCard";
@@ -62,55 +62,74 @@ function DefaultModelRow() {
   };
 
   return (
-    <section className={pageStyles.sec} aria-labelledby="ai-default-h">
-      <div className={pageStyles.head}>
-        <h3 id="ai-default-h">{t("settingsModal.ai.defaultModel.heading")}</h3>
+    <SettingGroup>
+      <SettingRow
+        title={t("settingsModal.ai.defaultModel.title")}
+        description={
+          canChange
+            ? t("settingsModal.ai.defaultModel.description")
+            : t("settings.providers.localDaemonOnly")
+        }
+      >
         <HomeHint />
-      </div>
-      <div className={`${pageStyles.card} ${pageStyles.item}`}>
-        <div className={pageStyles.text}>
-          <span>{t("settingsModal.ai.defaultModel.title")}</span>
-          <span className={pageStyles.sub}>
-            {canChange
-              ? t("settingsModal.ai.defaultModel.description")
-              : t("settings.providers.localDaemonOnly")}
-          </span>
-        </div>
         <ModelPicker
           groups={groups}
           value={override ?? current}
           disabled={!canChange}
           onPick={(ref) => void pick(ref)}
         />
-      </div>
-    </section>
+      </SettingRow>
+    </SettingGroup>
   );
 }
 
-/** Provider forms for servers the catalog does not cover; closed by default. */
-function AdvancedProviders() {
-  const { t } = useTranslation();
-  return (
-    <details className={pageStyles.advanced} id="ai-advanced-providers">
-      <summary>{t("settingsModal.ai.advanced")}</summary>
-      <ProvidersSection />
-    </details>
-  );
-}
-
-/** Cards of the "AI" section: found on this computer, API key, default, advanced. */
+/** Cards of the "AI models" section: default, keys, detected tools, memory, knowledge, local & advanced. */
 export function aiCards(t: TFunction): CardDef[] {
   return [
-    { id: "knowledge", section: "ai", kind: "block", title: t("knowledge.title"), description: t("knowledge.description"), keywords: "rag memory knowledge kaynak hafiza bilgi brain beyin", node: <KnowledgeCard /> },
-    { id: "memory", section: "ai", kind: "block", title: t("memory.title"), description: t("memory.description"), keywords: "memory recall forget undo remember hafiza hatirla unut geri al gedächtnis", node: <MemoryCard /> },
+    {
+      id: "defaultModel",
+      section: "ai",
+      kind: "block",
+      title: t("settingsModal.ai.defaultModel.title"),
+      description: t("settingsModal.ai.defaultModel.description"),
+      keywords: "model default ai brain varsayilan standartmodell modell",
+      node: <DefaultModelRow />
+    },
+    {
+      id: "keys",
+      section: "ai",
+      kind: "block",
+      title: t("settingsModal.ai.keys.title"),
+      description: t("settingsModal.ai.keys.description"),
+      keywords: "api key secret password anahtar sifre erisim passwort schluessel schlüssel zugang openai anthropic gemini openrouter",
+      node: <ApiKeyPaste />
+    },
     {
       id: "detectedAccounts",
       section: "ai",
       kind: "block",
       title: t("settingsModal.ai.detected.title"),
       description: t("settingsModal.ai.detected.description"),
-      keywords: "cli claude codex cursor gemini opencode chatgpt account hesap algilanan bulunan",
+      keywords: "cli claude codex cursor gemini opencode chatgpt account tool hesap arac algilanan bulunan werkzeuge",
       node: <EnginesCard />
+    },
+    {
+      id: "memory",
+      section: "ai",
+      kind: "block",
+      title: t("memory.title"),
+      description: t("memory.description"),
+      keywords: "memory recall forget undo remember delete hafiza hatirla unut sil geri al gedächtnis merken vergessen löschen",
+      node: <MemoryCard />
+    },
+    {
+      id: "knowledge",
+      section: "ai",
+      kind: "block",
+      title: t("knowledge.title"),
+      description: t("knowledge.description"),
+      keywords: "rag memory knowledge files notes kaynak hafiza bilgi dosya notlar brain beyin wissen dateien notizen",
+      node: <KnowledgeCard />
     },
     {
       id: "localModels",
@@ -120,29 +139,13 @@ export function aiCards(t: TFunction): CardDef[] {
       description: t("localModels.cardDescription"),
       keywords: "ollama lmstudio local model hardware gpu ram yerel donanim lokal modell hardware",
       node: (
-        <ThisComputerOnly>
-          <LocalInstallCard />
-          <LocalModelsAdvice />
-        </ThisComputerOnly>
+        <SettingsCard title={t("localModels.cardTitle")} description={t("localModels.cardDescription")}>
+          <ThisComputerOnly>
+            <LocalInstallCard />
+            <LocalModelsAdvice />
+          </ThisComputerOnly>
+        </SettingsCard>
       )
-    },
-    {
-      id: "keys",
-      section: "ai",
-      kind: "block",
-      title: t("settingsModal.ai.keys.title"),
-      description: t("settingsModal.ai.keys.description"),
-      keywords: "api key secret anahtar sifre openai anthropic gemini openrouter",
-      node: <ApiKeyPaste />
-    },
-    {
-      id: "defaultModel",
-      section: "ai",
-      kind: "block",
-      title: t("settingsModal.ai.defaultModel.title"),
-      description: t("settingsModal.ai.defaultModel.description"),
-      keywords: "model provider varsayilan",
-      node: <DefaultModelRow />
     },
     {
       id: "helpers",
@@ -150,7 +153,7 @@ export function aiCards(t: TFunction): CardDef[] {
       kind: "block",
       title: t("helpers.title"),
       description: t("helpers.description"),
-      keywords: "embedding embeddings gemini openai ollama decision helper yardimci karar anahtar helfer entscheidung bedeutung",
+      keywords: "embedding embeddings gemini openai ollama decision helper yardimci karar arama helfer entscheidung bedeutung suche",
       node: <HelpersCard />
     },
     {
@@ -159,8 +162,8 @@ export function aiCards(t: TFunction): CardDef[] {
       kind: "block",
       title: t("settings.providers.title"),
       description: t("settings.providers.description"),
-      keywords: "provider saglayici ollama openrouter gelismis advanced compatible api key anahtar",
-      node: <AdvancedProviders />
+      keywords: "provider server custom compatible ollama openrouter saglayici sunucu ozel gelismis advanced api key anahtar schluessel anbieter benutzerdefiniert",
+      node: <ProvidersSection />
     }
   ];
 }

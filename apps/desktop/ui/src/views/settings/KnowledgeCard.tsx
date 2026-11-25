@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Card } from "ui";
+import { Button } from "ui";
+import { SettingsCard } from "../../components/SettingsUi";
 import type { Chat, KnowledgeEmailCapture, KnowledgeEmbeddingProgress, KnowledgeEmbeddingApproval, KnowledgeEmbeddingGrantTarget, KnowledgeSource, KnowledgeSourceKind, KnowledgeSettings, KnowledgeSettingsInput } from "../../api/types";
 import { useDaemon } from "../../state/DaemonContext";
 import { useProviders } from "../../state/useProviders";
@@ -102,9 +103,8 @@ export function KnowledgeCard() {
     if (client) setGrant(await client.requestKnowledgeEmbeddingApproval(activeBot, target));
   });
 
-  return <Card padding="md" className={styles.root}>
-    <h3 className={styles.heading}>{t("knowledge.title")}</h3>
-    <p className={form.hint}>{t("knowledge.description")}</p>
+  return <SettingsCard title={t("knowledge.title")} description={t("knowledge.description")}>
+    <div className={styles.root}>
     <p className={form.hint}>{t("knowledge.importHint")}</p>
     <label className={form.field}>{t("knowledge.bot")}
       <select className={form.select} value={activeBot} disabled={busy} onChange={(e) => setBot(e.target.value)}>
@@ -201,7 +201,8 @@ export function KnowledgeCard() {
       </details>
       {settings ? <EmbeddingSettings key={activeBot + JSON.stringify(settings)} settings={settings} providerIds={providers?.configured.filter((p) => p.enabled && (p.custom || providers.catalog.some((entry) => entry.id === p.id && ["gemini", "openai_compatible"].includes(entry.kind)))).map((p) => p.id) ?? []} busy={busy} save={(value) => act(() => client!.updateKnowledgeSettings(activeBot, value))} queryApproval={() => requestApproval({ kind: "queries" })} revokeQuery={() => act(() => client!.revokeKnowledgeEmbeddingGrant(activeBot, { kind: "queries" }))} resetCooldown={() => act(() => client!.resetKnowledgeEmbeddingCooldown(activeBot))} /> : null}
     </>}
-  </Card>;
+    </div>
+  </SettingsCard>;
 }
 
 function EmbeddingSettings({ settings, providerIds, busy, save, queryApproval, revokeQuery, resetCooldown }: {

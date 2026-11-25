@@ -35,6 +35,40 @@ pub use browser_cdp::FieldTarget;
 /// Why a driver cannot type a secret.
 const NO_SECRET_FILL: &str = "this browser backend cannot tell which page frame holds a field, so secrets are not typed with it";
 
+const NO_SMART_SCROLL: &str = "this browser backend only scrolls by pixels: use dy (positive = down) and, if you need to reach something, snapshot again";
+const NO_HOVER: &str = "this browser backend cannot hover: click the element instead";
+const NO_SELECT_TEXT: &str = "this browser backend cannot select text";
+
+/// What `browser_scroll` was asked to do. At most one of `dx`/`dy`, `pages`, `to`, `into_view`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ScrollOpts {
+    /// Scroll over this element, or bring it into view with `into_view`.
+    pub r: Option<String>,
+    /// Pixels right.
+    pub dx: f64,
+    /// Pixels down.
+    pub dy: f64,
+    /// Screens down (negative: up).
+    pub pages: Option<f64>,
+    /// `top` or `bottom` of the page.
+    pub to: Option<String>,
+    /// Bring `r` into view.
+    pub into_view: bool,
+    /// `instant`, `smooth` or `slow`; `None` follows the `human_like` setting.
+    pub speed: Option<String>,
+}
+
+/// What `browser_select_text` was asked to do.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SelectOpts {
+    /// Element to select in.
+    pub r: Option<String>,
+    /// Visible text to select.
+    pub text: Option<String>,
+    /// `word` (double click), `paragraph` (triple click) or `range` (drag).
+    pub unit: String,
+}
+
 /// What `browser_wait` waits for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Wait {
@@ -129,6 +163,24 @@ pub trait BrowserDriver: Send + Sync {
     async fn press(&self, key: &str) -> Result<String, String>;
     /// Scroll the page, or element `r`.
     async fn scroll(&self, r: Option<&str>, dx: f64, dy: f64) -> Result<String, String>;
+    /// Scroll by pages, to an edge, an element into view, or at a chosen speed. A backend that
+    /// only knows pixel scrolls refuses the other forms instead of guessing.
+    async fn scroll_opts(&self, o: &ScrollOpts) -> Result<String, String> {
+        if o.pages.is_some() || o.to.is_some() || o.into_view {
+            return Err(NO_SMART_SCROLL.into());
+        }
+        self.scroll(o.r.as_deref(), o.dx, o.dy).await
+    }
+    /// Move the pointer over element `r` and rest there (hover menus, tooltips).
+    async fn hover(&self, r: &str) -> Result<String, String> {
+        let _ = r;
+        Err(NO_HOVER.into())
+    }
+    /// Select text with the mouse (see [`SelectOpts`]).
+    async fn select_text(&self, o: &SelectOpts) -> Result<String, String> {
+        let _ = o;
+        Err(NO_SELECT_TEXT.into())
+    }
     /// Wait for a condition.
     async fn wait(&self, cond: Wait, timeout: Option<Duration>) -> Result<String, String>;
     /// Go back in history.
@@ -212,6 +264,9 @@ pub struct BrowserSettings {
     pub profiles_root: PathBuf,
     /// Real bot work/active takeover pins the managed process; watch never does.
     pub idle_timeout: Duration,
+    /// How much like a person the pointer and the scrolling move (visible demo feel; this is
+    /// not a way around bot detection). `Auto` does it only while someone can watch.
+    pub human_like: browser_cdp::HumanLike,
 }
 
 impl BrowserSettings {
@@ -224,6 +279,7 @@ impl BrowserSettings {
             profile_dir: None,
             profiles_root: data_dir.join("browsers"),
             idle_timeout: Duration::from_secs(120),
+            human_like: browser_cdp::HumanLike::default(),
         }
     }
 }
@@ -326,6 +382,13 @@ fn s<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
+/// Sleep, except for a zero pause.
+async fn pause(d: Duration) {
+    if !d.is_zero() {
+        tokio::time::sleep(d).await;
+    }
+}
+
 /// Sanitize untrusted dialog message: strip control chars, cap at 300 chars with ellipsis, and escape quotes.
 pub(crate) fn sanitize_dialog_message(msg: &str) -> String {
     const MAX_CHARS: usize = 300;
@@ -411,6 +474,17 @@ impl CdpDriver {
 
     fn desired_headless(&self) -> bool {
         self.settings.headless
+    }
+
+    /// How an action moves right now: a window on the desktop or an open live view counts
+    /// as somebody watching.
+    fn feel(&self) -> browser_cdp::Feel {
+        let watched = !self.desired_headless()
+            || self
+                .view
+                .as_ref()
+                .is_some_and(|view| view.status().active_profile.is_some());
+        self.settings.human_like.feel(watched)
     }
 
     fn profile_path(&self, profile: Option<&str>) -> Result<Option<PathBuf>, String> {
@@ -857,13 +931,15 @@ impl BrowserDriver for CdpDriver {
             action: DialogAction::from_str_opt(dialog),
             prompt_text: prompt_text.map(str::to_string),
         };
+        let feel = self.feel();
         let acted = with_session!(self, None, |sess| {
             sess.page
-                .click_with_guard(
+                .click_human(
                     r,
                     &dialog_opts,
                     expected_input_origin().as_deref(),
                     &step_guard(),
+                    feel,
                 )
                 .await
         })?;
@@ -875,6 +951,13 @@ impl BrowserDriver for CdpDriver {
     }
 
     async fn fill(&self, r: &str, text: &str) -> Result<String, String> {
+        // The value is still set in one step on the approved element (so a page that steals
+        // focus cannot receive it); only a short beat before it looks natural.
+        pause(browser_cdp::human::prepare_pause(
+            self.feel(),
+            &mut browser_cdp::human::Jitter::from_clock(),
+        ))
+        .await;
         let acted = with_session!(self, None, |sess| {
             sess.page
                 .fill_with_origin(r, text, expected_input_origin().as_deref())
@@ -937,6 +1020,11 @@ impl BrowserDriver for CdpDriver {
     }
 
     async fn press(&self, key: &str) -> Result<String, String> {
+        pause(browser_cdp::human::prepare_pause(
+            self.feel(),
+            &mut browser_cdp::human::Jitter::from_clock(),
+        ))
+        .await;
         let acted = with_session!(self, None, |sess| {
             sess.page
                 .press_key_with_guard(key, expected_input_origin().as_deref(), &step_guard())
@@ -946,7 +1034,66 @@ impl BrowserDriver for CdpDriver {
     }
 
     async fn scroll(&self, r: Option<&str>, dx: f64, dy: f64) -> Result<String, String> {
-        let acted = with_session!(self, None, |sess| { sess.page.scroll(r, dx, dy).await })?;
+        self.scroll_opts(&ScrollOpts {
+            r: r.map(str::to_owned),
+            dx,
+            dy,
+            ..ScrollOpts::default()
+        })
+        .await
+    }
+
+    async fn scroll_opts(&self, o: &ScrollOpts) -> Result<String, String> {
+        let feel = o
+            .speed
+            .as_deref()
+            .and_then(browser_cdp::Feel::from_speed)
+            .unwrap_or_else(|| self.feel());
+        let to = match o.to.as_deref() {
+            Some("top") => Some(browser_cdp::ScrollTo::Top),
+            Some("bottom") => Some(browser_cdp::ScrollTo::Bottom),
+            _ => None,
+        };
+        let acted = with_session!(self, None, |sess| {
+            sess.page
+                .scroll_with(&browser_cdp::ScrollRequest {
+                    r: o.r.as_deref(),
+                    dx: o.dx,
+                    dy: o.dy,
+                    pages: o.pages,
+                    to,
+                    into_view: o.into_view,
+                    feel,
+                })
+                .await
+        })?;
+        render_action(&acted)
+    }
+
+    async fn hover(&self, r: &str) -> Result<String, String> {
+        let feel = self.feel();
+        let acted = with_session!(self, None, |sess| { sess.page.hover_with(r, feel).await })?;
+        render_action(&acted)
+    }
+
+    async fn select_text(&self, o: &SelectOpts) -> Result<String, String> {
+        let feel = self.feel();
+        let unit = match o.unit.as_str() {
+            "word" => browser_cdp::SelectUnit::Word,
+            "paragraph" => browser_cdp::SelectUnit::Paragraph,
+            _ => browser_cdp::SelectUnit::Range,
+        };
+        let acted = with_session!(self, None, |sess| {
+            sess.page
+                .select_text(&browser_cdp::TextSelection {
+                    r: o.r.as_deref(),
+                    text: o.text.as_deref(),
+                    unit,
+                    feel,
+                    expected: expected_input_origin().as_deref(),
+                })
+                .await
+        })?;
         render_action(&acted)
     }
 
@@ -1076,6 +1223,8 @@ enum Op {
     Select,
     Press,
     Scroll,
+    Hover,
+    SelectText,
     Wait,
     Back,
     Tabs,
@@ -1362,13 +1511,43 @@ fn tools_with_pool(
             Op::Scroll,
             spec(
                 "browser_scroll",
-                "Scroll the page (positive dy = down) or an element, to reach something that is not in the page text yet (long pages and lists load more as you scroll); then read again with browser_snapshot. Example: {\"dy\":600}",
+                "Scroll the page like a person reading, then read again with browser_snapshot: this is how you reach what is not in the page text yet. Do NOT call browser_open again to \"refresh\" or to see more: the page is still open, so scroll and read it. Long pages and lists load more as you scroll. The result says where you are (top, percent, bottom). Give ONE of: `dy` (pixels, positive = down), `pages` (screens: 1 = one screen down, -1 = one up), `to` (\"top\" or \"bottom\"), or `ref` with `into_view` (bring an element you already have a ref for onto the screen). `ref` alone scrolls inside that element (a list or a box). `speed`: smooth (a gentle glide, the default while someone watches), slow or instant. Examples: {\"pages\":1}, {\"to\":\"bottom\"}, {\"ref\":\"e12\",\"into_view\":true}, {\"dy\":600}",
                 json!({"type":"object","properties":{
                     "ref":ref_prop,
-                    "dx":{"type":"number"},
-                    "dy":{"type":"number"}
+                    "dx":{"type":"number","description":"Pixels right (positive) or left."},
+                    "dy":{"type":"number","description":"Pixels down (positive) or up."},
+                    "pages":{"type":"number","minimum":-50,"maximum":50,"description":"Screens down (positive) or up (negative); 1 is about one screen."},
+                    "to":{"type":"string","enum":["top","bottom"],"description":"Go to the top or the bottom of the page."},
+                    "into_view":{"type":"boolean","description":"With `ref`: scroll so that element is on screen."},
+                    "speed":{"type":"string","enum":["instant","smooth","slow"],"description":"How it looks. Default: smooth while the user watches, instant otherwise."}
                 }}),
                 Effect::Read,
+                b,
+            ),
+        ),
+        (
+            Op::Hover,
+            spec(
+                "browser_hover",
+                "Move the pointer over an element and rest there, like a person, so a menu, tooltip or preview that only shows on hover opens; the result shows what appeared. Use it before clicking an item of a hover menu (then click the item by its ref). It does not click. Example: {\"ref\":\"e12\"}",
+                json!({"type":"object","properties":{
+                    "ref":ref_prop
+                },"required":["ref"]}),
+                Effect::Read,
+                b,
+            ),
+        ),
+        (
+            Op::SelectText,
+            spec(
+                "browser_select_text",
+                "Select text with the mouse, like a person marking a sentence. Give `text` (a few words or the whole sentence exactly as the page shows it: it is scrolled into view and dragged over) and/or `ref` (search only inside that element; `ref` alone selects the whole element). `mode`: \"range\" (default, drags over the text), \"word\" (double click, one word) or \"paragraph\" (triple click, the whole paragraph). It presses the mouse on the page, so it can follow a link if the text is inside one. The result names what is selected. Example: {\"text\":\"Orders ship within two days\"}",
+                json!({"type":"object","properties":{
+                    "ref":ref_prop,
+                    "text":{"type":"string","description":"Visible text to select, as the page shows it."},
+                    "mode":{"type":"string","enum":["range","word","paragraph"],"description":"range (drag, default), word (double click) or paragraph (triple click)."}
+                }}),
+                Effect::Write,
                 b,
             ),
         ),
@@ -1520,6 +1699,105 @@ struct ScrollIn {
     dx: f64,
     #[serde(default)]
     dy: f64,
+    pages: Option<f64>,
+    to: Option<String>,
+    #[serde(default)]
+    into_view: bool,
+    speed: Option<String>,
+}
+
+impl ScrollIn {
+    /// The request, or why it makes no sense (said plainly, so the model can fix it).
+    fn opts(self) -> Result<ScrollOpts, ToolError> {
+        let bad = |m: &str| Err(ToolError::InvalidInput(m.into()));
+        if !self.dx.is_finite()
+            || !self.dy.is_finite()
+            || self.pages.is_some_and(|p| !p.is_finite())
+        {
+            return bad("dx, dy and pages must be plain numbers");
+        }
+        let by_pixels = self.dx != 0.0 || self.dy != 0.0;
+        let forms = usize::from(by_pixels)
+            + usize::from(self.pages.is_some())
+            + usize::from(self.to.is_some())
+            + usize::from(self.into_view);
+        if forms > 1 {
+            return bad(
+                "give only one of dy/dx, pages, to, or ref with into_view: for example {\"pages\":1} scrolls one screen down",
+            );
+        }
+        if forms == 0 {
+            return bad(
+                "say how far: {\"pages\":1} (one screen down), {\"to\":\"bottom\"}, {\"dy\":600}, or {\"ref\":\"e12\",\"into_view\":true}",
+            );
+        }
+        if self.into_view && self.r#ref.is_none() {
+            return bad("into_view needs the ref of the element to bring into view");
+        }
+        if let Some(p) = self.pages
+            && (p == 0.0 || p.abs() > 50.0)
+        {
+            return bad("pages must be between -50 and 50 and not 0 (1 = one screen down)");
+        }
+        if let Some(to) = &self.to
+            && !matches!(to.as_str(), "top" | "bottom")
+        {
+            return bad("to must be \"top\" or \"bottom\"");
+        }
+        if self.to.is_some() && self.r#ref.is_some() {
+            return bad("to scrolls the whole page; leave ref out");
+        }
+        if let Some(speed) = &self.speed
+            && browser_cdp::Feel::from_speed(speed).is_none()
+        {
+            return bad("speed must be instant, smooth or slow");
+        }
+        Ok(ScrollOpts {
+            r: self.r#ref,
+            dx: self.dx,
+            dy: self.dy,
+            pages: self.pages,
+            to: self.to,
+            into_view: self.into_view,
+            speed: self.speed,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct HoverIn {
+    r#ref: String,
+}
+
+#[derive(Deserialize)]
+struct SelectTextIn {
+    r#ref: Option<String>,
+    text: Option<String>,
+    mode: Option<String>,
+}
+
+impl SelectTextIn {
+    fn opts(self) -> Result<SelectOpts, ToolError> {
+        let text = self.text.filter(|t| !t.trim().is_empty());
+        if text.is_none() && self.r#ref.is_none() {
+            return Err(ToolError::InvalidInput(
+                "give `text` (what to select, as the page shows it) and/or `ref` (the element to select in)".into(),
+            ));
+        }
+        let unit = match self.mode.as_deref().unwrap_or("range") {
+            m @ ("range" | "word" | "paragraph") => m.to_owned(),
+            _ => {
+                return Err(ToolError::InvalidInput(
+                    "mode must be range, word or paragraph".into(),
+                ));
+            }
+        };
+        Ok(SelectOpts {
+            r: self.r#ref,
+            text,
+            unit,
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -1604,6 +1882,7 @@ pub async fn fill_with_secret(
     secrets: &FillSecrets,
     r: &str,
     name: &str,
+    bot: Option<&str>,
 ) -> Result<String, String> {
     let target = driver.field_target(r).await?;
     secrets
@@ -1611,18 +1890,26 @@ pub async fn fill_with_secret(
             name,
             target.frame_origin.as_deref(),
             target.top_origin.as_deref(),
+            bot,
         )
         .map_err(|e| e.to_string())?;
-    let value = secrets.resolve_value(name).map_err(|e| e.to_string())?;
+    let value = secrets
+        .resolve_value_for(name, bot)
+        .map_err(|e| e.to_string())?;
     let top = target.top_origin.clone();
     let accept = |origin: Option<String>| {
         secrets
-            .check_browser_in(name, origin.as_deref(), top.as_deref())
+            .check_browser_in(name, origin.as_deref(), top.as_deref(), bot)
             .is_ok()
     };
     let result = driver.fill_secret(r, value.expose(), &accept).await;
     let shown = match result {
-        Ok(text) => Ok(scrub(&text, &value)),
+        Ok(text) => {
+            // An account's password is now on a page: it is no longer "unused".
+            // A failed bookkeeping write never fails the fill that already ran.
+            let _ = secrets.mark_used(name);
+            Ok(scrub(&text, &value))
+        }
         Err(e) => Err(scrub(&e, &value)),
     };
     drop(value);
@@ -1706,6 +1993,9 @@ impl BrowserTool {
         };
         let i: FillIn = parse(input.clone())?;
         let secrets = self.fill_secrets()?;
+        secrets
+            .check_bot(&name, ctx.bot_id.as_deref())
+            .map_err(|e| refused(&e))?;
         let shared = self.select_shared(ctx)?;
         let target = shared
             .driver
@@ -1719,6 +2009,7 @@ impl BrowserTool {
                 &name,
                 target.frame_origin.as_deref(),
                 target.top_origin.as_deref(),
+                ctx.bot_id.as_deref(),
             )
             .map_err(|e| refused(&e))?;
         Ok(Some((name, target, grant)))
@@ -1754,6 +2045,38 @@ impl BrowserTool {
         .map_err(exec_err)
     }
 
+    /// After a human takeover (or when an observation was invalidated) the action is not
+    /// done: the fresh page is returned instead, so the model decides again.
+    async fn discard_if_stale(
+        &self,
+        permit: &ActionPermit,
+        d: &Arc<dyn BrowserDriver>,
+    ) -> Result<Option<String>, ToolError> {
+        let epoch_now = self
+            .shared
+            .control
+            .as_ref()
+            .map_or(0, |g| g.observation_epoch());
+        if !permit.needs_observation()
+            && self
+                .shared
+                .observed_epoch
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == epoch_now
+        {
+            return Ok(None);
+        }
+        self.shared
+            .observed_epoch
+            .store(epoch_now, std::sync::atomic::Ordering::SeqCst);
+        self.refuse_observation_while_latched()?;
+        let fresh = d.snapshot(false).await.map_err(exec_err)?;
+        permit.observed();
+        Ok(Some(format!(
+            "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+        )))
+    }
+
     /// A fresh observation is never taken while a pause, a human takeover or a
     /// local override is in force: the model must not read the page then.
     fn refuse_observation_while_latched(&self) -> Result<(), ToolError> {
@@ -1767,7 +2090,12 @@ impl BrowserTool {
 
     /// Observation tools discard their result if control changed while they
     /// ran (a screenshot, a wait or a tab list that straddles a takeover).
-    async fn run(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
+    async fn run(
+        &self,
+        run_id: &str,
+        input: Value,
+        bot: Option<&str>,
+    ) -> Result<String, ToolError> {
         let observing = match self.op {
             Op::Snapshot | Op::Wait | Op::Screenshot => true,
             Op::Tabs => input.get("switch_to").is_none_or(Value::is_null),
@@ -1775,7 +2103,7 @@ impl BrowserTool {
         };
         let gate = self.shared.control.clone();
         let epoch = gate.as_ref().map(|g| g.observation_epoch());
-        let text = self.run_inner(run_id, input).await?;
+        let text = self.run_inner(run_id, input, bot).await?;
         if let (Some(gate), Some(epoch)) = (gate, epoch) {
             if observing
                 && (gate.observation_epoch() != epoch || gate.observation_refused().is_some())
@@ -1793,7 +2121,12 @@ impl BrowserTool {
         Ok(text)
     }
 
-    async fn run_inner(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
+    async fn run_inner(
+        &self,
+        run_id: &str,
+        input: Value,
+        bot: Option<&str>,
+    ) -> Result<String, ToolError> {
         let observing = match self.op {
             Op::Snapshot | Op::Wait | Op::Screenshot => true,
             Op::Tabs => input.get("switch_to").is_none_or(Value::is_null),
@@ -1957,9 +2290,17 @@ impl BrowserTool {
                         .map_err(exec_err)?,
                     Source::Secret(name) => {
                         let secrets = self.fill_secrets()?;
+                        let bot = bot.map(str::to_owned);
                         permit
                             .protect(async move {
-                                fill_with_secret(d.as_ref(), &secrets, &i.r#ref, &name).await
+                                fill_with_secret(
+                                    d.as_ref(),
+                                    &secrets,
+                                    &i.r#ref,
+                                    &name,
+                                    bot.as_deref(),
+                                )
+                                .await
                             })
                             .await
                             .map_err(exec_err)?
@@ -2035,8 +2376,9 @@ impl BrowserTool {
             }
             Op::Scroll => {
                 let i: ScrollIn = parse(input)?;
+                let opts = i.opts()?;
                 let permit = self
-                    .gate(run_id, "scroll", i.r#ref.clone().unwrap_or_default())
+                    .gate(run_id, "scroll", opts.r.clone().unwrap_or_default())
                     .await?;
                 if permit.needs_observation()
                     || self
@@ -2064,7 +2406,31 @@ impl BrowserTool {
                     ));
                 }
                 permit
-                    .protect(async move { d.scroll(i.r#ref.as_deref(), i.dx, i.dy).await })
+                    .protect(async move { d.scroll_opts(&opts).await })
+                    .await
+                    .map_err(exec_err)?
+            }
+            Op::Hover => {
+                let i: HoverIn = parse(input)?;
+                let permit = self.gate(run_id, "hover", i.r#ref.clone()).await?;
+                if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
+                    return Ok(fresh);
+                }
+                permit
+                    .protect(async move { d.hover(&i.r#ref).await })
+                    .await
+                    .map_err(exec_err)?
+            }
+            Op::SelectText => {
+                let i: SelectTextIn = parse(input)?;
+                let opts = i.opts()?;
+                let what = opts.r.clone().unwrap_or_else(|| "text".to_owned());
+                let permit = self.gate(run_id, "click", what).await?;
+                if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
+                    return Ok(fresh);
+                }
+                permit
+                    .protect(async move { d.select_text(&opts).await })
                     .await
                     .map_err(exec_err)?
             }
@@ -2170,7 +2536,7 @@ impl BrowserTool {
                 let path = save_file(&self.shared.data_dir.join("screenshots"), ext, &bytes)?;
                 Ok(format!("screenshot: {path}"))
             }
-            Op::Act => return self.run_act(run_id, input).await,
+            Op::Act => return self.run_act(run_id, input, bot).await,
             Op::Eval => {
                 let i: EvalIn = parse(input)?;
                 let label: String = i.js.trim().chars().take(80).collect();
@@ -2216,7 +2582,7 @@ impl BrowserTool {
         // Only the actions that act on the page that is open now (not open/eval/tabs/back).
         if !matches!(
             self.op,
-            Op::Click | Op::Fill | Op::Select | Op::Press | Op::Act
+            Op::Click | Op::Fill | Op::Select | Op::Press | Op::Act | Op::SelectText
         ) {
             return None;
         }
@@ -2229,7 +2595,10 @@ impl BrowserTool {
         shared
             .driver
             .input_origin(
-                if self.op == Op::Press || (self.op == Op::Act && batch_ref.is_none()) {
+                if self.op == Op::Press
+                    || (self.op == Op::Act && batch_ref.is_none())
+                    || (self.op == Op::SelectText && input.get("ref").is_none_or(Value::is_null))
+                {
                     None
                 } else if self.op == Op::Act {
                     batch_ref.as_deref()
@@ -2302,13 +2671,22 @@ impl BrowserTool {
                 "browser is unavailable for this run's computer target",
             ));
         }
+        // A bot-owned account is typed only by that bot, also with a standing grant.
+        if self.op == Op::Fill
+            && let (Some(secrets), Ok(Source::Secret(name))) =
+                (&self.shared.fill_secrets, source(&input, "text"))
+        {
+            secrets
+                .check_bot(&name, ctx.bot_id.as_deref())
+                .map_err(|e| refused(&e))?;
+        }
         let shared = self.select_shared(ctx)?;
         // Recheck the receiving frame after approval. The CDP driver repeats this
         // check with the session lock held immediately before sending input.
         if let Some(expected) = &ctx.expected_origin
             && matches!(
                 self.op,
-                Op::Click | Op::Fill | Op::Select | Op::Press | Op::Act
+                Op::Click | Op::Fill | Op::Select | Op::Press | Op::Act | Op::SelectText
             )
         {
             let now = self.current_origin(ctx, &input).await;
@@ -2327,7 +2705,7 @@ impl BrowserTool {
         let text = EXPECTED_PAGE_ORIGIN
             .scope(
                 ctx.expected_origin.clone(),
-                selected.run(&ctx.run_id, input),
+                selected.run(&ctx.run_id, input, ctx.bot_id.as_deref()),
             )
             .await?;
         let view = selected.shared.driver.live_view_attached();
@@ -2588,6 +2966,18 @@ pub(crate) mod fake {
         }
         async fn scroll(&self, r: Option<&str>, dx: f64, dy: f64) -> Result<String, String> {
             self.rec(&format!("scroll:{}:{dx}:{dy}", r.unwrap_or("-")))
+        }
+        async fn scroll_opts(&self, o: &ScrollOpts) -> Result<String, String> {
+            if o.pages.is_none() && o.to.is_none() && !o.into_view {
+                return self.scroll(o.r.as_deref(), o.dx, o.dy).await;
+            }
+            self.rec(&format!("scroll_opts:{o:?}"))
+        }
+        async fn hover(&self, r: &str) -> Result<String, String> {
+            self.rec(&format!("hover:{r}"))
+        }
+        async fn select_text(&self, o: &SelectOpts) -> Result<String, String> {
+            self.rec(&format!("select_text:{o:?}"))
         }
         async fn wait(&self, c: Wait, _t: Option<Duration>) -> Result<String, String> {
             self.rec(&format!("wait:{c:?}"))
@@ -2907,6 +3297,115 @@ mod tests {
                 "scroll:-:0:100"
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn scroll_by_screens_edges_and_into_view_reach_the_driver_with_clear_errors() {
+        let (_d, fake, t) = build();
+        let ctx = ToolContext::default();
+        let scroll = get(&t, "browser_scroll");
+        scroll.call(&ctx, json!({"pages": 1})).await.unwrap();
+        scroll
+            .call(&ctx, json!({"to": "bottom", "speed": "slow"}))
+            .await
+            .unwrap();
+        scroll
+            .call(&ctx, json!({"ref": "e3", "into_view": true}))
+            .await
+            .unwrap();
+        let calls = fake.calls.lock().clone();
+        assert_eq!(calls.len(), 3, "{calls:?}");
+        assert!(calls[0].contains("pages: Some(1.0)"), "{calls:?}");
+        assert!(
+            calls[1].contains("to: Some(\"bottom\")") && calls[1].contains("slow"),
+            "{calls:?}"
+        );
+        assert!(
+            calls[2].contains("into_view: true") && calls[2].contains("e3"),
+            "{calls:?}"
+        );
+        // Nonsense is refused in plain words, before anything is done.
+        for (bad, hint) in [
+            (json!({}), "say how far"),
+            (json!({"pages": 1, "dy": 5}), "only one of"),
+            (json!({"into_view": true}), "needs the ref"),
+            (json!({"pages": 500}), "between -50 and 50"),
+            (json!({"to": "middle"}), "top"),
+            (json!({"pages": 1, "speed": "warp"}), "speed must be"),
+        ] {
+            let err = scroll
+                .call(&ctx, bad.clone())
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(hint), "{bad}: {err}");
+        }
+        assert_eq!(fake.calls.lock().len(), 3, "a refused scroll did nothing");
+    }
+
+    #[tokio::test]
+    async fn hover_is_read_like_and_select_text_is_input_like_and_bound_to_the_page_origin() {
+        let (_d, fake, t) = build();
+        let ctx = ToolContext::default();
+        // Hover moves the pointer only: it is a read-like action, like scrolling.
+        assert_eq!(get(&t, "browser_hover").spec().effect, Effect::Read);
+        assert_eq!(get(&t, "browser_scroll").spec().effect, Effect::Read);
+        // Selecting presses the mouse on the page: input-like, like a click.
+        assert_eq!(get(&t, "browser_select_text").spec().effect, Effect::Write);
+        get(&t, "browser_hover")
+            .call(&ctx, json!({"ref": "e7"}))
+            .await
+            .unwrap();
+        get(&t, "browser_select_text")
+            .call(&ctx, json!({"text": "Orders ship", "mode": "word"}))
+            .await
+            .unwrap();
+        let calls = fake.calls.lock().clone();
+        assert_eq!(calls[0], "hover:e7");
+        assert!(
+            calls[1].contains("unit: \"word\"") && calls[1].contains("Orders ship"),
+            "{calls:?}"
+        );
+        // Selecting needs something to select; a hover needs its ref.
+        let select = get(&t, "browser_select_text");
+        assert!(select.call(&ctx, json!({})).await.is_err());
+        assert!(
+            select
+                .call(&ctx, json!({"text": "x", "mode": "line"}))
+                .await
+                .is_err()
+        );
+        assert!(
+            get(&t, "browser_hover")
+                .call(&ctx, json!({}))
+                .await
+                .is_err()
+        );
+        // The receiving page is checked at execution time, like for a click.
+        fake.targets.lock().insert(
+            "e9".into(),
+            FieldTarget {
+                name: "n".into(),
+                role: "text".into(),
+                frame_origin: Some("https://a.example:443".into()),
+                top_origin: Some("https://a.example:443".into()),
+                sensitive: false,
+            },
+        );
+        let origin = select
+            .current_origin(&ctx, &json!({"ref": "e9", "text": "x"}))
+            .await;
+        assert_eq!(origin.as_deref(), Some("https://a.example:443"));
+        let moved = ToolContext {
+            expected_origin: Some("https://b.example:443".into()),
+            ..ToolContext::default()
+        };
+        let err = select
+            .call(&moved, json!({"ref": "e9", "text": "x"}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no longer on"), "{err}");
     }
 
     #[tokio::test]
@@ -3346,6 +3845,9 @@ mod tests {
             ("browser_select", json!({"ref":"e1","value":"v"})),
             ("browser_press", json!({"key":"Enter"})),
             ("browser_scroll", json!({"dy":1})),
+            ("browser_scroll", json!({"pages":1})),
+            ("browser_hover", json!({"ref":"e1"})),
+            ("browser_select_text", json!({"text":"hello"})),
             ("browser_back", json!({})),
             ("browser_tabs", json!({"switch_to":2})),
             ("browser_eval", json!({"js":"1"})),

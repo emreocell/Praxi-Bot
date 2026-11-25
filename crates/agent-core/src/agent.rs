@@ -144,6 +144,8 @@ impl AgentLoop {
                 skill_hints: RwLock::new(None),
                 router: crate::router::Router::default(),
                 directives: Mutex::new(HashMap::new()),
+                user_stopped: Mutex::new(HashSet::new()),
+                concluded: Mutex::new(HashSet::new()),
                 approval_paused: Mutex::new(HashSet::new()),
                 identity_paused: Mutex::new(HashSet::new()),
                 parked: Mutex::new(HashMap::new()),
@@ -158,6 +160,8 @@ impl AgentLoop {
                 task_reap_done: AtomicBool::new(false),
                 #[cfg(test)]
                 exec_commit_hook: Mutex::new(None),
+                #[cfg(test)]
+                stop_split_hook: Mutex::new(None),
                 #[cfg(test)]
                 legacy_always: AtomicBool::new(false),
             }
@@ -1029,6 +1033,26 @@ impl AgentLoop {
             .map(|r| r.id))
     }
 
+    /// Start a run from an incoming webhook. `envelope` is data (a JSON
+    /// string), not a tool directive. The kind is `incoming_webhook`, which
+    /// [`initiator_of`](crate::shared::initiator_of) treats as an external
+    /// schedule: the router does not parse it, and tool approvals stay
+    /// once-only.
+    ///
+    /// The chat must be empty. Each delivery uses its own chat.
+    ///
+    /// # Errors
+    /// Existing chat history or any other run-start error.
+    pub fn run_incoming_webhook(
+        &self,
+        chat_id: ChatId,
+        hook_id: Uuid,
+        envelope: &str,
+    ) -> Result<RunId> {
+        let kind = format!("turn:incoming_webhook:{hook_id}:{}", Uuid::now_v7());
+        self.start_turn_from(chat_id, envelope, &kind, None, None, "incoming_webhook")
+    }
+
     /// Start an externally supplied scheduled run in a new, isolated chat.
     /// The durable initiator survives resume and is inherited by all children.
     ///
@@ -1483,6 +1507,7 @@ impl AgentLoop {
     /// [`LoopError::NoPendingApproval`] if it is not waiting (already decided
     /// or lost in a restart).
     pub fn approve(&self, call_id: ToolCallId, scope: ApprovalScope, by: UserId) -> Result<()> {
+        self.refuse_if_stopped(call_id)?;
         // Server-side, for every channel: an approval that carries details (a
         // schedule) or whose tool is always-ask is given once, never as a grant.
         // The run-scoped control scope is the one non-Once scope a once-only
@@ -1546,6 +1571,7 @@ impl AgentLoop {
     /// # Errors
     /// [`LoopError::NoPendingApproval`] if no question is waiting under that id.
     pub fn answer_question(&self, call_id: ToolCallId, answer: &str) -> Result<()> {
+        self.refuse_if_stopped(call_id)?;
         self.take_pending(call_id)?
             .tx
             .send(Verdict::Answered {
@@ -1588,6 +1614,9 @@ impl AgentLoop {
         stored: bool,
         by: UserId,
     ) -> Result<()> {
+        if stored {
+            self.refuse_if_stopped(call_id)?;
+        }
         self.sh.secret_requests.lock().remove(&call_id);
         let verdict = if stored {
             Verdict::SecretStored
@@ -1791,6 +1820,19 @@ impl AgentLoop {
         }
     }
 
+    /// A card of a run the owner stopped can no longer be approved, answered or
+    /// completed: it is closed as denied and the caller sees it as gone.
+    fn refuse_if_stopped(&self, call_id: ToolCallId) -> Result<()> {
+        let run = self.sh.pending.lock().get(&call_id).map(|p| p.run_id);
+        if let Some(run) = run
+            && self.sh.run_is_stopped(run)
+        {
+            self.sh.deny_open_for_stop(run);
+            return Err(LoopError::NoPendingApproval(call_id));
+        }
+        Ok(())
+    }
+
     fn take_pending(&self, call_id: ToolCallId) -> Result<Pending> {
         self.sh
             .pending
@@ -1802,29 +1844,39 @@ impl AgentLoop {
     /// Cancel a run (in-flight step becomes `Interrupted`); unfinished
     /// subagents of the run are cancelled too.
     ///
+    /// Queued messages stay queued. They are not started when this run ends.
+    /// A drive task that never polls the cancel token is finished by a
+    /// supervisor after one second.
+    ///
     /// # Errors
     /// Fails if the run is terminal or storage fails.
     pub fn cancel(&self, run_id: RunId) -> Result<()> {
+        self.cancel_user(run_id, true)
+    }
+
+    /// `supervise` arms the one-second hard stop. [`Self::force_cancel`] passes
+    /// `false` so a forced stop does not arm another supervisor.
+    fn cancel_user(&self, run_id: RunId, supervise: bool) -> Result<()> {
+        self.sh.user_stopped.lock().insert(run_id);
         self.cancel_wait_pc_timer(run_id);
         self.sh.run_computers.lock().remove(&run_id);
         self.sh.directives.lock().remove(&run_id);
         let idle_paused = !self.sh.tasks.lock().contains_key(&run_id)
             && self.rt.state(run_id).ok() == Some(RunState::Paused);
-        self.rt.cancel(run_id)?;
-        // Stop means stop: messages queued behind this turn are dropped, otherwise
-        // `conclude` would start the next one the moment this run ends and the
-        // user would see the bot carry on as if Stop did nothing. Only messages
-        // queued up to now are dropped; one sent after this call is kept.
-        if let Ok(Some(run)) = self.sh.storage.get_run(run_id)
-            && run.parent_run_id.is_none()
-            && let Some(chat_id) = run.chat_id
-        {
-            self.sh.queued.lock().remove(&chat_id);
-        }
+        // The token is cancelled first: releasing an approval wakes the step,
+        // and a woken step must already find the run stopped (no further model
+        // call). It also keeps this call from racing the drive task to the
+        // terminal state.
+        let result = self.rt.cancel(run_id);
+        // Every open card of the run is denied now (a forced stop concludes
+        // before the aborted task unwinds; the denial is recorded once either way).
+        self.sh.deny_open_for_stop(run_id);
         // A cancelled parent takes its subagents with it.
-        self.cancel_descendants(run_id);
+        self.cancel_descendants(run_id, supervise);
         crate::usage::finish(&self.sh, run_id);
-        if idle_paused {
+        if result.is_ok() && idle_paused {
+            self.sh.concluded.lock().insert(run_id);
+            self.sh.user_stopped.lock().remove(&run_id);
             if let Ok(Some(run)) = self.sh.storage.get_run(run_id)
                 && let Some(chat_id) = run.chat_id
             {
@@ -1845,7 +1897,34 @@ impl AgentLoop {
                 self.sh.run_computers.lock().remove(&run_id);
             }
         }
+        if supervise && self.rt.state(run_id).is_ok_and(|s| !s.is_terminal()) {
+            self.arm_stop_supervisor(run_id);
+        }
+        if result.is_err() {
+            self.sh.user_stopped.lock().remove(&run_id);
+        }
+        result?;
         Ok(())
+    }
+
+    /// If the run is still going a second after Stop, abort its drive task.
+    /// A `std::thread::sleep` (or any wait that never polls the token) cannot
+    /// leave the run `running`.
+    pub(crate) fn arm_stop_supervisor(&self, run_id: RunId) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let this = self.clone();
+        handle.spawn(async move {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let live = this
+                .rt
+                .state(run_id)
+                .is_ok_and(|state| !state.is_terminal());
+            if live {
+                let _ = this.force_cancel(run_id);
+            }
+        });
     }
 
     /// Hard stop: the polite [`Self::cancel`] first, then the drive task of the run
@@ -1858,7 +1937,7 @@ impl AgentLoop {
     /// # Errors
     /// Fails if the run is terminal (and was not drivable) or storage fails.
     pub fn force_cancel(&self, run_id: RunId) -> Result<()> {
-        let polite = self.cancel(run_id);
+        let polite = self.cancel_user(run_id, false);
         self.force_stop_tree(run_id, None);
         let run = self
             .sh
@@ -2631,6 +2710,14 @@ impl AgentLoop {
     /// Persist the final answer, emit the closing events and start any queued turn.
     #[allow(clippy::too_many_lines)] // one terminal bookkeeping pass; the order is the contract
     fn conclude(&self, run_id: RunId, res: &std::result::Result<RunState, RuntimeError>) {
+        // A paused run is resumed later, so it may pass through here again.
+        // A finished run must not: the stop supervisor can conclude while the
+        // drive task is still blocked, and that second call must not emit again.
+        let finishing = !matches!(res, Ok(RunState::Paused));
+        if finishing && !self.sh.concluded.lock().insert(run_id) {
+            self.sh.user_stopped.lock().remove(&run_id);
+            return;
+        }
         let run = self.sh.storage.get_run(run_id).ok().flatten();
         if !matches!(res, Ok(RunState::Paused)) {
             crate::usage::finish(&self.sh, run_id);
@@ -2758,8 +2845,29 @@ impl AgentLoop {
         self.sh.runs.lock().remove(&run_id);
         self.sh.run_computers.lock().remove(&run_id);
 
-        let Some(run) = run else { return };
-        self.start_next_queued(&run, run_id);
+        let Some(run) = run else {
+            self.sh.user_stopped.lock().remove(&run_id);
+            return;
+        };
+        // Stop leaves queued messages where they are and frees the chat so a
+        // later send is not Busy. It does not start them.
+        if matches!(res, Ok(RunState::Cancelled)) {
+            self.release_chat_keep_queue(&run, run_id);
+        } else {
+            self.start_next_queued(&run, run_id);
+        }
+        self.sh.user_stopped.lock().remove(&run_id);
+    }
+
+    /// Free the chat slot without taking the next queued message.
+    fn release_chat_keep_queue(&self, run: &storage::Run, run_id: RunId) {
+        let Some(chat_id) = run.chat_id else {
+            return;
+        };
+        let mut active = self.sh.active.lock();
+        if active.get(&chat_id) == Some(&run_id) {
+            active.remove(&chat_id);
+        }
     }
 
     /// Release the chat after `run_id`, or hand it straight to the next queued

@@ -15,6 +15,7 @@
 // The tool tables and dispatchers are long but flat declarative code.
 #![allow(clippy::too_many_lines)]
 
+pub mod account_register;
 pub mod bots;
 pub mod browser;
 pub mod checkpoint;
@@ -56,6 +57,10 @@ use std::sync::Arc;
 use desktop_api::DesktopBackend;
 use tool_registry::{Tool, ToolRegistry};
 
+pub use account_register::{
+    ACCOUNT_DISCARD, ACCOUNT_LIST, ACCOUNT_REGISTER, AccountRegisterConfig, account_discard_tool,
+    account_list_tool, account_register_tool,
+};
 pub use bots::{
     BOT_PRESETS, BOT_TOOL_NAMES, BotCaller, BotChange, BotHost, BotPreview, BotRequest, BotView,
     FieldChange,
@@ -145,6 +150,9 @@ pub struct BuiltinConfig {
     /// switch, **off by default** until the desktop form exists:
     /// with `false` the tool is not offered at all.
     pub secret_requests: bool,
+    /// Defaults of `account_register` (password length, symbols). The tool is
+    /// offered whenever `fill_secrets` is set and always asks the owner.
+    pub account_register: account_register::AccountRegisterConfig,
     /// Ledger of files with an untrusted origin (see [`provenance`]); `None` = rules only.
     pub provenance: Option<Arc<dyn provenance::Provenance>>,
 }
@@ -202,6 +210,7 @@ impl BuiltinConfig {
             fs_home: None,
             fill_secrets: None,
             secret_requests: false,
+            account_register: account_register::AccountRegisterConfig::default(),
             provenance: None,
         }
     }
@@ -253,6 +262,12 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
     }
     if let Some(secrets) = &cfg.fill_secrets {
         all.push(fill_secret::secrets_list_tool(Arc::clone(secrets)));
+        all.push(account_register::account_register_tool(
+            Arc::clone(secrets),
+            cfg.account_register,
+        ));
+        all.push(account_register::account_list_tool(Arc::clone(secrets)));
+        all.push(account_register::account_discard_tool(Arc::clone(secrets)));
         if cfg.secret_requests {
             all.push(secret_request::secret_request_tool(Arc::clone(secrets)));
         }
@@ -472,7 +487,12 @@ mod tests {
                 "{name} sends data off the machine"
             );
         }
-        for name in ["desktop_click", "desktop_scroll", "browser_scroll"] {
+        for name in [
+            "desktop_click",
+            "desktop_scroll",
+            "browser_scroll",
+            "browser_hover",
+        ] {
             let class = crate::util::classify(name).unwrap();
             assert!(!class.egress, "{name} cannot carry data off the machine");
         }
@@ -529,6 +549,8 @@ mod tests {
             ("browser_select", W, B),
             ("browser_press", W, B),
             ("browser_scroll", R, B),
+            ("browser_hover", R, B),
+            ("browser_select_text", W, B),
             ("browser_wait", R, B),
             ("browser_back", W, B),
             ("browser_tabs", W, B),
@@ -1123,7 +1145,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 37 + 6 + 2 + 2);
+        assert_eq!(added, 39 + 6 + 2 + 2);
 
         // Verification of email tools and their effects
         let send_tool = reg

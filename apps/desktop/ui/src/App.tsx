@@ -144,15 +144,15 @@ import {
 import { ChatView } from "./views/ChatView";
 import { NeedsYouView } from "./views/NeedsYouView";
 import { NotificationHistoryView } from "./views/NotificationHistoryView";
-import { unreadCount } from "./lib/notificationHistory";
-import { useNotificationHistory } from "./store/notificationHistoryStore";
+import { actionableCount } from "./lib/notificationHistory";
+import { restoreNotificationHistory, useNotificationHistory } from "./store/notificationHistoryStore";
 import { OnboardingView } from "./views/OnboardingView";
 import { SchedulesView } from "./views/SchedulesView";
 import { AppsModal } from "./views/AppsModal";
 import { NewBotModal } from "./views/NewBotModal";
 import { MyBotsView } from "./views/MyBotsView";
 import { nativePauseAction } from "./lib/myBots";
-import { SettingsModal } from "./views/SettingsModal";
+import { SettingsModal, type SettingsTargetRequest } from "./views/SettingsModal";
 import { OPEN_SETTINGS_EVENT, type SettingsTarget } from "./lib/settingsLink";
 import { OPEN_AI_SETTINGS_EVENT } from "./state/useCliEngineRows";
 import { OPEN_BOT_LIMITS_EVENT } from "./lib/botLimits";
@@ -277,19 +277,28 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   const [settingsOpen, setSettingsOpen] = useState<SettingsSectionId | SettingsPageId | null>(
     null
   );
+  const [settingsTarget, setSettingsTarget] = useState<SettingsTargetRequest | null>(null);
+  const settingsSeq = useRef(0);
+  const openSettings = useCallback((page: SettingsSectionId | SettingsPageId, card?: string, field?: string) => {
+    setSettingsTarget(card ? { page, card, field, seq: ++settingsSeq.current } : null);
+    setSettingsOpen(page);
+  }, []);
   const [appsOpen, setAppsOpen] = useState(false);
-  // The model picker's "Install <CLI>" rows open Settings > AI, where the install flow lives.
+  // The model picker's "Install <CLI>" rows open Settings > AI models, where the install flow lives.
   useEffect(() => {
-    const open = () => setSettingsOpen("ai");
+    const open = () => openSettings("models", "detectedAccounts");
     window.addEventListener(OPEN_AI_SETTINGS_EVENT, open);
     return () => window.removeEventListener(OPEN_AI_SETTINGS_EVENT, open);
-  }, []);
+  }, [openSettings]);
   // A message can point at a place in Settings (e.g. the voice call card's "Open settings").
   useEffect(() => {
-    const open = (e: Event) => setSettingsOpen((e as CustomEvent<SettingsTarget>).detail.page);
+    const open = (e: Event) => {
+      const detail = (e as CustomEvent<SettingsTarget>).detail;
+      openSettings(detail.page, detail.card, detail.field);
+    };
     window.addEventListener(OPEN_SETTINGS_EVENT, open);
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
-  }, []);
+  }, [openSettings]);
   const [newBotOpen, setNewBotOpen] = useState(false);
   // The dialogs of a bot (card 244-C): edit and profile replace the old pages; "add skill" can
   // sit on top of the skills dialog or the edit dialog.
@@ -433,6 +442,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         if (screen === "schedules") setRoute({ kind: "schedules" });
         if (screen === "myBots") setRoute({ kind: "myBots" });
         if (screen === "needs") setRoute({ kind: "needs" });
+        if (screen === "notifications" || screen === "notifications-empty") setRoute({ kind: "notifications" });
         if (screen === "home" || screen === "offline") setRoute({ kind: "home" });
       }
       setSettings(merged);
@@ -441,7 +451,132 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         setRoute({ kind: "onboarding" });
       }
       if (merged.language && merged.language !== i18n.language) {
-        void i18n.changeLanguage(merged.language);
+        await i18n.changeLanguage(merged.language);
+      }
+      if (mock) {
+        const screen = params.get("screen");
+        if (screen === "notifications-empty") {
+          restoreNotificationHistory([]);
+        } else if (screen === "notifications") {
+          const now = Date.now();
+          const atlasId = "11111111-1111-4111-8111-111111111111";
+          const novaId = "22222222-2222-4222-8222-222222222222";
+          const chatId = "33333333-3333-4333-8333-333333333333";
+          const openSite = i18n.t("notify.approval.openSite", { bot: "Atlas", site: "webioo.com.tr" });
+          const busyFailed = i18n.t("notify.failed.retrying", {
+            reason: i18n.t("notify.failed.reasonBusy"),
+            seconds: "46"
+          });
+          restoreNotificationHistory([
+            {
+              id: "mock-n1",
+              kind: "needsYou",
+              title: openSite,
+              body: "",
+              botId: atlasId,
+              botName: "Atlas",
+              chatId,
+              runId: "mock-live",
+              callId: "mock-open-webioo",
+              ts: now - 45_000,
+              shown: true,
+              read: false
+            },
+            {
+              id: "mock-n2",
+              kind: "needsYou",
+              title: openSite,
+              body: "",
+              botId: atlasId,
+              botName: "Atlas",
+              chatId,
+              runId: "mock-live",
+              ts: now - 75_000,
+              shown: true,
+              read: false
+            },
+            {
+              id: "mock-n3",
+              kind: "needsYou",
+              title: openSite,
+              body: "",
+              botId: atlasId,
+              botName: "Atlas",
+              chatId,
+              runId: "mock-live",
+              ts: now - 110_000,
+              shown: true,
+              read: false
+            },
+            {
+              id: "mock-n4",
+              kind: "needsYou",
+              title: openSite,
+              body: "",
+              botId: atlasId,
+              botName: "Atlas",
+              chatId,
+              runId: "mock-live",
+              ts: now - 140_000,
+              shown: true,
+              read: false
+            },
+            {
+              id: "mock-n5",
+              kind: "longRun",
+              title: i18n.t("notify.generic.longRun"),
+              body: "",
+              botId: novaId,
+              botName: "Nova",
+              chatId,
+              runId: "mock-long-1",
+              ts: now - 2 * 60_000,
+              shown: true,
+              read: false
+            },
+            {
+              id: "mock-n6",
+              kind: "failed",
+              title: busyFailed,
+              body: "",
+              botId: "bot-milo",
+              botName: "Milo",
+              chatId,
+              runId: "mock-fail-1",
+              retryAtMs: now + 46_000,
+              retryable: true,
+              ts: now - 5 * 60_000,
+              shown: true,
+              read: false
+            },
+            {
+              id: "mock-n7",
+              kind: "scheduleDone",
+              title: i18n.t("notify.generic.scheduleDone"),
+              body: "",
+              botId: "bot-ember",
+              botName: "Ember",
+              chatId,
+              runId: "mock-sched-1",
+              ts: now - 35 * 60_000,
+              shown: false,
+              heldBy: "quiet",
+              read: false
+            },
+            {
+              id: "mock-n8",
+              kind: "digest",
+              title: i18n.t("digest.notifyTitle"),
+              body: "2 done · $0.14",
+              botId: "",
+              botName: "",
+              chatId: "",
+              ts: now - 2 * 86_400_000,
+              shown: true,
+              read: true
+            }
+          ]);
+        }
       }
       if (merged.stopHotkey) {
         void setStopHotkey(merged.stopHotkey)
@@ -747,7 +882,8 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     else setNewBotOpen(true);
   };
   const notifyHistory = useNotificationHistory();
-  const notifyUnread = unreadCount(notifyHistory, Date.now());
+  const liveCallIds = useMemo(() => new Set(needs.map((n) => n.callId)), [needs]);
+  const notifyActionCount = actionableCount(notifyHistory, Date.now(), liveCallIds);
   // Selecting a bot: its latest chat, or the empty state when it has none.
   const goToBot = (botId: string) => go(botLanding(botId, chats));
   // Right-click on a bot in the rail.  The profile and settings dialogs belong to the selected bot
@@ -1062,7 +1198,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
             <span className={styles.srOnly} role="status" aria-live="polite">{orderNote}</span>
             <div ref={reorder.containerRef} className={styles.botList} data-stale={homeStale ? "true" : undefined}>
             {needs.length > 0 ? <SidebarItem className={styles.railItem} active={route.kind === "needs"} title={t("sidebar.needsYou")} aria-label={mini ? t("sidebar.needsYouCount", { count: needs.length }) : undefined} onClick={openNeeds}><BellDot /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.needsYou")}</span><span className={styles.needsBadge} data-testid="needs-you-badge" aria-label={t("sidebar.needsYouCount", { count: needs.length })}>{needs.length}</span></SidebarItem> : null}
-            {notifyHistory.length > 0 ? <SidebarItem className={styles.railItem} active={route.kind === "notifications"} title={t("sidebar.notifications")} aria-label={mini ? t("sidebar.notificationsCount", { count: notifyUnread }) : undefined} onClick={() => go({ kind: "notifications" })}><BellRing /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.notifications")}</span>{notifyUnread > 0 ? <span className={styles.needsBadge} data-testid="notify-history-badge" aria-label={t("sidebar.notificationsCount", { count: notifyUnread })}>{notifyUnread}</span> : null}</SidebarItem> : null}
+            {notifyHistory.length > 0 || route.kind === "notifications" ? <SidebarItem className={styles.railItem} active={route.kind === "notifications"} title={t("sidebar.notifications")} aria-label={mini && notifyActionCount > 0 ? t("sidebar.notificationsCount", { count: notifyActionCount }) : mini ? t("sidebar.notifications") : undefined} onClick={() => go({ kind: "notifications" })} data-testid="sidebar-notifications"><BellRing /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.notifications")}</span>{notifyActionCount > 0 ? <span className={styles.notifyBadge} data-testid="notify-history-badge" aria-label={t("sidebar.notificationsCount", { count: notifyActionCount })}>{notifyActionCount}</span> : null}</SidebarItem> : null}
             {filterBots(bots, botSearch).map((bot) => {
               const view = botView(bot);
               const latest = botChats(chats, bot.id).find((c) => !c.archived);
@@ -1310,7 +1446,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
           />
         ) : null}
         {route.kind === "needs" ? <NeedsYouView onOpenChat={openChat} /> : null}
-        {route.kind === "notifications" ? <NotificationHistoryView onOpenChat={openChat} onOpenNeeds={openNeeds} /> : null}
+        {route.kind === "notifications" ? <NotificationHistoryView onOpenChat={openChat} onOpenNeeds={openNeeds} privateMode={settings.notifyPrivate} /> : null}
         {route.kind === "myBots" ? <MyBotsView
           control={controlState}
           newChatBusy={newChatBusy}
@@ -1342,7 +1478,11 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
       <SettingsModal
         open={settingsOpen !== null}
         initialSection={settingsOpen ?? "general"}
-        onClose={() => setSettingsOpen(null)}
+        initialTarget={settingsTarget}
+        onClose={() => {
+          setSettingsOpen(null);
+          setSettingsTarget(null);
+        }}
         bridge={{
           settings,
           update: updateSettings,

@@ -105,7 +105,7 @@ test("App routes every user navigation through the leave gate", () => {
       l.includes("leave.attempt(() => setRoute(next))") ||
       l.includes('setRoute(destination.kind === "chat" ? { ...destination, external: true } : destination)') ||
       l.includes('setRoute({ kind: "home" });') ||
-      /screen === "(bot|myBots|schedules|needs|home)/.test(l) ||
+      /screen === "(bot|myBots|schedules|needs|notifications|home)/.test(l) ||
       l.includes('kind: "chat", chatId: "33333333') ||
       l.includes('setRoute({ kind: "onboarding" });')
   );

@@ -11,6 +11,14 @@ use serde_json::{Value, json};
 
 use crate::diff::{self, SnapshotDiff};
 use crate::error::{Error, Result};
+use crate::human::{self, Feel, Jitter};
+
+/// Sleep, except for a zero pause (instant actions pay nothing).
+async fn sleep(d: Duration) {
+    if !d.is_zero() {
+        tokio::time::sleep(d).await;
+    }
+}
 use crate::page::{DEFAULT_WAIT, DialogInfo, DialogOptions, NAVIGATION_LOAD_DEADLINE, Page};
 use crate::snapshot::{DomExtra, RefEntry, Snapshot};
 
@@ -895,7 +903,9 @@ impl Page {
         clicks: u32,
         expected: Option<&str>,
         guard: &StepGuard,
+        feel: Feel,
     ) -> Result<()> {
+        let mut rng = Jitter::from_clock();
         let e = self.locate(r).await?;
         let (x, y) = self.center(&e).await?;
         let covered = || {
@@ -909,7 +919,8 @@ impl Page {
         if guard.batch && !self.click_lands_on(&e, x, y).await {
             return Err(covered());
         }
-        self.mouse("mouseMoved", x, y, json!({})).await?;
+        self.glide((x, y), feel, &mut rng).await?;
+        sleep(human::settle_pause(feel, &mut rng)).await;
         self.check_input_origin(&e, expected).await?;
         for n in 1..=clicks {
             // Again right before every press (the move above may have run page handlers that
@@ -919,6 +930,7 @@ impl Page {
             }
             let btn = json!({"button": "left", "clickCount": n});
             self.mouse("mousePressed", x, y, btn.clone()).await?;
+            sleep(human::hold_pause(feel, &mut rng)).await;
             self.mouse("mouseReleased", x, y, btn).await?;
         }
         Ok(())
@@ -1060,8 +1072,22 @@ impl Page {
         expected: Option<&str>,
         guard: &StepGuard,
     ) -> Result<ActionResult> {
+        self.click_human(r, opts, expected, guard, Feel::Instant)
+            .await
+    }
+
+    /// Click like [`Page::click_with_guard`], moving the pointer over to the element the way
+    /// `feel` says.
+    pub async fn click_human(
+        &self,
+        r: &str,
+        opts: &DialogOptions,
+        expected: Option<&str>,
+        guard: &StepGuard,
+        feel: Feel,
+    ) -> Result<ActionResult> {
         let before = self.baseline_with(opts).await?;
-        let res = self.click_inner(r, 1, expected, guard).await;
+        let res = self.click_inner(r, 1, expected, guard, feel).await;
         self.finish(before, res).await
     }
 
@@ -1073,20 +1099,51 @@ impl Page {
     /// Double-click an element.
     pub async fn double_click(&self, r: &str) -> Result<ActionResult> {
         let before = self.baseline().await?;
-        let res = self.click_inner(r, 2, None, &StepGuard::default()).await;
+        let res = self
+            .click_inner(r, 2, None, &StepGuard::default(), Feel::Instant)
+            .await;
         self.finish(before, res).await
     }
 
     /// Move the mouse over an element.
     pub async fn hover(&self, r: &str) -> Result<ActionResult> {
+        self.hover_with(r, Feel::Instant).await
+    }
+
+    /// Move the pointer over an element along a short eased path and rest there long enough
+    /// for hover menus and tooltips to open; the result shows what appeared.
+    pub async fn hover_with(&self, r: &str, feel: Feel) -> Result<ActionResult> {
         let before = self.baseline().await?;
         let res = async {
+            let mut rng = Jitter::from_clock();
             let e = self.locate(r).await?;
-            let (x, y) = self.center(&e).await?;
-            self.mouse("mouseMoved", x, y, json!({})).await
+            let to = self.center(&e).await?;
+            self.glide(to, feel, &mut rng).await?;
+            sleep(human::hover_dwell(feel, &mut rng)).await;
+            Ok(())
         }
         .await;
         self.finish(before, res).await
+    }
+
+    /// Move the pointer to `to`, along an eased path unless `feel` is instant, and remember
+    /// where it is.
+    async fn glide(&self, to: (f64, f64), feel: Feel, rng: &mut Jitter) -> Result<()> {
+        let from = self
+            .shared
+            .pointer
+            .lock()
+            .ok()
+            .and_then(|p| *p)
+            .unwrap_or(((to.0 - 120.0).max(0.0), (to.1 - 70.0).max(0.0)));
+        for (x, y) in human::pointer_path(from, to, feel, rng) {
+            self.mouse("mouseMoved", x, y, json!({})).await?;
+            if let Ok(mut p) = self.shared.pointer.lock() {
+                *p = Some((x, y));
+            }
+            sleep(human::step_pause(feel, rng)).await;
+        }
+        Ok(())
     }
 
     /// Replace the content of an input/textarea/contenteditable with `text`.
@@ -1288,29 +1345,298 @@ impl Page {
 
     /// Scroll with the mouse wheel over an element, or the viewport center when `r` is `None`.
     pub async fn scroll(&self, r: Option<&str>, dx: f64, dy: f64) -> Result<ActionResult> {
+        self.scroll_with(&ScrollRequest {
+            r,
+            dx,
+            dy,
+            ..ScrollRequest::default()
+        })
+        .await
+    }
+
+    /// Scroll by pixels, pages or to an edge, or bring an element into view; in small wheel
+    /// steps with natural pauses unless `feel` is instant. The result says where on the page
+    /// the view is now.
+    pub async fn scroll_with(&self, req: &ScrollRequest<'_>) -> Result<ActionResult> {
         let before = self.baseline().await?;
-        let res = async {
-            let (x, y) = if let Some(r) = r {
-                let e = self.locate(r).await?;
-                self.center(&e).await?
-            } else {
-                let m = self.cmd("Page.getLayoutMetrics", json!({})).await?;
-                (
-                    m["cssVisualViewport"]["clientWidth"]
-                        .as_f64()
-                        .unwrap_or(800.0)
-                        / 2.0,
-                    m["cssVisualViewport"]["clientHeight"]
-                        .as_f64()
-                        .unwrap_or(600.0)
-                        / 2.0,
-                )
-            };
-            self.mouse("mouseWheel", x, y, json!({"deltaX": dx, "deltaY": dy}))
-                .await
+        let res = self.scroll_inner(req).await;
+        let mut out = self.finish(before, res).await?;
+        if out.ok
+            && (req.r.is_none() || req.into_view)
+            && let Some(note) = self.scroll_position_note().await
+        {
+            out.settle_note = Some(match out.settle_note.take() {
+                Some(old) => format!("{old}; {note}"),
+                None => note,
+            });
         }
-        .await;
-        self.finish(before, res).await
+        Ok(out)
+    }
+
+    /// `(scrollY, document height, viewport height)` of the top document.
+    async fn page_scroll(&self) -> Result<(f64, f64, f64)> {
+        let v = self
+            .evaluate_readonly(
+                "[window.scrollY, Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0), window.innerHeight]",
+            )
+            .await?;
+        let n = |i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
+        Ok((n(0), n(1), n(2)))
+    }
+
+    /// Where the view is on the page, in words a model can act on ("at the bottom").
+    async fn scroll_position_note(&self) -> Option<String> {
+        let (y, total, view) = self.page_scroll().await.ok()?;
+        if total <= view + 1.0 {
+            return Some("the page fits on one screen, nothing more to scroll".into());
+        }
+        let max = total - view;
+        Some(if y <= 1.0 {
+            format!("at the top of the page (a screen is {view:.0} px of {total:.0} px)")
+        } else if y >= max - 1.0 {
+            "at the bottom of the page (nothing more to scroll; a \"load more\" button or a next page may follow)".into()
+        } else {
+            format!(
+                "{:.0}% down the page ({y:.0} of {max:.0} px)",
+                y / max * 100.0
+            )
+        })
+    }
+
+    async fn scroll_inner(&self, req: &ScrollRequest<'_>) -> Result<()> {
+        let mut rng = Jitter::from_clock();
+        let metrics = self.cmd("Page.getLayoutMetrics", json!({})).await?;
+        let width = metrics["cssVisualViewport"]["clientWidth"]
+            .as_f64()
+            .unwrap_or(800.0);
+        let height = metrics["cssVisualViewport"]["clientHeight"]
+            .as_f64()
+            .unwrap_or(600.0);
+        let (mut dx, mut dy) = (req.dx, req.dy);
+        let mut at = (width / 2.0, height / 2.0);
+        if let Some(pages) = req.pages {
+            dy = pages * height * 0.9;
+        }
+        if let Some(to) = req.to {
+            let (y, total, view) = self.page_scroll().await?;
+            dx = 0.0;
+            dy = match to {
+                ScrollTo::Top => -y,
+                ScrollTo::Bottom => (total - view - y).max(0.0),
+            };
+        }
+        let mut finish_on = None;
+        if let Some(r) = req.r {
+            let entry = self.locate(r).await?;
+            if req.into_view {
+                if req.feel == Feel::Instant {
+                    self.center(&entry).await?;
+                    return Ok(());
+                }
+                let quad = self
+                    .quad(entry.session_id.as_deref(), entry.backend_id, "content")
+                    .await?;
+                let (cx, cy) =
+                    quad_center(&quad).ok_or_else(|| Error::Element("degenerate box".into()))?;
+                let (ox, oy) = self.frame_offset(&entry.frame_id).await;
+                let (ex, ey) = (cx + ox, cy + oy);
+                dy = if ey < height * 0.1 || ey > height * 0.9 {
+                    ey - height / 2.0
+                } else {
+                    0.0
+                };
+                dx = if ex < width * 0.05 || ex > width * 0.95 {
+                    ex - width / 2.0
+                } else {
+                    0.0
+                };
+                finish_on = Some(entry);
+            } else {
+                at = self.center(&entry).await?;
+            }
+        }
+        // One plan along the longer axis; the other axis follows in proportion.
+        let major = if dy.abs() >= dx.abs() { dy } else { dx };
+        for step in human::scroll_plan(major, req.feel, &mut rng) {
+            let part = step.delta / major;
+            self.mouse(
+                "mouseWheel",
+                at.0,
+                at.1,
+                json!({"deltaX": dx * part, "deltaY": dy * part}),
+            )
+            .await?;
+            sleep(step.pause).await;
+        }
+        if let Ok(mut p) = self.shared.pointer.lock() {
+            *p = Some(at);
+        }
+        if let Some(entry) = finish_on {
+            // Whatever the wheel left over (nested scrollers, late layout).
+            self.center(&entry).await?;
+        }
+        Ok(())
+    }
+
+    /// Select text with the mouse: a word (double click), a paragraph (triple click) or a
+    /// range (drag), of an element or of visible text on the page.
+    pub async fn select_text(&self, req: &TextSelection<'_>) -> Result<ActionResult> {
+        let before = self.baseline().await?;
+        let res = self.select_text_inner(req).await;
+        let mut out = self.finish(before, res).await?;
+        if out.ok {
+            let note = self.selection_note(req).await;
+            out.settle_note = Some(match out.settle_note.take() {
+                Some(old) => format!("{old}; {note}"),
+                None => note,
+            });
+        }
+        Ok(out)
+    }
+
+    /// The approved-origin check of `select_text`: the element's frame, or the top document
+    /// when selecting by text only.
+    async fn check_select_origin(
+        &self,
+        entry: Option<&RefEntry>,
+        expected: Option<&str>,
+    ) -> Result<()> {
+        match (entry, expected) {
+            (Some(e), _) => self.check_input_origin(e, expected).await,
+            (None, Some(expected))
+                if !grant_origin_matches(self.top_origin().await.as_deref(), expected) =>
+            {
+                Err(Error::Element(
+                    "receiving frame origin changed; ask again before input".into(),
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    async fn select_text_inner(&self, req: &TextSelection<'_>) -> Result<()> {
+        let mut rng = Jitter::from_clock();
+        let feel = req.feel;
+        let entry = match req.r {
+            Some(r) => Some(self.locate(r).await?),
+            None => None,
+        };
+        if let Some(e) = &entry {
+            self.refuse_if_sensitive_now(e, "selecting text").await?;
+        }
+        self.check_select_origin(entry.as_ref(), req.expected)
+            .await?;
+        let needle = req.text.map(str::trim).filter(|t| !t.is_empty());
+        let found = match (&entry, needle, req.unit) {
+            // A word or a paragraph of a whole element: click its middle.
+            (Some(e), None, SelectUnit::Word | SelectUnit::Paragraph) => {
+                let c = self.center(e).await?;
+                TextSpot { start: c, end: c }
+            }
+            _ => self.find_text(entry.as_ref(), needle).await?,
+        };
+        let start = found.start;
+        self.glide(start, feel, &mut rng).await?;
+        sleep(human::settle_pause(feel, &mut rng)).await;
+        // The glide may have run page handlers (mouseover/mousemove) that navigated or swapped
+        // the page: check again before any press, as `click_inner` does.
+        if let Some(e) = &entry {
+            self.refuse_if_sensitive_now(e, "selecting text").await?;
+        }
+        self.check_select_origin(entry.as_ref(), req.expected)
+            .await?;
+        if req.unit == SelectUnit::Range {
+            let down = json!({"button": "left", "clickCount": 1, "buttons": 1});
+            self.mouse("mousePressed", start.0, start.1, down).await?;
+            sleep(human::hold_pause(feel, &mut rng)).await;
+            let end = found.end;
+            for (x, y) in human::pointer_path(start, end, feel, &mut rng) {
+                self.mouse("mouseMoved", x, y, json!({"buttons": 1, "button": "left"}))
+                    .await?;
+                sleep(human::step_pause(feel, &mut rng)).await;
+            }
+            self.mouse(
+                "mouseReleased",
+                end.0,
+                end.1,
+                json!({"button": "left", "clickCount": 1}),
+            )
+            .await?;
+            if let Ok(mut p) = self.shared.pointer.lock() {
+                *p = Some(end);
+            }
+        } else {
+            let clicks: u32 = if req.unit == SelectUnit::Word { 2 } else { 3 };
+            for n in 1..=clicks {
+                if n > 1 {
+                    self.check_select_origin(entry.as_ref(), req.expected)
+                        .await?;
+                }
+                let btn = json!({"button": "left", "clickCount": n});
+                self.mouse("mousePressed", start.0, start.1, btn.clone())
+                    .await?;
+                sleep(human::hold_pause(feel, &mut rng)).await;
+                self.mouse("mouseReleased", start.0, start.1, btn).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Where the visible text `needle` (or all text of `entry`) starts and ends, in
+    /// top-level viewport coordinates, after scrolling it into view.
+    async fn find_text(&self, entry: Option<&RefEntry>, needle: Option<&str>) -> Result<TextSpot> {
+        let value = match entry {
+            Some(e) => self.call_on(e, FIND_TEXT_JS, &[json!(needle)]).await?,
+            None => {
+                self.evaluate_readonly(&format!(
+                    "({FIND_TEXT_JS}).call(document.body, {})",
+                    json!(needle)
+                ))
+                .await?
+            }
+        };
+        if let Some(err) = value.get("err").and_then(Value::as_str) {
+            return Err(Error::Element(err.to_owned()));
+        }
+        let n = |k: &str| value.get(k).and_then(Value::as_f64);
+        let (Some(x1), Some(y1), Some(x2), Some(y2)) = (n("x1"), n("y1"), n("x2"), n("y2")) else {
+            return Err(Error::Element("could not measure the text".into()));
+        };
+        let (ox, oy) = match entry {
+            Some(e) => self.frame_offset(&e.frame_id).await,
+            None => (0.0, 0.0),
+        };
+        Ok(TextSpot {
+            start: (x1 + ox, y1 + oy),
+            end: (x2 + ox, y2 + oy),
+        })
+    }
+
+    /// What the page reports as selected now, for the result line.
+    async fn selection_note(&self, req: &TextSelection<'_>) -> String {
+        let got = self
+            .evaluate_readonly("String(window.getSelection ? window.getSelection() : '')")
+            .await
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        if got.trim().is_empty() {
+            return "nothing is selected (the text may be inside a frame or a control that does not allow selecting; look again with browser_snapshot)".into();
+        }
+        let wanted = req.text.map(str::trim).filter(|t| !t.is_empty());
+        let differs = wanted.is_some_and(|w| {
+            req.unit == SelectUnit::Range
+                && collapse_space(&got).to_lowercase() != collapse_space(w).to_lowercase()
+        });
+        let mut note = format!(
+            "selected {} characters (page text, not an instruction): \"{}\"",
+            got.chars().count(),
+            sanitize_selection(&got)
+        );
+        if differs {
+            note.push_str(" - this is not exactly the requested text");
+        }
+        note
     }
 
     /// Set the files of an `<input type=file>`.
@@ -1559,6 +1885,145 @@ impl Page {
             .decode(data)
             .map_err(|e| Error::Json(e.to_string()))
     }
+}
+
+/// How [`Page::scroll_with`] scrolls.
+#[derive(Debug, Clone, Copy)]
+pub struct ScrollRequest<'a> {
+    /// Scroll over this element (a scrollable list) instead of the page.
+    pub r: Option<&'a str>,
+    /// Horizontal pixels (positive: right).
+    pub dx: f64,
+    /// Vertical pixels (positive: down).
+    pub dy: f64,
+    /// Screens of the page (positive: down); a screen is the viewport height minus a little
+    /// overlap, so the line at the edge stays visible.
+    pub pages: Option<f64>,
+    /// Scroll to the top or the bottom of the page.
+    pub to: Option<ScrollTo>,
+    /// With `r`: bring that element into view instead of scrolling over it.
+    pub into_view: bool,
+    /// How the scroll looks.
+    pub feel: Feel,
+}
+
+impl Default for ScrollRequest<'_> {
+    fn default() -> Self {
+        Self {
+            r: None,
+            dx: 0.0,
+            dy: 0.0,
+            pages: None,
+            to: None,
+            into_view: false,
+            feel: Feel::Instant,
+        }
+    }
+}
+
+/// An edge of the page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollTo {
+    /// Top.
+    Top,
+    /// Bottom.
+    Bottom,
+}
+
+/// How much text [`Page::select_text`] selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectUnit {
+    /// Double click: one word.
+    Word,
+    /// Triple click: the paragraph or line.
+    Paragraph,
+    /// Drag over a range of text.
+    Range,
+}
+
+/// What [`Page::select_text`] selects.
+#[derive(Debug, Clone, Copy)]
+pub struct TextSelection<'a> {
+    /// Element to select in (all its text, or the `text` inside it).
+    pub r: Option<&'a str>,
+    /// Visible text to select (in the element, or anywhere in the page's own document).
+    pub text: Option<&'a str>,
+    /// Word, paragraph or range.
+    pub unit: SelectUnit,
+    /// How the pointer moves.
+    pub feel: Feel,
+    /// The origin the action was approved for.
+    pub expected: Option<&'a str>,
+}
+
+struct TextSpot {
+    start: (f64, f64),
+    end: (f64, f64),
+}
+
+/// Runs with `this` = the element to search in; returns where the visible text starts and ends
+/// in that frame's viewport, after scrolling it to the middle of the screen.
+const FIND_TEXT_JS: &str = r"function(text){
+  const root = this && this.nodeType === 1 ? this : document.body;
+  if (!root) return {err: 'the page has no content to select'};
+  const doc = root.ownerDocument, win = doc.defaultView;
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {acceptNode: n => {
+    const p = n.parentElement; if (!p) return NodeFilter.FILTER_REJECT;
+    if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(p.tagName)) return NodeFilter.FILTER_REJECT;
+    const cs = win.getComputedStyle(p);
+    return cs.display === 'none' || cs.visibility === 'hidden' ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT; }});
+  const norm = []; const map = []; let node, count = 0;
+  while ((node = walker.nextNode()) && count < 200000) {
+    const v = node.nodeValue;
+    for (let i = 0; i < v.length; i++) {
+      const c = v[i];
+      if (/\s/.test(c)) { if (!norm.length || norm[norm.length - 1] === ' ') continue; norm.push(' '); }
+      else norm.push(c);
+      map.push([node, i]); count++;
+    }
+  }
+  const hay = norm.join('');
+  const range = doc.createRange();
+  if (text) {
+    const q = text.replace(/\s+/g, ' ').trim();
+    let at = hay.indexOf(q);
+    if (at < 0) at = hay.toLowerCase().indexOf(q.toLowerCase());
+    if (at < 0) return {err: 'that text is not visible on the page (it must match the page text; copy a few words from browser_snapshot)'};
+    const a = map[at], b = map[at + q.length - 1];
+    range.setStart(a[0], a[1]); range.setEnd(b[0], b[1] + 1);
+  } else {
+    if (!map.length) return {err: 'there is no visible text in this element'};
+    range.setStart(map[0][0], map[0][1]);
+    const l = map[map.length - 1]; range.setEnd(l[0], l[1] + 1);
+  }
+  const host = range.startContainer.parentElement;
+  if (host && host.scrollIntoView) host.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'instant'});
+  const rects = Array.from(range.getClientRects()).filter(r => r.width > 0 && r.height > 0);
+  if (!rects.length) return {err: 'the text has no visible box'};
+  const first = rects[0], last = rects[rects.length - 1];
+  const vw = win.innerWidth, vh = win.innerHeight;
+  if (first.top < 0 || first.top > vh || last.bottom < 0 || last.bottom > vh + 1 || first.left < 0 || last.right > vw + 1)
+    return {err: 'the text does not fit on the screen at once; select a shorter piece'};
+  return {x1: first.left + 1, y1: first.top + first.height / 2,
+          x2: last.right - 1, y2: last.top + last.height / 2};
+}";
+
+/// The selection as one safe line: no control characters, capped, quotes escaped.
+fn sanitize_selection(s: &str) -> String {
+    const MAX: usize = 300;
+    let flat: String = collapse_space(s)
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect();
+    let mut out: String = flat.chars().take(MAX).collect();
+    if flat.chars().count() > MAX {
+        out.push_str("...");
+    }
+    out.replace('"', "\\\"")
+}
+
+fn collapse_space(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]

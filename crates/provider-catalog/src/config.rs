@@ -93,6 +93,8 @@ pub enum CliEngine {
     Qwen,
     /// Kiro CLI (`kiro-cli acp`).
     Kiro,
+    /// Qoder CLI (`qodercli --acp`).
+    Qoder,
     /// GitHub Copilot CLI (`copilot --acp`).
     Copilot,
     /// Kimi Code CLI (`kimi acp`).
@@ -112,6 +114,7 @@ impl CliEngine {
             Self::Agy => "agy",
             Self::Qwen => "qwen",
             Self::Kiro => "kiro",
+            Self::Qoder => "qoder",
             Self::Copilot => "copilot",
             Self::Kimi => "kimi",
         }
@@ -465,6 +468,7 @@ impl ProviderConfig {
                     CliEngine::Agy => "cli:agy",
                     CliEngine::Qwen => "cli:qwen",
                     CliEngine::Kiro => "cli:kiro",
+                    CliEngine::Qoder => "cli:qoder",
                     CliEngine::Copilot => "cli:copilot",
                     CliEngine::Kimi => "cli:kimi",
                 };

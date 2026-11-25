@@ -6,7 +6,7 @@ official documentation, and the design of the optional "natural voice" follow-up
 
 ## Goal
 A hands-free toggle in the chat: listen -> transcribe -> normal bot turn -> speak the reply -> listen again.
-Speech-to-text is pluggable (Settings > General > Dictation service):
+Speech-to-text is pluggable (Settings > General > Voice dictation):
 
 | Provider | Where it runs | Audio format from the UI |
 |---|---|---|

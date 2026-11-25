@@ -29,7 +29,12 @@ import type {
   BotMemorySettings,
   BotMemorySettingsInput,
   MemoryEmbedding,
-  MemoryEmbeddingInput
+  MemoryEmbeddingInput,
+  IncomingWebhook,
+  IncomingWebhookAccepted,
+  IncomingWebhookCreated,
+  IncomingWebhookInput,
+  IncomingWebhookPatch
 } from "./types";
 import type {
   RecentLogs,
@@ -775,6 +780,34 @@ export class ApiClient {
   }
   deleteBot(id: string): Promise<void> {
     return this.request("DELETE", `/bots/${id}`);
+  }
+  /** Webhooks that start this bot. The secret is not included. */
+  listIncomingWebhooks(botId: string): Promise<IncomingWebhook[]> {
+    return this.request("GET", `/bots/${encodeURIComponent(botId)}/incoming-webhooks`);
+  }
+  /** Create a webhook. The secret is in the answer this once. */
+  createIncomingWebhook(botId: string, input: IncomingWebhookInput): Promise<IncomingWebhookCreated> {
+    return this.request("POST", `/bots/${encodeURIComponent(botId)}/incoming-webhooks`, { body: input });
+  }
+  updateIncomingWebhook(botId: string, hookId: string, input: IncomingWebhookPatch): Promise<IncomingWebhook> {
+    return this.request(
+      "PATCH",
+      `/bots/${encodeURIComponent(botId)}/incoming-webhooks/${encodeURIComponent(hookId)}`,
+      { body: input }
+    );
+  }
+  deleteIncomingWebhook(botId: string, hookId: string): Promise<void> {
+    return this.request(
+      "DELETE",
+      `/bots/${encodeURIComponent(botId)}/incoming-webhooks/${encodeURIComponent(hookId)}`
+    );
+  }
+  /** Owner test. Starts one untrusted run and does not use the caller's rate limit. */
+  testIncomingWebhook(botId: string, hookId: string): Promise<IncomingWebhookAccepted> {
+    return this.request(
+      "POST",
+      `/bots/${encodeURIComponent(botId)}/incoming-webhooks/${encodeURIComponent(hookId)}/test`
+    );
   }
   listGrants(botId: string): Promise<Grant[]> {
     return this.request("GET", `/bots/${botId}/grants`);

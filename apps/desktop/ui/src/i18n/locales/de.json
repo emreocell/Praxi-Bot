@@ -555,7 +555,7 @@
     },
     "photorealAvatars": {
       "description": "Bots erhalten weiche, fotorealistische Tonkörper in ihrer Farbe. Ausschalten für den leichteren gezeichneten Ton-Stil.",
-      "title": "Fotorealistische Ton-Avatare"
+      "title": "Fotorealistische Avatare"
     },
     "style": {
       "blur": "Unschärfe",
@@ -1379,6 +1379,7 @@
     "switcher": "Welcher Computer angezeigt wird",
     "tabs": {
       "activity": "Aktivität",
+      "automation": "Automatisierung",
       "label": "Panel-Bereiche",
       "library": "Bibliothek"
     },
@@ -1390,6 +1391,33 @@
       "title": "Anstehend",
       "toggle": "{{name}} ein- oder ausschalten",
       "trigger": "Wenn etwas passiert"
+    },
+    "webhooks": {
+      "copied": "Kopiert",
+      "copySecret": "Geheimnis kopieren",
+      "copyUrl": "Adresse kopieren",
+      "create": "Webhook anlegen",
+      "creating": "Wird angelegt…",
+      "empty": "Noch keine Webhooks. Lege einen an, wenn etwas von außen, etwa GitHub, ein Formular oder ein Schalter zu Hause, diesen Bot starten soll.",
+      "enabled": "An",
+      "instruction": "Was soll der Bot mit den Daten tun?",
+      "instructionHint": "Das ist deine Anweisung. Der eingehende Text ist Daten, nie ein Befehl, und der Bot fragt weiter, bevor er handelt.",
+      "intro": "Ein Webhook startet diesen Bot, wenn etwas seine Adresse aufruft. Praxi prüft die Signatur und behandelt den Text als nicht vertrauenswürdige Daten.",
+      "loadError": "Webhooks konnten nicht geladen werden.",
+      "name": "Name",
+      "namePlaceholder": "GitHub, die Haustür, ein Formular",
+      "off": "Aus",
+      "remove": "Entfernen",
+      "removed": "Webhook entfernt",
+      "secretLabel": "Signatur-Geheimnis",
+      "secretOnce": "Kopiere dieses Geheimnis jetzt. Praxi zeigt es nicht wieder an.",
+      "sign": "Jeder Aufruf sendet zwei Header. X-Webhook-Timestamp ist die Zeit in Millisekunden. X-Signature-256 beginnt mit sha256= und ist der HMAC aus dieser Zeit, einem Punkt und dem Rohtext, signiert mit dem Geheimnis. Derselbe signierte Aufruf gilt einmal und nur, wenn die Zeit innerhalb von 5 Minuten liegt. Der Text darf höchstens 64 KB groß sein. Mehr als 30 Aufrufe pro Minute werden abgelehnt.",
+      "test": "Test senden",
+      "testStarted": "Test gestartet. Der Bot behandelt ihn als nicht vertrauenswürdige Daten, und eine Frage erscheint weiter als Benachrichtigung.",
+      "testing": "Wird gesendet…",
+      "title": "Eingehende Webhooks",
+      "tunnel": "Praxi hört nur auf diesem Computer. Damit GitHub, ein Formular oder die Hausautomation diese Adresse aufrufen kann, leite einen Tunnel deiner Wahl (zum Beispiel Cloudflare Tunnel oder ssh) auf 127.0.0.1. Öffne keinen neuen Port am Router.",
+      "urlLabel": "Adresse"
     }
   },
   "botProfile": {
@@ -1917,7 +1945,7 @@
       "waiting": "Wartet auf deine Genehmigung"
     },
     "runFailed": "Der Lauf ist fehlgeschlagen: {{message}}",
-    "runStopped": "Gestoppt.",
+    "runStopped": "Von dir gestoppt",
     "send": "Senden",
     "slash": {
       "apps": "Apps öffnen",
@@ -1992,6 +2020,11 @@
         "failed": "Ein Feld wurde nicht ausgefüllt",
         "running": "Füllt ein Feld aus"
       },
+      "browser_hover": {
+        "done": "Mit der Maus über etwas auf einer Seite gefahren",
+        "failed": "Konnte nicht über etwas fahren",
+        "running": "Fährt mit der Maus über etwas auf einer Seite"
+      },
       "browser_open": {
         "done": "Eine Seite geöffnet",
         "failed": "Eine Seite wurde nicht geöffnet",
@@ -2006,6 +2039,11 @@
         "done": "Eine Option auf einer Seite gewählt",
         "failed": "Keine Option gewählt",
         "running": "Wählt eine Option auf einer Seite"
+      },
+      "browser_select_text": {
+        "done": "Text auf einer Seite markiert",
+        "failed": "Text nicht markiert",
+        "running": "Markiert Text auf einer Seite"
       },
       "browser_view": {
         "done": "Eine Seite betrachtet",
@@ -3621,7 +3659,7 @@
     },
     "test": "Verbindung testen",
     "testOk": "Verbindung funktioniert",
-    "title": "Helfer (optional)",
+    "title": "Schlaue Suche & Helfer",
     "usage": {
       "noLimit": "{{used}} genutzt",
       "of": "{{used}} von {{limit}}",
@@ -3879,7 +3917,7 @@
     "settings": "Abrufeinstellungen",
     "skippedFiles": "{{count}} Dateien übersprungen",
     "skippedFiles_one": "{{count}} Datei übersprungen",
-    "title": "Wissen und gemeinsames Gehirn",
+    "title": "Wissen & Dateien",
     "url": "URL der gespeicherten Seite"
   },
   "liveView": {
@@ -4457,57 +4495,101 @@
       "deny": "Ablehnen"
     },
     "approval": {
-      "mcp": "{{bot}} möchte {{app}} verwenden ({{action}})",
-      "other": "{{bot}} möchte fortfahren: {{what}}",
-      "title": "Genehmigung erforderlich"
+      "deleteFile": "{{bot}} braucht dein OK zum Löschen einer Datei",
+      "mcp": "{{bot}} braucht dein OK für {{app}} ({{action}})",
+      "openPage": "{{bot}} braucht dein OK zum Öffnen einer Seite",
+      "openSite": "{{bot}} braucht dein OK zum Öffnen von {{site}}",
+      "other": "{{bot}} braucht dein OK: {{what}}",
+      "readSite": "{{bot}} braucht dein OK zum Lesen von {{site}}",
+      "runCommand": "{{bot}} braucht dein OK für einen Befehl",
+      "saveFile": "{{bot}} braucht dein OK zum Speichern einer Datei",
+      "schedule": "{{bot}} braucht dein OK für eine geplante Aufgabe",
+      "sendEmail": "{{bot}} braucht dein OK zum Senden einer E-Mail",
+      "title": "Dein OK wird gebraucht"
     },
     "detail": {
-      "failed": "Fehlgeschlagen: {{detail}}",
+      "failed": "Lauf fehlgeschlagen: {{detail}}",
       "longRun": "{{detail}}",
       "needsYou": "{{detail}}",
       "scheduleDone": "{{detail}}"
     },
+    "failed": {
+      "reasonAuth": "Modelleinstellungen prüfen",
+      "reasonBusy": "Modell ist ausgelastet",
+      "reasonNetwork": "Verbindung unterbrochen",
+      "reasonTimeout": "Zeitüberschreitung",
+      "retrying": "Lauf fehlgeschlagen: {{reason}}, neuer Versuch in {{seconds}} s",
+      "withReason": "Lauf fehlgeschlagen: {{reason}}"
+    },
     "generic": {
-      "failed": "Ein Lauf ist fehlgeschlagen.",
-      "longRun": "Eine lange Aufgabe abgeschlossen.",
-      "needsYou": "Braucht deine Aufmerksamkeit.",
-      "scheduleDone": "Ein geplanter Auftrag ist fertig."
+      "failed": "Lauf fehlgeschlagen",
+      "longRun": "Lange Aufgabe abgeschlossen",
+      "needsYou": "Braucht deine Aufmerksamkeit",
+      "scheduleDone": "Geplante Aufgabe fertig"
+    },
+    "question": {
+      "title": "{{bot}} hat eine Frage"
     }
   },
   "notifyHistory": {
-    "allBots": "Alle Bots",
-    "allTypes": "Alle Arten",
-    "clear": "Verlauf löschen",
+    "approvedToast": "Erlaubt",
+    "askedTimes": "{{bot}} hat {{count}}-mal gefragt",
+    "clear": "Leeren",
+    "clearedToast": "Benachrichtigungen gelöscht",
+    "deniedToast": "Abgelehnt",
+    "dismiss": "Schließen",
     "empty": "Wenn ein Bot eine Aufgabe beendet oder dein OK braucht, siehst du es hier.",
     "emptyAction": "Ansehen, was dich braucht",
     "emptyTitle": "Nichts Neues",
-    "filterBot": "Bot",
-    "filterType": "Art",
+    "filterChip": {
+      "all": "Alle",
+      "errors": "Fehler",
+      "needsYou": "Braucht dich",
+      "runs": "Läufe"
+    },
     "filters": "Benachrichtigungen filtern",
+    "groups": {
+      "earlier": "Früher",
+      "needsYou": "Braucht dich",
+      "updates": "Neuigkeiten"
+    },
     "held": "Zurückgehalten (Ruhezeit)",
     "heldMuted": "Zurückgehalten (Bot stummgeschaltet)",
-    "kind": {
-      "digest": "Tageszusammenfassung",
-      "failed": "Lauf fehlgeschlagen",
-      "longRun": "Langer Lauf beendet",
-      "needsYou": "Braucht dich",
-      "scheduleDone": "Geplanter Auftrag fertig"
-    },
+    "heldMutedShort": "Stumm",
+    "heldShort": "Ruhezeit",
     "markAllRead": "Alle als gelesen markieren",
+    "markRead": "Als gelesen markieren",
     "noMatch": "Keine Benachrichtigung passt zu diesen Filtern.",
     "noMatchTitle": "Hier ist nichts",
-    "onlyUnread": "Nur ungelesene",
+    "onlyUnread": "Ungelesen",
     "openNeeds": "„Braucht dich“ öffnen",
     "quietNote": "{{count}} Benachrichtigungen wurden in den Ruhezeiten zurückgehalten und sind noch ungelesen.",
     "quietNote_one": "{{count}} Benachrichtigung wurde in den Ruhezeiten zurückgehalten und ist noch ungelesen.",
+    "repeatedTimes": "{{count}}-mal",
     "resetFilters": "Alles anzeigen",
+    "resolved": {
+      "answered": "Beantwortet",
+      "approved": "Erlaubt",
+      "denied": "Abgelehnt",
+      "expired": "Abgelaufen",
+      "retried": "Erneut versucht"
+    },
     "retention": "Wird {{days}} Tage lang aufbewahrt, höchstens {{max}} Benachrichtigungen, danach automatisch entfernt.",
+    "retriedToast": "Wird im Chat erneut versucht",
+    "retry": "Erneut versuchen",
     "showSnoozed": "Zurückgestellt ({{count}})",
-    "shown": "Angezeigt",
     "snooze": "1 Std. zurückstellen",
     "snoozeHint": "Blendet dies für eine Stunde aus. Es kommt von selbst wieder.",
-    "subtitle": "Was die Bots gemeldet haben und was die Ruhezeiten zurückgehalten haben. Offene Freigaben bleiben immer unter „Braucht dich“.",
-    "title": "Benachrichtigungsverlauf",
+    "subtitle": "Freigaben, abgeschlossene Aufgaben und Fehler deiner Bots.",
+    "systemBot": "Praxi",
+    "time": {
+      "hoursAgo": "vor {{count}} Std.",
+      "justNow": "Gerade eben",
+      "minutesAgo": "vor {{count}} Min.",
+      "yesterday": "Gestern"
+    },
+    "title": "Benachrichtigungen",
+    "undo": "Rückgängig",
     "unread": "Ungelesen",
     "unreadCount": "{{count}} ungelesen",
     "unsnooze": "Zurückholen"
@@ -5145,7 +5227,7 @@
       "enable": "Autostart aktivieren",
       "enabled": "Aktiviert",
       "error": "Die Windows-Autostart-Einstellung konnte nicht aktualisiert werden.",
-      "title": "Praxi-Bot beim Anmelden starten"
+      "title": "Beim Anmelden starten"
     },
     "background": {
       "blur": "Hintergrundunschärfe",
@@ -5185,11 +5267,11 @@
       "record": "Kürzel aufnehmen",
       "recording": "Modifikator + Taste drücken …",
       "reset": "Auf Strg+Alt+Esc zurücksetzen",
-      "title": "Tastenkürzel „Alles stoppen“"
+      "title": "Stopp-Tastenkürzel"
     },
     "keepInTray": {
       "description": "Standardmäßig aus: Beim Schließen des Fensters wird Praxi-Bot beendet. Ist dies an, wird das Fenster nur ausgeblendet und deine Bots arbeiten weiter. Das Praxi-Bot-Symbol erscheint im Infobereich (neben der Uhr); darüber kannst du es öffnen, pausieren oder beenden. Beim ersten Mal erhältst du einen einmaligen Hinweis.",
-      "title": "Im Infobereich weiterlaufen, wenn das Fenster geschlossen wird"
+      "title": "Im Infobereich weiterlaufen"
     },
     "language": {
       "de": "Deutsch",
@@ -5281,7 +5363,7 @@
       "restartHint": "Starte den Hintergrunddienst neu, damit er die Änderung übernimmt.",
       "restartManual": "Starte den Hintergrunddienst selbst neu, damit er die Änderung übernimmt (er wurde nicht von dieser App gestartet).",
       "test": "Verbindung testen",
-      "title": "Modellanbieter"
+      "title": "Eigene KI-Server"
     },
     "quickAsk": {
       "description": "Standardmäßig aus. Wenn aktiv, öffnet ein Tastenkürzel in jedem Programm ein kleines Feld, in dem du eine Frage eintippst und Enter drückst. Jede Frage startet einen neuen Chat mit dem gewählten Bot.",
@@ -5388,7 +5470,7 @@
         "saved": "Schlüssel für {{provider}} gespeichert",
         "savedOn": "Schlüssel für {{provider}} auf {{name}} gespeichert",
         "stored": "Ein Schlüssel ist gespeichert",
-        "title": "Mit API-Schlüssel hinzufügen",
+        "title": "Zugangsschlüssel",
         "unknown": "Wir können nicht erkennen, für welchen Anbieter dieser Schlüssel gilt. Wähle unten einen aus."
       }
     },
@@ -5521,7 +5603,7 @@
         "unsupported": "Nicht verfügbar",
         "warn": "Prüfen"
       },
-      "title": "Diagnose"
+      "title": "Systemprüfung"
     },
     "email": {
       "add": "Postfach hinzufügen",
@@ -5671,7 +5753,7 @@
     "general": {
       "account": {
         "description": "Wird im Kontomenü der Seitenleiste angezeigt.",
-        "title": "Kontoname"
+        "title": "Dein Name"
       },
       "frame": {
         "description": "Die native Titelleiste statt der eigenen Fenstertasten der App anzeigen.",
@@ -5695,11 +5777,6 @@
         "seconds": "Mit Sekunden",
         "title": "Nachrichtenzeiten anzeigen"
       }
-    },
-    "groups": {
-      "account": "Konto",
-      "appearance": "Darstellung",
-      "behavior": "Verhalten"
     },
     "learn": {
       "guide": "Mehr im Handbuch lesen",
@@ -5732,64 +5809,43 @@
       }
     },
     "mode": {
-      "advanced": "Erweitert",
-      "advancedOn": "Erweiterte Einstellungen werden angezeigt. Du kannst jederzeit zu Einfach zurückwechseln.",
-      "hidden": "{{count}} weitere Einstellungen für Profis anzeigen",
-      "hidden_one": "{{count}} weitere Einstellung für Profis anzeigen",
-      "hidden_other": "{{count}} weitere Einstellungen für Profis anzeigen",
-      "label": "Wie viel anzeigen",
-      "simple": "Einfach"
+      "moreHint": "Zusätzliche Feineinstellungen",
+      "moreOptions": "Weitere Optionen"
     },
     "navGroups": {
-      "app": "Die App",
+      "app": "App & Daten",
       "bots": "Deine Bots",
       "you": "Du"
     },
     "noResults": "Keine passenden Einstellungen.",
     "pages": {
-      "advanced": {
-        "description": "Gesundheitscheck, Reparatur und Version. Die meisten brauchen diese Seite nie.",
-        "name": "Erweitert"
-      },
       "appearance": {
-        "description": "Farben, Hintergrund und das Aussehen der App.",
+        "description": "Farben, Hintergrund und Lesbarkeit.",
         "name": "Darstellung"
       },
       "apps": {
-        "description": "E-Mail und Websuche, die deine Bots nutzen können.",
-        "name": "Apps & Verbindungen"
-      },
-      "data": {
-        "description": "Woran sich Bots erinnern, was sie wissen und wie viel du genutzt hast.",
-        "name": "Daten & Backup"
+        "description": "Websuche und Postfächer für deine Bots.",
+        "name": "Mail & Web"
       },
       "general": {
-        "description": "Dein Name, die Sprache und wie das Senden von Nachrichten funktioniert.",
+        "description": "Dein Name, Sprache, Hinweise und Stimme.",
         "name": "Allgemein"
       },
-      "help": {
-        "description": "Prüfe aktuelle Ereignisse und erstelle einen bereinigten Supportbericht.",
-        "name": "Hilfe"
-      },
       "models": {
-        "description": "Mit welcher KI deine Bots denken und woran sie sich erinnern können.",
-        "name": "Bots & Modelle"
-      },
-      "notifications": {
-        "description": "Wann dich die App auf etwas aufmerksam machen soll.",
-        "name": "Benachrichtigungen"
+        "description": "Mit welcher KI deine Bots denken und was sie sich merken.",
+        "name": "KI-Modelle"
       },
       "safety": {
-        "description": "Was Bots allein tun dürfen und was sie dich erst fragen müssen.",
-        "name": "Sicherheit & Berechtigungen"
+        "description": "Was Bots selbst dürfen, vertrauenswürdige Ordner und Aktivitätsprotokoll.",
+        "name": "Sicherheit"
       },
-      "voice": {
-        "description": "Antworten vorlesen lassen oder sprechen statt tippen.",
-        "name": "Stimme"
+      "system": {
+        "description": "Verbrauch, Speicherplatz, Updates und Systemprüfung.",
+        "name": "System"
       },
       "where": {
-        "description": "Der Computer, auf dem deine Bots arbeiten.",
-        "name": "Wo Bots laufen"
+        "description": "Auf welchem Computer deine Bots arbeiten.",
+        "name": "Computer"
       }
     },
     "reset": {
@@ -5891,7 +5947,7 @@
         "title": "Beim Update ist etwas schiefgelaufen",
         "working": "Kehrt zurück…"
       },
-      "title": "Updates",
+      "title": "Updates & Version",
       "unknown": "Unbekannt",
       "upToDate": "Sie haben die neueste Version."
     },
@@ -6395,7 +6451,7 @@
       "close": "Schließen",
       "daemonUnavailable": "Der Sprachdienst ist nicht verfügbar. Verbinde den Hintergrunddienst auf diesem Computer erneut. Aktualisiere ihn, falls er Sprache nicht unterstützt.",
       "end": "Anruf beenden",
-      "geminiKeyMissing": "Füge unter Einstellungen → Stimme → Diktierdienst einen Gemini-API-Schlüssel hinzu und versuche es erneut.",
+      "geminiKeyMissing": "Füge unter Einstellungen → Allgemein → Sprachdiktat einen Gemini-Schlüssel hinzu und versuche es erneut.",
       "holdToTalk": "Zum Sprechen gedrückt halten",
       "interrupt": "Unterbrechen",
       "micMuted": "Mikrofon stummgeschaltet",
@@ -6403,7 +6459,7 @@
       "micTimeout": "Das Mikrofon antwortet nicht. Bestätige die Mikrofonabfrage. Erlaube unter Windows-Einstellungen → Datenschutz und Sicherheit → Mikrofon den Mikrofonzugriff und Desktop-Apps und versuche es erneut.",
       "mute": "Mikrofon stummschalten",
       "noSpeech": "Keine Sprache erkannt. Ich höre weiter zu.",
-      "notConfigured": "Füge unter Einstellungen → Stimme → Diktierdienst einen Gemini-Schlüssel hinzu und wähle Gemini Live oder richte einen Whisper-kompatiblen Dienst ein.",
+      "notConfigured": "Füge unter Einstellungen → Allgemein → Sprachdiktat einen Gemini-Schlüssel hinzu und wähle Gemini Live, oder richte einen Whisper-kompatiblen Dienst ein.",
       "openSettings": "Einstellungen öffnen",
       "ownerRequired": "Die Eigentümerautorisierung fehlt. Öffne Praxi-Bot auf diesem Computer, verbinde den lokalen Hintergrunddienst erneut und versuche es noch einmal.",
       "phase": {
@@ -6419,7 +6475,7 @@
       "replyFailed": "Der Bot konnte nicht antworten. Bitte erneut versuchen.",
       "retry": "Erneut versuchen",
       "runActive": "Ein Bot arbeitet gerade. Warte, bis er fertig ist, oder stoppe ihn im Chat und starte den Sprachchat erneut. Das Mikrofon ist aus.",
-      "serviceRefused": "Der Diktierdienst hat die Anfrage abgelehnt. Prüfe unter Einstellungen → Stimme → Diktierdienst den Anbieter, API-Schlüssel, das Modell und das Kontingent.",
+      "serviceRefused": "Der Transkriptionsdienst hat die Anfrage abgelehnt. Prüfe unter Einstellungen → Allgemein → Sprachdiktat den Dienst, Zugangsschlüssel, das Modell und das Kontingent.",
       "simulate": "Sprechen simulieren (Mock)",
       "start": "Sprachchat starten",
       "stepTimeout": "Der Start dauerte zu lange, deshalb wurde der Anruf gestoppt. Prüfe deine Internetverbindung und ob der Hintergrunddienst läuft, und versuche es erneut.",
@@ -6427,7 +6483,7 @@
       "transcribeFailed": "Das konnte nicht transkribiert werden. Bitte noch einmal sagen.",
       "unmute": "Mikrofon einschalten",
       "unsupported": "Dieses Fenster kann kein Audio aufnehmen.",
-      "wrongProvider": "Wähle unter Einstellungen → Stimme → Diktierdienst Gemini Live, um deinen Gemini-Schlüssel zu nutzen, oder richte den ausgewählten Whisper-Dienst ein."
+      "wrongProvider": "Wähle unter Einstellungen → Allgemein → Sprachdiktat Gemini Live, um deinen Gemini-Schlüssel zu nutzen, oder richte den ausgewählten Whisper-Dienst ein."
     },
     "codeOmitted": "(Code ausgelassen)",
     "description": "Stimme und Tempo für die Vorlesen-Schaltfläche. Nutzt die Sprachausgabe deines Systems.",
@@ -6489,7 +6545,7 @@
     "micBusy": "Das Mikrofon wird von einer anderen App verwendet. Schließe sie und versuche es erneut.",
     "micDenied": "Erlaube Praxi-Bot den Mikrofonzugriff. Aktiviere unter Windows-Einstellungen → Datenschutz und Sicherheit → Mikrofon den Mikrofonzugriff und den Zugriff für Desktop-Apps. Starte Praxi-Bot neu und versuche es erneut.",
     "micMissing": "Es wurde kein Mikrofon gefunden. Schließe eines an und versuche es erneut.",
-    "notConfigured": "Diktieren ist noch nicht eingerichtet. Füge unter Einstellungen → Stimme → Diktierdienst einen Transkriptionsdienst hinzu.",
+    "notConfigured": "Diktat ist noch nicht eingerichtet. Füge unter Einstellungen → Allgemein → Sprachdiktat einen Transkriptionsdienst hinzu.",
     "online": "online",
     "speak": "Vorlesen",
     "speakAuto": {
@@ -6523,7 +6579,7 @@
       "statusOwnKey": "Bereit: Ein separat für Sprache gespeicherter Schlüssel wird verwendet.",
       "statusReusing": "Bereit: Der bereits für diesen Dienst hinzugefügte Schlüssel wird verwendet. Er bleibt im geheimen Speicher.",
       "statusReusingGemini": "Bereit: Der bereits hinzugefügte Gemini-Schlüssel wird verwendet. Er bleibt im geheimen Speicher.",
-      "title": "Diktierdienst",
+      "title": "Sprachdiktat",
       "url": "Dienstadresse",
       "whereTitle": "Wohin Ihre Stimme geht:"
     },

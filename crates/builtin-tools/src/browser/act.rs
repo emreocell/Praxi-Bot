@@ -280,7 +280,12 @@ fn report(steps: &[Step], done: usize, stop: Option<&str>, last: Option<&str>) -
 
 impl BrowserTool {
     /// Run a batch. Each step is exactly its single tool; see the module docs.
-    pub(super) async fn run_act(&self, run_id: &str, input: Value) -> Result<String, ToolError> {
+    pub(super) async fn run_act(
+        &self,
+        run_id: &str,
+        input: Value,
+        bot: Option<&str>,
+    ) -> Result<String, ToolError> {
         let steps = parse_steps(&input)?;
         let d = Arc::clone(&self.shared.driver);
         // Fingerprint of every ref, taken before anything runs. A ref the driver cannot
@@ -356,7 +361,7 @@ impl BrowserTool {
             };
             let text = match tokio::time::timeout(
                 remaining,
-                super::STEP_GUARD.scope(guard, Box::pin(tool.run_inner(run_id, single))),
+                super::STEP_GUARD.scope(guard, Box::pin(tool.run_inner(run_id, single, bot))),
             )
             .await
             {

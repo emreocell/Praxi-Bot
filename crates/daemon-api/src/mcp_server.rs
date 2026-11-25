@@ -436,6 +436,8 @@ fn is_computer_tool(spec: &tool_registry::ToolSpec) -> bool {
             | "browser_select"
             | "browser_press"
             | "browser_scroll"
+            | "browser_hover"
+            | "browser_select_text"
             | "browser_wait"
             | "browser_back"
             | "browser_tabs"

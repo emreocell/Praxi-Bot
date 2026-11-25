@@ -110,10 +110,11 @@ impl Tool for SecretsList {
         &self.spec
     }
 
-    async fn call(&self, _ctx: &ToolContext, _input: Value) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, ctx: &ToolContext, _input: Value) -> Result<ToolOutput, ToolError> {
+        // A bot sees the owner's secrets and its own accounts, not another bot's.
         let list = self
             .secrets
-            .list()
+            .list_for_bot(ctx.bot_id.as_deref())
             .map_err(|e| ToolError::Execution(e.to_string()))?;
         if list.is_empty() {
             return Ok(ToolOutput::text(

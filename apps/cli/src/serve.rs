@@ -337,6 +337,10 @@ fn build_agent_with_skills(
         std::env::var("BOT_BROWSER_IDLE_SECONDS").ok().as_deref(),
     );
     tools.browser_settings.idle_timeout = idle;
+    tools.browser_settings.human_like = browser_human_like(
+        &host_limits,
+        std::env::var("BOT_BROWSER_HUMAN_LIKE").ok().as_deref(),
+    );
     let approval_timeout = approval_timeout(
         std::env::var("BOT_APPROVAL_TIMEOUT_SECONDS")
             .ok()
@@ -387,6 +391,30 @@ fn build_agent_with_skills(
             tools: ToolRegistry::new(),
         },
     ))
+}
+
+/// How human-like the assistant's browser moves: `host.toml` `[browser] human_like =
+/// "off" | "auto" | "high"`, overridden by `BOT_BROWSER_HUMAN_LIKE`. `auto` (the default) moves
+/// the pointer and scrolls smoothly only while somebody can watch. A value that is not
+/// understood keeps the default rather than failing the start.
+pub(crate) fn browser_human_like(host: &str, env: Option<&str>) -> browser_cdp::HumanLike {
+    let file = toml::from_str::<BrowserFile>(host)
+        .ok()
+        .and_then(|f| f.browser.human_like)
+        .and_then(|v| v.parse().ok());
+    env.and_then(|v| v.parse().ok())
+        .or(file)
+        .unwrap_or_default()
+}
+
+#[derive(Default, Deserialize)]
+struct BrowserFile {
+    #[serde(default)]
+    browser: BrowserSection,
+}
+#[derive(Default, Deserialize)]
+struct BrowserSection {
+    human_like: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -1682,6 +1710,37 @@ secret_request=true",
         );
         assert_eq!(approval_timeout(Some("90")), Duration::from_secs(90));
         assert_eq!(approval_timeout(Some("0")), Duration::ZERO);
+    }
+
+    #[test]
+    fn browser_human_like_defaults_to_auto_and_the_environment_wins() {
+        use browser_cdp::HumanLike::{Auto, High, Off};
+        assert_eq!(browser_human_like("", None), Auto);
+        assert_eq!(
+            browser_human_like(
+                "[browser]
+human_like = \"off\"",
+                None
+            ),
+            Off
+        );
+        assert_eq!(
+            browser_human_like(
+                "[browser]
+human_like = \"off\"",
+                Some("high")
+            ),
+            High
+        );
+        // Not understood: keep the default instead of failing the start.
+        assert_eq!(
+            browser_human_like(
+                "[browser]
+human_like = \"x\"",
+                Some("y")
+            ),
+            Auto
+        );
     }
 
     #[test]

@@ -8,8 +8,10 @@
 //! `127.0.0.1`; on top of that every request must carry a loopback `Host`
 //! (DNS-rebinding protection), a browser `Origin` must be one of the
 //! configured desktop-app origins, and everything except `GET /v1/health`
-//! needs `Authorization: Bearer <per-install token>` (see [`auth`]).  The one
-//! exception is `GET /v1/events`, which also accepts `?token=<token>` for
+//! needs `Authorization: Bearer <per-install token>` (see [`auth`]).  Signed
+//! webhook calls (`POST /v1/webhooks/{id}` and `POST /v1/incoming-webhooks/{id}`)
+//! use an HMAC instead of the bearer.  The one
+//! other exception is `GET /v1/events`, which also accepts `?token=<token>` for
 //! browser `EventSource` clients (Host / Origin still apply).
 
 mod attachment_routes;
@@ -70,6 +72,7 @@ pub use peer::{PeerIdentity, PeerRole, peer_router};
 mod bot_limits_routes;
 mod data_routes;
 mod embeddings_routes;
+mod incoming_webhook;
 mod routes;
 mod schedule;
 mod schedule_tools;
@@ -1401,6 +1404,25 @@ fn api_routes() -> Router<AppState> {
             "/v1/bots/{id}/spend-limits",
             get(bot_limits_routes::get_bot_spend_limits)
                 .put(bot_limits_routes::put_bot_spend_limits),
+        )
+        .route(
+            "/v1/bots/{id}/incoming-webhooks",
+            get(incoming_webhook::list_webhooks).post(incoming_webhook::create_webhook),
+        )
+        .route(
+            "/v1/bots/{id}/incoming-webhooks/{hook}",
+            axum::routing::patch(incoming_webhook::update_webhook)
+                .delete(incoming_webhook::delete_webhook),
+        )
+        .route(
+            "/v1/bots/{id}/incoming-webhooks/{hook}/test",
+            post(incoming_webhook::test_webhook),
+        )
+        .route(
+            "/v1/incoming-webhooks/{hook}",
+            post(incoming_webhook::receive_webhook).layer(axum::extract::DefaultBodyLimit::max(
+                incoming_webhook::MAX_BODY,
+            )),
         )
         .route(
             "/v1/skills",

@@ -117,6 +117,15 @@ fn reset_imported_engines(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Incoming webhooks are standing signed ingress; one chosen by whoever made
+/// the bundle must not stay live. They come back disabled with no secret, so the
+/// owner has to re-create or rotate them on this machine.
+fn disable_imported_webhooks(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "UPDATE incoming_webhooks SET secret = '', enabled = 0; DELETE FROM incoming_webhook_seen;",
+    )
+}
+
 fn neutralise_system_messages(conn: &Connection) -> rusqlite::Result<()> {
     let rows: Vec<(String, String, String)> = {
         let mut stmt = conn.prepare(
@@ -196,6 +205,7 @@ fn prepare_database(path: &Path, db: &str, manifest: &Manifest) -> Result<()> {
             validate_run_ancestry(&conn)?;
             neutralise_system_messages(&conn).map_err(|error| database_error(db, error))?;
             reset_imported_engines(&conn).map_err(|error| database_error(db, error))?;
+            disable_imported_webhooks(&conn).map_err(|error| database_error(db, error))?;
             drop(conn);
         }
         "schedules.db" => {
@@ -206,6 +216,11 @@ fn prepare_database(path: &Path, db: &str, manifest: &Manifest) -> Result<()> {
                 }
                 other => database_error(db, other),
             })?;
+            let conn = open()?;
+            conn.execute_batch(
+                "UPDATE schedule_triggers SET trigger_json = json_set(trigger_json, '$.secret', '')                  WHERE json_extract(trigger_json, '$.kind') = 'webhook';                  UPDATE schedules SET enabled = 0 WHERE id IN (SELECT schedule_id FROM schedule_triggers                  WHERE json_extract(trigger_json, '$.kind') = 'webhook');",
+            )
+            .map_err(|error| database_error(db, error))?;
         }
         "memory.db" => {
             drop(conn);

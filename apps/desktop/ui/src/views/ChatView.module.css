@@ -642,7 +642,8 @@
   height: var(--size-icon-sm);
 }
 
-.send[data-mode="stop"] {
+.send[data-mode="stop"],
+.send[data-mode="stopping"] {
   border-radius: calc(var(--radius-md) * 1.125);
   background-color: var(--color-danger);
   color: var(--color-danger-contrast);

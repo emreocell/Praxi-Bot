@@ -138,12 +138,47 @@ pub(crate) fn backup(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Incoming-webhook signing secrets live in plain database columns, so the
+/// snapshot copy is blanked unless the owner chose `SecretSelection::All`.
+/// The replay table is dropped data too: it only holds signatures of past calls.
+fn scrub_webhook_secrets(path: &str, snapshot: &Path) -> Result<()> {
+    let sql = match path {
+        "bot.db" => {
+            "UPDATE incoming_webhooks SET secret = '', enabled = 0; DELETE FROM incoming_webhook_seen;"
+        }
+        "schedules.db" => {
+            "UPDATE schedule_triggers SET trigger_json = json_set(trigger_json, '$.secret', '')              WHERE json_extract(trigger_json, '$.kind') = 'webhook';"
+        }
+        _ => return Ok(()),
+    };
+    let table = if path == "bot.db" {
+        "incoming_webhooks"
+    } else {
+        "schedule_triggers"
+    };
+    let conn = Connection::open(snapshot)?;
+    // Older databases may predate the table; nothing to scrub then.
+    let present: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [table],
+        |row| row.get(0),
+    )?;
+    if present {
+        conn.execute_batch("PRAGMA secure_delete = ON;")?;
+        conn.execute_batch(sql)?;
+        // Rewrite the file so no old secret bytes survive in free pages.
+        conn.execute_batch("VACUUM;")?;
+    }
+    Ok(())
+}
+
 pub(crate) async fn write_files(
     data_dir: &Path,
     sink: &mut (impl AsyncWrite + Unpin),
     manifest: &mut Manifest,
     bytes: &mut u64,
     cb: Option<&ProgressCallback>,
+    keep_webhook_secrets: bool,
 ) -> Result<()> {
     let policy_json = crate::policy::export(data_dir)?;
     let mut paths = collect(data_dir)?;
@@ -177,6 +212,9 @@ pub(crate) async fn write_files(
                 std::fs::create_dir_all(parent)?;
             }
             backup(&source, &snapshot)?;
+            if !keep_webhook_secrets {
+                scrub_webhook_secrets(&path, &snapshot)?;
+            }
             source = snapshot;
             let version = storage::migrate::current_version(&rusqlite::Connection::open(&source)?)?;
             manifest

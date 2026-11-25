@@ -67,10 +67,10 @@ try {
   await send('Runtime.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1365, height: 1100, deviceScaleFactor: 1, mobile: false });
   for (const theme of ['obsidian', 'clay', 'cobalt', 'porcelain']) {
-    await send('Page.navigate', { url: `${base}/?mock=1&screen=settings&section=data&lang=en&theme=${theme}&style=solid` });
+    await send('Page.navigate', { url: `${base}/?mock=1&screen=settings&section=models&lang=en&theme=${theme}&style=solid` });
     await waitFor(`Array.from(document.querySelectorAll('h3')).some(e => e.textContent === 'Knowledge and shared brain')`, 'knowledge card');
     await waitFor(`Array.from(document.querySelectorAll('summary')).some(e => e.textContent === 'Add source')`, 'loaded source management');
-    await evaluate(`globalThis.kcard = Array.from(document.querySelectorAll('h3')).filter(e => e.textContent === 'Knowledge and shared brain').at(-1).parentElement;
+    await evaluate(`globalThis.kcard = Array.from(document.querySelectorAll('h3')).filter(e => e.textContent === 'Knowledge and shared brain').at(-1).closest('section');
       globalThis.kfield = (text) => Array.from(kcard.querySelectorAll('label')).find(e => e.firstChild?.textContent.trim() === text)?.querySelector('input,select,textarea');
       globalThis.kset = (text, value) => { const el = kfield(text); if (!el) throw new Error('Missing field '+text); const prototype = el.tagName === 'SELECT' ? HTMLSelectElement.prototype : el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype,'value').set.call(el,value); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input',{bubbles:true})); };
       globalThis.kbutton = (text) => Array.from(kcard.querySelectorAll('button')).find(e => e.textContent.trim() === text);

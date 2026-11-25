@@ -64,6 +64,8 @@ impl Drop for ClosedGuard {
 
 /// What a call's card says when nobody decided it in time (the model sees it as the denial reason).
 pub(crate) const EXPIRED_REASON: &str = "expired: nobody answered in time";
+/// Reason on the denial a Stop records for an approval that was still open.
+pub(crate) const STOPPED_REASON: &str = "denied: stopped by you";
 
 /// How a wait for the user ended.
 enum Waited {
@@ -1462,6 +1464,7 @@ impl Shared {
         grantable: bool,
     ) -> (Uuid, PendingGuard, oneshot::Receiver<Verdict>) {
         let (tx, rx) = oneshot::channel();
+        let approval_id = Uuid::now_v7();
         self.pending.lock().insert(
             call_id,
             Pending {
@@ -1471,10 +1474,11 @@ impl Shared {
                 gate_grant: false,
                 run_tool: false,
                 always_refused: false,
+                run_id: ctx.run_id,
+                approval_id,
             },
         );
         *self.parked.lock().entry(ctx.run_id).or_insert(0) += 1;
-        let approval_id = Uuid::now_v7();
         let guard = PendingGuard {
             sh: Arc::clone(self),
             id: call_id,
@@ -1502,6 +1506,10 @@ impl Shared {
     /// [`LoopConfig::approval_timeout`](crate::LoopConfig) (zero = no limit);
     /// then the call is denied as expired and the run carries on.
     async fn wait_verdict(&self, ctx: &RunCtx, rx: oneshot::Receiver<Verdict>) -> Waited {
+        // A card parked after Stop (a parallel call) is closed at once.
+        if self.run_is_stopped(ctx.run_id) {
+            self.deny_open_for_stop(ctx.run_id);
+        }
         if !matches!(
             ctx.initiator,
             InitiatorKind::Schedule | InitiatorKind::ExternalSchedule
@@ -1538,6 +1546,85 @@ impl Shared {
         Waited::Paused
     }
 
+    /// The owner stopped this run (the marker is set while it winds down) or it
+    /// already ended `Cancelled`. Nothing may be approved, granted or started for it.
+    pub(crate) fn run_is_stopped(&self, run_id: RunId) -> bool {
+        self.user_stopped.lock().contains(&run_id)
+            || self
+                .storage
+                .get_run(run_id)
+                .ok()
+                .flatten()
+                .and_then(|r| RunState::parse(&r.state))
+                .is_some_and(|s| s == RunState::Cancelled)
+    }
+
+    /// Record one approval as denied by the owner's Stop: the row, the audit
+    /// entry and the closing event, only when this call is the one that decided
+    /// the row (so every path may call it and the result is still once).
+    pub(crate) fn record_stop_denial(&self, run_id: RunId, call_id: ToolCallId, approval_id: Uuid) {
+        if self.storage.decide_approval(approval_id, "denied").is_err() {
+            return;
+        }
+        let ctx = self.runs.lock().get(&run_id).cloned().or_else(|| {
+            let run = self.storage.get_run(run_id).ok().flatten()?;
+            self.ctx(&run).ok()
+        });
+        let Some(ctx) = ctx else {
+            return;
+        };
+        self.audit(
+            &ctx,
+            "user",
+            "approval.denied",
+            &json!({ "reason": "stopped by you" }),
+        );
+        self.emit(
+            &ctx,
+            Event::ToolCallDenied(ToolCallDenied {
+                run_id,
+                call_id,
+                denied_by: ctx.user_id,
+                reason: Some(STOPPED_REASON.into()),
+            }),
+        );
+    }
+
+    /// Close every open card of `run_id` as denied, now. The cards leave
+    /// `pending`, so no later approve/answer can reach them, and their waits
+    /// end without a verdict.
+    pub(crate) fn deny_open_for_stop(&self, run_id: RunId) {
+        // Cancel the run's token BEFORE its waits are released. Releasing a
+        // card wakes the step; if the token were still live the step could
+        // finish as "denied", the drive loop would plan the next model call and
+        // only then see the cancel (a second model call after Stop).
+        if let Some(rt) = self.rt.get().and_then(Weak::upgrade) {
+            rt.signal_cancel(run_id);
+        }
+        let drained: Vec<(ToolCallId, Pending)> = {
+            let mut pending = self.pending.lock();
+            let ids: Vec<ToolCallId> = pending
+                .iter()
+                .filter(|(_, p)| p.run_id == run_id)
+                .map(|(id, _)| *id)
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| pending.remove(&id).map(|p| (id, p)))
+                .collect()
+        };
+        for (call_id, p) in drained {
+            self.secret_requests.lock().remove(&call_id);
+            self.record_stop_denial(run_id, call_id, p.approval_id);
+        }
+        #[cfg(test)]
+        {
+            let hook = self.stop_split_hook.lock().clone();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
+    }
+
     /// A wait that ended without a verdict (the tool around it timed out, the run was stopped):
     /// the approval row expires, every client's card closes (`tool_call_denied` with the expired
     /// reason) and a run that is still alive leaves `waiting_approval` when this was its last
@@ -1549,7 +1636,21 @@ impl Shared {
         approval_id: Uuid,
         last_parked: bool,
     ) {
-        let _ = self.storage.decide_approval(approval_id, "expired");
+        // The owner pressed Stop: that is a refusal, recorded once (the stop
+        // itself normally did it already). A timeout, or a schedule run that
+        // pauses because nobody answered, stays "expired".
+        if self.run_is_stopped(run_id) {
+            self.record_stop_denial(run_id, call_id, approval_id);
+            return;
+        }
+        if self
+            .storage
+            .decide_approval(approval_id, "expired")
+            .is_err()
+        {
+            // Already closed by someone else: nothing more to report.
+            return;
+        }
         let alive = self
             .storage
             .get_run(run_id)
@@ -1560,18 +1661,20 @@ impl Shared {
         if !alive {
             return;
         }
+        // A timeout resumes so the model can carry on.
         if last_parked {
             self.set_state(run_id, RunState::Running);
         }
         let ctx = self.runs.lock().get(&run_id).cloned();
         if let Some(ctx) = ctx {
+            let reason = EXPIRED_REASON;
             self.emit(
                 &ctx,
                 Event::ToolCallDenied(ToolCallDenied {
                     run_id,
                     call_id,
                     denied_by: ctx.user_id,
-                    reason: Some(EXPIRED_REASON.into()),
+                    reason: Some(reason.into()),
                 }),
             );
         }
@@ -1907,6 +2010,10 @@ impl Shared {
                 // the tool is invoked.
                 {
                     let _gate = self.exec_gate.lock();
+                    if self.run_is_stopped(ctx.run_id) {
+                        self.record_stop_denial(ctx.run_id, call_id, approval_id);
+                        return Err(Some(STOPPED_REASON.into()));
+                    }
                     if matches!(
                         self.decide_with_target(
                             ctx,
@@ -2280,6 +2387,12 @@ impl ExecPermit {
             if let Some(hook) = hook {
                 hook(&self.sh);
             }
+        }
+        // Stop wins over a click that was already sent: no grant, no tool.
+        if self.sh.run_is_stopped(self.ctx.run_id) {
+            self.sh
+                .record_stop_denial(self.ctx.run_id, self.call_id, self.approval_id);
+            return Err(Some(STOPPED_REASON.into()));
         }
         if matches!(
             self.sh.decide_with_target(

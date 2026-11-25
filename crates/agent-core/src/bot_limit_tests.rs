@@ -397,7 +397,15 @@ async fn a_cli_prompt_larger_than_the_cap_is_refused_before_the_session() {
     );
     req.max_tokens = Some(10);
     let err = executor
-        .stream_once(&ctx, &row, req, &[], crate::CallPurpose::Executor, None)
+        .stream_once(
+            &ctx,
+            &row,
+            req,
+            &[],
+            crate::CallPurpose::Executor,
+            None,
+            &tokio_util::sync::CancellationToken::new(),
+        )
         .await
         .expect_err("must be refused");
     assert!(err.to_string().contains(BOT_LIMIT_REACHED), "{err}");

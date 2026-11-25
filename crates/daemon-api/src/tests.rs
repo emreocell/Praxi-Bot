@@ -38,6 +38,7 @@ mod fill_secrets;
 mod host;
 mod host_admin;
 mod host_slice;
+mod incoming_webhook;
 mod knowledge;
 mod knowledge_brain;
 mod logs;
@@ -1085,6 +1086,47 @@ async fn cancel_and_resume_rules() {
     )
     .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn cancel_route_denies_the_open_approval_and_the_run_is_not_left_running() {
+    let t = setup();
+    let (_, chat) = make_chat(&t).await;
+    let run = send_msg(&t, &chat, "call:danger_run {}", "queue").await["run_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    pending_call(&t).await;
+    wait_state(&t, &run, "waiting_approval").await;
+    let started = std::time::Instant::now();
+    let r = call(&t, Method::POST, &format!("/v1/runs/{run}/cancel"), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    wait_state(&t, &run, "cancelled").await;
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "cancel took {:?}",
+        started.elapsed()
+    );
+    assert_ne!(run_state(&t, &run), "running");
+    let approvals = call(
+        &t,
+        Method::GET,
+        &format!("/v1/approvals?run_id={run}"),
+        None,
+    )
+    .await
+    .json();
+    assert_eq!(approvals[0]["decision"], "denied", "{approvals}");
+    let frames = events(&t, &format!("?run_id={run}"), None).await;
+    let reason = frames
+        .iter()
+        .find(|f| f.1 == "tool_call_denied")
+        .and_then(|f| f.2["event"]["reason"].as_str())
+        .unwrap_or("");
+    assert!(
+        !reason.starts_with("expired"),
+        "Stop closed the card as a timeout: {reason}"
+    );
 }
 
 #[tokio::test]
@@ -2458,7 +2500,7 @@ async fn providers_detected_reports_five_rows_without_the_retired_gemini_cli() {
     assert_eq!(r.status, StatusCode::OK);
     let list = r.json();
     let items = list.as_array().unwrap();
-    assert_eq!(items.len(), 9);
+    assert_eq!(items.len(), 10);
     let ids: Vec<&str> = items
         .iter()
         .map(|item| item["id"].as_str().unwrap())
@@ -2466,7 +2508,8 @@ async fn providers_detected_reports_five_rows_without_the_retired_gemini_cli() {
     assert_eq!(
         ids,
         vec![
-            "claude", "codex", "cursor", "opencode", "agy", "qwen", "copilot", "kiro", "kimi"
+            "claude", "codex", "cursor", "opencode", "agy", "qwen", "copilot", "kiro", "kimi",
+            "qoder"
         ]
     );
     for row in items {

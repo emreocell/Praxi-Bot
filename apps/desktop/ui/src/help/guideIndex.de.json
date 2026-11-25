@@ -11,7 +11,8 @@
       "Die Zeit in Worten sagen",
       "Wenn der Computer aus war",
       "Jetzt ausführen, bearbeiten, pausieren, löschen",
-      "Sicherheit"
+      "Sicherheit",
+      "Einen Bot von außen starten"
     ],
     "summary": "Ein geplanter Job lässt einen Bot zu den Zeiten, die du wählst, von selbst etwas tun. Zum Beispiel: „Sag mir jeden Morgen, was heute ansteht.“ Du richtest ihn einmal ein. Danach läuft er von allein."
   },
@@ -170,6 +171,17 @@
       "Sicherheit"
     ],
     "summary": "Bots können deine Home-Assistant-Entitäten lesen und Dienste aufrufen (ein Licht einschalten, einen Thermostat"
+  },
+  {
+    "doc": "de/incoming-webhooks.md",
+    "title": "Eingehende Webhooks",
+    "headings": [
+      "Was du einrichtest",
+      "Was der Aufrufer sendet",
+      "Was der Bot mit dem Text macht",
+      "Was aufgeschrieben wird"
+    ],
+    "summary": "Ein Webhook startet einen deiner Bots, wenn etwas von außen eine Adresse aufruft. Das können GitHub, ein Formular oder ein Schalter zu Hause sein. Du legst den Webhook im Bot-Panel an, auf dem Tab Au…"
   },
   {
     "doc": "de/index.md",
