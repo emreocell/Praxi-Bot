@@ -43,7 +43,7 @@ tokio-util.workspace = true
 tempfile.workspace = true
 fastembed = { version = "5", optional = true, default-features = false }
 ort = { version = "=2.0.0-rc.13", optional = true, default-features = false, features = ["std", "load-dynamic"] }
-tokenizers = { version = "0.22.2", optional = true, default-features = false, features = ["onig"] }
+tokenizers = { version = "0.23.2", optional = true, default-features = false, features = ["onig"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "1", default-features = false, features = ["fs", "std"] }
