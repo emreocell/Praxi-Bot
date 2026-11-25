@@ -235,6 +235,11 @@ async fn session(
         }
         Transport::CodexAppServer => codex_native_args(&nt.turn),
         Transport::Acp => {
+            // Vibe saves a model chosen over ACP as the user's default model, so Praxi never
+            // sends one; a model other than the CLI's own is refused, never silently swapped.
+            if driver == Driver::Vibe && nt.turn.model.as_deref().is_some_and(|m| m != "default") {
+                return Err(CliError::Protocol);
+            }
             acp_args(driver, &plan, nt.turn.model.as_deref()).ok_or(CliError::NativeToolsOpen)?
         }
     };
@@ -719,14 +724,24 @@ impl Run<'_> {
                         .as_str()
                         .ok_or(CliError::Protocol)?;
                     session = Some(id.to_owned());
-                    // Antigravity, Kimi Code and Qoder select mode and model after `session/new` (ACP
-                    // `session/set_mode`, `session/set_model`), Kiro V3 its model through
+                    // A mode the session does not list is never sent: `vibe-acp` answers it
+                    // with an empty success and keeps the policy from the user's settings.
+                    if let Some(mode) = self.plan.acp_mode
+                        && !mode_offered(&v["result"], mode)
+                    {
+                        return Err(CliError::Protocol);
+                    }
+                    // Antigravity, Kimi Code, Qoder and Vibe select the mode after `session/new`
+                    // (ACP `session/set_mode`), all but Vibe also the model
+                    // (`session/set_model`), Kiro V3 its model through
                     // `session/set_config_option`; the prompt waits for each answer.
                     let model = self.nt.turn.model.as_deref();
                     let requests = match self.nt.driver {
                         Driver::Agy | Driver::Kimi | Driver::Qoder => {
                             agy_setup(id, self.plan.acp_mode, model)
                         }
+                        // Only the mode: a Vibe model other than `default` is refused at launch.
+                        Driver::Vibe => agy_setup(id, self.plan.acp_mode, None),
                         Driver::Kiro => kiro_setup(id, model),
                         _ => Vec::new(),
                     };
@@ -769,6 +784,14 @@ fn agy_setup(session: &str, mode: Option<&str>, model: Option<&str>) -> Vec<Valu
         out.push(json!({"jsonrpc":"2.0","id":5,"method":"session/set_model","params":{"sessionId":session,"modelId":model}}));
     }
     out
+}
+
+/// Whether `session/new` offers `mode`. A CLI that lists no modes is trusted to answer
+/// `session/set_mode` itself; one that lists them must list this one.
+fn mode_offered(session: &Value, mode: &str) -> bool {
+    session["modes"]["availableModes"]
+        .as_array()
+        .is_none_or(|modes| modes.iter().any(|m| m["id"] == mode))
 }
 
 /// Kiro CLI V3 has no `session/set_model`; the model is the `model` config option.
@@ -880,6 +903,30 @@ mod tests {
         assert_eq!(full[0]["params"]["modeId"], "auto");
         assert_eq!(full[1]["method"], "session/set_model");
         assert_eq!(full[1]["params"]["modelId"], "kimi-for-coding");
+    }
+
+    #[test]
+    fn vibe_sets_only_the_mode_and_refuses_a_mode_the_session_does_not_offer() {
+        // `vibe-acp` 3.1.5 lists the approval policies the user can switch to as the session
+        // modes; `smart-approve` is behind a rollout gate, so it is often missing.
+        let gated = json!({"sessionId":"S","modes":{"currentModeId":"auto-approve",
+            "availableModes":[{"id":"ask"},{"id":"accept-edits"},{"id":"auto-approve"}]}});
+        assert!(mode_offered(&gated, "ask"));
+        assert!(mode_offered(&gated, "auto-approve"));
+        let auto = level_plan(Driver::Vibe, ApprovalLevel::Auto)
+            .acp_mode
+            .unwrap();
+        assert!(!mode_offered(&gated, auto));
+        // A CLI that lists no modes is left to answer `session/set_mode` itself.
+        assert!(mode_offered(&json!({"sessionId":"S"}), "default"));
+        let setup = agy_setup(
+            "S",
+            level_plan(Driver::Vibe, ApprovalLevel::Ask).acp_mode,
+            None,
+        );
+        assert_eq!(setup.len(), 1);
+        assert_eq!(setup[0]["method"], "session/set_mode");
+        assert_eq!(setup[0]["params"]["modeId"], "ask");
     }
 
     #[test]

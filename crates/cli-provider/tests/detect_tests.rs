@@ -32,7 +32,7 @@ async fn test_all_missing() {
 
     let detected = detector.detect(false).await;
     // Gemini CLI is retired: never listed unless it is already installed.
-    assert_eq!(detected.len(), 10);
+    assert_eq!(detected.len(), 11);
     assert!(detected.iter().all(|cli| cli.id != "gemini"));
 
     for cli in &detected {
@@ -291,6 +291,31 @@ async fn copilot_sign_in_is_never_claimed() {
     assert_eq!(copilot.detail.as_deref(), Some("auth_unverified"));
     let debug = format!("{copilot:?}");
     assert!(!debug.contains("copilot_secret_token"));
+    assert!(!debug.contains("SENTINEL_TOKEN"));
+}
+
+#[tokio::test]
+async fn vibe_sign_in_is_never_claimed() {
+    let temp = fixture_dir();
+    install_fake(temp.path(), "vibe-acp");
+
+    // An API key in the environment or in `~/.vibe/.env` is not evidence of a working
+    // sign-in (the key may be wrong, and the CLI can also use the OS keyring or a browser
+    // sign-in), and neither is ever read or forwarded.
+    let vibe_dir = temp.path().join("home").join(".vibe");
+    std::fs::create_dir_all(&vibe_dir).unwrap();
+    std::fs::write(vibe_dir.join(".env"), "MISTRAL_API_KEY=SENTINEL_TOKEN").unwrap();
+    let env = PathEnv::for_test(temp.path().to_path_buf())
+        .with_home(temp.path().join("home"))
+        .with_env_var("MISTRAL_API_KEY", "mistral_secret_key");
+    let detected = Detector::with_env(env).detect(true).await;
+    let vibe = detected.iter().find(|c| c.id == "vibe").unwrap();
+    assert!(vibe.installed);
+    assert!(vibe.version.is_some());
+    assert_eq!(vibe.auth, AuthState::Unknown);
+    assert_eq!(vibe.detail.as_deref(), Some("auth_unverified"));
+    let debug = format!("{vibe:?}");
+    assert!(!debug.contains("mistral_secret_key"));
     assert!(!debug.contains("SENTINEL_TOKEN"));
 }
 
@@ -741,7 +766,7 @@ fn cli_engines_catalog_marks_only_claude_runnable() {
         ids,
         [
             "claude", "codex", "cursor", "opencode", "gemini", "agy", "qwen", "copilot", "kiro",
-            "kimi", "qoder",
+            "kimi", "qoder", "vibe",
         ]
     );
     let claude = cli_provider::engine_spec("claude").expect("claude spec");
@@ -750,6 +775,7 @@ fn cli_engines_catalog_marks_only_claude_runnable() {
 
     for id in [
         "codex", "cursor", "opencode", "gemini", "agy", "qwen", "copilot", "kiro", "kimi", "qoder",
+        "vibe",
     ] {
         let spec = cli_provider::engine_spec(id).expect("spec exists");
         assert!(!spec.runnable, "{id} must not be runnable");

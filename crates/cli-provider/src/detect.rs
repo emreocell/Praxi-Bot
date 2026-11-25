@@ -1277,7 +1277,7 @@ impl Detector {
     }
 
     async fn detect_fresh(&self) -> Vec<DetectedCli> {
-        let (claude, codex, cursor, opencode, gemini, agy, qwen, copilot, kiro, kimi, qoder) = tokio::join!(
+        let (claude, codex, cursor, opencode, gemini, agy, qwen, copilot, kiro, kimi, qoder, vibe) = tokio::join!(
             self.probe_claude(),
             self.probe_codex(),
             self.probe_cursor(),
@@ -1289,10 +1289,13 @@ impl Detector {
             self.probe_unverified_auth("kiro"),
             self.probe_kimi(),
             self.probe_qoder(),
+            // Mistral Vibe: the key can be in the environment, `~/.vibe/.env`, the OS keyring
+            // or a browser sign-in, and there is no status command.
+            self.probe_unverified_auth("vibe"),
         );
 
         let mut rows = vec![
-            claude, codex, cursor, opencode, gemini, agy, qwen, copilot, kiro, kimi, qoder,
+            claude, codex, cursor, opencode, gemini, agy, qwen, copilot, kiro, kimi, qoder, vibe,
         ];
         // Gemini CLI is retired (Antigravity replaces it): never offered for install,
         // listed only where it is already installed so that setup keeps working.

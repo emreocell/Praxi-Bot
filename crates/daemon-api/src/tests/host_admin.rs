@@ -1520,7 +1520,8 @@ async fn only_the_admin_desktop_can_sign_in_and_manual_engines_say_what_to_run()
         .status,
         StatusCode::NOT_FOUND
     );
-    // OpenCode, Cursor, Antigravity, Qwen Code, Copilot CLI, Kiro, Kimi Code CLI and Qoder
+    // OpenCode, Cursor, Antigravity, Qwen Code, Copilot CLI, Kiro, Kimi Code CLI, Qoder and
+    // Mistral Vibe
     // have no flow that can be driven from here.
     for (engine, command) in [
         ("opencode", "opencode auth login"),
@@ -1531,6 +1532,7 @@ async fn only_the_admin_desktop_can_sign_in_and_manual_engines_say_what_to_run()
         ("qoder", "qodercli login"),
         ("copilot", "copilot login"),
         ("kimi", "kimi login"),
+        ("vibe", "vibe --setup"),
     ] {
         let resp = admin_call(
             &r,

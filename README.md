@@ -196,7 +196,7 @@ The [CLI reference](docs/guide/cli-reference.md) lists every command. To package
 | --- | --- | --- |
 | Cloud model APIs | Google Gemini, Anthropic, OpenRouter, DeepSeek, any OpenAI-compatible server | Gemini has a free tier. See [Providers and models](docs/guide/providers-and-models.md). |
 | Local models | Ollama, LM Studio | Runs on your hardware. |
-| Coding CLIs | Claude Code, Codex, Gemini CLI, Antigravity, Qwen Code, GitHub Copilot CLI, Kiro CLI, Kimi Code CLI, Qoder CLI, OpenCode, Cursor | Detected if installed. Support differs per CLI: some run as the bot's brain, others are detection only ([details](docs/guide/cli-engines.md)). |
+| Coding CLIs | Claude Code, Codex, Gemini CLI, Antigravity, Qwen Code, GitHub Copilot CLI, Kiro CLI, Kimi Code CLI, Qoder CLI, Mistral Vibe, OpenCode, Cursor | Detected if installed. Support differs per CLI: some run as the bot's brain, others are detection only ([details](docs/guide/cli-engines.md)). |
 | Channels | Desktop app, `bot` CLI, [Telegram](docs/guide/telegram.md) | Telegram is the only messaging app so far. |
 | Tools | Files, shell, browser, desktop, scripts, web, email, MCP servers, calendar, Home Assistant, Composio apps | Every call goes through the permission engine. |
 

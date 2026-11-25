@@ -98,6 +98,7 @@ test('Antigravity uses the official press path rather than an approximation', ()
   assert.deepEqual(brandIcon('cli:copilot'), brandIcon('githubcopilot'));
   assert.equal(brandIcon('cli:kimi').known, true);
   assert.deepEqual(brandIcon('cli:kimi'), brandIcon('kimi'));
+  for (const name of ['cli:vibe', 'vibe-acp', 'Mistral Vibe']) assert.deepEqual(brandIcon(name), brandIcon('mistralai'), name);
 });
 
 test('unlicensed brand artwork uses an explicit neutral initial and stays offline', () => {

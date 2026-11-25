@@ -34,7 +34,8 @@ const CLI_LABELS: Record<string, string> = {
   kiro: "Kiro",
   copilot: "GitHub Copilot",
   kimi: "Kimi Code",
-  qoder: "Qoder"
+  qoder: "Qoder",
+  vibe: "Mistral Vibe"
 };
 
 function pretty(id: string): string {
@@ -49,7 +50,7 @@ export function providerBrand(providerId: string): ProviderBrand {
   const cliLabel = providerId.startsWith("cli:") ? CLI_LABELS[bare] : undefined;
   if (cliLabel) {
     // Claude Code wears the Claude mark; the Anthropic API (`anthropic`) keeps the Anthropic "A".
-    const company = { claude: "claude", codex: "openai", gemini: "googlegemini", agy: "antigravity", copilot: "githubcopilot" }[bare] ?? bare;
+    const company = { claude: "claude", codex: "openai", gemini: "googlegemini", agy: "antigravity", copilot: "githubcopilot", vibe: "mistralai" }[bare] ?? bare;
     return { company, label: cliLabel, note: "CLI" };
   }
   const base = PROVIDERS[bare];

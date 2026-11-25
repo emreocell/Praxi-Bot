@@ -1188,6 +1188,7 @@ const CREDENTIAL_NAMES: &[&str] = &[
     ".kiro",
     ".copilot",
     ".qoder",
+    ".vibe",
     ".kimi-code",
     // Project-level OpenCode config can declare plugins, commands and MCP
     // servers that run code, so it is protected in every workspace on purpose.
@@ -1355,7 +1356,7 @@ pub fn workspace_refusal(dir: &Path, data_dir: &Path) -> Option<&'static str> {
 
 /// Credential and tool-configuration folders (SSH, cloud, GPG, container, CLI settings).
 /// A workspace may not be one, sit inside one, or contain one under the home folder.
-const CREDENTIAL_DIRS: [&str; 17] = [
+const CREDENTIAL_DIRS: [&str; 18] = [
     ".claude",
     ".codex",
     ".gemini",
@@ -1364,6 +1365,7 @@ const CREDENTIAL_DIRS: [&str; 17] = [
     ".kiro",
     ".kimi-code",
     ".qoder",
+    ".vibe",
     ".cursor",
     ".config",
     ".local",
@@ -1826,6 +1828,7 @@ const SENSITIVE_SEQUENCES: &[&[&str]] = &[
     &[".kiro"],
     &[".copilot"],
     &[".qoder"],
+    &[".vibe"],
     &[".kimi-code"],
     &[".opencode"],
     // Linux keyrings, wallets, browsers
@@ -4324,6 +4327,8 @@ mod tests {
             ".copilot/settings.json",
             ".qoder/settings.json",
             ".qoder/.auth/machine_id",
+            ".vibe/.env",
+            ".vibe/config.toml",
             ".kimi-code/credentials/kimi-code.json",
             ".kimi-code/config.toml",
             ".cursor/mcp.json",
@@ -6158,6 +6163,7 @@ mod tests {
             ".kiro",
             ".copilot",
             ".qoder",
+            ".vibe",
             ".kimi-code",
             ".claude.json.backup",
             "opencode.json",

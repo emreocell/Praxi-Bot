@@ -84,6 +84,17 @@ const fn npm(args: &'static [&'static str], verified: bool) -> Option<InstallCom
     })
 }
 
+/// `uv tool install`, shown for copying only: not verified against the network.
+#[allow(clippy::unnecessary_wraps)] // Descriptors use Option uniformly, including unsupported platforms.
+const fn uv(args: &'static [&'static str]) -> Option<InstallCommand> {
+    Some(InstallCommand {
+        program: "uv",
+        args,
+        verified: false,
+        executable: false,
+    })
+}
+
 /// Floor required by the native-tool confinement contract.
 pub const CLAUDE_SECURITY_FLOOR: (u32, u32, u32) = (2, 1, 257);
 
@@ -308,6 +319,27 @@ pub const CLI_ENGINES: &[CliEngineSpec] = &[
         models: &["default"],
         login: "qodercli login",
         docs_url: "https://qoder.com/cli",
+    },
+    // Mistral Vibe (Mistral AI). Runs with its own tools through `vibe-acp`, a separate
+    // entry point of the PyPI package `mistral-vibe` (Python 3.12+). Interface read from
+    // 3.1.5 (`--help`, `--version`, an unauthenticated ACP `initialize` and `session/new`),
+    // not from a signed-in run. The API key can live in the environment, `~/.vibe/.env`,
+    // the OS keyring or a browser sign-in, and there is no status command, so sign-in is
+    // never claimed.
+    CliEngineSpec {
+        id: "vibe",
+        display_name: "Mistral Vibe",
+        command: "vibe-acp",
+        aliases: &[],
+        runnable: false,
+        version_args: &["--version"],
+        auth_args: &[],
+        minimum_version: None,
+        install_windows: uv(&["tool", "install", "mistral-vibe"]),
+        install_unix: uv(&["tool", "install", "mistral-vibe"]),
+        models: &["default"],
+        login: "vibe --setup",
+        docs_url: "https://github.com/mistralai/mistral-vibe",
     },
 ];
 

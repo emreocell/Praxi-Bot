@@ -179,6 +179,71 @@ async fn codex_usage_reaches_the_host_before_an_unfinished_native_turn_fails() {
     assert_eq!(*host.1.lock(), Some((12, 4)));
 }
 
+async fn vibe_turn(mode: &str, level: ApprovalLevel) -> (tempfile::TempDir, Result<(), CliError>) {
+    let (bin, workspace, env) = setup(Driver::Vibe, mode);
+    let result = Driver::Vibe
+        .run_turn(
+            "fixture",
+            &env,
+            turn(),
+            workspace.path().to_owned(),
+            level,
+            Arc::new(Host::default()),
+            CancellationToken::new(),
+        )
+        .await
+        .map(|_| ());
+    (bin, result)
+}
+
+#[tokio::test]
+async fn vibe_without_an_api_key_is_signed_out_before_any_prompt() {
+    // `vibe-acp` answers `initialize` without credentials (so detection works signed out),
+    // then refuses `session/new` with -32000 "Missing API key for mistral provider.".
+    let (bin, result) = vibe_turn("acp-signed-out", ApprovalLevel::Ask).await;
+    assert_eq!(result.unwrap_err(), CliError::SignedOut);
+    assert!(log(&bin, "init").contains("praxi"));
+    assert!(!bin.path().join("prompt").exists());
+}
+
+#[tokio::test]
+async fn vibe_runs_only_in_a_mode_the_session_offers() {
+    // `smart-approve` is gated off in this session, and `vibe-acp` would answer
+    // `session/set_mode` for it with an empty success: Auto is refused before the prompt.
+    let (bin, result) = vibe_turn("acp-modes", ApprovalLevel::Auto).await;
+    assert_eq!(result.unwrap_err(), CliError::Protocol);
+    assert!(!bin.path().join("set_mode").exists());
+    assert!(!bin.path().join("prompt").exists());
+    // An offered mode is set before the prompt is sent.
+    let (bin, result) = vibe_turn("acp-modes", ApprovalLevel::Ask).await;
+    result.unwrap();
+    assert_eq!(log(&bin, "set_mode"), "\"ask\"");
+    assert!(log(&bin, "prompt").contains("PRIVATE_PROMPT"));
+}
+
+#[tokio::test]
+async fn vibe_refuses_a_model_instead_of_running_its_own() {
+    // `vibe-acp` would save a model chosen over ACP as the user's default, so Praxi sends
+    // none, and a model other than `default` is refused before the CLI starts.
+    let (bin, workspace, env) = setup(Driver::Vibe, "");
+    let mut chosen = turn();
+    chosen.model = Some("devstral-2".into());
+    let error = Driver::Vibe
+        .run_turn(
+            "fixture",
+            &env,
+            chosen,
+            workspace.path().to_owned(),
+            ApprovalLevel::Ask,
+            Arc::new(Host::default()),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error, CliError::Protocol);
+    assert!(!bin.path().join("session_new").exists());
+}
+
 fn log(bin: &tempfile::TempDir, name: &str) -> String {
     std::fs::read_to_string(bin.path().join(name)).unwrap()
 }

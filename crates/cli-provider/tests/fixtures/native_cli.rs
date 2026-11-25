@@ -120,12 +120,29 @@ fn acp(args: &[String]) {
         "protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}},"authMethods":[]}}));
     let new = read(&mut stdin);
     log("session_new", &new["params"].to_string());
-    emit(&json!({"jsonrpc":"2.0","id":new["id"],"result":{"sessionId":"s1"}}));
+    match std::env::var("FAKE_MODE").unwrap_or_default().as_str() {
+        // `vibe-acp` 3.1.5 without an API key.
+        "acp-signed-out" => {
+            emit(&json!({"jsonrpc":"2.0","id":new["id"],"error":{
+                "code":-32000,"message":"Missing API key for mistral provider.","data":null}}));
+            return;
+        }
+        // The approval policies `vibe-acp` lists while `smart-approve` is gated off.
+        "acp-modes" => emit(
+            &json!({"jsonrpc":"2.0","id":new["id"],"result":{"sessionId":"s1",
+            "modes":{"currentModeId":"auto-approve","availableModes":[
+                {"id":"ask"},{"id":"accept-edits"},{"id":"auto-approve"}]}}}),
+        ),
+        _ => emit(&json!({"jsonrpc":"2.0","id":new["id"],"result":{"sessionId":"s1"}})),
+    }
     let mut prompt = read(&mut stdin);
     while matches!(
         prompt["method"].as_str(),
         Some("session/set_mode" | "session/set_model" | "session/set_config_option")
     ) {
+        if prompt["method"] == "session/set_mode" {
+            log("set_mode", &prompt["params"]["modeId"].to_string());
+        }
         emit(&json!({"jsonrpc":"2.0","id":prompt["id"],"result":{}}));
         prompt = read(&mut stdin);
     }
@@ -201,7 +218,10 @@ fn main() {
     }
     if args.first().is_some_and(|a| a == "app-server") {
         codex(&args);
-    } else if args.iter().any(|a| a == "acp" || a == "--acp") {
+    } else if args.iter().any(|a| a == "acp" || a == "--acp")
+        // `vibe-acp` is its own entry point and takes no arguments.
+        || std::env::var("FAKE_DRIVER").as_deref() == Ok("vibe")
+    {
         acp(&args);
     } else {
         claude(&args);

@@ -110,6 +110,8 @@ pub enum Driver {
     Kimi,
     /// Qoder CLI (`qodercli --acp`).
     Qoder,
+    /// Mistral Vibe (`vibe-acp`).
+    Vibe,
 }
 
 /// How far a driver's interface was checked.
@@ -134,7 +136,7 @@ pub enum Transport {
 }
 
 impl Driver {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Claude,
         Self::Codex,
         Self::Cursor,
@@ -146,9 +148,10 @@ impl Driver {
         Self::Kiro,
         Self::Kimi,
         Self::Qoder,
+        Self::Vibe,
     ];
 
-    /// Registry id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `kimi`, `qoder`).
+    /// Registry id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `kimi`, `qoder`, `vibe`).
     #[must_use]
     pub const fn id(self) -> &'static str {
         match self {
@@ -163,6 +166,7 @@ impl Driver {
             Self::Copilot => "copilot",
             Self::Kimi => "kimi",
             Self::Qoder => "qoder",
+            Self::Vibe => "vibe",
         }
     }
 
@@ -185,6 +189,7 @@ impl Driver {
             Self::Copilot => "GitHub Copilot CLI",
             Self::Kimi => "Kimi Code CLI",
             Self::Qoder => "Qoder CLI",
+            Self::Vibe => "Mistral Vibe",
         }
     }
 
@@ -201,7 +206,8 @@ impl Driver {
             | Self::Copilot
             | Self::Kiro
             | Self::Kimi
-            | Self::Qoder => Transport::Acp,
+            | Self::Qoder
+            | Self::Vibe => Transport::Acp,
         }
     }
 
@@ -217,7 +223,8 @@ impl Driver {
             | Self::Copilot
             | Self::Kiro
             | Self::Kimi
-            | Self::Qoder => Support::Experimental,
+            | Self::Qoder
+            | Self::Vibe => Support::Experimental,
             _ => Support::Verified,
         }
     }
@@ -451,6 +458,28 @@ pub fn level_plan(driver: Driver, level: ApprovalLevel) -> LevelPlan {
                 ..plan(level, Full, "every permission request approved")
             },
         },
+        // Mistral Vibe 3.1.5 (`vibe-acp`): the ACP modes are the CLI's approval policies,
+        // sent with `session/set_mode` after `session/new`, because a new session starts in
+        // `default_approval_policy` from `config.toml`. `ask` approves only reads and a
+        // read-only command allowlist, `accept-edits` also file edits inside the working
+        // folder (outside it and sensitive files still ask), `smart-approve` lets a model
+        // classifier run the safe calls and `auto-approve` bypasses every permission.
+        // `smart-approve` ships behind a rollout gate and `auto-approve` can be turned off
+        // (`enable_auto_approve`); `vibe-acp` answers a mode it does not offer with an
+        // empty success, so the run checks the session's mode list first (`native.rs`).
+        Driver::Vibe => {
+            let (mode, native) = match level {
+                Ask => ("ask", "mode ask"),
+                AcceptEdits => ("accept-edits", "mode accept-edits"),
+                Auto => ("smart-approve", "mode smart-approve"),
+                Full => ("auto-approve", "mode auto-approve"),
+            };
+            LevelPlan {
+                acp_mode: Some(mode),
+                acp_allow_all: level == Full,
+                ..plan(level, level, native)
+            }
+        }
         // Qoder CLI 1.1.97 (`qodercli --acp`, a hidden flag): the ACP mode is sent with
         // `session/set_mode` after `session/new`, because a new session starts in the
         // permission mode of the user's settings. Its ACP modes are `default` ("Prompts for
@@ -531,6 +560,9 @@ pub fn acp_args(driver: Driver, plan: &LevelPlan, model: Option<&str>) -> Option
         // Qoder: the model is chosen with `session/set_model` after `session/new`, like the
         // mode, so a model the CLI does not list is refused instead of guessed.
         Driver::Qoder => args.push("--acp".into()),
+        // Vibe: `vibe-acp` takes no options; the mode is set after `session/new`, and no
+        // model is sent (Vibe saves a model chosen over ACP as the user's default).
+        Driver::Vibe => {}
         Driver::Gemini | Driver::Qwen => {
             args.push("--acp".into());
             args.extend(own(plan.flags));
@@ -746,6 +778,16 @@ mod tests {
             ),
             (Driver::Qoder, Auto, Auto, "mode auto", &["--acp"]),
             (Driver::Qoder, Full, Full, "mode yolo", &["--acp"]),
+            (Driver::Vibe, Ask, Ask, "mode ask", &[]),
+            (
+                Driver::Vibe,
+                AcceptEdits,
+                AcceptEdits,
+                "mode accept-edits",
+                &[],
+            ),
+            (Driver::Vibe, Auto, Auto, "mode smart-approve", &[]),
+            (Driver::Vibe, Full, Full, "mode auto-approve", &[]),
             (Driver::Kimi, Ask, Ask, KIMI_ASK, &["acp"]),
             (Driver::Kimi, AcceptEdits, Ask, KIMI_ASK, &["acp"]),
             (
@@ -829,6 +871,31 @@ mod tests {
         assert_eq!(
             acp_args(Driver::Qoder, &level_plan(Driver::Qoder, Ask), Some("auto")).unwrap(),
             ["--acp"]
+        );
+        // Mistral Vibe: the four approval policies, always sent; no option or model in argv.
+        assert_eq!(Driver::Vibe.support(), Support::Experimental);
+        let vibe: Vec<_> = ApprovalLevel::ALL
+            .into_iter()
+            .map(|l| level_plan(Driver::Vibe, l).acp_mode)
+            .collect();
+        assert_eq!(
+            vibe,
+            [
+                Some("ask"),
+                Some("accept-edits"),
+                Some("smart-approve"),
+                Some("auto-approve")
+            ]
+        );
+        assert!(level_plan(Driver::Vibe, Full).acp_allow_all);
+        assert!(!level_plan(Driver::Vibe, Auto).acp_allow_all);
+        assert_eq!(
+            acp_args(
+                Driver::Vibe,
+                &level_plan(Driver::Vibe, Ask),
+                Some("devstral-2")
+            ),
+            Some(Vec::new())
         );
         // Kimi Code CLI: the mode always goes through `session/set_mode`, and the CLI's
         // `yolo` ("Ask When Needed") is Auto while its `auto` ("Never Ask") is Full.

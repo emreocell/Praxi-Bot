@@ -1772,7 +1772,7 @@ fn canonical_target(path: &Path) -> Result<PathBuf, String> {
     Ok(out)
 }
 
-const CREDENTIAL_DIRS: [&str; 18] = [
+const CREDENTIAL_DIRS: [&str; 19] = [
     ".claude",
     ".codex",
     ".gemini",
@@ -1781,6 +1781,7 @@ const CREDENTIAL_DIRS: [&str; 18] = [
     ".kiro",
     ".kimi-code",
     ".qoder",
+    ".vibe",
     ".cursor",
     ".config",
     ".local",

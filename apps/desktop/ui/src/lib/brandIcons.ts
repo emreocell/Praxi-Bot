@@ -35,6 +35,11 @@ const aliases: Record<string, string> = {
   copilot: 'githubcopilot',
   clicopilot: 'githubcopilot',
   clikimi: 'kimi',
+  // Mistral Vibe is Mistral AI's own CLI: the Mistral AI mark.
+  vibe: 'mistralai',
+  clivibe: 'mistralai',
+  vibeacp: 'mistralai',
+  mistralvibe: 'mistralai',
   cliopencode: 'opencode'
 };
 
