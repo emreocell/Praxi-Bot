@@ -1260,10 +1260,13 @@ const CLI_CONFIG_SEQUENCES: &[&[&str]] = &[
     &[".config", "claude"],
     &[".config", "cursor"],
     &[".config", "cursor-agent"],
+    // Goose: `config.yaml`, `secrets.yaml` and `permission.yaml` (XDG on Linux and macOS).
+    &[".config", "goose"],
     &[".local", "share", "opencode"],
     &[".local", "share", "cursor-agent"],
     &["appdata", "roaming", "opencode"],
     &["appdata", "roaming", "cursor"],
+    &["appdata", "roaming", "block", "goose"],
     &["appdata", "local", "opencode"],
     &["appdata", "local", "cursor"],
     &["appdata", "local", "cursor-agent"],
@@ -1326,7 +1329,7 @@ fn cli_executable_dirs() -> Vec<PathBuf> {
 fn cli_relocated_config_dirs() -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(dir) = env_abs_dir("XDG_CONFIG_HOME") {
-        out.extend(["opencode", "claude", "cursor", "cursor-agent"].map(|n| dir.join(n)));
+        out.extend(["opencode", "claude", "cursor", "cursor-agent", "goose"].map(|n| dir.join(n)));
     }
     if let Some(dir) = env_abs_dir("XDG_DATA_HOME") {
         out.extend(["opencode", "cursor-agent"].map(|n| dir.join(n)));
@@ -1335,6 +1338,9 @@ fn cli_relocated_config_dirs() -> Vec<PathBuf> {
         if let Some(dir) = env_abs_dir(key) {
             out.extend(["opencode", "cursor", "cursor-agent"].map(|n| dir.join(n)));
         }
+    }
+    if let Some(dir) = env_abs_dir("APPDATA") {
+        out.push(dir.join("Block").join("goose"));
     }
     out
 }
@@ -1380,6 +1386,7 @@ fn cli_home_override(path: &[String]) -> bool {
         "OPENCODE_CONFIG_DIR",
         "OPENCODE_CONFIG",
         "VIBE_HOME",
+        "GOOSE_PATH_ROOT",
     ]
     .iter()
     .any(|key| {
@@ -1518,9 +1525,27 @@ fn native_cli_authority_roots() -> Vec<PathBuf> {
             home.join(".claude.json"),
             // Mistral Vibe loads its config, agents, prompts and hooks from here.
             home.join(".vibe"),
+            // Goose loads `.goosehints`, `AGENTS.md`, skills and saved tool permissions
+            // from its config folder (XDG on Linux and macOS, roaming AppData on Windows).
+            home.join(".config").join("goose"),
+            home.join("AppData")
+                .join("Roaming")
+                .join("Block")
+                .join("goose"),
         ]);
     }
-    for variable in ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "VIBE_HOME"] {
+    if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME").filter(|dir| !dir.is_empty()) {
+        roots.push(PathBuf::from(dir).join("goose"));
+    }
+    if let Some(dir) = std::env::var_os("APPDATA").filter(|dir| !dir.is_empty()) {
+        roots.push(PathBuf::from(dir).join("Block").join("goose"));
+    }
+    for variable in [
+        "CODEX_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "VIBE_HOME",
+        "GOOSE_PATH_ROOT",
+    ] {
         if let Some(root) = std::env::var_os(variable).filter(|root| !root.is_empty()) {
             roots.push(PathBuf::from(root));
         }
@@ -1909,6 +1934,8 @@ const SENSITIVE_SEQUENCES: &[&[&str]] = &[
     &[".vibe"],
     &[".kimi-code"],
     &[".opencode"],
+    &[".config", "goose"],
+    &["appdata", "roaming", "block", "goose"],
     // Linux keyrings, wallets, browsers
     &[".local", "share", "keyrings"],
     &[".local", "share", "kwalletd"],
@@ -4514,6 +4541,9 @@ mod tests {
             ".qoder/.auth/machine_id",
             ".vibe/.env",
             ".vibe/config.toml",
+            ".config/goose/config.yaml",
+            ".config/goose/permission.yaml",
+            "AppData/Roaming/Block/goose/config/secrets.yaml",
             ".kimi-code/credentials/kimi-code.json",
             ".kimi-code/config.toml",
             ".cursor/mcp.json",
@@ -4554,6 +4584,8 @@ mod tests {
             "cursor",
             "projects/claude/readme.md",
             "a/.config/other/opencode/x",
+            "code/goose/README.md",
+            "AppData/Roaming/goose/notes.txt",
         ] {
             assert!(
                 !is_protected(&dir.path().join(path), outside.path()),
@@ -4601,6 +4633,8 @@ mod tests {
                 "prefix/bin/claude",
                 "xdg-config/opencode/opencode.json",
                 "xdg-data/opencode/auth.json",
+                "xdg-config/goose/config.yaml",
+                "AppData/Roaming/Block/goose/config/permission.yaml",
             ] {
                 assert!(is_protected(&root.join(path), outside.path()), "{path}");
             }
@@ -4696,6 +4730,7 @@ mod tests {
             "OPENCODE_CONFIG_DIR",
             "OPENCODE_CONFIG",
             "VIBE_HOME",
+            "GOOSE_PATH_ROOT",
         ];
         if let Some(root) = std::env::var_os(FIXTURE) {
             let root = PathBuf::from(root);

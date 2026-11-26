@@ -50,6 +50,7 @@ not trademark ownership.
 | Qoder CLI: `qoder`, `cli:qoder`, `qodercli` | Not listed | The same neutral terminal-prompt glyph as Kiro, not the Qoder mark | Absent from SI 16.38.1; no mark redistribution grant verified |
 | Kimi Code CLI: `kimi`, `cli:kimi` | Not listed | SI `kimi.svg` | CC0 1.0 |
 | Mistral Vibe: `vibe`, `cli:vibe`, `vibe-acp` | Not listed | SI `mistralai.svg`, already bundled (Vibe is Mistral AI's own CLI) | CC0 1.0 |
+| Goose: `goose`, `cli:goose` | Not listed | The same neutral terminal-prompt glyph as Kiro, not the Goose mark | Absent from SI 16.38.1; no mark redistribution grant verified |
 | Anthropic: `anthropic` | Real mark | SI `anthropic.svg`, retained | CC0 1.0 |
 | DeepSeek: `deepseek` | Real mark | SI `deepseek.svg`, retained | CC0 1.0 |
 | LM Studio: `lmstudio` | Real mark | SI `lmstudio.svg`, retained | CC0 1.0 |
@@ -117,7 +118,7 @@ resolve locally. Custom providers/servers keep the deterministic unknown fallbac
 
 Obtain explicit redistributable artwork or permission for Groq, Together AI,
 llama.cpp, Playwright, Exa, Tavily, Firecrawl and Context7 before replacing
-their initials, and for Kiro and Qoder before replacing their neutral glyph. Keep this note open until each mark has a source and licence.
+their initials, and for Kiro, Qoder and Goose before replacing their neutral glyph. Keep this note open until each mark has a source and licence.
 Do not trace logos or extract installed-app artwork. Groq is a trademark of
 Groq LLC and/or its affiliates. Praxi-Bot is not affiliated with or endorsed
 by Groq LLC.

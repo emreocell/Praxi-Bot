@@ -20,6 +20,7 @@ An unrelated `agent` on PATH cannot hide Cursor's vendor-directory alias.
 | GitHub Copilot CLI | `copilot` | None: no status command (sign-in is `copilot login`, kept in the OS credential store; a GitHub token in the environment is not evidence) | `npm install -g @github/copilot` (**unverified**, copy only) | Runs with its own tools (`copilot --acp`, experimental); minimum unverified |
 | Kimi Code CLI | `kimi` | Credential-file metadata only (`~/.kimi-code/credentials/kimi-code.json`); contents never opened | `npm install -g @moonshot-ai/kimi-code` (**unverified**, copy only) | Runs with its own tools (`kimi acp`, experimental); minimum unverified. The Python `kimi-cli` 1.x is its retired predecessor |
 | Mistral Vibe | `vibe-acp` | None: no status command; the API key can be in the environment, `~/.vibe/.env`, the OS keyring or a browser sign-in, and none of them is evidence | `uv tool install mistral-vibe` (**unverified**, copy only) | Runs with its own tools (`vibe-acp`, experimental); minimum unverified. Runs the CLI's own model: Vibe saves a model chosen over ACP as the user's default, so another model is refused |
+| Goose | `goose` (the database migration tool of the same name, which prints `goose version: ...`, is reported as another program) | None: no status command; keys are in the OS keyring or `secrets.yaml` (set up with `goose configure`), and none of them is evidence | Unix: `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| CONFIGURE=false bash` (**unverified**, copy only) | Runs with its own tools (`goose acp`, experimental); minimum unverified. Without a configured provider the run ends as signed out |
 | OpenCode | `opencode` | Credential-file metadata only; contents never opened | `npm install -g opencode-ai` (verified local reference) | Detect/install only: inspected CLI has no switch to disable native tools |
 | Cursor | `cursor-agent`; `agent` only inside a `cursor-agent` directory | `status --format json`, then `status` | Windows: `irm 'https://cursor.com/install?win32=true' \| iex`; Unix: `curl https://cursor.com/install -fsS \| bash` (verified local reference) | Detection only; minimum unverified |
 | ChatGPT plan | Same Codex executable | Unknown; no Praxi PKCE flow | Use the Codex row | Detection only |
@@ -149,6 +150,7 @@ a bot to native tools needs a consent too; both are recorded in the audit log.
 | GitHub Copilot CLI (`--acp`, experimental) | default | `--allow-tool write` | runs as Ask | requests approved automatically (never `--allow-all-tools`) |
 | Kimi Code CLI (`kimi acp`, experimental) | Windows: mode `default` (Always Ask). Linux and macOS: not offered, because that mode approves edits inside a git repository | runs as Ask | mode `yolo` (Ask When Needed) | mode `auto` (Never Ask) |
 | Mistral Vibe (`vibe-acp`, experimental) | mode `ask` | mode `accept-edits` | mode `smart-approve`; refused when the session does not offer it (it is behind a rollout gate) | mode `auto-approve`; refused when the session does not offer it (`enable_auto_approve = false`) |
+| Goose (`goose acp`, experimental) | mode `approve` | runs as Ask | mode `smart_approve` | mode `auto` |
 
 A level a CLI has no mode for runs as Ask, never as something wider. When an ACP CLI
 lists its modes in `session/new` and the level's mode is not among them, the turn is
@@ -156,3 +158,21 @@ refused before the prompt is sent, because a CLI may accept an unknown mode sile
 cannot be a drive root, your home folder, Praxi's data folder or a credential or CLI
 settings folder. The CLI runs with an allowlisted environment (no Praxi secrets, no
 provider keys) and Stop or the per-bot kill switch ends its whole process tree.
+
+Goose starts a new session in `auto` ("Automatically approve tool calls") unless the
+user's config says otherwise, so Praxi always sends the level's mode; it applies to that
+session only. Three things to know about Goose:
+
+- **Auto asks a model.** In `smart_approve`, calls the MCP server marks read-only run
+  without asking. Goose's own model judges the rest (`permission_judge`), which can add
+  model calls. Calls it judges not read-only ask, and that decision is cached in
+  `permission.yaml`.
+- **Saved rules still apply.** A tool the user marked `always_allow` in `permission.yaml`
+  runs without asking, in every mode. Praxi answers permission requests with the
+  one-time options, never "always".
+- **Network at startup.** The released binary downloads its model catalog from
+  `https://models.dev/api.json` on every start. Only a build without that feature turns
+  it off.
+
+A model chosen in Praxi is sent as the session's `model` config option, which Goose keeps
+on that session and does not save as the user's default.

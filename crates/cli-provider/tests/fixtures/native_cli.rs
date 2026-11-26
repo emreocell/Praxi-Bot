@@ -127,6 +127,21 @@ fn acp(args: &[String]) {
                 "code":-32000,"message":"Missing API key for mistral provider.","data":null}}));
             return;
         }
+        // `goose acp` 1.61.1 with no provider configured.
+        "acp-goose-unconfigured" => {
+            emit(
+                &json!({"jsonrpc":"2.0","id":new["id"],"error":{"code":-32603,
+                "message":"Internal error",
+                "data":"Failed to resolve provider and model: Configuration value not found: GOOSE_PROVIDER"}}),
+            );
+            return;
+        }
+        // The modes `goose acp` 1.61.1 lists; a new session starts in `auto`.
+        "acp-goose" => emit(
+            &json!({"jsonrpc":"2.0","id":new["id"],"result":{"sessionId":"s1",
+            "modes":{"currentModeId":"auto","availableModes":[
+                {"id":"auto"},{"id":"approve"},{"id":"smart_approve"}]}}}),
+        ),
         // The approval policies `vibe-acp` lists while `smart-approve` is gated off.
         "acp-modes" => emit(
             &json!({"jsonrpc":"2.0","id":new["id"],"result":{"sessionId":"s1",
@@ -142,6 +157,9 @@ fn acp(args: &[String]) {
     ) {
         if prompt["method"] == "session/set_mode" {
             log("set_mode", &prompt["params"]["modeId"].to_string());
+        }
+        if prompt["method"] == "session/set_config_option" {
+            log("set_config_option", &prompt["params"].to_string());
         }
         emit(&json!({"jsonrpc":"2.0","id":prompt["id"],"result":{}}));
         prompt = read(&mut stdin);

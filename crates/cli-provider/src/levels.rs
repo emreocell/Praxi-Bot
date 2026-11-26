@@ -112,6 +112,8 @@ pub enum Driver {
     Qoder,
     /// Mistral Vibe (`vibe-acp`).
     Vibe,
+    /// Goose (`goose acp`).
+    Goose,
 }
 
 /// How far a driver's interface was checked.
@@ -136,7 +138,7 @@ pub enum Transport {
 }
 
 impl Driver {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Claude,
         Self::Codex,
         Self::Cursor,
@@ -149,9 +151,10 @@ impl Driver {
         Self::Kimi,
         Self::Qoder,
         Self::Vibe,
+        Self::Goose,
     ];
 
-    /// Registry id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `kimi`, `qoder`, `vibe`).
+    /// Registry id (`claude`, `codex`, `cursor`, `opencode`, `gemini`, `agy`, `qwen`, `copilot`, `kiro`, `kimi`, `qoder`, `vibe`, `goose`).
     #[must_use]
     pub const fn id(self) -> &'static str {
         match self {
@@ -167,6 +170,7 @@ impl Driver {
             Self::Kimi => "kimi",
             Self::Qoder => "qoder",
             Self::Vibe => "vibe",
+            Self::Goose => "goose",
         }
     }
 
@@ -190,6 +194,7 @@ impl Driver {
             Self::Kimi => "Kimi Code CLI",
             Self::Qoder => "Qoder CLI",
             Self::Vibe => "Mistral Vibe",
+            Self::Goose => "Goose",
         }
     }
 
@@ -207,7 +212,8 @@ impl Driver {
             | Self::Kiro
             | Self::Kimi
             | Self::Qoder
-            | Self::Vibe => Transport::Acp,
+            | Self::Vibe
+            | Self::Goose => Transport::Acp,
         }
     }
 
@@ -224,7 +230,8 @@ impl Driver {
             | Self::Kiro
             | Self::Kimi
             | Self::Qoder
-            | Self::Vibe => Support::Experimental,
+            | Self::Vibe
+            | Self::Goose => Support::Experimental,
             _ => Support::Verified,
         }
     }
@@ -480,6 +487,26 @@ pub fn level_plan(driver: Driver, level: ApprovalLevel) -> LevelPlan {
                 ..plan(level, level, native)
             }
         }
+        // Goose 1.61.1 (`goose acp`): the ACP modes are its `GooseMode`s, `approve` ("Ask
+        // before every tool call"), `smart_approve` (read-only calls run, as marked by the
+        // MCP server or judged by the session's own model; the rest ask) and `auto`
+        // ("Automatically approve tool calls"). A new session starts in `GOOSE_MODE` from the
+        // user's config, `auto` by default, so the mode is always sent with
+        // `session/set_mode`; it changes that session only. Goose has no mode for file edits
+        // alone, so Accept edits runs as Ask. Tools the user saved as `always_allow` in
+        // `permission.yaml` still run without asking, in every mode.
+        Driver::Goose => {
+            let (mode, applied, native) = match level {
+                Ask | AcceptEdits => ("approve", Ask, "mode approve"),
+                Auto => ("smart_approve", Auto, "mode smart_approve"),
+                Full => ("auto", Full, "mode auto"),
+            };
+            LevelPlan {
+                acp_mode: Some(mode),
+                acp_allow_all: level == Full,
+                ..plan(level, applied, native)
+            }
+        }
         // Qoder CLI 1.1.97 (`qodercli --acp`, a hidden flag): the ACP mode is sent with
         // `session/set_mode` after `session/new`, because a new session starts in the
         // permission mode of the user's settings. Its ACP modes are `default` ("Prompts for
@@ -555,8 +582,9 @@ pub fn acp_args(driver: Driver, plan: &LevelPlan, model: Option<&str>) -> Option
             args.push("acp".into());
         }
         // Kimi: `-m` is a top-level option that `kimi acp` does not take; the model is
-        // chosen with `session/set_model` after `session/new`.
-        Driver::OpenCode | Driver::Kimi => args.push("acp".into()),
+        // chosen with `session/set_model` after `session/new`. Goose: mode and model are
+        // set after `session/new` (`session/set_mode`, the `model` config option).
+        Driver::OpenCode | Driver::Kimi | Driver::Goose => args.push("acp".into()),
         // Qoder: the model is chosen with `session/set_model` after `session/new`, like the
         // mode, so a model the CLI does not list is refused instead of guessed.
         Driver::Qoder => args.push("--acp".into()),
@@ -788,6 +816,10 @@ mod tests {
             ),
             (Driver::Vibe, Auto, Auto, "mode smart-approve", &[]),
             (Driver::Vibe, Full, Full, "mode auto-approve", &[]),
+            (Driver::Goose, Ask, Ask, "mode approve", &["acp"]),
+            (Driver::Goose, AcceptEdits, Ask, "mode approve", &["acp"]),
+            (Driver::Goose, Auto, Auto, "mode smart_approve", &["acp"]),
+            (Driver::Goose, Full, Full, "mode auto", &["acp"]),
             (Driver::Kimi, Ask, Ask, KIMI_ASK, &["acp"]),
             (Driver::Kimi, AcceptEdits, Ask, KIMI_ASK, &["acp"]),
             (
@@ -896,6 +928,33 @@ mod tests {
                 Some("devstral-2")
             ),
             Some(Vec::new())
+        );
+        // Goose: the mode is always sent (its own default is `auto`), Accept edits never
+        // widens to anything but `approve`, and argv is only `acp` (no model, no mode).
+        assert_eq!(Driver::Goose.support(), Support::Experimental);
+        let goose: Vec<_> = ApprovalLevel::ALL
+            .into_iter()
+            .map(|l| level_plan(Driver::Goose, l).acp_mode)
+            .collect();
+        assert_eq!(
+            goose,
+            [
+                Some("approve"),
+                Some("approve"),
+                Some("smart_approve"),
+                Some("auto")
+            ]
+        );
+        assert!(level_plan(Driver::Goose, Full).acp_allow_all);
+        assert!(!level_plan(Driver::Goose, Auto).acp_allow_all);
+        assert_eq!(
+            acp_args(
+                Driver::Goose,
+                &level_plan(Driver::Goose, Ask),
+                Some("gpt-4o")
+            )
+            .unwrap(),
+            ["acp"]
         );
         // Kimi Code CLI: the mode always goes through `session/set_mode`, and the CLI's
         // `yolo` ("Ask When Needed") is Auto while its `auto` ("Never Ask") is Full.

@@ -747,10 +747,12 @@ const HOME_STORES: &[&str] = &[
     ".config/claude",
     ".config/cursor",
     ".config/cursor-agent",
+    ".config/goose",
     ".local/share/opencode",
     ".local/share/cursor-agent",
     "appdata/roaming/opencode",
     "appdata/roaming/cursor",
+    "appdata/roaming/block/goose",
     "appdata/local/opencode",
     "appdata/local/cursor",
     "appdata/local/cursor-agent",
@@ -824,12 +826,18 @@ impl CliStores {
         for home in &homes {
             roots.extend(HOME_STORES.iter().map(|s| format!("{home}/{s}")));
         }
-        for key in ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "VIBE_HOME"] {
+        for key in [
+            "CODEX_HOME",
+            "CLAUDE_CONFIG_DIR",
+            "VIBE_HOME",
+            "GOOSE_PATH_ROOT",
+        ] {
             roots.extend(env_dir(key));
         }
         if let Some(dir) = env_dir("XDG_CONFIG_HOME") {
             roots.extend(
-                ["opencode", "claude", "cursor", "cursor-agent"].map(|n| format!("{dir}/{n}")),
+                ["opencode", "claude", "cursor", "cursor-agent", "goose"]
+                    .map(|n| format!("{dir}/{n}")),
             );
         }
         if let Some(dir) = env_dir("XDG_DATA_HOME") {
@@ -839,6 +847,9 @@ impl CliStores {
             if let Some(dir) = env_dir(key) {
                 roots.extend(["opencode", "cursor", "cursor-agent"].map(|n| format!("{dir}/{n}")));
             }
+        }
+        if let Some(dir) = env_dir("APPDATA") {
+            roots.push(format!("{dir}/block/goose"));
         }
         if let Ok(slot) = DATA_DIR.read()
             && let Some(data) = slot.as_ref()
@@ -1103,6 +1114,13 @@ mod tests {
             ("cat ~/.vibe/.env", None),
             ("cat ${HOME}/.vibe/config.toml", None),
             ("cat .vibe/.env", Some("/home/praxi")),
+            // Goose: provider settings, keys without a keyring and saved tool permissions
+            ("cat ~/.config/goose/secrets.yaml", None),
+            ("rm ${HOME}/.config/goose/permission.yaml", None),
+            (
+                r"type %USERPROFILE%\AppData\Roaming\Block\goose\config\config.yaml",
+                None,
+            ),
             // Copilot CLI: config.json (accounts, plaintext token without a keychain) and
             // settings.json (hooks, MCP servers) under ~/.copilot
             ("cat ~/.copilot/config.json", None),

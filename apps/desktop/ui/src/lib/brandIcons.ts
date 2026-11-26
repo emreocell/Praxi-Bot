@@ -35,6 +35,7 @@ const aliases: Record<string, string> = {
   copilot: 'githubcopilot',
   clicopilot: 'githubcopilot',
   clikimi: 'kimi',
+  cligoose: 'goose',
   // Mistral Vibe is Mistral AI's own CLI: the Mistral AI mark.
   vibe: 'mistralai',
   clivibe: 'mistralai',
@@ -84,6 +85,8 @@ export function brandIcon(name: string): BrandArtwork {
   if (key === 'kiro') return { name: 'Kiro CLI', color: 'currentColor', path: 'M3.5 6.5 5 5l7 7-7 7-1.5-1.5L9 12ZM12 17h8.5v2H12Z', monogram: '', known: true, monochrome: true };
   // No licensed Qoder mark either: the same neutral terminal-prompt glyph.
   if (key === 'qoder') return { name: 'Qoder CLI', color: 'currentColor', path: 'M3.5 6.5 5 5l7 7-7 7-1.5-1.5L9 12ZM12 17h8.5v2H12Z', monogram: '', known: true, monochrome: true };
+  // No licensed Goose mark: the same neutral terminal-prompt glyph.
+  if (key === 'goose') return { name: 'Goose', color: 'currentColor', path: 'M3.5 6.5 5 5l7 7-7 7-1.5-1.5L9 12ZM12 17h8.5v2H12Z', monogram: '', known: true, monochrome: true };
   if (initials[key]) return { name: initials[key], color: 'currentColor', path: '', monogram: initials[key][0].toUpperCase(), known: true, monochrome: true };
   if (key === 'slack') return { name: 'Slack', color: '#4A154B', path: '', monogram: '', known: true };
   let hash = 0;

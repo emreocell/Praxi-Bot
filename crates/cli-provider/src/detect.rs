@@ -1157,6 +1157,13 @@ fn parse_version_string(stdout: &str) -> Option<String> {
     Some(bounded)
 }
 
+/// The pressly/goose database migration tool answers `--version` with
+/// `goose version: <version>` (`cmd/goose/main.go`). The coding agent prints only its
+/// version (` 1.61.1`: clap with an empty display name), never that label.
+fn is_goose_migration_tool(version: Option<&str>) -> bool {
+    version.is_some_and(|v| v.to_ascii_lowercase().starts_with("goose version:"))
+}
+
 fn bound_label(s: &str, max_len: usize) -> Option<String> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
@@ -1277,7 +1284,21 @@ impl Detector {
     }
 
     async fn detect_fresh(&self) -> Vec<DetectedCli> {
-        let (claude, codex, cursor, opencode, gemini, agy, qwen, copilot, kiro, kimi, qoder, vibe) = tokio::join!(
+        let (
+            claude,
+            codex,
+            cursor,
+            opencode,
+            gemini,
+            agy,
+            qwen,
+            copilot,
+            kiro,
+            kimi,
+            qoder,
+            vibe,
+            goose,
+        ) = tokio::join!(
             self.probe_claude(),
             self.probe_codex(),
             self.probe_cursor(),
@@ -1292,10 +1313,12 @@ impl Detector {
             // Mistral Vibe: the key can be in the environment, `~/.vibe/.env`, the OS keyring
             // or a browser sign-in, and there is no status command.
             self.probe_unverified_auth("vibe"),
+            self.probe_goose(),
         );
 
         let mut rows = vec![
             claude, codex, cursor, opencode, gemini, agy, qwen, copilot, kiro, kimi, qoder, vibe,
+            goose,
         ];
         // Gemini CLI is retired (Antigravity replaces it): never offered for install,
         // listed only where it is already installed so that setup keeps working.
@@ -1708,6 +1731,29 @@ impl Detector {
         cli
     }
 
+    /// Goose keeps its keys in the OS keyring or `secrets.yaml` and has no status command.
+    /// The command name is shared with the pressly/goose database migration tool, which is
+    /// reported as another program and never offered as an engine.
+    async fn probe_goose(&self) -> DetectedCli {
+        let (cli, resolved) = self.probe_engine_version("goose").await;
+        if !cli.installed || resolved.is_none() {
+            return cli;
+        }
+        if is_goose_migration_tool(cli.version.as_deref()) {
+            return DetectedCli {
+                installed: false,
+                version: None,
+                runnable: false,
+                detail: Some("other_program".to_owned()),
+                ..cli
+            };
+        }
+        DetectedCli {
+            detail: cli.detail.or_else(|| Some("auth_unverified".to_owned())),
+            ..cli
+        }
+    }
+
     /// GitHub Copilot CLI keeps its sign-in in the OS credential store (or, without one,
     /// in `~/.copilot/config.json`, which also holds unrelated state) and has no status
     /// command. A GitHub token in the environment is not evidence of a Copilot plan.
@@ -1995,6 +2041,16 @@ fn parse_cursor_json(stdout: &str) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_goose_migration_tool_is_told_apart_from_the_agent() {
+        // pressly/goose, the database migration tool with the same command name.
+        assert!(is_goose_migration_tool(Some("goose version: v3.24.1")));
+        assert!(is_goose_migration_tool(Some("goose version: (devel)")));
+        // `goose --version` of the agent, 1.61.1 (after the probe trims the line).
+        assert!(!is_goose_migration_tool(Some("1.61.1")));
+        assert!(!is_goose_migration_tool(None));
+    }
 
     #[test]
     fn cursor_batch_launcher_resolves_only_literal_sibling_file() {

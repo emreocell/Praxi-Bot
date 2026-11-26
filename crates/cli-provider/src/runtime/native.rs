@@ -703,7 +703,10 @@ impl Run<'_> {
             }
             if v.get("error").is_some() {
                 let classified = child_error(&v);
-                if classified == CliError::Protocol && v["error"]["code"] == -32000 {
+                if classified == CliError::Protocol
+                    && (v["error"]["code"] == -32000
+                        || (self.nt.driver == Driver::Goose && goose_unconfigured(&v)))
+                {
                     return Err(CliError::SignedOut);
                 }
                 return Err(classified);
@@ -731,9 +734,9 @@ impl Run<'_> {
                     {
                         return Err(CliError::Protocol);
                     }
-                    // Antigravity, Kimi Code, Qoder and Vibe select the mode after `session/new`
-                    // (ACP `session/set_mode`), all but Vibe also the model
-                    // (`session/set_model`), Kiro V3 its model through
+                    // Antigravity, Kimi Code, Qoder, Vibe and Goose select the mode after
+                    // `session/new` (ACP `session/set_mode`), Antigravity, Kimi Code and Qoder
+                    // also the model (`session/set_model`), Kiro V3 and Goose the model through
                     // `session/set_config_option`; the prompt waits for each answer.
                     let model = self.nt.turn.model.as_deref();
                     let requests = match self.nt.driver {
@@ -743,6 +746,11 @@ impl Run<'_> {
                         // Only the mode: a Vibe model other than `default` is refused at launch.
                         Driver::Vibe => agy_setup(id, self.plan.acp_mode, None),
                         Driver::Kiro => kiro_setup(id, model),
+                        Driver::Goose => {
+                            let mut requests = agy_setup(id, self.plan.acp_mode, None);
+                            requests.extend(kiro_setup(id, model));
+                            requests
+                        }
                         _ => Vec::new(),
                     };
                     for request in requests {
@@ -794,7 +802,19 @@ fn mode_offered(session: &Value, mode: &str) -> bool {
         .is_none_or(|modes| modes.iter().any(|m| m["id"] == mode))
 }
 
-/// Kiro CLI V3 has no `session/set_model`; the model is the `model` config option.
+/// Goose 1.61.1 without a provider: `session/new` fails with a JSON-RPC internal error
+/// (`-32603`) whose data is "Failed to resolve provider and model: Configuration value not
+/// found: `GOOSE_PROVIDER`" (or `GOOSE_MODEL`). Only this exact failure of `session/new` is
+/// a sign-in problem; any other internal error stays a protocol error.
+fn goose_unconfigured(v: &Value) -> bool {
+    v["id"] == 2
+        && v["error"]["code"] == -32603
+        && v["error"]["data"]
+            .as_str()
+            .is_some_and(|d| d.starts_with("Failed to resolve provider and model: "))
+}
+
+/// Kiro CLI V3 (and Goose) have no `session/set_model`; the model is the `model` config option.
 fn kiro_setup(session: &str, model: Option<&str>) -> Vec<Value> {
     model
         .filter(|m| *m != "default")
@@ -927,6 +947,21 @@ mod tests {
         assert_eq!(setup.len(), 1);
         assert_eq!(setup[0]["method"], "session/set_mode");
         assert_eq!(setup[0]["params"]["modeId"], "ask");
+    }
+
+    #[test]
+    fn goose_signed_out_is_only_its_exact_session_new_failure() {
+        // Captured from `goose acp` 1.61.1 with no provider configured.
+        let unconfigured = json!({"jsonrpc":"2.0","id":2,"error":{"code":-32603,
+            "message":"Internal error",
+            "data":"Failed to resolve provider and model: Configuration value not found: GOOSE_PROVIDER"}});
+        assert!(goose_unconfigured(&unconfigured));
+        let mut later = unconfigured.clone();
+        later["id"] = json!(3);
+        assert!(!goose_unconfigured(&later));
+        let other = json!({"jsonrpc":"2.0","id":2,"error":{"code":-32603,
+            "message":"Internal error","data":"database is locked"}});
+        assert!(!goose_unconfigured(&other));
     }
 
     #[test]

@@ -32,7 +32,7 @@ async fn test_all_missing() {
 
     let detected = detector.detect(false).await;
     // Gemini CLI is retired: never listed unless it is already installed.
-    assert_eq!(detected.len(), 11);
+    assert_eq!(detected.len(), 12);
     assert!(detected.iter().all(|cli| cli.id != "gemini"));
 
     for cli in &detected {
@@ -317,6 +317,51 @@ async fn vibe_sign_in_is_never_claimed() {
     let debug = format!("{vibe:?}");
     assert!(!debug.contains("mistral_secret_key"));
     assert!(!debug.contains("SENTINEL_TOKEN"));
+}
+
+#[tokio::test]
+async fn goose_sign_in_is_never_claimed() {
+    let temp = fixture_dir();
+    install_fake(temp.path(), "goose");
+
+    // Goose keeps keys in the OS keyring or `secrets.yaml` and has no status command; a
+    // provider key in the environment or a config file is not evidence of a working setup.
+    let config = temp.path().join("home").join(".config").join("goose");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("secrets.yaml"),
+        "OPENAI_API_KEY: SENTINEL_TOKEN",
+    )
+    .unwrap();
+    let env = PathEnv::for_test(temp.path().to_path_buf())
+        .with_home(temp.path().join("home"))
+        // `goose --version` 1.61.1 prints only the version, after a space.
+        .with_env_var("FAKE_CLI_VERSION_LINE", " 1.61.1")
+        .with_env_var("OPENAI_API_KEY", "goose_secret_key");
+    let detected = Detector::with_env(env).detect(true).await;
+    let goose = detected.iter().find(|c| c.id == "goose").unwrap();
+    assert!(goose.installed);
+    assert_eq!(goose.version.as_deref(), Some("1.61.1"));
+    assert_eq!(goose.auth, AuthState::Unknown);
+    assert_eq!(goose.detail.as_deref(), Some("auth_unverified"));
+    let debug = format!("{goose:?}");
+    assert!(!debug.contains("goose_secret_key"));
+    assert!(!debug.contains("SENTINEL_TOKEN"));
+}
+
+#[tokio::test]
+async fn a_migration_tool_named_goose_is_not_offered_as_goose() {
+    // pressly/goose, the database migration tool, installs a `goose` command too.
+    let temp = fixture_dir();
+    install_fake(temp.path(), "goose");
+    let env = PathEnv::for_test(temp.path().to_path_buf())
+        .with_env_var("FAKE_CLI_VERSION_LINE", "goose version: v3.24.1");
+    let detected = Detector::with_env(env).detect(true).await;
+    let goose = detected.iter().find(|c| c.id == "goose").unwrap();
+    assert!(!goose.installed);
+    assert!(goose.version.is_none());
+    assert!(!goose.runnable);
+    assert_eq!(goose.detail.as_deref(), Some("other_program"));
 }
 
 #[tokio::test]
@@ -766,7 +811,7 @@ fn cli_engines_catalog_marks_only_claude_runnable() {
         ids,
         [
             "claude", "codex", "cursor", "opencode", "gemini", "agy", "qwen", "copilot", "kiro",
-            "kimi", "qoder", "vibe",
+            "kimi", "qoder", "vibe", "goose",
         ]
     );
     let claude = cli_provider::engine_spec("claude").expect("claude spec");
@@ -775,7 +820,7 @@ fn cli_engines_catalog_marks_only_claude_runnable() {
 
     for id in [
         "codex", "cursor", "opencode", "gemini", "agy", "qwen", "copilot", "kiro", "kimi", "qoder",
-        "vibe",
+        "vibe", "goose",
     ] {
         let spec = cli_provider::engine_spec(id).expect("spec exists");
         assert!(!spec.runnable, "{id} must not be runnable");

@@ -101,6 +101,8 @@ pub enum CliEngine {
     Kimi,
     /// Mistral Vibe (`vibe-acp`).
     Vibe,
+    /// Goose (`goose acp`).
+    Goose,
 }
 
 impl CliEngine {
@@ -120,6 +122,7 @@ impl CliEngine {
             Self::Copilot => "copilot",
             Self::Kimi => "kimi",
             Self::Vibe => "vibe",
+            Self::Goose => "goose",
         }
     }
 }
@@ -475,6 +478,7 @@ impl ProviderConfig {
                     CliEngine::Copilot => "cli:copilot",
                     CliEngine::Kimi => "cli:kimi",
                     CliEngine::Vibe => "cli:vibe",
+                    CliEngine::Goose => "cli:goose",
                 };
                 if p.id != id
                     || p.key.is_some()

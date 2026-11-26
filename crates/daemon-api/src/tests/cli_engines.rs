@@ -9,7 +9,7 @@ async fn registry_is_authenticated_and_preserves_confinement() {
     assert_eq!(response.status, StatusCode::OK);
     let body = response.json();
     let rows = body.as_array().unwrap();
-    assert_eq!(rows.len(), 11);
+    assert_eq!(rows.len(), 12);
     let qwen = rows.iter().find(|r| r["detected"]["id"] == "qwen").unwrap();
     assert_eq!(qwen["native"]["support"], "experimental");
     assert_eq!(
@@ -55,6 +55,18 @@ async fn registry_is_authenticated_and_preserves_confinement() {
         "mode auto-approve"
     );
     assert_eq!(vibe["auth_args"], json!([]));
+    let goose = rows
+        .iter()
+        .find(|r| r["detected"]["id"] == "goose")
+        .unwrap();
+    assert_eq!(goose["native"]["support"], "experimental");
+    assert_eq!(
+        goose["native"]["levels"][0]["native_setting"],
+        "mode approve"
+    );
+    assert_eq!(goose["native"]["levels"][1]["applied"], "ask");
+    assert_eq!(goose["native"]["levels"][3]["native_setting"], "mode auto");
+    assert_eq!(goose["auth_args"], json!([]));
     let claude = rows
         .iter()
         .find(|r| r["detected"]["id"] == "claude")

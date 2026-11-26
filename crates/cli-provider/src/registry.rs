@@ -341,6 +341,35 @@ pub const CLI_ENGINES: &[CliEngineSpec] = &[
         login: "vibe --setup",
         docs_url: "https://github.com/mistralai/mistral-vibe",
     },
+    // Goose (AAIF, formerly Block). Runs with its own tools through `goose acp`, the ACP
+    // server its own clients use. Interface read from 1.61.1 (`goose --version`,
+    // `goose acp --help`, an unauthenticated ACP `initialize` and `session/new`) and its
+    // source, not from a signed-in run. Keys live in the OS keyring or in
+    // `secrets.yaml`, set up by `goose configure`, and there is no status command, so
+    // sign-in is never claimed. The documented installer is a shell script.
+    CliEngineSpec {
+        id: "goose",
+        display_name: "Goose",
+        command: "goose",
+        aliases: &[],
+        runnable: false,
+        version_args: &["--version"],
+        auth_args: &[],
+        minimum_version: None,
+        install_windows: None,
+        install_unix: Some(InstallCommand {
+            program: "sh",
+            args: &[
+                "-c",
+                "curl --proto =https --proto-redir =https --tlsv1.2 -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
+            ],
+            verified: false,
+            executable: false,
+        }),
+        models: &["default"],
+        login: "goose configure",
+        docs_url: "https://github.com/aaif-goose/goose",
+    },
 ];
 
 #[must_use]

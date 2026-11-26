@@ -35,7 +35,8 @@ const CLI_LABELS: Record<string, string> = {
   copilot: "GitHub Copilot",
   kimi: "Kimi Code",
   qoder: "Qoder",
-  vibe: "Mistral Vibe"
+  vibe: "Mistral Vibe",
+  goose: "Goose"
 };
 
 function pretty(id: string): string {

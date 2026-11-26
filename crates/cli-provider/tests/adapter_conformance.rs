@@ -244,6 +244,62 @@ async fn vibe_refuses_a_model_instead_of_running_its_own() {
     assert!(!bin.path().join("session_new").exists());
 }
 
+async fn goose_turn(
+    mode: &str,
+    level: ApprovalLevel,
+    model: Option<&str>,
+) -> (tempfile::TempDir, Result<(), CliError>) {
+    let (bin, workspace, env) = setup(Driver::Goose, mode);
+    let mut chosen = turn();
+    chosen.model = model.map(Into::into);
+    let result = Driver::Goose
+        .run_turn(
+            "fixture",
+            &env,
+            chosen,
+            workspace.path().to_owned(),
+            level,
+            Arc::new(Host::default()),
+            CancellationToken::new(),
+        )
+        .await
+        .map(|_| ());
+    (bin, result)
+}
+
+#[tokio::test]
+async fn goose_without_a_provider_is_signed_out_before_any_prompt() {
+    // `goose acp` answers `initialize` without credentials, then fails `session/new` with
+    // -32603 "Failed to resolve provider and model: ...". This exact text is pinned: a Goose
+    // release that changes it must fail here, not silently become a protocol error.
+    let (bin, result) = goose_turn("acp-goose-unconfigured", ApprovalLevel::Ask, None).await;
+    assert_eq!(result.unwrap_err(), CliError::SignedOut);
+    assert!(log(&bin, "init").contains("praxi"));
+    assert!(!bin.path().join("prompt").exists());
+}
+
+#[tokio::test]
+async fn goose_always_sets_the_mode_and_sends_the_model_for_the_session_only() {
+    // A new Goose session starts in `auto`, so even Ask sends `approve` before the prompt.
+    let (bin, result) = goose_turn("acp-goose", ApprovalLevel::Ask, None).await;
+    result.unwrap();
+    assert_eq!(log(&bin, "set_mode"), "\"approve\"");
+    assert!(!bin.path().join("set_config_option").exists());
+    assert!(log(&bin, "prompt").contains("PRIVATE_PROMPT"));
+    // Accept edits has no Goose mode of its own and runs as Ask.
+    let (bin, result) = goose_turn("acp-goose", ApprovalLevel::AcceptEdits, None).await;
+    result.unwrap();
+    assert_eq!(log(&bin, "set_mode"), "\"approve\"");
+    // A chosen model is the `model` config option, which Goose keeps on the session.
+    let (bin, result) = goose_turn("acp-goose", ApprovalLevel::Auto, Some("gpt-4o")).await;
+    result.unwrap();
+    assert_eq!(log(&bin, "set_mode"), "\"smart_approve\"");
+    let option: Value = serde_json::from_str(&log(&bin, "set_config_option")).unwrap();
+    assert_eq!(option["configId"], "model");
+    assert_eq!(option["value"], "gpt-4o");
+    assert!(log(&bin, "prompt").contains("PRIVATE_PROMPT"));
+}
+
 fn log(bin: &tempfile::TempDir, name: &str) -> String {
     std::fs::read_to_string(bin.path().join(name)).unwrap()
 }

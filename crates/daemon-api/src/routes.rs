@@ -2044,6 +2044,7 @@ pub(crate) fn cli_engine_kind(id: &str) -> Option<provider_catalog::config::CliE
         "copilot" => CliEngine::Copilot,
         "kimi" => CliEngine::Kimi,
         "vibe" => CliEngine::Vibe,
+        "goose" => CliEngine::Goose,
         _ => return None,
     })
 }

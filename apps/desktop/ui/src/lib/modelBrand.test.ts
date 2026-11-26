@@ -44,6 +44,9 @@ test("rows show the product logo, not the company's", () => {
   assert.equal(providerBrand("cli:vibe").label, "Mistral Vibe");
   assert.equal(sourceLabel("cli:vibe"), "Mistral Vibe CLI");
   assert.equal(providerBrand("cli:vibe").company, "mistralai");
+  assert.equal(providerBrand("cli:goose").label, "Goose");
+  assert.equal(sourceLabel("cli:goose"), "Goose CLI");
+  assert.equal(providerBrand("cli:goose").company, "goose");
   assert.equal(productBrandKey("openai", "gpt-4.1"), "openai");
   assert.equal(productBrandKey("openai", "o3"), "openai");
   assert.equal(productBrandKey("gemini", "gemini-2.5-flash"), "googlegemini");

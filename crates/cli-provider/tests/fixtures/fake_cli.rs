@@ -187,7 +187,9 @@ fn main() {
 
     match joined.as_str() {
         "--version" => {
-            if std::env::var("FAKE_CLI_MULTILINE").is_ok() {
+            if let Ok(line) = std::env::var("FAKE_CLI_VERSION_LINE") {
+                println!("{line}");
+            } else if std::env::var("FAKE_CLI_MULTILINE").is_ok() {
                 println!("fake 1.2.3\nsecond line to ignore\nthird line");
             } else {
                 println!("fake 1.2.3");
