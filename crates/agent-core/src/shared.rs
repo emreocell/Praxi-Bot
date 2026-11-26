@@ -908,6 +908,9 @@ pub(crate) struct RunCtx {
     pub bot_id: BotId,
     pub user_id: UserId,
     pub initiator: InitiatorKind,
+    /// The mission this run is a session of (`turn:mission:<id>`): the run is offered the
+    /// `mission_*` tools.
+    pub mission: Option<String>,
     /// The schedule that started the run (schedule-initiated runs only).
     pub schedule_id: Option<TaskId>,
     pub profile: Arc<BotProfile>,
@@ -1105,6 +1108,9 @@ pub(crate) struct Shared {
     pub control: RwLock<Option<Arc<dyn crate::control::ControlGate>>>,
     /// Dynamic computer availability provider installed by the daemon (`serve`).
     pub computer_provider: RwLock<Option<Arc<dyn ComputerProvider>>>,
+    /// The mission ledger, set by the daemon. Mission sessions park a CAPTCHA / 2FA
+    /// item in it instead of waiting for the owner, and ask the owner once.
+    pub mission_store: RwLock<Option<Arc<missions::MissionStore>>>,
     /// Paired servers a bot may use as ITS computer while it runs here.
     pub server_links: RwLock<Option<Arc<dyn builtin_tools::pc::ServerLinks>>>,
     /// Static desktop backend passed to [`AgentLoop::with_builtin_tools`] (fallback when
@@ -2019,6 +2025,12 @@ impl Shared {
             taint.exposure.observe(true, false);
             taint.note_label("incoming e-mail");
         }
+        // A mission session starts from a brief built out of a ledger that earlier
+        // sessions filled with text from pages and mails: untrusted from step 0.
+        if run.parent_run_id.is_none() && missions::mission_of_kind(&run.kind).is_some() {
+            taint.exposure.observe(true, false);
+            taint.note_label("mission ledger");
+        }
         // A helper bot starts with untrusted exposure: its task was written
         // by another bot, whatever that bot had read.
         if run
@@ -2193,6 +2205,11 @@ impl Shared {
             bot_id: run.bot_id,
             user_id: run.user_id,
             initiator,
+            mission: run
+                .parent_run_id
+                .is_none()
+                .then(|| missions::mission_of_kind(&run.kind).map(str::to_owned))
+                .flatten(),
             schedule_id: if run.parent_run_id.is_none() {
                 schedule_id_of(&run.kind)
             } else {

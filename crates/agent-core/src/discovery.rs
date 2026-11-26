@@ -86,9 +86,15 @@ impl Shared {
         if self.cfg.safe_mode {
             return Vec::new();
         }
+        let mission: &[&str] = if ctx.mission.is_some() {
+            &missions::tools::MISSION_TOOL_NAMES
+        } else {
+            &[]
+        };
         let mut specs: Vec<_> = CORE
             .iter()
             .chain(DIRECT_EXTRAS.iter().filter(|_| direct_only))
+            .chain(mission)
             .filter_map(|name| self.visible_definition(ctx, name))
             .collect();
         if !direct_only {
@@ -132,7 +138,10 @@ impl Shared {
         let spec = self
             .visible_definition(ctx, name)
             .ok_or("unknown tool; search with tool_search")?;
-        if CORE.contains(&name) || active.contains(&name) {
+        if CORE.contains(&name)
+            || active.contains(&name)
+            || (ctx.mission.is_some() && missions::tools::is_mission_tool(name))
+        {
             return Ok(false);
         }
         let alias = provider_tool_name(&spec.name);

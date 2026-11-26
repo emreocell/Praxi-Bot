@@ -13,6 +13,7 @@
 mod agent;
 mod approval;
 pub mod attachments;
+mod auto_continue;
 pub mod bot_limits;
 pub mod browser_profile;
 mod browser_url;
@@ -55,6 +56,8 @@ mod account_register_tests;
 #[cfg(test)]
 mod approval_expiry_tests;
 #[cfg(test)]
+mod auto_continue_tests;
+#[cfg(test)]
 mod bot_limit_tests;
 #[cfg(test)]
 mod browser_mcp_tests;
@@ -70,6 +73,8 @@ mod egress_tests;
 mod full_mode_tests;
 #[cfg(test)]
 mod mail_tests;
+#[cfg(test)]
+mod mission_session_tests;
 #[cfg(test)]
 mod mode_tests;
 #[cfg(test)]
@@ -91,7 +96,7 @@ mod subagent_tests;
 #[cfg(test)]
 mod tests;
 
-pub use agent::AgentLoop;
+pub use agent::{AgentLoop, SessionStats};
 pub use computer_target::{
     ComputerLabel, ComputerNode, ComputerProvider, ComputerTarget, Resolution, RuntimeConfig,
     WAIT_FOR_PC_REASON, resolve as resolve_computer_target,

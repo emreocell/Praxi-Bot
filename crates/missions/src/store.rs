@@ -447,6 +447,18 @@ impl MissionStore {
         Ok(n == 1)
     }
 
+    /// Whether `bot_id` has a mission that is running (its `mission_*` tools are visible then).
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn bot_has_running_mission(&self, bot_id: &str) -> Result<bool> {
+        Ok(self.conn().query_row(
+            "SELECT EXISTS(SELECT 1 FROM missions WHERE bot_id = ?1 AND state = 'running')",
+            [bot_id],
+            |r| r.get(0),
+        )?)
+    }
+
     // ---- items ----
 
     /// Add items; keys already in the ledger are left alone. The ledger holds at most [`MAX_ITEMS`].
@@ -623,6 +635,37 @@ impl MissionStore {
         }
         tx.commit()?;
         Ok(released)
+    }
+
+    /// A CAPTCHA or 2FA stopped the work on the site the bot is on: park the item
+    /// being worked on (the only one `doing`) as blocked, so the session moves on
+    /// instead of waiting for the owner. Returns its key; `None` when no single
+    /// item is `doing` (the caller then tells the model to park it itself).
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn block_sole_doing_item(
+        &self,
+        id: &str,
+        reason: &str,
+        now: i64,
+    ) -> Result<Option<String>> {
+        let doing = self.items(id, Some(ItemStatus::Doing))?;
+        let [item] = doing.as_slice() else {
+            return Ok(None);
+        };
+        self.update_item(
+            id,
+            &item.key,
+            &ItemUpdate {
+                status: Some(ItemStatus::Blocked),
+                blocked_reason: Some(reason.to_owned()),
+                ..ItemUpdate::default()
+            },
+            false,
+            now,
+        )?;
+        Ok(Some(item.key.clone()))
     }
 
     /// End-of-session housekeeping: an item still `doing` goes back to `todo`

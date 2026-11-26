@@ -38,6 +38,17 @@ use crate::{AUDIT_GRANT_ALWAYS, AUDIT_GRANT_INERT, AUDIT_GRANT_REVOKED};
 
 type Result<T> = std::result::Result<T, LoopError>;
 
+/// What a finished run did (see [`AgentLoop::session_stats`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SessionStats {
+    /// Model calls the run made.
+    pub model_steps: u32,
+    /// A safety limit (steps, tokens) closed the run with its tool-less summary.
+    pub guard_stopped: bool,
+    /// Spend in USD, for calls whose model has a known price.
+    pub cost_usd: f64,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum Start {
     Fresh,
@@ -225,6 +236,7 @@ impl AgentLoop {
                 spend: crate::spend::SpendState::default(),
                 control: RwLock::new(None),
                 computer_provider: RwLock::new(None),
+                mission_store: RwLock::new(None),
                 mail: Arc::new(builtin_tools::connector_email::MailHandle::new()),
                 server_links: RwLock::new(None),
                 static_desktop: RwLock::new(None),
@@ -515,6 +527,11 @@ impl AgentLoop {
     /// display and connected remote PC desktops here).
     pub fn set_computer_provider(&self, provider: Arc<dyn computer_target::ComputerProvider>) {
         *self.sh.computer_provider.write() = Some(provider);
+    }
+
+    /// Install the mission ledger (`serve` wires the daemon's `missions.db` here).
+    pub fn set_mission_store(&self, store: Arc<missions::MissionStore>) {
+        *self.sh.mission_store.write() = Some(store);
     }
 
     /// Install the paired servers a bot may use as its own computer
@@ -936,6 +953,93 @@ impl AgentLoop {
         initiator: InitiatorKind,
     ) -> Result<RunId> {
         self.start_turn(chat_id, user_message, &kind_for(initiator), None, None)
+    }
+
+    /// Start one session of mission `mission_id`: an ordinary turn in the mission's
+    /// chat whose first message is `brief`, built by the missions supervisor from
+    /// the ledger. The run kind is `turn:mission:<id>` (so the loop knows to offer
+    /// the `mission_*` tools and to start from an untrusted-exposure state: the
+    /// ledger holds text earlier sessions copied from pages and mails).
+    ///
+    /// The message counts as the owner's own, which is what lets the Full level's
+    /// autonomy apply to unattended sessions: the mission was started by the owner
+    /// through an owner-only route, its bot is checked to be at the Full level
+    /// before every session ([`Self::bot_is_full`]), and the brief fences every
+    /// ledger value as data (`missions::brief`).
+    ///
+    /// # Errors
+    /// As [`Self::run_turn`]; [`LoopError::Busy`] while the chat has an active turn.
+    pub fn run_mission_session(
+        &self,
+        chat_id: ChatId,
+        mission_id: &str,
+        brief: &str,
+    ) -> Result<RunId> {
+        self.start_turn_from(
+            chat_id,
+            brief,
+            &missions::run_kind(mission_id),
+            None,
+            None,
+            "owner",
+        )
+    }
+
+    /// Wire missions into this loop: the ledger store (for parking CAPTCHA / 2FA items
+    /// and the one-batch question rule) and the `mission_*` tools, whose mission is found
+    /// from the calling run's kind. Returns how many tools were registered.
+    pub fn enable_missions(
+        &self,
+        store: &Arc<missions::MissionStore>,
+        clock: &Arc<dyn missions::supervisor::Clock>,
+    ) -> usize {
+        self.set_mission_store(Arc::clone(store));
+        let storage = Arc::clone(&self.sh.storage);
+        let resolve: missions::tools::Resolver = Arc::new(move |run_id| {
+            let id = Uuid::parse_str(run_id).ok()?;
+            let run = storage.get_run(RunId(id)).ok().flatten()?;
+            missions::mission_of_kind(&run.kind).map(str::to_owned)
+        });
+        let registry = self.sh.tools.clone();
+        missions::tools::tools(store, &resolve, clock)
+            .into_iter()
+            .filter(|t| registry.register(Arc::clone(t)))
+            .count()
+    }
+
+    /// Whether the bot's permission preset is the Full level (a mission runs
+    /// unattended only there).
+    #[must_use]
+    pub fn bot_is_full(&self, bot: BotId) -> bool {
+        self.sh
+            .profile_for(bot)
+            .is_ok_and(|p| p.permissions.mode() == permission_engine::AutonomyMode::Full)
+    }
+
+    /// What a finished run did, for the missions supervisor: model calls made,
+    /// whether a safety limit closed it, and its spend when the model has a known price.
+    #[must_use]
+    pub fn session_stats(&self, run_id: RunId) -> SessionStats {
+        let steps = self.sh.storage.list_steps(run_id).unwrap_or_default();
+        let model: Vec<ModelOut> = steps
+            .iter()
+            .filter(|s| s.name == STEP_MODEL)
+            .filter_map(step_output::<ModelOut>)
+            .collect();
+        let cost_usd = model
+            .iter()
+            .filter_map(|m| {
+                let u = m.usage.as_ref()?;
+                self.sh
+                    .price_for(&m.model)
+                    .map(|p| p.cost(u.prompt_tokens, u.completion_tokens, u.cached_tokens))
+            })
+            .sum();
+        SessionStats {
+            model_steps: u32::try_from(model.len()).unwrap_or(u32::MAX),
+            guard_stopped: model.last().is_some_and(|m| m.stopped_by_guard),
+            cost_usd,
+        }
     }
 
     /// Human-only replay entry: parameter values never enter persisted turn

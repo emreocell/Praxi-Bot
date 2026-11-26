@@ -75,6 +75,7 @@ dependencies = [
  "globset",
  "live-view",
  "memory-store",
+ "missions",
  "openapi-tools",
  "parking_lot",
  "permission-engine",

@@ -2907,6 +2907,47 @@ fn handover_outcome(kind: HandoverKind, done: bool, why: &str) -> (String, bool)
 }
 
 impl Shared {
+    /// A CAPTCHA or 2FA in a mission session blocks only the item it stops: nobody
+    /// waits for the owner. The item the bot is working on is parked in the ledger
+    /// (the owner finds it in the blocked list and the digest) and the session moves on.
+    fn park_item_for_handover(
+        &self,
+        ctx: &RunCtx,
+        mission: &str,
+        kind: HandoverKind,
+        card: &builtin_tools::HandoverCard,
+    ) -> (String, bool) {
+        builtin_tools::handover_hub().disarm(&ctx.run_id.to_string());
+        let site = truncate_utf8(&card.site, 80);
+        let reason = match kind {
+            HandoverKind::Captcha => format!("a CAPTCHA on {site} has to be solved by the owner"),
+            HandoverKind::Code => {
+                format!("a 2FA / verification code for {site} has to be entered by the owner")
+            }
+        };
+        let store = self.mission_store.read().clone();
+        let key = store.and_then(|s| {
+            s.block_sole_doing_item(mission, &reason, storage::now_ms())
+                .ok()
+                .flatten()
+        });
+        self.audit(
+            ctx,
+            "system",
+            "handover.parked",
+            &json!({"kind": kind, "site": card.site, "item": key}),
+        );
+        let text = match key {
+            Some(key) => format!(
+                "Not waiting: this is a mission, so a person is not asked right now. Item {key:?} is parked as blocked ({reason}); the owner sees it in the blocked list. Do not retry this site. Take the next open item now."
+            ),
+            None => format!(
+                "Not waiting: this is a mission, so a person is not asked right now. Mark the item you are working on as blocked with mission_item (reason: {reason}), do not retry this site, and take the next open item now."
+            ),
+        };
+        (text, true)
+    }
+
     /// Run a `browser_handover`: show the owner's card and park the run until the
     /// owner's app answers through the daemon, cancels it, or it expires. A code
     /// never passes through here: the owner-only route types it into the page and
@@ -2934,6 +2975,9 @@ impl Shared {
             );
             handover_outcome(kind, false, why)
         };
+        if let Some(mission) = &ctx.mission {
+            return self.park_item_for_handover(ctx, mission, kind, card);
+        }
         if ctx.initiator != InitiatorKind::Human {
             return refuse(
                 "only a run the owner started at the desktop can hand a step over; tell the owner in your answer instead",

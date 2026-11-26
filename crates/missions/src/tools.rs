@@ -379,6 +379,12 @@ impl Tool for MissionTool {
         &self.spec
     }
 
+    /// Only a bot with a running mission sees the tools; a call outside a mission
+    /// session still fails in [`MissionTool::mission`].
+    fn visible_to(&self, bot_id: Option<&str>) -> bool {
+        bot_id.is_some_and(|b| self.store.bot_has_running_mission(b).unwrap_or(false))
+    }
+
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let m = self.mission(ctx)?;
         let text = match self.op {

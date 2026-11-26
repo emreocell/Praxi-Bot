@@ -1278,7 +1278,8 @@ async fn todo_tool_emits_event_without_permission() {
                 {"content": "b", "status": "in_progress"}
             ]}),
         )]),
-        text("planned"),
+        // An answer without "Done:" while a step is open would be continued by the runtime.
+        text("Done: planned"),
     ]);
     // Even a read-only policy allows the Meta category.
     let lp = make_loop(

@@ -197,7 +197,16 @@ fn silent_end(history: &[RunStep]) -> bool {
         .rposition(|s| s.name == STEP_USER)
         .unwrap_or(0);
     let turn = &history[turn_start..];
-    blank && turn.iter().any(|s| s.name == STEP_TOOLS) && !turn.iter().any(|s| s.name == STEP_NUDGE)
+    blank
+        && turn.iter().any(|s| s.name == STEP_TOOLS)
+        && !turn
+            .iter()
+            .any(|s| s.name == STEP_NUDGE && !is_auto_continue(s))
+}
+
+/// A nudge the runtime wrote to continue a turn that ended with work left.
+fn is_auto_continue(step: &RunStep) -> bool {
+    step.name == STEP_NUDGE && step.input["auto_continue"] == true
 }
 
 /// Shown when the model is still silent after the nudge (never end empty).
@@ -292,6 +301,11 @@ impl TurnExecutor {
             return self.webhook_first_step(&ctx, run).map(Some);
         }
         let raw = self.first_user_text(&ctx, run)?;
+        if ctx.mission.is_some() {
+            // The brief is the whole task: built by the missions supervisor from the
+            // ledger. No router and no recalled memory can reinterpret it.
+            return Ok(Some(user_step(&raw)));
+        }
         if crate::shared::is_registry_kind(&run.kind) {
             // Only the host builds this prompt from an owner definition plus
             // an untrusted_data_block_capped event. No router or recalled text
@@ -448,6 +462,16 @@ impl TurnExecutor {
                 if let Some(step) = self.nudge_step(&ctx, history, model_steps) {
                     return Ok(Some(step));
                 }
+                let open_steps = st
+                    .todos
+                    .iter()
+                    .filter(|t| t.status != TodoStatus::Done)
+                    .count();
+                if let Some(step) =
+                    self.auto_continue_step(&ctx, run, history, model_steps, open_steps)
+                {
+                    return Ok(Some(step));
+                }
                 st.closed = true;
                 return Ok(None);
             }
@@ -488,7 +512,10 @@ impl TurnExecutor {
                 input["tier_upgrade_reason"] = json!(reason);
             }
         }
-        if history.iter().any(|s| s.name == STEP_NUDGE) {
+        if history
+            .iter()
+            .any(|s| s.name == STEP_NUDGE && !is_auto_continue(s))
+        {
             input["nudged"] = json!(true);
         }
         if cli_session {
@@ -502,6 +529,71 @@ impl TurnExecutor {
             // which provider errors are worth retrying.
             retry: None,
         }))
+    }
+
+    /// The turn ended with work left: answer "yes, continue" (a plan with open
+    /// steps, or a request for permission at the Full level) instead of
+    /// stopping. Only for the owner's own top-level turn, inside the step,
+    /// token and time budgets, never for money (see [`crate::auto_continue`]).
+    fn auto_continue_step(
+        &self,
+        ctx: &RunCtx,
+        run: &Run,
+        history: &[RunStep],
+        model_steps: usize,
+        open_steps: usize,
+    ) -> Option<StepSpec> {
+        use crate::auto_continue as ac;
+        let g = &self.sh.cfg.guards;
+        if g.auto_continue_max == 0
+            || ctx.sub.is_some()
+            || ctx.parent_run_id.is_some()
+            || self.sh.cfg.safe_mode
+            || !matches!(
+                ctx.initiator,
+                protocol::InitiatorKind::Human
+                    | protocol::InitiatorKind::Schedule
+                    | protocol::InitiatorKind::Routine
+                    | protocol::InitiatorKind::Channel
+            )
+        {
+            return None;
+        }
+        let used = history.iter().filter(|s| is_auto_continue(s)).count();
+        let idle = history
+            .iter()
+            .rev()
+            .take_while(|s| s.name != STEP_TOOLS)
+            .filter(|s| is_auto_continue(s))
+            .count();
+        let elapsed_ms = storage::now_ms().saturating_sub(run.created_at_ms);
+        let in_window = u128::try_from(elapsed_ms.max(0))
+            .is_ok_and(|ms| ms < g.auto_continue_window.as_millis());
+        let tokens = crate::subagent::model_tokens(history).saturating_add(
+            crate::subagent::descendant_tokens(&self.sh.storage, ctx.run_id),
+        );
+        if used >= g.auto_continue_max as usize
+            || idle >= g.auto_continue_idle as usize
+            || !in_window
+            || model_steps >= g.max_steps as usize
+            || tokens >= g.max_tokens_per_turn
+        {
+            return None;
+        }
+        let text = step_output::<ModelOut>(history.last()?)?.text;
+        let full = ctx.profile.permissions.mode() == permission_engine::AutonomyMode::Full;
+        let reason = ac::verdict(&text, open_steps, full)?;
+        Some(StepSpec {
+            name: STEP_NUDGE.to_owned(),
+            input: json!({
+                "auto_continue": true,
+                "reason": reason.as_str(),
+                "n": used + 1,
+                "text": ac::continue_text(reason, open_steps),
+            }),
+            idempotent: true,
+            retry: None,
+        })
     }
 
     /// The one-per-turn nudge when the model went silent after tool calls.
@@ -747,6 +839,8 @@ impl TurnExecutor {
             )
         } else {
             let mut specs = self.sh.model_specs(&ctx.profile, ctx.bot_id, &hints.tools);
+            // The mission tools belong to mission sessions only.
+            specs.retain(|s| ctx.mission.is_some() || !missions::tools::is_mission_tool(&s.name));
             if !self.sh.cfg.legacy_tool_surface {
                 crate::discovery::bound_legacy(&mut specs);
             }
@@ -2292,6 +2386,22 @@ impl TurnExecutor {
                     }),
                 );
                 (texts(), false)
+            }
+            Some((QUESTION_CARD_KIND, _))
+                if ctx.mission.as_deref().is_some_and(|m| {
+                    // A mission asks its questions once, in one batch. Later questions
+                    // would park the whole mission, so they become blocked items.
+                    self.sh
+                        .mission_store
+                        .read()
+                        .as_ref()
+                        .is_some_and(|s| !s.take_question_slot(m).unwrap_or(true))
+                }) =>
+            {
+                (
+                    "You already used the one batch of questions this mission allows. Do not ask again: decide yourself and write the decision down with mission_note, or mark the item that depends on the answer as blocked (the question is the reason) and carry on with the next item.".to_owned(),
+                    true,
+                )
             }
             Some((QUESTION_CARD_KIND, data)) => {
                 let question = data["question"].as_str().unwrap_or_default();

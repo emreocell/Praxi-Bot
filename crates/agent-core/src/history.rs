@@ -47,15 +47,40 @@ const SUBAGENT_GUIDANCE: &str = "\n\nYou are a subagent: another agent delegated
 Do exactly that task with your tools, then reply with a concise final answer; the parent receives \
 your final text as-is and nothing else.";
 
-/// Added for a bot on the Full ("Tam") level: the owner chose it so that the bot works through a
-/// task alone. A model that ends its turn with "shall I start?" makes the owner type "go on"
-/// after every step. Only for a top-level run (a subagent reports to its parent, who decides).
-/// The hard stops are the ones the daemon enforces with a card anyway.
+/// Added to every top-level run (a subagent reports to its parent, who decides): the default is to
+/// finish the task. A secretary who asks "shall I open the file, shall I pick up the pen?" at every
+/// step is useless, so the bot asks its questions once at the start and then works alone. The
+/// permission engine still decides every tool call; this only stops the check-in turns.
+const AUTONOMY_GUIDANCE: &str = "
+
+Finish the task: once you have a task, work through all of it in this turn; do not stop after one item of a list. Never end with \"should I continue?\", \"shall I do the next one?\" or \"want me to also ...?\": just do it. If something is unclear, ask all your questions once, together, before you start, with the answer you recommend for each; after that decide small choices yourself (which sites, names, wording, order) and say what you chose in your final report. Stop early only when the task is complete, when money would move, or when one item needs the owner (a CAPTCHA, a 2FA code, a login only they have): then park that item, say so, and carry on with the rest. Report once, at the end.";
+
+/// Added for a bot on the Full ("Tam") level on top of [`AUTONOMY_GUIDANCE`]: the owner chose it so
+/// that the bot works through a task alone, so a reply that waits for a go-ahead is wrong (the
+/// runtime answers it with an automatic "yes, continue", see `auto_continue`). The hard stops are
+/// the ones the daemon enforces with a card anyway.
 const FULL_GUIDANCE: &str = "
 
-Autonomy: the owner chose the Full level, so work alone until the whole task is done. Do not ask \"shall I start?\", \"should I continue?\" or for a go-ahead, and do not stop after a step to report: keep calling tools. Pick sensible defaults yourself (which sites, names, wording, order) and say what you chose at the end. Ask the owner only for what only they know (a password, a personal choice you cannot guess) or at a hard stop: spending money, deleting outside the workspace, secrets, messaging third parties, a CAPTCHA or 2FA handover. Never end a turn with a question while steps remain. When every step worked, write \"Done:\" (in the user's language) with what you did, then what is left, if anything. If a step failed or something is missing, never write \"Done:\": start with plainly what did not work and why, in everyday words (no tool or backend names), then what you did manage and what you need.";
+Autonomy: the owner chose the Full level, so work alone until the whole task is done. Do not ask \"shall I start?\", \"should I continue?\" or for a go-ahead, and do not stop after a step to report: keep calling tools. Pick sensible defaults yourself (which sites, names, wording, order) and say what you chose at the end. Ask the owner only for what only they know (a password, a personal choice you cannot guess) and ask it once, up front, or at a hard stop: spending money, deleting outside the workspace, secrets, messaging third parties. A CAPTCHA or 2FA stops only the item it blocks: park that item and carry on with the rest. Never end a turn with a question while steps remain. When every step worked, write \"Done:\" (in the user's language) with what you did, then what is left, if anything. If a step failed or something is missing, never write \"Done:\": start with plainly what did not work and why, in everyday words (no tool or backend names), then what you did manage and what you need.";
 
+/// Added for a mission session. The first user message is a brief the runtime built from the
+/// mission ledger; the ledger, not this conversation, is the memory between sessions.
+const MISSION_GUIDANCE: &str = "
+
+This is a session of a long-running mission. The first user message is a brief the runtime built from the mission ledger, with the goal in the owner's words. Work the open items one after the other without asking anything; record each outcome with mission_item as you go, and decide small choices yourself (note them with mission_note). An item that needs the owner (CAPTCHA, 2FA, payment, a private choice) is marked blocked with the reason and you move on to the next one. Only the ledger carries over to the next session, so write down what a later session must know. When no open item is left, call mission_complete.";
+
+#[cfg(test)]
 pub(crate) fn system_prompt(profile: &BotProfile, subagent: bool, skills: Option<&str>) -> String {
+    system_prompt_with(profile, subagent, skills, false)
+}
+
+/// [`system_prompt`], plus the mission-session rules when `mission` is set.
+pub(crate) fn system_prompt_with(
+    profile: &BotProfile,
+    subagent: bool,
+    skills: Option<&str>,
+    mission: bool,
+) -> String {
     let mut s = String::new();
     if !profile.persona.is_empty() {
         s.push_str(&profile.persona);
@@ -68,8 +93,14 @@ pub(crate) fn system_prompt(profile: &BotProfile, subagent: bool, skills: Option
     s.push_str(HONESTY_GUIDANCE);
     if subagent {
         s.push_str(SUBAGENT_GUIDANCE);
-    } else if profile.permissions.mode() == permission_engine::AutonomyMode::Full {
-        s.push_str(FULL_GUIDANCE);
+    } else {
+        s.push_str(AUTONOMY_GUIDANCE);
+        if profile.permissions.mode() == permission_engine::AutonomyMode::Full {
+            s.push_str(FULL_GUIDANCE);
+        }
+        if mission {
+            s.push_str(MISSION_GUIDANCE);
+        }
     }
     if let Some(block) = skills.filter(|b| !b.is_empty()) {
         s.push_str("\n\n");
@@ -103,6 +134,10 @@ const LEGACY_NUDGE_TEXT: &str = "You looked up tools but did not use them. Call 
 
 /// Note appended to the closing, tool-less model call after a guard stopped the turn.
 pub(crate) const GUARD_NOTE: &str = "The turn was stopped by a safety limit ({reason}). Tools are no longer available. Summarize the progress made so far and what is left to do, in plain text.";
+
+/// Used only if a recorded auto-continue step lost its text.
+const AUTO_CONTINUE_FALLBACK: &str =
+    "Automatic message from the Praxi runtime: continue with the next step of the task.";
 
 const NOT_EXECUTED: &str = "[not executed: the turn was stopped by a safety limit]";
 
@@ -476,7 +511,12 @@ pub(crate) fn build_messages(
     let subagent = run.parent_run_id.is_some();
     let mut out = vec![Message::text(
         MessageRole::System,
-        system_prompt(profile, subagent, skills),
+        system_prompt_with(
+            profile,
+            subagent,
+            skills,
+            missions::mission_of_kind(&run.kind).is_some(),
+        ),
     )];
     if !subagent {
         append_chat_history(storage, run, &mut out)?;
@@ -556,6 +596,17 @@ pub(crate) fn build_messages(
                         ),
                     ));
                 }
+            }
+            STEP_NUDGE if step.input["auto_continue"] == true => {
+                flush(&mut out, &mut outstanding);
+                // The runtime's answer to a turn that ended with work left. It says
+                // in its own words that the owner did not type it.
+                out.push(Message::text(
+                    MessageRole::User,
+                    step.input["text"]
+                        .as_str()
+                        .unwrap_or(AUTO_CONTINUE_FALLBACK),
+                ));
             }
             STEP_NUDGE => {
                 flush(&mut out, &mut outstanding);

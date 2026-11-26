@@ -59,6 +59,15 @@ pub struct Guards {
     /// When the messages of a model call exceed this many bytes, the oldest
     /// tool results are cut to a short preview. `0` turns the budget off.
     pub turn_context_soft_bytes: usize,
+    /// Most times the runtime continues a turn by itself when the model ended it
+    /// with work left (a plan with open steps, or "shall I continue?" at the
+    /// Full level). `0` turns auto-continue off. Always inside `max_steps`,
+    /// `max_tokens_per_turn` and `auto_continue_window`.
+    pub auto_continue_max: u32,
+    /// Continuations in a row that produced no tool call before auto-continue gives up.
+    pub auto_continue_idle: u32,
+    /// Auto-continue stops this long after the turn started.
+    pub auto_continue_window: Duration,
 }
 
 impl Default for Guards {
@@ -74,6 +83,9 @@ impl Default for Guards {
             spill_preview_bytes: 2 * 1024,
             keep_observations: 2,
             turn_context_soft_bytes: 96 * 1024,
+            auto_continue_max: 25,
+            auto_continue_idle: 2,
+            auto_continue_window: Duration::from_secs(2 * 60 * 60),
         }
     }
 }
