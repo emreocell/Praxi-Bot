@@ -67,7 +67,9 @@ test("a freshly added engine with default settings ends up runnable: ready, or o
     copilot: ["ask", "accept_edits", "full"],
     kimi: ["auto", "full"],
     qoder: ["ask", "accept_edits", "auto", "full"],
-    vibe: ["ask", "accept_edits", "auto", "full"]
+    vibe: ["ask", "accept_edits", "auto", "full"],
+    // Goose has no edits-only mode: Accept edits would run as Ask, so it is not offered.
+    goose: ["ask", "auto", "full"]
   };
   for (const [id, levels] of Object.entries(offered)) {
     const list = [engine(id, { runnable: id === "claude", levels })];
