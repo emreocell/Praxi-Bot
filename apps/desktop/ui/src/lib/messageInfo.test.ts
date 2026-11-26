@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { durationLabel, replyInfoRows, userInfoRows } from "./messageInfo.ts";
+import { durationLabel, messageSourceKind, replyInfoRows, userInfoRows } from "./messageInfo.ts";
 
 const units = { s: "sn", m: "dk", steps: (n: number) => `${n} araç` };
 const at = (h: number, m: number, s: number) => new Date(2026, 10, 18, h, m, s).getTime();
@@ -52,4 +52,9 @@ test("the owner's own message shows the sent time with seconds and where it came
 
 test("Discord messages show their channel source", () => {
   assert.equal(userInfoRows(at(1, 2, 3), "discord", "en", (k) => k).find((r) => r.key === "source")?.value, "discord");
+});
+
+test("the owner's paired Telegram chat shows as Telegram like any other Telegram message", () => {
+  assert.equal(messageSourceKind("telegram_owner"), "telegram");
+  assert.equal(messageSourceKind("telegram"), "telegram");
 });

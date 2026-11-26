@@ -1258,7 +1258,14 @@ pub(crate) async fn send_message(
         // computer (`pc_*`).
         if actor.admin { "peer_admin" } else { "peer" }
     } else if hint == Some("telegram") {
-        "telegram"
+        // The Telegram bridge only forwards messages of PAIRED users and presents the owner
+        // key, so a message that carries both is the owner writing to their own bot over their
+        // paired channel. Without the key it stays the plain, un-waived `telegram`.
+        if s.owner_ok(&headers) {
+            "telegram_owner"
+        } else {
+            "telegram"
+        }
     } else if hint == Some("discord") {
         "discord"
     } else if hint == Some("local_ui") && s.owner_ok(&headers) {

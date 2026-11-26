@@ -69,6 +69,10 @@ daemon messages are not translated.
 - Runs started from Telegram are ordinary runs of the selected bot and follow
   that bot's permission rules like runs you start at your desk. (A separate
   `channel` initiator exists in the policy model but is not assigned to Telegram
-  runs yet.)
+  runs yet.) A message from your own paired chat counts as **you** for the Full
+  level (no extra cards for web browsing and plain shell commands, see
+  [Chatting and approvals](chatting-and-approvals.md)): it needs the paired
+  Telegram account and the daemon's owner key. Money, mail sending, secrets and
+  the never-list still ask, and other senders never get this.
 - Telegram messages travel through Telegram's servers. Do not use it for
   anything you would not send through Telegram.

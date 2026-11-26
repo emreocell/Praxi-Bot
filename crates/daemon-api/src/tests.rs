@@ -688,6 +688,49 @@ async fn resend_edits_the_last_owner_message_keeps_the_old_turn_and_is_owner_onl
     );
 }
 
+/// The Telegram bridge forwards only paired users' messages and presents the owner key: that
+/// pair is the owner on their own paired channel (`telegram_owner`). The bare hint, which any
+/// local API caller can send, stays the plain `telegram` source.
+#[tokio::test]
+async fn a_telegram_message_with_the_owner_key_is_the_owners_own_channel() {
+    let t = setup();
+    let (k, v) = auth();
+    for (headers, want) in [
+        (
+            vec![
+                (k, v.as_str()),
+                ("x-praxi-message-source", "telegram"),
+                ("x-praxi-owner-key", OWNER_KEY),
+            ],
+            "telegram_owner",
+        ),
+        (
+            vec![
+                (k, v.as_str()),
+                ("x-test-token-only", "1"),
+                ("x-praxi-message-source", "telegram"),
+            ],
+            "telegram",
+        ),
+    ] {
+        let (_, chat) = make_chat(&t).await;
+        let sent = send(
+            &t.app,
+            Method::POST,
+            &format!("/v1/chats/{chat}/messages"),
+            Some(json!({"text": "hello"})),
+            &headers,
+        )
+        .await
+        .json();
+        wait_state(&t, sent["run_id"].as_str().unwrap(), "succeeded").await;
+        let msgs = call(&t, Method::GET, &format!("/v1/chats/{chat}/messages"), None)
+            .await
+            .json();
+        assert_eq!(msgs[0]["source"], want, "{msgs}");
+    }
+}
+
 #[tokio::test]
 async fn send_message_streams_events_in_order() {
     let t = setup();
