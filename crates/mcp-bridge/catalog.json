@@ -21,8 +21,8 @@
   },
   {
     "id": "github",
-    "name": "GitHub",
-    "description": "Repositories, issues, pull requests and code search. Needs a personal access token: prefer a fine-grained one with only the permissions you use.",
+    "name": "GitHub (access token)",
+    "description": "Advanced: connects with a personal access token you paste. For a one-click sign-in use the GitHub app in the main Apps list instead. Prefer a fine-grained token with only the permissions you use.",
     "category": "accounts",
     "homepage": "https://github.com/github/github-mcp-server",
     "icon": "github",
@@ -113,20 +113,111 @@
     }
   },
   {
-    "id": "google-drive",
-    "name": "Google Drive",
-    "description": "Search and read files in Google Drive. Needs a one-time OAuth setup, see the homepage.",
+    "id": "google-gmail",
+    "name": "Gmail (your own Google client)",
+    "description": "Search and read your mail, read-only. Sign in with a Google client you create once in your own Google Cloud project; Praxi has no shared one. Mail stays between Google and this computer.",
     "category": "accounts",
-    "homepage": "https://github.com/modelcontextprotocol/servers-archived/tree/main/src/gdrive",
+    "homepage": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+    "icon": "gmail",
+    "install": {
+      "transport": "http",
+      "url": "https://gmailmcp.googleapis.com/mcp/v1",
+      "required_secrets": [],
+      "oauth_client": {
+        "issuer": "https://accounts.google.com",
+        "scopes": [
+          "https://www.googleapis.com/auth/gmail.readonly"
+        ],
+        "offline_access": true,
+        "setup": "google"
+      },
+      "tool_allow": [
+        "search_threads",
+        "get_thread",
+        "get_message",
+        "list_labels",
+        "list_drafts",
+        "get_draft"
+      ],
+      "test": {
+        "tool": "search_threads",
+        "arguments": {
+          "query": "in:inbox",
+          "pageSize": 3
+        }
+      }
+    }
+  },
+  {
+    "id": "google-drive",
+    "name": "Google Drive (your own Google client)",
+    "description": "Search and read your Drive files, read-only. Sign in with a Google client you create once in your own Google Cloud project; Praxi has no shared one.",
+    "category": "accounts",
+    "homepage": "https://developers.google.com/workspace/guides/configure-mcp-servers",
     "icon": "googledrive",
     "install": {
-      "transport": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-gdrive@2025.1.14"
+      "transport": "http",
+      "url": "https://drivemcp.googleapis.com/mcp/v1",
+      "required_secrets": [],
+      "oauth_client": {
+        "issuer": "https://accounts.google.com",
+        "scopes": [
+          "https://www.googleapis.com/auth/drive.readonly"
+        ],
+        "offline_access": true,
+        "setup": "google"
+      },
+      "tool_allow": [
+        "search_files",
+        "list_recent_files",
+        "get_file_metadata",
+        "get_file_permissions",
+        "read_file_content",
+        "download_file_content"
       ],
-      "required_secrets": []
+      "test": {
+        "tool": "list_recent_files",
+        "arguments": {
+          "pageSize": 3,
+          "excludeContentSnippets": true
+        }
+      }
+    }
+  },
+  {
+    "id": "google-calendar",
+    "name": "Google Calendar (your own Google client)",
+    "description": "See your calendars and events, read-only. Sign in with a Google client you create once in your own Google Cloud project; Praxi has no shared one.",
+    "category": "accounts",
+    "homepage": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+    "icon": "googlecalendar",
+    "install": {
+      "transport": "http",
+      "url": "https://calendarmcp.googleapis.com/mcp/v1",
+      "required_secrets": [],
+      "oauth_client": {
+        "issuer": "https://accounts.google.com",
+        "scopes": [
+          "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+          "https://www.googleapis.com/auth/calendar.events.readonly",
+          "https://www.googleapis.com/auth/calendar.events.freebusy"
+        ],
+        "offline_access": true,
+        "setup": "google"
+      },
+      "tool_allow": [
+        "list_calendars",
+        "list_events",
+        "get_event",
+        "search_events",
+        "suggest_time"
+      ],
+      "test": {
+        "tool": "list_calendars",
+        "arguments": {
+          "pageSize": 3
+        }
+      }
     }
   },
   {

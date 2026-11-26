@@ -228,6 +228,8 @@ impl Server {
                 .clone_from(&config.client_metadata_url);
             options.allow_loopback_http = config.allow_loopback_http;
             options.expected_issuer.clone_from(&config.issuer);
+            options.scopes.clone_from(&config.scopes);
+            options.offline_access = config.offline_access;
             options.client_secret = match &config.client_secret_ref {
                 Some(name) => {
                     let value = self
@@ -915,6 +917,44 @@ impl McpServerHandle {
     pub async fn close(&self) {
         self.0.retire();
         self.0.close_session().await;
+    }
+
+    /// Call one tool by its server-side name and return what it said as text
+    /// (at most `max_bytes`, cut at a character boundary). For the owner's
+    /// own "Test" button: the host picks a fixed read-only tool from the
+    /// catalog and shows the result on the owner's screen only. It is not a
+    /// bot call: no approval, no model, no tool filter.
+    ///
+    /// # Errors
+    /// Not connected, the server refused, or the tool reported an error.
+    pub async fn call_for_owner(
+        &self,
+        tool: &str,
+        arguments: Option<serde_json::Map<String, serde_json::Value>>,
+        max_bytes: usize,
+    ) -> Result<String> {
+        let result = self.0.call(tool, arguments).await?;
+        let output = crate::tool::into_output(result).map_err(|e| McpError::Transport {
+            server: self.0.id().to_owned(),
+            message: e.to_string(),
+        })?;
+        let mut text = String::new();
+        for part in &output.content {
+            match part {
+                tool_registry::ContentPart::Text { text: t } => text.push_str(t),
+                tool_registry::ContentPart::Json { data } => text.push_str(&data.to_string()),
+                tool_registry::ContentPart::Binary { .. } => continue,
+            }
+            text.push('\n');
+        }
+        if text.len() > max_bytes {
+            let mut end = max_bytes;
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            text.truncate(end);
+        }
+        Ok(text)
     }
 }
 

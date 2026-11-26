@@ -29,7 +29,9 @@ const FIXTURES: &[&str] = &[
     "gitlab",
     "slack",
     "notion",
+    "google-gmail",
     "google-drive",
+    "google-calendar",
     "postgres",
     "sqlite",
     "brave-search",
@@ -72,6 +74,9 @@ const CANNOT_FAKE_YET: &[(&str, &str, &str)] = &[
     ("posthog", "transport_http_status", HTTP_REASON),
     ("intercom", "transport_http_status", HTTP_REASON),
     ("paypal", "transport_http_status", HTTP_REASON),
+    ("google-gmail", "transport_http_status", HTTP_REASON),
+    ("google-drive", "transport_http_status", HTTP_REASON),
+    ("google-calendar", "transport_http_status", HTTP_REASON),
 ];
 
 /// Known violations of the contract: (entry id or `*`, leg, why). Each must

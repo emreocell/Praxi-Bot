@@ -30,6 +30,34 @@ pub struct RequiredFolder {
     pub label: String,
 }
 
+/// A sign-in client the owner creates themselves with the authorization
+/// server (Google: their own Cloud project), because Praxi ships none. The
+/// desktop walks the owner through it (`setup` names the guide), stores the
+/// client secret in the secret store and writes the server's `oauth` block.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogOAuthClient {
+    /// The authorization server the client is registered with (https).
+    pub issuer: String,
+    /// What the sign-in asks for: the read-only scopes. Changing things is a
+    /// second, explicit choice and is never in this list.
+    pub scopes: Vec<String>,
+    /// Ask for a refresh token too (Google needs `access_type=offline`).
+    #[serde(default)]
+    pub offline_access: bool,
+    /// Which guided setup of the app walks through creating the client.
+    pub setup: String,
+}
+
+/// One fixed, read-only call the owner's "Test" button makes to prove the
+/// connection works: it shows the first few items it returns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogTest {
+    /// Server-side tool name (must be one the catalog marks read-only).
+    pub tool: String,
+    /// Fixed arguments.
+    pub arguments: serde_json::Value,
+}
+
 /// How to run a catalog server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogInstall {
@@ -64,6 +92,17 @@ pub struct CatalogInstall {
     /// A folder the user must choose; it is appended as the last argument.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<RequiredFolder>,
+    /// Sign-in needs a client the owner creates themselves (http).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client: Option<CatalogOAuthClient>,
+    /// What the "Test" button runs, when the entry has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test: Option<CatalogTest>,
+    /// Tools the server may expose (glob over the server-side name). A
+    /// read-only entry lists only its read tools, so the others stay hidden
+    /// until the owner chooses otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_allow: Vec<String>,
 }
 
 /// A catalog entry.
@@ -127,6 +166,36 @@ pub fn check_secret_header_templates(entry: &CatalogEntry) -> Result<()> {
     Ok(())
 }
 
+/// A `oauth_client` entry is an http server whose client the owner creates:
+/// an https issuer, at least one scope, no token header to fall back on, and a
+/// `test` that only names a tool the entry lets through.
+///
+/// # Errors
+/// [`McpError::Config`] naming the entry.
+pub fn check_oauth_client(entry: &CatalogEntry) -> Result<()> {
+    let bad = |why: &str| Err(McpError::Config(format!("server `{}`: {why}", entry.id)));
+    let Some(client) = &entry.install.oauth_client else {
+        return Ok(());
+    };
+    if entry.install.transport != "http" || !entry.install.required_secrets.is_empty() {
+        return bad("`oauth_client` belongs on an http entry without required secrets");
+    }
+    if !client.issuer.starts_with("https://") {
+        return bad("`oauth_client.issuer` must be an https URL");
+    }
+    if client.scopes.is_empty() || client.setup.is_empty() {
+        return bad("`oauth_client` needs `scopes` and `setup`");
+    }
+    if let Some(test) = &entry.install.test {
+        let allowed = entry.install.tool_allow.is_empty()
+            || entry.install.tool_allow.iter().any(|t| t == &test.tool);
+        if !allowed || !test.arguments.is_object() {
+            return bad("`test` must be an object call to a tool in `tool_allow`");
+        }
+    }
+    Ok(())
+}
+
 /// The catalog shipped with the bot.
 ///
 /// # Errors
@@ -144,6 +213,7 @@ pub fn builtin_catalog() -> Result<Vec<CatalogEntry>> {
             )?;
         }
         check_secret_header_templates(entry)?;
+        check_oauth_client(entry)?;
     }
     Ok(entries)
 }
@@ -391,6 +461,59 @@ mod tests {
     use crate::McpServerConfig;
     use crate::transport::secret_header_names;
     use std::collections::HashSet;
+
+    #[test]
+    fn google_entries_are_read_only_and_bring_your_own_client() {
+        let all = builtin_catalog().unwrap();
+        for id in ["google-gmail", "google-drive", "google-calendar"] {
+            let e = all
+                .iter()
+                .find(|e| e.id == id)
+                .unwrap_or_else(|| panic!("{id}"));
+            let client = e.install.oauth_client.as_ref().expect("oauth_client");
+            assert_eq!(client.issuer, "https://accounts.google.com");
+            assert!(client.offline_access, "{id}: Google needs a refresh token");
+            assert!(e.install.url.as_deref().unwrap().starts_with("https://"));
+            // Read-only first: no scope that can change anything.
+            for scope in &client.scopes {
+                assert!(
+                    scope.ends_with(".readonly") || scope.ends_with(".freebusy"),
+                    "{id}: {scope} is not read-only"
+                );
+            }
+            let test = e.install.test.as_ref().expect("test call");
+            assert!(e.install.tool_allow.contains(&test.tool));
+            assert_eq!(e.install.required_secrets, Vec::new());
+        }
+        // The archived stdio Drive server is gone: one Drive card.
+        assert!(
+            all.iter()
+                .filter(|e| e.id.contains("drive"))
+                .all(|e| e.install.transport == "http")
+        );
+    }
+
+    #[test]
+    fn a_bad_oauth_client_entry_is_refused() {
+        let mut e = builtin_catalog()
+            .unwrap()
+            .into_iter()
+            .find(|e| e.id == "google-gmail")
+            .unwrap();
+        assert!(check_oauth_client(&e).is_ok());
+        let good = e.clone();
+        e.install.oauth_client.as_mut().unwrap().issuer = "http://accounts.google.com".into();
+        assert!(check_oauth_client(&e).is_err());
+        let mut e = good.clone();
+        e.install.test.as_mut().unwrap().tool = "send_email".into();
+        assert!(
+            check_oauth_client(&e).is_err(),
+            "a test may only call an allowed tool"
+        );
+        let mut e = good;
+        e.install.oauth_client.as_mut().unwrap().scopes.clear();
+        assert!(check_oauth_client(&e).is_err());
+    }
 
     #[test]
     fn catalog_parses_and_is_consistent() {

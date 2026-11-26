@@ -263,6 +263,109 @@ async fn a_wrong_state_or_a_refused_code_stores_nothing_and_leaks_nothing() {
     server.abort();
 }
 
+/// The browser runs on the owner's computer: the daemon opens no listener, sends
+/// the redirect to the owner's own loopback port, and finishes only from the
+/// redirect the desktop forwards (same `state` and address checks as a paste).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_relayed_sign_in_finishes_from_the_forwarded_redirect_only() {
+    let (base, seen, server) = fake_authorization_server(true).await;
+    let port: u16 = 53172;
+    for (forwarded, ok) in [
+        (
+            "http://127.0.0.1:53172/callback?code=code-1&state={state}",
+            true,
+        ),
+        (
+            "http://127.0.0.1:53172/callback?code=code-1&state=forged",
+            false,
+        ),
+        (
+            "http://127.0.0.1:53173/callback?code=code-1&state={state}",
+            false,
+        ),
+        (
+            "http://evil.example:53172/callback?code=code-1&state={state}",
+            false,
+        ),
+        (
+            "http://127.0.0.1:53172/callback?error=access_denied&state={state}",
+            false,
+        ),
+    ] {
+        let store = Arc::new(MemoryStore::default());
+        let mut opts = options();
+        opts.redirect_port = Some(port);
+        opts.scopes = vec!["https://www.googleapis.com/auth/gmail.readonly".into()];
+        opts.offline_access = true;
+        let sign_in = SignIn::start("relay", &format!("{base}/mcp"), store.clone(), None, opts)
+            .await
+            .unwrap();
+        assert!(sign_in.is_relayed());
+        assert_eq!(
+            sign_in.redirect_uri(),
+            format!("http://127.0.0.1:{port}/callback")
+        );
+        let url = sign_in.authorization_url().to_owned();
+        let params = pairs(url.split_once('?').unwrap().1);
+        assert_eq!(
+            params["redirect_uri"],
+            format!("http://127.0.0.1:{port}/callback")
+        );
+        assert_eq!(
+            params["scope"],
+            "https://www.googleapis.com/auth/gmail.readonly"
+        );
+        assert_eq!(params["access_type"], "offline");
+        assert_eq!(params["prompt"], "consent");
+        seen.lock().challenge = Some(params["code_challenge"].clone());
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let finishing =
+            tokio::spawn(sign_in.finish_or_pasted(Duration::from_secs(20), Some(receive)));
+        send.send(forwarded.replace("{state}", &params["state"]) + &format!("&iss={base}"))
+            .unwrap();
+        let result = finishing.await.unwrap();
+        assert_eq!(result.is_ok(), ok, "{forwarded}: {result:?}");
+        if ok {
+            assert_eq!(store.list_names().unwrap(), vec![credential_name("relay")]);
+        } else {
+            let error = result.unwrap_err().to_string();
+            assert!(!error.contains("code-1"), "{error}");
+            assert_eq!(
+                store.list_names().unwrap(),
+                Vec::<String>::new(),
+                "{forwarded}"
+            );
+        }
+    }
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_relayed_sign_in_needs_a_forwarded_redirect_and_a_safe_port() {
+    let (base, _seen, server) = fake_authorization_server(true).await;
+    let store = Arc::new(MemoryStore::default());
+    let mut opts = options();
+    opts.redirect_port = Some(80);
+    let refused = SignIn::start("relay", &format!("{base}/mcp"), store.clone(), None, opts)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("port"), "{refused}");
+    let mut opts = options();
+    opts.redirect_port = Some(53174);
+    let sign_in = SignIn::start("relay", &format!("{base}/mcp"), store, None, opts)
+        .await
+        .unwrap();
+    // Without a forwarding channel nothing could ever finish it.
+    let error = sign_in
+        .finish(Duration::from_secs(1))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("forwarded"), "{error}");
+    server.abort();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_authorization_server_without_pkce_is_refused_before_any_browser_step() {
     let (base, seen, server) = fake_authorization_server(false).await;

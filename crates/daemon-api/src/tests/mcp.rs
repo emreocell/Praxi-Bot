@@ -19,6 +19,10 @@ use crate::mcp::{
 struct FakeMcp {
     servers: Mutex<Vec<McpServerDto>>,
     events: broadcast::Sender<McpServerChanged>,
+    /// Answer `auth_start` / `test_call` (off: the trait defaults, "unavailable").
+    oauth: std::sync::atomic::AtomicBool,
+    /// The `relay_port` of every `auth_start` that reached the host.
+    relay_ports: Mutex<Vec<Option<u16>>>,
 }
 
 impl FakeMcp {
@@ -26,6 +30,8 @@ impl FakeMcp {
         Arc::new(Self {
             servers: Mutex::new(Vec::new()),
             events: broadcast::channel(16).0,
+            oauth: std::sync::atomic::AtomicBool::new(false),
+            relay_ports: Mutex::new(Vec::new()),
         })
     }
 
@@ -149,6 +155,40 @@ impl FakeMcp {
 
 #[async_trait]
 impl McpControl for FakeMcp {
+    async fn auth_start(
+        &self,
+        _name: &str,
+        relay_port: Option<u16>,
+    ) -> Result<crate::mcp::McpAuthStart, McpControlError> {
+        if !self.oauth.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(McpControlError::Invalid("OAuth is unavailable".into()));
+        }
+        self.relay_ports.lock().push(relay_port);
+        let redirect = relay_port.map_or_else(
+            || "http://127.0.0.1:41000/callback".to_owned(),
+            |p| format!("http://127.0.0.1:{p}/callback"),
+        );
+        Ok(crate::mcp::McpAuthStart {
+            authorization_url: format!(
+                "https://accounts.example/auth?state=s&redirect_uri={redirect}"
+            ),
+            expires_in: 300,
+            redirect_uri: redirect,
+            relayed: relay_port.is_some(),
+        })
+    }
+    async fn test_call(&self, name: &str) -> Result<crate::mcp::McpTestResult, McpControlError> {
+        if !self.oauth.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(McpControlError::Invalid("testing is unavailable".into()));
+        }
+        if name != "gmail" {
+            return Err(McpControlError::NotFound(format!("mcp server {name}")));
+        }
+        Ok(crate::mcp::summarize_test_output(
+            "search_threads",
+            r#"{"threads":[{"id":"t1","subject":"Hello"},{"id":"t2"}]}"#,
+        ))
+    }
     fn list(&self) -> Vec<McpServerDto> {
         self.servers.lock().clone()
     }
@@ -250,6 +290,9 @@ impl McpControl for FakeMcp {
                 secret_headers: BTreeMap::new(),
                 required_secrets: Vec::new(),
                 folder: None,
+                oauth_client: None,
+                test: None,
+                tool_allow: Vec::new(),
             },
         }]
     }
@@ -1191,4 +1234,142 @@ async fn connection_test_mcp_maps_state_to_typed_outcome() {
     }
     let r = call(&t, Method::POST, path, body()).await;
     assert_eq!(r.json()["outcome"], "no_network");
+}
+
+/// The desktop of a server's owner starts a relayed sign-in: the port comes in the body, is
+/// bounded, and the route is the owner's alone.
+#[tokio::test]
+async fn auth_start_takes_an_optional_relay_port() {
+    let (t, fake) = with_mcp();
+    fake.oauth.store(true, std::sync::atomic::Ordering::SeqCst);
+    let path = "/v1/mcp/servers/gmail/auth/start";
+    let plain = call(&t, Method::POST, path, None).await;
+    assert_eq!(plain.status, StatusCode::OK, "{}", plain.json());
+    assert_eq!(plain.json()["relayed"], false);
+    let relayed = call(&t, Method::POST, path, Some(json!({"relay_port": 53123}))).await;
+    assert_eq!(relayed.status, StatusCode::OK, "{}", relayed.json());
+    assert_eq!(relayed.json()["relayed"], true);
+    assert_eq!(
+        relayed.json()["redirect_uri"],
+        "http://127.0.0.1:53123/callback"
+    );
+    assert_eq!(*fake.relay_ports.lock(), vec![None, Some(53123)]);
+    // A well-known service port, a port out of range and a stray field never reach the host.
+    for bad in [
+        json!({"relay_port": 80}),
+        json!({"relay_port": 70000}),
+        json!({"other": 1}),
+    ] {
+        let r = call(&t, Method::POST, path, Some(bad.clone())).await;
+        assert!(r.status.is_client_error(), "{bad}: {}", r.json());
+    }
+    assert_eq!(fake.relay_ports.lock().len(), 2);
+    // Local authentication is mandatory.
+    let r = send(
+        &t.app,
+        Method::POST,
+        path,
+        Some(json!({"relay_port": 53123})),
+        &[],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn the_test_button_shows_three_items_and_is_owner_only() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+    let (t, fake) = with_mcp();
+    // Off: the host says so, no result is made up.
+    assert_eq!(
+        call(&t, Method::POST, "/v1/mcp/servers/gmail/test", None)
+            .await
+            .status,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    fake.oauth.store(true, std::sync::atomic::Ordering::SeqCst);
+    let ok = call(&t, Method::POST, "/v1/mcp/servers/gmail/test", None).await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.json());
+    assert_eq!(ok.json()["tool"], "search_threads");
+    assert_eq!(ok.json()["items"], json!(["Hello", "t2"]));
+    assert_eq!(
+        call(&t, Method::POST, "/v1/mcp/servers/nope/test", None)
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        send(
+            &t.app,
+            Method::POST,
+            "/v1/mcp/servers/gmail/test",
+            None,
+            &[]
+        )
+        .await
+        .status,
+        StatusCode::UNAUTHORIZED
+    );
+    // A paired peer never reaches it (the host's own app does).
+    for role in [
+        crate::PeerRole::Phone,
+        crate::PeerRole::Node,
+        crate::PeerRole::Host,
+        crate::PeerRole::Desktop,
+    ] {
+        let mut request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/mcp/servers/gmail/test")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(crate::PeerIdentity {
+            key: "test-peer".into(),
+            role,
+        });
+        let response = crate::peer_router(t.state.clone())
+            .oneshot(request)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{role:?}");
+    }
+    assert!(crate::owner::is_owner_route(
+        "POST",
+        "/v1/mcp/servers/gmail/test"
+    ));
+}
+
+#[test]
+fn a_test_result_is_three_short_single_line_items() {
+    use crate::mcp::summarize_test_output as sum;
+    let files = sum(
+        "list_recent_files",
+        r#"{"files":[{"name":"a.txt"},{"name":"b\ntwo"},{"title":"c"},{"name":"d"}],"nextPageToken":"x"}"#,
+    );
+    assert_eq!(files.items, ["a.txt", "b two", "c"]);
+    assert!(files.more);
+    assert!(files.text.is_none());
+    // Nested names (a thread's first message) and bare strings are found too.
+    let threads = sum(
+        "t",
+        r#"[{"id":"1","messages":[{"subject":"Re: lunch"}]},"plain"]"#,
+    );
+    assert_eq!(threads.items, ["1", "plain"]);
+    assert!(!threads.more);
+    // An empty list is an honest "nothing", not a failure.
+    let none = sum("t", r#"{"events":[]}"#);
+    assert!(none.items.is_empty() && none.text.is_none() && !none.more);
+    // No list at all: the start of the answer, cut, on one line, control characters gone.
+    let prose = sum("t", &format!("Hello\u{7}\nworld {}", "x".repeat(2000)));
+    assert_eq!(prose.items, Vec::<String>::new());
+    let text = prose.text.unwrap();
+    assert!(text.starts_with("Hello world "), "{text}");
+    assert!(text.chars().count() <= 601 && !text.contains('\u{7}'));
+    // One very long item is cut too.
+    let long = sum(
+        "t",
+        &json!({"files": [{"name": "n".repeat(500)}]}).to_string(),
+    );
+    assert!(long.items[0].chars().count() <= 161);
 }

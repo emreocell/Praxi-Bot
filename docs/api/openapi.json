@@ -13062,7 +13062,7 @@
         "tags": [
           "mcp"
         ],
-        "summary": "Start a sign-in from an authenticated local user's explicit action.",
+        "summary": "Start a sign-in from an authenticated local user's explicit action. With\n`relay_port` the browser is on the owner's computer: no listener is opened\nhere, and the app that catches the redirect there forwards it to\n`/auth/callback`.",
         "operationId": "start_mcp_auth",
         "parameters": [
           {
@@ -13074,6 +13074,17 @@
             }
           }
         ],
+        "requestBody": {
+          "description": "Optional",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpAuthStartInput"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "",
@@ -13200,6 +13211,62 @@
           },
           "503": {
             "description": "MCP management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/mcp/servers/{name}/test": {
+      "post": {
+        "tags": [
+          "mcp"
+        ],
+        "summary": "Run the app's fixed, read-only test call and show the first few items.\nOwner only; the answer goes to the owner's screen, never to a model.",
+        "operationId": "test_mcp_server",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpTestResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
@@ -29491,7 +29558,8 @@
         "description": "Browser destination for a user-started, five-minute sign-in.",
         "required": [
           "authorization_url",
-          "expires_in"
+          "expires_in",
+          "redirect_uri"
         ],
         "properties": {
           "authorization_url": {
@@ -29501,8 +29569,32 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "redirect_uri": {
+            "type": "string",
+            "description": "Where the authorization server sends the browser back to."
+          },
+          "relayed": {
+            "type": "boolean",
+            "description": "`true`: nothing listens on this daemon for the redirect; the app that\ncaught it on the owner's computer has to forward it to\n`POST /v1/mcp/servers/{name}/auth/callback`."
           }
         }
+      },
+      "McpAuthStartInput": {
+        "type": "object",
+        "description": "Optional body of `POST /v1/mcp/servers/{name}/auth/start`.",
+        "properties": {
+          "relay_port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The browser is on another computer (the owner's), which listens on this\n`127.0.0.1` port for the redirect and forwards it. Omit it when the\nbrowser runs where this daemon runs. Ports below 1024 are refused.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "McpAuthState": {
         "type": "string",
@@ -29624,6 +29716,17 @@
               }
             ]
           },
+          "oauth_client": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpCatalogOAuthClientDto",
+                "description": "Sign-in needs a client the owner creates themselves (Google)."
+              }
+            ]
+          },
           "required_secrets": {
             "type": "array",
             "items": {
@@ -29651,6 +29754,24 @@
               "type": "string"
             }
           },
+          "test": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/McpCatalogTestDto",
+                "description": "What the \"Test\" button runs."
+              }
+            ]
+          },
+          "tool_allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tools to let through (glob over the server-side name); empty = all."
+          },
           "transport": {
             "$ref": "#/components/schemas/McpTransportKind",
             "description": "`stdio` or `http`."
@@ -29661,6 +29782,54 @@
               "null"
             ],
             "description": "Endpoint (http)."
+          }
+        }
+      },
+      "McpCatalogOAuthClientDto": {
+        "type": "object",
+        "description": "A sign-in client the owner creates themselves with the authorization server.",
+        "required": [
+          "issuer",
+          "scopes",
+          "offline_access",
+          "setup"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "description": "The authorization server the client is registered with."
+          },
+          "offline_access": {
+            "type": "boolean",
+            "description": "Ask for a refresh token too."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The read-only scopes the sign-in asks for."
+          },
+          "setup": {
+            "type": "string",
+            "description": "Which guided setup walks through creating the client (`google`)."
+          }
+        }
+      },
+      "McpCatalogTestDto": {
+        "type": "object",
+        "description": "The fixed call of an entry's \"Test\" button.",
+        "required": [
+          "tool",
+          "arguments"
+        ],
+        "properties": {
+          "arguments": {
+            "description": "Fixed arguments."
+          },
+          "tool": {
+            "type": "string",
+            "description": "Server-side tool name."
           }
         }
       },
@@ -29728,6 +29897,17 @@
               "null"
             ],
             "description": "The authorization server a pre-registered client is bound to;\nrequired with `client_id` / `client_secret_ref`."
+          },
+          "offline_access": {
+            "type": "boolean",
+            "description": "Also ask for a refresh token (Google needs it to stay signed in)."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Scopes the sign-in asks for (empty = what the server advertises)."
           }
         },
         "additionalProperties": false
@@ -30375,6 +30555,39 @@
           "name": {
             "type": "string",
             "description": "A configured MCP server name."
+          }
+        }
+      },
+      "McpTestResult": {
+        "type": "object",
+        "description": "What the owner's \"Test\" button saw: a few items from one fixed read-only\ncall. Shown to the owner only; never given to a model.",
+        "required": [
+          "tool",
+          "items",
+          "more"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "At most three short, single-line items."
+          },
+          "more": {
+            "type": "boolean",
+            "description": "The answer held more than the items shown."
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When no list could be recognised: the start of the answer, cut short."
+          },
+          "tool": {
+            "type": "string",
+            "description": "The server-side tool that was called."
           }
         }
       },

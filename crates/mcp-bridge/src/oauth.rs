@@ -409,7 +409,20 @@ pub struct SignInOptions {
     /// DNS used by the OAuth policy client; `None` = the system resolver.
     /// Tests inject a static table so no real lookup happens.
     pub resolver: Option<Arc<dyn EndpointResolver>>,
+    /// Scopes to request; empty lets the library pick from the server's metadata.
+    pub scopes: Vec<String>,
+    /// Also ask for a refresh token (`access_type=offline`, `prompt=consent`).
+    pub offline_access: bool,
+    /// The browser is NOT on this machine: it is sent back to
+    /// `http://127.0.0.1:<port>/callback` on the owner's own computer, where
+    /// the desktop app catches the redirect and forwards it (with
+    /// [`SignIn::finish_or_pasted`]'s paste channel). No listener is opened
+    /// here. `None` = this machine runs the browser and listens itself.
+    pub redirect_port: Option<u16>,
 }
+
+/// Lowest port a relayed redirect may name: never a well-known service port.
+pub const MIN_RELAY_PORT: u16 = 1024;
 
 /// `https://a.example/` and `https://a.example` name the same issuer.
 fn same_issuer(a: &str, b: &str) -> bool {
@@ -462,6 +475,9 @@ impl std::fmt::Debug for SignInOptions {
             )
             .field("client_metadata_url", &self.client_metadata_url)
             .field("allow_loopback_http", &self.allow_loopback_http)
+            .field("scopes", &self.scopes)
+            .field("offline_access", &self.offline_access)
+            .field("redirect_port", &self.redirect_port)
             .finish_non_exhaustive()
     }
 }
@@ -528,8 +544,28 @@ fn quiet() -> tracing::Dispatch {
 pub struct SignIn {
     server: String,
     session: AuthorizationSession,
-    listener: CallbackListener,
+    redirect: Redirect,
+    authorization_url: String,
     state: String,
+}
+
+/// Where the authorization server sends the browser back to.
+#[derive(Debug)]
+enum Redirect {
+    /// A one-shot listener on this machine's loopback.
+    Listener(CallbackListener),
+    /// A loopback address on another computer (the owner's), whose redirect
+    /// arrives only through the paste channel.
+    Relayed { port: u16 },
+}
+
+impl Redirect {
+    fn uri(&self) -> String {
+        match self {
+            Self::Listener(listener) => listener.redirect_uri(),
+            Self::Relayed { port } => format!("http://127.0.0.1:{port}/callback"),
+        }
+    }
 }
 
 impl std::fmt::Debug for SignIn {
@@ -597,9 +633,18 @@ impl SignIn {
         let issuer = resolution.metadata.issuer.clone();
         manager.set_metadata(resolution.metadata);
 
-        let listener = CallbackListener::bind(server).await?;
-        let mut request =
-            AuthorizationRequest::new(listener.redirect_uri()).with_client_name("Praxi");
+        let redirect = match options.redirect_port {
+            Some(port) if port < MIN_RELAY_PORT => {
+                return Err(flow_error(server, "the redirect port is not allowed"));
+            }
+            Some(port) => Redirect::Relayed { port },
+            None => Redirect::Listener(CallbackListener::bind(server).await?),
+        };
+        let redirect_uri = redirect.uri();
+        let mut request = AuthorizationRequest::new(redirect_uri.clone()).with_client_name("Praxi");
+        if !options.scopes.is_empty() {
+            request = request.with_scopes(options.scopes);
+        }
         if let Some(id) = options.client_id.filter(|_| !use_metadata_document) {
             request = request.with_preregistered_client(id);
             if let Some(secret) = options.client_secret {
@@ -609,7 +654,7 @@ impl SignIn {
             // Dynamic registration, done here (not inside rmcp's session) so a
             // client secret the server issues is kept for later refreshes.
             let client = manager
-                .register_client("Praxi", &listener.redirect_uri(), &[])
+                .register_client("Praxi", &redirect_uri, &[])
                 .await
                 .map_err(|e| auth_error(server, &e))?;
             request = request.with_preregistered_client(client.client_id.clone());
@@ -639,13 +684,18 @@ impl SignIn {
         let session = AuthorizationSession::new(manager, request)
             .await
             .map_err(|(_, e)| auth_error(server, &e))?;
-        let state = query_param(session.get_authorization_url(), "state")
+        let mut authorization_url = session.get_authorization_url().to_owned();
+        let state = query_param(&authorization_url, "state")
             .filter(|s| !s.is_empty())
             .ok_or_else(|| flow_error(server, "the authorization URL carries no `state`"))?;
+        if options.offline_access && query_param(&authorization_url, "access_type").is_none() {
+            authorization_url.push_str("&access_type=offline&prompt=consent");
+        }
         Ok(Self {
             server: server.to_owned(),
             session,
-            listener,
+            redirect,
+            authorization_url,
             state,
         })
     }
@@ -653,7 +703,20 @@ impl SignIn {
     /// The URL the user's browser must open.
     #[must_use]
     pub fn authorization_url(&self) -> &str {
-        self.session.get_authorization_url()
+        &self.authorization_url
+    }
+
+    /// The address the authorization server sends the browser back to.
+    #[must_use]
+    pub fn redirect_uri(&self) -> String {
+        self.redirect.uri()
+    }
+
+    /// Whether the redirect is caught on another computer and has to come in
+    /// through the paste channel ([`SignInOptions::redirect_port`]).
+    #[must_use]
+    pub fn is_relayed(&self) -> bool {
+        matches!(self.redirect, Redirect::Relayed { .. })
     }
 
     /// Wait for the redirect, exchange the code (PKCE verifier, `resource`,
@@ -689,20 +752,34 @@ impl SignIn {
         timeout: Duration,
         pasted: Option<tokio::sync::oneshot::Receiver<String>>,
     ) -> Result<()> {
-        let redirect_uri = self.listener.redirect_uri();
-        let callback = match pasted {
-            None => {
-                self.listener
-                    .wait(&self.server, &self.state, timeout)
-                    .await?
+        let redirect_uri = self.redirect.uri();
+        let callback = match (self.redirect, pasted) {
+            (Redirect::Listener(listener), None) => {
+                listener.wait(&self.server, &self.state, timeout).await?
             }
-            Some(pasted) => {
+            (Redirect::Listener(listener), Some(pasted)) => {
                 tokio::select! {
-                    received = self.listener.wait(&self.server, &self.state, timeout) => received?,
+                    received = listener.wait(&self.server, &self.state, timeout) => received?,
                     Ok(url) = pasted => {
                         pasted_callback(&self.server, &redirect_uri, &url, &self.state)?
                     }
                 }
+            }
+            // Nothing listens here: the redirect can only be forwarded.
+            (Redirect::Relayed { .. }, None) => {
+                return Err(flow_error(
+                    &self.server,
+                    "a relayed sign-in needs the redirect to be forwarded",
+                ));
+            }
+            (Redirect::Relayed { .. }, Some(pasted)) => {
+                let url = tokio::time::timeout(timeout, pasted)
+                    .await
+                    .map_err(|_| {
+                        flow_error(&self.server, "no redirect arrived before the time limit")
+                    })?
+                    .map_err(|_| flow_error(&self.server, "the sign-in was cancelled"))?;
+                pasted_callback(&self.server, &redirect_uri, &url, &self.state)?
             }
         };
         self.session

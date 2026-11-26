@@ -67,7 +67,23 @@ pub struct OAuthConfig {
     /// server advertises later.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub issuer: Option<String>,
+    /// Scopes to ask for at sign-in. Empty = whatever the server advertises.
+    /// A catalog entry lists the read-only ones, so access to change things
+    /// is a second, explicit choice.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<String>,
+    /// Ask the authorization server for a refresh token as well
+    /// (`access_type=offline`, `prompt=consent`), which Google needs to keep a
+    /// sign-in alive beyond one hour.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub offline_access: bool,
 }
+
+/// Most scopes one sign-in may ask for.
+pub const MAX_OAUTH_SCOPES: usize = 32;
+
+/// Longest single OAuth scope.
+pub const MAX_OAUTH_SCOPE_LEN: usize = 200;
 
 /// Longest server id; see [`McpServerConfig::validate`].
 pub const MAX_SERVER_ID: usize = 100;
@@ -246,6 +262,55 @@ impl McpServerConfig {
         }
     }
 
+    /// The `[server.oauth]` block: HTTP only, no empty ids, bounded scopes, an issuer for
+    /// a pre-registered client.
+    fn check_oauth(&self, oauth: &OAuthConfig) -> Result<()> {
+        let bad = |m: String| Err(McpError::Config(m));
+        if !matches!(self.transport, McpTransport::Http { .. }) {
+            return bad("OAuth settings apply only to HTTP servers".into());
+        }
+        if oauth
+            .client_id
+            .as_ref()
+            .is_some_and(|id| id.trim().is_empty())
+        {
+            return bad("OAuth client id must not be empty".into());
+        }
+        if let Some(reference) = &oauth.client_secret_ref {
+            SecretRef::new(reference.as_str())
+                .map_err(|_| McpError::Config("invalid OAuth client secret reference".into()))?;
+            if oauth.client_id.is_none() {
+                return bad("an OAuth client secret reference requires a client id".into());
+            }
+        }
+        if oauth.scopes.len() > MAX_OAUTH_SCOPES
+            || oauth.scopes.iter().any(|s| {
+                s.is_empty()
+                    || s.len() > MAX_OAUTH_SCOPE_LEN
+                    || s.chars().any(|c| c.is_whitespace() || c.is_control())
+            })
+        {
+            return bad(format!(
+                "OAuth `scopes` must be at most {MAX_OAUTH_SCOPES} scopes of 1 to {MAX_OAUTH_SCOPE_LEN} characters without spaces"
+            ));
+        }
+        if oauth.client_id.is_some() || oauth.client_secret_ref.is_some() {
+            let Some(issuer) = &oauth.issuer else {
+                return bad(
+                    "a pre-registered OAuth client needs `issuer`: the authorization server it was registered with"
+                        .into(),
+                );
+            };
+            let loopback = issuer.starts_with("http://127.0.0.1")
+                || issuer.starts_with("http://localhost")
+                || issuer.starts_with("http://[::1]");
+            if !(issuer.starts_with("https://") || (oauth.allow_loopback_http && loopback)) {
+                return bad("OAuth `issuer` must be an https URL".into());
+            }
+        }
+        Ok(())
+    }
+
     /// Check the config for obvious mistakes.
     ///
     /// # Errors
@@ -253,38 +318,7 @@ impl McpServerConfig {
     pub fn validate(&self) -> Result<()> {
         let bad = |m: String| Err(McpError::Config(m));
         if let Some(oauth) = &self.oauth {
-            if !matches!(self.transport, McpTransport::Http { .. }) {
-                return bad("OAuth settings apply only to HTTP servers".into());
-            }
-            if oauth
-                .client_id
-                .as_ref()
-                .is_some_and(|id| id.trim().is_empty())
-            {
-                return bad("OAuth client id must not be empty".into());
-            }
-            if let Some(reference) = &oauth.client_secret_ref {
-                SecretRef::new(reference.as_str()).map_err(|_| {
-                    McpError::Config("invalid OAuth client secret reference".into())
-                })?;
-                if oauth.client_id.is_none() {
-                    return bad("an OAuth client secret reference requires a client id".into());
-                }
-            }
-            if oauth.client_id.is_some() || oauth.client_secret_ref.is_some() {
-                let Some(issuer) = &oauth.issuer else {
-                    return bad(
-                        "a pre-registered OAuth client needs `issuer`: the authorization server it was registered with"
-                            .into(),
-                    );
-                };
-                let loopback = issuer.starts_with("http://127.0.0.1")
-                    || issuer.starts_with("http://localhost")
-                    || issuer.starts_with("http://[::1]");
-                if !(issuer.starts_with("https://") || (oauth.allow_loopback_http && loopback)) {
-                    return bad("OAuth `issuer` must be an https URL".into());
-                }
-            }
+            self.check_oauth(oauth)?;
         }
         // At most 100 bytes: every derived secret name (`mcp/<id>/oauth-client`,
         // `mcp/<id>/header/<name>`) must fit the secret store's 128 (review
@@ -842,6 +876,24 @@ K = \"composio/api-key\"
         c.oauth.as_mut().unwrap().issuer = Some("https://auth.example.com".into());
         assert!(c.validate().is_ok());
         c.oauth.as_mut().unwrap().client_secret_ref = Some("invalid secret name!".into());
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn oauth_scopes_are_bounded_and_have_no_spaces() {
+        let mut c = McpServerConfig::http("s", "https://example.com/mcp");
+        c.oauth = Some(OAuthConfig {
+            scopes: vec!["https://www.googleapis.com/auth/gmail.readonly".into()],
+            offline_access: true,
+            ..OAuthConfig::default()
+        });
+        assert!(c.validate().is_ok());
+        // A space would smuggle a second scope into one entry.
+        c.oauth.as_mut().unwrap().scopes = vec!["a b".into()];
+        assert!(c.validate().is_err());
+        c.oauth.as_mut().unwrap().scopes = vec![String::new()];
+        assert!(c.validate().is_err());
+        c.oauth.as_mut().unwrap().scopes = vec!["s".into(); MAX_OAUTH_SCOPES + 1];
         assert!(c.validate().is_err());
     }
 }

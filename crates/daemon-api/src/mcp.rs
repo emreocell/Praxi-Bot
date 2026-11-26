@@ -437,6 +437,37 @@ pub struct McpCatalogInstallDto {
     /// A folder to collect first (filesystem servers).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<McpFolderDto>,
+    /// Sign-in needs a client the owner creates themselves (Google).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client: Option<McpCatalogOAuthClientDto>,
+    /// What the "Test" button runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test: Option<McpCatalogTestDto>,
+    /// Tools to let through (glob over the server-side name); empty = all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_allow: Vec<String>,
+}
+
+/// A sign-in client the owner creates themselves with the authorization server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpCatalogOAuthClientDto {
+    /// The authorization server the client is registered with.
+    pub issuer: String,
+    /// The read-only scopes the sign-in asks for.
+    pub scopes: Vec<String>,
+    /// Ask for a refresh token too.
+    pub offline_access: bool,
+    /// Which guided setup walks through creating the client (`google`).
+    pub setup: String,
+}
+
+/// The fixed call of an entry's "Test" button.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpCatalogTestDto {
+    /// Server-side tool name.
+    pub tool: String,
+    /// Fixed arguments.
+    pub arguments: serde_json::Value,
 }
 
 /// An entry of the curated MCP catalog (`GET /v1/mcp/catalog`).
@@ -526,6 +557,12 @@ pub struct McpOAuthConfig {
     /// required with `client_id` / `client_secret_ref`.
     #[serde(default)]
     pub issuer: Option<String>,
+    /// Scopes the sign-in asks for (empty = what the server advertises).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<String>,
+    /// Also ask for a refresh token (Google needs it to stay signed in).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub offline_access: bool,
 }
 
 /// Authentication state, independent of transport errors.
@@ -551,6 +588,133 @@ pub struct McpAuthCallback {
 pub struct McpAuthStart {
     pub authorization_url: String,
     pub expires_in: u64,
+    /// Where the authorization server sends the browser back to.
+    pub redirect_uri: String,
+    /// `true`: nothing listens on this daemon for the redirect; the app that
+    /// caught it on the owner's computer has to forward it to
+    /// `POST /v1/mcp/servers/{name}/auth/callback`.
+    #[serde(default)]
+    pub relayed: bool,
+}
+
+/// Optional body of `POST /v1/mcp/servers/{name}/auth/start`.
+#[derive(Clone, Default, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct McpAuthStartInput {
+    /// The browser is on another computer (the owner's), which listens on this
+    /// `127.0.0.1` port for the redirect and forwards it. Omit it when the
+    /// browser runs where this daemon runs. Ports below 1024 are refused.
+    #[serde(default)]
+    pub relay_port: Option<u16>,
+}
+
+/// What the owner's "Test" button saw: a few items from one fixed read-only
+/// call. Shown to the owner only; never given to a model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct McpTestResult {
+    /// The server-side tool that was called.
+    pub tool: String,
+    /// At most three short, single-line items.
+    pub items: Vec<String>,
+    /// The answer held more than the items shown.
+    pub more: bool,
+    /// When no list could be recognised: the start of the answer, cut short.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+/// Most items a test result shows.
+pub const TEST_ITEMS: usize = 3;
+/// Longest item or text of a test result, in characters.
+const TEST_CHARS: usize = 160;
+const TEST_TEXT_CHARS: usize = 600;
+
+fn one_line(text: &str, max: usize) -> String {
+    let flat: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() > max {
+        let cut: String = flat.chars().take(max).collect();
+        format!("{cut}…")
+    } else {
+        flat
+    }
+}
+
+/// Keys that most often hold what a person would call the item's name.
+const LABEL_KEYS: &[&str] = &[
+    "subject",
+    "title",
+    "name",
+    "summary",
+    "displayName",
+    "snippet",
+    "sender",
+    "id",
+];
+
+fn label_of(value: &serde_json::Value, depth: usize) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) if !s.trim().is_empty() => Some(one_line(s, TEST_CHARS)),
+        serde_json::Value::Object(map) if depth < 3 => LABEL_KEYS
+            .iter()
+            .find_map(|k| map.get(*k).and_then(|v| label_of(v, depth + 1)))
+            .or_else(|| map.values().find_map(|v| label_of(v, depth + 1))),
+        serde_json::Value::Array(items) if depth < 3 => {
+            items.iter().find_map(|v| label_of(v, depth + 1))
+        }
+        _ => None,
+    }
+}
+
+/// The first array in `value`, shallowest first (a list of files, events,
+/// threads, whatever the tool calls it).
+fn first_list(value: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    let mut level = vec![value];
+    for _ in 0..4 {
+        let mut next = Vec::new();
+        for v in level {
+            match v {
+                serde_json::Value::Array(a) => return Some(a),
+                serde_json::Value::Object(m) => next.extend(m.values()),
+                _ => {}
+            }
+        }
+        level = next;
+    }
+    None
+}
+
+/// Turn what a test call returned into at most [`TEST_ITEMS`] short lines,
+/// whatever the server calls its fields. Without a recognisable list the
+/// answer's start is shown instead.
+#[must_use]
+pub fn summarize_test_output(tool: &str, text: &str) -> McpTestResult {
+    let parsed = serde_json::from_str::<serde_json::Value>(text.trim()).ok();
+    if let Some(list) = parsed.as_ref().and_then(first_list) {
+        let items: Vec<String> = list
+            .iter()
+            .filter_map(|v| label_of(v, 0))
+            .take(TEST_ITEMS)
+            .collect();
+        if !items.is_empty() || list.is_empty() {
+            return McpTestResult {
+                tool: tool.to_owned(),
+                more: list.len() > TEST_ITEMS,
+                items,
+                text: None,
+            };
+        }
+    }
+    let shown = one_line(text, TEST_TEXT_CHARS);
+    McpTestResult {
+        tool: tool.to_owned(),
+        items: Vec::new(),
+        more: false,
+        text: (!shown.is_empty()).then_some(shown),
+    }
 }
 
 /// What `/v1/mcp/*` needs from the embedder: the managed MCP servers, their
@@ -560,8 +724,19 @@ pub trait McpControl: Send + Sync {
     /// Start sign-in only for an explicit user action. Never exposed as a tool.
     /// # Errors
     /// Unknown server, unsupported transport or discovery/policy failure.
-    async fn auth_start(&self, _name: &str) -> Result<McpAuthStart, McpControlError> {
+    async fn auth_start(
+        &self,
+        _name: &str,
+        _relay_port: Option<u16>,
+    ) -> Result<McpAuthStart, McpControlError> {
         Err(McpControlError::Invalid("OAuth is unavailable".into()))
+    }
+    /// The owner's "Test" button: one fixed read-only call named by the
+    /// catalog entry, summarised to a few lines. Never a bot call.
+    /// # Errors
+    /// Unknown server, no test for this app, not connected, or the call failed.
+    async fn test_call(&self, _name: &str) -> Result<McpTestResult, McpControlError> {
+        Err(McpControlError::Invalid("testing is unavailable".into()))
     }
     /// Finish a pending sign-in with the redirect URL the user pasted (a host
     /// without a browser); same `state` check and one-shot rule as the

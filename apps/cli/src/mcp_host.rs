@@ -14,10 +14,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use daemon_api::mcp::{
-    McpAuthStart, McpAuthState, McpCatalogEntryDto, McpCatalogInstallDto,
-    McpErrorKind as ErrorKindDto, McpFolderDto, McpOAuthConfig, McpRequiredSecretDto,
-    McpServerChanged, McpServerDto, McpServerInput, McpStatus, McpToolChangeDto, McpToolDto,
-    McpTransportInput, McpTransportKind, McpTransportObject,
+    McpAuthStart, McpAuthState, McpCatalogEntryDto, McpCatalogInstallDto, McpCatalogOAuthClientDto,
+    McpCatalogTestDto, McpErrorKind as ErrorKindDto, McpFolderDto, McpOAuthConfig,
+    McpRequiredSecretDto, McpServerChanged, McpServerDto, McpServerInput, McpStatus, McpTestResult,
+    McpToolChangeDto, McpToolDto, McpTransportInput, McpTransportKind, McpTransportObject,
 };
 use daemon_api::{McpControl, McpControlError};
 use mcp_bridge::{
@@ -345,6 +345,8 @@ impl McpHost {
                 client_metadata_url: c.client_metadata_url.clone(),
                 allow_loopback_http: c.allow_loopback_http,
                 issuer: c.issuer.clone(),
+                scopes: c.scopes.clone(),
+                offline_access: c.offline_access,
             }),
             name: cfg.id.clone(),
             transport,
@@ -919,6 +921,8 @@ fn to_config(name: &str, input: McpServerInput) -> Result<McpServerConfig, McpCo
             client_metadata_url: c.client_metadata_url,
             allow_loopback_http: c.allow_loopback_http,
             issuer: c.issuer,
+            scopes: c.scopes,
+            offline_access: c.offline_access,
         }),
         id: name.to_owned(),
         transport,
@@ -973,6 +977,21 @@ fn catalog_dto(e: &CatalogEntry, suggestion: Option<&str>) -> Option<McpCatalogE
                 label: f.label.clone(),
                 suggestion: suggestion.map(str::to_owned),
             }),
+            oauth_client: e
+                .install
+                .oauth_client
+                .as_ref()
+                .map(|c| McpCatalogOAuthClientDto {
+                    issuer: c.issuer.clone(),
+                    scopes: c.scopes.clone(),
+                    offline_access: c.offline_access,
+                    setup: c.setup.clone(),
+                }),
+            test: e.install.test.as_ref().map(|t| McpCatalogTestDto {
+                tool: t.tool.clone(),
+                arguments: t.arguments.clone(),
+            }),
+            tool_allow: e.install.tool_allow.clone(),
         },
     })
 }
@@ -985,7 +1004,11 @@ impl McpControl for McpHost {
             .map_or_else(|| text.to_owned(), |r| r(text))
     }
 
-    async fn auth_start(&self, name: &str) -> Result<McpAuthStart, McpControlError> {
+    async fn auth_start(
+        &self,
+        name: &str,
+        relay_port: Option<u16>,
+    ) -> Result<McpAuthStart, McpControlError> {
         let mut flows = self.auth_flows.lock().await;
         self.check_http(name)?;
         if flows.get(name).is_some_and(SignInFlow::running) {
@@ -997,12 +1020,20 @@ impl McpControl for McpHost {
         let handle = self.manager.server_handle(name).map_err(map_err)?;
         let sign_in = self
             .manager
-            .start_sign_in(name, mcp_bridge::oauth::SignInOptions::default())
+            .start_sign_in(
+                name,
+                mcp_bridge::oauth::SignInOptions {
+                    redirect_port: relay_port,
+                    ..mcp_bridge::oauth::SignInOptions::default()
+                },
+            )
             .await
             .map_err(map_err)?;
         let response = McpAuthStart {
             authorization_url: sign_in.authorization_url().to_owned(),
             expires_in: mcp_bridge::oauth::CALLBACK_TIMEOUT.as_secs(),
+            redirect_uri: sign_in.redirect_uri(),
+            relayed: sign_in.is_relayed(),
         };
         let (paste, pasted) = tokio::sync::oneshot::channel();
         let (outcome, done) = tokio::sync::watch::channel(None);
@@ -1026,6 +1057,29 @@ impl McpControl for McpHost {
             },
         );
         Ok(response)
+    }
+
+    async fn test_call(&self, name: &str) -> Result<McpTestResult, McpControlError> {
+        // The call comes from the catalog entry of the same id, never from the
+        // request: the owner's button cannot be pointed at another tool.
+        let call = self
+            .catalog
+            .iter()
+            .find(|e| e.id == name)
+            .and_then(|e| e.install.test.clone())
+            .ok_or_else(|| invalid("this app has no test"))?;
+        if self.status_of(name) != McpStatus::Connected {
+            return Err(invalid("the app is not connected"));
+        }
+        let handle = self.manager.server_handle(name).map_err(map_err)?;
+        let arguments = call.arguments.as_object().cloned();
+        let answer = handle
+            .call_for_owner(&call.tool, arguments, 64 * 1024)
+            .await
+            .map_err(map_err)?;
+        // The server's words are untrusted and may hold a secret it echoed.
+        let answer = self.redact(&answer);
+        Ok(daemon_api::mcp::summarize_test_output(&call.tool, &answer))
     }
 
     async fn auth_callback(
@@ -1663,14 +1717,14 @@ mod tests {
         assert!(registry.get("mcp:remote/echo").is_none());
 
         // Sign-in, then cancel: the one-shot listener is gone afterwards.
-        let started = host.auth_start("remote").await.unwrap();
+        let started = host.auth_start("remote", None).await.unwrap();
         assert_eq!(started.expires_in, 300);
         assert_eq!(
             host.auth_status("remote").await.unwrap(),
             McpAuthState::SigningIn
         );
         assert!(matches!(
-            host.auth_start("remote").await,
+            host.auth_start("remote", None).await,
             Err(McpControlError::Conflict(_))
         ));
         let cancelled = host.auth_cancel("remote").await.unwrap();
@@ -1688,7 +1742,7 @@ mod tests {
         assert!(store.get("mcp/remote/oauth").unwrap().is_none());
 
         // Full sign-in: the tool list arrives with the bearer.
-        let started = host.auth_start("remote").await.unwrap();
+        let started = host.auth_start("remote", None).await.unwrap();
         let params = query_pairs(&started.authorization_url);
         assert_eq!(params["code_challenge_method"], "S256");
         assert_eq!(params["resource"], format!("{base}/mcp"));
@@ -1740,7 +1794,7 @@ mod tests {
         // OAuth routes refuse stdio servers.
         host.add(stdio("local", false)).await.unwrap();
         assert!(matches!(
-            host.auth_start("local").await,
+            host.auth_start("local", None).await,
             Err(McpControlError::Invalid(_))
         ));
         host.shutdown().await;
@@ -1976,7 +2030,7 @@ mod tests {
         ));
 
         // A wrong `state` fails and ends the flow; a second paste finds nothing.
-        let started = host.auth_start("remote").await.unwrap();
+        let started = host.auth_start("remote", None).await.unwrap();
         let redirect = query_pairs(&started.authorization_url)["redirect_uri"].clone();
         let Err(McpControlError::Invalid(err)) = host
             .auth_callback("remote", &format!("{redirect}?code=code-1&state=forged"))
@@ -2001,7 +2055,7 @@ mod tests {
         );
 
         // A fresh sign-in finished by paste connects; its loopback port is closed.
-        let started = host.auth_start("remote").await.unwrap();
+        let started = host.auth_start("remote", None).await.unwrap();
         let params = query_pairs(&started.authorization_url);
         let redirect = params["redirect_uri"].clone();
         let state = host
@@ -2026,6 +2080,109 @@ mod tests {
             late.as_ref().map_or(true, |r| !r.contains(" 200 ")),
             "loopback still open: {late:?}"
         );
+        host.shutdown().await;
+    }
+
+    /// The daemon is on a server, the browser on the owner's computer: the app there catches the
+    /// redirect on a port it chose and forwards it. No listener opens here; only the announced
+    /// address with this sign-in's `state` is accepted, once.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_relayed_sign_in_accepts_only_the_forwarded_announced_redirect() {
+        const ACCESS: &str = "relay-flow-access-sentinel-77b1";
+        const REFRESH: &str = "relay-flow-refresh-sentinel-0c5d";
+        let remote = fake_remote(ACCESS, REFRESH).await;
+        let base = remote.uri();
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = McpServerConfig::http("remote", format!("{base}/mcp"));
+        config.oauth = Some(mcp_bridge::OAuthConfig {
+            client_id: Some("praxi-relay-test".into()),
+            allow_loopback_http: true,
+            issuer: Some(base.clone()),
+            ..mcp_bridge::OAuthConfig::default()
+        });
+        TomlFileStore::new(dir.path().join(MCP_FILE))
+            .save(&[config])
+            .unwrap();
+        let store = Arc::new(secret_store::MemoryStore::new());
+        let registry = ToolRegistry::new();
+        let host = McpHost::start_with_policy(
+            dir.path(),
+            registry.clone(),
+            Some(store.clone()),
+            None,
+            None,
+            fast_policy(),
+        );
+        wait_for(&host, "remote", McpStatus::AuthRequired).await;
+
+        // A port below 1024 is refused; nothing starts.
+        assert!(matches!(
+            host.auth_start("remote", Some(80)).await,
+            Err(McpControlError::Internal(_) | McpControlError::Invalid(_))
+        ));
+        assert_eq!(
+            host.auth_status("remote").await.unwrap(),
+            McpAuthState::AuthRequired
+        );
+
+        let started = host.auth_start("remote", Some(53211)).await.unwrap();
+        assert!(started.relayed);
+        assert_eq!(started.redirect_uri, "http://127.0.0.1:53211/callback");
+        let params = query_pairs(&started.authorization_url);
+        assert_eq!(params["redirect_uri"], started.redirect_uri);
+        assert_eq!(
+            host.auth_status("remote").await.unwrap(),
+            McpAuthState::SigningIn
+        );
+        // The address of another sign-in's port is not this one's redirect, and it ends the flow.
+        let Err(McpControlError::Invalid(err)) = host
+            .auth_callback(
+                "remote",
+                &format!(
+                    "http://127.0.0.1:53212/callback?code=code-1&state={}&iss={base}",
+                    params["state"]
+                ),
+            )
+            .await
+        else {
+            panic!("a redirect for another port must be refused");
+        };
+        assert!(err.contains("redirect"), "{err}");
+        assert!(store.get("mcp/remote/oauth").unwrap().is_none());
+
+        // A fresh one finished by the forwarded address connects.
+        let started = host.auth_start("remote", Some(53211)).await.unwrap();
+        let params = query_pairs(&started.authorization_url);
+        let state = host
+            .auth_callback(
+                "remote",
+                &format!(
+                    "http://127.0.0.1:53211/callback?code=code-1&state={}&iss={base}",
+                    params["state"]
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(state, McpAuthState::SignedIn);
+        wait_for(&host, "remote", McpStatus::Connected).await;
+        assert!(registry.get("mcp:remote/echo").is_some());
+        // The same address again finds no sign-in waiting.
+        assert!(matches!(
+            host.auth_callback(
+                "remote",
+                &format!(
+                    "http://127.0.0.1:53211/callback?code=code-1&state={}&iss={base}",
+                    params["state"]
+                ),
+            )
+            .await,
+            Err(McpControlError::Invalid(_))
+        ));
+        // A server with no catalog test cannot be "tested" into showing anything.
+        assert!(matches!(
+            host.test_call("remote").await,
+            Err(McpControlError::Invalid(why)) if why.contains("no test")
+        ));
         host.shutdown().await;
     }
 
@@ -2102,7 +2259,7 @@ mod tests {
                 fast_policy(),
             );
             wait_for(&host, "remote", McpStatus::AuthRequired).await;
-            let started = host.auth_start("remote").await.unwrap();
+            let started = host.auth_start("remote", None).await.unwrap();
             let params = query_pairs(&started.authorization_url);
             let pasted = format!(
                 "{}?code=code-1&state={}&iss={base}",
@@ -2137,7 +2294,7 @@ mod tests {
             );
             assert!(
                 matches!(
-                    host.auth_start("remote").await,
+                    host.auth_start("remote", None).await,
                     Err(McpControlError::Conflict(_))
                 ),
                 "{action}"

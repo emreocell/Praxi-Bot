@@ -9,8 +9,8 @@ use axum::{Extension, Json};
 use crate::AppState;
 use crate::error::{ApiError, ErrorBody};
 use crate::mcp::{
-    McpApproveChangesInput, McpCatalogEntryDto, McpControl, McpControlError, McpServerDto,
-    McpServerInput, McpToolDto, SetSecret,
+    McpApproveChangesInput, McpAuthStartInput, McpCatalogEntryDto, McpControl, McpControlError,
+    McpServerDto, McpServerInput, McpTestResult, McpToolDto, SetSecret,
 };
 use crate::routes::ApiJson;
 
@@ -382,17 +382,44 @@ pub(crate) async fn set_secret(
     .await
 }
 
-/// Start a sign-in from an authenticated local user's explicit action.
+/// Start a sign-in from an authenticated local user's explicit action. With
+/// `relay_port` the browser is on the owner's computer: no listener is opened
+/// here, and the app that catches the redirect there forwards it to
+/// `/auth/callback`.
 #[utoipa::path(post, path = "/v1/mcp/servers/{name}/auth/start", tag = "mcp", security(("bearer" = [])),
-    params(("name" = String, Path)), responses((status = 200, body = crate::mcp::McpAuthStart), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody)))]
+    params(("name" = String, Path)), request_body(content = McpAuthStartInput, description = "Optional"),
+    responses((status = 200, body = crate::mcp::McpAuthStart), (status = 404, body = ErrorBody), (status = 422, body = ErrorBody)))]
 pub(crate) async fn start_mcp_auth(
     State(s): State<AppState>,
     actor: MaybeActor,
     Path(name): Path<String>,
+    body: Option<Json<McpAuthStartInput>>,
 ) -> Result<Json<crate::mcp::McpAuthStart>, ApiError> {
     let host = mcp(&s)?;
+    let relay_port = body.and_then(|Json(b)| b.relay_port);
+    if relay_port.is_some_and(|p| p < 1024) {
+        return Err(ApiError::bad_request("`relay_port` must be 1024 or higher"));
+    }
     audited(&s, &actor, "mcp.auth_start", &name, async {
-        Ok(Json(host.auth_start(&name).await?))
+        Ok(Json(host.auth_start(&name, relay_port).await?))
+    })
+    .await
+}
+
+/// Run the app's fixed, read-only test call and show the first few items.
+/// Owner only; the answer goes to the owner's screen, never to a model.
+#[utoipa::path(post, path = "/v1/mcp/servers/{name}/test", tag = "mcp", security(("bearer" = [])),
+    params(("name" = String, Path)),
+    responses((status = 200, body = McpTestResult), (status = 404, body = ErrorBody),
+              (status = 422, body = ErrorBody)))]
+pub(crate) async fn test_mcp_server(
+    State(s): State<AppState>,
+    actor: MaybeActor,
+    Path(name): Path<String>,
+) -> Result<Json<McpTestResult>, ApiError> {
+    let host = mcp(&s)?;
+    audited(&s, &actor, "mcp.server_test", &name, async {
+        Ok(Json(host.test_call(&name).await?))
     })
     .await
 }

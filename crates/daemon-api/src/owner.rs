@@ -274,6 +274,7 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/connection-test/voice"),
     ("POST", "/v1/connection-test/email"),
     ("POST", "/v1/mcp/servers/{}/auth/start"),
+    ("POST", "/v1/mcp/servers/{}/test"),
     ("POST", "/v1/mcp/servers/{}/auth/callback"),
     ("POST", "/v1/mcp/servers/{}/auth/cancel"),
     ("POST", "/v1/mcp/servers/{}/auth/logout"),
