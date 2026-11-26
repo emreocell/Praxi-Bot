@@ -94,13 +94,30 @@ test('Antigravity uses the official press path rather than an approximation', ()
   assert.deepEqual(brandIcon('cli:qwen'), brandIcon('qwen'));
   for (const name of ['cli:kiro', 'kiro-cli', 'Kiro CLI']) assert.deepEqual(brandIcon(name), brandIcon('kiro'), name);
   for (const name of ['cli:qoder', 'qodercli', 'Qoder CLI']) assert.deepEqual(brandIcon(name), brandIcon('qoder'), name);
+  assert.equal(brandIcon('kiro').known, true);
+  assert.equal(brandIcon('qoder').known, true);
   assert.equal(brandIcon('cli:copilot').known, true);
   assert.deepEqual(brandIcon('cli:copilot'), brandIcon('githubcopilot'));
   assert.equal(brandIcon('cli:kimi').known, true);
   assert.deepEqual(brandIcon('cli:kimi'), brandIcon('kimi'));
   for (const name of ['cli:vibe', 'vibe-acp', 'Mistral Vibe']) assert.deepEqual(brandIcon(name), brandIcon('mistralai'), name);
   for (const name of ['cli:goose', 'Goose']) assert.deepEqual(brandIcon(name), brandIcon('goose'), name);
-  assert.equal(brandIcon('goose').path, brandIcon('kiro').path);
+  assert.equal(brandIcon('goose').path, 'M3.5 6.5 5 5l7 7-7 7-1.5-1.5L9 12ZM12 17h8.5v2H12Z');
+  assert.notEqual(brandIcon('goose').path, brandIcon('kiro').path);
+});
+
+test('Kiro and Qoder use their own marks, not the generic terminal glyph', () => {
+  const terminal = 'M3.5 6.5 5 5l7 7-7 7-1.5-1.5L9 12ZM12 17h8.5v2H12Z';
+  for (const key of ['kiro', 'qoder']) {
+    const svg = readFileSync(new URL(`../assets/brands/${key}.svg`, import.meta.url), 'utf8');
+    const path = /\bd="([^"]+)"/.exec(svg)?.[1];
+    assert.ok(path, key);
+    assert.equal(brandIcon(key).path, path, key);
+    assert.notEqual(brandIcon(key).path, terminal, key);
+    assert.equal(brandIcon(key).monochrome, true, key);
+  }
+  assert.notEqual(brandIcon('kiro').path, brandIcon('qoder').path);
+  assert.equal(brandIcon('goose').path, terminal, 'Goose has no vendor mark yet and keeps the neutral glyph');
 });
 
 test('unlicensed brand artwork uses an explicit neutral initial and stays offline', () => {

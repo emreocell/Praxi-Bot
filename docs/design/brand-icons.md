@@ -45,12 +45,12 @@ not trademark ownership.
 | Gemini: `gemini`, `gemini-cli`, `cli:gemini`, `gemini-openai-compat` | Real mark; raw CLI/compat IDs fell back | SI `googlegemini.svg`; aliases fixed | CC0 1.0 |
 | Antigravity: `agy`, `cli:agy`, `antigravity` | Hand-drawn approximation labelled real | [Official one-colour SVG](https://antigravity.google/assets/image/brand/antigravity-icon__one-color.svg) from [press assets](https://antigravity.google/press) | Vendor compatibility use, below |
 | Qwen Code: `qwen`, `cli:qwen` | Not listed | SI `qwen.svg` | CC0 1.0 |
-| Kiro CLI: `kiro`, `cli:kiro`, `kiro-cli` | Not listed | Original neutral terminal-prompt glyph, not the Kiro mark | Absent from SI 16.38.1; no mark redistribution grant verified |
+| Kiro CLI: `kiro`, `cli:kiro`, `kiro-cli` | Original neutral terminal-prompt glyph | Official Kiro ghost, from the vendor's own site icon [kiro.dev/icon.svg](https://kiro.dev/icon.svg) (retrieved 2026-11-26): the white ghost silhouette with its eyes cut out, one monochrome path in a 24-box (coordinates rescaled from 1200, geometry unchanged), without the purple tile. Provenance file `src/assets/brands/kiro.svg` | No licence stated; see "Vendor-published icons" below |
 | GitHub Copilot CLI: `copilot`, `cli:copilot` | Not listed | SI `githubcopilot.svg`, already bundled | CC0 1.0 |
-| Qoder CLI: `qoder`, `cli:qoder`, `qodercli` | Not listed | The same neutral terminal-prompt glyph as Kiro, not the Qoder mark | Absent from SI 16.38.1; no mark redistribution grant verified |
+| Qoder CLI: `qoder`, `cli:qoder`, `qodercli` | The same neutral terminal-prompt glyph as Kiro | Official Qoder mark, from the vendor's own site icon [qoder.com/favIcon.svg](https://qoder.com/favIcon.svg) (retrieved 2026-11-26): the outline mark without its grey tile, stroke expanded to a filled shape and flattened to one monochrome path in a 24-box (maximum deviation 0.03 of 24). Provenance file `src/assets/brands/qoder.svg` | No licence stated; see "Vendor-published icons" below |
 | Kimi Code CLI: `kimi`, `cli:kimi` | Not listed | SI `kimi.svg` | CC0 1.0 |
 | Mistral Vibe: `vibe`, `cli:vibe`, `vibe-acp` | Not listed | SI `mistralai.svg`, already bundled (Vibe is Mistral AI's own CLI) | CC0 1.0 |
-| Goose: `goose`, `cli:goose` | Not listed | The same neutral terminal-prompt glyph as Kiro, not the Goose mark | Absent from SI 16.38.1; no mark redistribution grant verified |
+| Goose: `goose`, `cli:goose` | Not listed | Original neutral terminal-prompt glyph (the generic fallback glyph also named in "Vendor-published icons"), not the Goose mark | Absent from SI 16.38.1; no mark redistribution grant verified |
 | Anthropic: `anthropic` | Real mark | SI `anthropic.svg`, retained | CC0 1.0 |
 | DeepSeek: `deepseek` | Real mark | SI `deepseek.svg`, retained | CC0 1.0 |
 | LM Studio: `lmstudio` | Real mark | SI `lmstudio.svg`, retained | CC0 1.0 |
@@ -69,6 +69,22 @@ shows the vendor's one-colour icon next to the Antigravity name. Coordinates
 and viewBox are rescaled from 180 to 24; geometry is unchanged. The provenance
 SVG is `src/assets/brands/antigravity.svg`; its path is inlined by the registry.
 Google Antigravity is a trademark of Google LLC.
+
+### Vendor-published icons (Kiro, Qoder)
+
+Neither product is in Simple Icons (checked in 16.38.1, the latest release on
+2026-11-26: no `kiro` or `qoder` file), and neither vendor publishes a brand or
+press kit that could be found (`kiro.dev/brand`, `/press`, `/media-kit`,
+`/brand-guidelines` and `qoder.com/brand`, `/press`, `/media-kit` answer 404).
+The marks therefore come from the icon each vendor serves for its own product
+site. No licence or brand-use terms accompany those files, so this is
+nominative use only: the mark identifies the vendor's CLI in the engine list and
+model picker, next to its name, and implies no endorsement. Kiro and Qoder are
+trademarks of their owners. If a vendor objects, or publishes a kit with
+different rules, replace the path in `lib/brandIcons.ts` (and the file under
+`src/assets/brands/`) with the generic glyph `M3.5 6.5 5 5l7 7-7 7-1.5-1.5L9
+12ZM12 17h8.5v2H12Z`. This is the one engine-logo decision that needs the
+owner's confirmation (see the pull request).
 
 Read-only installed-app inspection: Antigravity IDE's SVG agrees with the press
 mark; Codex's Windows app PNG shows the OpenAI blossom. Cursor's Start Menu
@@ -118,7 +134,7 @@ resolve locally. Custom providers/servers keep the deterministic unknown fallbac
 
 Obtain explicit redistributable artwork or permission for Groq, Together AI,
 llama.cpp, Playwright, Exa, Tavily, Firecrawl and Context7 before replacing
-their initials, and for Kiro, Qoder and Goose before replacing their neutral glyph. Keep this note open until each mark has a source and licence.
+their initials, and for Goose before replacing its neutral glyph. Kiro and Qoder use vendor-published marks (see "Vendor-published icons"). Keep this note open until each mark has a source and licence.
 Do not trace logos or extract installed-app artwork. Groq is a trademark of
 Groq LLC and/or its affiliates. Praxi-Bot is not affiliated with or endorsed
 by Groq LLC.
