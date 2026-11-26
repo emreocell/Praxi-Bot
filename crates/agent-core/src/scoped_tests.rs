@@ -174,6 +174,66 @@ async fn always_allow_is_refused_for_sends_writes_shell_and_innocently_named_too
     }
 }
 
+/// Approving one `shell_interactive` call "for this chat" must not unlock the tool for the rest
+/// of the chat: `start` and `write` of any command would follow. The card is once-only, every
+/// standing scope is refused, and the next call asks again.
+#[tokio::test]
+async fn an_interactive_shell_call_is_approved_once_and_never_for_the_chat() {
+    let env = setup();
+    let shell = tool(
+        "shell_interactive",
+        Effect::Destructive,
+        PermissionCategory::Shell,
+    );
+    let start = json!({"action": "start", "command": "vibe --setup"});
+    let write = json!({"action": "write", "session": "pty-1", "input": "yes", "enter": true});
+    let fake = Fake::new(vec![
+        calls(&[("c1", "shell_interactive", start.clone())]),
+        text("ok"),
+        // Each of these asks and is cancelled, so no text answer follows.
+        calls(&[("c2", "shell_interactive", write)]),
+        calls(&[("c3", "shell_interactive", start)]),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&shell)],
+        profile(ASK),
+        cfg(Policy::approve_destructive()),
+    );
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let Event::ApprovalNeeded(card) =
+        until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await
+    else {
+        unreachable!()
+    };
+    let details = card.details.clone().unwrap();
+    assert_eq!(details["once_only"], true);
+    assert_eq!(details["always_offered"], false);
+    for scope in [
+        ApprovalScope::ThisChat,
+        ApprovalScope::Always,
+        ApprovalScope::AlwaysCategory,
+    ] {
+        assert!(
+            matches!(
+                lp.approve(card.call_id, scope, env.user),
+                Err(LoopError::OnceOnly(_))
+            ),
+            "{scope:?} must be refused"
+        );
+    }
+    lp.approve(card.call_id, ApprovalScope::Once, env.user)
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(lp.list_grants(env.bot).is_empty());
+    // The `write` of the same chat asks too, and so does a second `start`.
+    assert!(asks(&env, &lp).await, "write must ask again");
+    assert!(asks(&env, &lp).await, "start must ask again");
+}
+
 /// A site grant is origin-exact, durable across a restart and revocable.
 #[tokio::test]
 async fn an_origin_grant_covers_that_origin_survives_restart_and_is_revocable() {

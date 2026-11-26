@@ -91,7 +91,7 @@ pub enum Derived {
 pub fn is_scoped_family(tool: &str) -> bool {
     matches!(
         tool,
-        "browser_open" | "fs_write" | "fs_edit" | "fs_move" | "shell_run"
+        "browser_open" | "fs_write" | "fs_edit" | "fs_move" | "shell_run" | "shell_interactive"
     )
 }
 
@@ -131,6 +131,10 @@ pub fn derive(tool: &str, input: &Value) -> Derived {
                 kind: ScopeKind::Command,
                 pattern,
             }),
+        // A session is a conversation with a program: `start` names it, but `write` types
+        // whatever the bot chooses afterwards, so no target describes what a rule would allow.
+        // Every call is approved once.
+        "shell_interactive" => None,
         _ => input
             .get("path")
             .and_then(Value::as_str)
@@ -431,6 +435,25 @@ mod tests {
                 derive("shell_run", &json!({ "command": c })),
                 Derived::Unscopable,
                 "{c:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_interactive_session_is_never_remembered() {
+        // `start` names a program, but what `write` types afterwards is the bot's choice: no
+        // rule can describe it, so every call is approved once.
+        for input in [
+            json!({"action": "start", "command": "vibe --setup"}),
+            json!({"action": "write", "session": "pty-1", "input": "rm -rf /", "enter": true}),
+            json!({"action": "read", "session": "pty-1"}),
+            json!({}),
+        ] {
+            assert!(is_scoped_family("shell_interactive"));
+            assert_eq!(
+                derive("shell_interactive", &input),
+                Derived::Unscopable,
+                "{input}"
             );
         }
     }
