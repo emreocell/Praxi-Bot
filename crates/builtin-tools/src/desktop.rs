@@ -38,6 +38,47 @@ use secret_store::{FillSecrets, SecretValue, sanitize_label};
 /// An OCR engine usable from tools.
 pub type SharedOcr = Arc<dyn OcrEngine + Send + Sync>;
 
+/// The on-device OCR engine for set-of-marks, from the model files already on this computer
+/// (see [`vision::OcrModelPaths::default_data_dir`], `PRAXI_OCR_MODEL_DIR` overrides it).
+///
+/// Nothing is downloaded here: with no model files this is `None`, the desktop tools then say
+/// that no OCR engine is configured and keep working from the accessibility tree.
+#[must_use]
+pub fn default_ocr() -> Option<SharedOcr> {
+    ocr_from_dir(&vision::OcrModelPaths::default_data_dir())
+}
+
+/// Like [`default_ocr`] for the model files in `dir`.
+#[must_use]
+pub fn ocr_from_dir(dir: &std::path::Path) -> Option<SharedOcr> {
+    let paths = vision::OcrModelPaths::from_dir(dir);
+    paths.exists().then(|| {
+        Arc::new(LazyOcr {
+            paths,
+            engine: std::sync::OnceLock::new(),
+        }) as SharedOcr
+    })
+}
+
+/// Loads the models on the first screenshot that needs them, not at start-up, so a daemon
+/// that never meets a weak accessibility tree pays nothing. A model that fails to load is
+/// reported once and then reads as "no text found".
+struct LazyOcr {
+    paths: vision::OcrModelPaths,
+    engine: std::sync::OnceLock<Option<vision::OcrsEngine>>,
+}
+
+impl OcrEngine for LazyOcr {
+    fn recognize(&self, img: &vision::RgbImage) -> Vec<vision::TextBox> {
+        let engine = self.engine.get_or_init(|| {
+            vision::OcrsEngine::from_paths(&self.paths)
+                .map_err(|e| tracing::warn!("OCR models could not be loaded: {e}"))
+                .ok()
+        });
+        engine.as_ref().map_or_else(Vec::new, |e| e.recognize(img))
+    }
+}
+
 /// Timing knobs for the desktop tools.
 #[derive(Debug, Clone, Copy)]
 pub struct DesktopSettings {
@@ -2967,6 +3008,24 @@ mod tests {
                 vision::TextBox::new("Cancel".into(), BoundingBox::new(100, 20, 60, 20), 0.9),
             ]
         }
+    }
+
+    #[test]
+    fn ocr_is_offered_only_when_the_model_files_exist_and_a_broken_model_reads_as_no_text() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(ocr_from_dir(dir.path()).is_none(), "no models, no engine");
+        let paths = vision::OcrModelPaths::from_dir(dir.path());
+        std::fs::write(&paths.detection_model, b"not a model").unwrap();
+        assert!(ocr_from_dir(dir.path()).is_none(), "one file is not enough");
+        std::fs::write(&paths.recognition_model, b"not a model").unwrap();
+        let ocr = ocr_from_dir(dir.path()).expect("both files present");
+        let img = image::RgbImage::from_pixel(64, 32, image::Rgb([255, 255, 255]));
+        assert_eq!(ocr.recognize(&img).len(), 0);
+        assert_eq!(
+            ocr.recognize(&img).len(),
+            0,
+            "second call does not retry or panic"
+        );
     }
 
     #[tokio::test]

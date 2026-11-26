@@ -441,7 +441,8 @@ impl Shared {
         // Document converters are shell-free writers too. In particular a
         // one-column CSV can be a valid SKILL.md or workflow/config document.
         let output_field = match name {
-            "docx_write" | "xlsx_write" => Some("path"),
+            "docx_write" | "xlsx_write" | "docx_append" | "xlsx_append_rows"
+            | "xlsx_update_cells" => Some("path"),
             "csv_transform" | "doc_convert" => Some("output_path"),
             "doc_preview" => Some("output_dir"),
             _ => None,

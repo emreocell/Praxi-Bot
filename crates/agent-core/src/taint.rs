@@ -177,7 +177,8 @@ impl ContentTaint {
         use protocol::PermissionCategory as C;
         let category = match name {
             "fs_write" | "fs_edit" | "fs_move" | "checkpoint_restore" | "docx_write"
-            | "xlsx_write" | "csv_transform" | "doc_convert" | "doc_preview" => C::Fs,
+            | "xlsx_write" | "docx_append" | "xlsx_append_rows" | "xlsx_update_cells"
+            | "csv_transform" | "doc_convert" | "doc_preview" => C::Fs,
             "script_run" => C::Script,
             n if n.starts_with("desktop_") => C::Desktop,
             // `note_write` decides on the name alone for this one; the category is not read.
@@ -479,9 +480,10 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
     match name {
         "fs_read" | "fs_list" | "fs_search" | "fs_write" | "fs_edit" | "fs_move" | "fs_delete"
         | "checkpoint_list" | "checkpoint_restore" | "pdf_extract" | "docx_read" | "docx_write"
-        | "xlsx_read" | "xlsx_write" | "csv_read" | "csv_transform" | "json_query"
-        | "doc_convert" | "doc_preview" | "git_status" | "git_diff" | "git_log" | "git_show"
-        | "git_branch" | "git_commit" => {
+        | "docx_append" | "xlsx_read" | "xlsx_write" | "xlsx_append_rows" | "xlsx_update_cells"
+        | "pptx_read" | "csv_read" | "csv_transform" | "json_query" | "doc_convert"
+        | "doc_preview" | "git_status" | "git_diff" | "git_log" | "git_show" | "git_branch"
+        | "git_commit" => {
             format!("file {}", str_field("path").unwrap_or("a file"))
         }
         "email_read" | "email_search" | "email_list_folders" | "email_download_attachment" => {

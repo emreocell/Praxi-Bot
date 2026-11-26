@@ -2227,6 +2227,44 @@ async fn shell_free_document_writers_cannot_change_daemon_authority() {
     );
 }
 
+#[tokio::test]
+async fn in_place_document_editors_cannot_change_daemon_authority() {
+    for (tool, input) in [
+        (
+            "xlsx_append_rows",
+            json!({"sheet": "S", "rows": [["planted"]]}),
+        ),
+        ("xlsx_update_cells", json!({"cells": {"A1": "planted"}})),
+        (
+            "docx_append",
+            json!({"blocks": [{"type": "paragraph", "text": "planted"}]}),
+        ),
+    ] {
+        let env = setup();
+        let target = env.dir.path().join("skills/forged/doc.xlsx");
+        let mut input = input;
+        input["path"] = json!(target);
+        let fake = Fake::new(vec![calls(&[("c1", tool, input)]), text("done")]);
+        let lp = make_loop(
+            &env.storage,
+            env.bot,
+            &fake,
+            &[],
+            profile(""),
+            cfg(Policy::full()),
+        );
+        doc_tools::register(&lp.tool_registry(), &doc_tools::DocToolsConfig::default());
+        let run = lp.run_turn(env.chat, "edit").unwrap();
+        assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+        assert!(
+            tool_messages(&fake.request(1))
+                .join("\n")
+                .contains("denied"),
+            "{tool} must be refused before it runs"
+        );
+    }
+}
+
 /// The built-in tools that start a program chosen by their arguments, with
 /// the category and effect their real specs use.
 const EXECUTORS: [(&str, PermissionCategory, Effect); 7] = [
