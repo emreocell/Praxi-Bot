@@ -839,6 +839,8 @@ async fn search_maps_the_criteria_to_list_filters() {
         since: Some("2026-11-01".into()),
         before: Some("2026-11-10".into()),
         unread: Some(true),
+        text: None,
+        include_junk: None,
     };
     let found = bound(&server)
         .search(&SearchRequest {
@@ -1115,6 +1117,7 @@ async fn send_posts_the_message_with_an_idempotency_key() {
             bcc: vec![],
             subject: "Hi".into(),
             body: "Body".into(),
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -1291,6 +1294,7 @@ async fn the_recipients_in_the_request_are_exactly_the_ones_given_and_validated(
         bcc: vec!["hidden@example.com".into()],
         subject: "s".into(),
         body: "b".into(),
+        ..Default::default()
     };
     p.send(&mail).await.unwrap();
     p.reply("m1", &mail, true).await.unwrap();

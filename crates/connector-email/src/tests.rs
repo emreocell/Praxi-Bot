@@ -290,7 +290,7 @@ async fn registration_effects_and_input_validation() {
     let config = account(&imap, &smtp, SmtpSecurity::Implicit);
     let conn = connector(config.clone());
     let registry = ToolRegistry::new();
-    assert_eq!(register(&registry, &conn), 7);
+    assert_eq!(register(&registry, &conn), 8);
     assert_eq!(register(&registry, &conn), 0);
     for name in crate::TOOL_NAMES {
         let tool = registry.get(name).unwrap();
@@ -298,7 +298,7 @@ async fn registration_effects_and_input_validation() {
         assert_eq!(tool.spec().category, PermissionCategory::Messaging);
         let expected = match name {
             "email_send" => Effect::Destructive,
-            "email_draft" | "email_mark_read" => Effect::Write,
+            "email_draft" | "email_mark_read" | "email_download_attachment" => Effect::Write,
             _ => Effect::Read,
         };
         assert_eq!(tool.spec().effect, expected);

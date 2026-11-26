@@ -40,6 +40,7 @@ pub mod pure_tools;
 pub mod schedule;
 pub mod script;
 pub mod secret_request;
+pub mod selfcheck;
 pub mod shell;
 mod util;
 pub mod wait;
@@ -364,6 +365,7 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
     all.extend(notes::tools(&cfg.data_dir));
     all.extend(pure_tools::tools());
     all.extend(wait::tools());
+    all.push(selfcheck::tool(registry.clone(), cfg.data_dir.clone()));
     if let Some(backend) = cfg.knowledge {
         all.push(knowledge::tool(backend));
     }
@@ -655,6 +657,7 @@ mod tests {
             ("wait", R, Me),
             ("calculate", R, Me),
             ("email_wait_for", R, Ms),
+            ("tool_self_check", R, Me),
         ]
     }
 
@@ -1246,7 +1249,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 44 + 7 + 2 + 2 + 1 + 1);
+        assert_eq!(added, 44 + 8 + 2 + 2 + 1 + 1 + 1);
 
         // Verification of email tools and their effects
         let send_tool = reg
@@ -1270,7 +1273,7 @@ mod tests {
         // Also test direct helper register_email_tools
         let reg2 = ToolRegistry::new();
         let registered = register_email_tools(&reg2, &connector);
-        assert_eq!(registered, 7);
+        assert_eq!(registered, 8);
         assert!(reg2.get(connector_email::tools::SEND).is_some());
     }
 

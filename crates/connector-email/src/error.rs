@@ -89,11 +89,49 @@ impl EmailError {
     }
 }
 
+impl EmailError {
+    /// One plain sentence on what to do about this failure, for the model and the
+    /// owner; `None` when the message already says it. Never contains server text.
+    #[must_use]
+    pub fn fix_hint(&self) -> Option<&'static str> {
+        Some(match self {
+            Self::Credential(_) => {
+                "no password or API key is stored for this account; the owner must enter it again in Settings > E-mail"
+            }
+            Self::Tls(_) => {
+                "the secure connection failed; the owner should check the server name and port (IMAP is usually 993) in Settings > E-mail"
+            }
+            Self::Timeout(_) => {
+                "the mail server did not answer in time; try again once, then tell the owner"
+            }
+            Self::Imap(m) if m.contains("login failed") => {
+                "the server refused the login: the password may be wrong or expired; the owner can run \"Test connection\" in Settings > E-mail"
+            }
+            Self::Imap(m) if m.starts_with("examine") || m.starts_with("select") => {
+                "that folder could not be opened; call email_list_folders and use a name from it"
+            }
+            Self::Imap(m) if m.starts_with("connect") || m.contains("greeting") => {
+                "the mail server could not be reached; the owner should check the host, the port and the network of this computer"
+            }
+            Self::Provider(ProviderError::Auth | ProviderError::Forbidden) => {
+                "the mail provider refused the API key; the owner must replace it in Settings > E-mail"
+            }
+            Self::Provider(ProviderError::Quota) => {
+                "the provider plan limit was reached; the owner must free space or upgrade the plan"
+            }
+            _ => return None,
+        })
+    }
+}
+
 impl From<EmailError> for ToolError {
     fn from(e: EmailError) -> Self {
         match e {
             EmailError::Input(m) | EmailError::Config(m) => ToolError::InvalidInput(m),
-            other => ToolError::Execution(other.to_string()),
+            other => match other.fix_hint() {
+                Some(hint) => ToolError::Execution(format!("{other}. Fix: {hint}")),
+                None => ToolError::Execution(other.to_string()),
+            },
         }
     }
 }

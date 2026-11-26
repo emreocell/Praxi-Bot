@@ -565,7 +565,11 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
             everyone.extend(all_addrs(input.get("bcc")));
             (domains_of(&everyone), "body")
         }
-        "email_search" | "email_read" | "email_mark_read" | "email_list_folders" => {
+        "email_search"
+        | "email_read"
+        | "email_mark_read"
+        | "email_list_folders"
+        | "email_download_attachment" => {
             let account = str_field("account");
             let host = if account.is_empty() {
                 "the mailbox".to_owned()

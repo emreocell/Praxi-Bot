@@ -1266,3 +1266,65 @@ async fn a_refused_or_empty_page_points_at_the_interactive_browser() {
     assert!(t.contains("Title: Sign in"), "{t}");
     assert!(t.contains("browser_open"), "{t}");
 }
+
+#[tokio::test]
+async fn redirect_target_reads_exactly_one_hop_and_never_requests_the_target() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/click"))
+        .respond_with(
+            ResponseTemplate::new(302).insert_header("Location", "https://example.com/verify?t=1"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/plain"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("hello"))
+        .mount(&server)
+        .await;
+    let fetcher = HttpFetcher::new(Arc::new(loopback_ok()), HttpConfig::default()).unwrap();
+    let next = fetcher
+        .redirect_target(&format!("{}/click", server.uri()))
+        .await
+        .unwrap()
+        .expect("a redirect");
+    assert_eq!(next.as_str(), "https://example.com/verify?t=1");
+    // Not a redirect: nothing to report, and nothing was followed.
+    assert!(
+        fetcher
+            .redirect_target(&format!("{}/plain", server.uri()))
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn redirect_target_refuses_loopback_and_private_hops() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/click"))
+        .respond_with(
+            ResponseTemplate::new(302).insert_header("Location", "http://169.254.169.254/latest"),
+        )
+        .mount(&server)
+        .await;
+    // The default policy refuses the loopback tracker itself ...
+    let strict =
+        HttpFetcher::new(Arc::new(DefaultUrlPolicy::default()), HttpConfig::default()).unwrap();
+    assert!(
+        strict
+            .redirect_target(&format!("{}/click", server.uri()))
+            .await
+            .is_err()
+    );
+    // ... and a tracker that points at a metadata address is refused even when
+    // loopback is allowed.
+    let lax = HttpFetcher::new(Arc::new(loopback_ok()), HttpConfig::default()).unwrap();
+    assert!(
+        lax.redirect_target(&format!("{}/click", server.uri()))
+            .await
+            .is_err()
+    );
+}

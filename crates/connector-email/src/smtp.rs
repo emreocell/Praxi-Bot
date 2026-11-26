@@ -32,6 +32,13 @@ pub struct OutgoingMail {
     /// Plain-text body.
     #[serde(default)]
     pub body: String,
+    /// `Message-ID` of the mail this one answers. Set by the daemon for a reply
+    /// (read from the original), never taken from the model.
+    #[serde(skip)]
+    pub in_reply_to: Option<String>,
+    /// `References` chain of a reply: the original's chain plus its own id.
+    #[serde(skip)]
+    pub references: Vec<String>,
 }
 
 /// Models sometimes write a line break as the two characters backslash and `n` instead of a
@@ -130,6 +137,26 @@ pub fn envelope_address(s: &str) -> Result<String, EmailError> {
     mailbox(s).map(|(_, email)| email)
 }
 
+/// A `Message-ID` for a threading header, without the angle brackets; `None` for
+/// an absent one. A value with whitespace, brackets or control characters is
+/// refused so a header can never be split by a forged id.
+fn threading_id(id: Option<&str>) -> Result<Option<String>, EmailError> {
+    let Some(id) = id.map(|i| i.trim().trim_start_matches('<').trim_end_matches('>')) else {
+        return Ok(None);
+    };
+    if id.is_empty() {
+        return Ok(None);
+    }
+    if id.len() > 998
+        || id
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '<' | '>'))
+    {
+        return Err(EmailError::Input("invalid Message-ID".into()));
+    }
+    Ok(Some(id.to_owned()))
+}
+
 /// Composed message and separate delivery envelope. Blind recipients never
 /// appear in transmitted headers.
 pub struct ComposedMail {
@@ -215,6 +242,20 @@ fn compose_message(
     }
     if draft && !bcc.is_empty() {
         builder = builder.bcc(bcc);
+    }
+    if let Some(id) = threading_id(mail.in_reply_to.as_deref())? {
+        builder = builder.in_reply_to(id);
+    }
+    let references = mail
+        .references
+        .iter()
+        .map(|r| threading_id(Some(r)))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    if !references.is_empty() {
+        builder = builder.references(references);
     }
     let raw = builder
         .write_to_vec()

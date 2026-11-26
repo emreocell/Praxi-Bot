@@ -137,6 +137,11 @@ pub struct SearchQuery {
     pub before: Option<String>,
     /// `true` = unread only, `false` = read only.
     pub unread: Option<bool>,
+    /// Text that must occur in the message body (IMAP `BODY`).
+    pub text: Option<String>,
+    /// API mailboxes hide spam and unauthenticated mail unless asked; `true`
+    /// includes it. IMAP accounts have the spam folder to name instead.
+    pub include_junk: Option<bool>,
 }
 
 /// Quote a string as an IMAP quoted string.
@@ -166,7 +171,11 @@ impl SearchQuery {
     pub fn to_imap(&self) -> Result<String, EmailError> {
         let mut parts: Vec<String> = Vec::new();
         let mut non_ascii = false;
-        for (key, val) in [("FROM", &self.from), ("SUBJECT", &self.subject)] {
+        for (key, val) in [
+            ("FROM", &self.from),
+            ("SUBJECT", &self.subject),
+            ("BODY", &self.text),
+        ] {
             if let Some(v) = val.as_deref().filter(|v| !v.is_empty()) {
                 non_ascii |= !v.is_ascii();
                 parts.push(format!("{key} {}", quote(v)?));
@@ -609,6 +618,55 @@ impl ImapSession {
         }
         let unread = !f.flags().any(|fl| matches!(fl, Flag::Seen));
         parse_detail(uid, body, unread, f.size, max_body_chars)
+    }
+
+    /// Download one attachment of a message (by its index among the message's
+    /// attachments, as listed by `fetch`), refusing more than `max_bytes`.
+    ///
+    /// # Errors
+    /// [`EmailError::NotFound`] for an unknown message or attachment; IMAP failures.
+    pub async fn fetch_attachment(
+        &mut self,
+        folder: &str,
+        uid: u32,
+        index: usize,
+        max_bytes: usize,
+    ) -> Result<crate::provider::AttachmentData, EmailError> {
+        let wire_name = wire_mailbox_name(folder)?;
+        enforce_imap_trace_ceiling();
+        self.session
+            .examine(wire_name)
+            .await
+            .map_err(|e| self.fail("examine", &e))?;
+        // A message with a big attachment is bigger than the mail-reading cap;
+        // allow the attachment's own cap on top of it, and ask the size first so
+        // nothing larger is ever downloaded.
+        let allowed = u64::try_from(max_bytes)
+            .unwrap_or(u64::MAX)
+            .saturating_add(u64::from(MAX_MESSAGE_BYTES));
+        let sized = self
+            .uid_fetch(&uid.to_string(), "(UID RFC822.SIZE)")
+            .await?;
+        let size = sized
+            .iter()
+            .find(|f| f.uid == Some(uid))
+            .ok_or_else(|| EmailError::NotFound(format!("message uid {uid} in {folder}")))?
+            .size
+            .ok_or_else(|| EmailError::Imap(format!("message uid {uid} has no size; refused")))?;
+        if u64::from(size) > allowed {
+            return Err(EmailError::Imap(format!(
+                "message uid {uid} is {size} bytes, too large to download an attachment from"
+            )));
+        }
+        let fetches = self
+            .uid_fetch(&uid.to_string(), "(UID RFC822.SIZE BODY.PEEK[])")
+            .await?;
+        let f = fetches
+            .iter()
+            .find(|f| f.uid == Some(uid) && f.body().is_some())
+            .ok_or_else(|| EmailError::NotFound(format!("message uid {uid} in {folder}")))?;
+        let body = f.body().unwrap_or_default();
+        crate::message::attachment_of(body, index, max_bytes)
     }
 
     /// Set or clear `\Seen` on a message.

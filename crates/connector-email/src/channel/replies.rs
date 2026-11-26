@@ -74,6 +74,7 @@ impl PendingReply {
             bcc: Vec::new(),
             subject: self.subject.clone(),
             body: self.body.clone(),
+            ..OutgoingMail::default()
         }
     }
 }

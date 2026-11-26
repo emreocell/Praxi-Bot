@@ -515,6 +515,15 @@ impl MailboxProvider for AgentMailProvider {
         if let Some(d) = &q.before {
             query.push(("before", day_start(d)?));
         }
+        if q.text.as_deref().is_some_and(|t| !t.is_empty()) {
+            return Err(EmailError::unsupported(
+                "searching message bodies (search by `from` or `subject`, or read the message)",
+            ));
+        }
+        if q.include_junk == Some(true) {
+            query.push(("include_spam", "true".to_owned()));
+            query.push(("include_unauthenticated", "true".to_owned()));
+        }
         match q.unread {
             Some(true) => query.push(("labels", "unread".to_owned())),
             Some(false) => {

@@ -233,6 +233,66 @@ pub fn classify_link(raw: &str, site: Option<&str>, allow: &[String]) -> LinkVer
     LinkVerdict::External(host)
 }
 
+/// Click-tracking hosts of e-mail service providers (suffixes). A sign-up mail
+/// sent through one wraps the real verification link in a redirect on such a
+/// host, so the link's own host says nothing about the site.
+const TRACKING_SUFFIXES: &[&str] = &[
+    "sendgrid.net",
+    "mandrillapp.com",
+    "list-manage.com",
+    "mailchimp.com",
+    "mcsv.net",
+    "mailgun.org",
+    "mailgun.net",
+    "sparkpostmail.com",
+    "sparkpostmail1.com",
+    "customeriomail.com",
+    "mlsend.com",
+    "sendibt2.com",
+    "sendibt3.com",
+    "brevo.com",
+    "awstrack.me",
+    "hubspotlinks.com",
+    "klaviyomail.com",
+    "convertkit-mail.com",
+    "convertkit-mail2.com",
+    "pstmrk.it",
+    "iterable.com",
+    "sailthru.com",
+    "rs6.net",
+];
+
+/// Most tracking links looked through for one message.
+pub const MAX_TRACKING_LOOKUPS: usize = 3;
+
+/// Whether `host` is a known click-tracking host.
+#[must_use]
+pub fn is_tracking_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    TRACKING_SUFFIXES
+        .iter()
+        .any(|s| host == *s || host.ends_with(&format!(".{s}")))
+}
+
+/// The links of a message that are click-tracking redirects of a known provider
+/// (https only, no user info) and would otherwise be reported as external.
+#[must_use]
+pub fn tracking_links(links: &[String], site: Option<&str>, allow: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in links.iter().take(MAX_LINKS_SCANNED) {
+        let LinkVerdict::External(host) = classify_link(raw, site, allow) else {
+            continue;
+        };
+        if is_tracking_host(&host) && !out.contains(raw) {
+            out.push(raw.trim().to_owned());
+        }
+        if out.len() >= MAX_TRACKING_LOOKUPS {
+            break;
+        }
+    }
+    out
+}
+
 /// What a message offers, judged.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Verification {

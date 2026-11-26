@@ -721,6 +721,21 @@ impl Scoped<'_> {
         message_id: &str,
         attachment_id: &str,
     ) -> Result<(PathBuf, AttachmentData), EmailError> {
+        self.save_attachment_in(account, "INBOX", message_id, attachment_id)
+            .await
+    }
+
+    /// [`Scoped::save_attachment`] for a message in `folder` (IMAP accounts).
+    ///
+    /// # Errors
+    /// As [`Scoped::save_attachment`].
+    pub async fn save_attachment_in(
+        &self,
+        account: Option<&str>,
+        folder: &str,
+        message_id: &str,
+        attachment_id: &str,
+    ) -> Result<(PathBuf, AttachmentData), EmailError> {
         let acct = self.account(account)?;
         let dir = self
             .conn
@@ -734,7 +749,7 @@ impl Scoped<'_> {
             .conn
             .provider_for(&acct)
             .await?
-            .get_attachment(message_id, attachment_id, MAX_ATTACHMENT_BYTES)
+            .get_attachment_in(folder, message_id, attachment_id, MAX_ATTACHMENT_BYTES)
             .await?;
         let path = dir.join(format!("{}.bin", uuid::Uuid::now_v7()));
         let bytes = data.bytes.clone();

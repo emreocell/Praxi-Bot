@@ -42,6 +42,8 @@ static RUNS: LazyLock<Mutex<HashMap<String, RunWait>>> = LazyLock::new(Mutex::de
 pub fn cancel_run_waits(run_id: &str) {
     let mut runs = RUNS.lock();
     runs.entry(run_id.to_owned()).or_default().token.cancel();
+    drop(runs);
+    crate::mail_wait::cancel_run_mail_waits(run_id);
 }
 
 #[derive(Deserialize)]

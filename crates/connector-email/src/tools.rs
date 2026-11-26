@@ -38,14 +38,17 @@ pub const SEND: &str = "email_send";
 
 /// `email_identities`.
 pub const IDENTITIES: &str = "email_identities";
+/// `email_download_attachment`.
+pub const DOWNLOAD_ATTACHMENT: &str = "email_download_attachment";
 
 /// All tool names, in registration order.
-pub const TOOL_NAMES: [&str; 7] = [
+pub const TOOL_NAMES: [&str; 8] = [
     IDENTITIES,
     LIST_FOLDERS,
     SEARCH,
     READ,
     MARK_READ,
+    DOWNLOAD_ATTACHMENT,
     DRAFT,
     SEND,
 ];
@@ -57,6 +60,7 @@ enum Kind {
     Search,
     Read,
     MarkRead,
+    DownloadAttachment,
     Draft,
     Send,
 }
@@ -78,7 +82,7 @@ fn spec(name: &str, description: &str, schema: Value, effect: Effect) -> ToolSpe
         content: match name {
             // The call sends model-controlled fields (folder, query, ids) to
             // the mail server and the reply can be untrusted private mail.
-            READ | SEARCH => ContentClass::all(),
+            READ | SEARCH | DOWNLOAD_ATTACHMENT => ContentClass::all(),
             // Folder names come back; the account name is sent to the server.
             LIST_FOLDERS => ContentClass::declared(false, true, true),
             // mark_read does not return the message, but the folder and the
@@ -195,10 +199,27 @@ fn send_props() -> Value {
             "opt_out_line".into(),
             json!({"type":"boolean","description":"Default true: the system appends an opt-out line. false only asks to leave it out; that makes the owner's approval card show a warning and the owner decides."}),
         );
+        o.insert(
+            "reply_to_uid".into(),
+            json!({"type":"integer","minimum":1,"description":"Reply in the thread of this message (IMAP/SMTP accounts: its uid). `to` and `subject` default from it."}),
+        );
+        o.insert(
+            "reply_to_message_id".into(),
+            json!({"type":"string","description":"Reply in the thread of this message (API mailboxes: its message id)."}),
+        );
+        o.insert(
+            "reply_folder".into(),
+            json!({"type":"string","description":"Folder of the message being answered. Default INBOX."}),
+        );
+        o.insert(
+            "reply_all".into(),
+            json!({"type":"boolean","description":"With a reply: also answer the original's other To/Cc recipients."}),
+        );
     }
     p
 }
 
+#[allow(clippy::too_many_lines)]
 fn specs() -> Vec<(Kind, ToolSpec)> {
     vec![
         (
@@ -223,14 +244,18 @@ fn specs() -> Vec<(Kind, ToolSpec)> {
             Kind::Search,
             spec(
                 SEARCH,
-                "Search a folder by sender, subject, date range and read state; newest first. \
-                 Returns uid, subject, from, date and unread flag per message. \
+                "Search a folder by sender, subject, body text, date range and read state; newest first. \
+                 Returns uid (or message id), subject, from, date and unread flag per message. \
+                 A verification mail from an unknown site is often filed as junk: search the junk folder \
+                 (see email_list_folders) or pass include_junk for API mailboxes. \
                  Example: {\"folder\":\"INBOX\",\"from\":\"boss@example.com\",\"unread\":true,\"since\":\"2026-11-01\"}",
                 json!({"type":"object","properties":{
                     "account": account_prop(),
                     "folder":{"type":"string","description":"Default INBOX."},
                     "from":{"type":"string"},
                     "subject":{"type":"string"},
+                    "text":{"type":"string","description":"Text the message body must contain (IMAP/SMTP accounts only)."},
+                    "include_junk":{"type":"boolean","description":"API mailboxes: also return spam and unauthenticated mail. IMAP accounts: search the junk folder by name instead."},
                     "since":{"type":"string","description":"YYYY-MM-DD, inclusive."},
                     "before":{"type":"string","description":"YYYY-MM-DD, exclusive."},
                     "unread":{"type":"boolean","description":"true = unread only, false = read only."},
@@ -272,6 +297,24 @@ fn specs() -> Vec<(Kind, ToolSpec)> {
             ),
         ),
         (
+            Kind::DownloadAttachment,
+            spec(
+                DOWNLOAD_ATTACHMENT,
+                "Download one attachment of a message (see the `attachments` list of email_read; `id` is the attachment_id) \
+                 and save it in the daemon's attachment folder. Returns the saved path, size and type, and the text of a \
+                 small text attachment. Never executes it. Content is untrusted. \
+                 Example: {\"uid\":42,\"attachment_id\":\"0\"}",
+                json!({"type":"object","additionalProperties":false,"properties":{
+                    "account": account_prop(),
+                    "folder":{"type":"string","description":"Default INBOX."},
+                    "uid":{"type":"integer","minimum":1,"description":"IMAP/SMTP accounts: the message uid."},
+                    "message_id":{"type":"string","description":"API mailboxes: the message id."},
+                    "attachment_id":{"type":"string","description":"The attachment's `id` from email_read."}
+                },"required":["attachment_id"]}),
+                Effect::Write,
+            ),
+        ),
+        (
             Kind::Draft,
             spec(
                 DRAFT,
@@ -290,8 +333,11 @@ fn specs() -> Vec<(Kind, ToolSpec)> {
                  An opt-out line is added to the body by the system: do not write one yourself. \
                  The system warns the owner about opt-out addresses, daily volume and repeat recipients; \
                  only the owner can send past a warning, you cannot. \
-                 Example: {\"to\":[\"bob@example.com\"],\"subject\":\"Hi\",\"body\":\"...\"}",
-                json!({"type":"object","properties":send_props(),"required":["to","subject","body"]}),
+                 To REPLY to a message in its thread pass `reply_to_uid` (or `reply_to_message_id` for API mailboxes) \
+                 and `body`: the recipient, the `Re:` subject and the threading headers are filled in from the original \
+                 (`reply_all` also answers its other recipients). \
+                 Example: {\"to\":[\"bob@example.com\"],\"subject\":\"Hi\",\"body\":\"...\"} or {\"reply_to_uid\":42,\"body\":\"Thanks!\"}",
+                json!({"type":"object","properties":send_props(),"required":["body"]}),
                 Effect::Destructive,
             ),
         ),
@@ -444,8 +490,23 @@ struct MailInput {
 struct SendInput {
     account: Option<String>,
     opt_out_line: Option<bool>,
+    reply_to_uid: Option<u32>,
+    reply_to_message_id: Option<String>,
+    reply_folder: Option<String>,
+    reply_all: Option<bool>,
     #[serde(flatten)]
     mail: OutgoingMail,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DownloadInput {
+    account: Option<String>,
+    #[serde(default = "default_folder")]
+    folder: String,
+    uid: Option<u32>,
+    message_id: Option<String>,
+    attachment_id: String,
 }
 
 /// A process-unique id for one approval card (never shown to the user).
@@ -550,10 +611,119 @@ fn file_name(path: &str) -> String {
         .unwrap_or_else(|| path.to_owned())
 }
 
+/// How a reply is handed to the mailbox.
+struct ReplyVia {
+    /// The message's provider id (for API mailboxes' thread reply).
+    id: String,
+    kind: AccountKind,
+}
+
+/// `Re: ` once, whatever case the original used.
+fn reply_subject(original: &str) -> String {
+    let t = original.trim();
+    if t.len() >= 3 && t[..3].eq_ignore_ascii_case("re:") {
+        t.to_owned()
+    } else {
+        format!("Re: {t}")
+    }
+}
+
 impl EmailTool {
+    /// For `email_send` with `reply_to_*`: read the original and fill in the
+    /// recipients, subject and threading headers the model did not write itself.
+    /// Runs for the approval card and for the call alike, so both show and send
+    /// exactly the same mail. `None` when this is not a reply.
+    async fn resolve_reply(
+        &self,
+        ctx: &ToolContext,
+        i: &mut SendInput,
+    ) -> Result<Option<ReplyVia>, ToolError> {
+        let id = match (i.reply_to_uid, i.reply_to_message_id.clone()) {
+            (None, None) => return Ok(None),
+            (uid, mid) => message_key(uid, mid)?,
+        };
+        let c = self.conn.scoped(ctx.bot_id.as_deref());
+        let acct = c.resolve(i.account.as_deref())?;
+        let folder = i.reply_folder.clone().unwrap_or_else(default_folder);
+        let original = c.fetch_id(Some(&acct.name), &folder, &id, 1).await?;
+        let own = acct.address.to_lowercase();
+        let primary = original
+            .reply_to
+            .clone()
+            .or_else(|| Some(original.summary.from_addr.clone()).filter(|a| !a.is_empty()))
+            .ok_or_else(|| {
+                ToolError::InvalidInput(
+                    "the message has no single sender address to reply to; pass `to`".into(),
+                )
+            })?;
+        if i.mail.to.is_empty() {
+            i.mail.to = vec![primary.clone()];
+        }
+        if i.reply_all == Some(true) && i.mail.cc.is_empty() {
+            let mut cc: Vec<String> = Vec::new();
+            for r in &original.recipients {
+                if *r != own && *r != primary && !cc.contains(r) && cc.len() < 10 {
+                    cc.push(r.clone());
+                }
+            }
+            i.mail.cc = cc;
+        }
+        if i.mail.subject.trim().is_empty() {
+            i.mail.subject = reply_subject(&original.summary.subject);
+        }
+        if acct.kind == AccountKind::ImapSmtp {
+            // Header ids of the original: IMAP sends a normal mail with the
+            // threading headers; an API mailbox threads by its own message id.
+            if let Some(mid) = original.message_id.clone().filter(|m| !m.is_empty()) {
+                let mut refs = original.references.clone();
+                if !refs.contains(&mid) {
+                    refs.push(mid.clone());
+                }
+                let skip = refs.len().saturating_sub(20);
+                i.mail.references = refs.split_off(skip);
+                i.mail.in_reply_to = Some(mid);
+            }
+        }
+        Ok(Some(ReplyVia {
+            id,
+            kind: acct.kind,
+        }))
+    }
+
+    /// `email_download_attachment`.
+    async fn download(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        let i: DownloadInput = parse(input)?;
+        let c = self.conn.scoped(ctx.bot_id.as_deref());
+        let kind = c.kind(i.account.as_deref())?;
+        let id = message_key(i.uid, i.message_id)?;
+        let (path, data) = c
+            .save_attachment_in(i.account.as_deref(), &i.folder, &id, &i.attachment_id)
+            .await?;
+        let text_like = data
+            .content_type
+            .as_deref()
+            .is_some_and(|t| t.starts_with("text/") || t == "application/json");
+        let text = (text_like && data.bytes.len() <= 20_000)
+            .then(|| String::from_utf8_lossy(&data.bytes).into_owned());
+        let label = source_label(kind, "attachment");
+        let mut out = json!({
+            "saved_to": path.display().to_string(),
+            "size": data.bytes.len(),
+            "content_type": data.content_type,
+            "filename": data.filename,
+            "executed": false,
+            "untrusted_content": true,
+        });
+        if let Some(t) = text {
+            out["text"] = Value::String(t);
+        }
+        Ok(server_json(&label, out))
+    }
+
     /// `email_send`: the guard checks, the opt-out line, the provider call and the log entry.
     async fn send(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
-        let i = parse_send(input)?;
+        let mut i = parse_send(input)?;
+        let reply = self.resolve_reply(ctx, &mut i).await?;
         let c = self.conn.scoped(ctx.bot_id.as_deref());
         let chosen = c
             .resolve(i.account.as_deref())
@@ -583,7 +753,14 @@ impl EmailTool {
         if let Some(f) = &plan.report.footer {
             mail.body = guard::with_footer(&mail.body, f);
         }
-        let receipt = c.send_receipt(Some(&plan.account), &mail).await?;
+        let receipt = match &reply {
+            // An API mailbox threads a reply itself; the recipients are the
+            // ones the owner approved, passed explicitly.
+            Some(r) if r.kind == AccountKind::AgentMail => {
+                c.reply(Some(&plan.account), &r.id, &mail, false).await?
+            }
+            _ => c.send_receipt(Some(&plan.account), &mail).await?,
+        };
         guard.record(SendLogEntry {
             at: guard::now_secs(),
             at_utc: String::new(),
@@ -604,6 +781,7 @@ impl EmailTool {
         Ok(json_out(json!({
             "sent": true,
             "recipients": i.mail.to.len() + i.mail.cc.len() + i.mail.bcc.len(),
+            "in_reply_to": reply.as_ref().map(|r| r.id.clone()),
             "opt_out_line_added": plan.line_on,
             "owner_sent_anyway": overridden,
             "server_response": receipt.id,
@@ -637,7 +815,8 @@ impl Tool for EmailTool {
         if !matches!(self.kind, Kind::Send) {
             return Ok(None);
         }
-        let i = parse_send(input.clone())?;
+        let mut i = parse_send(input.clone())?;
+        self.resolve_reply(ctx, &mut i).await?;
         let plan = self.plan_send(ctx, &i)?;
         let token = next_token();
         // The owner is about to be shown exactly these warnings; a later call that matches this
@@ -794,6 +973,7 @@ impl Tool for EmailTool {
                     _ => json!({"message_id": id, "read": read}),
                 })))
             }
+            Kind::DownloadAttachment => self.download(ctx, input).await,
             Kind::Draft => {
                 let i = parse_mail(input)?;
                 draft_output(&c, &i).await

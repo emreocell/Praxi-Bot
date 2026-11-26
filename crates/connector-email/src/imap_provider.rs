@@ -13,7 +13,9 @@ use crate::cred::resolve_secret;
 use crate::error::EmailError;
 use crate::imap::{FolderInfo, ImapSession};
 use crate::message::MessageDetail;
-use crate::provider::{Capabilities, Found, MailboxProvider, Receipt, SearchRequest};
+use crate::provider::{
+    AttachmentData, Capabilities, Found, MailboxProvider, Receipt, SearchRequest,
+};
 use crate::smtp::{self, OutgoingMail};
 
 /// IMAP/SMTP access to one account. The password is resolved from the secret
@@ -87,7 +89,7 @@ impl MailboxProvider for ImapSmtpProvider {
             mark_read: true,
             drafts: true,
             list_new: false,
-            attachments: false,
+            attachments: true,
             reply: false,
             push: false,
         }
@@ -149,6 +151,25 @@ impl MailboxProvider for ImapSmtpProvider {
         let folder = folder.to_owned();
         self.with_imap(move |s, _| Box::pin(async move { s.set_seen(&folder, uid, read).await }))
             .await
+    }
+
+    async fn get_attachment_in(
+        &self,
+        folder: &str,
+        message_id: &str,
+        attachment_id: &str,
+        max_bytes: usize,
+    ) -> Result<AttachmentData, EmailError> {
+        crate::imap::check_folder(folder)?;
+        let uid = parse_uid(message_id)?;
+        let index: usize = attachment_id.trim().parse().map_err(|_| {
+            EmailError::Input("`attachment_id` is the number listed by email_read".into())
+        })?;
+        let folder = folder.to_owned();
+        self.with_imap(move |s, _| {
+            Box::pin(async move { s.fetch_attachment(&folder, uid, index, max_bytes).await })
+        })
+        .await
     }
 
     async fn save_draft(&self, mail: &OutgoingMail) -> Result<String, EmailError> {

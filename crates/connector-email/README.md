@@ -11,11 +11,12 @@ number of new tools and leaves existing registrations intact.
 | Tool | Effect | Inputs |
 | --- | --- | --- |
 | `email_list_folders` | Read | optional account |
-| `email_search` | Read | account, folder, from, subject, since, before, unread, limit |
+| `email_search` | Read | account, folder, from, subject, text, include_junk, since, before, unread, limit |
 | `email_read` | Read | uid, account, folder, max_body_chars |
 | `email_mark_read` | Write | uid, account, folder, read |
+| `email_download_attachment` | Write | uid or message_id, attachment_id, account, folder |
 | `email_draft` | Write | account, to, cc, bcc, subject, body |
-| `email_send` | Destructive | account, to, cc, bcc, subject, body |
+| `email_send` | Destructive | account, to, cc, bcc, subject, body; or reply_to_uid / reply_to_message_id (+ reply_folder, reply_all) to reply in a thread |
 
 All tools use `PermissionCategory::Messaging`. **The host must obtain approval
 before invoking `email_send`.** As with builtin tools, a `ToolSpec` describes

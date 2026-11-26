@@ -99,6 +99,16 @@ pub struct MessageDetail {
     /// it reports them after judging each one.
     #[serde(skip)]
     pub links: Vec<String>,
+    /// Bare `Reply-To` address (lower-case), when the mail names exactly one.
+    /// Only the reply flow reads it; it is not part of the model-facing JSON.
+    #[serde(skip)]
+    pub reply_to: Option<String>,
+    /// The `References` header ids (without angle brackets), oldest first.
+    #[serde(skip)]
+    pub references: Vec<String>,
+    /// Bare addresses of the To and Cc recipients, for "reply all".
+    #[serde(skip)]
+    pub recipients: Vec<String>,
 }
 
 /// The bare address inside a `Name <addr>` / `addr` string, lower-case; empty
@@ -230,8 +240,11 @@ pub fn parse_detail(
     let (body_text, body_truncated) = truncate_chars(&body, max_body_chars);
     let attachments = msg
         .attachments()
-        .map(|p| AttachmentInfo {
-            id: None,
+        .enumerate()
+        .map(|(i, p)| AttachmentInfo {
+            // The position among the message's attachments: what
+            // `email_download_attachment` takes.
+            id: Some(i.to_string()),
             filename: p.attachment_name().map(cap_untrusted),
             content_type: p.content_type().map_or_else(
                 || "application/octet-stream".to_string(),
@@ -254,6 +267,60 @@ pub fn parse_detail(
         body_truncated,
         attachments,
         links,
+        reply_to: msg
+            .reply_to()
+            .map(|a| sole_address(Some(a)))
+            .filter(|a| !a.is_empty()),
+        references: msg
+            .references()
+            .as_text_list()
+            .unwrap_or_default()
+            .iter()
+            .map(|r| r.trim_matches(['<', '>']).to_owned())
+            .collect(),
+        recipients: msg
+            .to()
+            .iter()
+            .chain(msg.cc().iter())
+            .flat_map(|a| a.iter())
+            .filter_map(|a| a.address.as_deref())
+            .map(bare_address)
+            .filter(|a| !a.is_empty())
+            .collect(),
+    })
+}
+
+/// The bytes of attachment number `index` of a raw message (the numbering
+/// [`parse_detail`] lists), refusing more than `max_bytes`.
+///
+/// # Errors
+/// [`EmailError::NotFound`] for an unknown attachment, [`EmailError::Imap`] for
+/// an unparseable message or an attachment over `max_bytes`.
+pub(crate) fn attachment_of(
+    raw: &[u8],
+    index: usize,
+    max_bytes: usize,
+) -> Result<crate::provider::AttachmentData, EmailError> {
+    let msg = MessageParser::default()
+        .parse(raw)
+        .ok_or_else(|| EmailError::Imap("message could not be parsed".into()))?;
+    let part = msg
+        .attachments()
+        .nth(index)
+        .ok_or_else(|| EmailError::NotFound(format!("attachment {index}")))?;
+    if part.len() > max_bytes {
+        return Err(EmailError::Imap(format!(
+            "attachment {index} is {} bytes, over the {max_bytes} byte cap",
+            part.len()
+        )));
+    }
+    Ok(crate::provider::AttachmentData {
+        bytes: part.contents().to_vec(),
+        content_type: part.content_type().map(|ct| match ct.subtype() {
+            Some(s) => cap_untrusted(&format!("{}/{s}", ct.ctype())),
+            None => cap_untrusted(ct.ctype()),
+        }),
+        filename: part.attachment_name().map(cap_untrusted),
     })
 }
 

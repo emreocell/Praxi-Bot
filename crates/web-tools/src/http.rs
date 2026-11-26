@@ -276,6 +276,40 @@ impl HttpFetcher {
         }
     }
 
+    /// Send ONE `GET` to `url` and return where it redirects to, without
+    /// requesting that target. `None` when the answer is not a redirect. The
+    /// URL and the target are policy-checked and the connection only goes to a
+    /// checked address; no body is read. Used to look through a click-tracking
+    /// link exactly one hop.
+    ///
+    /// # Errors
+    /// Policy violations, transport errors, or a redirect without a usable
+    /// `Location`.
+    pub async fn redirect_target(&self, url: &str) -> Result<Option<Url>, WebError> {
+        let current = self.check(url)?;
+        refuse_blocked_site(&current, false)?;
+        let resp = self
+            .client
+            .get(current.clone())
+            .send()
+            .await
+            .map_err(|e| map_send_error(&e))?;
+        if !resp.status().is_redirection() {
+            return Ok(None);
+        }
+        let loc = resp
+            .headers()
+            .get(LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| WebError::Http(format!("{} without Location header", resp.status())))?;
+        let next = current
+            .join(loc)
+            .map_err(|e| WebError::InvalidUrl(format!("redirect `{loc}`: {e}")))?;
+        self.policy.check_url(&next)?;
+        refuse_blocked_site(&next, true)?;
+        Ok(Some(next))
+    }
+
     /// POST a JSON payload to `url` without following redirects (so API keys
     /// and request bodies are never bounced to another host).
     ///

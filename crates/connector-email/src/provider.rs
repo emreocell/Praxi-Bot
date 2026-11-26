@@ -239,6 +239,23 @@ pub trait MailboxProvider: Send + Sync {
         unsupported("downloading attachments")
     }
 
+    /// [`MailboxProvider::get_attachment`] for a message in `folder` (IMAP
+    /// needs the folder; providers without folders ignore it). Attachment ids
+    /// are whatever `get_message` listed.
+    ///
+    /// # Errors
+    /// As [`MailboxProvider::get_attachment`].
+    async fn get_attachment_in(
+        &self,
+        _folder: &str,
+        message_id: &str,
+        attachment_id: &str,
+        max_bytes: usize,
+    ) -> Result<AttachmentData, EmailError> {
+        self.get_attachment(message_id, attachment_id, max_bytes)
+            .await
+    }
+
     /// Send a message **now**. Callers must have obtained approval.
     ///
     /// # Errors

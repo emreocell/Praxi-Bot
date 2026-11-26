@@ -178,12 +178,26 @@ Açıldığında sekiz araç `Messaging` izin kategorisi altında kaydedilir (ye
 | --- | --- | --- |
 | `email_identities` | Okuma | Botun kullanabileceği posta kimliklerini (adresleri), varsayılanını ve her gönderim kipini listeler. Gizli bilgi içermez |
 | `email_list_folders` | Okuma | IMAP LIST ile klasörleri ve özelliklerini listeler |
-| `email_search` | Okuma | Gönderen/konu/tarih/okunmamış süzgeçleriyle iletileri arar, UID özetleri döndürür |
+| `email_search` | Okuma | Gönderen/konu/ileti metni/tarih/okunmamış süzgeçleriyle iletileri arar, UID özetleri döndürür. API posta kutularında `include_junk` ile istenmeyen postalar da gelir |
 | `email_read` | Okuma | BODY.PEEK kullanarak UID ile ileti içeriğini ve ek meta verisini okur |
 | `email_mark_read` | Yazma | Bir iletide Seen bayrağını koyar ya da kaldırır |
+| `email_download_attachment` | Yazma | Bir iletinin tek bir ekini (`email_read`in listelediği `id` ile) daemon'un ek klasörüne kaydeder. Yolu, boyutu ve türünü, küçük bir metin dosyasıysa metnini döndürür. Eki asla açmaz ya da çalıştırmaz |
 | `email_draft` | Yazma | İletiyi taslaklar klasörüne taslak olarak kaydeder (SMTP'ye asla bağlanmaz) |
-| `email_send` | Yıkıcı | Bir e-postayı SMTP ile hemen gönderir (**insan onayı gerektirir**) |
-| `email_wait_for` | Okuma | Botun **kendi** gelen kutusunda beklenen TEK bir postayı (bir doğrulama postası) en fazla 10 dakika bekler. Gönderen, konu, zaman, kodlar ve izleyebileceği bağlantıları döndürür |
+| `email_send` | Yıkıcı | Bir e-postayı SMTP ile hemen gönderir (**insan onayı gerektirir**). `reply_to_uid` ile (API posta kutularında `reply_to_message_id`) aynı konuşmaya yanıt verir: alıcı, `Re:` konusu ve `In-Reply-To`/`References` başlıkları asıl iletiden alınır, onay kartı tam olarak bunu gösterir |
+| `email_wait_for` | Okuma | Botun **kendi** gelen kutusunda ve istenmeyen postalar klasöründe beklenen TEK bir postayı (bir doğrulama postası) bekler. Gönderen, konu, zaman, kodlar ve izleyebileceği bağlantıları döndürür. Aşağıya bak |
+
+## Doğrulama postasını beklemek
+
+`email_wait_for`, botun bir kaydı bitirme yoludur: formu gönderdikten hemen sonra siteden gelen postayı ister ve açabileceği kodu ve bağlantıyı alır.
+
+- **Çalışmayı tutmaz.** Bekleme arka planda en fazla 10 dakika sürer (`timeout_minutes`), ama bir çağrı en çok 30 saniye bekletir (`block_seconds`, en fazla 90). Henüz bir şey gelmediyse yanıt, bir `wait_id` ile `pending` olur: bot başka işe geçer (sıradaki site) ve sonra bu kimlikle yeniden sorar. Önceden gelmiş posta hemen bulunur. Durdur, çağrıyı ve arka plandaki beklemeyi bitirir. Daemon yeniden başlarsa bekleme kimlikleri unutulur; yeniden sormak, önceden gelmiş postayı yine bulur.
+- **İstenmeyen postalar klasörü de taranır.** IMAP'te sunucunun istenmeyenler klasörü (`\Junk` işaretli ya da adı Junk, Spam, Bulk, Önemsiz, Gereksiz olan) gelen kutusuyla birlikte kontrol edilir. AgentMail'de spam ve kimliği doğrulanmamış postalar da dahildir.
+- **İzleme bağlantılarının içine bir adım bakılır.** SendGrid, Mailgun, Mailchimp gibi hizmetlerin postaları gerçek bağlantıyı bir tıklama izleme yönlendirmesine sarar. Bilinen bu adresler için daemon tek bir istek yapar (web getirmeleriyle aynı adres korumasından geçer: özel, yerel ya da metadata adresi yok, vekil sunucu yok) ve yönlendirmenin nereye gittiğini okur, hedefi açmaz. Hedef sonra diğer bağlantılar gibi değerlendirilir: bota yalnızca tarayıcının bulunduğu sitedeki (ya da senin listelediğin bir alan adındaki) https bağlantı verilir.
+- Yanıttaki her şey postadan gelir ve güvenilmeyen veridir.
+
+## Botun araçlarının çalıştığını denetle
+
+Bottan **`tool_self_check`** çalıştırmasını iste (“hangi araçların çalışıyor?”). Güvenli bir örnek çağrısı olan her araç için sabit, salt okunur bir çağrı yapar ve `ok`, `failed` (hata ve sade bir çözüm ipucuyla) ya da `skipped` (nedeniyle) bildirir; ayrıca bilgisayar hakkında bilgi verir: daemon'un kullanıcısı veri klasörüne yazabiliyor mu, bir ev klasörü var mı, PATH'te bir kabuk var mı. Bir şeyi değiştiren aracı asla çağırmaz ve posta ya da dosya içeriği döndürmez. Tarayıcı ve masaüstü denetimleri `bot doctor` içindedir.
 
 ## Birden fazla posta kimliği
 

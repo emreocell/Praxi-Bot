@@ -88,11 +88,11 @@ inbox, so expect a verification mail after you submit a sign-up form.",
     match (tools.read, tools.wait) {
         (true, true) => out.push_str(
             "\nRead the inbox with email_search and email_read. Right after you submit a sign-up form call \
-email_wait_for: it waits for the verification mail and returns the code and the links you may follow.",
+email_wait_for: it waits for the verification mail (inbox and junk folder) and returns the code and the links you may follow. If it answers pending, do other work and call it again with its wait_id.",
         ),
         (true, false) => out.push_str("\nRead the inbox with email_search and email_read."),
         (false, true) => out.push_str(
-            "\nRight after you submit a sign-up form call email_wait_for: it waits for the verification mail and returns the code and the links you may follow.",
+            "\nRight after you submit a sign-up form call email_wait_for: it waits for the verification mail (inbox and junk folder) and returns the code and the links you may follow. If it answers pending, do other work and call it again with its wait_id.",
         ),
         (false, false) => out.push_str(
             "\nThe mail tools are switched off for you: if a task needs to read this inbox, tell the owner to switch them on in your mail settings.",
