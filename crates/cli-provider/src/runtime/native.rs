@@ -807,6 +807,7 @@ fn mode_offered(session: &Value, mode: &str) -> bool {
 /// found: `GOOSE_PROVIDER`" (or `GOOSE_MODEL`). Only this exact failure of `session/new` is
 /// a sign-in problem; any other internal error stays a protocol error.
 fn goose_unconfigured(v: &Value) -> bool {
+    // `id == 2` is the id of the `session/new` request sent by the ACP handshake.
     v["id"] == 2
         && v["error"]["code"] == -32603
         && v["error"]["data"]
