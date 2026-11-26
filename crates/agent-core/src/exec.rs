@@ -70,6 +70,8 @@ enum Slot {
     },
     Run {
         tool: Arc<dyn Tool>,
+        /// The tool the model meant: the target of a `use_tool` call, else `tool` itself.
+        name: String,
         input: Value,
         call: ToolCallId,
         meta: bool,
@@ -1933,6 +1935,7 @@ impl TurnExecutor {
                 {
                     Slot::Run {
                         tool,
+                        name: resolved.name.clone(),
                         input,
                         call: call_uuid,
                         meta,
@@ -1957,6 +1960,7 @@ impl TurnExecutor {
                     {
                         Ok(permit) => Slot::Run {
                             tool,
+                            name: resolved.name.clone(),
                             input,
                             call: call_uuid,
                             meta,
@@ -1984,6 +1988,7 @@ impl TurnExecutor {
             } else {
                 Slot::Run {
                     tool,
+                    name: resolved.name.clone(),
                     input,
                     call: call_uuid,
                     meta,
@@ -2061,6 +2066,7 @@ impl TurnExecutor {
                 }
                 Slot::Run {
                     tool,
+                    name: observed,
                     input,
                     call: call_id,
                     meta,
@@ -2109,8 +2115,9 @@ impl TurnExecutor {
                     }
                     // A full page observation is kept per browser tab when the
                     // conversation is shortened: ask the browser which tab this was.
+                    // A `use_tool` call is a page observation by the name of its target.
                     if !is_error
-                        && tool_registry::ObservationScope::of_name(&tool.spec().name)
+                        && tool_registry::ObservationScope::of_name(&observed)
                             == Some(tool_registry::ObservationScope::Page)
                     {
                         let tctx = ToolContext {
@@ -2119,7 +2126,14 @@ impl TurnExecutor {
                             lane: ctx_ref.lane(),
                             ..ToolContext::default()
                         };
-                        if let Some(tab) = tool.landed_tab(&tctx).await {
+                        let target = if tool.spec().name == observed {
+                            Some(Arc::clone(&tool))
+                        } else {
+                            self.sh.tools.get(&observed)
+                        };
+                        if let Some(target) = target
+                            && let Some(tab) = target.landed_tab(&tctx).await
+                        {
                             tabs_ref.lock().insert(call_id, tab);
                         }
                     }

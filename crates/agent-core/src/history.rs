@@ -1264,7 +1264,7 @@ preset = 'approve-destructive'",
     /// Registry stand-in: the built-in tools with their real category/effect.
     fn spec_of(name: &str) -> Option<ToolSpec> {
         let (category, effect) = match name {
-            "browser_open" | "browser_click" | "browser_fill" => {
+            "browser_open" | "browser_click" | "browser_fill" | "browser_back" => {
                 (PermissionCategory::Browser, Effect::Write)
             }
             "browser_snapshot" | "browser_scroll" | "browser_wait" => {
@@ -2162,8 +2162,9 @@ preset = 'approve-destructive'",
         assert_eq!(texts(&pass1), texts(&off), "different sites are not merged");
         let on = build(&fx, &steps, None, &comp(2, 20_000, Some(&spill)));
         let t = texts(&on);
-        // Horizon 8: ordinals 0..8 may be cut, 8 and 9 (the newest) are after it.
-        for (i, x) in t.iter().enumerate().take(8) {
+        // Horizon 8: ordinals 0..8 may be cut, 8 and 9 (the newest) are after it. They go
+        // oldest first and only until the budget is met: about 6 pages of 8 KB here.
+        for (i, x) in t.iter().enumerate().take(6) {
             assert!(
                 x.contains("full output saved at"),
                 "page {i} not spilled: {x}"
@@ -2248,6 +2249,188 @@ preset = 'approve-destructive'",
         let t = texts(&on);
         assert!(t[..4].iter().all(|x| is_cut(x)), "{t:?}");
         assert!(!is_cut(&t[5]), "the newest page stays whole");
+    }
+
+    /// Result `id` of the built conversation.
+    fn result_of(messages: &[Message], id: &str) -> String {
+        messages
+            .iter()
+            .find(|m| m.tool_call_id.as_deref() == Some(id))
+            .unwrap()
+            .content
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    /// A browser call of `name` in tab `tab` whose answer is `text`.
+    fn browser_round(
+        run: &Run,
+        idx: &mut u32,
+        id: &str,
+        name: &str,
+        args: &Value,
+        text: &str,
+        tab: Option<&str>,
+    ) -> Vec<RunStep> {
+        let mut steps = round(run, idx, id, name, args, text, false, None);
+        if let Some(tab) = tab {
+            steps[1].output.as_mut().unwrap()["results"][0]["tab"] = json!(tab);
+        }
+        steps
+    }
+
+    /// Pages of other sites in tab 2, so the budget has something to cut.
+    fn pressure(run: &Run, idx: &mut u32, steps: &mut Vec<RunStep>) {
+        for i in 0..6 {
+            steps.extend(site_round(
+                run,
+                idx,
+                &format!("p{i}"),
+                &format!("https://other{i}.test/"),
+                Some("tab-2"),
+            ));
+        }
+    }
+
+    #[test]
+    fn an_interactive_snapshot_does_not_make_the_opened_page_of_its_tab_stale() {
+        let fx = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let spill = dir.path().to_path_buf();
+        let mut steps = start(&fx.1);
+        let mut idx = 1;
+        steps.extend(site_round(
+            &fx.1,
+            &mut idx,
+            "open",
+            "https://app.test/",
+            Some("tab-1"),
+        ));
+        // The same page again, as its interactive elements only: another view
+        // of one page, not a different one.
+        steps.extend(browser_round(
+            &fx.1,
+            &mut idx,
+            "snap",
+            "browser_snapshot",
+            &json!({"interactive_only": true}),
+            &page("https://app.test/", 1),
+            Some("tab-1"),
+        ));
+        pressure(&fx.1, &mut idx, &mut steps);
+        let on = build(&fx, &steps, None, &comp(2, 10_000, Some(&spill)));
+        assert!(
+            !is_cut(&result_of(&on, "open")),
+            "the opened page is still the page of its tab"
+        );
+        assert!(!is_cut(&result_of(&on, "snap")));
+        assert!(is_cut(&result_of(&on, "p0")), "other tabs' old pages go");
+    }
+
+    #[test]
+    fn going_back_keeps_the_page_the_tab_is_on_now_not_only_the_one_it_left() {
+        let fx = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let spill = dir.path().to_path_buf();
+        let mut steps = start(&fx.1);
+        let mut idx = 1;
+        steps.extend(site_round(
+            &fx.1,
+            &mut idx,
+            "a",
+            "https://a.test/",
+            Some("tab-1"),
+        ));
+        steps.extend(site_round(
+            &fx.1,
+            &mut idx,
+            "b",
+            "https://b.test/",
+            Some("tab-1"),
+        ));
+        // `browser_back`: the answer starts with the page the tab went back to.
+        steps.extend(browser_round(
+            &fx.1,
+            &mut idx,
+            "back",
+            "browser_back",
+            &json!({}),
+            &page("https://a.test/", 2),
+            None,
+        ));
+        pressure(&fx.1, &mut idx, &mut steps);
+        let on = build(&fx, &steps, None, &comp(2, 10_000, Some(&spill)));
+        assert!(!is_cut(&result_of(&on, "a")), "the page the tab is on");
+        assert!(!is_cut(&result_of(&on, "b")), "its newest observation");
+        assert!(!is_cut(&result_of(&on, "back")), "an action is never cut");
+        assert!(is_cut(&result_of(&on, "p0")));
+    }
+
+    #[test]
+    fn a_framed_page_is_still_found_by_its_address() {
+        // The daemon's data frame (a fresh label and marker line on every call) and the
+        // notice of an already open page come before the page line.
+        let fx = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let spill = dir.path().to_path_buf();
+        let framed = |tag: usize| {
+            crate::page_guard::wrap_data_block(
+                "browser_open",
+                &format!(
+                    "[Praxi notice] This page is already open (not reloaded).\n{}",
+                    page("https://app.test/", tag)
+                ),
+            )
+        };
+        let mut steps = start(&fx.1);
+        let mut idx = 1;
+        for i in 0..5 {
+            steps.extend(browser_round(
+                &fx.1,
+                &mut idx,
+                &format!("o{i}"),
+                "browser_open",
+                &json!({"url": "https://app.test/"}),
+                &framed(i),
+                Some("tab-1"),
+            ));
+        }
+        let on = build(&fx, &steps, None, &comp(2, 0, Some(&spill)));
+        let t = texts(&on);
+        assert!(
+            is_marker(&t[0]) && is_marker(&t[1]),
+            "older observations of one page are merged: {t:?}"
+        );
+        assert!(!is_cut(&t[4]), "the newest stays");
+    }
+
+    #[test]
+    fn the_budget_cuts_pages_only_as_far_as_it_needs() {
+        let fx = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let spill = dir.path().to_path_buf();
+        let mut steps = start(&fx.1);
+        let mut idx = 1;
+        for i in 0..10 {
+            steps.extend(site_round(
+                &fx.1,
+                &mut idx,
+                &format!("o{i}"),
+                &format!("https://site{i}.test/"),
+                Some("tab-1"),
+            ));
+        }
+        let off = build(&fx, &steps, None, &Compaction::OFF);
+        let on = build(&fx, &steps, None, &comp(2, 45_000, Some(&spill)));
+        let t = texts(&on);
+        assert!(is_cut(&t[0]), "the oldest page goes first");
+        assert!(
+            !is_cut(&t[6]) && !is_cut(&t[7]),
+            "pages the budget does not need stay whole"
+        );
+        assert!(total_bytes(&on) < total_bytes(&off));
+        assert_pairing(&on);
     }
 
     #[test]

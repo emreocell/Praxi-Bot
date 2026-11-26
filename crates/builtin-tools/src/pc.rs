@@ -516,6 +516,16 @@ impl BrowserDriver for RemoteBrowserDriver {
             .and_then(Value::as_str)
             .map(str::to_owned)
     }
+    /// The computer's own id of the tab. A computer that does not serve this
+    /// operation (an older version) answers with an error: the tab stays unknown.
+    async fn current_tab_id(&self) -> Option<String> {
+        self.op("current_tab_id", json!({}))
+            .await
+            .ok()?
+            .get("tab")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    }
 }
 
 /// `pc_info`: what the computer is, so the model writes its commands and paths
@@ -866,6 +876,59 @@ mod tests {
             self.desktops.lock().push(caller.clone());
             Err(PcError::Offline)
         }
+    }
+
+    /// Answers every browser operation from a table; an operation it does not
+    /// know is an error (what an older computer does).
+    struct Serving(Vec<(&'static str, Value)>);
+
+    #[async_trait]
+    impl PcLink for Serving {
+        async fn call(&self, _: &str, params: Value, _: Duration) -> Result<Value, PcError> {
+            let op = params["op"].as_str().unwrap_or_default();
+            self.0
+                .iter()
+                .find(|(name, _)| *name == op)
+                .map(|(_, answer)| answer.clone())
+                .ok_or(PcError::Offline)
+        }
+        fn desktop(&self, _: &PcCaller) -> Result<Arc<dyn DesktopBackend>, PcError> {
+            Err(PcError::Offline)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_remote_browser_reports_the_tab_the_computer_names() {
+        let caller = PcCaller {
+            id: "bot-a".into(),
+            name: "Ayla".into(),
+        };
+        let link: Arc<dyn PcLink> = Arc::new(Serving(vec![(
+            "current_tab_id",
+            json!({"tab": "REMOTE-TAB-1"}),
+        )]));
+        let driver = RemoteBrowserDriver::for_server(link, caller.clone());
+        assert_eq!(
+            driver.current_tab_id().await.as_deref(),
+            Some("REMOTE-TAB-1")
+        );
+        // The computer cannot say (no session): unknown, not an error.
+        let link: Arc<dyn PcLink> =
+            Arc::new(Serving(vec![("current_tab_id", json!({"tab": null}))]));
+        assert_eq!(
+            RemoteBrowserDriver::new(link, caller.clone())
+                .current_tab_id()
+                .await,
+            None
+        );
+        // An older computer does not serve the operation: unknown as well.
+        let link: Arc<dyn PcLink> = Arc::new(Serving(Vec::new()));
+        assert_eq!(
+            RemoteBrowserDriver::for_server(link, caller)
+                .current_tab_id()
+                .await,
+            None
+        );
     }
 
     /// Review blocker 1: every request names the calling bot, and the desktop

@@ -259,3 +259,48 @@ async fn identical_untrusted_pages_in_fresh_frames_are_still_a_cycle() {
         "the framed cycle must stop early, {ran} calls ran"
     );
 }
+
+#[tokio::test]
+async fn a_page_observation_behind_use_tool_records_its_tab_too() {
+    let env = setup();
+    let mut snapshot = with_class(
+        "browser_snapshot",
+        Effect::Read,
+        PermissionCategory::Browser,
+        ContentClass::none(),
+        "# Page (http://a/)\nbutton",
+    );
+    snapshot.tab = Some("TAB-3".to_owned());
+    let snapshot = Arc::new(snapshot);
+    let mut tools = vec![snapshot.clone()];
+    // Enough tools that the model is offered the discovery surface (`use_tool`).
+    tools.extend((0..4).map(|i| Arc::new(tool(&format!("t.extra{i}"), Effect::Read, "x"))));
+    let refs: Vec<&Arc<TestTool>> = tools.iter().collect();
+    let fake = Fake::new(vec![
+        calls(&[(
+            "1",
+            "use_tool",
+            json!({"name": "browser_snapshot", "input": {}}),
+        )]),
+        text("done"),
+    ]);
+    let mut config = cfg(Policy::full());
+    config.discovery_threshold = 3;
+    let lp = make_loop(&env.storage, env.bot, &fake, &refs, profile(""), config);
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(snapshot.count.load(Ordering::SeqCst), 1);
+    let tab = env
+        .storage
+        .list_steps(run)
+        .unwrap()
+        .iter()
+        .find(|s| s.name == "tools")
+        .map(|s| s.output.as_ref().unwrap()["results"][0]["tab"].clone())
+        .unwrap();
+    assert_eq!(
+        tab,
+        json!("TAB-3"),
+        "the tab of a use_tool call is recorded"
+    );
+}

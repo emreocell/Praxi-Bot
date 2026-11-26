@@ -1190,7 +1190,8 @@ impl HostDesktopHandler {
                     format!("switch to tab {n}"),
                 ))
             }
-            "snapshot" | "screenshot" | "tabs" | "wait" | "scroll" | "current_url" => None,
+            "snapshot" | "screenshot" | "tabs" | "wait" | "scroll" | "current_url"
+            | "current_tab_id" => None,
             _ => return Err(self.refuse(peer, method, "that browser operation is not served")),
         };
         if let Some((target, payload)) = write {
@@ -1713,6 +1714,11 @@ pub(crate) async fn run_browser_op(
         }
         "current_url" => Ok(serde_json::json!({
             "url": driver.current_url().await.map(|u| redact(&u))
+        })),
+        // The browser's own id of the tab (an opaque id, no page text); the loop
+        // keeps one full page per tab when it shortens a long conversation.
+        "current_tab_id" => Ok(serde_json::json!({
+            "tab": driver.current_tab_id().await.map(|t| redact(&t))
         })),
         _ => Err(RpcError::new(
             ERR_METHOD_NOT_FOUND,
@@ -2290,6 +2296,8 @@ mod tests {
     struct FakeBrowser {
         /// What `current_url` reports (`None`: the driver cannot tell).
         url: Mutex<Option<String>>,
+        /// What `current_tab_id` reports (`None`: the driver cannot tell).
+        tab: Mutex<Option<String>>,
         opened: Mutex<Vec<String>>,
         snapshots: std::sync::atomic::AtomicUsize,
         /// Bump this epoch while a snapshot is being captured.
@@ -2309,6 +2317,9 @@ mod tests {
     impl BrowserDriver for FakeBrowser {
         async fn current_url(&self) -> Option<String> {
             self.url.lock().clone()
+        }
+        async fn current_tab_id(&self) -> Option<String> {
+            self.tab.lock().clone()
         }
         async fn open(&self, url: &str, _: Option<&str>) -> Result<String, String> {
             self.opened.lock().push(url.to_owned());
@@ -2780,7 +2791,13 @@ mod tests {
         assert_eq!(r.browser.snapshots.load(Ordering::SeqCst), 1);
         // The human takes the screen: nothing is read at all.
         r.refused.store(true, Ordering::SeqCst);
-        for op in ["snapshot", "screenshot", "tabs", "current_url"] {
+        for op in [
+            "snapshot",
+            "screenshot",
+            "tabs",
+            "current_url",
+            "current_tab_id",
+        ] {
             let res =
                 r.h.handle(
                     &host,
@@ -2811,6 +2828,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out["url"], "https://example.test/?token=••••");
+    }
+
+    /// The tab id leaves the host as `{"tab": id}`, `null` when the browser cannot say.
+    #[tokio::test]
+    async fn current_tab_id_reports_the_browsers_own_tab() {
+        let browser = Arc::new(FakeBrowser::default());
+        let driver: Arc<dyn BrowserDriver> = browser.clone();
+        let redact: Arc<dyn Fn(&str) -> String + Send + Sync> = Arc::new(str::to_owned);
+        let out = run_browser_op(&driver, "current_tab_id", &serde_json::json!({}), &redact)
+            .await
+            .unwrap();
+        assert!(out["tab"].is_null(), "unknown stays unknown");
+        *browser.tab.lock() = Some("TAB-9".into());
+        let out = run_browser_op(&driver, "current_tab_id", &serde_json::json!({}), &redact)
+            .await
+            .unwrap();
+        assert_eq!(out["tab"], "TAB-9");
     }
 
     /// Blocker 3: an "allow" that was already delivered does not run once ITS

@@ -239,6 +239,7 @@ impl ServerTargetHandler {
                 | "wait"
                 | "screenshot"
                 | "current_url"
+                | "current_tab_id"
         ) {
             return Err(self.refuse(peer, method, "that browser operation is not served"));
         }

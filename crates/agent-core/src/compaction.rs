@@ -17,13 +17,14 @@
 //!    touches) are cut to a preview, after their full text is on disk behind
 //!    an `[UNTRUSTED ...]` header and its path is in the shortened text.  Full
 //!    page observations (`browser_open` / `browser_snapshot`) are cut too,
-//!    except the newest one of each browser tab and older ones of that same
-//!    page (pass 1's business): a task that walks through many sites would
-//!    otherwise keep every page it ever read (pass 1 only merges observations
-//!    of one URL).  The set of cut results is decided on
-//!    the size without pass-1 savings, so it only ever grows with the turn (no
-//!    result is restored later).  If the full text cannot be saved the result
-//!    stays whole.
+//!    oldest first and only as far as the budget needs, except the newest one
+//!    of each browser tab and every observation of the page a tab is on now
+//!    (by address, whatever the view, see `protected_pages`): a task that
+//!    walks through many sites would otherwise keep every page it ever read
+//!    (pass 1 only merges observations of one URL).  The set of cut results is
+//!    decided on the size without pass-1 savings, so it grows with the turn
+//!    (a result is restored only when its tab goes back to that page).  If the
+//!    full text cannot be saved the result stays whole.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -116,6 +117,9 @@ pub(crate) struct ToolMeta {
     /// Browser tab a full page observation came from (the browser's own id,
     /// recorded with the result); `None` on older rows and for other tools.
     pub tab: Option<String>,
+    /// Address the page was at in this result: of a full page observation, or
+    /// where a browser action (a click, `browser_back`) left the page.
+    pub page_url: Option<String>,
     /// Pass 1 already replaced this result.
     pub shortened: bool,
     /// Bytes pass 1 saved on this result (0 when not shortened).
@@ -135,7 +139,10 @@ pub(crate) fn resolve_call(name: &str, arguments: &str) -> (String, Value) {
 
 /// `# title (url)` first line of a browser observation -> `url`.
 fn page_url(text: &str) -> Option<&str> {
-    // A label line may come first; the page line is the first `# ` line.
+    // The daemon's data frame (a per-call label and marker line) comes off
+    // first, then a notice line may still precede the page line (the page that
+    // `browser_open` found already open); the page line is the first `# ` line.
+    let text = crate::page_guard::unframe(text);
     let line = text
         .lines()
         .take(3)
@@ -193,6 +200,15 @@ pub(crate) fn tool_meta(
         (None, Some(_)) => None,
     };
     let key = scope.and_then(|s| target_key(s, &args, &r.text));
+    // Where the page is after this call: a full observation says so, and so does
+    // the answer of a browser action (it starts with the page line too).
+    let browser_call = match &spec {
+        Some(s) => s.category == tool_registry::PermissionCategory::Browser,
+        None => c.lookup.is_none() && name.starts_with("browser_"),
+    };
+    let page_url = (!r.is_error && (scope == Some(ObservationScope::Page) || browser_call))
+        .then(|| page_url(&r.text).map(str::to_owned))
+        .flatten();
     // Browser and desktop tools return page/window state or diffs that later
     // calls depend on; meta tools carry answers and notices.
     let cuttable = scope.is_none()
@@ -214,6 +230,7 @@ pub(crate) fn tool_meta(
         key,
         cuttable,
         tab: r.tab.clone(),
+        page_url,
         shortened: false,
         saved: 0,
     }
@@ -380,29 +397,50 @@ fn pass_superseded(out: &mut [Message], metas: &mut [ToolMeta], n_model: usize, 
 }
 
 /// Indexes (into `metas`) of the full page observations pass 2 leaves alone:
-/// the newest one of each browser tab, and every older one of the same page
-/// (URL and view) as that newest one, which is pass 1's business. What is left
-/// are pages a tab has navigated away from. Results with no recorded tab (older
-/// rows, a driver that cannot tell) share one tab group.
+/// - the newest one of each browser tab, whatever its view;
+/// - every one of the page a tab is on now (by address, `interactive_only` or
+///   not: a `browser_snapshot` of the interactive elements after a
+///   `browser_open` does not make the opened page stale). That address is where
+///   the tab's newest result left it, so a `browser_back` to an earlier page
+///   keeps that page and not just the one the tab came from;
+/// - every older one of the same page and view as the newest, which is pass 1's
+///   business.
+///
+/// What is left are pages a tab has navigated away from. Results with no
+/// recorded tab (older rows, a driver that cannot tell) share one tab group; a
+/// browser action carries no tab of its own and counts for the tab of the
+/// observation before it.
 ///
 /// Limit: if a tab later returns to a page that pass 2 already cut, pass 1 may
 /// replace that preview with its own marker once; it is never restored.
 fn protected_pages(metas: &[ToolMeta]) -> std::collections::HashSet<usize> {
-    let mut newest_in_tab: std::collections::HashMap<Option<&str>, usize> =
-        std::collections::HashMap::new();
+    use std::collections::HashMap;
+    let mut newest_in_tab: HashMap<Option<&str>, usize> = HashMap::new();
+    let mut now_at: HashMap<Option<&str>, &str> = HashMap::new();
+    let mut tab_of: HashMap<usize, Option<&str>> = HashMap::new();
+    let mut current: Option<&str> = None;
+    // `metas` is in conversation order: a later one is newer.
     for (i, m) in metas.iter().enumerate() {
-        if m.scope == Some(ObservationScope::Page) && !m.is_error {
-            // `metas` is in conversation order: a later one is newer.
-            newest_in_tab.insert(m.tab.as_deref(), i);
+        if m.is_error {
+            continue;
+        }
+        if m.scope == Some(ObservationScope::Page) {
+            current = m.tab.as_deref();
+            newest_in_tab.insert(current, i);
+            tab_of.insert(i, current);
+        }
+        if let Some(url) = m.page_url.as_deref() {
+            now_at.insert(current, url);
         }
     }
     let mut kept = std::collections::HashSet::new();
-    for (i, m) in metas.iter().enumerate() {
-        if m.scope != Some(ObservationScope::Page) || m.is_error {
-            continue;
-        }
-        let newest = newest_in_tab[&m.tab.as_deref()];
-        if i == newest || (m.key.is_some() && m.key == metas[newest].key) {
+    for (&i, &tab) in &tab_of {
+        let m = &metas[i];
+        let newest = newest_in_tab[&tab];
+        if i == newest
+            || (m.key.is_some() && m.key == metas[newest].key)
+            || (m.page_url.is_some() && m.page_url.as_deref() == now_at.get(&tab).copied())
+        {
             kept.insert(i);
         }
     }
@@ -472,11 +510,15 @@ fn pass_budget(out: &mut [Message], metas: &mut [ToolMeta], n_model: usize, c: &
         }
     }
     // Still over budget with nothing else to cut: older page observations go,
-    // all of them at once. A page that a newer observation of its tab (or of
-    // its URL) replaced stays replaced, so this set only ever grows too.
+    // oldest first, until the budget is met. The page a tab is on stays whole
+    // (see `protected_pages`), and a page that a newer observation of its tab
+    // replaced stays replaced.
     if raw > c.soft_bytes {
         let kept = protected_pages(metas);
         for (i, m) in metas.iter().enumerate() {
+            if raw <= c.soft_bytes {
+                break;
+            }
             if m.scope != Some(ObservationScope::Page)
                 || m.is_error
                 || m.shortened
@@ -485,7 +527,8 @@ fn pass_budget(out: &mut [Message], metas: &mut [ToolMeta], n_model: usize, c: &
             {
                 continue;
             }
-            if let Some((short, to_save, _)) = budget_cut(out, m, c) {
+            if let Some((short, to_save, saved)) = budget_cut(out, m, c) {
+                raw = raw.saturating_sub(saved);
                 plan.push((i, short, to_save));
             }
         }
