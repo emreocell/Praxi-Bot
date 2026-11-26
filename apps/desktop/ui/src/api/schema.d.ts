@@ -559,6 +559,26 @@ export interface paths {
         patch: operations["update_webhook"];
         trace?: never;
     };
+    "/v1/bots/{bot}/incoming-webhooks/{hook}/rotate-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace the signing secret. The old secret is refused from this moment, so
+         *     the sender has to be updated; the new secret is returned once.
+         */
+        post: operations["rotate_webhook_secret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bots/{bot}/incoming-webhooks/{hook}/test": {
         parameters: {
             query?: never;
@@ -8283,6 +8303,16 @@ export interface components {
             /** @description New name. */
             name?: string | null;
         };
+        /** @description Answer of rotate: the new secret, shown this once. */
+        IncomingWebhookRotated: {
+            /**
+             * @description New HMAC secret. Copy it now; later reads do not return it. The old one
+             *     stops working at once.
+             */
+            secret: string;
+            /** @description The webhook, unchanged. */
+            webhook: components["schemas"]["IncomingWebhookDto"];
+        };
         InputBatch: {
             /** Format: int64 */
             control_epoch: number;
@@ -13169,6 +13199,47 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    rotate_webhook_secret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Bot id */
+                bot: string;
+                /** @description Webhook id */
+                hook: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomingWebhookRotated"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the secret store is not available */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

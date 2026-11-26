@@ -29,6 +29,14 @@ Gövde veridir, emir değildir. Praxi onu güvenilmeyen içerik olarak saklar ve
 
 Test düğmesi aynı yoldan küçük bir yük gönderir: `{"praxi_test":true}`. Dışarıdaki hız sınırını harcamaz.
 
+## Gizli anahtar nerede durur, nasıl yenilenir
+
+İmza sırrı, diğer sırlarınla aynı korumalı sır deposunda durur; yerel veritabanında durmaz. Eski sürümlerin oluşturduğu webhook'larda sır veritabanındaydı: bu sürümün ilk açılışı onu sır deposuna taşır ve veritabanındaki kopyayı siler. O sırrı zaten tutan gönderen çalışmaya devam eder.
+
+Bir sırrı yenilemek için (sızdıysa ya da webhook'u yeni bir bilgisayara aldıysan) Otomasyon sekmesinde webhook'u aç ve **Sırrı yenile**'yi seç. Eski sır hemen geçersiz olur; webhook'u çağıran sistemi (GitHub, bir form, bir betik) bir kez gösterilen yeni sırla güncellemelisin. O zamana kadar çağrılar `401` ile reddedilir. Aynı işlem `POST /v1/bots/{bot}/incoming-webhooks/{hook}/rotate-secret` yoludur (yalnızca sahip).
+
+Sır deposuna ulaşılamazsa webhook oluşturma ya da yenileme `503` ile başarısız olur; veritabanına yedek olarak sır yazılmaz.
+
 ## Ne yazılır
 
 Oluşturma, düzenleme, silme, test, kabul ve ret denetim günlüğüne yazılır. Günlük nedeni saklar (kötü imza, eski zaman, tekrar, hız sınırı, kapalı ya da güvenli mod). Gizli anahtarı ve gövdeyi saklamaz.

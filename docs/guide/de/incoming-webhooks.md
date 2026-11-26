@@ -29,6 +29,14 @@ Der Text ist Daten, nie eine Anweisung. Praxi speichert ihn als nicht vertrauens
 
 Die Testschaltfläche sendet eine kleine Nutzlast, `{"praxi_test":true}`, über denselben Weg. Sie verbraucht nicht das Limit von außen.
 
+## Wo das Geheimnis liegt und wie du es ersetzt
+
+Das Signaturgeheimnis liegt im selben geschützten Geheimnisspeicher wie deine anderen Geheimnisse, nie in der lokalen Datenbank. Webhooks älterer Versionen hatten ihr Geheimnis in der Datenbank: Der erste Start dieser Version verschiebt es in den Geheimnisspeicher und leert die Kopie in der Datenbank. Ein Absender, der dieses Geheimnis schon hat, funktioniert weiter.
+
+Um ein Geheimnis zu ersetzen (es ist durchgesickert oder du hast den Webhook auf einen neuen Rechner übernommen), öffne den Webhook im Tab Automatisierung und wähle **Geheimnis ersetzen**. Das alte Geheimnis funktioniert sofort nicht mehr; was den Webhook aufruft (GitHub, ein Formular, ein Skript), muss mit dem neuen Geheimnis aktualisiert werden, das nur einmal angezeigt wird. Bis dahin werden seine Aufrufe mit `401` abgelehnt. Dieselbe Aktion ist `POST /v1/bots/{bot}/incoming-webhooks/{hook}/rotate-secret` (nur Besitzer).
+
+Ist der Geheimnisspeicher nicht erreichbar, schlägt das Anlegen oder Ersetzen mit `503` fehl; als Ausweichlösung wird nie ein Geheimnis in die Datenbank geschrieben.
+
 ## Was aufgeschrieben wird
 
 Anlegen, Ändern, Löschen, Testen, Annehmen und Ablehnen stehen im Prüfprotokoll. Das Protokoll speichert den Grund (schlechte Signatur, alte Zeit, Wiederholung, Rate-Limit, ausgeschaltet oder Sicherheitsmodus). Es speichert weder das Geheimnis noch den Text.

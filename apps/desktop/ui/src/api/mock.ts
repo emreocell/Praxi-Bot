@@ -2910,6 +2910,10 @@ export class MockApiClient extends ApiClient {
       this.incomingWebhooks.set(botId, rows.filter((item) => item.id !== hookId));
       return undefined;
     }
+    if (method === "POST" && seg[4] === "rotate-secret") {
+      row.updated_at_ms = Date.now();
+      return { webhook: { ...row }, secret: "cd".repeat(32) };
+    }
     if (method === "POST" && seg[4] === "test") {
       if (!row.enabled) throw new ApiError(409, "conflict", "webhook is off");
       return {

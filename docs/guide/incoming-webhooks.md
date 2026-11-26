@@ -29,10 +29,18 @@ The body is data, never an instruction. Your instruction is the only task the bo
 
 The test button sends a tiny payload, `{"praxi_test":true}`, through the same path. It does not spend the outside rate limit.
 
+## Where the secret is kept, and replacing it
+
+The signing secret is kept in the same protected secret store as your other secrets, never in the local database. Webhooks made by older versions had their secret in the database: the first start of this version moves it into the secret store and blanks the database copy, and the sender that already holds that secret keeps working. Nothing changes for it.
+
+To replace a secret (it leaked, a colleague left, or you imported the webhook on a new computer), open the webhook in the Automation tab and choose **Replace secret**. The old secret stops working at once, so whatever calls the webhook (GitHub, a form, a script) must be updated with the new secret, which is shown once. Until then its calls are refused with `401`. The same action is `POST /v1/bots/{bot}/incoming-webhooks/{hook}/rotate-secret` (owner only).
+
+If the secret store cannot be reached, creating or replacing a webhook fails with `503` and calls to existing webhooks are refused; no secret is ever written to the database as a fallback.
+
 ## What is written down
 
-Creating, editing, deleting, testing, accepting, and refusing a call are written to the audit log. The log stores the reason (bad signature, old timestamp, replay, rate limit, turned off, or safe mode). It does not store the secret or the body.
+Creating, editing, replacing the secret, deleting, testing, accepting, and refusing a call are written to the audit log. The log stores the reason (bad signature, old timestamp, replay, rate limit, turned off, or safe mode). It does not store the secret or the body.
 
 ## Moving to another computer
 
-Webhook secrets do not travel in a state bundle. A normal export blanks them (and the list of already-seen signatures); only when you choose to export all secrets do the secret bytes stay in the file. Either way, on import every webhook comes back turned off with no secret, and so do webhook triggers of scheduled jobs. Create the webhook again (or turn it on with a new secret) on the new computer. The secret is currently stored as plain text in the local database; a protected secret store and a rotate button are planned.
+Webhook secrets do not travel in a state bundle. A normal export blanks them (and the list of already-seen signatures); only when you choose to export all secrets do the secret bytes stay in the file. Either way, on import every webhook comes back turned off with no secret, and so do webhook triggers of scheduled jobs. Create the webhook again (or turn it on with a new secret) on the new computer.

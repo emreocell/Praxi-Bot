@@ -430,6 +430,7 @@
       "Ne ayarlarsın",
       "Çağıran ne gönderir",
       "Bot metinle ne yapar",
+      "Gizli anahtar nerede durur, nasıl yenilenir",
       "Ne yazılır"
     ],
     "summary": "Bir webhook, dışarıdaki bir şey bir adresi çağırınca botlarından birini başlatır. Bunu GitHub, bir form ya da evdeki bir anahtar yapabilir. Webhook'u bot panelinde, Otomasyon sekmesinde oluşturursun."

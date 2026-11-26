@@ -37,7 +37,8 @@ import type {
   IncomingWebhookAccepted,
   IncomingWebhookCreated,
   IncomingWebhookInput,
-  IncomingWebhookPatch
+  IncomingWebhookPatch,
+  IncomingWebhookRotated
 } from "./types";
 import type {
   RecentLogs,
@@ -892,6 +893,13 @@ export class ApiClient {
     return this.request(
       "DELETE",
       `/bots/${encodeURIComponent(botId)}/incoming-webhooks/${encodeURIComponent(hookId)}`
+    );
+  }
+  /** Replace the signing secret. The old one stops working at once; the new one is in the answer this once. */
+  rotateIncomingWebhookSecret(botId: string, hookId: string): Promise<IncomingWebhookRotated> {
+    return this.request(
+      "POST",
+      `/bots/${encodeURIComponent(botId)}/incoming-webhooks/${encodeURIComponent(hookId)}/rotate-secret`
     );
   }
   /** Owner test. Starts one untrusted run and does not use the caller's rate limit. */

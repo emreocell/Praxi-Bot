@@ -219,8 +219,8 @@ Desktop cannot reveal the plaintext of a stored login, password or card
 (`POST /v1/fill-secrets/reveal` is on the never-list and the handler also
 insists on the person at the host's own app), so a stolen administrator Desktop
 cannot drain the vault. One route shows a credential once on purpose: creating
-an incoming webhook for a bot (`POST /v1/bots/{id}/incoming-webhooks`) returns
-its HMAC secret in that one answer, because whoever sets the webhook up must
+an incoming webhook for a bot (`POST /v1/bots/{id}/incoming-webhooks`, and its
+`rotate-secret` sibling) returns its HMAC secret in that one answer, because whoever sets the webhook up must
 paste it into the sending service; it is the owner's job and is audited.
 Reads of sensitive collections by an administrator Desktop (audit export, chat
 export, the list of stored secret names, the mail send log, the usage export)

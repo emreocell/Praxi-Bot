@@ -192,6 +192,7 @@
       "Was du einrichtest",
       "Was der Aufrufer sendet",
       "Was der Bot mit dem Text macht",
+      "Wo das Geheimnis liegt und wie du es ersetzt",
       "Was aufgeschrieben wird"
     ],
     "summary": "Ein Webhook startet einen deiner Bots, wenn etwas von außen eine Adresse aufruft. Das können GitHub, ein Formular oder ein Schalter zu Hause sein. Du legst den Webhook im Bot-Panel an, auf dem Tab Au…"

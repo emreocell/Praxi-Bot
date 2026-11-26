@@ -1,4 +1,4 @@
-import { Webhook } from "lucide-react";
+import { KeyRound, Webhook } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { IncomingWebhook, IncomingWebhookCreated } from "../api/types";
@@ -25,6 +25,9 @@ export function BotPanelWebhooks({ botId }: { botId: string }) {
   const [created, setCreated] = useState<IncomingWebhookCreated | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
+  // Replacing a secret breaks the sender until it is updated: ask once, inline.
+  const [rotateAskId, setRotateAskId] = useState<string | null>(null);
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!client) return;
@@ -57,6 +60,22 @@ export function BotPanelWebhooks({ botId }: { botId: string }) {
       toast.show(humanLine(e), "danger");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const rotate = async (row: IncomingWebhook) => {
+    if (!client || rotatingId) return;
+    setRotatingId(row.id);
+    try {
+      const next = await client.rotateIncomingWebhookSecret(botId, row.id);
+      setCreated(next);
+      setRotateAskId(null);
+      toast.show(t("botPanel.webhooks.rotated"), "success");
+      await load();
+    } catch (e) {
+      toast.show(humanLine(e), "danger");
+    } finally {
+      setRotatingId(null);
     }
   };
 
@@ -176,6 +195,15 @@ export function BotPanelWebhooks({ botId }: { botId: string }) {
                 </button>
                 <button
                   type="button"
+                  className={styles.quiet}
+                  disabled={rotatingId === row.id}
+                  data-testid={`webhook-rotate-${row.id}`}
+                  onClick={() => setRotateAskId(rotateAskId === row.id ? null : row.id)}
+                >
+                  <KeyRound aria-hidden="true" /> {rotatingId === row.id ? t("botPanel.webhooks.rotating") : t("botPanel.webhooks.rotate")}
+                </button>
+                <button
+                  type="button"
                   className={styles.danger}
                   onClick={() => {
                     if (!client) return;
@@ -192,6 +220,25 @@ export function BotPanelWebhooks({ botId }: { botId: string }) {
                   {t("botPanel.webhooks.remove")}
                 </button>
               </div>
+              {rotateAskId === row.id ? (
+                <div role="group" aria-label={t("botPanel.webhooks.rotate")} data-testid={`webhook-rotate-ask-${row.id}`}>
+                  <p className={styles.note}>{t("botPanel.webhooks.rotateWarn")}</p>
+                  <div className={styles.row}>
+                    <button
+                      type="button"
+                      className={styles.primary}
+                      disabled={rotatingId === row.id}
+                      data-testid={`webhook-rotate-confirm-${row.id}`}
+                      onClick={() => void rotate(row)}
+                    >
+                      {t("botPanel.webhooks.rotateConfirm")}
+                    </button>
+                    <button type="button" className={styles.quiet} onClick={() => setRotateAskId(null)}>
+                      {t("botPanel.webhooks.rotateCancel")}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>
