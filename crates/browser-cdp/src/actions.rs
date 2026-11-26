@@ -20,9 +20,14 @@ async fn sleep(d: Duration) {
     }
 }
 mod consent;
+mod pointer;
 use crate::page::{DEFAULT_WAIT, DialogInfo, DialogOptions, NAVIGATION_LOAD_DEADLINE, Page};
 use crate::snapshot::{DomExtra, RefEntry, Snapshot};
 pub use consent::{ConsentChoice, ConsentOutcome};
+pub use pointer::{
+    Grounded, POINTER_MAX_EDGE, PointerButton, PointerOp, PointerRequest, PointerView, Region,
+    pointer_scale,
+};
 
 /// Result of an action: success flag, refreshed view as a diff against what the agent saw before.
 #[derive(Debug, Clone)]

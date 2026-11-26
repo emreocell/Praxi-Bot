@@ -21,6 +21,7 @@
 )]
 
 pub mod actions;
+pub mod attach;
 pub mod browser;
 pub mod client;
 pub mod destination;
@@ -44,6 +45,10 @@ pub use actions::{
     StepGuard, WaitCondition, parse_key,
 };
 pub use actions::{ConsentChoice, ConsentOutcome};
+pub use actions::{
+    Grounded, POINTER_MAX_EDGE, PointerButton, PointerOp, PointerRequest, PointerView, Region,
+    pointer_scale,
+};
 pub use actions::{ScrollRequest, ScrollTo, SelectUnit, TextSelection};
 pub use browser::{Browser, TargetInfo};
 pub use client::{

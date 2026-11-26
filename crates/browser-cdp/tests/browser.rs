@@ -1112,3 +1112,305 @@ async fn dismiss_consent_lists_the_options_when_two_dialogs_fit() {
     );
     let _ = b.close().await;
 }
+
+// ---- pointer mode: what has no ref -------------------------------------------------------------
+
+async fn text_of(p: &Page, js: &str) -> String {
+    p.evaluate(js)
+        .await
+        .unwrap()
+        .as_str()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// A click by screenshot coordinates, the way the tool does it.
+async fn point_click(p: &Page, x: f64, y: f64) -> (browser_cdp::ActionResult, String) {
+    use browser_cdp::{Feel, PointerButton, PointerOp, PointerRequest};
+    p.pointer(
+        &PointerRequest {
+            op: PointerOp::Click {
+                button: PointerButton::Left,
+                count: 1,
+            },
+            at: (x, y),
+            feel: Feel::Instant,
+            expected: None,
+        },
+        &DialogOptions::default(),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn pointer_reaches_a_canvas_radio_and_a_box_in_another_origins_frame() {
+    let port = common::serve().await;
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = b
+        .new_page(&format!("http://127.0.0.1:{port}/widgets"))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await; // let the OOPIF attach and load
+
+    // The picture is made for pointing at: JPEG, sized like the viewport (scaled), and it lists
+    // the canvas and both frames, which the accessibility snapshot cannot click into.
+    let shot = p.grounded_screenshot().await.unwrap();
+    assert!(shot.bytes.starts_with(&[0xff, 0xd8]), "a JPEG");
+    assert_eq!(shot.image, shot.view.image_size());
+    let kinds: Vec<_> = shot.regions.iter().map(|r| r.kind.as_str()).collect();
+    assert!(
+        kinds.contains(&"canvas") && kinds.iter().filter(|k| **k == "iframe").count() == 2,
+        "{kinds:?}"
+    );
+    println!("{}", shot.describe());
+    let canvas = shot.regions.iter().find(|r| r.kind == "canvas").unwrap();
+    let human = shot
+        .regions
+        .iter()
+        .find(|r| r.label == "Human check")
+        .expect("the cross-origin frame is listed by its title");
+
+    // A radio drawn on a canvas: no element, so only a point can choose it.
+    let (acted, hit) = point_click(
+        &p,
+        f64::from(canvas.x) + 1.0 + 180.0,
+        f64::from(canvas.y) + 1.0 + 30.0,
+    )
+    .await;
+    assert!(acted.ok, "{:?}", acted.error);
+    assert!(hit.starts_with("<canvas"), "{hit}");
+    assert_eq!(
+        text_of(&p, "document.getElementById('picked').textContent").await,
+        "radio-1"
+    );
+
+    // A checkbox drawn with a div inside a frame of another origin: the click is routed there.
+    let (acted, hit) = point_click(&p, f64::from(human.x) + 37.0, f64::from(human.y) + 37.0).await;
+    assert!(acted.ok, "{:?}", acted.error);
+    assert!(hit.contains("a frame"), "{hit}");
+    let mut seen = String::new();
+    for _ in 0..20 {
+        seen = text_of(&p, "document.getElementById('picked').textContent").await;
+        if seen.contains("|human") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        seen.contains("|human"),
+        "the frame's checkbox was not clicked: {seen}"
+    );
+
+    // A point outside the picture is refused, nothing is clicked.
+    let err = p
+        .pointer(
+            &browser_cdp::PointerRequest {
+                op: browser_cdp::PointerOp::Move,
+                at: (99_999.0, 5.0),
+                feel: browser_cdp::Feel::Instant,
+                expected: None,
+            },
+            &DialogOptions::default(),
+        )
+        .await
+        .unwrap();
+    assert!(!err.0.ok);
+    assert!(err.0.error.unwrap().contains("outside the screenshot"));
+    b.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+#[allow(clippy::many_single_char_names)]
+async fn pointer_typing_and_drag_and_wheel_work_and_secret_fields_are_refused() {
+    use browser_cdp::{Feel, PointerOp, PointerRequest};
+    let port = common::serve().await;
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = b
+        .new_page(&format!("http://127.0.0.1:{port}/widgets"))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let view = p.pointer_view().await.unwrap();
+    let s = view.scale();
+    let centre = |id: &'static str| {
+        let p = &p;
+        async move {
+            let r = p
+                .evaluate(&format!(
+                    "(()=>{{const r=document.getElementById('{id}').getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]}})()"
+                ))
+                .await
+                .unwrap();
+            (r[0].as_f64().unwrap() * s, r[1].as_f64().unwrap() * s)
+        }
+    };
+    // Click the field by point, then type into the focused element.
+    let (x, y) = centre("free").await;
+    assert!(point_click(&p, x, y).await.0.ok);
+    let typed = p.pointer_type("hi there", None).await.unwrap();
+    assert!(typed.ok, "{:?}", typed.error);
+    assert_eq!(
+        text_of(&p, "document.getElementById('free').value").await,
+        "hi there"
+    );
+
+    // A password field takes the click but never the typing.
+    let (x, y) = centre("pw").await;
+    assert!(point_click(&p, x, y).await.0.ok);
+    let refused = p.pointer_type("hunter2", None).await.unwrap();
+    assert!(!refused.ok);
+    assert!(refused.error.unwrap().contains("refused"));
+    assert_eq!(text_of(&p, "document.getElementById('pw').value").await, "");
+
+    // Wheel over the page scrolls it; a drag fires the mouse events a drag needs.
+    p.evaluate("document.body.style.height='4000px'")
+        .await
+        .unwrap();
+    let acted = p
+        .pointer(
+            &PointerRequest {
+                op: PointerOp::Wheel { dx: 0.0, dy: 400.0 },
+                at: (50.0, 50.0),
+                feel: Feel::Instant,
+                expected: None,
+            },
+            &DialogOptions::default(),
+        )
+        .await
+        .unwrap();
+    assert!(acted.0.ok, "{:?}", acted.0.error);
+    let y = p
+        .evaluate("window.scrollY")
+        .await
+        .unwrap()
+        .as_f64()
+        .unwrap();
+    assert!(y > 100.0, "the wheel scrolled the page: {y}");
+    p.evaluate(
+        "window.__drag=[];for(const t of ['mousedown','mousemove','mouseup'])document.addEventListener(t,e=>window.__drag.push(t))",
+    )
+    .await
+    .unwrap();
+    let acted = p
+        .pointer(
+            &PointerRequest {
+                op: PointerOp::Drag { to: (200.0, 120.0) },
+                at: (40.0, 60.0),
+                feel: Feel::Instant,
+                expected: None,
+            },
+            &DialogOptions::default(),
+        )
+        .await
+        .unwrap();
+    assert!(acted.0.ok, "{:?}", acted.0.error);
+    let events = p.evaluate("window.__drag.join(',')").await.unwrap();
+    let events = events.as_str().unwrap();
+    assert!(
+        events.contains("mousedown,mousemove,mousemove") && events.ends_with("mouseup"),
+        "a drag presses, moves several times, releases: {events}"
+    );
+    b.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn a_failed_send_is_recovered_in_place_without_reloading_the_page() {
+    let port = common::serve().await;
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = b
+        .new_page(&format!("http://127.0.0.1:{port}/widgets"))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let opts = SnapshotOptions {
+        compact: true,
+        ..Default::default()
+    };
+    let in_form =
+        |js: &'static str| format!("document.getElementById('form').contentDocument.{js}");
+
+    // A role=radio div has a ref and is chosen like any control: no pointer needed.
+    let snap = p.snapshot(&opts).await.unwrap();
+    let radio = ref_of(&snap, "radio", "Option A");
+    assert!(p.click(&radio).await.unwrap().ok);
+    assert!(
+        text_of(&p, "document.getElementById('picked').textContent")
+            .await
+            .contains("|aria")
+    );
+
+    // The form lives in a same-origin iframe; its fields are reachable by ref.
+    let email = ref_of(&snap, "textbox", "Email");
+    let send = ref_of(&snap, "button", "Send");
+    assert!(p.fill(&email, "ada@example.org").await.unwrap().ok);
+    assert!(p.click(&send).await.unwrap().ok);
+    assert_eq!(
+        text_of(&p, &in_form("getElementById('msg').textContent")).await,
+        "Server busy, try again"
+    );
+
+    // A step on a ref that no longer exists fails ...
+    let stale = p.click("e9999").await;
+    assert!(
+        stale.is_err() || !stale.as_ref().unwrap().ok,
+        "a stale ref must fail"
+    );
+    // ... and the page is exactly as it was: the typed value is still there and nothing reloaded.
+    assert_eq!(
+        text_of(&p, &in_form("getElementById('email').value")).await,
+        "ada@example.org"
+    );
+    assert_eq!(
+        p.evaluate("window.__marker").await.unwrap(),
+        serde_json::json!(1)
+    );
+
+    // Recovery in place: read the page again, send again; the second send goes through.
+    let snap = p.snapshot(&opts).await.unwrap();
+    let send = ref_of(&snap, "button", "Send");
+    assert!(p.click(&send).await.unwrap().ok);
+    assert_eq!(
+        text_of(&p, &in_form("getElementById('msg').textContent")).await,
+        "Sent ada@example.org"
+    );
+    assert_eq!(
+        p.evaluate("window.__marker").await.unwrap(),
+        serde_json::json!(1),
+        "the page was never reloaded"
+    );
+    b.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn the_owners_open_browser_can_be_attached_and_is_only_disconnected_afterwards() {
+    // The "owner's" browser: started on its own with a debugging port, as a person would.
+    let owner = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let port = common::serve().await;
+    let tab = owner
+        .new_page(&format!("http://127.0.0.1:{port}/form"))
+        .await
+        .unwrap();
+    tab.bring_to_front().await.unwrap();
+    let endpoint = owner.ws_url().to_owned();
+    browser_cdp::attach::loopback_endpoint(&endpoint).unwrap();
+
+    let (attached, found) = browser_cdp::attach::connect_first(std::slice::from_ref(&endpoint))
+        .await
+        .unwrap();
+    assert_eq!(found, endpoint);
+    let page = attached.visible_page().await.unwrap();
+    assert!(
+        page.url().await.unwrap().ends_with("/form"),
+        "the tab the owner looks at is the one used"
+    );
+    // Closing the attached side only disconnects: the owner's browser and tab keep running.
+    attached.close().await.unwrap();
+    assert!(!owner.is_closed());
+    assert_eq!(tab.title().await.unwrap(), "Form");
+    owner.close().await.unwrap();
+}

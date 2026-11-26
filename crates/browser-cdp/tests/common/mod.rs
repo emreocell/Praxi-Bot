@@ -32,6 +32,31 @@ for(let i=0;i<4000;i++){const d=document.createElement('div');d.textContent='row
 
 const CONSENT: &str = "<title>consent-start</title><p>Shop</p><div id=\"onetrust-banner-sdk\" style=\"position:fixed;bottom:0;left:0;right:0;height:100px;background:#ddd\"><button id=\"onetrust-reject-all-handler\" onclick=\"document.title='rejected'\">Reject All</button></div>";
 
+/// Pointer fixture: a canvas-drawn radio group (no element to ref), a same-origin iframe form
+/// whose first send fails, and a "human" box drawn with a plain div in a frame of ANOTHER
+/// origin (`localhost` vs `127.0.0.1`). `window.__marker` is wiped by any reload.
+const WIDGETS: &str = "<title>Widgets</title><style>body{margin:0;font:16px sans-serif}</style>\
+<h1>Pick one</h1>\
+<canvas id=cv width=300 height=60 style='border:1px solid #888'></canvas>\
+<p id=picked>none</p>\
+<div role=radio aria-checked=false tabindex=0 id=aria-radio onclick=\"this.setAttribute('aria-checked','true');document.getElementById('picked').textContent+='|aria'\">Option A</div>\
+<iframe id=form src='/widgets-form' width=420 height=150></iframe>\
+<iframe id=human src='http://localhost:{PORT}/widgets-human' width=300 height=90 title='Human check'></iframe>\
+<input id=free aria-label='Free text'><input id=pw type=password aria-label='Secret'>\
+<script>window.__marker=1;\
+const cv=document.getElementById('cv'),c=cv.getContext('2d');\
+function draw(sel){c.clearRect(0,0,300,60);[60,180].forEach((x,i)=>{c.beginPath();c.arc(x,30,18,0,7);c.stroke();if(sel===i){c.beginPath();c.arc(x,30,10,0,7);c.fill();}});}\
+draw(-1);\
+cv.addEventListener('click',e=>{const r=cv.getBoundingClientRect();const x=e.clientX-r.left;const i=x<120?0:1;draw(i);document.getElementById('picked').textContent='radio-'+i;});\
+addEventListener('message',e=>{if(e.data==='human')document.getElementById('picked').textContent+='|human';});</script>";
+
+const WIDGETS_FORM: &str = "<title>form</title><label>Email <input id=email></label>\
+<button id=send onclick=\"window.n=(window.n||0)+1;document.getElementById('msg').textContent=window.n<2?'Server busy, try again':'Sent '+document.getElementById('email').value\">Send</button>\
+<p id=msg>ready</p>";
+
+const WIDGETS_HUMAN: &str = "<title>human</title><style>body{margin:0}</style><div id=box style='width:30px;height:30px;border:2px solid #000;margin:20px;float:left' \
+onclick=\"this.textContent='x';parent.postMessage('human','*')\"></div><span style='line-height:70px'>I am human</span>";
+
 /// Start the server on a random port; returns the port.
 pub async fn serve() -> u16 {
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -75,8 +100,12 @@ pub async fn serve() -> u16 {
                             "/beforeunload" => BEFOREUNLOAD,
                             "/heavy" => HEAVY,
                             "/consent" => CONSENT,
+                            "/widgets" => WIDGETS,
+                            "/widgets-form" => WIDGETS_FORM,
+                            "/widgets-human" => WIDGETS_HUMAN,
                             _ => "<title>other</title><p>other</p>",
-                        };
+                        }
+                        .replace("{PORT}", &port.to_string());
                         format!(
                             "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                             body.len()
