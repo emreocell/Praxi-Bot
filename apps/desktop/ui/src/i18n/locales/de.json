@@ -1236,19 +1236,21 @@
     "preset": {
       "approve-destructive": {
         "hint": "Lesen, Surfen, Änderungen im Arbeitsbereich und der eigene Computer des Bots laufen frei; Löschen, Senden, Geld und dein eigener PC fragen zuerst.",
-        "name": "Kritisches genehmigen"
+        "name": "Kritisches genehmigen (Ausgewogen)"
       },
       "custom": {
         "hint": "Wähle eine Stufe für jede Kategorie.",
         "name": "Benutzerdefiniert"
       },
       "full": {
-        "hint": "Läuft ohne Nachfrage (auch Löschen), außer bei Geld, E-Mail-Versand, Aktivierung von Zeitplänen und katastrophalen Befehlen auf der Verbotsliste. Wenn du den Lauf selbst startest, besucht der Bot auch nach dem Lesen einer Seite jede öffentliche Webseite, registriert sich und füllt Formulare ohne Nachfrage aus. Er fragt nur dann wieder, wenn der Lauf auch deine privaten Daten (Dateien, E-Mails, Gedächtnis) hält und eine neue Seite oder ein Formular ein Stück davon enthält, bei einem gespeicherten Geheimnis, bei einem Seitenskript und, nach dem Lesen nicht vertrauenswürdiger Inhalte, vor dem Start eines Programms.",
+        "exceptions": "Läuft ohne Nachfrage (auch Löschen), außer bei Geld, E-Mail-Versand, Aktivierung von Zeitplänen und katastrophalen Befehlen auf der Verbotsliste. Wenn du den Lauf selbst startest, besucht der Bot auch nach dem Lesen einer Seite jede öffentliche Webseite, registriert sich und füllt Formulare ohne Nachfrage aus. Er fragt nur dann wieder, wenn der Lauf auch deine privaten Daten (Dateien, E-Mails, Gedächtnis) hält und eine neue Seite oder ein Formular ein Stück davon enthält, bei einem gespeicherten Geheimnis, bei einem Seitenskript und, nach dem Lesen nicht vertrauenswürdiger Inhalte, vor dem Start eines Programms.",
+        "exceptionsTitle": "Ausnahmen ansehen",
+        "hint": "Läuft ohne Nachfrage, auch beim Löschen. Ein paar feste Stopps fragen immer zuerst.",
         "name": "Voll"
       },
       "read-and-draft": {
         "hint": "Lesen ist frei; jede Änderung, jedes Senden, jeder Seitenabruf, Klick und Befehl fragt zuerst.",
-        "name": "Lesen & entwerfen"
+        "name": "Lesen & entwerfen (Vorsichtig)"
       },
       "read-only": {
         "hint": "Der Bot kann nachsehen, aber nie etwas ändern.",
@@ -2111,6 +2113,7 @@
     "runFailed": "Der Lauf ist fehlgeschlagen: {{message}}",
     "runStopped": "Von dir gestoppt",
     "send": "Senden",
+    "skipToComposer": "Zum Nachrichtenfeld springen",
     "slash": {
       "apps": "Apps öffnen",
       "export": "Diesen Chat als Markdown-Datei speichern",
@@ -2322,9 +2325,9 @@
         "running": "Schreibt eine Datei"
       },
       "generic": {
-        "done": "{{name}} ausgeführt",
-        "failed": "{{name}} nicht abgeschlossen",
-        "running": "Führt {{name}} aus"
+        "done": "Ein Werkzeug benutzt",
+        "failed": "Werkzeug nicht benutzt",
+        "running": "Benutzt ein Werkzeug"
       },
       "knowledge_search": {
         "done": "Wissensquellen durchsucht",
@@ -3582,12 +3585,20 @@
       "title": "Du hast diesen Schritt nicht erlaubt"
     },
     "toolFailed": {
-      "hint": "Frage erneut oder beschreibe die Aufgabe anders.",
-      "title": "Der Bot konnte diesen Schritt nicht abschließen"
+      "hint": "Öffne die Details, um zu sehen, was das Werkzeug gemeldet hat, oder frage erneut.",
+      "title": "Dieser Schritt hat nicht funktioniert"
     },
     "toolMissingProgram": {
       "hint": "Installiere {{name}} und versuche es dann erneut.",
       "title": "{{name}} ist nicht installiert"
+    },
+    "toolNoPermission": {
+      "hint": "Der Bot darf diese Datei oder diesen Ordner nicht anfassen. Wähle einen erlaubten Ordner oder korrigiere den Zugriff.",
+      "title": "Der Computer hat abgelehnt: keine Berechtigung"
+    },
+    "toolNoSuchTool": {
+      "hint": "Für Dateien und Befehle wähle in den Berechtigungen des Bots eine Coding-Engine, oder bitte um etwas anderes.",
+      "title": "Dieser Bot hat dafür kein Werkzeug"
     },
     "toolNotFound": {
       "hint": "Frage erneut und nenne den Namen oder Speicherort.",
@@ -3596,6 +3607,10 @@
     "toolScreenControl": {
       "hint": "Du steuerst ihn gerade. Gib die Kontrolle zurück und frage dann erneut.",
       "title": "Der Bot konnte den Bildschirm nicht ansehen"
+    },
+    "toolSearchDown": {
+      "hint": "Füge in den Einstellungen einen kostenlosen Suchschlüssel hinzu und versuche es erneut. Eine genannte Seite zu lesen funktioniert weiterhin.",
+      "title": "Die Websuche ist nicht eingerichtet oder wird blockiert"
     },
     "toolTargetOffline": {
       "hint": "Er ist aus oder nicht verbunden. Schalte ihn ein und versuche es erneut.",
@@ -5885,7 +5900,6 @@
       }
     },
     "computer": {
-      "soon": "Bald",
       "target": {
         "description": "Derzeit wird nur der verbundene Computer unterstützt. Verwalte den Zugriff auf Computer und Browser unten unter Berechtigungen.",
         "title": "Wo der Bot läuft"
@@ -6378,7 +6392,7 @@
         },
         "handsOff": {
           "ask": "Geld ausgeben, gefährliche Befehle und alles, nachdem eine nicht vertrauenswürdige Seite gelesen wurde.",
-          "name": "Freie Hand",
+          "name": "Voll",
           "own": "Fast alles, auch Dateien löschen und Nachrichten senden.",
           "summary": "Bots legen einfach los. Nur die größten Risiken fragen nach."
         }
@@ -6386,6 +6400,7 @@
       "offline": "Noch nicht mit dem Helfer verbunden, daher kann die Stufe nicht angezeigt oder geändert werden.",
       "onItsOwn": "Allein",
       "recommended": "Empfohlen",
+      "samePresets": "Diese drei Stufen sind dieselben Vorgaben, die du für einen einzelnen Bot unter Berechtigungen wählen kannst: Vorsichtig ist „Lesen & entwerfen“, Ausgewogen ist „Kritisches genehmigen“, Voll ist Voll.",
       "saved": "Gespeichert. Gilt ab dem nächsten Schritt des Bots.",
       "title": "Was Bots allein tun dürfen",
       "willAsk": "Fragt dich zuerst"
@@ -7190,8 +7205,8 @@
       "notePlaceholder": "Wiederherstellungshinweis oder Verwendungszweck",
       "originHint": "Kommagetrennte URLs oder Hosts (z. B. https://github.com).",
       "originLabel": "Website-Adresse",
-      "refHint": "Stabile Kennung für die interne Zuordnung von Ausfüllanfragen.",
-      "refLabel": "Referenzschlüssel",
+      "refHint": "So wird dieser Login aufgelistet. Er wird für dich ausgefüllt; ändere ihn nur, wenn du magst.",
+      "refLabel": "Kurzname",
       "saved": "Änderungen gespeichert.",
       "secretKeepPlaceholder": "Leer lassen, um das vorhandene Passwort zu behalten",
       "secretLabel": "Passwort oder Geheimnis",

@@ -1236,19 +1236,21 @@
     "preset": {
       "approve-destructive": {
         "hint": "Reads, browsing, workspace edits and the bot's own computer run freely; deleting, sending, money and your own PC ask first.",
-        "name": "Approve destructive"
+        "name": "Approve destructive (Balanced)"
       },
       "custom": {
         "hint": "Choose a level for each category.",
         "name": "Custom"
       },
       "full": {
-        "hint": "Runs without asking (including deletes), except Money, sending mail, schedule activation and catastrophic never-list commands. When you start the run yourself it also browses any public site, signs up and fills forms without asking, even after reading a page. It asks again only if the run also holds your private data (files, mail, memory) and a new site or a form contains a piece of it, for a stored secret, a page script, and, after reading untrusted content, for running a program.",
+        "exceptions": "Runs without asking (including deletes), except Money, sending mail, schedule activation and catastrophic never-list commands. When you start the run yourself it also browses any public site, signs up and fills forms without asking, even after reading a page. It asks again only if the run also holds your private data (files, mail, memory) and a new site or a form contains a piece of it, for a stored secret, a page script, and, after reading untrusted content, for running a program.",
+        "exceptionsTitle": "See exceptions",
+        "hint": "Runs without asking, even for deletes. A few hard stops always ask first.",
         "name": "Full"
       },
       "read-and-draft": {
         "hint": "Reads are free; every change, send, page fetch, click and command asks first.",
-        "name": "Read & draft"
+        "name": "Read & draft (Careful)"
       },
       "read-only": {
         "hint": "The bot can look but never change anything.",
@@ -2111,6 +2113,7 @@
     "runFailed": "The run failed: {{message}}",
     "runStopped": "Stopped by you",
     "send": "Send",
+    "skipToComposer": "Skip to the message box",
     "slash": {
       "apps": "Open apps",
       "export": "Save this chat as a Markdown file",
@@ -2322,9 +2325,9 @@
         "running": "Writing a file"
       },
       "generic": {
-        "done": "Ran {{name}}",
-        "failed": "Didn't complete {{name}}",
-        "running": "Running {{name}}"
+        "done": "Used a tool",
+        "failed": "Couldn't use a tool",
+        "running": "Using a tool"
       },
       "knowledge_search": {
         "done": "Searched knowledge sources",
@@ -3582,12 +3585,20 @@
       "title": "You did not allow that step"
     },
     "toolFailed": {
-      "hint": "Ask again, or describe the task differently.",
-      "title": "The bot could not finish this step"
+      "hint": "Open Details to see what the tool said, or ask again.",
+      "title": "That step did not work"
     },
     "toolMissingProgram": {
       "hint": "Install {{name}}, then try again.",
       "title": "{{name}} is not installed"
+    },
+    "toolNoPermission": {
+      "hint": "The bot may not touch that file or folder. Pick a folder it may use, or fix the folder’s access.",
+      "title": "The computer refused: no permission"
+    },
+    "toolNoSuchTool": {
+      "hint": "For files and commands, give the bot a coding engine in its Permissions, or ask for something else.",
+      "title": "This bot has no tool for that"
     },
     "toolNotFound": {
       "hint": "Ask again and say its name or location.",
@@ -3596,6 +3607,10 @@
     "toolScreenControl": {
       "hint": "You are controlling it right now. Hand control back, then ask again.",
       "title": "The bot could not look at the screen"
+    },
+    "toolSearchDown": {
+      "hint": "Add a free search key in Settings, then try again. Reading a page you name still works.",
+      "title": "Web search is not set up or is blocked"
     },
     "toolTargetOffline": {
       "hint": "It is off or not connected. Turn it on and try again.",
@@ -5885,7 +5900,6 @@
       }
     },
     "computer": {
-      "soon": "Soon",
       "target": {
         "description": "Only the connected computer is currently supported. Manage computer and browser access in Permissions below.",
         "title": "Where the bot runs"
@@ -6378,7 +6392,7 @@
         },
         "handsOff": {
           "ask": "Spending money, dangerous commands, and anything after reading an untrusted page.",
-          "name": "Hands-off",
+          "name": "Full",
           "own": "Almost everything, including deleting files and sending messages.",
           "summary": "Bots get on with it. Only the biggest risks stop to ask."
         }
@@ -6386,6 +6400,7 @@
       "offline": "Not connected to the helper yet, so the level cannot be shown or changed.",
       "onItsOwn": "On its own",
       "recommended": "Recommended",
+      "samePresets": "These three levels are the same presets you can pick for a single bot under Permissions: Careful is Read & draft, Balanced is Approve destructive, Full is Full.",
       "saved": "Saved. It applies from the bot’s next step.",
       "title": "What bots can do on their own",
       "willAsk": "Will ask you first"
@@ -7190,8 +7205,8 @@
       "notePlaceholder": "Recovery hint or account purpose",
       "originHint": "Comma-separated URLs or hosts (e.g. https://github.com).",
       "originLabel": "Website address",
-      "refHint": "Stable handle used internally to match fill requests.",
-      "refLabel": "Reference key",
+      "refHint": "How this login is listed. It is filled in for you; change it only if you like.",
+      "refLabel": "Short name",
       "saved": "Changes saved.",
       "secretKeepPlaceholder": "Leave blank to keep existing password",
       "secretLabel": "Password or secret",

@@ -316,6 +316,12 @@ export function PermissionFields({ draft, patch }: { draft: BotDraft; patch: Pat
           );
         })}
       </div>
+      {draft.preset === "full" ? (
+        <details className={styles.exceptions} data-testid="bot-edit-full-exceptions">
+          <summary>{t("botForm.preset.full.exceptionsTitle")}</summary>
+          <p>{t("botForm.preset.full.exceptions")}</p>
+        </details>
+      ) : null}
       {draft.preset === "custom" ? (
         <section className={dialogStyles.block}>
           <div className={dialogStyles.blockHead}>

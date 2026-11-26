@@ -235,6 +235,12 @@ const PATTERNS: ReadonlyArray<readonly [RegExp, string, ((m: RegExpExecArray) =>
   [/spend_limit_reached[\s\S]*saved limit could not be read/, "codes.spend_limit_unreadable"],
   [/spend_limit_reached/, "codes.spend_limit_reached"],
   [/providers_require_app_daemon|_outside_tauri|daemon_unavailable/i, "desktop_only"],
+  // Before the generic "denied": an operating-system refusal is not the owner saying no.
+  [/permission denied|access is denied|os error 5(?![0-9])|\beacces\b|operation not permitted/i, "toolNoPermission"],
+  // The web search tool: every backend blocked it or none is set up (the raw text is written for the model).
+  [/search backends?\b|no search backend|bot challenge|search (?:is )?not (?:set up|configured)/i, "toolSearchDown"],
+  // The model asked for a tool this bot does not have (often a file or shell tool without a coding engine).
+  [/unknown tool|no such tool|tool (?:is )?not (?:available|enabled|found)/i, "toolNoSuchTool"],
   [/denied|not allowed by the user|user rejected/i, "toolDenied"],
   [/failed to fetch|networkerror|load failed|econnrefused|enotfound|fetch failed|connection (refused|reset|lost)/i, "network"],
   [/timed? ?out|etimedout/i, "timeout"],

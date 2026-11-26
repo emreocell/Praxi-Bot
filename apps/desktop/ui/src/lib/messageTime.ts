@@ -15,10 +15,18 @@ export function parseMessageTimes(v: unknown): MessageTimes {
   return v === "off" || v === "seconds" ? v : "minutes";
 }
 
-/** tr and de are always 24 h; other languages follow the OS locale. */
-function clockLocale(lang: string): string | undefined {
+/**
+ * The locale a time is written in. tr and de are always 24 h. Any other language keeps the OS
+ * region only when the OS speaks the same language (en-GB for an English UI: 24 h, day first);
+ * otherwise the UI language alone, so an English UI on a Turkish PC says "Nov", not "Kas".
+ */
+function clockLocale(lang: string): string {
   const l = lang.toLowerCase();
-  return l.startsWith("tr") ? "tr-TR" : l.startsWith("de") ? "de-DE" : undefined;
+  if (l.startsWith("tr")) return "tr-TR";
+  if (l.startsWith("de")) return "de-DE";
+  const os = typeof navigator === "undefined" ? "" : navigator.language;
+  const base = l.split("-")[0] ?? l;
+  return os && os.toLowerCase().split("-")[0] === base ? os : lang;
 }
 
 function is24h(lang: string): boolean {
@@ -131,7 +139,7 @@ export function formatStepDuration(
 ): string {
   const clamped = Math.max(0, ms);
   if (clamped < 10_000) {
-    const one = new Intl.NumberFormat(clockLocale(lang) ?? lang, {
+    const one = new Intl.NumberFormat(clockLocale(lang), {
       minimumFractionDigits: 1,
       maximumFractionDigits: 1
     }).format(Math.round(clamped / 100) / 10);

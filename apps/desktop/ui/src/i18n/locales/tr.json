@@ -1236,19 +1236,21 @@
     "preset": {
       "approve-destructive": {
         "hint": "Okuma, gezinme, çalışma alanı düzenlemeleri ve botun kendi bilgisayarı serbest; silme, gönderme, para ve kendi bilgisayarın önce sorar.",
-        "name": "Yıkıcı işlemlerde onay"
+        "name": "Yıkıcı işlemlerde onay (Dengeli)"
       },
       "custom": {
         "hint": "Her kategori için bir düzey seç.",
         "name": "Özel"
       },
       "full": {
-        "hint": "Sormadan çalışır (silme dahil); yalnızca Para, e-posta gönderme, zamanlanmış görev etkinleştirme ve yasaklı listedeki yıkıcı komutlarda sorar. Çalışmayı sen başlattıysan, bir sayfa okuduktan sonra bile her genel siteyi gezer, kayıt olur ve formları sormadan doldurur. Yalnızca çalışma özel verini (dosya, posta, hafıza) de tutuyorsa ve yeni bir site ya da form bunlardan bir parça içeriyorsa, kayıtlı bir sır için, sayfa betiği için ve güvenilmeyen içerik okuduktan sonra program çalıştırmak için yine sorar.",
+        "exceptions": "Sormadan çalışır (silme dahil); yalnızca Para, e-posta gönderme, zamanlanmış görev etkinleştirme ve yasaklı listedeki yıkıcı komutlarda sorar. Çalışmayı sen başlattıysan, bir sayfa okuduktan sonra bile her genel siteyi gezer, kayıt olur ve formları sormadan doldurur. Yalnızca çalışma özel verini (dosya, posta, hafıza) de tutuyorsa ve yeni bir site ya da form bunlardan bir parça içeriyorsa, kayıtlı bir sır için, sayfa betiği için ve güvenilmeyen içerik okuduktan sonra program çalıştırmak için yine sorar.",
+        "exceptionsTitle": "İstisnalara bak",
+        "hint": "Sormadan çalışır, silme dahil. Birkaç kesin durak her zaman önce sorar.",
         "name": "Tam"
       },
       "read-and-draft": {
         "hint": "Okumalar serbest; her değişiklik, gönderim, sayfa açma, tıklama ve komut önce sorar.",
-        "name": "Oku ve taslak hazırla"
+        "name": "Oku ve taslak hazırla (Dikkatli)"
       },
       "read-only": {
         "hint": "Bot bakabilir ama hiçbir şeyi değiştiremez.",
@@ -2111,6 +2113,7 @@
     "runFailed": "Çalışma başarısız oldu: {{message}}",
     "runStopped": "Senin tarafından durduruldu",
     "send": "Gönder",
+    "skipToComposer": "Mesaj kutusuna geç",
     "slash": {
       "apps": "Uygulamaları aç",
       "export": "Bu sohbeti Markdown dosyası olarak kaydet",
@@ -2322,9 +2325,9 @@
         "running": "Dosya yazılıyor"
       },
       "generic": {
-        "done": "{{name}} çalıştırıldı",
-        "failed": "{{name}} tamamlanamadı",
-        "running": "{{name}} çalıştırılıyor"
+        "done": "Bir araç kullandı",
+        "failed": "Bir araç kullanamadı",
+        "running": "Bir araç kullanıyor"
       },
       "knowledge_search": {
         "done": "Bilgi kaynaklarında arandı",
@@ -3582,12 +3585,20 @@
       "title": "Bu adıma izin vermedin"
     },
     "toolFailed": {
-      "hint": "Yeniden iste ya da görevi başka türlü anlat.",
-      "title": "Bot bu adımı tamamlayamadı"
+      "hint": "Aracın ne dediğini görmek için Ayrıntılar’ı aç ya da tekrar sor.",
+      "title": "Bu adım çalışmadı"
     },
     "toolMissingProgram": {
       "hint": "{{name}} programını kurup yeniden dene.",
       "title": "{{name}} kurulu değil"
+    },
+    "toolNoPermission": {
+      "hint": "Bot o dosyaya ya da klasöre dokunamaz. Kullanabileceği bir klasör seç ya da klasörün erişimini düzelt.",
+      "title": "Bilgisayar reddetti: izin yok"
+    },
+    "toolNoSuchTool": {
+      "hint": "Dosyalar ve komutlar için botun İzinler bölümünde bir kodlama motoru seç ya da başka bir şey iste.",
+      "title": "Bu botun bunun için bir aracı yok"
     },
     "toolNotFound": {
       "hint": "Adını ya da yerini belirterek yeniden iste.",
@@ -3596,6 +3607,10 @@
     "toolScreenControl": {
       "hint": "Ekranı şu an sen kontrol ediyorsun. Kontrolü geri verip yeniden iste.",
       "title": "Bot ekrana bakamadı"
+    },
+    "toolSearchDown": {
+      "hint": "Ayarlar’dan ücretsiz bir arama anahtarı ekleyip tekrar dene. Adını verdiğin bir sayfayı okumak yine çalışır.",
+      "title": "Web araması kurulu değil ya da engellendi"
     },
     "toolTargetOffline": {
       "hint": "Bilgisayar kapalı ya da bağlı değil. Açıp yeniden dene.",
@@ -5885,7 +5900,6 @@
       }
     },
     "computer": {
-      "soon": "Yakında",
       "target": {
         "description": "Şimdilik yalnızca bağlı bilgisayar destekleniyor. Bilgisayar ve tarayıcı erişimini aşağıdaki İzinler bölümünden yönet.",
         "title": "Bot nerede çalışır"
@@ -6378,7 +6392,7 @@
         },
         "handsOff": {
           "ask": "Para harcamak, tehlikeli komutlar ve güvenilmeyen bir sayfa okuduktan sonraki her şey.",
-          "name": "Serbest",
+          "name": "Tam",
           "own": "Dosya silmek ve mesaj göndermek dahil hemen her şey.",
           "summary": "Botlar işini kendisi halleder. Yalnızca en büyük risklerde durup sorar."
         }
@@ -6386,6 +6400,7 @@
       "offline": "Yardımcıya henüz bağlı değil, bu yüzden seviye gösterilemiyor ya da değiştirilemiyor.",
       "onItsOwn": "Kendi başına",
       "recommended": "Önerilen",
+      "samePresets": "Bu üç seviye, tek bir bot için İzinler bölümünde seçebileceğin hazır ayarlarla aynıdır: Dikkatli “Oku ve taslak hazırla”, Dengeli “Yıkıcı işlemlerde onay”, Tam ise Tam’dır.",
       "saved": "Kaydedildi. Botun bir sonraki adımından itibaren geçerli.",
       "title": "Botlar kendi başına neler yapabilir",
       "willAsk": "Önce sana soracak"
@@ -7190,8 +7205,8 @@
       "notePlaceholder": "Kurtarma ipucu veya hesap amacı",
       "originHint": "Virgülle ayrılmış URL veya alan adları (örn. https://github.com).",
       "originLabel": "Web sitesi adresi",
-      "refHint": "Doldurma isteklerini eşleştirmek için dahili olarak kullanılan kararlı ad.",
-      "refLabel": "Referans anahtarı",
+      "refHint": "Bu girişin listede görünme adı. Senin için doldurulur; istersen değiştir.",
+      "refLabel": "Kısa ad",
       "saved": "Değişiklikler kaydedildi.",
       "secretKeepPlaceholder": "Mevcut parolayı korumak için boş bırakın",
       "secretLabel": "Parola veya sır",

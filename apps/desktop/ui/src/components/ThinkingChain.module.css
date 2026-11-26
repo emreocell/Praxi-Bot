@@ -197,9 +197,12 @@
   font-size: var(--font-size-xs);
 }
 
+/* Danger text on its own tint is dim on the dark themes at this size: mix in the body text colour (a
+   palette-neutral way to lift the contrast) and let the pill use the readable small size. */
 .stepBad .reason {
   background-color: var(--color-danger-subtle);
-  color: var(--color-danger);
+  color: color-mix(in srgb, var(--color-danger) 55%, var(--color-text));
+  font-size: var(--font-size-xs);
 }
 
 .slow {
@@ -450,7 +453,7 @@
 
 .stepError {
   margin: var(--space-1) var(--space-0) var(--space-0);
-  color: var(--color-danger);
+  color: color-mix(in srgb, var(--color-danger) 55%, var(--color-text));
   font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }

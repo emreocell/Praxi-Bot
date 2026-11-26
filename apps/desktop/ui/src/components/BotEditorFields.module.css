@@ -251,3 +251,22 @@
   flex: 1;
   min-width: var(--space-0);
 }
+
+/* "See exceptions" under the Full preset: the long list stays one click away, not in the card. */
+.exceptions {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-muted);
+}
+
+.exceptions summary {
+  width: fit-content;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+
+.exceptions p {
+  margin: var(--space-2) var(--space-0) var(--space-0);
+}

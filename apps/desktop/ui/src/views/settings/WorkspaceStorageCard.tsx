@@ -191,7 +191,7 @@ export function WorkspaceStorageCard() {
       <SettingGroup>
         <SettingRow
           title={t("workspace.storageHeading")}
-          description={overview?.root_path ?? t("workspace.unconfiguredHint")}
+          description={overview?.root_path ?? undefined}
           stacked
         >
           {disk ? (

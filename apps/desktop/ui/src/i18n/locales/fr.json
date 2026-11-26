@@ -1236,19 +1236,21 @@
     "preset": {
       "approve-destructive": {
         "hint": "Les lectures, la navigation, les modifications de l'espace de travail et l'ordinateur propre au bot s'exécutent librement ; la suppression, l'envoi, l'argent et votre propre PC demandent d'abord.",
-        "name": "Approuver le destructif"
+        "name": "Approve destructive (Équilibré)"
       },
       "custom": {
         "hint": "Choisissez un niveau pour chaque catégorie.",
         "name": "Personnalisé"
       },
       "full": {
-        "hint": "S'exécute sans demander (suppressions comprises), sauf pour l'argent, l'envoi d'e-mails, l'activation de planifications et les commandes catastrophiques de la liste d'interdiction. Quand vous lancez vous-même l'exécution, il navigue aussi sur n'importe quel site public, s'inscrit et remplit des formulaires sans demander, même après avoir lu une page. Il ne redemande que si l'exécution détient aussi vos données privées (fichiers, e-mails, mémoire) et qu'un nouveau site ou un formulaire en contient un élément, pour un secret enregistré, pour un script de page et, après lecture d'un contenu non fiable, pour exécuter un programme.",
+        "exceptions": "Runs without asking (including deletes and sends), except Money, schedule activation and catastrophic never-list commands. After reading untrusted content it still asks before sending data out or running a program. Exception: actions inside a browser you connected as a browser (Playwright: open, look, click, type, run a page script) do not ask after a web page alone; they ask once the task also read something private (files, mail, memory, your screen). Running code outside the page and moving files always ask.",
+        "exceptionsTitle": "Voir les exceptions",
+        "hint": "Agit sans demander, même pour supprimer. Quelques arrêts stricts demandent toujours d'abord.",
         "name": "Complet"
       },
       "read-and-draft": {
         "hint": "Les lectures sont libres ; chaque modification, envoi, récupération de page, clic et commande demande d'abord.",
-        "name": "Lire et rédiger"
+        "name": "Read & draft (Prudent)"
       },
       "read-only": {
         "hint": "Le bot peut regarder, mais ne modifie jamais rien.",
@@ -2111,6 +2113,7 @@
     "runFailed": "L'exécution a échoué : {{message}}",
     "runStopped": "Arrêtée par vous",
     "send": "Envoyer",
+    "skipToComposer": "Aller à la zone de message",
     "slash": {
       "apps": "Ouvrir les applications",
       "export": "Enregistrer cette conversation au format Markdown",
@@ -2322,9 +2325,9 @@
         "running": "Écriture d'un fichier"
       },
       "generic": {
-        "done": "{{name}} exécuté",
-        "failed": "{{name}} non terminé",
-        "running": "Exécution de {{name}}"
+        "done": "A utilisé un outil",
+        "failed": "N'a pas pu utiliser un outil",
+        "running": "Utilise un outil"
       },
       "knowledge_search": {
         "done": "Sources de connaissances consultées",
@@ -3582,12 +3585,20 @@
       "title": "Vous n'avez pas autorisé cette étape"
     },
     "toolFailed": {
-      "hint": "Redemandez, ou décrivez la tâche autrement.",
-      "title": "Le bot n'a pas pu terminer cette étape"
+      "hint": "Ouvre les Détails pour voir ce que l'outil a répondu, ou redemande.",
+      "title": "Cette étape n'a pas fonctionné"
     },
     "toolMissingProgram": {
       "hint": "Installez {{name}}, puis réessayez.",
       "title": "{{name}} n'est pas installé"
+    },
+    "toolNoPermission": {
+      "hint": "Le bot ne peut pas toucher ce fichier ou ce dossier. Choisis un dossier autorisé ou corrige l'accès.",
+      "title": "L'ordinateur a refusé : pas d'autorisation"
+    },
+    "toolNoSuchTool": {
+      "hint": "Pour les fichiers et les commandes, choisis un moteur de code dans les Autorisations du bot, ou demande autre chose.",
+      "title": "Ce bot n'a pas d'outil pour cela"
     },
     "toolNotFound": {
       "hint": "Redemandez en indiquant son nom ou son emplacement.",
@@ -3596,6 +3607,10 @@
     "toolScreenControl": {
       "hint": "Vous en avez le contrôle en ce moment. Rendez-le au bot, puis redemandez.",
       "title": "Le bot n'a pas pu regarder l'écran"
+    },
+    "toolSearchDown": {
+      "hint": "Ajoute une clé de recherche gratuite dans les Réglages, puis réessaie. Lire une page que tu indiques fonctionne toujours.",
+      "title": "La recherche web n'est pas configurée ou est bloquée"
     },
     "toolTargetOffline": {
       "hint": "Il est éteint ou non connecté. Allumez-le, puis réessayez.",
@@ -5885,7 +5900,6 @@
       }
     },
     "computer": {
-      "soon": "Bientôt",
       "target": {
         "description": "Seul l'ordinateur connecté est pris en charge pour le moment. Gérez l'accès à l'ordinateur et au navigateur dans Autorisations ci-dessous.",
         "title": "Où le bot s'exécute"
@@ -6378,7 +6392,7 @@
         },
         "handsOff": {
           "ask": "Dépenser de l'argent, les commandes dangereuses, et tout ce qui suit la lecture d'une page non fiable.",
-          "name": "Autonome",
+          "name": "Complet",
           "own": "Presque tout, y compris supprimer des fichiers et envoyer des messages.",
           "summary": "Les bots se débrouillent. Seuls les plus gros risques s'arrêtent pour demander."
         }
@@ -6386,6 +6400,7 @@
       "offline": "Pas encore connecté à l'assistant : le niveau ne peut donc être ni affiché ni modifié.",
       "onItsOwn": "Seul",
       "recommended": "Recommandé",
+      "samePresets": "Ces trois niveaux sont les mêmes préréglages que tu peux choisir pour un seul bot dans Autorisations : Prudent correspond à Read & draft, Équilibré à Approve destructive, Complet à Full.",
       "saved": "Enregistré. Cela s'applique dès la prochaine étape du bot.",
       "title": "Ce que les bots peuvent faire seuls",
       "willAsk": "Vous demandera d'abord"
@@ -7190,8 +7205,8 @@
       "notePlaceholder": "Recovery hint or account purpose",
       "originHint": "Comma-separated URLs or hosts (e.g. https://github.com).",
       "originLabel": "Website address",
-      "refHint": "Stable handle used internally to match fill requests.",
-      "refLabel": "Reference key",
+      "refHint": "Comment cet identifiant apparaît dans la liste. Il est rempli pour toi ; change-le seulement si tu veux.",
+      "refLabel": "Nom court",
       "saved": "Changes saved.",
       "secretKeepPlaceholder": "Leave blank to keep existing password",
       "secretLabel": "Password or secret",

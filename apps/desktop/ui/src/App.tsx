@@ -1329,10 +1329,14 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
             onClick={(e) => {
               e.preventDefault();
               const main = document.getElementById("main-content");
+              // The message box first: a plain selector list returns the first match in page order,
+              // which in a chat is a button inside the oldest message.
               const target =
+                main?.querySelector<HTMLElement>("[data-composer-input]:not([disabled])") ??
                 main?.querySelector<HTMLElement>(
                   "textarea:not([disabled]), [data-autofocus], h1[tabindex], button:not([disabled]), [href], input:not([disabled])"
-                ) ?? main;
+                ) ??
+                main;
               target?.focus();
             }}
           >

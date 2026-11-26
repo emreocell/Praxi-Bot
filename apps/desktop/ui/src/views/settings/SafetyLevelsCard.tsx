@@ -49,6 +49,7 @@ export function SafetyLevelsCard() {
   return (
     <div className={styles.root} data-testid="safety-levels">
       <p className={styles.lead}>{t("settingsModal.safety.lead")}</p>
+      <p className={formStyles.hint}>{t("settingsModal.safety.samePresets")}</p>
       <div className={styles.grid} role="radiogroup" aria-label={t("settingsModal.safety.title")}>
         {SAFETY_LEVELS.map((l) => {
           const active = current === l.id;

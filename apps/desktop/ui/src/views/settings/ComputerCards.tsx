@@ -81,8 +81,8 @@ export function ComputerTargetBlock({
       aria-label={t("settingsModal.computer.target.title")}
       onKeyDown={onKeyDown}
     >
-      {COMPUTER_TARGETS.map((target) => {
-        const soon = !isComputerTargetAvailable(target);
+      {/* Modes that cannot be chosen yet are not listed: a "Soon" card is a promise the customer cannot use. */}
+      {COMPUTER_TARGETS.filter(isComputerTargetAvailable).map((target) => {
         const active = current === target;
         return (
           <button
@@ -90,27 +90,15 @@ export function ComputerTargetBlock({
             type="button"
             role="radio"
             aria-checked={active}
-            tabIndex={!soon && target === activeTarget ? 0 : -1}
-            disabled={soon}
+            tabIndex={target === activeTarget ? 0 : -1}
             data-testid={`computer-target-${target}`}
-            className={[
-              styles.targetCard,
-              active ? styles.targetActive : "",
-              soon ? styles.targetSoon : ""
-            ]
-              .filter(Boolean)
-              .join(" ")}
+            className={[styles.targetCard, active ? styles.targetActive : ""].filter(Boolean).join(" ")}
             onClick={() => onChange(target)}
           >
             <span className={styles.targetHead}>
               <span className={styles.targetTitle}>
                 {t(`settingsModal.computer.targets.${target}.title`)}
               </span>
-              {soon ? (
-                <span className={styles.badge}>
-                  {t("settingsModal.computer.soon")}
-                </span>
-              ) : null}
             </span>
             <span className={styles.targetDesc}>
               {t(`settingsModal.computer.targets.${target}.description`)}

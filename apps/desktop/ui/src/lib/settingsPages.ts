@@ -54,16 +54,16 @@ export const CARD_META: Record<string, CardMeta> = {
   hotkey: { page: "general", advanced: true },
   onboarding: { page: "general", advanced: true },
 
-  // Appearance (You): 5 basic, 7 under "More options"
+  // Appearance (You): 6 basic (corners promoted: owners look for it next to the theme), 6 under "More options"
   theme: { page: "appearance" },
   accent: { page: "appearance" },
   backdrop: { page: "appearance" },
   wallpaper: { page: "appearance" },
+  corners: { page: "appearance" },
   accessibility: { page: "appearance" },
   style: { page: "appearance", advanced: true },
   clearChat: { page: "appearance", advanced: true },
   photorealAvatars: { page: "appearance", advanced: true },
-  corners: { page: "appearance", advanced: true },
   bubbles: { page: "appearance", advanced: true },
   background: { page: "appearance", advanced: true },
   frame: { page: "appearance", advanced: true },

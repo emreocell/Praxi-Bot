@@ -4,6 +4,7 @@ import {
   dayHeader,
   formatClock,
   formatDateTime,
+  formatStamp,
   formatStepDuration,
   messageTimeLabel,
   parseMessageTimes
@@ -57,4 +58,17 @@ test("dates in sentences follow the app language, tr and de on a 24 h clock (#64
   // 00:xx stays 00:xx, never "24:xx" or a 12 h clock
   assert.equal(formatDateTime(local(2026, 11, 22, 0, 7), "tr"), "22 Kas 2026 00:07");
   assert.equal(formatDateTime(local(2026, 11, 22, 0, 7), "de"), "22. Nov. 2026, 00:07");
+});
+
+test("an English UI on a PC in another language writes the date in English", () => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", { value: { language: "tr-TR" }, configurable: true });
+  try {
+    const stamp = formatStamp(Date.UTC(2026, 10, 26, 12, 0, 0), "en");
+    assert.match(stamp, /Nov/);
+    assert.doesNotMatch(stamp, /Kas/);
+  } finally {
+    if (real) Object.defineProperty(globalThis, "navigator", real);
+    else delete (globalThis as { navigator?: unknown }).navigator;
+  }
 });

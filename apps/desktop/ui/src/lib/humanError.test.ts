@@ -333,3 +333,11 @@ test("a provider's refusal behind a 502 is worded by what the provider said, nev
   }
   await i18n.changeLanguage("en");
 });
+
+test("a failed tool step says one human reason, not the generic sentence", () => {
+  assert.equal(layer.humanToolError("all configured search backends failed (duckduckgo returned a bot challenge (HTTP 202))").code, "toolSearchDown");
+  assert.equal(layer.humanToolError("Permission denied (os error 13)").code, "toolNoPermission");
+  assert.equal(layer.humanToolError("unknown tool `write_file`; use find_tool to search for the right name").code, "toolNoSuchTool");
+  assert.equal(layer.humanToolError("user rejected the step").code, "toolDenied");
+  assert.equal(layer.humanToolError("something odd happened").code, "toolFailed");
+});

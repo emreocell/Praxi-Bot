@@ -79,7 +79,7 @@ test("Settings nav, Segmented, ComputerTargetBlock, and CharacterPicker implemen
   assert.match(settingsUi, /role="radiogroup"[\s\S]*?onKeyDown=\{onKeyDown\}/);
   assert.match(settingsUi, /tabIndex=\{idx === activeIdx \? 0 : -1\}/);
   assert.match(computerCards, /role="radiogroup"[\s\S]*?onKeyDown=\{onKeyDown\}/);
-  assert.match(computerCards, /tabIndex=\{!soon && target === activeTarget \? 0 : -1\}/);
+  assert.match(computerCards, /tabIndex=\{target === activeTarget \? 0 : -1\}/);
   assert.match(characterPicker, /tabIndex=\{idx === activeIdx \? 0 : -1\}/);
 });
 

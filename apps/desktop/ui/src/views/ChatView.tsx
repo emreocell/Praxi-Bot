@@ -1717,6 +1717,15 @@ export function ChatView({
         {...chatMenu.bind}
       >
         {chatMenu.menu}
+        {/* One Tab from the transcript reaches the message box instead of walking every control of every past message. */}
+        <button
+          type="button"
+          className={styles.skipToComposer}
+          data-testid="skip-to-composer"
+          onClick={() => inputRef.current?.focus()}
+        >
+          {t("chat.skipToComposer")}
+        </button>
         <div
           ref={timelineRef}
           className={[

@@ -226,9 +226,9 @@ function appName(
   return h ? h.charAt(0).toUpperCase() + h.slice(1) : server;
 }
 
-/** Discovery plumbing (`find_tool`, `get_tool_details`): never shown as a step. */
+/** Discovery plumbing (`find_tool`, `get_tool_details`, `tool_search`): never shown as a step. */
 export function isDiscoveryTool(name: string): boolean {
-  return name === "find_tool" || name === "get_tool_details";
+  return name === "find_tool" || name === "get_tool_details" || name === "tool_search";
 }
 
 /**

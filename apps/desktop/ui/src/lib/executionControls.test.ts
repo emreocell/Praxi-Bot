@@ -57,13 +57,10 @@ async function withWindow(stored: unknown, search: string, run: () => void | Pro
 }
 
 for (const target of ["browser", "remote", "off"] as const) {
-  test(`the unavailable ${target} computer mode is disabled and cannot appear active`, () => {
+  test(`the unavailable ${target} computer mode is not listed (no "Soon" placeholder cards)`, () => {
     const html = renderToStaticMarkup(createElement(ComputerTargetBlock, { value: target, onChange: () => {} }));
-    const button = html.match(new RegExp(`<button\\b[^>]*data-testid="computer-target-${target}"[^>]*>`))?.[0];
-    assert.ok(button);
-    assert.match(button, /\bdisabled=""/);
-    assert.match(button, /aria-checked="false"/);
-    assert.match(html, /<button\b[^>]*aria-checked="true"[^>]*data-testid="computer-target-this-pc"/);
+    assert.doesNotMatch(html, new RegExp(`data-testid="computer-target-${target}"`));
+    assert.match(html, /<button[^>]*aria-checked="true"[^>]*data-testid="computer-target-this-pc"/);
   });
 
   test(`stored ${target} mode does not survive either browser settings load path`, async () => {

@@ -534,11 +534,6 @@
   background-color: var(--color-accent-subtle);
 }
 
-.targetSoon {
-  border-style: dashed;
-  cursor: default;
-}
-
 .targetHead {
   display: flex;
   align-items: center;
