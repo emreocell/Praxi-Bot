@@ -719,7 +719,15 @@ mod tests {
                     profile.tool_visible("desktop_click"),
                     preset == BotPreset::Desktop
                 );
-                assert!(!profile.tool_visible("shell_run"));
+                // Only General exposes the shell; permission presets still govern its use.
+                assert_eq!(
+                    profile.tool_visible("shell_run"),
+                    preset == BotPreset::General
+                );
+                assert_eq!(
+                    profile.tool_visible("fs_write"),
+                    matches!(preset, BotPreset::General | BotPreset::Desktop)
+                );
                 // Only the General preset reaches MCP servers; permissions (not
                 // visibility) still gate every call.  No preset exposes email:
                 // its read tools are prompt-free and would pair with `web_*`.
