@@ -646,17 +646,14 @@ fn is_executable_file(path: &Path) -> bool {
     let Ok(meta) = std::fs::metadata(path) else {
         return false;
     };
-    if !meta.is_file() {
-        return false;
-    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        meta.permissions().mode() & 0o111 != 0
+        meta.is_file() && meta.permissions().mode() & 0o111 != 0
     }
     #[cfg(not(unix))]
     {
-        true
+        meta.is_file()
     }
 }
 
@@ -1691,6 +1688,7 @@ mod tests {
         assert_eq!(bare().mask_lines("a\nb\nc"), "a\nb\nc");
     }
 
+    #[cfg(unix)]
     fn start_input(command: &str, cwd: Option<&Path>) -> Input {
         parse(json!({"action":"start","command":command,"cwd":cwd})).unwrap()
     }
@@ -1821,7 +1819,9 @@ mod tests {
         assert!(full.contains("on this computer"), "{full}");
     }
 
+    #[cfg(unix)]
     struct Ledger(Mutex<Vec<(String, bool, String)>>);
+    #[cfg(unix)]
     impl Provenance for Ledger {
         fn is_marked(&self, _normalized: &str) -> bool {
             false
