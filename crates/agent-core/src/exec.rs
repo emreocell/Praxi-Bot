@@ -18,7 +18,7 @@ use futures::StreamExt;
 use permission_engine::{Decision, Limits};
 use protocol::PermissionCategory;
 use protocol::event::{
-    MessageDelta, ModelFallback, TodoItem, TodoStatus, TodoUpdated, ToolCallCompleted,
+    MessageDelta, ModelFallback, RunError, TodoItem, TodoStatus, TodoUpdated, ToolCallCompleted,
     ToolCallDenied, ToolCallRequested,
 };
 use protocol::{Event, RunId, ToolCallId};
@@ -1064,145 +1064,192 @@ impl TurnExecutor {
             std::collections::HashMap::<String, (tokio::time::Instant, Duration)>::new();
         let mut last_model = &primary;
         let connectivity = self.sh.providers.read().connectivity.clone();
-        let reachability = connectivity.check().await;
-        for (i, &name) in models.iter().enumerate() {
-            // Only the owner's configured fallback chain is eligible. Unknown/CLI providers
-            // keep their normal path; HTTP responses such as 401/429 never count as offline.
-            if reachability
-                .iter()
-                .any(|r| Some(r.id.as_str()) == ModelRef(name.clone()).provider() && !r.reachable)
-            {
-                other_failure = true;
-                last_model = name;
-                last_err = Some(ProviderError::Connection("The model service cannot be reached. Your message has not been answered; try again when the connection returns.".into()));
-                continue;
-            }
-            req.model = ModelRef(name.clone());
-            let picked = self.sh.providers.read().pick(&req.model).ok();
-            let provider_id = picked.as_ref().map(|p| p.id().to_owned());
-            // The picture goes only to a model its provider says takes images, never to a CLI
-            // model, and never by changing the messages the other candidates are built from.
-            let mut sent_picture = false;
-            req.messages = match &shot_messages {
-                Some(with)
-                    if !name.starts_with("cli:")
-                        && picked
-                            .as_ref()
-                            .is_some_and(|p| p.supports_vision(req.model.model())) =>
+        // A whole chain that failed only for transient reasons (rate limit, a
+        // provider or network outage) is not the end of the run: wait, with
+        // exponential backoff and within `transient_outage_budget`, and try the
+        // chain again. The sleeps of this wait never count against the
+        // per-call retry budget of `call_with_retries`.
+        let mut outage_slept = Duration::ZERO;
+        let mut outage_round = 0u32;
+        'outage: loop {
+            let reachability = connectivity.check().await;
+            for (i, &name) in models.iter().enumerate() {
+                // Only the owner's configured fallback chain is eligible. Unknown/CLI providers
+                // keep their normal path; HTTP responses such as 401/429 never count as offline.
+                if reachability
+                    .iter()
+                    .any(|r| Some(r.id.as_str()) == ModelRef(name.clone()).provider() && !r.reachable)
                 {
-                    sent_picture = true;
-                    with.clone()
-                }
-                _ => plain_messages.clone(),
-            };
-            if provider_id
-                .as_ref()
-                .and_then(|id| cooldowns.get(id))
-                .is_some_and(|(started, delay)| started.elapsed() < *delay)
-            {
-                continue;
-            }
-            if let Some(prev) = &last_err {
-                if tier_light && i == 1 {
-                    let reason = match prev {
-                        ProviderError::Unsupported { .. } => "unsupported",
-                        ProviderError::MalformedToolCall(_) => "invalid_tool_calls",
-                        _ => "provider_failure",
-                    };
-                    self.record_tier_upgrade(&ctx, &primary, reason)?;
-                }
-                self.sh.emit(
-                    &ctx,
-                    Event::ModelFallback(ModelFallback {
-                        run_id: run.id,
-                        from: last_model.clone(),
-                        to: name.clone(),
-                        reason: prev.to_string(),
-                    }),
-                );
-            }
-            let alternative;
-            let offered = if deferred && guard_reason.is_none() && name.starts_with("cli:") {
-                let mut cli_specs = self.sh.model_specs(&ctx.profile, ctx.bot_id, &hints.tools);
-                crate::discovery::bound_legacy(&mut cli_specs);
-                alternative = cli_specs;
-                &alternative
-            // Only the standard (executor) attempt gets the full deferred surface;
-            // later fallback models keep the light tier's direct-only surface.
-            } else if deferred && tier_light && i == 1 && !ctx.profile.models.direct_tools_only {
-                alternative =
-                    self.sh
-                        .deferred_specs(&ctx, &crate::discovery::activations(&steps), false);
-                &alternative
-            } else {
-                &specs
-            };
-            let using_deferred = deferred && !name.starts_with("cli:");
-            req.tools = tool_defs(offered, using_deferred);
-            note_metadata(&ctx, offered, &mut metadata);
-            let timeout = self.sh.cfg.guards.model_timeout;
-            let mut attempt;
-            loop {
-                attempt = tokio::time::timeout(
-                    timeout,
-                    self.call_with_retries(
-                        &ctx,
-                        run,
-                        &req,
-                        offered,
-                        purpose,
-                        tier_active.then_some(if tier_light && name.as_str() == primary {
-                            crate::tiering::LIGHT
-                        } else {
-                            crate::tiering::STANDARD
-                        }),
-                        cancel,
-                    ),
-                )
-                .await
-                .unwrap_or(Err(ProviderError::Timeout));
-                // A model that turns the screenshot down: ask again without it.
-                if sent_picture
-                    && attempt
-                        .as_ref()
-                        .err()
-                        .is_some_and(crate::grounding::refused_picture)
-                {
-                    sent_picture = false;
-                    req.messages = plain_messages.clone();
+                    other_failure = true;
+                    last_model = name;
+                    last_err = Some(ProviderError::Connection("The model service cannot be reached. Your message has not been answered; try again when the connection returns.".into()));
                     continue;
                 }
-                break;
-            }
-            match attempt {
-                Ok(mut out) => {
-                    if using_deferred {
-                        out.offered_tools = Some(offered.iter().map(|s| s.name.clone()).collect());
+                req.model = ModelRef(name.clone());
+                let picked = self.sh.providers.read().pick(&req.model).ok();
+                let provider_id = picked.as_ref().map(|p| p.id().to_owned());
+                // The picture goes only to a model its provider says takes images, never to a CLI
+                // model, and never by changing the messages the other candidates are built from.
+                let mut sent_picture = false;
+                req.messages = match &shot_messages {
+                    Some(with)
+                        if !name.starts_with("cli:")
+                            && picked
+                                .as_ref()
+                                .is_some_and(|p| p.supports_vision(req.model.model())) =>
+                    {
+                        sent_picture = true;
+                        with.clone()
                     }
-                    result = Some(out);
+                    _ => plain_messages.clone(),
+                };
+                if provider_id
+                    .as_ref()
+                    .and_then(|id| cooldowns.get(id))
+                    .is_some_and(|(started, delay)| started.elapsed() < *delay)
+                {
+                    continue;
+                }
+                if let Some(prev) = &last_err {
+                    if tier_light && i == 1 {
+                        let reason = match prev {
+                            ProviderError::Unsupported { .. } => "unsupported",
+                            ProviderError::MalformedToolCall(_) => "invalid_tool_calls",
+                            _ => "provider_failure",
+                        };
+                        self.record_tier_upgrade(&ctx, &primary, reason)?;
+                    }
+                    self.sh.emit(
+                        &ctx,
+                        Event::ModelFallback(ModelFallback {
+                            run_id: run.id,
+                            from: last_model.clone(),
+                            to: name.clone(),
+                            reason: prev.to_string(),
+                        }),
+                    );
+                }
+                let alternative;
+                let offered = if deferred && guard_reason.is_none() && name.starts_with("cli:") {
+                    let mut cli_specs = self.sh.model_specs(&ctx.profile, ctx.bot_id, &hints.tools);
+                    crate::discovery::bound_legacy(&mut cli_specs);
+                    alternative = cli_specs;
+                    &alternative
+                // Only the standard (executor) attempt gets the full deferred surface;
+                // later fallback models keep the light tier's direct-only surface.
+                } else if deferred && tier_light && i == 1 && !ctx.profile.models.direct_tools_only {
+                    alternative =
+                        self.sh
+                            .deferred_specs(&ctx, &crate::discovery::activations(&steps), false);
+                    &alternative
+                } else {
+                    &specs
+                };
+                let using_deferred = deferred && !name.starts_with("cli:");
+                req.tools = tool_defs(offered, using_deferred);
+                note_metadata(&ctx, offered, &mut metadata);
+                let timeout = self.sh.cfg.guards.model_timeout;
+                let mut attempt;
+                loop {
+                    attempt = tokio::time::timeout(
+                        timeout,
+                        self.call_with_retries(
+                            &ctx,
+                            run,
+                            &req,
+                            offered,
+                            purpose,
+                            tier_active.then_some(if tier_light && name.as_str() == primary {
+                                crate::tiering::LIGHT
+                            } else {
+                                crate::tiering::STANDARD
+                            }),
+                            cancel,
+                        ),
+                    )
+                    .await
+                    .unwrap_or(Err(ProviderError::Timeout));
+                    // A model that turns the screenshot down: ask again without it.
+                    if sent_picture
+                        && attempt
+                            .as_ref()
+                            .err()
+                            .is_some_and(crate::grounding::refused_picture)
+                    {
+                        sent_picture = false;
+                        req.messages = plain_messages.clone();
+                        continue;
+                    }
                     break;
                 }
-                Err(e) => {
-                    if cancel.is_cancelled() {
-                        last_err = Some(ProviderError::Interrupted("cancelled"));
+                match attempt {
+                    Ok(mut out) => {
+                        if using_deferred {
+                            out.offered_tools = Some(offered.iter().map(|s| s.name.clone()).collect());
+                        }
+                        result = Some(out);
                         break;
                     }
-                    if let ProviderError::Unsupported { capability } = &e {
-                        misses.push((name.clone(), capability.clone()));
-                    } else {
-                        other_failure = true;
-                    }
-                    if let (Some(provider_id), Some(delay)) = (provider_id, e.retry_after()) {
-                        cooldowns.insert(provider_id, (tokio::time::Instant::now(), delay));
-                    }
-                    let hard = name.starts_with("cli:") || !e.can_fallback();
-                    last_model = name;
-                    last_err = Some(e);
-                    if hard {
-                        break;
+                    Err(e) => {
+                        if cancel.is_cancelled() {
+                            last_err = Some(ProviderError::Interrupted("cancelled"));
+                            break;
+                        }
+                        if let ProviderError::Unsupported { capability } = &e {
+                            misses.push((name.clone(), capability.clone()));
+                        } else {
+                            other_failure = true;
+                        }
+                        if let (Some(provider_id), Some(delay)) = (provider_id, e.retry_after()) {
+                            cooldowns.insert(provider_id, (tokio::time::Instant::now(), delay));
+                        }
+                        let hard = name.starts_with("cli:") || !e.can_fallback();
+                        last_model = name;
+                        last_err = Some(e);
+                        if hard {
+                            break;
+                        }
                     }
                 }
             }
+            if result.is_none()
+                && !cancel.is_cancelled()
+                && misses.is_empty()
+                && !models.iter().any(|m| m.starts_with("cli:"))
+                && let Some(error) = &last_err
+                && let Some(delay) = outage_delay(
+                    error,
+                    outage_round,
+                    outage_slept,
+                    self.sh.cfg.transient_outage_budget,
+                )
+            {
+                self.sh.emit(
+                    &ctx,
+                    Event::Error(RunError {
+                        run_id: run.id,
+                        message: outage_notice(error, delay),
+                        recoverable: true,
+                    }),
+                );
+                tokio::select! {
+                    biased;
+                    () = cancel.cancelled() => {
+                        return Err(xe("the run was stopped while waiting for the model service"));
+                    }
+                    () = tokio::time::sleep(delay) => {}
+                }
+                outage_slept = outage_slept.saturating_add(delay);
+                outage_round += 1;
+                result = None;
+                last_err = None;
+                misses.clear();
+                other_failure = false;
+                cooldowns.clear();
+                last_model = &primary;
+                continue 'outage;
+            }
+            break;
         }
         let Some(mut out) = result else {
             let message = if !other_failure && !misses.is_empty() {
@@ -2644,6 +2691,42 @@ fn unsupported_chain_message(misses: &[(String, String)]) -> String {
         "no model supports the request: {listed}. \
          Set model_caps in providers.toml (the user's values override the catalog); \
          for example, under [provider.model_caps.\"<model-id>\"] set tools = true or vision = true"
+    )
+}
+
+/// First pause after a whole model chain failed for a transient reason.
+const OUTAGE_INITIAL_BACKOFF: Duration = Duration::from_secs(5);
+/// Longest single pause of that wait.
+const OUTAGE_MAX_BACKOFF: Duration = Duration::from_secs(60);
+
+/// How long to wait before running the whole model chain again after it failed
+/// with `error`; `None`: fail the step (not transient, or the sleep budget is
+/// used up). `round` counts the waits so far, `slept` is their total.
+///
+/// A provider's `Retry-After` is honoured as the minimum, however long the
+/// per-call retry budget is: only `budget` bounds it.
+fn outage_delay(
+    error: &ProviderError,
+    round: u32,
+    slept: Duration,
+    budget: Duration,
+) -> Option<Duration> {
+    if !error.is_retryable() || matches!(error, ProviderError::MalformedToolCall(_)) {
+        return None;
+    }
+    let backoff = OUTAGE_INITIAL_BACKOFF
+        .saturating_mul(2u32.saturating_pow(round))
+        .min(OUTAGE_MAX_BACKOFF);
+    let delay = jittered_backoff(backoff).max(error.retry_after().unwrap_or(Duration::ZERO));
+    (slept.saturating_add(delay) <= budget).then_some(delay)
+}
+
+/// What the user is told while the loop waits for the model service.
+fn outage_notice(error: &ProviderError, delay: Duration) -> String {
+    let secs = delay.as_secs().max(1);
+    let why = truncate_utf8(&error.to_string(), 160).to_owned();
+    format!(
+        "The model service did not answer ({why}). Waiting {secs} s, then trying again. /          Model servisi yanıt vermedi ({why}). {secs} sn bekleyip yeniden denenecek."
     )
 }
 

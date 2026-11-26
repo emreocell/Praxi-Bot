@@ -146,3 +146,49 @@ async fn cycle_detection_can_be_switched_off() {
     assert!(!lp.stopped_by_guard(run).unwrap());
     assert_eq!(clicker.count.load(Ordering::SeqCst), 8);
 }
+
+#[tokio::test]
+async fn page_observations_record_the_browser_tab_and_other_results_do_not() {
+    let env = setup();
+    let mut snapshot = with_class(
+        "browser_snapshot",
+        Effect::Read,
+        PermissionCategory::Browser,
+        ContentClass::none(),
+        "# Page (http://a/)
+button",
+    );
+    snapshot.tab = Some("TAB-7".to_owned());
+    let snapshot = Arc::new(snapshot);
+    let mut read = tool("t.read", Effect::Read, "plain");
+    read.tab = Some("must-not-be-recorded".to_owned());
+    let read = Arc::new(read);
+    let fake = Fake::new(vec![
+        calls(&[("1", "browser_snapshot", json!({}))]),
+        calls(&[("2", "t.read", json!({}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[&snapshot, &read],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let tabs: Vec<Option<String>> = env
+        .storage
+        .list_steps(run)
+        .unwrap()
+        .iter()
+        .filter(|s| s.name == "tools")
+        .map(|s| {
+            s.output.as_ref().unwrap()["results"][0]["tab"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(tabs, vec![Some("TAB-7".to_owned()), None]);
+}

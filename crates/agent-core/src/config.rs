@@ -336,6 +336,9 @@ impl JournalSlot {
     }
 }
 
+/// Default total wait of a model step for a provider that keeps failing transiently (10 minutes).
+pub const DEFAULT_TRANSIENT_OUTAGE_BUDGET: Duration = Duration::from_secs(10 * 60);
+
 /// Default max time a run waits for an offline PC node before failing (24 hours).
 pub const DEFAULT_WAIT_FOR_PC_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -351,6 +354,13 @@ pub struct LoopConfig {
     pub global_policy: Policy,
     /// Retry policy for model steps (they are idempotent).
     pub model_retry: RetryPolicy,
+    /// How long in total a model step may wait, with exponential backoff, for a
+    /// provider that keeps failing for transient reasons (a rate limit with a
+    /// long `Retry-After`, an outage, no network) before the run fails. The
+    /// waits are separate from the short per-call retries of `model_retry`
+    /// and a provider's `Retry-After` counts toward this budget only. `ZERO`
+    /// fails the step as soon as the per-call retries are used up.
+    pub transient_outage_budget: Duration,
     /// Prices keyed by the full model reference (`provider/model`).
     pub prices: HashMap<String, ModelPrice>,
     /// Tools with `Effect::Read` skip an `Ask` that comes from the policy level
@@ -424,6 +434,7 @@ impl Default for LoopConfig {
                 multiplier: 2,
                 max_backoff_ms: 8_000,
             },
+            transient_outage_budget: DEFAULT_TRANSIENT_OUTAGE_BUDGET,
             prices: HashMap::new(),
             read_tools_skip_ask: true,
             max_tokens: None,

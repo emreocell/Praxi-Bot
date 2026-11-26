@@ -12,6 +12,7 @@ mod fill_secret;
 mod grounding;
 mod loop_cycles;
 mod offline;
+mod outage_wait;
 mod page_guard;
 mod planning_pause;
 mod secret_request;
@@ -194,6 +195,8 @@ pub(crate) struct TestTool {
     pub(crate) notes_screenshot: Option<PathBuf>,
     /// Fail with `output` as the error text instead of returning it.
     pub(crate) fails: bool,
+    /// The browser tab this tool reports as the one it just observed (`landed_tab`).
+    pub(crate) tab: Option<String>,
 }
 
 pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
@@ -235,6 +238,7 @@ pub(crate) fn with_class(
         moves_to: None,
         notes_screenshot: None,
         fails: false,
+        tab: None,
     }
 }
 
@@ -253,6 +257,9 @@ impl Tool for TestTool {
     }
     async fn landed_origin(&self, _: &ToolContext) -> Option<String> {
         self.page_origin.lock().clone()
+    }
+    async fn landed_tab(&self, _: &ToolContext) -> Option<String> {
+        self.tab.clone()
     }
     async fn call(&self, ctx: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
         self.count.fetch_add(1, Ordering::SeqCst);
@@ -377,6 +384,8 @@ pub(crate) fn cfg(policy: Policy) -> LoopConfig {
             multiplier: 1,
             max_backoff_ms: 1,
         },
+        // Most tests count provider calls after a failure; the outage wait has its own.
+        transient_outage_budget: Duration::ZERO,
         ..LoopConfig::default()
     }
 }

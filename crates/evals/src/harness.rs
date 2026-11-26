@@ -195,6 +195,8 @@ fn build_config(c: &TurnConfig) -> LoopConfig {
             multiplier: 2,
             max_backoff_ms: 8_000,
         },
+        // Scenarios replay recorded failures: no extra waiting for a provider to come back.
+        transient_outage_budget: Duration::ZERO,
         prices: c.prices.clone(),
         ..LoopConfig::default()
     }

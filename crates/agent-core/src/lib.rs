@@ -107,9 +107,9 @@ pub use computer_target::{
 pub use config::{
     DEFAULT_APPROVAL_TIMEOUT, DEFAULT_DIRECT_TOOL_LIMIT, DEFAULT_HANDOVER_TIMEOUT,
     DEFAULT_MAX_HANDOVERS_PER_RUN, DEFAULT_MAX_SECRET_REQUESTS_PER_RUN,
-    DEFAULT_SCHEDULE_APPROVAL_TIMEOUT, DEFAULT_SECRET_REQUEST_TIMEOUT, DEFAULT_WAIT_FOR_PC_TIMEOUT,
-    Guards, JournalSlot, LoopConfig, MemoryConfig, ModelPrice, RedactorRefreshFn, SharedRedactor,
-    secret_variants,
+    DEFAULT_SCHEDULE_APPROVAL_TIMEOUT, DEFAULT_SECRET_REQUEST_TIMEOUT,
+    DEFAULT_TRANSIENT_OUTAGE_BUDGET, DEFAULT_WAIT_FOR_PC_TIMEOUT, Guards, JournalSlot, LoopConfig,
+    MemoryConfig, ModelPrice, RedactorRefreshFn, SharedRedactor, secret_variants,
 };
 pub use control::{ControlGate, ControlRequest};
 pub use knowledge::{
