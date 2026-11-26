@@ -132,12 +132,19 @@ değişmişse komut herhangi bir değişiklikten önce durur (`host key mismatch
 
 Yönetilen güncelleyiciyle kurulmuş bir Linux sunucusunda **Sunucuyu güncelle**
 düğmesi, masaüstü uygulamasının yayınlanan sürümünü eşleştirilmiş bağlantı üzerinden
-ister. Bu işlem için masaüstünün sunucu yönetici yetkisi gerekir. Güncelleyici
-SHA‑256 özetini ve GitHub derleme kaynağını doğrular, program dosyalarını değiştirir,
-`praxi.service` birimini yeniden başlatır ve yeni sürecin hazır olmasını bekler.
-Sağlık kontrolü başarısız olursa önceki program dosyalarını geri koyar ve önceki
-sürümün yeniden açıldığını kontrol eder. Daha eski kurulumlarda doğrulanmış kurulum
-programıyla bir kez yükseltme yap. Uygulama güncellemeyi başlatamazsa SSH ile
+ister. Bu işlem için masaüstünün sunucu yönetici yetkisi gerekir ve isteği root
+güncelleyiciye yalnızca arka plan servisinin kendi süreci iletebilir. Güncelleyici,
+sunucuda kurulu olandan eski bir sürümü asla kurmaz ve sunucunun kanalına uyar (aşağıya bak):
+`stable` seçili bir sunucu ön sürüme geçmez. SHA‑256 özetini ve GitHub derleme kaynağını
+(yalnızca sürüm etiketi için, hiçbir dal için değil) doğrular, servisi durdurur, SQLite
+veritabanlarını `/var/lib/praxi-updates/db-snapshot` klasörüne kopyalar (yalnızca root
+okuyabilir; sonraki güncelleme bunu değiştirir), program dosyalarını değiştirir,
+`praxi.service` birimini başlatır ve yeni sürecin hazır olduğunu bildirmesini en fazla altı
+dakika bekler. Hazır olmazsa güncelleyici onu durdurur, veritabanlarını ve önceki program
+dosyalarını geri koyar ve önceki servisin açıldığını kontrol eder. Yeni sürümün bu sürede
+yazdığı veriler geri almayla birlikte kaybolur. Güncelleme kopya için boş disk alanı ister;
+yeterli alan yoksa hiçbir şeyi değiştirmeden durur. Daha eski kurulumlarda doğrulanmış
+kurulum programıyla bir kez yükseltme yap. Uygulama güncellemeyi başlatamazsa SSH ile
 yükseltme yolunu veya uygulamanın gösterdiği komutları kullan.
 
 Zamanlanmış güncellemeler varsayılan olarak kapalıdır. Ayarı değiştirmek için
@@ -151,13 +158,19 @@ channel = "stable"      # stable, pre-release
 systemd zamanlayıcısı her gün kontrol eder. `notify`, masaüstünde seçili sunucu
 için yeni sürümü gösterir. `auto` güncellemeyi de kurar ve botlar çalışırken servisi
 yeniden başlatabilir. `stable` kararlı sürümü bekler. `pre-release` ön sürümleri de
-kontrol eder. Ayar değişikliğini hemen uygulamak için
+kontrol eder. Yazdığın `channel` değeri masaüstündeki güncelleme düğmesi için de geçerlidir.
+Yazmazsan ön sürüm çalıştıran sunucu ön sürümleri, kararlı sürüm çalıştıran sunucu kararlı
+sürümleri izler. Dosya sıradan bir dosya olmalı, sahibi root olmalı, bağlantı olmamalı ve
+16 KiB'den küçük olmalı. Ayar değişikliğini hemen uygulamak için
 `sudo systemctl start praxi-update-check.service` çalıştır. Hata kayıtları için
 `sudo journalctl -u 'praxi-update*.service'` komutunu kullan. Masaüstünden gelen
 güncelleme isteklerini kapatmak için sunucuda `praxi-update.socket` birimini durdur
 ve devre dışı bırak.
 
-Otomatik geri alma program dosyalarını geri yükler. Önemli veriler bulunan bir
+Yönetilen geri alma, program dosyalarını ve güncellemeden hemen önce kopyalanan veritabanlarını
+geri yükler. Yarıda kesilen bir güncelleme (süre sınırı, çökme) başarısız sayılır ve servis yeniden
+başlatılır; böylece güncelleme düğmesi kapalı kalmaz. `praxi self-update --rollback` ve aşağıdaki
+kurulum programı geri alması yalnızca program dosyalarını değiştirir. Önemli veriler bulunan bir
 sunucuyu yükseltmeden önce aşağıdaki yedekleme adımlarını uygula. Böylece başarısız
 bir veri geçişinden de dönebilirsin.
 

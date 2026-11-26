@@ -74,7 +74,11 @@ export function hostMismatch(health: HostHealthLike, protocol: HostProtocol): Ex
   const builds = updateState({ version: health.version, releaseTag: hostRelease }, { version: localVersion, releaseTag: localRelease });
   const incompatible = (localApiVersion !== null && health.api_version !== localApiVersion) || !sameMinor(host, local);
   const preview = Boolean(localRelease && (localRelease.includes("-") || hostRelease?.includes("-")));
-  const previewSkew = preview && builds !== "current";
+  // Every published build reports the same cargo version, so "same version" says nothing about which
+  // release a server is. Once this app knows its own release, a server that names none (an older
+  // build, or a pre-release answering as 0.1.0 to a stable app) is not accepted as the same.
+  const unidentified = Boolean(localRelease) && !hostRelease;
+  const previewSkew = (preview && builds !== "current") || unidentified;
   const sameVersion = builds === "current" || (builds === "unknown" && health.version === localVersion);
   if (!incompatible && !previewSkew && sameVersion) return null;
   return {

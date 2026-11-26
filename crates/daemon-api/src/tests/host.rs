@@ -1453,3 +1453,104 @@ async fn a_standby_node_does_not_resume_interrupted_runs_until_it_becomes_the_le
     assert_eq!(attempts, 1, "the leader continues the interrupted run once");
     t.state.stop_components().await;
 }
+
+#[tokio::test]
+async fn update_requests_are_audited_with_their_tag_and_outcome() {
+    let t = setup();
+    for (body, tag) in [
+        (json!({"tag":"v0.1.0-alpha.9"}), json!("v0.1.0-alpha.9")),
+        // Text that is not a release tag never reaches the audit trail.
+        (json!({"tag":"../../etc/passwd"}), json!(null)),
+    ] {
+        let response = call(&t, Method::POST, "/v1/host/update", Some(body)).await;
+        assert_eq!(response.status, StatusCode::CONFLICT);
+        let audit = t.state.storage().list_audit(t.state.user_id()).unwrap();
+        let last = audit
+            .iter()
+            .filter(|row| row.action == "host.update")
+            .next_back()
+            .unwrap();
+        assert_eq!(last.detail["detail"]["phase"], "rejected");
+        assert_eq!(last.detail["detail"]["outcome"], "unavailable");
+        assert_eq!(last.detail["detail"]["tag"], tag);
+    }
+    let phases: Vec<_> = t
+        .state
+        .storage()
+        .list_audit(t.state.user_id())
+        .unwrap()
+        .iter()
+        .filter(|row| row.action == "host.update")
+        .map(|row| row.detail["detail"]["phase"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(phases, ["requested", "rejected", "requested", "rejected"]);
+}
+
+#[tokio::test]
+async fn update_request_body_is_bounded() {
+    let t = setup();
+    let big = json!({"tag": format!("v{}", "1".repeat(crate::host_admin::MAX_ADMIN_BODY))});
+    let response = call(&t, Method::POST, "/v1/host/update", Some(big)).await;
+    assert_eq!(response.status, StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn update_requests_have_their_own_small_budget() {
+    let t = setup();
+    let leader = t.state.leader();
+    for _ in 0..3 {
+        leader.admit_update().unwrap();
+    }
+    let error = leader.admit_update().unwrap_err();
+    assert_eq!(error.status(), StatusCode::TOO_MANY_REQUESTS);
+    // Other administration calls and invites keep their own budgets.
+    leader.admit_admin_call().unwrap();
+}
+
+#[test]
+fn a_running_status_does_not_outlive_the_updater() {
+    use crate::host::{HostUpdateState, read_update_status};
+    use std::time::{Duration, SystemTime};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("status.json");
+    let now = SystemTime::now();
+    let written = |state: &str| {
+        std::fs::write(
+            &path,
+            format!(r#"{{"state":"{state}","tag":"v0.1.0-alpha.9"}}"#),
+        )
+        .unwrap();
+    };
+    // Nothing recorded yet, or a file that is not a status: idle.
+    assert!(matches!(
+        read_update_status(&path, now).state,
+        HostUpdateState::Idle
+    ));
+    std::fs::write(&path, "{").unwrap();
+    assert!(matches!(
+        read_update_status(&path, now).state,
+        HostUpdateState::Idle
+    ));
+    // A recent run is shown as running; one that outlived the unit's time limit has failed.
+    written("running");
+    assert!(matches!(
+        read_update_status(&path, now).state,
+        HostUpdateState::Running
+    ));
+    let later = now + Duration::from_secs(46 * 60);
+    let stale = read_update_status(&path, later);
+    assert!(matches!(stale.state, HostUpdateState::Failed));
+    assert_eq!(stale.tag.as_deref(), Some("v0.1.0-alpha.9"));
+    // Other states are never rewritten, however old.
+    written("updated");
+    assert!(matches!(
+        read_update_status(&path, later).state,
+        HostUpdateState::Updated
+    ));
+    // A status file larger than the bound is ignored, not read whole.
+    std::fs::write(&path, vec![b' '; 1 << 20]).unwrap();
+    assert!(matches!(
+        read_update_status(&path, now).state,
+        HostUpdateState::Idle
+    ));
+}

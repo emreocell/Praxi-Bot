@@ -140,10 +140,17 @@ confirmation for `--purge`.
 
 On a Linux host installed with the managed updater, the desktop's **Update server**
 button requests the exact published desktop release over the paired connection.
-The host administrator pairing is required. The updater checks both SHA-256 and
-GitHub build provenance, switches the program files, restarts `praxi.service`,
-and waits for the new process to report ready. If readiness fails, it switches
-back to the previous program files and checks that the previous daemon restarts.
+The host administrator pairing is required, and only the daemon's own process can pass
+the request on to the root updater. The updater never installs a release older than the one
+on the server, and it keeps to the server's channel (see below): a server set to `stable`
+does not move to a pre-release. It checks both SHA-256 and GitHub build provenance (for the
+release tag itself, never a branch), stops the daemon, copies its SQLite databases to
+`/var/lib/praxi-updates/db-snapshot` (root only; the next update replaces it), switches the
+program files, starts `praxi.service`, and waits up to six minutes for the new process to
+report ready. If it does not, the updater stops it, puts the databases and the previous
+program files back, and checks that the previous daemon starts. Data the new release wrote in
+that time is lost with the rollback. The update needs free disk space for the copy and stops
+before it changes anything when there is not enough.
 A host installed before the managed updater needs one verified installer upgrade.
 Use the SSH upgrade or the commands the app shows if it cannot start the update.
 
@@ -158,14 +165,20 @@ channel = "stable"      # stable, pre-release
 The systemd timer checks daily. `notify` shows available releases on the selected
 server in the desktop app. `auto` also installs them and can restart the daemon
 while bots are working. `stable` waits for a stable release. `pre-release` also
-considers preview releases. Run `sudo systemctl start praxi-update-check.service`
+considers preview releases. A `channel` you set also applies to the desktop's update
+button. Without one, a server that runs a pre-release follows pre-releases and a server
+that runs a final release follows stable releases. The file must be a regular file owned
+by root, not a link, and under 16 KiB. Run `sudo systemctl start praxi-update-check.service`
 to apply a mode change immediately. Use `sudo journalctl -u 'praxi-update*.service'`
 to inspect failures. To turn off update requests from paired desktops, disable
 and stop `praxi-update.socket` on the host.
 
-Managed rollback restores program files. Before upgrading a host with important
-data, take a backup as described below so you can also recover from a failed data
-migration.
+Managed rollback restores the program files and the databases copied just before the
+update. A killed update run (time limit, crash) is marked failed and the daemon is
+started again, so the update button does not stay off. `praxi self-update --rollback`
+and the installer rollback below only switch program files. Before upgrading a host
+with important data, take a backup as described below so you can also recover from a
+failed data migration.
 
 ## Roll back
 

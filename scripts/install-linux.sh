@@ -1333,7 +1333,7 @@ StandardError=journal
 StateDirectory=praxi-updates
 PrivateTmp=true
 ProtectSystem=full
-RuntimeMaxSec=25min
+RuntimeMaxSec=40min
 UNIT
   cat > "${UNIT_DIR}/praxi-update-check.service" <<UNIT
 [Unit]
@@ -1348,7 +1348,7 @@ ExecStopPost=${PREFIX}/bin/bot self-update --managed-port ${PORT} --recover
 StateDirectory=praxi-updates
 PrivateTmp=true
 ProtectSystem=full
-TimeoutStartSec=25min
+TimeoutStartSec=40min
 UNIT
   cat > "${UNIT_DIR}/praxi-update-check.timer" <<'UNIT'
 [Unit]

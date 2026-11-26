@@ -19,6 +19,14 @@ pub struct UpdateArgs {
     pub managed_port: Option<u16>,
     #[arg(long, hide = true, requires = "managed_port")]
     pub scheduled: bool,
+    /// Run by the updater units after every run: mark a run that was killed as failed.
+    #[arg(
+        long,
+        hide = true,
+        requires = "managed_port",
+        conflicts_with = "scheduled"
+    )]
+    pub recover: bool,
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(clippy::unnecessary_wraps))]
@@ -479,6 +487,16 @@ mod linux {
     }
 
     #[cfg(unix)]
+    fn remove_link(prefix: &Path, name: &str) -> Result<()> {
+        match std::fs::remove_file(prefix.join(name)) {
+            Ok(()) => std::fs::File::open(prefix)?.sync_all()?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
     fn switch(prefix: &Path, target: &Path) -> Result<()> {
         let old = read_version_link(prefix, "current")?;
         if old.as_deref() == Some(target) {
@@ -510,6 +528,8 @@ mod linux {
             return Err("bin is not a directory".into());
         }
         let current = read_version_link(prefix, "current")?;
+        // Flat files are the installer's, newer than anything `current` still names: adopt them again.
+        let flat = flat_launchers(prefix);
         for name in ["bot", "bot-node"] {
             let meta = std::fs::symlink_metadata(bin.join(name))?;
             if meta.file_type().is_symlink() {
@@ -522,7 +542,7 @@ mod linux {
                 return Err("launcher must be an ordinary file".into());
             }
         }
-        if current.is_none() {
+        if current.is_none() || flat {
             let installed = std::fs::read_to_string(prefix.join("VERSION"))
                 .ok()
                 .and_then(|s| s.split_whitespace().next().map(str::to_owned))
@@ -547,6 +567,8 @@ mod linux {
             std::fs::rename(staging.path(), prefix.join(&baseline))?;
             std::fs::File::open(prefix.join("versions"))?.sync_all()?;
             replace_link(prefix, "current", &baseline)?;
+            // `previous` belonged to the chain this installation replaced.
+            remove_link(prefix, "previous")?;
         }
         for name in ["bot", "bot-node"] {
             let staging = tempfile::Builder::new()
@@ -560,9 +582,26 @@ mod linux {
         Ok(())
     }
 
+    /// The installer's flat layout: `bin/bot` and `bin/bot-node` are ordinary files. A managed
+    /// installation has links to `../current/bin/<name>` instead.
+    #[cfg(unix)]
+    fn flat_launchers(prefix: &Path) -> bool {
+        let bin = prefix.join("bin");
+        std::fs::symlink_metadata(&bin).is_ok_and(|meta| meta.is_dir())
+            && ["bot", "bot-node"].iter().all(|name| {
+                std::fs::symlink_metadata(bin.join(name)).is_ok_and(|meta| meta.is_file())
+            })
+    }
+
     #[cfg(unix)]
     fn installed_tag(prefix: &Path) -> Result<String> {
-        if let Some(current) = read_version_link(prefix, "current")? {
+        // Flat launchers outrank `current`: `install-linux.sh --update` replaces the files but leaves
+        // the links of an earlier managed update, which then name an older release. Trusting them
+        // would let a request for that older tag pass as "installed" (a downgrade), and
+        // `ensure_launchers` would point the launchers back at it.
+        if !flat_launchers(prefix)
+            && let Some(current) = read_version_link(prefix, "current")?
+        {
             let installed = prefix.join(&current);
             validate_installed(&installed)?;
             if let Some(version) = version_file(&installed)? {
@@ -600,6 +639,9 @@ mod linux {
     #[allow(clippy::too_many_lines)] // Keep the verified installation transaction sequential.
     pub(super) async fn run(args: &UpdateArgs) -> Result<()> {
         if let Some(port) = args.managed_port {
+            if args.recover {
+                return managed::recover().await;
+            }
             return managed::run(port, args.scheduled).await;
         }
         let prefix = args
@@ -651,6 +693,7 @@ mod linux {
         let _lock = lock(&prefix)?;
         let target = prepare(&prefix, &client, &release).await?;
         switch(&prefix, &target)?;
+        prune_versions(&prefix);
         println!(
             "installed {}; restart required (launch {}/current/bin/bot)",
             release.tag_name,
@@ -818,6 +861,37 @@ mod linux {
             Err(e) => return Err(e.into()),
         }
         Ok(())
+    }
+
+    /// Delete every generation that neither `current` nor `previous` names. Each update publishes a
+    /// fresh directory (a same-tag repair too), so without this repeated updates fill the disk.
+    /// Best effort: a directory that cannot be removed is reported and kept. Call under the update lock.
+    #[cfg(unix)]
+    fn prune_versions(prefix: &Path) {
+        let mut keep = Vec::new();
+        for name in ["current", "previous"] {
+            match read_version_link(prefix, name) {
+                Ok(link) => keep.extend(link),
+                Err(error) => {
+                    eprintln!("Praxi update: not pruning old versions: {error}");
+                    return;
+                }
+            }
+        }
+        // With nothing to keep, nothing is certain: never prune an installation without a baseline.
+        let Ok(entries) = std::fs::read_dir(prefix.join("versions")) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let relative = PathBuf::from("versions").join(entry.file_name());
+            if keep.is_empty() || keep.contains(&relative) {
+                continue;
+            }
+            // Only directories named like a version or a generation are ours to delete.
+            if remove_version(prefix, &relative).is_err() {
+                eprintln!("Praxi update: kept {}", relative.display());
+            }
+        }
     }
 
     fn lock(prefix: &Path) -> Result<std::fs::File> {
@@ -1283,6 +1357,154 @@ mod linux {
             );
             replace_link(dir.path(), "previous", Path::new("../escape")).unwrap();
             assert!(read_version_link(dir.path(), "previous").is_err());
+        }
+
+        /// An installation as `bot self-update` leaves it after two managed updates.
+        #[cfg(unix)]
+        fn managed_prefix(dir: &Path) {
+            std::fs::create_dir_all(dir.join("bin")).unwrap();
+            std::fs::create_dir_all(dir.join("versions")).unwrap();
+            std::fs::write(dir.join("VERSION"), "v1.0.0\n").unwrap();
+            for name in ["bot", "bot-node"] {
+                std::fs::write(dir.join("bin").join(name), "v1 flat").unwrap();
+            }
+            ensure_launchers(dir).unwrap();
+            for tag in ["v2.0.0", "v3.0.0"] {
+                let generation = dir.join("versions").join(tag).join("bin");
+                std::fs::create_dir_all(&generation).unwrap();
+                for name in ["bot", "bot-node"] {
+                    std::fs::write(generation.join(name), tag).unwrap();
+                }
+                seal_installation(&dir.join("versions").join(tag)).unwrap();
+                switch(dir, &Path::new("versions").join(tag)).unwrap();
+            }
+        }
+
+        /// What `install-linux.sh --update` does: replace the launcher links by flat files and
+        /// write VERSION, without touching `current`, `previous` or `versions/`.
+        #[cfg(unix)]
+        fn installer_update(dir: &Path, version: &str) {
+            for name in ["bot", "bot-node"] {
+                std::fs::remove_file(dir.join("bin").join(name)).unwrap();
+                std::fs::write(dir.join("bin").join(name), format!("{version} flat")).unwrap();
+            }
+            std::fs::write(dir.join("VERSION"), format!("{version}\n")).unwrap();
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_flat_installer_update_after_managed_updates_is_not_a_downgrade_target() {
+            let dir = tempfile::tempdir().unwrap();
+            managed_prefix(dir.path());
+            assert_eq!(installed_tag(dir.path()).unwrap(), "v3.0.0");
+            // The administrator installs v5.0.0 with the verified installer. The stale links still
+            // name v3.0.0 (current) and v2.0.0 (previous).
+            installer_update(dir.path(), "v5.0.0");
+            assert_eq!(
+                read_version_link(dir.path(), "current").unwrap().as_deref(),
+                Some(Path::new("versions/v3.0.0"))
+            );
+            // Before anything is adopted, the flat files already decide what is installed...
+            assert_eq!(installed_tag(dir.path()).unwrap(), "v5.0.0");
+            // ...so a peer asking for the stale v3.0.0 or the intermediate v4.0.0 is a downgrade.
+            for stale in ["v3.0.0", "v4.0.0", "v2.0.0"] {
+                assert!(!managed::newer_release(
+                    stale,
+                    &installed_tag(dir.path()).unwrap()
+                ));
+            }
+            // The next managed update adopts the installer's files instead of re-pointing the
+            // launchers at the stale release, and drops the history of the replaced chain.
+            ensure_launchers(dir.path()).unwrap();
+            assert_eq!(installed_tag(dir.path()).unwrap(), "v5.0.0");
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("bin/bot")).unwrap(),
+                "v5.0.0 flat"
+            );
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("current/bin/bot-node")).unwrap(),
+                "v5.0.0 flat"
+            );
+            assert!(read_version_link(dir.path(), "previous").unwrap().is_none());
+            validate_installed(&dir.path().join("current")).unwrap();
+            // Whatever the stale chain left behind is now pruned.
+            prune_versions(dir.path());
+            let mut left: Vec<_> = std::fs::read_dir(dir.path().join("versions"))
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                .collect();
+            left.sort();
+            assert_eq!(left, ["v5.0.0"]);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn the_same_release_installed_flat_again_replaces_its_own_stale_baseline() {
+            let dir = tempfile::tempdir().unwrap();
+            managed_prefix(dir.path());
+            // The installer re-installs the very tag that `current` names (v3.0.0), other bytes.
+            installer_update(dir.path(), "v3.0.0");
+            ensure_launchers(dir.path()).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("current/bin/bot")).unwrap(),
+                "v3.0.0 flat"
+            );
+            assert_eq!(installed_tag(dir.path()).unwrap(), "v3.0.0");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn pruning_keeps_current_and_previous_and_only_deletes_version_directories() {
+            let dir = tempfile::tempdir().unwrap();
+            managed_prefix(dir.path());
+            let versions = dir.path().join("versions");
+            for generation in ["v0-install-abc123", "v0-install-def456", "v1.0.0-old"] {
+                std::fs::create_dir_all(versions.join(generation).join("bin")).unwrap();
+            }
+            // Not ours: a plain file, a directory that is not named like a version, and a link.
+            std::fs::write(versions.join("notes.txt"), "keep").unwrap();
+            std::fs::create_dir(versions.join("lost+found")).unwrap();
+            std::os::unix::fs::symlink("/", versions.join("v9.9.9")).unwrap();
+            prune_versions(dir.path());
+            let mut left: Vec<_> = std::fs::read_dir(&versions)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                .collect();
+            left.sort();
+            assert_eq!(
+                left,
+                ["lost+found", "notes.txt", "v2.0.0", "v3.0.0", "v9.9.9"]
+            );
+            assert!(Path::new("/").exists());
+            // With no baseline nothing is certain, so nothing is deleted.
+            remove_link(dir.path(), "current").unwrap();
+            remove_link(dir.path(), "previous").unwrap();
+            prune_versions(dir.path());
+            assert!(versions.join("v2.0.0").exists() && versions.join("v3.0.0").exists());
+        }
+
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn repeated_same_tag_repairs_do_not_fill_the_disk() {
+            let dir = tempfile::tempdir().unwrap();
+            managed_prefix(dir.path());
+            for round in 0..6 {
+                let file = dir.path().join("archive.gz");
+                std::fs::write(&file, archive()).unwrap();
+                let unpacked = dir.path().join(format!("unpacked-{round}"));
+                std::fs::create_dir(&unpacked).unwrap();
+                unpack(&file, &unpacked, "aarch64").unwrap();
+                let target = publish_version(dir.path(), &unpacked, "v3.0.0").unwrap();
+                switch(dir.path(), &target).unwrap();
+                prune_versions(dir.path());
+                // Only what a rollback needs: the new generation and the one it replaced.
+                let count = std::fs::read_dir(dir.path().join("versions"))
+                    .unwrap()
+                    .count();
+                assert!(count <= 2, "round {round}: {count} generations");
+            }
+            validate_installed(&dir.path().join("current")).unwrap();
+            validate_installed(&dir.path().join("previous")).unwrap();
         }
     }
 }

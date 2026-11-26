@@ -99,6 +99,29 @@ test("published preview builds use the exact release, including legacy build IDs
   assert.equal(homeStatus({ kind: "host", hostId: "h1", name: "Oracle" }, false, unidentified), "version_mismatch");
 });
 
+test("a stable app does not take a server that names no release for the same version", () => {
+  const derive = (remote: Partial<HostHealthLike>) => deriveHostState({
+    link: link("connected"), health: health(remote), ...base, localRelease: "v0.1.0"
+  });
+  // An unidentified legacy pre-release answers as cargo version 0.1.0, like the stable release.
+  for (const remote of [{}, { build_id: "0.1.0+gabc1234" }, { release_tag: null, build_id: null }]) {
+    const s = derive(remote);
+    assert.equal(s.kind, "version_mismatch");
+    assert.equal(hostAcceptsWork(s), false);
+    assert.equal(s.kind === "version_mismatch" && s.blocking, true);
+    assert.equal(s.kind === "version_mismatch" && s.unidentified, true);
+    assert.equal(s.kind === "version_mismatch" && s.update, "host");
+  }
+  // The same release, however it is reported, still connects; a different patch only warns.
+  assert.equal(derive({ release_tag: "v0.1.0" }).kind, "connected");
+  assert.equal(derive({ build_id: "v0.1.0" }).kind, "connected");
+  const patch = derive({ release_tag: "v0.1.1", version: "0.1.1" });
+  assert.equal(patch.kind, "version_mismatch");
+  assert.equal(hostAcceptsWork(patch), true);
+  // An app that does not know its release (a local build) still compares versions only.
+  assert.equal(deriveHostState({ link: link("connected"), health: health(), ...base }).kind, "connected");
+});
+
 test("setup_required on a compatible host is the no-model-key state", () => {
   const s = deriveHostState({
     link: link("connected"),

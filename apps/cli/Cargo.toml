@@ -109,7 +109,7 @@ libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 desktop-linux = { path = "../../crates/desktop-linux", version = "0.1.0" }
-rustix = { version = "1", features = ["net"] }
+rustix = { version = "1", features = ["net", "fs", "process"] }
 
 [target.'cfg(any(target_os = "linux", windows))'.dependencies]
 semver = "1"
