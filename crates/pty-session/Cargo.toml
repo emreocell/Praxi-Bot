@@ -16,5 +16,8 @@ portable-pty = "0.9"
 tokio = { workspace = true, features = ["sync", "time", "rt"] }
 vt100 = "0.18"
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["process", "std"] }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

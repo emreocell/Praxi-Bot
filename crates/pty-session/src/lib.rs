@@ -90,6 +90,8 @@ struct Shared {
     last_output: Instant,
     exit: Option<(ExitInfo, Instant)>,
     reader_done: bool,
+    /// The leader has been waited for: its process id may be handed to another program.
+    reaped: bool,
 }
 
 /// A program on a PTY. Dropping it kills the program.
@@ -117,6 +119,8 @@ fn spawn_reader(
         .name("pty-reader".into())
         .spawn(move || {
             let mut buf = [0u8; 4096];
+            // The end of the previous read: a query can be cut in two between reads.
+            let mut tail: Vec<u8> = Vec::new();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
@@ -126,7 +130,10 @@ fn spawn_reader(
                         sh.screen.process(&buf[..count]);
                         sh.received += count as u64;
                         sh.last_output = Instant::now();
-                        let replies = terminal_replies(&buf[..count], sh.screen.screen());
+                        tail.extend_from_slice(&buf[..count]);
+                        let fresh = tail.len() - count.min(tail.len());
+                        let replies = terminal_replies(&tail, fresh, sh.screen.screen());
+                        tail.drain(..tail.len().saturating_sub(QUERY_OVERLAP));
                         drop(sh);
                         if !replies.is_empty() {
                             let mut out = writer.lock();
@@ -154,6 +161,7 @@ fn spawn_waiter(
         .spawn(move || {
             let status = child.wait();
             let mut sh = state.lock();
+            sh.reaped = true;
             let was_killed = sh.exit.is_some_and(|(e, _)| e.killed);
             let code = status
                 .ok()
@@ -175,8 +183,15 @@ fn spawn_waiter(
 /// Answers to the questions a program asks its terminal. Windows' `ConPTY` does not print a thing
 /// until its cursor-position query (`ESC [ 6 n`) is answered, and full-screen programs ask for
 /// the cursor and the terminal type too. The reply to the first is the emulator's real cursor.
-fn terminal_replies(chunk: &[u8], screen: &vt100::Screen) -> String {
-    let find = |needle: &[u8]| chunk.windows(needle.len()).any(|w| w == needle);
+///
+/// `data` is the last few bytes of the previous read followed by the new ones; `fresh` is where
+/// the new ones start, so a query that ended in the previous read is not answered twice.
+fn terminal_replies(data: &[u8], fresh: usize, screen: &vt100::Screen) -> String {
+    let find = |needle: &[u8]| {
+        data.windows(needle.len())
+            .enumerate()
+            .any(|(at, w)| w == needle && at + needle.len() > fresh)
+    };
     let mut out = String::new();
     if find(b"[6n") {
         let (row, col) = screen.cursor_position();
@@ -187,6 +202,10 @@ fn terminal_replies(chunk: &[u8], screen: &vt100::Screen) -> String {
     }
     out
 }
+
+/// How much of a read is kept to catch a query split across two reads (one byte less than the
+/// longest query, `ESC [ 0 c`, so a whole query is never seen twice).
+const QUERY_OVERLAP: usize = 3;
 
 /// The sizes are clamped to at least 1 before they get here.
 fn nz(n: u16) -> std::num::NonZeroU16 {
@@ -247,6 +266,7 @@ impl PtySession {
             last_output: Instant::now(),
             exit: None,
             reader_done: false,
+            reaped: false,
         }));
         let notify = Arc::new(Notify::new());
 
@@ -338,6 +358,17 @@ impl PtySession {
                     Instant::now(),
                 ));
             }
+        }
+        // The program is a session leader, so its process group is its own: kill what it
+        // started too, also a helper that ignores the hang-up the leader's death sends.
+        #[cfg(unix)]
+        if let Some(pid) = self.pid
+            && !self.shared.lock().reaped
+            && let Some(group) = i32::try_from(pid)
+                .ok()
+                .and_then(rustix::process::Pid::from_raw)
+        {
+            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
         }
         let _ = self.killer.lock().kill();
         self.notify.notify_one();
@@ -572,6 +603,99 @@ mod tests {
             .read(Duration::from_millis(600), Duration::from_millis(200), 1024)
             .await;
         assert_eq!(snap.state, State::WaitingForInput, "{snap:?}");
+    }
+
+    /// Is the process still around (a zombie that was never reaped counts as around)?
+    #[cfg(unix)]
+    fn alive(pid: u32) -> bool {
+        std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
+
+    #[cfg(unix)]
+    async fn gone(pid: u32) -> bool {
+        for _ in 0..50 {
+            if !alive(pid) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        false
+    }
+
+    #[cfg(unix)]
+    fn sh_spec(script: &str) -> SpawnSpec {
+        let mut spec = asker();
+        spec.program = "sh".into();
+        spec.args = vec!["-c".into(), script.into()];
+        spec
+    }
+
+    /// The leader and a helper it started, one of which shrugs off a hang-up (as `nohup` does).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_takes_the_whole_tree_and_leaves_no_zombie() {
+        let dir = std::env::temp_dir().join(format!("pty-session-tree-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pids = dir.join("pids");
+        let script = format!(
+            "sleep 300 & echo $! > {p}; (trap '' HUP; exec sleep 301) & echo $! >> {p}; \
+             echo ready; wait",
+            p = pids.display()
+        );
+        let session = PtySession::spawn(&sh_spec(&script)).expect("spawn");
+        read_until(&session, "ready").await;
+        let leader = session.pid().expect("pid");
+        let helpers: Vec<u32> = std::fs::read_to_string(&pids)
+            .unwrap()
+            .lines()
+            .map(|l| l.trim().parse().unwrap())
+            .collect();
+        assert_eq!(helpers.len(), 2);
+        assert!(alive(leader) && helpers.iter().all(|p| alive(*p)));
+        session.kill();
+        assert!(gone(leader).await, "the leader is reaped, not a zombie");
+        for pid in &helpers {
+            assert!(gone(*pid).await, "helper {pid} outlived the session");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A program that exits by itself is reaped too, and dropping the session kills what is left.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_finished_program_is_reaped_and_a_dropped_session_kills_the_rest() {
+        let session = PtySession::spawn(&asker()).expect("spawn");
+        read_until(&session, "Your name").await;
+        let pid = session.pid().expect("pid");
+        session.write(b"x\r").unwrap();
+        assert!(gone(pid).await, "an exited program is reaped");
+        let waiting = PtySession::spawn(&asker()).expect("spawn");
+        read_until(&waiting, "Your name").await;
+        let pid = waiting.pid().expect("pid");
+        drop(waiting);
+        assert!(gone(pid).await, "a dropped session leaves nothing running");
+    }
+
+    /// A terminal query can arrive in two reads; a full-screen program waits for the answer.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_cursor_query_split_across_reads_is_still_answered() {
+        let script = "printf '\\033['; sleep 0.4; printf '6n'; \
+                      stty raw -echo; dd bs=1 count=6 2>/dev/null | od -c | head -1; echo done";
+        let session = PtySession::spawn(&sh_spec(script)).expect("spawn");
+        let seen = read_until(&session, "done").await;
+        assert!(seen.contains("033") && seen.contains('R'), "{seen:?}");
+    }
+
+    /// A character that is cut in two by the read size is not turned into replacement signs.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_multibyte_character_split_across_reads_stays_whole() {
+        let script = "printf 'caf\\303'; sleep 0.4; printf '\\251 \\342\\202'; sleep 0.4; \
+                      printf '\\254 ok\\n'; sleep 0.5";
+        let session = PtySession::spawn(&sh_spec(script)).expect("spawn");
+        let seen = read_until(&session, "ok").await;
+        assert!(seen.contains("café €"), "{seen:?}");
     }
 
     #[tokio::test]
