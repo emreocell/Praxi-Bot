@@ -796,7 +796,9 @@ fn the_attachment_cap_leaves_room_for_base64() {
 #[tokio::test]
 async fn a_server_that_lies_about_the_size_is_refused_after_the_download() {
     let (imap, conn) = rig().await;
-    let big = vec![b'A'; 1_300_000];
+    // Just over what a cap of 1000 bytes allows (1000 + 500 + 1 MiB of message), once base64
+    // encoded. No larger: this travels over TLS in a debug build on a slow runner.
+    let big = vec![b'A'; 850_000];
     let uid = imap.deliver(
         "INBOX",
         attachment_mail(
@@ -808,7 +810,9 @@ async fn a_server_that_lies_about_the_size_is_refused_after_the_download() {
         ),
     );
     imap.folders.lock().unwrap().get_mut("INBOX").unwrap()[0].reported_size = Some(100);
-    let acct = conn.accounts().remove(0);
+    let mut acct = conn.accounts().remove(0);
+    // The default of the fixture (5 s) is for small mails; the point here is the size check.
+    acct.timeout_secs = 120;
     let provider = conn.provider_for(&acct).await.unwrap();
     // A cap of 1000 bytes lets a message of about a megabyte through its size check (the
     // lie), but not through the check of what really arrived.

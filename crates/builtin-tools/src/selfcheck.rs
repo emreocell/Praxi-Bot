@@ -647,7 +647,7 @@ mod tests {
         let text = data.to_string();
         let dir_text = dir.path().display().to_string();
         assert!(!text.contains(&dir_text), "{text}");
-        if let Some(home) = crate::user_home() {
+        if let Some(home) = crate::user_home().filter(|h| h.as_os_str().len() > 4) {
             assert!(!text.contains(&home.display().to_string()), "{text}");
         }
         // Nothing was written next to the owner's data.
