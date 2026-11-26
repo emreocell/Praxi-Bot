@@ -301,10 +301,18 @@ impl Supervisor {
         let this = Arc::clone(self);
         tokio::spawn(async move {
             match this.store.recover_interrupted(this.clock.now_ms()) {
-                Ok(0) => {}
-                Ok(n) => tracing::info!(
-                    "missions: {n} interrupted session(s) abandoned; missions continue from their ledger"
-                ),
+                Ok(runs) if runs.is_empty() => {}
+                Ok(runs) => {
+                    tracing::info!(
+                        "missions: {} interrupted session(s) abandoned; missions continue from their ledger",
+                        runs.len()
+                    );
+                    // The recovered runs sit paused: cancel them so nobody resumes one
+                    // next to the session that replaces it.
+                    for run in &runs {
+                        this.runner.cancel_run(run);
+                    }
+                }
                 Err(e) => tracing::warn!("missions: recovery failed: {e}"),
             }
             loop {

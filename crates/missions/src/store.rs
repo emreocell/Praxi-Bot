@@ -864,20 +864,23 @@ impl MissionStore {
     /// After a restart: sessions that never ended are `interrupted` (the run
     /// itself is already paused by the run recovery; it is abandoned, not
     /// resumed, because its model context is gone and side effects are never
-    /// replayed). Their missions go on with a fresh brief. Returns how many.
+    /// replayed). Their missions go on with a fresh brief. Returns the run ids
+    /// of the abandoned sessions, so the caller can cancel those paused runs
+    /// (nobody must be able to resume one next to its replacement).
     ///
     /// # Errors
     /// SQLite failure.
-    pub fn recover_interrupted(&self, now: i64) -> Result<u32> {
+    pub fn recover_interrupted(&self, now: i64) -> Result<Vec<String>> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let open: Vec<(i64, String)> = {
-            let mut stmt = tx
-                .prepare("SELECT id, mission_id FROM mission_sessions WHERE ended_at_ms IS NULL")?;
-            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        let open: Vec<(i64, String, Option<String>)> = {
+            let mut stmt = tx.prepare(
+                "SELECT id, mission_id, run_id FROM mission_sessions WHERE ended_at_ms IS NULL",
+            )?;
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
                 .collect::<rusqlite::Result<_>>()?
         };
-        for (sid, mission) in &open {
+        for (sid, mission, _) in &open {
             tx.execute(
                 "UPDATE mission_sessions SET ended_at_ms = ?2, outcome = 'interrupted' WHERE id = ?1",
                 params![sid, now],
@@ -896,7 +899,7 @@ impl MissionStore {
             )?;
         }
         tx.commit()?;
-        Ok(u32::try_from(open.len()).unwrap_or(u32::MAX))
+        Ok(open.into_iter().filter_map(|(_, _, run)| run).collect())
     }
 
     // ---- digest and timeline ----
@@ -1349,8 +1352,9 @@ mod tests {
         let m = s.create(&new_mission(&[]), 1).unwrap();
         s.begin_session(&m.id, 2).unwrap();
         s.set_lease(&m.id, Some("run-x")).unwrap();
-        assert_eq!(s.recover_interrupted(3).unwrap(), 1);
-        assert_eq!(s.recover_interrupted(4).unwrap(), 0);
+        s.set_session_run(1, "run-x").unwrap();
+        assert_eq!(s.recover_interrupted(3).unwrap(), vec!["run-x".to_owned()]);
+        assert!(s.recover_interrupted(4).unwrap().is_empty());
         assert_eq!(s.get(&m.id).unwrap().unwrap().lease_run_id, None);
     }
 

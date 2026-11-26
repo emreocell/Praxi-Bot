@@ -6,9 +6,12 @@ import { ApiClient, ApiError } from "./client.ts";
 import { MOCK_MCP_CATALOG } from "./mockCatalog.ts";
 import { MockHostSetup } from "./mockHostSetup.ts";
 import { MockLiveViewService } from "./mockLiveView.ts";
+import { MockMissions } from "./mockMissions.ts";
 import { longChatEvents, longChatMessages } from "./mockLongChat.ts";
 import type {
   BotSpendLimits,
+  CreateMission,
+  MissionAnswer,
   BrowserProfileStatus,
   IncomingWebhook,
   IncomingWebhookCreated,
@@ -969,6 +972,7 @@ export class MockApiClient extends ApiClient {
   /** Repairs run so far (tests). */
   readonly repairs: string[] = [];
   private readonly liveView = new MockLiveViewService();
+  private readonly missions = new MockMissions(ATLAS);
   private readonly hostSetup = new MockHostSetup();
   private lastPlan: import("./types.ts").PackPlan | null = null;
   private webSearchConfig: WebSearchConfig = {
@@ -1472,6 +1476,16 @@ export class MockApiClient extends ApiClient {
     const ok = (v: unknown) => v as T;
     const seg = path.split("/").filter(Boolean).map(decodeURIComponent);
     if (path === "/connectivity" && method === "GET") return ok({ services: [] });
+    if (seg[0] === "missions") {
+      const id = seg[1] ?? "";
+      if (!id) {
+        if (method === "POST") return ok(this.missions.start(opts.body as CreateMission, [ATLAS]));
+        return ok(this.missions.list(opts.query?.bot_id as string | undefined, opts.query?.state as string | undefined));
+      }
+      if (seg[2] === "answers") return ok(this.missions.answer(id, (opts.body as { answers: MissionAnswer[] }).answers));
+      if (seg[2]) return ok(this.missions.steer(id, seg[2]));
+      return ok(this.missions.get(id));
+    }
     if (seg[0] === "bots" && seg[2] === "incoming-webhooks") {
       return ok(this.incomingWebhookRoute(method, seg, opts.body));
     }

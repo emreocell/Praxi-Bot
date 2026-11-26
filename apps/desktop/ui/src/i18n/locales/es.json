@@ -4746,6 +4746,74 @@
     "when_month": "Último mes",
     "when_week": "Última semana"
   },
+  "missions": {
+    "chip": {
+      "done": "Terminada",
+      "failed": "Fallida",
+      "needsYou": "Te necesita",
+      "paused": "En pausa",
+      "running": "En marcha",
+      "stopped": "Detenida"
+    },
+    "counts": {
+      "blocked": "bloqueadas",
+      "done": "hechas",
+      "left": "pendientes"
+    },
+    "digest": {
+      "blocked": "Siguen esperándote",
+      "counts": "{{done}} de {{total}} hechas, {{blocked}} te esperan, se desistió de {{failed}}.",
+      "decisions": "Decisiones que tomó el bot",
+      "done": "Algunas que salieron bien",
+      "failed": "Descartadas",
+      "summary": "Informe"
+    },
+    "endedAt": "terminó {{when}}",
+    "headline": {
+      "done": "Terminada: {{done}} de {{total}} hechas",
+      "failed": "No se pudo terminar: {{done}} de {{total}} hechas",
+      "needsYou": "{{blocked}} te esperan, el bot sigue con el resto",
+      "paused": "En pausa: {{done}} de {{total}} hechas",
+      "planning": "Preparando la lista de tareas…",
+      "running": "{{done}} de {{total}} hechas, trabajando en el resto",
+      "stopped": "Detenida: {{done}} de {{total}} hechas",
+      "stuck": "El bot se detuvo y te está esperando"
+    },
+    "modelCalls": "{{count}} llamadas al modelo",
+    "modelCalls_one": "{{count}} llamada al modelo",
+    "modelCalls_other": "{{count}} llamadas al modelo",
+    "needsYou": {
+      "answerFor": "Tu respuesta para {{key}}",
+      "intro": "Responde de una vez lo que puedas. Lo que dejes sin tocar sigue en espera.",
+      "missing": "Escribe una respuesta o marca «Omitir este».",
+      "placeholder": "El código, o lo que debe hacer el bot…",
+      "send": "Enviar respuestas",
+      "sending": "Enviando…",
+      "skip": "Omitir este",
+      "title": "Te necesita ({{count}})",
+      "title_one": "Te necesita ({{count}})",
+      "title_other": "Te necesita ({{count}})"
+    },
+    "pause": "Pausar",
+    "progressLabel": "Progreso: {{done}} de {{total}} hechas",
+    "resume": "Reanudar",
+    "sessions": "{{count}} sesiones",
+    "sessions_one": "{{count}} sesión",
+    "sessions_other": "{{count}} sesiones",
+    "start": {
+      "button": "Iniciar",
+      "goalLabel": "¿Qué debe hacer el bot?",
+      "help": "Describe toda la tarea una sola vez; el bot preguntará al principio lo que necesite, luego trabajará hasta terminar y te informará.",
+      "placeholder": "Por ejemplo: registra mi tienda en estos 15 sitios web y dime en cuáles funcionó.",
+      "starting": "Iniciando…",
+      "summary": "Iniciar una misión"
+    },
+    "stop": "Detener",
+    "stopConfirm": "¿Detener esta misión definitivamente?",
+    "stopNo": "Que siga",
+    "stopYes": "Sí, detener",
+    "title": "Misiones"
+  },
   "modelPicker": {
     "addEngines": "Añadir una CLI de programación",
     "blocked": {

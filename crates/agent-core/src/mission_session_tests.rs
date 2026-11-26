@@ -155,7 +155,12 @@ async fn a_session_gets_the_mission_tools_the_brief_and_the_mission_rules() {
         first_user.content.as_str(),
         Some("MISSION BRIEF · session 1")
     );
-    // The run kind carries the mission, and the owner-started Full level applies.
+    // The run kind carries the mission, and it counts as the owner's own run (the Full level applies).
+    assert!(crate::approval::owner_started_run(
+        &w.env.storage,
+        run,
+        None
+    ));
     let run = w.env.storage.get_run(run).unwrap().unwrap();
     assert_eq!(
         missions::mission_of_kind(&run.kind),

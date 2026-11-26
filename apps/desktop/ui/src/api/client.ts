@@ -178,6 +178,11 @@ import type {
   DataUsage,
   ClearCacheResult,
   BotSpendLimits,
+  CreateMission,
+  Mission,
+  MissionAnswer,
+  MissionAnswersResult,
+  MissionDetail,
   UsageSummary,
   ViewHeartbeat,
   TranscribeInput,
@@ -1346,6 +1351,27 @@ export class ApiClient {
   /** Replace a bot's limits (owner only); `null` fields are unlimited. */
   setBotSpendLimits(botId: string, limits: BotSpendLimits["limits"]): Promise<BotSpendLimits> {
     return this.request("PUT", `/bots/${botId}/spend-limits`, { body: { limits } });
+  }
+
+  /** A bot's missions, newest first; `active` = running, paused or blocked. */
+  listMissions(botId: string, state?: "active"): Promise<Mission[]> {
+    return this.request("GET", "/missions", { query: { bot_id: botId, state } });
+  }
+  /** One mission with its ledger, the items waiting for the owner and the digest. */
+  getMission(id: string): Promise<MissionDetail> {
+    return this.request("GET", `/missions/${id}`);
+  }
+  /** Start a mission (owner only; the bot has to be on the Full level). */
+  startMission(input: CreateMission): Promise<MissionDetail> {
+    return this.request("POST", "/missions", { body: input });
+  }
+  /** Pause, resume or stop a mission (owner only). */
+  steerMission(id: string, action: "pause" | "resume" | "cancel"): Promise<MissionDetail> {
+    return this.request("POST", `/missions/${id}/${action}`);
+  }
+  /** Answer the blocked items in one request (owner only); each needs an answer or `skip`. */
+  answerMission(id: string, answers: MissionAnswer[]): Promise<MissionAnswersResult> {
+    return this.request("POST", `/missions/${id}/answers`, { body: { answers } });
   }
 
   usage(

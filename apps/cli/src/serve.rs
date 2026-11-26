@@ -641,6 +641,20 @@ fn register_schedule_tools(data_dir: &Path, state: &AppState) {
     }
 }
 
+/// Open the mission ledger and give mission sessions their `mission_*` tools. A ledger that cannot
+/// be opened disables missions only (the routes answer 503), never the daemon.
+fn register_mission_tools(state: &AppState) {
+    match state.enable_missions() {
+        Ok(n) if n == missions::tools::MISSION_TOOL_NAMES.len() => {}
+        Ok(n) => {
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: only {n} mission tool(s) registered (name clash)");
+        }
+        Err(e) => {
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: missions are disabled: {e}");
+        }
+    }
+}
+
 /// Give bots that have the "Can create bots" switch the `bot_*` tools. They
 /// are hidden from every other bot and always ask the user.
 fn register_bot_tools(state: &AppState) {
@@ -1242,6 +1256,7 @@ pub fn serve(
     if !safe_mode {
         register_schedule_tools(data_dir, &state);
         register_bot_tools(&state);
+        register_mission_tools(&state);
     }
     step("schedule tools registered");
     if let Some(f) = &fill_secrets {

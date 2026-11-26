@@ -597,6 +597,18 @@
     "summary": "In another language: Türkçe · Deutsch."
   },
   {
+    "doc": "missions.md",
+    "title": "Missions: one big task, finished without check-ins",
+    "headings": [
+      "Two things that changed",
+      "Starting a mission",
+      "What you see",
+      "When a mission stops",
+      "Limits of this first version"
+    ],
+    "summary": "A secretary who asks \"shall I open the file? shall I pick up the pen? this page"
+  },
+  {
     "doc": "model-catalog.md",
     "title": "Model picker metadata",
     "headings": [

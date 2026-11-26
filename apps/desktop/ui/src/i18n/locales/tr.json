@@ -4746,6 +4746,74 @@
     "when_month": "Son 30 gün",
     "when_week": "Son 7 gün"
   },
+  "missions": {
+    "chip": {
+      "done": "Bitti",
+      "failed": "Olmadı",
+      "needsYou": "Sana ihtiyacı var",
+      "paused": "Duraklatıldı",
+      "running": "Çalışıyor",
+      "stopped": "Durduruldu"
+    },
+    "counts": {
+      "blocked": "takılan",
+      "done": "biten",
+      "left": "kalan"
+    },
+    "digest": {
+      "blocked": "Hâlâ seni bekleyenler",
+      "counts": "{{total}} işin {{done}} tanesi bitti, {{blocked}} tanesi seni bekliyor, {{failed}} tanesinden vazgeçildi.",
+      "decisions": "Botun verdiği kararlar",
+      "done": "Olanlardan birkaçı",
+      "failed": "Vazgeçilenler",
+      "summary": "Rapor"
+    },
+    "endedAt": "{{when}} tarihinde bitti",
+    "headline": {
+      "done": "Bitti: {{total}} işin {{done}} tanesi tamamlandı",
+      "failed": "Bitirilemedi: {{total}} işin {{done}} tanesi tamamlandı",
+      "needsYou": "{{blocked}} iş seni bekliyor, bot gerisine devam ediyor",
+      "paused": "Duraklatıldı: {{total}} işin {{done}} tanesi bitti",
+      "planning": "Yapılacakların listesini çıkarıyor…",
+      "running": "{{total}} işin {{done}} tanesi bitti, gerisi üzerinde çalışıyor",
+      "stopped": "Durduruldu: {{total}} işin {{done}} tanesi tamamlandı",
+      "stuck": "Bot durdu ve seni bekliyor"
+    },
+    "modelCalls": "{{count}} model çağrısı",
+    "modelCalls_one": "{{count}} model çağrısı",
+    "modelCalls_other": "{{count}} model çağrısı",
+    "needsYou": {
+      "answerFor": "{{key}} için yanıtın",
+      "intro": "Yanıtlayabildiklerini tek seferde yanıtla. Dokunmadıkların beklemeye devam eder.",
+      "missing": "Bir yanıt yaz ya da “Bunu atla” kutusunu işaretle.",
+      "placeholder": "Kodu yaz ya da botun ne yapması gerektiğini söyle…",
+      "send": "Yanıtları gönder",
+      "sending": "Gönderiliyor…",
+      "skip": "Bunu atla",
+      "title": "Sana ihtiyacı var ({{count}})",
+      "title_one": "Sana ihtiyacı var ({{count}})",
+      "title_other": "Sana ihtiyacı var ({{count}})"
+    },
+    "pause": "Duraklat",
+    "progressLabel": "İlerleme: {{total}} işin {{done}} tanesi bitti",
+    "resume": "Devam ettir",
+    "sessions": "{{count}} oturum",
+    "sessions_one": "{{count}} oturum",
+    "sessions_other": "{{count}} oturum",
+    "start": {
+      "button": "Başlat",
+      "goalLabel": "Bot ne yapsın?",
+      "help": "Tüm işi bir kez anlat; bot başta ihtiyaç duyduklarını sorar, sonra iş bitene kadar çalışır ve sana rapor verir.",
+      "placeholder": "Örneğin: dükkânımı şu 15 sitede kaydet ve hangilerinin olduğunu söyle.",
+      "starting": "Başlatılıyor…",
+      "summary": "Görev başlat"
+    },
+    "stop": "Durdur",
+    "stopConfirm": "Bu görev tamamen durdurulsun mu?",
+    "stopNo": "Devam etsin",
+    "stopYes": "Evet, durdur",
+    "title": "Görevler"
+  },
   "modelPicker": {
     "addEngines": "Kodlama CLI'ı ekle",
     "blocked": {

@@ -252,7 +252,19 @@ impl StepExecutor for TurnExecutor {
     ) -> Result<Value, ExecError> {
         match step.name.as_str() {
             STEP_USER => Ok(json!({ "text": step.input["text"] })),
-            STEP_NUDGE => Ok(json!({})),
+            STEP_NUDGE => {
+                if step.input["auto_continue"] == true {
+                    // The owner can see in the audit log that the runtime, not they, said "go on".
+                    let ctx = self.sh.ctx(run)?;
+                    self.sh.audit(
+                        &ctx,
+                        "system",
+                        "run.auto_continued",
+                        &json!({"reason": step.input["reason"], "n": step.input["n"]}),
+                    );
+                }
+                Ok(json!({}))
+            }
             STEP_MODEL => self.exec_model(run, step, cancel).await,
             STEP_TOOLS => self.exec_tools(run, step).await,
             STEP_WORKFLOW => self.exec_workflow(run, step).await,

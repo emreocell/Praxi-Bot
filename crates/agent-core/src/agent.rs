@@ -1007,6 +1007,13 @@ impl AgentLoop {
             .count()
     }
 
+    /// Model calls one run may make before the step guard closes it (the length of a
+    /// mission session; the supervisor chains the next one).
+    #[must_use]
+    pub fn session_max_steps(&self) -> u32 {
+        self.sh.cfg.guards.max_steps
+    }
+
     /// Whether the bot's permission preset is the Full level (a mission runs
     /// unattended only there).
     #[must_use]

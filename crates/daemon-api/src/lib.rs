@@ -63,6 +63,8 @@ mod mcp_routes;
 pub mod mcp_server;
 pub mod memory;
 mod memory_embed;
+pub mod mission_host;
+mod mission_routes;
 pub mod openapi;
 pub mod owner;
 pub mod pc_access;
@@ -347,6 +349,10 @@ struct Inner {
     cli_models: Arc<cli_provider::models::ModelCache>,
     /// The running scheduler (see [`AppState::start_scheduler`]).
     scheduler: parking_lot::Mutex<Option<Scheduler>>,
+    /// The mission ledger (see [`AppState::enable_missions`]).
+    mission_store: OnceLock<Arc<missions::MissionStore>>,
+    /// The running mission supervisor (leader components only).
+    missions: parking_lot::Mutex<Option<mission_host::MissionRuntime>>,
     leader: OnceLock<host::LeaderControl>,
     /// Embedder additions to `/v1/doctor` (see [`AppState::set_doctor_host`]).
     doctor_host: OnceLock<Arc<dyn DoctorHost>>,
@@ -538,6 +544,8 @@ impl AppState {
             cli_logins: cli_login::LoginBook::default(),
             cli_models,
             scheduler: parking_lot::Mutex::new(None),
+            mission_store: OnceLock::new(),
+            missions: parking_lot::Mutex::new(None),
             leader: OnceLock::new(),
             doctor_host: OnceLock::new(),
             doctor_runs: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -824,6 +832,7 @@ impl AppState {
             return Ok(());
         }
         self.start_scheduler()?;
+        self.start_missions();
         for channel in self.0.channels.lock().iter() {
             channel.start();
         }
@@ -836,6 +845,7 @@ impl AppState {
         for channel in channels {
             channel.stop().await;
         }
+        self.stop_missions().await;
         self.stop_scheduler().await;
     }
 
@@ -1516,6 +1526,27 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/bots/{id}/skills",
             get(skills::get_bot_skills).put(skills::put_bot_skills),
+        )
+        .route(
+            "/v1/missions",
+            get(mission_routes::list_missions).post(mission_routes::create_mission),
+        )
+        .route("/v1/missions/{id}", get(mission_routes::get_mission))
+        .route(
+            "/v1/missions/{id}/pause",
+            post(mission_routes::pause_mission),
+        )
+        .route(
+            "/v1/missions/{id}/resume",
+            post(mission_routes::resume_mission),
+        )
+        .route(
+            "/v1/missions/{id}/cancel",
+            post(mission_routes::cancel_mission),
+        )
+        .route(
+            "/v1/missions/{id}/answers",
+            post(mission_routes::answer_mission),
         )
         .route(
             "/v1/bots/{id}/spend-limits",

@@ -43,6 +43,7 @@ import { BotPanelSkills } from "./BotPanelSkills";
 import { BotPanelWorkspace } from "./BotPanelWorkspace";
 import { BrandMark } from "./BrandMark";
 import { ChatList } from "./ChatList";
+import { MissionBlock } from "./MissionBlock";
 import { QuotaBlock } from "./QuotaRings";
 import { SubagentDetail } from "./SubagentDetail";
 import { SubagentList, useNow } from "./SubagentList";
@@ -365,6 +366,7 @@ export function BotPanel({
                 </button>
               </div>
             ) : null}
+            <MissionBlock key={bot.id} botId={bot.id} visible={visible} />
             {activity.map((id) => {
               switch (id) {
                 case "subagents":

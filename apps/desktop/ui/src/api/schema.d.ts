@@ -3665,6 +3665,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/missions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The user's missions, newest first. */
+        get: operations["list_missions"];
+        put?: never;
+        /**
+         * Start a mission (owner only): the bot works through the goal alone, session after session,
+         *     until it is done, a budget is used up or the owner stops it. The bot has to be on the Full
+         *     level. The goal is stored verbatim; the audit entry `mission.created` holds ids only.
+         */
+        post: operations["create_mission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/missions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One mission with its ledger, blocked items and digest. */
+        get: operations["get_mission"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/missions/{id}/answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer the blocked items of a mission in one go (owner only). Answered items go back to the
+         *     bot with the answer; skipped ones are left out; a blocked mission runs again.
+         */
+        post: operations["answer_mission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/missions/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop a mission for good (owner only): the live session is stopped and the owner gets the digest. */
+        post: operations["cancel_mission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/missions/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause a mission (owner only): a session in flight is stopped, no new one starts. */
+        post: operations["pause_mission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/missions/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a paused or blocked mission (owner only). */
+        post: operations["resume_mission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/peer/link": {
         parameters: {
             query?: never;
@@ -6542,6 +6652,24 @@ export interface components {
             bot_id?: string | null;
             content: string;
             kind: components["schemas"]["MemoryKindDto"];
+        };
+        /** @description `POST /v1/missions`. */
+        CreateMissionInput: {
+            /**
+             * Format: uuid
+             * @description The lead bot; it has to be on the Full level.
+             */
+            bot_id: string;
+            budgets?: null | components["schemas"]["MissionBudgetsDto"];
+            /** @description The task in the owner's words. */
+            goal: string;
+            /**
+             * Format: int32
+             * @description Success criterion: at least this many items done. Default: every item finished.
+             */
+            target_done?: number | null;
+            /** @description Short label; defaults to the start of the goal. */
+            title?: string | null;
         };
         CreateSession: {
             /**
@@ -9460,6 +9588,249 @@ export interface components {
              * @description Used in the current window.
              */
             used: number;
+        };
+        /** @description One answer to a blocked item. */
+        MissionAnswerInput: {
+            /** @description What the owner says (the bot reads it in the next session). Empty with `skip`. */
+            answer?: string;
+            /** @description The blocked item's key. */
+            key: string;
+            /** @description Leave this item out instead of retrying it. */
+            skip?: boolean;
+        };
+        /** @description How many items an answer request released. */
+        MissionAnswersDto: {
+            /**
+             * Format: int32
+             * @description Items that go back to the bot.
+             */
+            released: number;
+            /**
+             * Format: int32
+             * @description Items the owner chose to skip.
+             */
+            skipped: number;
+        };
+        /** @description `POST /v1/missions/{id}/answers`: all blocked items at once. */
+        MissionAnswersInput: {
+            /** @description The answers; items not named stay blocked. */
+            answers: components["schemas"]["MissionAnswerInput"][];
+        };
+        /** @description The limits the supervisor enforces before every session. */
+        MissionBudgetsDto: {
+            /**
+             * Format: double
+             * @description Model spend cap in USD; `null` = no mission cap (bot limits still apply).
+             */
+            max_cost_usd?: number | null;
+            /**
+             * Format: int32
+             * @description Failed sessions in a row before the mission blocks.
+             */
+            max_failed_sessions: number;
+            /**
+             * Format: int64
+             * @description Wall clock from start to deadline, in minutes.
+             */
+            max_minutes: number;
+            /**
+             * Format: int32
+             * @description Most model calls over all sessions.
+             */
+            max_model_steps: number;
+            /**
+             * Format: int32
+             * @description Most sessions (agent runs) over the mission's life.
+             */
+            max_sessions: number;
+            /**
+             * Format: int32
+             * @description Sessions in a row without progress before the mission blocks.
+             */
+            max_stalled_sessions: number;
+        };
+        /** @description A mission with its ledger, blocked items and digest. */
+        MissionDetailDto: {
+            /** @description The items that wait for the owner: answer them all with one `POST .../answers`. */
+            blocked: components["schemas"]["MissionItemDto"][];
+            digest?: null | components["schemas"]["MissionDigestDto"];
+            /** @description Every ledger item, in ledger order. */
+            items: components["schemas"]["MissionItemDto"][];
+            /** @description The mission. */
+            mission: components["schemas"]["MissionDto"];
+        };
+        /** @description What the owner reads when a mission ends or blocks (built from the ledger by code). */
+        MissionDigestDto: {
+            /**
+             * Format: int64
+             * @description When it was written (ms since epoch).
+             */
+            at_ms: number;
+            /** @description Items that need the owner. */
+            blocked: components["schemas"]["MissionDigestItemDto"][];
+            /** @description Decisions the bot recorded. */
+            decisions: string[];
+            /** @description A few finished items. */
+            done_sample: components["schemas"]["MissionDigestItemDto"][];
+            /** @description Items given up. */
+            failed: components["schemas"]["MissionDigestItemDto"][];
+            /** @description `done`, `blocked`, `failed` or `cancelled`. */
+            outcome: string;
+            /** @description Headline counts. */
+            progress: components["schemas"]["MissionProgressDto"];
+            /** @description Why. */
+            reason?: string | null;
+        };
+        /** @description A line of the owner digest. */
+        MissionDigestItemDto: {
+            /** @description Item key. */
+            key: string;
+            /** @description Reason, error or result. */
+            text?: string | null;
+            /** @description Item title. */
+            title: string;
+        };
+        /** @description A mission with its headline numbers. */
+        MissionDto: {
+            /**
+             * Format: uuid
+             * @description The lead bot.
+             */
+            bot_id: string;
+            /** @description Limits. */
+            budgets: components["schemas"]["MissionBudgetsDto"];
+            /**
+             * Format: uuid
+             * @description The mission's chat (its sessions run there).
+             */
+            chat_id: string;
+            /**
+             * Format: double
+             * @description Spend over all sessions (USD, for models with a known price).
+             */
+            cost_usd: number;
+            /**
+             * Format: int64
+             * @description End of a finished mission (ms since epoch).
+             */
+            finished_at_ms?: number | null;
+            /** @description The owner's words, verbatim. */
+            goal: string;
+            /**
+             * Format: uuid
+             * @description Mission id.
+             */
+            id: string;
+            /**
+             * Format: int32
+             * @description Model calls over all sessions.
+             */
+            model_steps: number;
+            /** @description Done / blocked / left counts. */
+            progress: components["schemas"]["MissionProgressDto"];
+            /** @description A session is working right now. */
+            session_running: boolean;
+            /**
+             * Format: int32
+             * @description Sessions started so far.
+             */
+            sessions: number;
+            /**
+             * Format: int64
+             * @description Start (ms since epoch).
+             */
+            started_at_ms: number;
+            /** @description `running`, `paused`, `blocked`, `done`, `failed` or `cancelled`. */
+            state: string;
+            /** @description Why it is paused, blocked or failed. */
+            state_reason?: string | null;
+            /**
+             * Format: int32
+             * @description Success criterion: at least this many items done; `null` = every item finished.
+             */
+            target_done?: number | null;
+            /** @description Short label. */
+            title: string;
+            /**
+             * Format: int64
+             * @description Last change (ms since epoch).
+             */
+            updated_at_ms: number;
+        };
+        /** @description One ledger item. */
+        MissionItemDto: {
+            /**
+             * Format: int32
+             * @description How often a session started on it.
+             */
+            attempts: number;
+            /** @description What the owner has to do or answer (blocked items). */
+            blocked_reason?: string | null;
+            /** @description Dedupe key (a domain, an address). */
+            key: string;
+            /** @description Label such as `site`, `lead`, `task`. */
+            kind: string;
+            /** @description Last failure. */
+            last_error?: string | null;
+            /** @description What the owner answered for a blocked item. */
+            owner_answer?: string | null;
+            /** @description What was achieved (evidence), when done. */
+            result?: string | null;
+            /** @description `todo`, `doing`, `done`, `blocked`, `failed` or `skipped`. */
+            status: string;
+            /** @description What to do, one line. */
+            title: string;
+            /**
+             * Format: int64
+             * @description Last change (ms since epoch).
+             */
+            updated_at_ms: number;
+        };
+        /**
+         * @description Counts of a mission's ledger items. `done`, `blocked` and `left` are the three headline
+         *     numbers and do not overlap: `left` is what the bot still has to work on (`todo + doing`).
+         */
+        MissionProgressDto: {
+            /**
+             * Format: int32
+             * @description Parked for the owner (CAPTCHA, 2FA, a question).
+             */
+            blocked: number;
+            /**
+             * Format: int32
+             * @description Being worked on right now.
+             */
+            doing: number;
+            /**
+             * Format: int32
+             * @description Finished successfully.
+             */
+            done: number;
+            /**
+             * Format: int32
+             * @description Given up (the site refuses, needs payment, ...).
+             */
+            failed: number;
+            /**
+             * Format: int32
+             * @description Still for the bot to work on: `todo + doing` (blocked items are counted in `blocked`).
+             */
+            left: number;
+            /**
+             * Format: int32
+             * @description Left out on purpose.
+             */
+            skipped: number;
+            /**
+             * Format: int32
+             * @description Not started.
+             */
+            todo: number;
+            /**
+             * Format: int32
+             * @description All items.
+             */
+            total: number;
         };
         /**
          * @description What to do when the chat already has a running turn.
@@ -20774,6 +21145,271 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryItemDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_missions: {
+        parameters: {
+            query?: {
+                /** @description Only this bot's missions. */
+                bot_id?: string;
+                /** @description `active` = running, paused or blocked. */
+                state?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionDto"][];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_mission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMissionInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionDetailDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_mission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mission id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionDetailDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    answer_mission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mission id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MissionAnswersInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionAnswersDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    cancel_mission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mission id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionDetailDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    pause_mission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mission id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionDetailDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    resume_mission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mission id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionDetailDto"];
                 };
             };
             404: {

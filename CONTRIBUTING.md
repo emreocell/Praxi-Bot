@@ -62,6 +62,7 @@ size are welcome: fixes, improvements and new features, from first-timers and re
 | `connector-email` | IMAP/SMTP tools |
 | `web-tools`, `doc-tools`, `dev-tools`, `openapi-tools` | Web research, document/data, git/process and OpenAPI-import tools |
 | `scheduler`, `task-runtime` | Durable schedules (cron, interval, one-shot, triggers) and background jobs |
+| `missions` | Long-running missions: item ledger, per-session brief, supervisor that chains sessions, `mission_*` tools ([design](docs/design/missions-adr.md)) |
 | `workflow-replay`, `skills`, `script-runtime` | Recorded workflows, markdown skills, the script sandbox |
 | `memory-store` | Persistent memory and the knowledge/RAG store |
 | `storage` | SQLite + NDJSON event log, migrations |

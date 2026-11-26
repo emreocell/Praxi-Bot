@@ -4746,6 +4746,74 @@
     "when_month": "Letzte 30 Tage",
     "when_week": "Letzte 7 Tage"
   },
+  "missions": {
+    "chip": {
+      "done": "Fertig",
+      "failed": "Gescheitert",
+      "needsYou": "Braucht dich",
+      "paused": "Pausiert",
+      "running": "Läuft",
+      "stopped": "Gestoppt"
+    },
+    "counts": {
+      "blocked": "hängt",
+      "done": "erledigt",
+      "left": "offen"
+    },
+    "digest": {
+      "blocked": "Warten noch auf dich",
+      "counts": "{{done}} von {{total}} erledigt, {{blocked}} warten auf dich, bei {{failed}} wurde aufgegeben.",
+      "decisions": "Entscheidungen des Bots",
+      "done": "Einige, die geklappt haben",
+      "failed": "Aufgegeben",
+      "summary": "Bericht"
+    },
+    "endedAt": "beendet {{when}}",
+    "headline": {
+      "done": "Fertig: {{done}} von {{total}} erledigt",
+      "failed": "Nicht abgeschlossen: {{done}} von {{total}} erledigt",
+      "needsYou": "{{blocked}} warten auf dich, der Bot macht mit dem Rest weiter",
+      "paused": "Pausiert: {{done}} von {{total}} erledigt",
+      "planning": "Erstellt die Liste der Aufgaben…",
+      "running": "{{done}} von {{total}} erledigt, der Rest wird bearbeitet",
+      "stopped": "Gestoppt: {{done}} von {{total}} erledigt",
+      "stuck": "Der Bot hat angehalten und wartet auf dich"
+    },
+    "modelCalls": "{{count}} Modellaufrufe",
+    "modelCalls_one": "{{count}} Modellaufruf",
+    "modelCalls_other": "{{count}} Modellaufrufe",
+    "needsYou": {
+      "answerFor": "Deine Antwort für {{key}}",
+      "intro": "Beantworte, was du kannst, in einem Rutsch. Was du auslässt, bleibt liegen.",
+      "missing": "Schreibe eine Antwort oder setze den Haken bei „Diesen überspringen“.",
+      "placeholder": "Der Code oder was der Bot tun soll…",
+      "send": "Antworten senden",
+      "sending": "Wird gesendet…",
+      "skip": "Diesen überspringen",
+      "title": "Braucht dich ({{count}})",
+      "title_one": "Braucht dich ({{count}})",
+      "title_other": "Braucht dich ({{count}})"
+    },
+    "pause": "Pausieren",
+    "progressLabel": "Fortschritt: {{done}} von {{total}} erledigt",
+    "resume": "Fortsetzen",
+    "sessions": "{{count}} Sitzungen",
+    "sessions_one": "{{count}} Sitzung",
+    "sessions_other": "{{count}} Sitzungen",
+    "start": {
+      "button": "Starten",
+      "goalLabel": "Was soll der Bot tun?",
+      "help": "Beschreibe die ganze Aufgabe einmal; der Bot fragt am Anfang, was er braucht, arbeitet dann bis alles erledigt ist und berichtet.",
+      "placeholder": "Zum Beispiel: Trage meinen Shop auf diesen 15 Webseiten ein und sag mir, welche geklappt haben.",
+      "starting": "Wird gestartet…",
+      "summary": "Auftrag starten"
+    },
+    "stop": "Stoppen",
+    "stopConfirm": "Diesen Auftrag endgültig stoppen?",
+    "stopNo": "Weiterlaufen lassen",
+    "stopYes": "Ja, stoppen",
+    "title": "Aufträge"
+  },
   "modelPicker": {
     "addEngines": "Coding-CLI hinzufügen",
     "blocked": {

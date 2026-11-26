@@ -129,6 +129,12 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/v1/decision-helper"),
     // monthly spending limit: a token holder must not lift its own cap
     ("PUT", "/v1/spend-limit"),
+    // missions: starting, steering and answering unattended work is the owner's own action
+    ("POST", "/v1/missions"),
+    ("POST", "/v1/missions/{}/pause"),
+    ("POST", "/v1/missions/{}/resume"),
+    ("POST", "/v1/missions/{}/cancel"),
+    ("POST", "/v1/missions/{}/answers"),
     // per-bot spending limits: a bot or token holder must not lift its own cap
     ("PUT", "/v1/bots/{}/spend-limits"),
     // how outside text reaches a bot (the quarantined page reader): a bot must not switch off

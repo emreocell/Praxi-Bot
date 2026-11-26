@@ -44,6 +44,7 @@ use crate::mcp;
 use crate::mcp_routes;
 use crate::mcp_server;
 use crate::memory;
+use crate::mission_routes;
 use crate::page_reader_routes;
 use crate::peer;
 use crate::profile_share;
@@ -403,6 +404,13 @@ impl Modify for Security {
         voice_routes::transcribe,
         voice_routes::update_voice,
         bot_limits_routes::get_bot_spend_limits,
+        mission_routes::list_missions,
+        mission_routes::get_mission,
+        mission_routes::create_mission,
+        mission_routes::pause_mission,
+        mission_routes::resume_mission,
+        mission_routes::cancel_mission,
+        mission_routes::answer_mission,
         bot_limits_routes::put_bot_spend_limits,
         page_reader_routes::get_page_reader,
         page_reader_routes::put_page_reader,
@@ -819,6 +827,17 @@ impl Modify for Security {
         incoming_webhook::IncomingWebhookPatch,
         incoming_webhook::IncomingWebhookRotated,
         bot_limits_routes::BotLimitUsageDto,
+        mission_routes::MissionAnswerInput,
+        mission_routes::MissionAnswersDto,
+        mission_routes::MissionAnswersInput,
+        mission_routes::MissionBudgetsDto,
+        mission_routes::MissionDetailDto,
+        mission_routes::MissionDigestDto,
+        mission_routes::MissionDigestItemDto,
+        mission_routes::MissionDto,
+        mission_routes::MissionItemDto,
+        mission_routes::MissionProgressDto,
+        mission_routes::CreateMissionInput,
         bot_limits_routes::BotLimitsDto,
         bot_limits_routes::BotSpendLimitsDto,
         bot_limits_routes::PeriodLimitDto,
@@ -890,6 +909,7 @@ impl Modify for Security {
         (name = "providers"),
         (name = "runs"),
         (name = "schedules"),
+        (name = "missions"),
         (name = "secrets"),
         (name = "skills"),
         (name = "usage"),

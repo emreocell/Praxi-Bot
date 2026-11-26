@@ -518,7 +518,9 @@ pub(crate) fn build_messages(
             missions::mission_of_kind(&run.kind).is_some(),
         ),
     )];
-    if !subagent {
+    // A mission session starts from the brief alone: the ledger is its memory, not the
+    // chat, and stale briefs of earlier sessions would only confuse it.
+    if !subagent && missions::mission_of_kind(&run.kind).is_none() {
         append_chat_history(storage, run, &mut out)?;
     }
     // Tool calls of the latest model step that have no result yet; a stopped

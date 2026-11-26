@@ -4746,6 +4746,74 @@
     "when_month": "Past month",
     "when_week": "Past week"
   },
+  "missions": {
+    "chip": {
+      "done": "Done",
+      "failed": "Failed",
+      "needsYou": "Needs you",
+      "paused": "Paused",
+      "running": "Running",
+      "stopped": "Stopped"
+    },
+    "counts": {
+      "blocked": "blocked",
+      "done": "done",
+      "left": "left"
+    },
+    "digest": {
+      "blocked": "Still waiting for you",
+      "counts": "{{done}} of {{total}} done, {{blocked}} waiting for you, {{failed}} given up.",
+      "decisions": "Decisions the bot made",
+      "done": "A few that worked",
+      "failed": "Given up",
+      "summary": "Report"
+    },
+    "endedAt": "ended {{when}}",
+    "headline": {
+      "done": "Finished: {{done}} of {{total}} done",
+      "failed": "Could not finish: {{done}} of {{total}} done",
+      "needsYou": "{{blocked}} waiting for you, the bot keeps going with the rest",
+      "paused": "Paused: {{done}} of {{total}} done",
+      "planning": "Making the list of what to do…",
+      "running": "{{done}} of {{total}} done, working on the rest",
+      "stopped": "Stopped: {{done}} of {{total}} done",
+      "stuck": "The bot stopped and waits for you"
+    },
+    "modelCalls": "{{count}} model calls",
+    "modelCalls_one": "{{count}} model call",
+    "modelCalls_other": "{{count}} model calls",
+    "needsYou": {
+      "answerFor": "Your answer for {{key}}",
+      "intro": "Answer what you can in one go. Items you leave alone stay parked.",
+      "missing": "Write an answer or tick “Skip this one”.",
+      "placeholder": "The code, or what the bot should do…",
+      "send": "Send answers",
+      "sending": "Sending…",
+      "skip": "Skip this one",
+      "title": "Needs you ({{count}})",
+      "title_one": "Needs you ({{count}})",
+      "title_other": "Needs you ({{count}})"
+    },
+    "pause": "Pause",
+    "progressLabel": "Progress: {{done}} of {{total}} done",
+    "resume": "Resume",
+    "sessions": "{{count}} sessions",
+    "sessions_one": "{{count}} session",
+    "sessions_other": "{{count}} sessions",
+    "start": {
+      "button": "Start",
+      "goalLabel": "What should the bot do?",
+      "help": "Describe the whole task once; the bot will ask what it needs at the start, then work until it is done and report.",
+      "placeholder": "For example: register my shop on these 15 websites and tell me which ones worked.",
+      "starting": "Starting…",
+      "summary": "Start a mission"
+    },
+    "stop": "Stop",
+    "stopConfirm": "Stop this mission for good?",
+    "stopNo": "Keep going",
+    "stopYes": "Yes, stop",
+    "title": "Missions"
+  },
   "modelPicker": {
     "addEngines": "Add a coding CLI",
     "blocked": {

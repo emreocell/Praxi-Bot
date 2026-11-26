@@ -1,6 +1,6 @@
 # ADR: Missions (long-running autonomous work)
 
-Status: proposed (design and gap analysis only; no feature code in this PR).
+Status: **wave 1 slice implemented** (see "Implementation status" below); everything else is still proposed.
 Related: [bot delegation](bot-delegation.md), [bot spending limits](bot-spending-limits-adr.md),
 [schedule triggers and prechecks](../schedule-triggers-prechecks.md),
 [permissions UX](permissions-ux.md), [stop and cancel](stop-cancel.md),
@@ -12,6 +12,31 @@ Related: [bot delegation](bot-delegation.md), [bot spending limits](bot-spending
 > commits after it (2026-11-26). The in-flight trigger registry (PR #869) was
 > read through `gh pr diff 869`. Section 9 (cold outreach) is a list of product
 > duties and open questions for the owner. It is **not legal advice**.
+
+## Implementation status
+
+The first slice that gives durable progress is built (`crates/missions`, `agent-core`,
+`daemon-api`, the Activity panel; user guide: [missions](../guide/missions.md)). Deviations from
+the design below are deliberate and listed here.
+
+| ADR item | Status |
+|---|---|
+| M1 `missions` crate: model, `can_transition`, store, brief, digest | **built**, with a smaller state set (`running`, `paused`, `blocked`, `done`, `failed`, `cancelled`: no `draft`/`intake`/`waiting` yet), items `todo/doing/done/blocked/failed/skipped`, an own `missions.db` (index-based migrations like the scheduler store, so no `storage` migration number is taken) and no `runs.mission_id` column (`mission_sessions.run_id` links the other way). Counters: sessions, model calls, spend, stalled and failed sessions; no per-day or per-site counters. |
+| M4 session guard semantics | **built**: the step limit ends a *session*, the supervisor chains the next one (this removes the 40-step wall of a mission). Not built: the mission USD sub-limit inside `CallGuard`; the supervisor sums the spend of finished sessions instead and checks the cap before each session. |
+| M5 supervisor and tools | **built** (without timers): lease, session runner, brief as first message, `mission_status/plan/item/note/complete`, continue / finish / block from the ledger, restart recovery (an open session is `interrupted`, never resumed). Not built: `mission_wait`, `mission_ask_owner`, `mission_report`, `mission_delegate`, `mission_block`, idempotency keys. |
+| 8.3 CAPTCHA and 2FA become blocked items | **built** for `browser_handover` (the item being worked on is parked and the session moves on, gap report P1 #9). Not built: approval cards of always-ask tools as blocked items; secret requests. |
+| 10 single-batch questions | **partly**: the first `ask_user` of a mission parks the run as before; a second one is refused with "decide yourself or park the item" (`questions_asked`). No intake form, no contract, no `mission_ask_owner` digest. The **blocked-items list** the owner answers in one request is built (`POST /v1/missions/{id}/answers`). |
+| 11 digests | **built** for the end: a code-built digest when a mission ends or blocks (stored, posted to the mission chat). Not built: milestone digests, quiet hours, push to Telegram or mail. |
+| 12.3 API | **built**: list, get, create, pause, resume, cancel, answers (owner-only where it starts or steers work). Not built: intake, scope and budget patch routes, items retry/skip routes, artifacts, events and the SSE events (the UI polls). |
+| M3 trust model, `InitiatorKind::Mission` | **not built**. A session is the owner's own run (`turn:mission:<id>`, message source `owner`): the mission is started by an owner-only route, its bot is checked to be at the Full level before every session and the brief fences ledger text as data and defangs `@mentions`. The run starts with untrusted exposure (the ledger holds text copied from the web), like an incoming-webhook run. A mission therefore asks for what Full asks for (money, secrets, third-party messages); it blocks after the approval timeout instead of running past a card. The security review of M3 is still required before wave 2. |
+| M2 test harness | **partly**: `crates/evals/tests/missions.rs` runs the real loop, ledger and supervisor against a reactive fake model (no `VirtualClock` across the scheduler, no `FakeWeb`, no `FakeMailServer`). Scenarios covered: "continues without asking", A3 (CAPTCHA), A9 (session, model-call and deadline budgets), A5 (restart), A12 (stalled). |
+| M6-M8 timers, mail, webhook wakes; M9 intake; M10 outreach; M13 delegation; M14 channels; M15 templates | not built |
+
+Separately from missions, the agent loop now continues a turn that ended with work left (see
+[missions](../guide/missions.md#two-things-that-changed)): the default prompt tells every bot to
+finish the whole task and ask its questions once, and `exec.rs` answers a "shall I continue?"
+turn at the Full level and an unfinished plan at every level, inside the step, token and time
+budgets and never for money.
 
 ## 1. Problem
 

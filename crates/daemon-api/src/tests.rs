@@ -47,6 +47,8 @@ mod logs;
 mod mcp;
 mod memory;
 mod memory_controls;
+mod mission_long_run;
+mod missions;
 mod model_catalog;
 mod offline_schedule;
 mod peer_knowledge;

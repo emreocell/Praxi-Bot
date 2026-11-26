@@ -255,3 +255,32 @@ fn every_level_is_told_to_finish_the_task_but_only_a_subagent_is_not() {
     }
     assert!(!system_prompt(&balanced, true, None).contains("work through all of it"));
 }
+
+#[tokio::test]
+async fn the_audit_log_shows_that_the_runtime_said_go_on() {
+    let env = setup();
+    let fake = Fake::new(vec![
+        text("I registered on site 1. Shall I continue?"),
+        text("Done: all of it."),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(FULL),
+        cfg(Policy::full()),
+    );
+    let run = lp
+        .run_turn(env.chat, "Register me on the backlink sites")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let audit = env.storage.list_audit(env.user).unwrap();
+    let a = audit
+        .iter()
+        .find(|a| a.action == "run.auto_continued")
+        .expect("the continuation is audited");
+    assert_eq!(a.actor, "system");
+    assert_eq!(a.detail["reason"], "asked_permission");
+    assert_eq!(a.detail["n"], 1);
+}

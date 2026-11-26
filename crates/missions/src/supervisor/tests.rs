@@ -581,7 +581,8 @@ async fn shutdown_leaves_the_mission_running_for_the_next_start() {
 async fn restart_abandons_the_open_session_and_continues_from_the_ledger() {
     let h = harness(sites(4), Budgets::default(), worker(4));
     // A session was in flight when the daemon died.
-    h.store.begin_session(&h.mission, 1_500).unwrap();
+    let lost = h.store.begin_session(&h.mission, 1_500).unwrap();
+    h.store.set_session_run(lost, "run-lost").unwrap();
     h.store.set_lease(&h.mission, Some("run-lost")).unwrap();
     let handle = h.sup.spawn();
     for _ in 0..200 {
@@ -603,6 +604,11 @@ async fn restart_abandons_the_open_session_and_continues_from_the_ledger() {
         .map(|e| e.data["outcome"].as_str().unwrap().to_owned())
         .collect();
     assert_eq!(outcomes.first().map(String::as_str), Some("interrupted"));
+    assert_eq!(
+        h.runner.cancelled.lock().as_slice(),
+        ["run-lost"],
+        "the abandoned run is cancelled"
+    );
 }
 
 #[tokio::test]
