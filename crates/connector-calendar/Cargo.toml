@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 async-trait.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+chrono-tz = "0.10"
 quick-xml = "0.42"
 reqwest.workspace = true
 secret-store.workspace = true
