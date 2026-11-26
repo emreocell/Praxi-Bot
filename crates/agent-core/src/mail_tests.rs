@@ -300,3 +300,120 @@ async fn the_block_does_not_promise_tools_the_bot_does_not_have() {
     assert!(sys.contains("switched off"), "{sys}");
     assert!(!sys.contains("email_wait_for"), "{sys}");
 }
+
+// ---- A background mail wait belongs to its run ---------------------------------------------
+
+/// The `wait_id` of the pending answer a tool message holds (`mw-` and 32 hex digits).
+fn wait_id_in(message: &str) -> String {
+    let at = message
+        .find("mw-")
+        .unwrap_or_else(|| panic!("a pending answer carries a wait id, got: {message}"));
+    message[at..at + 3 + 32].to_owned()
+}
+
+fn mail_wait_tool(bot: BotId) -> Arc<dyn Tool> {
+    use secret_store::SecretStore as _;
+    // A key is stored (so the wait really polls) and the endpoint is a dead port (every poll
+    // fails the way a network blip does: retried, the wait stays pending for seconds).
+    let store = Arc::new(MemoryStore::new());
+    store
+        .set("email/bot-mail/api_key", "am_tool_test_KEY_31ff")
+        .unwrap();
+    let conn = EmailConnector::reloadable_with(
+        store,
+        AgentMailEndpoint::loopback_mock_for_tests("http://127.0.0.1:9").unwrap(),
+    );
+    conn.replace_accounts(vec![account(
+        "bot-mail",
+        Some(bot.to_string()),
+        "me@agentmail.to",
+        SendMode::Ask,
+    )])
+    .unwrap();
+    let handle = Arc::new(builtin_tools::connector_email::MailHandle::new());
+    handle.set(Arc::new(conn));
+    builtin_tools::mail_wait::email_wait_for_tool(
+        handle,
+        Arc::new(builtin_tools::connector_email::PageOriginSlot::new()),
+        None,
+    )
+}
+
+/// What the run's own model would do next with the id: collect it, in that run.
+async fn collect_in_run(
+    wait: &Arc<dyn Tool>,
+    bot: BotId,
+    run: protocol::RunId,
+    wait_id: &str,
+) -> Result<ToolOutput, ToolError> {
+    wait.call(
+        &ToolContext {
+            bot_id: Some(bot.to_string()),
+            run_id: run.to_string(),
+            ..ToolContext::default()
+        },
+        json!({"wait_id": wait_id, "block_seconds": 1}),
+    )
+    .await
+}
+
+/// A run that ends leaves nobody to collect its background waits: their polling stops and their
+/// slots are free again. (The wait here keeps polling for several seconds if nothing ends it.)
+#[tokio::test]
+async fn a_background_mail_wait_ends_with_its_run() {
+    let env = setup();
+    let wait = mail_wait_tool(env.bot);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "email_wait_for", json!({"block_seconds": 1}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(FULL),
+        cfg(Policy::full()),
+    );
+    lp.sh.tools.register(Arc::clone(&wait));
+    let run = lp.run_turn(env.chat, "wait for the mail").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+
+    let id = wait_id_in(&crate::tests::tool_messages(&fake.request(1))[0]);
+    let e = collect_in_run(&wait, env.bot, run, &id).await.unwrap_err();
+    assert!(e.to_string().contains("no such wait"), "{e}");
+}
+
+/// A run parked for an approval when the daemon shuts down is paused; its waits go with it
+/// (no polling task outlives the loop).
+#[tokio::test]
+async fn shutdown_ends_the_background_mail_waits_of_the_runs_it_pauses() {
+    let env = setup();
+    let wait = mail_wait_tool(env.bot);
+    let write = Arc::new(crate::tests::tool("t.write", Effect::Write, "w"));
+    let fake = Fake::new(vec![
+        calls(&[("c1", "email_wait_for", json!({"block_seconds": 1}))]),
+        calls(&[("c2", "t.write", json!({}))]),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&write)],
+        profile(""),
+        cfg(Policy::approve_destructive()),
+    );
+    lp.sh.tools.register(Arc::clone(&wait));
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "wait, then write").unwrap();
+    until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    let id = wait_id_in(&crate::tests::tool_messages(&fake.request(1))[0]);
+    // Still collectable while the run lives.
+    let live = collect_in_run(&wait, env.bot, run, &id).await.unwrap();
+    assert!(format!("{live:?}").contains("pending"), "{live:?}");
+
+    let paused = lp.shutdown(std::time::Duration::from_secs(30)).await;
+    assert_eq!(paused, vec![run]);
+    let e = collect_in_run(&wait, env.bot, run, &id).await.unwrap_err();
+    assert!(e.to_string().contains("no such wait"), "{e}");
+}

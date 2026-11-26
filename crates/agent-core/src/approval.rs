@@ -2326,9 +2326,12 @@ impl Shared {
         if let Some(o) = details.as_mut().and_then(Value::as_object_mut) {
             o.remove("approval_ref");
         }
-        self.refuse_unshowable_egress(ctx, name, input, token.as_deref(), true)
+        // A mail reply's recipients and subject are filled in by the tool: the egress checks and
+        // the card must see what is really sent, not the model's partial input.
+        let sent = taint::input_as_sent(name, input, details.as_ref());
+        self.refuse_unshowable_egress(ctx, name, &sent, token.as_deref(), true)
             .map_err(Some)?;
-        let disclosure = self.egress_card(ctx, name, input);
+        let disclosure = self.egress_card(ctx, name, &sent);
         let showed_disclosure = disclosure.is_some();
         if let Some(extra) = disclosure {
             taint::merge_egress(&mut details, extra);
@@ -3494,6 +3497,39 @@ impl ToolGate for LoopGate {
         self.authorize_inner(req, true)
             .await
             .map(|(_, origin)| origin)
+    }
+
+    /// The same decision as [`Self::authorize`] with every way of asking removed:
+    /// a call the profile hides, policy denies or policy would ask about
+    /// (including every call in a run that read untrusted content) is refused,
+    /// and nothing is recorded as read, because the caller discards the output.
+    async fn authorize_unattended(&self, req: &GateRequest) -> Result<(), String> {
+        let sh = self.sh.upgrade().ok_or("agent loop is gone")?;
+        let run_id = req
+            .run_id
+            .parse::<Uuid>()
+            .map(RunId)
+            .map_err(|_| "no run context".to_owned())?;
+        let ctx = sh
+            .runs
+            .lock()
+            .get(&run_id)
+            .cloned()
+            .ok_or("no active run")?;
+        let tool = sh
+            .tools
+            .get(&req.tool)
+            .filter(|t| sh.spec_visible(&ctx.profile, ctx.bot_id, t.spec()))
+            .ok_or_else(|| format!("unknown tool: {}", req.tool))?;
+        // The registry's spec, not the caller's claim, decides what the call is.
+        let spec = tool.spec();
+        match sh.decide(&ctx, &req.tool, spec.effect, spec.category, &req.input) {
+            Decision::Allow => {
+                sh.refuse_unshowable_egress(&ctx, &req.tool, &req.input, None, false)
+            }
+            Decision::Deny => Err(format!("{} is not allowed by policy", req.tool)),
+            Decision::Ask { .. } => Err(format!("{} needs approval", req.tool)),
+        }
     }
 }
 

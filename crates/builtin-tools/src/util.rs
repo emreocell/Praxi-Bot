@@ -95,9 +95,9 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // `account_register` creates a standing credential and a site identity (login,
         // mailbox) chosen by the model, so a run that read untrusted content asks like a
         // created bot; it also always asks on its own and never takes a standing grant.
-        // The self-check makes fixed, harmless sample calls (a mailbox check, one
-        // fixed search) and returns only status words, never content: it can
-        // reach the network and brings nothing in.
+        // The self-check makes fixed, read-only sample calls (a mailbox check), each only
+        // after the loop's gate allowed it unattended, and returns constant sentences,
+        // never a tool's own text: it can reach the network and brings nothing in.
         "schedule_create" | "schedule_update" | "schedule_resume" | "bot_create" | "bot_update"
         | "account_register" | "tool_self_check" => ContentClass::egress(),
         // A bot's name and persona are text any bot with `manage_bots` can write, so a

@@ -84,6 +84,20 @@ pub trait ToolGate: Send + Sync {
         self.authorize(req).await.map(|()| None)
     }
 
+    /// Whether the call would run right now without asking anyone: the run's
+    /// profile offers the tool and policy allows it outright. Unlike
+    /// [`Self::authorize`] it never opens an approval card and records nothing
+    /// the call reads, so the caller must throw the output away (the
+    /// `tool_self_check` probes). `Err` is any reason the call may not run
+    /// unattended; callers must not show its text to the model. The default
+    /// refuses: a gate that cannot answer keeps unattended calls from running.
+    ///
+    /// # Errors
+    /// The call is hidden, denied or needs approval.
+    async fn authorize_unattended(&self, _req: &GateRequest) -> Result<(), String> {
+        Err("this gate has no unattended mode".into())
+    }
+
     /// Withdraw every task-wide permission of `run_id`. A caller that sent a
     /// guarded call itself (workflow replay) calls this when that send stopped
     /// or failed, as the agent loop does for its own tool calls. The default
@@ -165,6 +179,11 @@ impl ToolGate for ResolverGate {
             )),
             Decision::Deny => Err(format!("permission denied: {} is not allowed", req.tool)),
         }
+    }
+
+    /// This gate never asks anyone, so unattended is the same as authorized.
+    async fn authorize_unattended(&self, req: &GateRequest) -> Result<(), String> {
+        self.authorize(req).await
     }
 }
 

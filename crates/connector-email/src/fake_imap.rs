@@ -30,6 +30,9 @@ pub struct Stored {
     pub uid: u32,
     pub raw: Vec<u8>,
     pub seen: bool,
+    /// The `RFC822.SIZE` the server claims, when it should differ from the real size (a
+    /// server that lies about how much it is about to send).
+    pub reported_size: Option<usize>,
 }
 
 type Folders = Arc<Mutex<BTreeMap<String, Vec<Stored>>>>;
@@ -68,6 +71,22 @@ pub fn html_mail(from: &str, subject: &str, message_id: &str, date: &str, html: 
 pub fn mail_with_attachment(subject: &str, date: &str) -> Vec<u8> {
     format!(
         "From: Ann <ann@example.com>\r\nTo: bot@example.com\r\nSubject: {subject}\r\nMessage-ID: <att1@example.com>\r\nDate: {date}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=B\r\n\r\n--B\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSee the attachment.\r\n--B\r\nContent-Type: text/plain; name=\"notes.txt\"\r\nContent-Disposition: attachment; filename=\"notes.txt\"\r\nContent-Transfer-Encoding: base64\r\n\r\naGVsbG8gYXR0YWNobWVudA==\r\n--B--\r\n"
+    )
+    .into_bytes()
+}
+
+/// A mail with one attachment of the given name, declared type and bytes.
+pub fn attachment_mail(
+    subject: &str,
+    date: &str,
+    filename: &str,
+    content_type: &str,
+    bytes: &[u8],
+) -> Vec<u8> {
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+    format!(
+        "From: Ann <ann@example.com>\r\nTo: bot@example.com\r\nSubject: {subject}\r\nMessage-ID: <att2@example.com>\r\nDate: {date}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=B\r\n\r\n--B\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSee the attachment.\r\n--B\r\nContent-Type: {content_type}\r\nContent-Disposition: attachment; filename=\"{filename}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{b64}\r\n--B--\r\n"
     )
     .into_bytes()
 }
@@ -167,6 +186,7 @@ impl FakeImap {
             uid,
             raw,
             seen: false,
+            reported_size: None,
         });
         uid
     }
@@ -359,7 +379,7 @@ async fn session<S: AsyncReadExt + AsyncWrite + Unpin>(
             for uid in uids_of(spec, &all) {
                 let m = all.iter().find(|m| m.uid == uid).unwrap();
                 let flags = if m.seen { "\\Seen" } else { "" };
-                let size = m.raw.len();
+                let size = m.reported_size.unwrap_or(m.raw.len());
                 if upper.contains("BODY.PEEK[HEADER]") {
                     let (head, _) = split_mail(&m.raw);
                     let header = format!("{head}\r\n\r\n");

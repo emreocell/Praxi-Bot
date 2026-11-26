@@ -46,6 +46,12 @@ pub fn cancel_run_waits(run_id: &str) {
     crate::mail_wait::cancel_run_mail_waits(run_id);
 }
 
+/// Drop the background mail waits of `run_id`: the run is over (finished, failed, stopped or
+/// paused), so nobody can collect them and their polling must not go on.
+pub fn end_run_mail_waits(run_id: &str) {
+    crate::mail_wait::cancel_run_mail_waits(run_id);
+}
+
 #[derive(Deserialize)]
 struct WaitIn {
     seconds: u64,

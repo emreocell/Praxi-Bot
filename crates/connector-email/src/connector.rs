@@ -22,6 +22,9 @@ use crate::smtp::OutgoingMail;
 
 /// Largest attachment downloaded and saved.
 pub const MAX_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
+/// Name of the folder under the data folder that holds downloaded attachments
+/// (one sub-folder per account). What is in it came from a stranger.
+pub const ATTACHMENTS_DIR_NAME: &str = "email-attachments";
 
 /// Result of a search.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -737,6 +740,8 @@ impl Scoped<'_> {
         attachment_id: &str,
     ) -> Result<(PathBuf, AttachmentData), EmailError> {
         let acct = self.account(account)?;
+        // The account name is a path component here; it is checked where it is used too.
+        crate::config::validate_account_name(&acct.name)?;
         let dir = self
             .conn
             .attachments_dir

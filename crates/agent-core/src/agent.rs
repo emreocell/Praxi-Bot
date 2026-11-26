@@ -2771,6 +2771,12 @@ impl AgentLoop {
             let left = hard.saturating_duration_since(tokio::time::Instant::now());
             let _ = tokio::time::timeout(left.max(Duration::from_millis(200)), h).await;
         }
+        // A run that never reached `conclude` leaves its mail waits behind: no polling task
+        // may outlive the loop.
+        let live: Vec<RunId> = self.sh.runs.lock().keys().copied().collect();
+        for run in live.into_iter().chain(seen.iter().copied()) {
+            builtin_tools::wait::end_run_mail_waits(&run.to_string());
+        }
         let mut paused = Vec::new();
         for run in seen {
             if self.rt.state(run).ok() != Some(RunState::Paused) {
@@ -3228,6 +3234,9 @@ impl AgentLoop {
             return;
         }
         let run = self.sh.storage.get_run(run_id).ok().flatten();
+        // Whatever ended the run (done, failed, stopped, paused for a restart), nobody is left
+        // to collect its background mail waits: stop their polling and free their slots.
+        builtin_tools::wait::end_run_mail_waits(&run_id.to_string());
         if !matches!(res, Ok(RunState::Paused)) {
             builtin_tools::handover_hub().forget(&run_id.to_string());
             crate::usage::finish(&self.sh, run_id);

@@ -90,6 +90,8 @@ mod stop_approval_tests;
 mod subagent_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unattended_gate_tests;
 
 pub use agent::AgentLoop;
 pub use computer_target::{

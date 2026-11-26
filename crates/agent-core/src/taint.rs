@@ -140,6 +140,12 @@ impl ContentTaint {
         input: &Value,
     ) {
         use protocol::PermissionCategory as C;
+        // A mail attachment is a stranger's file put on this computer, and its bytes can be
+        // anything a program accepts. It counts as written code whatever the run read before.
+        if name == "email_download_attachment" && effect != tool_registry::Effect::Read {
+            self.code_written_after_untrusted = true;
+            return;
+        }
         if self.code_written_after_untrusted
             || !self.exposure.untrusted
             || effect == tool_registry::Effect::Read
@@ -174,6 +180,8 @@ impl ContentTaint {
             | "xlsx_write" | "csv_transform" | "doc_convert" | "doc_preview" => C::Fs,
             "script_run" => C::Script,
             n if n.starts_with("desktop_") => C::Desktop,
+            // `note_write` decides on the name alone for this one; the category is not read.
+            "email_download_attachment" => C::Messaging,
             _ => return,
         };
         let input = serde_json::from_str(arguments).unwrap_or(Value::Null);
@@ -476,7 +484,7 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
         | "git_branch" | "git_commit" => {
             format!("file {}", str_field("path").unwrap_or("a file"))
         }
-        "email_read" | "email_search" | "email_list_folders" => {
+        "email_read" | "email_search" | "email_list_folders" | "email_download_attachment" => {
             format!("mailbox {}", str_field("folder").unwrap_or("INBOX"))
         }
         "web_search" => format!("page {}", str_field("query").unwrap_or("a search")),
@@ -524,6 +532,33 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
         "shell_run" | "shell_interactive" | "script_run" => "command output".to_owned(),
         other => format!("tool {other}"),
     }
+}
+
+/// What a call will really send, for the egress checks and card. A mail reply fills in its
+/// recipients and subject itself, from the original message it read: the model's own input
+/// lacks them (so a card built from it would show an empty `To:` and the host "unknown"),
+/// while the tool's approval card (`details`, built from the very values it will send) has
+/// them. The card's `to`, `cc`, `bcc` and `subject` replace the input's; every other field is
+/// the input's. Any other tool, or a card that is not a mail card, leaves the input as it is.
+pub(crate) fn input_as_sent(name: &str, input: &Value, details: Option<&Value>) -> Value {
+    let mut sent = input.clone();
+    if name != "email_send" {
+        return sent;
+    }
+    let (Some(card), Some(fields)) = (
+        details
+            .filter(|d| d.get("kind").and_then(Value::as_str) == Some("mail_send"))
+            .and_then(Value::as_object),
+        sent.as_object_mut(),
+    ) else {
+        return sent;
+    };
+    for key in ["to", "cc", "bcc", "subject"] {
+        if let Some(value) = card.get(key) {
+            fields.insert(key.to_owned(), value.clone());
+        }
+    }
+    sent
 }
 
 /// Destination host, the exact outgoing text, and which kind of text it is.
@@ -1877,5 +1912,104 @@ mod hashed_history_tests {
         let mut taint = ContentTaint::default();
         taint.note_label_hashed("memory");
         assert!(taint.private_source && !taint.seen.unhashed);
+    }
+}
+
+#[cfg(test)]
+mod mail_review_tests {
+    use protocol::PermissionCategory as C;
+    use serde_json::json;
+    use tool_registry::Effect;
+
+    use super::*;
+
+    /// A saved attachment is a stranger's file: the run counts as having written code even
+    /// when it has read nothing untrusted yet, and a shell waiver then stops covering
+    /// interpreters (`code_written_after_untrusted`).
+    #[test]
+    fn downloading_a_mail_attachment_marks_the_run_as_having_written_code() {
+        let mut clean = ContentTaint::default();
+        assert!(!clean.exposure.untrusted && !clean.code_written_after_untrusted);
+        clean.note_write(
+            "email_download_attachment",
+            Effect::Write,
+            C::Messaging,
+            &json!({"uid": 1, "attachment_id": "0"}),
+        );
+        assert!(clean.code_written_after_untrusted);
+        // Other mail tools that only touch the mailbox do not.
+        for name in ["email_draft", "email_mark_read", "email_send"] {
+            let mut t = ContentTaint::default();
+            t.exposure.observe(true, false);
+            t.note_write(name, Effect::Write, C::Messaging, &json!({}));
+            assert!(!t.code_written_after_untrusted, "{name}");
+        }
+        // A rebuilt run (after a restart) judges it by name alone.
+        let mut rebuilt = ContentTaint::default();
+        rebuilt.note_write_from_history("email_download_attachment", "{}");
+        assert!(rebuilt.code_written_after_untrusted);
+    }
+
+    #[test]
+    fn the_attachment_card_names_the_mailbox_like_the_other_mail_reads() {
+        assert_eq!(
+            source_label("email_download_attachment", &json!({"folder": "Junk"})),
+            "mailbox Junk"
+        );
+        assert_eq!(
+            source_label("email_download_attachment", &json!({})),
+            "mailbox INBOX"
+        );
+    }
+
+    /// A reply leaves `to` and `subject` out and the mail tool fills them in. The card the tool
+    /// built has them; the egress card must be made from those, not from the partial input.
+    #[test]
+    fn the_egress_card_of_a_reply_uses_the_recipients_the_tool_resolved() {
+        let input = json!({"reply_to_uid": 7, "body": "Thanks!"});
+        let (host, payload, _) = egress_payload("email_send", &input);
+        assert_eq!(host, "unknown", "the model's input alone names nobody");
+        assert!(payload.contains("To: \n") || !payload.contains("example.com"));
+
+        let card = json!({
+            "kind": "mail_send",
+            "to": ["billing@elsewhere.test"],
+            "cc": ["ann@example.com"],
+            "bcc": [],
+            "subject": "Re: Hello bot",
+            "body": "Thanks!",
+        });
+        let sent = input_as_sent("email_send", &input, Some(&card));
+        let (host, payload, _) = egress_payload("email_send", &sent);
+        assert!(
+            host.contains("elsewhere.test") && host.contains("example.com"),
+            "{host}"
+        );
+        assert!(payload.contains("To: billing@elsewhere.test"), "{payload}");
+        assert!(payload.contains("Subject: Re: Hello bot"), "{payload}");
+        // The fields the model did write stay as they were.
+        assert_eq!(sent["reply_to_uid"], 7);
+        assert_eq!(sent["body"], "Thanks!");
+    }
+
+    #[test]
+    fn only_a_mail_card_of_the_mail_send_tool_changes_what_is_checked() {
+        let input = json!({"to": ["a@b.test"], "subject": "x", "body": "y"});
+        let other_card = json!({"kind": "something_else", "to": ["z@z.test"]});
+        let card = json!({"kind": "mail_send", "to": ["z@z.test"], "subject": "s"});
+        // Not a mail card: unchanged.
+        assert_eq!(
+            input_as_sent("email_send", &input, Some(&other_card)),
+            input
+        );
+        assert_eq!(input_as_sent("email_send", &input, None), input);
+        // Not the mail tool: unchanged, whatever the card says.
+        assert_eq!(input_as_sent("email_draft", &input, Some(&card)), input);
+        assert_eq!(input_as_sent("web_extract", &input, Some(&card)), input);
+        // A mail card replaces exactly what it names.
+        let sent = input_as_sent("email_send", &input, Some(&card));
+        assert_eq!(sent["to"], json!(["z@z.test"]));
+        assert_eq!(sent["subject"], "s");
+        assert_eq!(sent["body"], "y");
     }
 }

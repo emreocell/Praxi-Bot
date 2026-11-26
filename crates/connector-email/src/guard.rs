@@ -7,9 +7,9 @@
 //!
 //! The count, the wait and the opt-out list are *soft* guards: [`MailGuard::check`] returns
 //! [`Warning`]s, never a refusal. Only the owner can send past a warning, by approving the card
-//! that shows it ("Send anyway"). The tool freezes the warnings it showed
-//! ([`MailGuard::freeze`]) and a later call goes through only when it matches a frozen entry
-//! exactly ([`MailGuard::take_override`]). The model has no argument that can do this.
+//! that shows it ("Send anyway"). The tool freezes the card it showed, warnings or not
+//! ([`MailGuard::freeze`]) and a later call goes through past a warning only when it matches a
+//! frozen entry exactly ([`MailGuard::take_card`]). The model has no argument that can do this.
 //!
 //! State is a JSON settings file, a JSON opt-out file and an append-only JSONL send log under one
 //! directory (or memory only, for tests).
@@ -226,6 +226,16 @@ pub struct MailFacts<'a> {
     pub recipients: &'a [String],
     /// Whether the opt-out line stays on (`false` only when the model asked to drop it).
     pub opt_out_line: bool,
+}
+
+/// What [`MailGuard::take_card`] found of the card the owner was shown for a mail.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CardCheck {
+    /// A card for exactly this mail was shown, and recently enough.
+    pub shown: bool,
+    /// That card showed warnings and they include every warning the mail has now: the
+    /// owner chose to send past them.
+    pub overrides: bool,
 }
 
 struct Frozen {
@@ -887,14 +897,12 @@ impl MailGuard {
         lock(&self.state).settings.opt_out_line
     }
 
-    /// Remember that the owner is being shown exactly these warnings for the mail with `key`.
+    /// Remember that the owner is being shown the mail with `key`, with exactly these
+    /// warnings (none is a card too: a send can then tell "the owner saw this very mail"
+    /// from "no card was shown for it").
     pub fn freeze(&self, key: &str, report: &GuardReport, token: &str) {
         let mut st = lock(&self.state);
         st.frozen.retain(|_, f| f.at.elapsed() < FREEZE_TTL);
-        if report.warnings.is_empty() {
-            st.frozen.remove(key);
-            return;
-        }
         st.frozen.insert(
             key.to_owned(),
             Frozen {
@@ -910,15 +918,25 @@ impl MailGuard {
         lock(&self.state).frozen.retain(|_, f| f.token != token);
     }
 
-    /// One-shot: `true` when the owner was shown every warning in `report` for this very mail.
-    /// The entry is consumed either way a match is found.
-    pub fn take_override(&self, key: &str, report: &GuardReport) -> bool {
+    /// One-shot: what the owner was shown for this very mail (`key`). The entry is consumed
+    /// whether or not it is still fresh.
+    pub fn take_card(&self, key: &str, report: &GuardReport) -> CardCheck {
         let mut st = lock(&self.state);
         let Some(f) = st.frozen.remove(key) else {
-            return false;
+            return CardCheck::default();
         };
-        let current = report.codes();
-        f.at.elapsed() < FREEZE_TTL && current.iter().all(|c| f.codes.contains(c))
+        let shown = f.at.elapsed() < FREEZE_TTL;
+        let covers = report.codes().iter().all(|c| f.codes.contains(c));
+        CardCheck {
+            shown,
+            overrides: shown && covers && !f.codes.is_empty(),
+        }
+    }
+
+    /// One-shot: `true` when the owner was shown every warning in `report` for this very mail
+    /// (and there was a warning to send past).
+    pub fn take_override(&self, key: &str, report: &GuardReport) -> bool {
+        self.take_card(key, report).overrides
     }
 
     /// Log a mail the program sent on its own for the owner (not a bot's `email_send`), e.g. the
@@ -1082,6 +1100,31 @@ mod tests {
         let none = g.check(&facts(&["z@x.io".to_owned()], true));
         g.freeze("k", &none, "t3");
         assert!(!g.take_override("k", &rep));
+    }
+
+    #[test]
+    fn a_card_without_warnings_is_remembered_but_overrides_nothing() {
+        let g = MailGuard::in_memory();
+        let clean = g.check(&facts(&["z@x.io".to_owned()], true));
+        assert_eq!(clean.codes(), Vec::<String>::new());
+        assert_eq!(
+            g.take_card("k", &clean),
+            CardCheck::default(),
+            "no card was shown"
+        );
+        g.freeze("k", &clean, "t1");
+        let seen = g.take_card("k", &clean);
+        assert!(seen.shown && !seen.overrides, "{seen:?}");
+        assert!(!g.take_card("k", &clean).shown, "one shot");
+        g.freeze("k", &clean, "t2");
+        g.discard("t2");
+        assert!(!g.take_card("k", &clean).shown, "approval ended");
+        // A warning the card did not show is no override, whatever else it showed.
+        g.add_opt_out("a@x.io", "").unwrap();
+        let warned = g.check(&facts(&["a@x.io".to_owned()], true));
+        g.freeze("k", &clean, "t3");
+        let c = g.take_card("k", &warned);
+        assert!(c.shown && !c.overrides, "{c:?}");
     }
 
     #[test]

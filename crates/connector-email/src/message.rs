@@ -109,6 +109,12 @@ pub struct MessageDetail {
     /// Bare addresses of the To and Cc recipients, for "reply all".
     #[serde(skip)]
     pub recipients: Vec<String>,
+    /// The folder a wait found the message in; set only by `email_wait_for`.
+    #[serde(skip)]
+    pub found_in: Option<String>,
+    /// Whether that folder is a junk folder; `None` when the mailbox has no folders.
+    #[serde(skip)]
+    pub from_junk: Option<bool>,
 }
 
 /// The bare address inside a `Name <addr>` / `addr` string, lower-case; empty
@@ -287,6 +293,8 @@ pub fn parse_detail(
             .map(bare_address)
             .filter(|a| !a.is_empty())
             .collect(),
+        found_in: None,
+        from_junk: None,
     })
 }
 

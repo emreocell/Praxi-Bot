@@ -188,6 +188,8 @@ const EXTERNAL_PARTS: &[&str] = &[
     "/tmp/",
     "/attachments/",
     "/attachment/",
+    // Where `email_download_attachment` saves (the folder is `connector_email::ATTACHMENTS_DIR_NAME`).
+    "/email-attachments/",
     "/quarantine/",
     "/inetcache/",
     "/google/chrome/",
@@ -447,6 +449,24 @@ mod tests {
                 .iter()
                 .any(|p| n == p || n.starts_with(&format!("{p}/")))
         }
+    }
+
+    #[test]
+    fn saved_mail_attachments_are_external_by_rule() {
+        // `/attachments/` alone does not match `email-attachments`: the folder has its own rule.
+        let dir = connector_email::ATTACHMENTS_DIR_NAME;
+        assert_eq!(dir, "email-attachments");
+        assert!(EXTERNAL_PARTS.contains(&format!("/{dir}/").as_str()));
+        assert!(external_location(Path::new(&format!(
+            "/home/a/.local/share/praxi/{dir}/work/0190.bin"
+        ))));
+        assert!(external_location(Path::new(&format!(
+            r"C:\Users\a\AppData\Roaming\praxi\{dir}\work\0190.bin"
+        ))));
+        // A look-alike folder of the owner's own is still the owner's.
+        assert!(!external_location(Path::new(
+            "/home/a/documents/my-email-notes/x.txt"
+        )));
     }
 
     #[test]

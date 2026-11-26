@@ -196,11 +196,15 @@ async fn a_bot_waits_on_its_own_inbox_and_gets_a_short_untrusted_answer() {
         !t.visible_to(Some(BOT_B)),
         "a bot without an identity does not see it"
     );
+    let card = t.egress_extra(&ctx(BOT_A, "r1"), &json!({})).unwrap();
+    assert!(card.contains("a@agentmail.to"), "{card}");
+    // The card says what really happens: junk is read and a tracking hop is a request out.
+    assert!(card.contains("junk folder"), "{card}");
     assert!(
-        t.egress_extra(&ctx(BOT_A, "r1"), &json!({}))
-            .unwrap()
-            .contains("a@agentmail.to")
+        card.contains("click-tracking") && card.contains("GET"),
+        "{card}"
     );
+    assert!(!card.contains("nothing is sent"), "{card}");
     let out = t
         .call(
             &ctx(BOT_A, "r-found"),
@@ -398,4 +402,141 @@ async fn the_probe_reports_the_page_the_browser_is_on_not_what_anyone_claims() {
     // A non-web page has no origin.
     *fake.url.lock() = Some("about:blank".to_owned());
     assert_eq!(slot.top_origin(&ctx(BOT_A, "r-probe")).await, None);
+}
+
+fn patient(mail: &Arc<MailHandle>) -> EmailWaitFor {
+    EmailWaitFor::new(
+        Arc::clone(mail),
+        Arc::new(Page(None)),
+        Some(WaitPlan {
+            timeout: Duration::from_secs(600),
+            ..quick()
+        }),
+    )
+}
+
+/// The id of a pending wait is useful to the run (and account) that started it, to nobody else;
+/// and the wait ends with its run.
+#[tokio::test]
+async fn a_pending_wait_id_works_only_for_its_own_run_and_account() {
+    let mail = rig(
+        vec![
+            account("a-mail", Some(BOT_A), "a@agentmail.to"),
+            account("a-mail-2", Some(BOT_A), "a2@agentmail.to"),
+        ],
+        "a@agentmail.to",
+        vec![],
+    )
+    .await;
+    let t = patient(&mail);
+    let start = |run: &'static str| {
+        let t = &t;
+        async move {
+            let out = t
+                .call(
+                    &ctx(BOT_A, run),
+                    json!({"account": "a-mail", "block_seconds": 1}),
+                )
+                .await
+                .unwrap();
+            let d = data(&out);
+            assert_eq!(d["pending"], true, "{d}");
+            d["wait_id"].as_str().unwrap().to_owned()
+        }
+    };
+    let id_a = start("run-scope-a").await;
+    // The identical ask in another run (same bot) is a wait of its own.
+    let id_b = start("run-scope-b").await;
+    assert_ne!(id_a, id_b);
+
+    let collect = |run: &'static str, input: Value| {
+        let t = &t;
+        async move { t.call(&ctx(BOT_A, run), input).await }
+    };
+    // Another run cannot collect it...
+    let e = collect(
+        "run-scope-b",
+        json!({"account": "a-mail", "wait_id": id_a, "block_seconds": 1}),
+    )
+    .await
+    .unwrap_err();
+    assert!(e.to_string().contains("no such wait"), "{e}");
+    // ...nor can the same run under another of its accounts.
+    let e = collect(
+        "run-scope-a",
+        json!({"account": "a-mail-2", "wait_id": id_a, "block_seconds": 1}),
+    )
+    .await
+    .unwrap_err();
+    assert!(e.to_string().contains("no such wait"), "{e}");
+    // The run that started it still can.
+    let out = collect(
+        "run-scope-a",
+        json!({"account": "a-mail", "wait_id": id_a, "block_seconds": 1}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(data(&out)["pending"], true);
+
+    // Stopping run b leaves run a's wait alone; a run that is over takes its waits with it.
+    crate::wait::cancel_run_waits("run-scope-b");
+    let out = collect(
+        "run-scope-a",
+        json!({"account": "a-mail", "wait_id": id_a, "block_seconds": 1}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(data(&out)["pending"], true);
+    crate::wait::end_run_mail_waits("run-scope-a");
+    let e = collect(
+        "run-scope-a",
+        json!({"account": "a-mail", "wait_id": id_a, "block_seconds": 1}),
+    )
+    .await
+    .unwrap_err();
+    assert!(e.to_string().contains("no such wait"), "{e}");
+}
+
+/// A hop that never answers must not hold the call when the run is stopped.
+#[tokio::test]
+async fn stop_ends_a_call_that_is_looking_through_a_tracking_link() {
+    struct Silent;
+    #[async_trait]
+    impl connector_email::TrackingResolver for Silent {
+        async fn hop(&self, _: &str) -> Option<String> {
+            std::future::pending().await
+        }
+    }
+    let mut mail_with_tracker = verification_mail("a@agentmail.to");
+    mail_with_tracker["html"] =
+        json!("<a href=\"https://u1.ct.sendgrid.net/ls/click?upn=a\">Confirm</a>");
+    let mail = rig(
+        vec![account("a-mail", Some(BOT_A), "a@agentmail.to")],
+        "a@agentmail.to",
+        vec![mail_with_tracker],
+    )
+    .await;
+    let t = EmailWaitFor::new(
+        Arc::clone(&mail),
+        Arc::new(Page(Some("https://example.com:443"))),
+        Some(quick()),
+    )
+    .with_resolver(Some(Arc::new(Silent)));
+    let started = std::time::Instant::now();
+    let h = tokio::spawn(async move {
+        t.call(
+            &ctx(BOT_A, "r-hop-stop"),
+            json!({"site":"https://example.com"}),
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    crate::wait::cancel_run_waits("r-hop-stop");
+    let e = tokio::time::timeout(Duration::from_secs(10), h)
+        .await
+        .expect("a stopped run must not wait for a hop")
+        .unwrap()
+        .unwrap_err();
+    assert!(e.to_string().contains("stopped"), "{e}");
+    assert!(started.elapsed() < Duration::from_secs(10));
 }

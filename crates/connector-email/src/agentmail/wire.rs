@@ -181,6 +181,8 @@ impl MessageWire {
                 .map(|a| crate::message::bare_address(a))
                 .filter(|a| !a.is_empty())
                 .collect(),
+            found_in: None,
+            from_junk: None,
         })
     }
 }

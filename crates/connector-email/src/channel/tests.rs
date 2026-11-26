@@ -115,6 +115,8 @@ impl MailboxProvider for Fake {
             reply_to: None,
             references: Vec::new(),
             recipients: Vec::new(),
+            found_in: None,
+            from_junk: None,
         })
     }
     async fn send(&self, mail: &OutgoingMail) -> Result<Receipt, EmailError> {

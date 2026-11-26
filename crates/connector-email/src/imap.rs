@@ -347,6 +347,18 @@ pub(crate) enum ConnectStage {
     Login,
 }
 
+/// Most bytes a message may have when an attachment of up to `max_bytes` is
+/// downloaded from it: a message with a big attachment is bigger than the
+/// mail-reading cap, so the attachment's own cap comes on top of it. The
+/// attachment travels base64 encoded (4/3 of its size, plus line breaks), so half
+/// as much again is allowed.
+pub(crate) fn attachment_fetch_cap(max_bytes: usize) -> u64 {
+    u64::try_from(max_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(u64::try_from(max_bytes / 2).unwrap_or(u64::MAX))
+        .saturating_add(u64::from(MAX_MESSAGE_BYTES))
+}
+
 /// An authenticated IMAP session.
 pub struct ImapSession {
     session: async_imap::Session<Stream>,
@@ -638,12 +650,8 @@ impl ImapSession {
             .examine(wire_name)
             .await
             .map_err(|e| self.fail("examine", &e))?;
-        // A message with a big attachment is bigger than the mail-reading cap;
-        // allow the attachment's own cap on top of it, and ask the size first so
-        // nothing larger is ever downloaded.
-        let allowed = u64::try_from(max_bytes)
-            .unwrap_or(u64::MAX)
-            .saturating_add(u64::from(MAX_MESSAGE_BYTES));
+        // Ask the size first so nothing larger is ever downloaded.
+        let allowed = attachment_fetch_cap(max_bytes);
         let sized = self
             .uid_fetch(&uid.to_string(), "(UID RFC822.SIZE)")
             .await?;
@@ -666,6 +674,14 @@ impl ImapSession {
             .find(|f| f.uid == Some(uid) && f.body().is_some())
             .ok_or_else(|| EmailError::NotFound(format!("message uid {uid} in {folder}")))?;
         let body = f.body().unwrap_or_default();
+        // The size above is what the server said, not what it sent: a server that
+        // lies must not get its bytes parsed (and held) all the same.
+        if u64::try_from(body.len()).unwrap_or(u64::MAX) > allowed {
+            return Err(EmailError::Imap(format!(
+                "message uid {uid} is {} bytes, too large to download an attachment from",
+                body.len()
+            )));
+        }
         crate::message::attachment_of(body, index, max_bytes)
     }
 

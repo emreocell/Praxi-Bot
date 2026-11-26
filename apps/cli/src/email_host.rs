@@ -137,7 +137,7 @@ fn api_report(r: &Result<(), EmailError>) -> EmailTestReport {
 }
 
 /// Directory attachments are saved in, under the data dir.
-pub const ATTACHMENTS_DIR: &str = "email-attachments";
+pub const ATTACHMENTS_DIR: &str = connector_email::ATTACHMENTS_DIR_NAME;
 
 fn invalid(e: impl std::fmt::Display) -> EmailControlError {
     EmailControlError::Invalid(e.to_string())

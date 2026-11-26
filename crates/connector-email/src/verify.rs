@@ -275,7 +275,9 @@ pub fn is_tracking_host(host: &str) -> bool {
 }
 
 /// The links of a message that are click-tracking redirects of a known provider
-/// (https only, no user info) and would otherwise be reported as external.
+/// (https on the standard port, no user info) and would otherwise be reported as
+/// external. A link on another port is never asked about: the daemon makes this
+/// request itself, for a stranger's mail.
 #[must_use]
 pub fn tracking_links(links: &[String], site: Option<&str>, allow: &[String]) -> Vec<String> {
     let mut out = Vec::new();
@@ -283,8 +285,11 @@ pub fn tracking_links(links: &[String], site: Option<&str>, allow: &[String]) ->
         let LinkVerdict::External(host) = classify_link(raw, site, allow) else {
             continue;
         };
-        if is_tracking_host(&host) && !out.contains(raw) {
-            out.push(raw.trim().to_owned());
+        let standard_port =
+            url::Url::parse(raw.trim()).is_ok_and(|u| u.port_or_known_default() == Some(443));
+        let link = raw.trim().to_owned();
+        if standard_port && is_tracking_host(&host) && !out.contains(&link) {
+            out.push(link);
         }
         if out.len() >= MAX_TRACKING_LOOKUPS {
             break;
@@ -712,5 +717,21 @@ mod tests {
         ] {
             assert!(normalize_allowed_domain(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn tracking_links_need_the_standard_port() {
+        let links = vec![
+            "https://u1.ct.sendgrid.net:8443/ls/click?upn=a".to_owned(),
+            "https://u2.ct.sendgrid.net:443/ls/click?upn=b".to_owned(),
+            "https://u3.ct.sendgrid.net/ls/click?upn=c".to_owned(),
+        ];
+        assert_eq!(
+            tracking_links(&links, Some("site.test"), &[]),
+            [
+                "https://u2.ct.sendgrid.net:443/ls/click?upn=b",
+                "https://u3.ct.sendgrid.net/ls/click?upn=c"
+            ]
+        );
     }
 }

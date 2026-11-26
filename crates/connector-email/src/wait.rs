@@ -354,11 +354,13 @@ async fn wait_inner<C: Future<Output = ()>>(
                     checked.insert(key);
                     continue;
                 }
-                let detail = tokio::select! {
+                let mut detail = tokio::select! {
                     () = &mut cancel => return Ok(WaitEnd::Cancelled),
                     d = scoped.fetch_id(account, folder, &id, BODY_CHARS) => d?,
                 };
                 if filter.detail_matches(&detail) {
+                    detail.found_in = Some(folder.clone());
+                    detail.from_junk = has_folders.then(|| folder != "INBOX");
                     return Ok(WaitEnd::Found(Box::new(detail)));
                 }
                 checked.insert(key);
@@ -416,7 +418,9 @@ enum State {
 
 struct Waiter {
     bot: Option<String>,
+    /// The run that started it: only that run joins or collects it.
     tag: String,
+    account: String,
     fingerprint: String,
     deadline: std::time::Instant,
     state: Arc<std::sync::Mutex<State>>,
@@ -424,15 +428,29 @@ struct Waiter {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// Who a background wait belongs to. A wait is visible only to the bot, the run
+/// and the mailbox account it was started for: another run of the same bot (a
+/// scheduled or mail-started one, say) can neither join it, collect it nor stop it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WaitOwner<'a> {
+    /// The bot (`None` = no bot).
+    pub bot: Option<&'a str>,
+    /// The run that started the wait; [`Waiters::cancel_tagged`] ends its waits.
+    pub run: &'a str,
+    /// The mailbox account the wait polls.
+    pub account: &'a str,
+}
+
 /// Background waits for expected mail. A wait polls on its own (so a run is not
 /// blocked for minutes) and is collected with [`Waiters::progress`]; starting
-/// the same wait again joins the one already running. Nothing is persisted: a
-/// restart forgets the waits, and starting again finds mail that already
-/// arrived (the filters and `max_age` fully describe a wait).
+/// the same wait again in the same run joins the one still polling (a finished
+/// one is never reused: it starts afresh and finds mail that already arrived).
+/// Waits die with their run. Nothing is persisted: a restart forgets the waits,
+/// and starting again finds mail that already arrived (the filters and
+/// `max_age` fully describe a wait).
 #[derive(Default)]
 pub struct Waiters {
     inner: std::sync::Mutex<std::collections::HashMap<String, Waiter>>,
-    next: std::sync::atomic::AtomicU64,
 }
 
 impl Drop for Waiters {
@@ -468,27 +486,32 @@ impl Waiters {
         map
     }
 
-    /// Start waiting (or join the identical running wait of the same bot) and
-    /// return its id. `tag` names the run that asked; [`Waiters::cancel_tagged`]
-    /// ends its waits when the run is stopped.
+    /// Start waiting (or join the identical wait this run still has polling) and
+    /// return its id: unguessable, and useful only to `owner`.
     ///
     /// # Errors
     /// [`EmailError::Input`] when the bot already has too many waits.
     pub fn start(
         &self,
         connector: &Arc<EmailConnector>,
-        bot: Option<&str>,
-        tag: &str,
-        account: &str,
+        owner: WaitOwner<'_>,
         filter: &WaitFilter,
         plan: &WaitPlan,
     ) -> Result<String, EmailError> {
+        let WaitOwner { bot, run, account } = owner;
         let fingerprint = format!("{account}|{filter:?}|{}", plan.max_age.as_secs());
         let mut map = self.lock();
-        if let Some((id, _)) = map
-            .iter()
-            .find(|(_, w)| w.bot.as_deref() == bot && w.fingerprint == fingerprint)
-        {
+        // Only a wait that is still polling is joined: a finished one holds an old
+        // answer (found, timed out or failed) that must not stand in for a new ask.
+        if let Some((id, _)) = map.iter().find(|(_, w)| {
+            w.bot.as_deref() == bot
+                && w.tag == run
+                && w.fingerprint == fingerprint
+                && matches!(
+                    *w.state.lock().unwrap_or_else(PoisonError::into_inner),
+                    State::Pending { .. }
+                )
+        }) {
             return Ok(id.clone());
         }
         let mine = map.values().filter(|w| w.bot.as_deref() == bot).count();
@@ -497,11 +520,7 @@ impl Waiters {
                 "too many mail waits are running ({MAX_WAITERS_PER_BOT} per bot): collect or finish one first"
             )));
         }
-        let id = format!(
-            "mw{}-{}",
-            self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            now_secs()
-        );
+        let id = format!("mw-{}", uuid::Uuid::new_v4().simple());
         let shared = Arc::new(std::sync::Mutex::new(State::Pending { polls: 0 }));
         let done = Arc::new(tokio::sync::Notify::new());
         let task_done = Arc::clone(&done);
@@ -540,7 +559,8 @@ impl Waiters {
             id.clone(),
             Waiter {
                 bot: bot.map(str::to_owned),
-                tag: tag.to_owned(),
+                tag: run.to_owned(),
+                account: account.to_owned(),
                 fingerprint,
                 deadline: std::time::Instant::now() + plan.timeout.min(MAX_WAIT),
                 state: shared,
@@ -551,7 +571,18 @@ impl Waiters {
         Ok(id)
     }
 
-    /// Stop every wait started under `tag` (its run was stopped).
+    /// Whether wait `id` has ended (found, timed out or failed) and waits to be collected.
+    #[cfg(test)]
+    pub(crate) fn is_finished(&self, id: &str) -> bool {
+        self.lock().get(id).is_some_and(|w| {
+            !matches!(
+                *w.state.lock().unwrap_or_else(PoisonError::into_inner),
+                State::Pending { .. }
+            )
+        })
+    }
+
+    /// Stop every wait started under `tag` (its run ended or was stopped).
     pub fn cancel_tagged(&self, tag: &str) {
         self.lock().retain(|_, w| {
             let mine = w.tag == tag;
@@ -562,13 +593,14 @@ impl Waiters {
         });
     }
 
-    /// Where wait `id` of `bot` stands, blocking for at most `block` while it
+    /// Where wait `id` of `owner` stands, blocking for at most `block` while it
     /// is still pending (`cancel` ends the blocking at once). A finished wait is
-    /// handed over once and then forgotten.
+    /// handed over once and then forgotten. The id of a wait that belongs to
+    /// another bot, run or account is as unknown as one that never existed.
     pub async fn progress<C: Future<Output = ()>>(
         &self,
         id: &str,
-        bot: Option<&str>,
+        owner: WaitOwner<'_>,
         block: Duration,
         cancel: C,
     ) -> WaitProgress {
@@ -577,7 +609,11 @@ impl Waiters {
         loop {
             let done = {
                 let mut map = self.lock();
-                let Some(w) = map.get_mut(id).filter(|w| w.bot.as_deref() == bot) else {
+                let Some(w) = map.get_mut(id).filter(|w| {
+                    w.bot.as_deref() == owner.bot
+                        && w.tag == owner.run
+                        && w.account == owner.account
+                }) else {
                     return WaitProgress::Unknown;
                 };
                 let state = Arc::clone(&w.state);
@@ -670,11 +706,13 @@ pub trait TrackingResolver: Send + Sync {
 
 /// The production [`TrackingResolver`]: one `GET` through the SSRF guard (no
 /// private, loopback or metadata addresses, DNS pinned to checked addresses,
-/// no proxy, no cookies), the target never requested.
+/// no proxy, no cookies), the target never requested. The daemon passes its own
+/// [`web_tools::UrlPolicy`] ([`WebResolver::with_policy`]) so the sockets it
+/// protects and the hosts the owner denied are refused here as for any web tool.
 pub struct WebResolver(web_tools::HttpFetcher);
 
 impl WebResolver {
-    /// A resolver with short limits.
+    /// A resolver with short limits and the default URL policy.
     ///
     /// # Errors
     /// [`EmailError::Config`] when the HTTP client cannot be built.
@@ -682,7 +720,11 @@ impl WebResolver {
         Self::with_policy(Arc::new(web_tools::DefaultUrlPolicy::default()))
     }
 
-    pub(crate) fn with_policy(policy: Arc<dyn web_tools::UrlPolicy>) -> Result<Self, EmailError> {
+    /// A resolver with short limits that asks `policy` about every address.
+    ///
+    /// # Errors
+    /// [`EmailError::Config`] when the HTTP client cannot be built.
+    pub fn with_policy(policy: Arc<dyn web_tools::UrlPolicy>) -> Result<Self, EmailError> {
         let cfg = web_tools::HttpConfig {
             timeout: Duration::from_secs(8),
             connect_timeout: Duration::from_secs(4),
@@ -708,23 +750,34 @@ impl TrackingResolver for WebResolver {
 }
 
 /// Look through the known click-tracking links of `d` exactly one hop each and
-/// add the targets to its links, so they are judged like any other link (a
+/// put the targets FIRST in its links, so they are judged like any other link (a
 /// target on the sign-up site becomes followable; anything else stays
-/// external). Returns how many tracking links were resolved.
-pub async fn expand_tracking_links(
+/// external) even in a mail with more links than are ever read. `cancel` ends the
+/// lookup at once (the run was stopped): a hop in flight is dropped. Returns how
+/// many tracking links were resolved.
+pub async fn expand_tracking_links<C: Future<Output = ()>>(
     d: &mut MessageDetail,
     resolver: &dyn TrackingResolver,
     basis: &LinkBasis,
     owner_domains: &[String],
+    cancel: C,
 ) -> usize {
+    tokio::pin!(cancel);
     let candidates = verify::tracking_links(&d.links, basis.site_domain.as_deref(), owner_domains);
-    let mut looked_through = 0;
+    let mut targets = Vec::new();
     for link in candidates {
-        if let Some(target) = resolver.hop(&link).await {
-            d.links.push(target);
-            looked_through += 1;
+        let hop = tokio::select! {
+            () = &mut cancel => break,
+            hop = resolver.hop(&link) => hop,
+        };
+        if let Some(target) = hop {
+            targets.push(target);
         }
     }
+    let looked_through = targets.len();
+    // `verify::analyse` reads only the first links of a message: a target pushed to the
+    // end would vanish from a link-heavy mail.
+    d.links.splice(0..0, targets);
     looked_through
 }
 
@@ -772,6 +825,10 @@ pub fn found_json(
             "subject": d.summary.subject,
             "received": d.summary.date,
         },
+        // Where it was found. Junk is where a stranger's (or a forged) mail is filed: `null`
+        // when the mailbox has no folders to tell (API mailboxes list spam with the rest).
+        "folder": d.found_in,
+        "from_junk": d.from_junk,
         "codes": v.codes,
         "followable_links": v.followable,
         "other_links": other,

@@ -138,23 +138,31 @@ pub fn envelope_address(s: &str) -> Result<String, EmailError> {
 }
 
 /// A `Message-ID` for a threading header, without the angle brackets; `None` for
-/// an absent one. A value with whitespace, brackets or control characters is
-/// refused so a header can never be split by a forged id.
+/// an empty one or one that cannot be written into a header as it is: more than
+/// 998 characters, or anything but printable ASCII without `<`, `>`, `"` and `\`
+/// (whitespace, control and non-ASCII characters can split or smuggle a header).
+pub(crate) fn valid_threading_id(id: &str) -> Option<String> {
+    let id = id.trim().trim_start_matches('<').trim_end_matches('>');
+    (!id.is_empty()
+        && id.len() <= 998
+        && id
+            .chars()
+            .all(|c| c.is_ascii_graphic() && !matches!(c, '<' | '>' | '"' | '\\')))
+    .then(|| id.to_owned())
+}
+
+/// [`valid_threading_id`] for an id the caller of [`compose`] supplied: `None` for an absent
+/// one, an error for one that is not safe to write.
 fn threading_id(id: Option<&str>) -> Result<Option<String>, EmailError> {
-    let Some(id) = id.map(|i| i.trim().trim_start_matches('<').trim_end_matches('>')) else {
+    let Some(raw) = id
+        .map(str::trim)
+        .filter(|i| !i.trim_matches(['<', '>']).is_empty())
+    else {
         return Ok(None);
     };
-    if id.is_empty() {
-        return Ok(None);
-    }
-    if id.len() > 998
-        || id
-            .chars()
-            .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '<' | '>'))
-    {
-        return Err(EmailError::Input("invalid Message-ID".into()));
-    }
-    Ok(Some(id.to_owned()))
+    valid_threading_id(raw)
+        .map(Some)
+        .ok_or_else(|| EmailError::Input("invalid Message-ID".into()))
 }
 
 /// Composed message and separate delivery envelope. Blind recipients never
@@ -267,6 +275,16 @@ fn compose_message(
     })
 }
 
+/// `text` with every copy of `password` blanked. An empty password is skipped: replacing
+/// "nothing" would put the marker between every two characters.
+fn redact_password(text: &str, password: &str) -> String {
+    if password.is_empty() {
+        text.to_owned()
+    } else {
+        text.replace(password, "[REDACTED]")
+    }
+}
+
 /// Submit a composed message. TLS is always required; there is no plaintext path.
 ///
 /// # Errors
@@ -284,7 +302,7 @@ pub async fn send(
         ) {
             EmailError::Smtp("authentication failed".into())
         } else {
-            EmailError::Smtp(e.to_string().replace(password, "[REDACTED]"))
+            EmailError::Smtp(redact_password(&e.to_string(), password))
         }
     };
     let mut builder = SmtpClientBuilder::new(acct.smtp.host.clone(), acct.smtp.port)
@@ -311,6 +329,18 @@ mod tests {
             body: "Hi".into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn an_empty_password_redacts_nothing_and_a_real_one_is_blanked() {
+        assert_eq!(
+            redact_password("550 mailbox unavailable", ""),
+            "550 mailbox unavailable"
+        );
+        assert_eq!(
+            redact_password("bad login hunter2 for hunter2", "hunter2"),
+            "bad login [REDACTED] for [REDACTED]"
+        );
     }
 
     #[test]

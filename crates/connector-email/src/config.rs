@@ -321,6 +321,8 @@ impl AccountConfig {
         if self.name.trim().is_empty() {
             return Err(EmailError::Config("account name is empty".into()));
         }
+        // The name becomes a folder name (the attachments folder): no separators, no `..`.
+        validate_account_name(&self.name)?;
         match self.kind {
             AccountKind::ImapSmtp => self.validate_imap_smtp()?,
             AccountKind::AgentMail => self.validate_agentmail()?,

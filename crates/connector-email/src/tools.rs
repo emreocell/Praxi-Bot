@@ -561,13 +561,22 @@ impl EmailTool {
         if !line_on {
             report.footer = None;
         }
+        // Everything the owner's card shows or the send uses, the resolved reply included: a
+        // reply whose original reads differently at send time is not the mail that was approved.
         let key = json!([
             ctx.bot_id,
             account,
             recipients,
+            i.mail.to,
+            i.mail.cc,
             i.mail.subject,
             i.mail.body,
-            line_on
+            line_on,
+            i.mail.in_reply_to,
+            i.mail.references,
+            i.reply_to_uid,
+            i.reply_to_message_id,
+            i.reply_folder,
         ])
         .to_string();
         Ok(SendPlan {
@@ -601,6 +610,68 @@ fn attachment_line(item: &Value) -> (String, u64) {
         .and_then(|p| std::fs::metadata(p).ok())
         .map_or(0, |meta| meta.len());
     (name, bytes)
+}
+
+/// Longest attachment text handed to the model inline.
+const MAX_INLINE_ATTACHMENT_BYTES: usize = 20_000;
+
+/// The text of a small attachment, to hand to the model without a second call. The declared
+/// type is the sender's word, so it only says what to look for: the bytes must really be
+/// text (valid UTF-8, no NUL or other control characters), and an HTML page is reduced to
+/// what a person sees, as a mail body is (hidden text, scripts and comments are left out).
+fn inline_attachment_text(content_type: Option<&str>, bytes: &[u8]) -> Option<String> {
+    let declared = content_type?.trim().to_ascii_lowercase();
+    let html = matches!(declared.as_str(), "text/html" | "application/xhtml+xml");
+    let plain = declared.starts_with("text/") || declared == "application/json";
+    if !(html || plain) || bytes.len() > MAX_INLINE_ATTACHMENT_BYTES {
+        return None;
+    }
+    let text = std::str::from_utf8(bytes).ok()?;
+    if text
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+    {
+        return None;
+    }
+    if !html {
+        return Some(text.to_owned());
+    }
+    let opts = web_tools::ExtractOptions {
+        include_links: false,
+        include_images: false,
+        full_page: true,
+        max_links: 0,
+    };
+    Some(
+        web_tools::html_to_markdown(text, None, &opts)
+            .markdown
+            .chars()
+            .take(MAX_INLINE_ATTACHMENT_BYTES)
+            .collect(),
+    )
+}
+
+/// An attachment name from a stranger's header as a plain file name: the last path component
+/// only, with control characters and invisible direction marks (which disguise an extension)
+/// dropped. `None` when nothing usable is left.
+fn plain_file_name(name: &str) -> Option<String> {
+    let last = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let clean: String = last
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(
+                    c,
+                    '\u{200B}'..='\u{200F}'
+                        | '\u{202A}'..='\u{202E}'
+                        | '\u{2060}'..='\u{2064}'
+                        | '\u{2066}'..='\u{2069}'
+                        | '\u{FEFF}'
+                )
+        })
+        .collect();
+    let clean = clean.trim();
+    (!clean.is_empty() && !clean.chars().all(|c| c == '.')).then(|| clean.to_owned())
 }
 
 fn file_name(path: &str) -> String {
@@ -674,8 +745,19 @@ impl EmailTool {
         if acct.kind == AccountKind::ImapSmtp {
             // Header ids of the original: IMAP sends a normal mail with the
             // threading headers; an API mailbox threads by its own message id.
-            if let Some(mid) = original.message_id.clone().filter(|m| !m.is_empty()) {
-                let mut refs = original.references.clone();
+            // These ids come from a stranger's headers. One that cannot be written into a
+            // header is left out: the reply goes out unthreaded rather than not at all (or,
+            // worse, failing after the owner approved it).
+            if let Some(mid) = original
+                .message_id
+                .as_deref()
+                .and_then(crate::smtp::valid_threading_id)
+            {
+                let mut refs: Vec<String> = original
+                    .references
+                    .iter()
+                    .filter_map(|r| crate::smtp::valid_threading_id(r))
+                    .collect();
                 if !refs.contains(&mid) {
                     refs.push(mid.clone());
                 }
@@ -699,18 +781,13 @@ impl EmailTool {
         let (path, data) = c
             .save_attachment_in(i.account.as_deref(), &i.folder, &id, &i.attachment_id)
             .await?;
-        let text_like = data
-            .content_type
-            .as_deref()
-            .is_some_and(|t| t.starts_with("text/") || t == "application/json");
-        let text = (text_like && data.bytes.len() <= 20_000)
-            .then(|| String::from_utf8_lossy(&data.bytes).into_owned());
+        let text = inline_attachment_text(data.content_type.as_deref(), &data.bytes);
         let label = source_label(kind, "attachment");
         let mut out = json!({
             "saved_to": path.display().to_string(),
             "size": data.bytes.len(),
             "content_type": data.content_type,
-            "filename": data.filename,
+            "filename": data.filename.as_deref().and_then(plain_file_name),
             "executed": false,
             "untrusted_content": true,
         });
@@ -734,7 +811,19 @@ impl EmailTool {
         let plan = self.plan_send(ctx, &i)?;
         let guard = self.conn.guard();
         // Consumes the card the owner was shown. No argument of the model reaches this.
-        let overridden = guard.take_override(&plan.key, &plan.report);
+        let card = guard.take_card(&plan.key, &plan.report);
+        let overridden = card.overrides;
+        // A reply fills in its recipients, subject and threading from the original, read from
+        // the mailbox. It goes out only as the owner saw it: the original is read again here,
+        // and a message that changed since (or a card that expired) is a different mail.
+        if reply.is_some() && !card.shown {
+            return Err(ToolError::Execution(
+                "Not sent. This reply is not the one the owner approved (the original message \
+                 changed, or the approval expired). Call email_send again so the owner sees the \
+                 reply as it is now."
+                    .into(),
+            ));
+        }
         if !plan.report.warnings.is_empty() && !overridden {
             let why: Vec<&str> = plan
                 .report
@@ -943,6 +1032,13 @@ impl Tool for EmailTool {
                     .await?;
                 let mut message =
                     serde_json::to_value(&m).map_err(|e| ToolError::Execution(e.to_string()))?;
+                // A reply goes to `Reply-To`, not to the sender: when they differ the model
+                // and the owner must see it (a classic way to send answers to a stranger).
+                if let (Some(reply_to), Value::Object(map)) = (&m.reply_to, &mut message)
+                    && *reply_to != m.summary.from_addr
+                {
+                    map.insert("reply_to".into(), Value::String(reply_to.clone()));
+                }
                 if let Some(attachments) =
                     message.get_mut("attachments").and_then(Value::as_array_mut)
                 {

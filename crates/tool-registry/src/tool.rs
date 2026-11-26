@@ -443,6 +443,11 @@ mod delegation_guard {
             "script_run: every inner call goes through the loop's ToolGate (decide + approval_details)",
         ),
         (
+            "builtin-tools/src/selfcheck.rs",
+            "SelfCheck",
+            "tool_self_check: every probe is a fixed read-only sample that the loop's ToolGate must authorize unattended first (never an approval card: a call that would ask is skipped), and its output is discarded",
+        ),
+        (
             "workflow-replay/src/tool.rs",
             "WorkflowRun",
             "workflow_run: every step goes through the loop's ToolGate (decide + approval_details)",
