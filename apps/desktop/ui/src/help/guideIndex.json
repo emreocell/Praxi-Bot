@@ -155,6 +155,7 @@
       "The four presets",
       "Absolute floors",
       "Egress after a read",
+      "Full access: asks only before spending money",
       "Full level: working on the web after a read (owner-started runs)",
       "Host-status commands on an always-on host",
       "Runs started by a schedule",

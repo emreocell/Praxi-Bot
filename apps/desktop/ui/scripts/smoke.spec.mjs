@@ -513,7 +513,7 @@ export async function flows(ctx) {
     await page.getByText(/tool said: .*smoke-one/).first().waitFor(SLOW);
     if ((await cards(page).count()) > 0) throw new Error('an approval card appeared although nothing untrusted was read');
   });
-  await run(s, 'after an untrusted read one card offers "This chat"; the next shell call does not ask', async (page) => {
+  await run(s, 'Full level: after a web read, shell_run still asks nothing (only money asks)', async (page) => {
     // A fresh chat: exposure of earlier turns rides on the chat's messages, and
     // the previous flow's shell output would make the first search ask instead.
     const fresh = page.getByTestId('bot-panel-new-chat');
@@ -530,18 +530,12 @@ export async function flows(ctx) {
     }
     await composer(page).waitFor(T);
     await sendLines(page, ['call:web_search {"query":"smoke untrusted"}', `call:shell_run ${JSON.stringify({ command: 'echo smoke-two' })}`]);
-    const card = cards(page).first();
-    await card.waitFor(T);
-    const details = card.getByTestId('approval-details');
-    if (await details.count()) await details.locator('summary').click();
-    const why = ((await card.getByTestId('approval-why').textContent().catch(() => '')) ?? '').trim();
-    if (!/untrusted/i.test(why)) throw new Error(`the card does not say why: "${why}"`);
-    await card.getByRole('button', { name: /this chat/i }).click();
+    // Full access asks only before spending money: the search result is untrusted, yet nothing is asked.
     await page.getByText(/tool said: .*smoke-two/).first().waitFor(SLOW);
+    if ((await cards(page).count()) > 0) throw new Error('an approval card appeared after an untrusted read although nothing spends money');
     await sendLines(page, [`call:shell_run ${JSON.stringify({ command: 'echo smoke-three' })}`]);
     await page.getByText(/tool said: .*smoke-three/).first().waitFor(SLOW);
-    // Answered cards stay in the timeline; only a card that still waits has its buttons.
-    if ((await page.getByRole('button', { name: /allow once|^allow$/i }).count()) > 0) throw new Error('the second shell call asked again after "This chat"');
+    if ((await cards(page).count()) > 0) throw new Error('the next shell call asked');
   });
   await run(s, 'human-driving latch: banner, "Give control back", then an observation tool works', async (page) => {
     // A fresh page: with the live-view side panel open the viewer shows its own controls instead of the banner.

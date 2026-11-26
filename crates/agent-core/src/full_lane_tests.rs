@@ -482,11 +482,14 @@ async fn a_full_bots_scheduled_run_runs_a_shell_command_and_sends_mail_without_a
     ));
     connector.replace_accounts(vec![account]).unwrap();
     let marker = env.dir.path().join("timer-ran.txt");
+    // PowerShell's cold start on a Windows runner can outlast the 10s event wait; cmd starts at
+    // once and the policy under test does not depend on which shell runs.
+    let shell = if cfg!(windows) { "cmd" } else { "sh" };
     let fake = Fake::new(vec![
         calls(&[(
             "s",
             "shell_run",
-            json!({"command": "echo timer-ran > timer-ran.txt", "cwd": env.dir.path()}),
+            json!({"command": "echo timer-ran > timer-ran.txt", "cwd": env.dir.path(), "shell": shell}),
         )]),
         calls(&[(
             "m",
