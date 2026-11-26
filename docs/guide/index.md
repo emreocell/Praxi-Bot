@@ -88,6 +88,7 @@ Seven short pages in plain words. Read them in this order:
 | Teach a bot how to handle a tricky web page or app | [Skills](skills.md) |
 | Create, import, update or delete shared skills through the local API | [Managing shared skills](skill-management-api.md) |
 | Connect external apps (OAuth, Composio, and MCP servers in the desktop app) | [Connecting apps](apps.md) |
+| Connect Gmail, Drive and Calendar with your own Google client, also on a server | [Google Workspace](google-workspace.md) |
 | Configure external MCP servers by hand (`mcp.toml` and API) | [MCP servers](mcp-servers.md) |
 | Let another MCP agent use a selected Praxi bot; client recipes and troubleshooting | [Praxi as an MCP server](mcp-server.md) |
 | Pick a provider, use the Gemini free tier | [Providers and models](providers-and-models.md) |

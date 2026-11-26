@@ -826,6 +826,58 @@
       "save": "Speichern und verbinden"
     },
     "getKey": "API-Schlüssel holen",
+    "google": {
+      "allAdded": "Alle drei Google-Apps sind hinzugefügt. Verwalte sie unter Verbunden.",
+      "changeClient": "Anderen Google-Client verwenden",
+      "clientId": "Client-ID",
+      "clientSecret": "Client-Secret",
+      "copied": "Kopiert",
+      "copyScopes": "Berechtigungen kopieren",
+      "error": {
+        "client_id": "Die Client-ID sollte wie 123456789012-abc….apps.googleusercontent.com aussehen.",
+        "client_secret": "Das Client-Secret ist zu kurz oder enthält Leerzeichen. Kopiere es erneut von Google.",
+        "legacy": "Ein alter Google-Drive-Server (der archivierte) ist noch unter demselben Namen eingerichtet. Entferne ihn unter Erweitert und verbinde dann erneut.",
+        "missing": "Richte zuerst deinen Google-Client ein."
+      },
+      "intro": "Gmail, Drive und Kalender über Googles eigene Server. Praxi hat keine gemeinsame Google-Anmeldung, daher legst du einmal einen kleinen Client in deinem eigenen Google-Konto an (etwa fünf Minuten). Nur lesender Zugriff.",
+      "readOnly": "Nur lesen · dein eigener Google-Client",
+      "save": "Speichern und anmelden",
+      "secretNote": "Das Secret liegt im geheimen Speicher von Praxi und wird nie wieder angezeigt. Es erreicht keinen Bot.",
+      "steps": {
+        "apis": {
+          "body": "Wähle die Apps, öffne jede Seite und klicke auf Aktivieren. Jede App hat zwei Dienste: die API und den MCP-Dienst.",
+          "title": "2. Dienste aktivieren"
+        },
+        "audience": {
+          "body": "Wähle Extern (oder Intern, falls dein Workspace es erlaubt). Füge unter Testnutzer deine eigene Google-Adresse hinzu.",
+          "title": "4. Zielgruppe wählen"
+        },
+        "branding": {
+          "body": "Gib einen App-Namen (etwa Praxi) und deine E-Mail-Adresse als Support-Adresse ein.",
+          "title": "3. App benennen"
+        },
+        "client": {
+          "body": "Erstelle einen Client vom Typ Desktop-App. Kopiere dann Client-ID und Client-Secret in die Felder unten.",
+          "title": "6. Client erstellen"
+        },
+        "project": {
+          "body": "Lege in der Google Cloud Console ein Projekt an (beliebiger Name, etwa Praxi) oder nutze ein vorhandenes.",
+          "title": "1. Projekt anlegen"
+        },
+        "scopes": {
+          "body": "Klicke unter Datenzugriff auf Bereiche hinzufügen oder entfernen und füge diese ein, eine pro Zeile:",
+          "title": "5. Lesende Berechtigungen hinzufügen"
+        }
+      },
+      "title": "Google-Apps mit eigenem Google-Client",
+      "trouble": {
+        "secret": "Client-Secret verloren? Erstelle in der Google Console ein neues und wähle \"Anderen Google-Client verwenden\".",
+        "sevenDays": "Solange die App im Testmodus ist, fragt Google etwa alle 7 Tage erneut nach der Anmeldung. Die App in der Google Console zu veröffentlichen vermeidet das.",
+        "title": "Was schiefgehen kann",
+        "unverified": "Google zeigt \"Google hat diese App nicht überprüft\". Bei deinem eigenen Client ist das normal: Wähle Erweitert und fahre fort.",
+        "workspace": "Ein Google-Workspace-Administrator kann solche Apps sperren. Bitte ihn dann um Freigabe."
+      }
+    },
     "group": {
       "all": "Alle",
       "business": "Geschäft",
@@ -844,6 +896,23 @@
     "missingSecret": "Gib alle erforderlichen Zugangsdaten ein.",
     "noResults": "Keine passenden Server.",
     "reconnect": "Neu verbinden",
+    "sample": {
+      "empty": "Es funktioniert, aber es gibt noch nichts anzuzeigen.",
+      "failed": {
+        "admin_needed": "Dieser Computer ist auf dem Server noch nicht als Administrator bestätigt.",
+        "no_test": "Diese App hat keinen Test.",
+        "not_connected": "Die App ist nicht verbunden. Melde dich zuerst an.",
+        "other": "Der Test hat nicht geklappt. Öffne die Details.",
+        "permission": "Google hat abgelehnt. Prüfe, ob der Dienst aktiviert ist und die Berechtigungen in deinem Google-Projekt hinzugefügt sind.",
+        "rate": "Google meldet zu viele Anfragen. Warte eine Minute und versuche es erneut.",
+        "signed_out": "Google akzeptiert die Anmeldung nicht mehr. Melde dich erneut an."
+      },
+      "more": "Es gibt mehr.",
+      "ok": "Es funktioniert. Die ersten {{n}} Einträge:",
+      "okText": "Es funktioniert. Der Anfang der Antwort:",
+      "run": "Test: erste Einträge zeigen",
+      "running": "Wird getestet…"
+    },
     "search": "Apps suchen",
     "secretHint": "Zugangsdaten werden im Schlüsselbund deines Betriebssystems gespeichert und nie wieder angezeigt.",
     "sheet": {
@@ -868,6 +937,42 @@
       "progress": "Schritt {{current}} von {{total}}",
       "timedOut": "Die Anmeldung wurde nicht rechtzeitig abgeschlossen. Klicke auf „Verbinden“, um neu zu starten.",
       "title": "{{name}} verbinden"
+    },
+    "signIn": {
+      "copyLink": "Link kopieren",
+      "details": "Details",
+      "done": "Angemeldet.",
+      "failed": {
+        "admin_needed": "Dieser Computer ist auf dem Server noch nicht als Administrator bestätigt. Bestätige ihn zuerst auf dem Server und melde dich dann erneut an.",
+        "already_running": "Für diese App läuft schon eine Anmeldung. Schließe sie ab oder brich sie ab.",
+        "code_rejected": "Der Dienst hat den Anmeldecode nicht akzeptiert. Versuche es erneut und prüfe Client-ID und Secret.",
+        "denied": "Die Anmeldung wurde abgelehnt oder nicht abgeschlossen. Versuche es erneut und erlaube den Zugriff.",
+        "issuer_mismatch": "Der Anmeldedienst gehört nicht zu diesem Client. Prüfe den eingefügten Client.",
+        "not_waiting": "Die Anmeldung war schon beendet (abgelaufen oder abgebrochen). Starte sie erneut.",
+        "owner_needed": "Dafür braucht es die Praxi-Desktop-App auf diesem Computer. Starte Praxi über die App und versuche es erneut.",
+        "provider_unreachable": "Der Anmeldedienst war nicht erreichbar. Prüfe die Internetverbindung des Computers, auf dem der Dienst läuft.",
+        "relay_failed": "Diese App konnte die Antwort nicht auffangen. Versuche es erneut.",
+        "scope_refused": "Der Dienst hat den angefragten Zugriff abgelehnt. Prüfe bei Google, dass die Berechtigungen unter Datenzugriff hinzugefügt sind.",
+        "timeout": "Die Anmeldung wurde nicht rechtzeitig abgeschlossen. Versuche es erneut.",
+        "unknown": "Die Anmeldung hat nicht geklappt. Versuche es erneut; bei weiteren Fehlern öffne die Details.",
+        "unreachable": "Praxi konnte den Dienst nicht erreichen. Prüfe, ob er läuft, und versuche es erneut.",
+        "wrong_address": "Diese Adresse gehört nicht zu dieser Anmeldung. Starte die Anmeldung neu und nutze die geöffnete Seite."
+      },
+      "finishing": "Fast fertig. Dein Server schließt die Anmeldung ab…",
+      "linkCopied": "Link kopiert",
+      "notOpened": "Die Anmeldeseite ließ sich im Browser nicht öffnen. Öffne sie erneut oder kopiere den Link.",
+      "open": "Anmeldeseite öffnen",
+      "openAgain": "Seite erneut öffnen",
+      "paste": {
+        "body": "Ein Schritt noch. Dieses Fenster kann die Antwort nicht selbst auffangen. Nach der Anmeldung zeigt der Browser eine Seite, die sich nicht öffnet (127.0.0.1 nicht erreichbar). Das ist normal. Kopiere die ganze Adresse aus der Adressleiste und füge sie hier ein.",
+        "label": "Adresse der Seite, bei der der Browser gelandet ist",
+        "submit": "Anmeldung abschließen"
+      },
+      "retry": "Erneut versuchen",
+      "starting": "Die Anmeldeseite wird vorbereitet…",
+      "title": "Anmeldung bei {{name}}",
+      "waiting": "Schließe die Anmeldung im Browser ab. Praxi macht von selbst weiter, es muss nichts kopiert werden.",
+      "waitingServer": "Schließe die Anmeldung im Browser ab. Die Antwort kommt zu dieser App zurück und wird an deinen Server weitergegeben. Es muss nichts kopiert werden."
     },
     "status": {
       "auth_required": "Anmeldung erforderlich",

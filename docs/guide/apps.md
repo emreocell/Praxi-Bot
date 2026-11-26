@@ -20,6 +20,12 @@ At the top of the dialog you have:
 
 ## Three ways apps connect
 
+> **Google (Gmail, Drive, Calendar) with your own Google account setup:** under
+> **Advanced** there is a guided setup that connects Google's own MCP servers
+> with a client you create yourself. See [Google Workspace](google-workspace.md).
+> The one-click Gmail, Drive and Calendar tiles in the main list use Composio and
+> need no setup.
+
 ### 1. Direct OAuth apps
 
 Remote HTTP MCP servers in the built-in catalog that need no API key appear
@@ -32,7 +38,8 @@ directly in **Discover** on the main screen (for example **Atlassian**,
    app moves into **Connected**.
 
 Direct OAuth apps talk straight to the vendor's remote MCP server with no
-intermediary. If a service is available both directly and through Composio,
+intermediary. They also work when Praxi runs on a server: see
+[Praxi runs on a server](#oauth-sign-in-is-stuck-on-waiting-for-the-browser-sign-in). If a service is available both directly and through Composio,
 Praxi shows only the direct tile so each product appears once.
 
 ### 2. Composio apps
@@ -210,16 +217,21 @@ A few important rules:
 
 ### OAuth sign-in is stuck on "Waiting for the browser sign-in…"
 
-- **Cancel and retry:** click **Cancel** next to **Signing in** (or in the
-  **Manage** panel). Brand-new direct OAuth sign-ins also time out and clean up
-  automatically after **10 minutes**.
-- **Browser runs on another computer (or remote host):** if you completed
-  sign-in in a browser that cannot reach Praxi's local callback port and the
-  browser displays a `http://127.0.0.1:…/callback?…` error page, open **Manage**
-  on the waiting server, paste that full page address into **Redirect address
-  from the browser**, and click **Finish sign-in**.
-- **Browser window did not open:** check your OS default browser and retry
-  **Sign in** from **Manage**.
+- **Cancel and retry:** click **Cancel** in the sign-in card at the top of the
+  dialog. A sign-in nobody finishes expires after **5 minutes** and is cleaned
+  up automatically; a brand-new app that never signed in is removed again.
+- **Praxi runs on a server (or a paired host):** the sign-in page still opens in
+  the browser of the computer you are at. The desktop app catches the answer on
+  a temporary local port and passes it to the server over the paired, encrypted
+  link, so there is nothing to copy. This needs the desktop app, and this
+  computer must be confirmed as an administrator of the server (see
+  [Remote host](remote-host.md)). If the app cannot catch the answer (for
+  example you use Praxi in a plain browser tab), the card says so and shows one
+  box: after you sign in the browser lands on a page that does not open and
+  whose address starts with `http://127.0.0.1:`. Copy that full address and
+  paste it into the box, then press **Finish sign-in**.
+- **Browser window did not open:** the card says so and offers **Open the page
+  again** and **Copy the link**; the sign-in keeps waiting.
 - **GitLab returns a namespace error:** GitLab requires the MCP server to be
   enabled on your top-level group (`group[mcp_server_enabled]` in the group's
   General settings).

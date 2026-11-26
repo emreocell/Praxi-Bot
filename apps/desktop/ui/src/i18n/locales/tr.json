@@ -826,6 +826,58 @@
       "save": "Kaydet ve bağla"
     },
     "getKey": "API anahtarı al",
+    "google": {
+      "allAdded": "Üç Google uygulaması da eklendi. Bağlı olanları Bağlı bölümünden yönetin.",
+      "changeClient": "Başka bir Google istemcisi kullan",
+      "clientId": "İstemci kimliği",
+      "clientSecret": "İstemci gizli anahtarı",
+      "copied": "Kopyalandı",
+      "copyScopes": "İzinleri kopyala",
+      "error": {
+        "client_id": "İstemci kimliği 123456789012-abc….apps.googleusercontent.com gibi görünmeli.",
+        "client_secret": "İstemci gizli anahtarı çok kısa ya da boşluk içeriyor. Google'dan yeniden kopyalayın.",
+        "legacy": "Aynı adla eski bir Google Drive sunucusu (arşivlenmiş olan) hâlâ kurulu. Gelişmiş altından kaldırın, sonra yeniden bağlayın.",
+        "missing": "Önce Google istemcinizi kurun."
+      },
+      "intro": "Gmail, Drive ve Takvim, Google'ın kendi sunucuları üzerinden. Praxi'nin ortak bir Google girişi yok; bu yüzden kendi Google hesabınızda küçük bir istemci oluşturursunuz (yaklaşık beş dakika, bir kez). E-postalarınız ve dosyalarınız yalnızca Google ile Praxi'nin çalıştığı bilgisayar arasında dolaşır. Yalnızca okuma: Praxi burada e-posta gönderemez, dosyaları değiştiremez.",
+      "readOnly": "Yalnızca okuma · kendi Google istemciniz",
+      "save": "Kaydet ve giriş yap",
+      "secretNote": "Gizli anahtar Praxi'nin gizli deposunda saklanır ve bir daha gösterilmez. Hiçbir bota ulaşmaz.",
+      "steps": {
+        "apis": {
+          "body": "İstediğiniz uygulamaları seçin, sonra her sayfayı açıp Etkinleştir'e basın. Her uygulamanın iki hizmeti var: API'si ve MCP hizmeti.",
+          "title": "2. Hizmetleri açın"
+        },
+        "audience": {
+          "body": "Harici'yi seçin (Google Workspace'iniz izin veriyorsa Dahili de olur). Test kullanıcıları altına kendi Google adresinizi ekleyin.",
+          "title": "4. Kimin giriş yapabileceğini seçin"
+        },
+        "branding": {
+          "body": "Bir uygulama adı (örneğin Praxi) ve destek adresi olarak e-postanızı girin.",
+          "title": "3. Uygulamaya ad verin"
+        },
+        "client": {
+          "body": "Masaüstü uygulaması türünde bir istemci oluşturun. Sonra İstemci kimliğini ve İstemci gizli anahtarını aşağıdaki kutulara kopyalayın.",
+          "title": "6. İstemciyi oluşturun"
+        },
+        "project": {
+          "body": "Google Cloud konsolunda bir proje oluşturun (herhangi bir ad, örneğin Praxi). Zaten bir projeniz varsa onu kullanın.",
+          "title": "1. Proje oluşturun"
+        },
+        "scopes": {
+          "body": "Veri Erişimi altında Kapsam ekle ya da kaldır'a basın ve şunları satır satır ekleyin:",
+          "title": "5. Yalnızca okuma izinlerini ekleyin"
+        }
+      },
+      "title": "Kendi Google istemcinizle Google uygulamaları",
+      "trouble": {
+        "secret": "İstemci gizli anahtarını mı kaybettiniz? Google konsolunda yenisini oluşturun ve \"Başka bir Google istemcisi kullan\"ı seçin.",
+        "sevenDays": "Uygulama Test durumundayken Google yaklaşık 7 günde bir yeniden giriş isteyebilir. Uygulamayı Google konsolunda yayınlamak (yine yalnızca sizin kalır) bunu önler.",
+        "title": "Neler ters gidebilir",
+        "unverified": "Google \"Google bu uygulamayı doğrulamadı\" der. Kendi istemciniz için bu normaldir: Gelişmiş'i seçip devam edin. Ona yalnızca siz giriş yapabilirsiniz.",
+        "workspace": "Bir Google Workspace yöneticisi böyle uygulamaları engelleyebilir. Giriş reddedilirse yöneticinizden izin vermesini isteyin."
+      }
+    },
     "group": {
       "all": "Tümü",
       "business": "İş",
@@ -844,6 +896,23 @@
     "missingSecret": "Gerekli tüm gizli anahtarları gir.",
     "noResults": "Eşleşen sunucu yok.",
     "reconnect": "Yeniden bağlan",
+    "sample": {
+      "empty": "Çalışıyor ama gösterecek bir şey yok.",
+      "failed": {
+        "admin_needed": "Bu bilgisayar sunucuda henüz yönetici olarak onaylanmadı.",
+        "no_test": "Bu uygulamanın bir denemesi yok.",
+        "not_connected": "Uygulama bağlı değil. Önce giriş yapın.",
+        "other": "Deneme olmadı. Ayrıntılar'ı açın.",
+        "permission": "Google reddetti. Hizmetin açık olduğunu ve izinlerin Google projenizde eklendiğini kontrol edin.",
+        "rate": "Google çok fazla istek olduğunu söylüyor. Bir dakika bekleyip yeniden deneyin.",
+        "signed_out": "Google artık girişi kabul etmiyor. Yeniden giriş yapın."
+      },
+      "more": "Daha fazlası var.",
+      "ok": "Çalışıyor. İlk {{n}} kayıt:",
+      "okText": "Çalışıyor. Yanıtın başı:",
+      "run": "Dene: ilk kayıtları göster",
+      "running": "Deneniyor…"
+    },
     "search": "Uygulamalarda ara",
     "secretHint": "Gizli anahtarlar işletim sistemi anahtarlığında saklanır ve bir daha gösterilmez.",
     "sheet": {
@@ -868,6 +937,42 @@
       "progress": "Adım {{current}} / {{total}}",
       "timedOut": "Giriş zamanında bitirilmedi. Yeniden başlamak için Bağlan'a bas.",
       "title": "{{name}} uygulamasını bağla"
+    },
+    "signIn": {
+      "copyLink": "Bağlantıyı kopyala",
+      "details": "Ayrıntılar",
+      "done": "Giriş yapıldı.",
+      "failed": {
+        "admin_needed": "Bu bilgisayar sunucuda henüz yönetici olarak onaylanmadı. Önce sunucuda onaylayın (komut, sunucu kurulumunda gösterilir), sonra yeniden giriş yapın.",
+        "already_running": "Bu uygulama için bir giriş zaten sürüyor. Önce onu bitirin ya da iptal edin.",
+        "code_rejected": "Hizmet giriş kodunu kabul etmedi. Yeniden deneyin. Sürerse istemci kimliğini ve gizli anahtarı kontrol edin.",
+        "denied": "Giriş reddedildi ya da tamamlanmadı. Sayfada İptal ya da Reddet'e bastıysanız nedeni budur. Yeniden deneyin ve erişime izin verin.",
+        "issuer_mismatch": "Giriş hizmeti, bu istemcinin ait olduğu hizmet değil. Yapıştırdığınız istemciyi kontrol edin.",
+        "not_waiting": "Giriş zaten bitmişti (süresi doldu ya da iptal edildi). Yeniden başlatın.",
+        "owner_needed": "Bunun için bu bilgisayarda Praxi masaüstü uygulaması gerekir. Praxi'yi uygulamadan başlatıp yeniden deneyin.",
+        "provider_unreachable": "Giriş hizmetine ulaşılamadı. Arka plan hizmetinin çalıştığı bilgisayarın internet bağlantısını kontrol edin.",
+        "relay_failed": "Bu uygulama yanıtı yakalayamadı. Yeniden deneyin.",
+        "scope_refused": "Hizmet uygulamanın istediği erişimi reddetti. Google'da uygulamanın izinlerinin Veri Erişimi altında eklendiğini kontrol edin.",
+        "timeout": "Giriş zamanında tamamlanmadı. Yeniden deneyin.",
+        "unknown": "Giriş olmadı. Yeniden deneyin; sürerse Ayrıntılar'ı açın.",
+        "unreachable": "Praxi arka plan hizmetine ulaşamadı. Çalıştığından emin olup yeniden deneyin.",
+        "wrong_address": "Bu adres bu girişe ait değil. Girişi yeniden başlatın ve açılan sayfayı kullanın."
+      },
+      "finishing": "Neredeyse bitti. Sunucunuz girişi tamamlıyor…",
+      "linkCopied": "Bağlantı kopyalandı",
+      "notOpened": "Giriş sayfası tarayıcınızda açılamadı. Sayfayı yeniden açın ya da bağlantıyı kopyalayın.",
+      "open": "Giriş sayfasını aç",
+      "openAgain": "Sayfayı yeniden aç",
+      "paste": {
+        "body": "Bir adım daha var. Bu pencere yanıtı kendi başına yakalayamıyor. Giriş yaptıktan sonra tarayıcı açılmayan bir sayfa gösterir (127.0.0.1 adresine bağlanamadığını söyler). Bu beklenen bir durum. Tarayıcının adres çubuğundaki adresin tamamını kopyalayıp buraya yapıştırın.",
+        "label": "Tarayıcının son durduğu sayfanın adresi",
+        "submit": "Girişi tamamla"
+      },
+      "retry": "Yeniden dene",
+      "starting": "Giriş sayfası hazırlanıyor…",
+      "title": "{{name}} girişi",
+      "waiting": "Tarayıcınızda girişi tamamlayın. Praxi kendiliğinden devam eder, kopyalayacak bir şey yok.",
+      "waitingServer": "Tarayıcınızda girişi tamamlayın. Yanıt bu uygulamaya döner, uygulama da sunucunuza iletir. Kopyalayacak bir şey yok."
     },
     "status": {
       "auth_required": "Oturum açılması gerekiyor",

@@ -17,7 +17,13 @@ import { McpTrustChoice } from "../components/McpTrustChoice";
 import { Modal } from "../components/Modal";
 import { Segmented } from "../components/SettingsUi";
 import { useToast } from "../components/Toast";
-import { openExternal } from "../lib/externalLink";
+import { oauthRelay, openExternal, openSignInLink } from "../lib/externalLink";
+import { addGoogleApp, GoogleClientError, googleEntries } from "../lib/googleSetup";
+import { type SignInControl, type SignInState, runSignIn } from "../lib/mcpSignIn";
+import { isLocalBaseUrl } from "../lib/liveViewState";
+import { GoogleApps } from "./GoogleApps";
+import { McpSampleTest } from "./McpSampleTest";
+import { McpSignInPanel } from "./McpSignInPanel";
 import { mcpErrorHintKey } from "../lib/mcpError";
 import {
   ALL_CATEGORIES,
@@ -32,9 +38,7 @@ import {
   filterServers,
   isConnected,
   MissingFolderError,
-  McpBrowserOpenError,
   MissingSecretError,
-  signInMcpServer,
   statusTone,
   withFolder
 } from "../lib/mcpApps";
@@ -48,7 +52,7 @@ import { type FlowCancel, type FlowState, classifyLinkFailure, runConnectFlow } 
 import { ComposioAdvanced } from "./ComposioAdvanced";
 import { MissingComponent, componentFor } from "./MissingComponent";
 import { useComposio } from "../state/useComposio";
-import { SIGN_IN_WAIT_MINUTES, composioTileState, directEntries, filterDirect, isRemoteServer, settledApps, unsettledApps, visibleToolkits } from "../lib/appTiles";
+import { composioTileState, directEntries, filterDirect, isRemoteServer, settledApps, unsettledApps, visibleToolkits } from "../lib/appTiles";
 import { openComposioLink } from "../lib/externalLink";
 import type { McpServer as McpServerT } from "../api/types";
 import own from "./AppsGrid.module.css";
@@ -57,6 +61,9 @@ import { humanError, humanLine } from "../lib/humanError";
 function errorText(e: unknown): string {
   return humanLine(e);
 }
+
+/** How long a started sign-in is waited for (the daemon's own limit). */
+const SIGN_IN_EXPIRES_MINUTES = 5;
 
 /** Most bot faces shown next to an app; the rest collapse into "+n". */
 const MAX_FACES = 4;
@@ -230,7 +237,7 @@ function ConnectedCell({
   onApproveChange,
   onSignIn,
   onCancelSignIn,
-  onPasteRedirect,
+  sample,
   onSignOut,
   onDisconnect,
   onSaveBots,
@@ -249,7 +256,8 @@ function ConnectedCell({
   onApproveChange: (tool: string, hash: string) => void;
   onSignIn: () => void;
   onCancelSignIn: () => void;
-  onPasteRedirect: (url: string) => void;
+  /** The catalog entry has a fixed read-only test (Google apps): offer it under Manage. */
+  sample: boolean;
   onSignOut: () => void;
   onDisconnect: () => void;
   onSaveBots: (from: BotScope, to: BotScope) => void;
@@ -262,7 +270,6 @@ function ConnectedCell({
   const [open, setOpen] = useState(false);
   const [fixOpen, setFixOpen] = useState(false);
   const [auth, setAuth] = useState<McpAuthState | null>(null);
-  const [pasted, setPasted] = useState("");
   const isHttp = server.transport === "http";
   const needsSignIn = server.status === "auth_required";
   // Ask the daemon (never the server) whether a sign-in is stored, so
@@ -444,31 +451,9 @@ function ConnectedCell({
               </>
             ) : null}
           </div>
-          {signingIn ? (
-            <form
-              className={styles.actions}
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (pasted.trim()) {
-                  onPasteRedirect(pasted.trim());
-                  setPasted("");
-                }
-              }}
-            >
-              <input
-                className={formStyles.input}
-                value={pasted}
-                onChange={(e) => setPasted(e.target.value)}
-                placeholder="http://127.0.0.1:…/callback?…"
-                aria-label={t("apps.auth.pasteLabel")}
-                data-testid={`mcp-paste-${server.name}`}
-              />
-              <Button size="sm" variant="secondary" type="submit" disabled={!pasted.trim()}>
-                {t("apps.auth.pasteSubmit")}
-              </Button>
-            </form>
+          {sample ? (
+            <McpSampleTest client={client} name={server.name} disabled={busy || server.status !== "connected"} />
           ) : null}
-          {signingIn ? <p className={formStyles.hint}>{t("apps.auth.pasteHint")}</p> : null}
           <div className={styles.actions}>
             {needsReconnect && !needsSignIn ? (
               <Button size="sm" variant="secondary" disabled={busy} onClick={onReconnect}>
@@ -807,7 +792,9 @@ export function AppsModal({
   const [flow, setFlow] = useState<FlowState | null>(null);
   const flowCancel = useRef<FlowCancel>({ cancelled: false });
   // Pending sign-ins by server; the flag stops the poll and cancels the flow.
-  const [signing, setSigning] = useState<Record<string, { aborted: boolean }>>({});
+  const [signing, setSigning] = useState<Record<string, SignInControl>>({});
+  // The sign-in shown in the status card at the top, and whether its app has a test to run after.
+  const [signPanel, setSignPanel] = useState<{ state: SignInState; title: string; test: boolean } | null>(null);
   // Servers this session created for a sign-in that has not finished: they are tiles with a
   // Cancel, never "Connected", and are removed again when the sign-in is cancelled or expires.
   const [fresh, setFresh] = useState<Record<string, true>>({});
@@ -852,39 +839,51 @@ export function AppsModal({
     if (!client || signing[name]) {
       return;
     }
-    const signal = { aborted: false };
-    let expired = false;
-    // A sign-in nobody finishes expires (the documented wait) and is cleaned up.
-    const timer = setTimeout(() => {
-      expired = true;
-      signal.aborted = true;
-    }, SIGN_IN_WAIT_MINUTES * 60 * 1000);
-    setSigning((m) => ({ ...m, [name]: signal }));
+    const control: SignInControl = { cancelled: false, pasted: null };
+    const title = catalog.find((e) => e.id === name)?.name ?? name;
+    const hasTest = Boolean(catalog.find((e) => e.id === name)?.install.test);
+    setSigning((m) => ({ ...m, [name]: control }));
+    // A daemon on another computer is finished by the redirect this app catches and forwards.
+    const remote = client.hostName !== null || !isLocalBaseUrl(client.baseUrl);
     let signedIn = false;
+    let failed = false;
     try {
-      const state = await signInMcpServer(client, name, openExternal, { signal });
-      signedIn = state === "signed_in";
+      const last = await runSignIn(
+        {
+          remote,
+          start: (port) => client.startMcpAuth(name, port),
+          status: () => client.mcpAuthStatus(name),
+          complete: (url) => client.completeMcpAuth(name, url),
+          cancel: () => client.cancelMcpAuth(name),
+          open: (url) => openSignInLink(url),
+          relay: oauthRelay(),
+          sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+          now: () => Date.now()
+        },
+        name,
+        (state) => setSignPanel({ state, title, test: hasTest }),
+        control
+      );
+      signedIn = last.step === "done";
+      failed = last.step === "failed";
       if (signedIn) {
         toast.show(t("apps.auth.signedInToast", { name }), "success");
-      } else if (expired) {
-        toast.show(t("apps.auth.expiredToast", { name, minutes: SIGN_IN_WAIT_MINUTES }), "info");
-      } else if (!signal.aborted) {
-        toast.show(t("apps.auth.failedToast", { name }), "danger");
+      } else if (last.step === "expired") {
+        toast.show(t("apps.auth.expiredToast", { name, minutes: SIGN_IN_EXPIRES_MINUTES }), "info");
       }
-    } catch (e) {
-      toast.show(
-        e instanceof McpBrowserOpenError ? t("apps.auth.openFailed", { name }) : errorText(e),
-        "danger"
-      );
+      // A finished, cancelled or expired flow needs no card; a failed one stays to say why.
+      if (last.step !== "failed" && !(signedIn && hasTest)) {
+        setSignPanel(null);
+      }
     } finally {
-      clearTimeout(timer);
       setSigning((m) => {
         const next = { ...m };
         delete next[name];
         return next;
       });
-      // A connection that never finished is not kept as a half-made server.
-      if (!signedIn && fresh[name]) {
+      // A connection nobody finished is not kept as a half-made server. A failed one stays, so
+      // "Try again" has something to sign in to and its Sign in button is under Manage.
+      if (!signedIn && !failed && fresh[name]) {
         await client.deleteMcpServer(name).catch(() => undefined);
       }
       setFresh((m) => {
@@ -894,6 +893,27 @@ export function AppsModal({
       });
       await reload();
     }
+  };
+
+  /** Google app: save the client when one was typed, add the app (read-only), sign in. */
+  const connectGoogle = async (
+    entry: McpCatalogEntry,
+    typed: { clientId: string; clientSecret: string } | null
+  ) => {
+    if (!client) {
+      return;
+    }
+    try {
+      await addGoogleApp(client, entry, typed, servers, ownClient);
+    } catch (e) {
+      toast.show(
+        e instanceof GoogleClientError ? t(`apps.google.error.${e.field}`) : errorText(e),
+        "danger"
+      );
+      return;
+    }
+    setFresh((m) => ({ ...m, [entry.id]: true }));
+    await signIn(entry.id);
   };
 
   useEffect(() => {
@@ -915,14 +935,17 @@ export function AppsModal({
   );
   // Remote apps Praxi signs in to itself are tiles in the grid; local developer
   // servers and token cards live under Advanced.
+  // Apps that need the owner's own sign-in client (Google) have their own section under Advanced.
+  const ownClient = useMemo(() => googleEntries(catalog), [catalog]);
+  const mainCatalog = useMemo(() => catalog.filter((e) => !e.install.oauth_client), [catalog]);
   const allDirect = useMemo(
-    () => catalog.filter((e) => e.install.transport === "http" && e.install.required_secrets.length === 0),
-    [catalog]
+    () => mainCatalog.filter((e) => e.install.transport === "http" && e.install.required_secrets.length === 0),
+    [mainCatalog]
   );
   const pendingNames = useMemo(() => new Set([...Object.keys(signing), ...Object.keys(fresh)]), [signing, fresh]);
   const directShown = useMemo(
-    () => filterDirect(directEntries(catalog, servers.filter((s) => !pendingNames.has(s.name))), query, group),
-    [catalog, servers, query, group, pendingNames]
+    () => filterDirect(directEntries(mainCatalog, servers.filter((s) => !pendingNames.has(s.name))), query, group),
+    [mainCatalog, servers, query, group, pendingNames]
   );
   const shownCatalog = useMemo(
     () =>
@@ -945,7 +968,10 @@ export function AppsModal({
     [c.items, c.apps, allDirect]
   );
   const entryOf = (name: string) => catalog.find((e) => e.id === name);
-  const describe = (name: string) => catalog.find((c) => c.id === name)?.description;
+  // A server is that catalog entry only when the transport is the same: an old stdio server that
+  // happens to carry the name of a newer remote app (Google Drive) is not it.
+  const entryForServer = (s: McpServerT) =>
+    catalog.find((e) => e.id === s.name && e.install.transport === s.transport);
 
   const run = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -1080,9 +1106,10 @@ export function AppsModal({
     <ConnectedCell
       key={s.name}
       server={s}
-      title={entryOf(s.name)?.name}
-      icon={entryOf(s.name)?.icon ?? undefined}
-      description={describe(s.name)}
+      title={entryForServer(s)?.name}
+      icon={entryForServer(s)?.icon ?? undefined}
+      description={entryForServer(s)?.description}
+      sample={Boolean(entryForServer(s)?.install.test)}
       busy={busy === s.name}
       onChooseFolder={(folder) =>
         void run(s.name, async () => {
@@ -1095,14 +1122,9 @@ export function AppsModal({
       onCancelSignIn={() => {
         const signal = signing[s.name];
         if (signal) {
-          signal.aborted = true;
+          signal.cancelled = true;
         }
       }}
-      onPasteRedirect={(url) =>
-        void run(s.name, async () => {
-          await client?.completeMcpAuth(s.name, url);
-        })
-      }
       onSignOut={() =>
         void run(s.name, async () => {
           await client?.logoutMcpAuth(s.name);
@@ -1218,6 +1240,31 @@ export function AppsModal({
             </p>
           ) : null}
 
+          {signPanel ? (
+            <McpSignInPanel
+              state={signPanel.state}
+              title={signPanel.title}
+              onCancel={() => {
+                const control = signing[signPanel.state.name];
+                if (control) control.cancelled = true;
+              }}
+              onPaste={(url) => {
+                const control = signing[signPanel.state.name];
+                if (control) control.pasted = url;
+              }}
+              onRetry={() => {
+                const name = signPanel.state.name;
+                setSignPanel(null);
+                void signIn(name);
+              }}
+              onClose={() => setSignPanel(null)}
+            >
+              {signPanel.state.step === "done" && signPanel.test ? (
+                <McpSampleTest client={client} name={signPanel.state.name} disabled={false} autoRun />
+              ) : null}
+            </McpSignInPanel>
+          ) : null}
+
           {advanced ? (
             <>
             <h3 className={styles.sectionLabel}>{t("apps.advanced.title")}</h3>
@@ -1239,6 +1286,14 @@ export function AppsModal({
                 });
               }}
             />
+            {ownClient.length > 0 ? (
+              <GoogleApps
+                entries={ownClient}
+                servers={servers}
+                busy={busy}
+                onConnect={(entry, typed) => run(`google-${entry.id}`, () => connectGoogle(entry, typed))}
+              />
+            ) : null}
             {localServers.length > 0 || shownCatalog.length > 0 ? (
               <section className={styles.section} aria-labelledby="apps-local-h">
                 <h3 className={styles.sectionLabel} id="apps-local-h">{t("apps.advanced.localTitle")}</h3>
@@ -1382,7 +1437,7 @@ export function AppsModal({
                             onCancel={() => {
                               const sig = signing[n];
                               if (sig) {
-                                sig.aborted = true;
+                                sig.cancelled = true;
                               }
                             }}
                           />

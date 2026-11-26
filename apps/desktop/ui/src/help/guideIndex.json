@@ -401,6 +401,20 @@
     "summary": "Alphabetical reference of core terms used across Praxi, the user guide, and the codebase."
   },
   {
+    "doc": "google-workspace.md",
+    "title": "Google Workspace: Gmail, Drive and Calendar with your own Google client",
+    "headings": [
+      "Why you create a Google client yourself",
+      "Set it up (about five minutes, once)",
+      "Read-only first",
+      "Praxi on a server",
+      "What can go wrong",
+      "Sign out and remove",
+      "In mcp.toml"
+    ],
+    "summary": "Praxi can connect to Gmail, Google Drive and Google Calendar through Google's"
+  },
+  {
     "doc": "home-assistant.md",
     "title": "Home Assistant",
     "headings": [
@@ -582,7 +596,8 @@
     "title": "MCP servers",
     "headings": [
       "What a server becomes",
-      "mcp.toml"
+      "mcp.toml",
+      "Signing in when the daemon runs on another computer"
     ],
     "summary": "The daemon (bot serve) loads /mcp.toml at startup and runs every"
   },

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isComposioLink } from "./composioApps";
 import { sanitizeUrl } from "./markdown";
+import type { RelayApi } from "./mcpSignIn";
 
 /**
  * Open a link in the system browser, never inside the app window. Only
@@ -29,4 +30,41 @@ export async function openComposioLink(href: string, dashboard = false): Promise
   } catch {
     return false;
   }
+}
+
+/** A plain browser tab (dev server, a web client of a server), where no Tauri command exists. */
+function browserOnly(): boolean {
+  return typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window);
+}
+
+/**
+ * Open a sign-in page (an app's consent page, a Google console page) in the system browser with the
+ * app's own opener. Only https addresses; `false` when the page could not be opened, so the caller
+ * can show the address instead.
+ */
+export async function openSignInLink(href: string): Promise<boolean> {
+  if (!/^https:\/\//i.test(href)) return false;
+  if (browserOnly()) {
+    window.open(href, "_blank", "noopener,noreferrer");
+    return true;
+  }
+  try {
+    await invoke("open_sign_in_link", { href });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Catching a sign-in redirect on this computer, for a daemon that runs on another one. `null` in a
+ * plain browser tab: it cannot listen, so the sign-in asks for the address instead.
+ */
+export function oauthRelay(): RelayApi | null {
+  if (browserOnly()) return null;
+  return {
+    listen: () => invoke<{ id: number; port: number }>("oauth_relay_listen"),
+    wait: (id, state) => invoke<string>("oauth_relay_wait", { id, state }),
+    cancel: (id) => invoke<void>("oauth_relay_cancel", { id })
+  };
 }

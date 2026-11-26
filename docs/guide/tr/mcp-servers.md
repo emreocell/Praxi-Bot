@@ -124,7 +124,24 @@ client_secret_ref = "mcp/remote-client-secret"
 # allow_loopback_http = true   # local development only; default false
 ```
 
+İsteğe bağlı iki `[server.oauth]` alanı daha var: `scopes = ["..."]` (girişin istediği izinler;
+boşsa sunucunun bildirdikleri) ve `offline_access = true` (yenileme tokenı da iste; Google'ın
+oturumu açık tutması için gerekir). Google kartları ikisini de kullanır; bkz.
+[Google Workspace](google-workspace.md).
+
 O gizli bilgiyi `bot secrets set mcp/remote-client-secret` ile kaydet. Değerini asla
 `mcp.toml` içine yazma. Erişim ve yenileme tokenları, gizli bilgi deposunda `mcp/remote/oauth`
 altında durur. İstemci gizli bilgileri yeniden bağlanırken tekrar çözülür, böylece yenileme
 (rotasyon) hemen geçerli olur. OAuth ayarları stdio aktarımlarında reddedilir.
+
+### Daemon başka bir bilgisayarda çalışırken giriş
+
+`POST /v1/mcp/servers/{name}/auth/start` isteğe bağlı bir gövde alır: `{"relay_port": 53123}`.
+Giriş sayfası senin bulunduğun bilgisayarın tarayıcısında açılır; yetkilendirme sunucusu tarayıcıyı
+**o** bilgisayardaki `http://127.0.0.1:53123/callback` adresine geri gönderir ve masaüstü
+uygulaması verilen portta tam olarak bu yönlendirmeyi dinler. Uygulama adresi eşleştirilmiş bağlantı
+üzerinden `POST /v1/mcp/servers/{name}/auth/callback` yoluna iletir. Bu kipte daemon dinleyici
+açmaz, adresi yalnızca bir kez kabul eder ve güvenmeden önce adresin duyurduğu yönlendirmenin
+(yanıttaki `redirect_uri`) birebir aynısı olduğunu ve `state` değerinin eşleştiğini denetler. 1024
+altındaki portlar reddedilir. İki rota da yalnızca sahibe açıktır; ev sahibinde yalnızca yönetici
+masaüstü bunları çağırabilir.

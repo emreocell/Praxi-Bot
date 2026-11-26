@@ -95,7 +95,7 @@ test("the mock client serves the same typed calls in memory", async () => {
   });
   assert.equal(s.status, "connected");
   assert.equal((await m.listMcpServers()).length, before + 1);
-  assert.equal((await m.mcpCatalog()).length, 24);
+  assert.equal((await m.mcpCatalog()).length, 26);
   assert.ok((await m.listMcpTools("demo")).length > 0);
   await m.deleteMcpServer("demo");
   assert.equal((await m.listMcpServers()).length, before);

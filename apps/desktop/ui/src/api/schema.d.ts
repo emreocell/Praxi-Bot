@@ -3474,7 +3474,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a sign-in from an authenticated local user's explicit action. */
+        /**
+         * Start a sign-in from an authenticated local user's explicit action. With
+         *     `relay_port` the browser is on the owner's computer: no listener is opened
+         *     here, and the app that catches the redirect there forwards it to
+         *     `/auth/callback`.
+         */
         post: operations["start_mcp_auth"];
         delete?: never;
         options?: never;
@@ -3513,6 +3518,26 @@ export interface paths {
          *     failed connect is reported as `status: error`, not as an HTTP error.
          */
         post: operations["reconnect_mcp_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp/servers/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the app's fixed, read-only test call and show the first few items.
+         *     Owner only; the answer goes to the owner's screen, never to a model.
+         */
+        post: operations["test_mcp_server"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9067,6 +9092,24 @@ export interface components {
             authorization_url: string;
             /** Format: int64 */
             expires_in: number;
+            /** @description Where the authorization server sends the browser back to. */
+            redirect_uri: string;
+            /**
+             * @description `true`: nothing listens on this daemon for the redirect; the app that
+             *     caught it on the owner's computer has to forward it to
+             *     `POST /v1/mcp/servers/{name}/auth/callback`.
+             */
+            relayed?: boolean;
+        };
+        /** @description Optional body of `POST /v1/mcp/servers/{name}/auth/start`. */
+        McpAuthStartInput: {
+            /**
+             * Format: int32
+             * @description The browser is on another computer (the owner's), which listens on this
+             *     `127.0.0.1` port for the redirect and forwards it. Omit it when the
+             *     browser runs where this daemon runs. Ports below 1024 are refused.
+             */
+            relay_port?: number | null;
         };
         /**
          * @description Authentication state, independent of transport errors.
@@ -9111,6 +9154,7 @@ export interface components {
                 [key: string]: string;
             };
             folder?: null | components["schemas"]["McpFolderDto"];
+            oauth_client?: null | components["schemas"]["McpCatalogOAuthClientDto"];
             /** @description Secrets to collect first. */
             required_secrets: components["schemas"]["McpRequiredSecretDto"][];
             /** @description Environment variable -> secret name (stdio). */
@@ -9121,10 +9165,31 @@ export interface components {
             secret_headers?: {
                 [key: string]: string;
             };
+            test?: null | components["schemas"]["McpCatalogTestDto"];
+            /** @description Tools to let through (glob over the server-side name); empty = all. */
+            tool_allow?: string[];
             /** @description `stdio` or `http`. */
             transport: components["schemas"]["McpTransportKind"];
             /** @description Endpoint (http). */
             url?: string | null;
+        };
+        /** @description A sign-in client the owner creates themselves with the authorization server. */
+        McpCatalogOAuthClientDto: {
+            /** @description The authorization server the client is registered with. */
+            issuer: string;
+            /** @description Ask for a refresh token too. */
+            offline_access: boolean;
+            /** @description The read-only scopes the sign-in asks for. */
+            scopes: string[];
+            /** @description Which guided setup walks through creating the client (`google`). */
+            setup: string;
+        };
+        /** @description The fixed call of an entry's "Test" button. */
+        McpCatalogTestDto: {
+            /** @description Fixed arguments. */
+            arguments: unknown;
+            /** @description Server-side tool name. */
+            tool: string;
         };
         /**
          * @description Class of the last connect error of an MCP server, so a UI can show a
@@ -9153,6 +9218,10 @@ export interface components {
              *     required with `client_id` / `client_secret_ref`.
              */
             issuer?: string | null;
+            /** @description Also ask for a refresh token (Google needs it to stay signed in). */
+            offline_access?: boolean;
+            /** @description Scopes the sign-in asks for (empty = what the server advertises). */
+            scopes?: string[];
         };
         /** @description A secret the user must provide to install a catalog entry. */
         McpRequiredSecretDto: {
@@ -9400,6 +9469,20 @@ export interface components {
         McpTestInput: {
             /** @description A configured MCP server name. */
             name: string;
+        };
+        /**
+         * @description What the owner's "Test" button saw: a few items from one fixed read-only
+         *     call. Shown to the owner only; never given to a model.
+         */
+        McpTestResult: {
+            /** @description At most three short, single-line items. */
+            items: string[];
+            /** @description The answer held more than the items shown. */
+            more: boolean;
+            /** @description When no list could be recognised: the start of the answer, cut short. */
+            text?: string | null;
+            /** @description The server-side tool that was called. */
+            tool: string;
         };
         /** @description Nonsecret grant, returned to the owner after storing a credential. */
         McpTokenGrant: {
@@ -20773,7 +20856,12 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        /** @description Optional */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpAuthStartInput"];
+            };
+        };
         responses: {
             200: {
                 headers: {
@@ -20860,6 +20948,43 @@ export interface operations {
             };
             /** @description MCP management is not available */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_mcp_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpTestResult"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

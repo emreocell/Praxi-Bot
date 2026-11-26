@@ -826,6 +826,58 @@
       "save": "Save and connect"
     },
     "getKey": "Get API key",
+    "google": {
+      "allAdded": "All three Google apps are added. Manage them under Connected.",
+      "changeClient": "Use a different Google client",
+      "clientId": "Client ID",
+      "clientSecret": "Client secret",
+      "copied": "Copied",
+      "copyScopes": "Copy the permissions",
+      "error": {
+        "client_id": "The client ID should look like 123456789012-abc….apps.googleusercontent.com.",
+        "client_secret": "The client secret is too short or contains spaces. Copy it again from Google.",
+        "legacy": "An old Google Drive server (the archived one) is still set up under the same name. Remove it under Advanced, then connect again.",
+        "missing": "Set up your Google client first."
+      },
+      "intro": "Gmail, Drive and Calendar through Google's own servers. Praxi has no shared Google login, so you create one small client in your own Google account (about five minutes, once). Your mail and files go only between Google and the computer where Praxi runs. Read-only access: Praxi cannot send mail or change files here.",
+      "readOnly": "Read-only · your own Google client",
+      "save": "Save and sign in",
+      "secretNote": "The secret is stored in Praxi's secret store and is never shown again. It never reaches a bot.",
+      "steps": {
+        "apis": {
+          "body": "Pick the apps you want, then open each page and press Enable. Each app has two: its API and its MCP service.",
+          "title": "2. Turn on the services"
+        },
+        "audience": {
+          "body": "Choose External (or Internal if your Google Workspace allows it). Under Test users add your own Google address.",
+          "title": "4. Choose who may sign in"
+        },
+        "branding": {
+          "body": "Set an app name (for example Praxi) and your e-mail as the support address.",
+          "title": "3. Name the app"
+        },
+        "client": {
+          "body": "Create a client of the type Desktop app. Then copy its Client ID and Client secret into the boxes below.",
+          "title": "6. Create the client"
+        },
+        "project": {
+          "body": "In the Google Cloud console create a project (any name, for example Praxi). If you already have one, use it.",
+          "title": "1. Create a project"
+        },
+        "scopes": {
+          "body": "Under Data Access press Add or remove scopes and add these, one per line:",
+          "title": "5. Add the read-only permissions"
+        }
+      },
+      "title": "Google apps with your own Google client",
+      "trouble": {
+        "secret": "Lost the client secret? Create a new one in the Google console and use \"Use a different Google client\".",
+        "sevenDays": "While the app is in Testing, Google may ask you to sign in again about every 7 days. Publishing the app in the Google console (it stays yours alone) avoids that.",
+        "title": "What can go wrong",
+        "unverified": "Google shows \"Google hasn't verified this app\". That is normal for your own client: choose Advanced, then continue. Only you can sign in to it.",
+        "workspace": "A Google Workspace administrator can block apps like this. If sign-in is refused, ask your administrator to allow it."
+      }
+    },
     "group": {
       "all": "All",
       "business": "Business",
@@ -844,6 +896,23 @@
     "missingSecret": "Enter every required secret.",
     "noResults": "No matching servers.",
     "reconnect": "Reconnect",
+    "sample": {
+      "empty": "It works, but there is nothing to show yet.",
+      "failed": {
+        "admin_needed": "This computer is not yet confirmed as an administrator of the server.",
+        "no_test": "This app has no test.",
+        "not_connected": "The app is not connected. Sign in first.",
+        "other": "The test did not work. Open Details.",
+        "permission": "Google refused. Check that the service is enabled and the permissions are added in your Google project.",
+        "rate": "Google says too many requests. Wait a minute and try again.",
+        "signed_out": "Google no longer accepts the sign-in. Sign in again."
+      },
+      "more": "There is more.",
+      "ok": "It works. The first {{n}} items:",
+      "okText": "It works. The start of the answer:",
+      "run": "Test: show the first items",
+      "running": "Testing…"
+    },
     "search": "Search apps",
     "secretHint": "Secrets are stored in your OS keychain and never shown again.",
     "sheet": {
@@ -868,6 +937,42 @@
       "progress": "Step {{current}} of {{total}}",
       "timedOut": "The sign-in was not finished in time. Press Connect to start again.",
       "title": "Connect {{name}}"
+    },
+    "signIn": {
+      "copyLink": "Copy the link",
+      "details": "Details",
+      "done": "Signed in.",
+      "failed": {
+        "admin_needed": "This computer is not yet confirmed as an administrator of the server. Confirm it on the server first (the command is shown in the server's setup), then sign in again.",
+        "already_running": "A sign-in for this app is already running. Finish or cancel it first.",
+        "code_rejected": "The service did not accept the sign-in code. Try again. If it keeps failing, check the client id and secret.",
+        "denied": "The sign-in was refused or not finished. If you pressed Cancel or Deny on the page, that is why. Try again and allow access.",
+        "issuer_mismatch": "The sign-in service is not the one this client belongs to. Check the client you pasted.",
+        "not_waiting": "The sign-in had already ended (it expired or was cancelled). Start it again.",
+        "owner_needed": "This needs the Praxi desktop app on this computer. Start Praxi from the app and try again.",
+        "provider_unreachable": "The sign-in service could not be reached. Check the internet connection of the computer where Praxi runs.",
+        "relay_failed": "This app could not catch the answer. Try again.",
+        "scope_refused": "The service refused the access this app asks for. In Google, check that the app's permissions are added under Data Access.",
+        "timeout": "The sign-in was not finished in time. Try again.",
+        "unknown": "The sign-in did not work. Try again; if it keeps failing, open Details.",
+        "unreachable": "Praxi could not reach its background service. Check that it is running, then try again.",
+        "wrong_address": "That address is not from this sign-in. Start the sign-in again and use the page it opens."
+      },
+      "finishing": "Almost done. Your server is finishing the sign-in…",
+      "linkCopied": "Link copied",
+      "notOpened": "The sign-in page could not be opened in your browser. Open it again, or copy the link.",
+      "open": "Open the sign-in page",
+      "openAgain": "Open the page again",
+      "paste": {
+        "body": "One more step. This window cannot catch the answer on its own. After you sign in, the browser shows a page that does not open (it says it cannot connect to 127.0.0.1). That is expected. Copy the full address from the browser's address bar and paste it here.",
+        "label": "Address of the page the browser ended on",
+        "submit": "Finish sign-in"
+      },
+      "retry": "Try again",
+      "starting": "Getting the sign-in page ready…",
+      "title": "Signing in to {{name}}",
+      "waiting": "Finish signing in in your browser. Praxi carries on by itself; there is nothing to copy.",
+      "waitingServer": "Finish signing in in your browser. The answer comes back to this app, which passes it on to your server. There is nothing to copy."
     },
     "status": {
       "auth_required": "Sign-in required",

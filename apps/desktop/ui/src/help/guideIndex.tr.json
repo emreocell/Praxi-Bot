@@ -398,6 +398,20 @@
     "summary": "Praxi'de, kullanım kılavuzunda ve kodda geçen temel terimlerin alfabetik listesi."
   },
   {
+    "doc": "tr/google-workspace.md",
+    "title": "Google Workspace: kendi Google istemcinle Gmail, Drive ve Takvim",
+    "headings": [
+      "Neden Google istemcisini kendin oluşturuyorsun",
+      "Kurulum (yaklaşık beş dakika, bir kez)",
+      "Önce yalnızca okuma",
+      "Praxi bir sunucuda",
+      "Neler ters gidebilir",
+      "Çıkış ve kaldırma",
+      "mcp.toml içinde"
+    ],
+    "summary": "Praxi, Google'ın kendi MCP sunucuları üzerinden Gmail, Google Drive ve Google Takvim'e"
+  },
+  {
     "doc": "tr/home-assistant.md",
     "title": "Home Assistant",
     "headings": [
@@ -574,7 +588,8 @@
     "title": "MCP sunucuları",
     "headings": [
       "Bir sunucu neye dönüşür",
-      "mcp.toml"
+      "mcp.toml",
+      "Daemon başka bir bilgisayarda çalışırken giriş"
     ],
     "summary": "Daemon (bot serve) açılırken /mcp.toml dosyasını yükler ve o dosyadaki etkin her"
   },

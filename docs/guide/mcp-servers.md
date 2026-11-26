@@ -130,7 +130,27 @@ client_secret_ref = "mcp/remote-client-secret"
 # allow_loopback_http = true   # local development only; default false
 ```
 
+Two more optional `[server.oauth]` fields: `scopes = ["..."]` (what the
+sign-in asks for; empty means what the server advertises) and
+`offline_access = true` (also ask for a refresh token, which Google needs to stay
+signed in). The Google cards use both; see
+[Google Workspace](google-workspace.md).
+
 Store that secret using `bot secrets set mcp/remote-client-secret`; never put
 its value in `mcp.toml`. Access and refresh tokens live in the secret store
 under `mcp/remote/oauth`. Client secrets are resolved again on reconnect so
 rotation takes effect. OAuth settings are refused on stdio transports.
+
+### Signing in when the daemon runs on another computer
+
+`POST /v1/mcp/servers/{name}/auth/start` takes an optional body
+`{"relay_port": 53123}`. The sign-in page opens in the browser of the computer
+you are at; the authorization server sends that browser back to
+`http://127.0.0.1:53123/callback` on **that** computer, where the desktop app
+listens on the given port for exactly that redirect. The app forwards the
+address to `POST /v1/mcp/servers/{name}/auth/callback` over the paired link. The
+daemon opens no listener in this mode, accepts the address once, and checks that
+it is exactly the redirect it announced (`redirect_uri` in the answer) and that
+its `state` matches before it trusts it. Ports below 1024 are refused. Both
+routes are owner-only, and on a host only its administrator desktop may call
+them.

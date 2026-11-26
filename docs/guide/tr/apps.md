@@ -17,6 +17,11 @@ Pencerenin üstünde şunlar bulunur:
 
 ## Uygulamalar üç yolla bağlanır
 
+> **Google (Gmail, Drive, Takvim), kendi Google kurulumunla:** **Gelişmiş** altında, kendi
+> oluşturduğun bir istemciyle Google'ın kendi MCP sunucularını bağlayan yönlendirmeli bir kurulum
+> vardır. Bkz. [Google Workspace](google-workspace.md). Ana listedeki tek tıklık Gmail, Drive ve
+> Takvim kutucukları Composio kullanır ve kurulum gerektirmez.
+
 ### 1. Doğrudan OAuth uygulamaları
 
 Yerleşik katalogdaki, API anahtarı istemeyen uzak HTTP MCP sunucuları ana ekranda doğrudan
@@ -171,16 +176,19 @@ Birkaç önemli kural:
 
 ### OAuth girişi “Tarayıcıda oturum açılması bekleniyor…” ekranında takıldı
 
-- **İptal edip yeniden dene:** **Giriş yapılıyor** yanındaki (ya da **Yönet** panelindeki)
-  **İptal**'e tıkla. Yepyeni doğrudan OAuth girişleri de **10 dakika** sonra zaman aşımına uğrar
-  ve kendiliğinden temizlenir.
-- **Tarayıcı başka bir bilgisayarda (ya da uzak sunucuda) çalışıyor:** Girişi, Praxi'nin yerel
-  geri dönüş portuna ulaşamayan bir tarayıcıda tamamladıysan tarayıcı bir
-  `http://127.0.0.1:…/callback?…` hata sayfası gösterir. Bekleyen sunucuda **Yönet**'i aç, o
-  sayfanın tam adresini **Tarayıcıdaki yönlendirme adresi** alanına yapıştır ve
-  **Oturum açmayı bitir**'e tıkla.
-- **Tarayıcı penceresi açılmadı:** İşletim sistemindeki varsayılan tarayıcını kontrol et ve
-  **Yönet** içinden **Oturum aç**'ı yeniden dene.
+- **İptal edip yeniden dene:** Pencerenin üstündeki giriş kartında **İptal**'e tıkla. Kimsenin
+  bitirmediği bir giriş **5 dakika** sonra sona erer ve kendiliğinden temizlenir; hiç giriş
+  yapılmamış yepyeni bir uygulama yeniden kaldırılır.
+- **Praxi bir sunucuda (ya da eşleştirilmiş bir ev sahibinde) çalışıyor:** Giriş sayfası yine
+  senin bulunduğun bilgisayarın tarayıcısında açılır. Masaüstü uygulaması yanıtı geçici bir yerel
+  portta yakalar ve eşleştirilmiş, şifreli bağlantı üzerinden sunucuya iletir; yani kopyalanacak
+  bir şey yoktur. Bunun için masaüstü uygulaması gerekir ve bu bilgisayar sunucuda yönetici
+  olarak onaylanmış olmalıdır ([Uzak sunucu](remote-host.md)). Uygulama yanıtı yakalayamıyorsa
+  (örneğin Praxi'yi düz bir tarayıcı sekmesinde kullanıyorsan) kart bunu söyler ve tek bir kutu
+  gösterir: giriş yaptıktan sonra tarayıcı açılmayan, adresi `http://127.0.0.1:` ile başlayan
+  bir sayfada durur. O adresin tamamını kopyalayıp kutuya yapıştır ve **Girişi tamamla**'ya bas.
+- **Tarayıcı penceresi açılmadı:** Kart bunu söyler ve **Sayfayı yeniden aç** ile
+  **Bağlantıyı kopyala** seçeneklerini sunar; giriş beklemeye devam eder.
 - **GitLab bir namespace hatası veriyor:** GitLab, MCP sunucusunun en üst düzey grubunda açık
   olmasını ister (grubun General ayarlarında `group[mcp_server_enabled]`).
 

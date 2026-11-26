@@ -826,6 +826,58 @@
       "save": "Guardar y conectar"
     },
     "getKey": "Obtener clave de API",
+    "google": {
+      "allAdded": "Las tres aplicaciones de Google están añadidas. Gestiónalas en Conectadas.",
+      "changeClient": "Usar otro cliente de Google",
+      "clientId": "ID de cliente",
+      "clientSecret": "Secreto del cliente",
+      "copied": "Copiado",
+      "copyScopes": "Copiar los permisos",
+      "error": {
+        "client_id": "El ID de cliente debe verse como 123456789012-abc….apps.googleusercontent.com.",
+        "client_secret": "El secreto del cliente es demasiado corto o tiene espacios. Cópialo de nuevo desde Google.",
+        "legacy": "Todavía hay un servidor antiguo de Google Drive (el archivado) con el mismo nombre. Quítalo en Avanzado y vuelve a conectar.",
+        "missing": "Configura primero tu cliente de Google."
+      },
+      "intro": "Gmail, Drive y Calendar a través de los servidores de Google. Praxi no tiene un acceso de Google compartido, así que creas una vez un cliente pequeño en tu propia cuenta (unos cinco minutos). Solo lectura.",
+      "readOnly": "Solo lectura · tu propio cliente de Google",
+      "save": "Guardar e iniciar sesión",
+      "secretNote": "El secreto se guarda en el almacén secreto de Praxi y no se vuelve a mostrar. Nunca llega a un bot.",
+      "steps": {
+        "apis": {
+          "body": "Elige las aplicaciones, abre cada página y pulsa Habilitar. Cada aplicación tiene dos: su API y su servicio MCP.",
+          "title": "2. Activa los servicios"
+        },
+        "audience": {
+          "body": "Elige Externo (o Interno si tu Workspace lo permite). En Usuarios de prueba añade tu propia dirección de Google.",
+          "title": "4. Elige quién puede iniciar sesión"
+        },
+        "branding": {
+          "body": "Indica un nombre (por ejemplo Praxi) y tu correo como dirección de asistencia.",
+          "title": "3. Pon nombre a la aplicación"
+        },
+        "client": {
+          "body": "Crea un cliente de tipo Aplicación de escritorio. Luego copia su ID y su secreto en las casillas de abajo.",
+          "title": "6. Crea el cliente"
+        },
+        "project": {
+          "body": "En la consola de Google Cloud crea un proyecto (cualquier nombre, por ejemplo Praxi) o usa uno existente.",
+          "title": "1. Crea un proyecto"
+        },
+        "scopes": {
+          "body": "En Acceso a los datos pulsa Añadir o quitar ámbitos y añade estos, uno por línea:",
+          "title": "5. Añade los permisos de solo lectura"
+        }
+      },
+      "title": "Aplicaciones de Google con tu propio cliente",
+      "trouble": {
+        "secret": "¿Perdiste el secreto? Crea uno nuevo en la consola de Google y elige \"Usar otro cliente de Google\".",
+        "sevenDays": "Mientras la aplicación esté en modo de prueba, Google puede pedir iniciar sesión de nuevo cada 7 días. Publicarla en la consola de Google lo evita.",
+        "title": "Qué puede salir mal",
+        "unverified": "Google muestra \"Google no ha verificado esta aplicación\". Con tu propio cliente es normal: elige Avanzado y continúa.",
+        "workspace": "Un administrador de Google Workspace puede bloquear estas aplicaciones. Pídele que lo permita."
+      }
+    },
     "group": {
       "all": "Todas",
       "business": "Negocios",
@@ -844,6 +896,23 @@
     "missingSecret": "Introduce todos los secretos necesarios.",
     "noResults": "No hay servidores que coincidan.",
     "reconnect": "Reconectar",
+    "sample": {
+      "empty": "Funciona, pero aún no hay nada que mostrar.",
+      "failed": {
+        "admin_needed": "Este equipo aún no está confirmado como administrador del servidor.",
+        "no_test": "Esta aplicación no tiene prueba.",
+        "not_connected": "La aplicación no está conectada. Inicia sesión primero.",
+        "other": "La prueba no funcionó. Abre los detalles.",
+        "permission": "Google lo rechazó. Comprueba que el servicio está activado y que los permisos están añadidos en tu proyecto de Google.",
+        "rate": "Google dice que hay demasiadas peticiones. Espera un minuto e inténtalo de nuevo.",
+        "signed_out": "Google ya no acepta el inicio de sesión. Inicia sesión de nuevo."
+      },
+      "more": "Hay más.",
+      "ok": "Funciona. Los primeros {{n}} elementos:",
+      "okText": "Funciona. El comienzo de la respuesta:",
+      "run": "Probar: mostrar los primeros elementos",
+      "running": "Probando…"
+    },
     "search": "Buscar apps",
     "secretHint": "Los secretos se guardan en el llavero de tu sistema operativo y no se vuelven a mostrar.",
     "sheet": {
@@ -868,6 +937,42 @@
       "progress": "Paso {{current}} de {{total}}",
       "timedOut": "El inicio de sesión no se completó a tiempo. Pulsa Conectar para empezar de nuevo.",
       "title": "Conectar {{name}}"
+    },
+    "signIn": {
+      "copyLink": "Copiar el enlace",
+      "details": "Detalles",
+      "done": "Sesión iniciada.",
+      "failed": {
+        "admin_needed": "Este equipo aún no está confirmado como administrador del servidor. Confírmalo primero en el servidor y vuelve a iniciar sesión.",
+        "already_running": "Ya hay un inicio de sesión en curso para esta aplicación. Termínalo o cancélalo primero.",
+        "code_rejected": "El servicio no aceptó el código. Inténtalo de nuevo y revisa el ID y el secreto del cliente.",
+        "denied": "Se rechazó el inicio de sesión o no se terminó. Inténtalo de nuevo y permite el acceso.",
+        "issuer_mismatch": "El servicio de inicio de sesión no es el de este cliente. Revisa el cliente que pegaste.",
+        "not_waiting": "El inicio de sesión ya había terminado (caducó o se canceló). Empieza de nuevo.",
+        "owner_needed": "Esto necesita la aplicación de escritorio de Praxi en este equipo. Inicia Praxi desde la aplicación e inténtalo de nuevo.",
+        "provider_unreachable": "No se pudo contactar con el servicio de inicio de sesión. Revisa la conexión a internet del equipo donde corre el servicio.",
+        "relay_failed": "Esta aplicación no pudo captar la respuesta. Inténtalo de nuevo.",
+        "scope_refused": "El servicio rechazó el acceso que pide la aplicación. En Google, comprueba que los permisos están añadidos en Acceso a los datos.",
+        "timeout": "El inicio de sesión no terminó a tiempo. Inténtalo de nuevo.",
+        "unknown": "El inicio de sesión no funcionó. Inténtalo de nuevo; si sigue fallando, abre los detalles.",
+        "unreachable": "Praxi no pudo contactar con el servicio. Comprueba que está en marcha e inténtalo de nuevo.",
+        "wrong_address": "Esa dirección no es de este inicio de sesión. Empieza de nuevo y usa la página que se abre."
+      },
+      "finishing": "Casi listo. Tu servidor está terminando el inicio de sesión…",
+      "linkCopied": "Enlace copiado",
+      "notOpened": "No se pudo abrir la página de inicio de sesión en el navegador. Ábrela de nuevo o copia el enlace.",
+      "open": "Abrir la página de inicio de sesión",
+      "openAgain": "Abrir la página de nuevo",
+      "paste": {
+        "body": "Un paso más. Esta ventana no puede captar la respuesta por sí sola. Tras iniciar sesión, el navegador muestra una página que no abre (dice que no puede conectar con 127.0.0.1). Es lo esperado. Copia la dirección completa de la barra de direcciones y pégala aquí.",
+        "label": "Dirección de la página donde terminó el navegador",
+        "submit": "Terminar el inicio de sesión"
+      },
+      "retry": "Reintentar",
+      "starting": "Preparando la página de inicio de sesión…",
+      "title": "Iniciar sesión en {{name}}",
+      "waiting": "Termina de iniciar sesión en el navegador. Praxi continúa solo; no hay nada que copiar.",
+      "waitingServer": "Termina de iniciar sesión en el navegador. La respuesta vuelve a esta aplicación, que la pasa a tu servidor. No hay nada que copiar."
     },
     "status": {
       "auth_required": "Requiere iniciar sesión",
