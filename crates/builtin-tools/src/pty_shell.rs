@@ -855,13 +855,12 @@ impl PtyShellTool {
                  Every answer says the state: running, waiting_for_input, finished or failed (with exit_code). \
                  When the program shows a link or a code that the USER must act on (browser sign-in, device code), \
                  show it to the user and wait for them; do not guess it. Kill the session when done. \
-                 The command is a program and its arguments, started directly: NO shell, so no pipes, redirects, \
-                 variables, globs or &&. Shells, interpreters, launchers (sudo, env, nohup, timeout...), pagers and \
-                 editors with a shell escape (less, vim, git...) are refused: use shell_run for those and for scripts. \
+                 command is a program and its arguments, started directly (no shell: no pipes, redirects, variables, globs or &&); \
+                 shells, interpreters, launchers (sudo, env, nohup...) and pagers/editors (less, vim, git) are refused: use shell_run. \
                  Example: {\"action\":\"start\",\"command\":\"vibe --setup\"}",
                 json!({"type":"object","properties":{
                     "action":{"type":"string","enum":["start","read","write","screen","resize","kill","list"]},
-                    "command":{"type":"string","description":"start: the program and its arguments, started directly (no shell)."},
+                    "command":{"type":"string","description":"start: the program and its arguments (no shell)."},
                     "cwd":{"type":"string","description":"start: working directory (defaults to the bot's workspace)."},
                     "session":{"type":"string","description":"The id start returned."},
                     "input":{"type":"string","description":"write: text to type (up to 4096 characters, no escape characters)."},

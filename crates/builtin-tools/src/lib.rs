@@ -487,8 +487,9 @@ mod tests {
             println!("schema-bytes {n:>6} {name}");
         }
         println!("schema-bytes total {total} over {} tools", rows.len());
-        // Loose ceiling so a runaway description is noticed; not a target.
-        assert!(total < 24_000, "tool list grew to {total} bytes");
+        // Loose ceiling so a runaway description is noticed; not a target. Raised from 24 000
+        // when `shell_interactive` (about 1.9 KB) joined a list that was already near it.
+        assert!(total < 26_000, "tool list grew to {total} bytes");
     }
 
     #[test]
