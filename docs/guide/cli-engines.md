@@ -13,7 +13,7 @@ An unrelated `agent` on PATH cannot hide Cursor's vendor-directory alias.
 | Claude Code | `claude` | `auth status --json` | `npm install -g @anthropic-ai/claude-code` (verified local reference) | Yes, minimum 2.1.257 plus runtime capability checks |
 | Codex | `codex` | `login status` | `npm install -g @openai/codex` (verified local reference) | Blocked: `unified_exec` cannot be disabled |
 | Gemini CLI | `gemini` | Credential-file metadata only; contents never opened | `npm install -g @google/gemini-cli` (**unverified**, copy only) | Detection only; minimum unverified |
-| Antigravity | `agy` | None: no status command (sign-in shows at the first turn) | none known | Runs with its own tools (`agy acp`); models from `agy models` |
+| Antigravity | `agy` | None: no status command (sign-in shows at the first turn); on a server the token folder `~/.gemini/antigravity-cli/` (existence and age only) confirms a sign-in | none known | Runs with its own tools (`agy acp`); models from `agy models` |
 | Qwen Code | `qwen` | Credential-file metadata only (`~/.qwen/oauth_creds.json`); contents never opened | `npm install -g @qwen-code/qwen-code` (verified against the vendor source 2026-11-26; the Install button runs it after your approval) | Runs with its own tools (`qwen --acp`, experimental); minimum unverified |
 | Kiro CLI | `kiro-cli` | None: `whoami` exit codes are undocumented; `KIRO_API_KEY` is not evidence | Unix: `curl -fsSL https://cli.kiro.dev/install \| bash` (verified against the vendor source 2026-11-26; the Install button runs it after your approval) | Runs with its own tools (`kiro-cli acp --agent-engine v3`, experimental); minimum unverified |
 | Qoder CLI | `qodercli` | `status -o json` (`logged_in`) | `npm install -g @qoder-ai/qodercli` (verified against the vendor source 2026-11-26; the Install button runs it after your approval) | Runs with its own tools (`qodercli --acp`, experimental); minimum unverified |
@@ -30,6 +30,25 @@ real model prompt was run while implementing this feature. Minimum versions
 are unknown unless listed above. Missing credential files do not prove that
 an engine cannot use an OS keychain; the UI distinguishes unknown status.
 Ambient API keys are withheld and are not evidence of a usable CLI login.
+
+## Install and sign in on a server
+
+On a headless server (a paired host) the engine list under Settings → Home shows each coding CLI **as it is installed there**: the daemon on the server answers, as its own service user, so the list always matches what the bots on that server can run. **Install on server** runs the engine's fixed installer as that user (an npm package into a user-level prefix, or the vendor's installer script into the user's `~/.local/bin`); nothing is written outside that user's own folders. The row then reads *Ready · account* (when the CLI names its account), *Installed · sign-in needed* or *Installed · sign-in state unknown*.
+
+**Sign in on server** runs the vendor's own login command on the server and shows what it asks of you in the app: a link with an **Open the page** and a **Copy link** button, the one-time code to type there (device flows), or a box to paste the code the page shows (paste flows). When it finishes, the server confirms the sign-in and the app shows the account. The login runs on a terminal (a PTY), because these CLIs only print their link when they think a person is typing. Only the link (on the vendor's own hosts), the code and the account name leave the server; the rest of the output stays private and a pasted code goes straight to the CLI and is never kept.
+
+| Engine | Command (on the server) | What the app shows | Confirmed by |
+| --- | --- | --- | --- |
+| Claude Code | `claude auth login` | Link, then paste the code | `claude auth status --json` (account) |
+| Codex | `codex login --device-auth` | Link and one-time code | `codex login status` |
+| Cursor | `cursor-agent login` (`NO_OPEN_BROWSER=1`) | Link only | `cursor-agent status` |
+| Antigravity | `agy` (its first run signs in) | Google link, then paste the code | The token folder it writes |
+| OpenCode | `opencode auth login opencode` (login method: the console account) | Link (and the code, when it prints one) | `auth.json` written during the sign-in |
+| Kiro | `kiro-cli login --license free --use-device-flow` | Link and one-time code | The success line and exit 0 |
+| Qoder | `qodercli login` | Link only | `qodercli status -o json`, or "Login successful! Welcome, name." |
+| Kimi | `kimi login` | Link and one-time code | "Logged in to ..." and exit 0 |
+
+The Kimi and Qoder rows follow the text of those CLIs' own source (npm 2.8.1 and 1.1.99); OpenCode's menu was read on a terminal (opencode 2.3.0); Cursor, Kiro and Antigravity follow the vendors' documentation and were not run signed in. When a CLI does not show the expected link in time, the window says so and offers the plain command, to run over SSH or to ask your bot to run (the bot can answer a CLI's prompts with the `shell_interactive` tool, see [Agent tools](agent-tools.md)). A sign-in that is already working is never replaced from here.
 
 Install shows the exact fixed command and an expiring **Approve once / Deny**
 card. It runs only after the authenticated local owner approves. No standing

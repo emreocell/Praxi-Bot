@@ -4053,11 +4053,13 @@
       "installing": "Wird auf dem Server installiert (Node.js wird zuerst heruntergeladen, falls es fehlt) …",
       "loading": "Server wird gefragt …",
       "needNode": "Auf dem Server ist kein Node.js (npm) vorhanden, und Praxi kann es auf diesem System nicht installieren. Installiere Node.js 22 LTS von Hand und versuche es dann erneut.",
+      "needsSignIn": "Installed · sign-in needed",
       "none": "Der Server hat keine Coding-CLIs gemeldet.",
       "notInstalled": "Nicht installiert.",
       "note": "Das sind die eigenen Werkzeuge des Servers. Installation und Anmeldung erfolgen auf {{name}}.",
       "officialPage": "{{name}} von der offiziellen Seite installieren",
       "ready": "Bereit",
+      "readyAs": "Ready · {{account}}",
       "reinstall": "Auf Server neu installieren",
       "runOnServer": "Führe auf dem Server aus:",
       "signIn": "Zum Anmelden führe auf dem Server aus:",
@@ -5636,6 +5638,7 @@
     "codeLabel": "Dein Einmalcode",
     "copyLink": "Link kopieren",
     "done": "{{name}} ist auf {{server}} angemeldet.",
+    "doneAs": "{{name}} is signed in on {{server}} as {{account}}.",
     "error": {
       "cancelled": "Die Anmeldung wurde abgebrochen.",
       "device_auth_disabled": "Die Geräteanmeldung ist für dieses Konto ausgeschaltet. Aktiviere sie in den Sicherheitseinstellungen deines Kontos und versuche es erneut.",
@@ -5654,6 +5657,7 @@
     },
     "lead": "Die Anmeldung läuft auf {{server}} selbst, damit seine Bots dein Konto nutzen können, wenn dieser Computer aus ist. Von diesem Computer wird nichts kopiert.",
     "manual": {
+      "fallback": "This sign-in did not start by itself. Run this once over SSH on {{server}}, or ask your bot to run it: it can answer the prompts.",
       "generic": "{{name}} kann aus diesem Fenster nicht angemeldet werden: Seine Anmeldung braucht einen Browser auf dem Server selbst. Führe dies einmal über SSH auf {{server}} aus:",
       "opencode": "OpenCode fragt, welcher Anbieter verbunden werden soll, und wird daher nicht von hier gesteuert. Verwende unten einen API-Schlüssel oder führe dies einmal über SSH auf {{server}} aus:"
     },
@@ -5669,6 +5673,7 @@
     "title": "Bei {{name}} auf {{server}} anmelden",
     "typeCode": "Gib diesen Code auf jener Seite ein.",
     "verifying": "Anmeldung auf dem Server wird geprüft …",
+    "waitingBrowser": "Waiting for you to finish signing in on that page. This window updates by itself.",
     "waitingDevice": "Wartet darauf, dass du auf jener Seite fertig wirst. Dieses Fenster aktualisiert sich von selbst."
   },
   "servers": {

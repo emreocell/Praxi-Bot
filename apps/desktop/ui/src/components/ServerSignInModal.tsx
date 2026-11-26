@@ -5,7 +5,7 @@ import { Button } from "ui";
 import type { AdminCliEngine, AdminCliLogin } from "../api/types";
 import { humanError } from "../lib/humanError";
 import { openExternal } from "../lib/externalLink";
-import { signInPhase, apiKeyProvider, type SignInPhase } from "../lib/serverSignIn";
+import { signInPhase, apiKeyProvider, needsManualFallback, waitingFor, type SignInPhase } from "../lib/serverSignIn";
 import { useDaemon } from "../state/DaemonContext";
 import { Modal } from "./Modal";
 import { RunOnServer } from "./RunOnServer";
@@ -162,6 +162,8 @@ function Content({
   };
 
   const url = job?.url ?? null;
+  // The CLI showed no sign-in page (its prompt was not the expected one): offer the plain command.
+  const startFailed = needsManualFallback(job);
   return (
     <div className={styles.root} data-testid="server-signin" data-phase={phase}>
       <header>
@@ -169,11 +171,16 @@ function Content({
         <p className={styles.lead}>{t("serverSignIn.lead", { server: serverName })}</p>
       </header>
 
-      {manual ? (
+      {manual || startFailed ? (
         <div className={styles.notice} data-testid="signin-manual">
-          <p>{t(engine.id === "opencode" ? "serverSignIn.manual.opencode" : "serverSignIn.manual.generic", { name: engine.name, server: serverName })}</p>
-          <code className={styles.command}>{manual}</code>
-          <RunOnServer command={manual} beforeOpen={onClose} />
+          <p>
+            {t(startFailed ? "serverSignIn.manual.fallback" : engine.id === "opencode" ? "serverSignIn.manual.opencode" : "serverSignIn.manual.generic", {
+              name: engine.name,
+              server: serverName
+            })}
+          </p>
+          <code className={styles.command}>{manual ?? engine.login}</code>
+          <RunOnServer command={manual ?? engine.login} beforeOpen={onClose} />
         </div>
       ) : null}
 
@@ -228,7 +235,7 @@ function Content({
               </div>
             </li>
           ) : (
-            <li className={styles.hint} role="status">{t("serverSignIn.waitingDevice")}</li>
+            <li className={styles.hint} role="status">{t(waitingFor(job) === "device" ? "serverSignIn.waitingDevice" : "serverSignIn.waitingBrowser")}</li>
           )}
         </ol>
       ) : null}
@@ -237,7 +244,10 @@ function Content({
 
       {phase === "done" ? (
         <p role="status" data-testid="signin-done">
-          <Check aria-hidden="true" /> {t("serverSignIn.done", { name: engine.name, server: serverName })}
+          <Check aria-hidden="true" />{" "}
+          {job?.account
+            ? t("serverSignIn.doneAs", { name: engine.name, server: serverName, account: job.account })
+            : t("serverSignIn.done", { name: engine.name, server: serverName })}
         </p>
       ) : null}
 

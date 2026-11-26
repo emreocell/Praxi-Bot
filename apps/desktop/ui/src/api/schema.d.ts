@@ -5179,6 +5179,8 @@ export interface components {
         };
         /** @description What the host reports about one CLI engine, as installed THERE. */
         AdminCliEngineDto: {
+            /** @description The account the CLI says it is signed in as (an e-mail or user name), when it names one. */
+            account?: string | null;
             /** @description The host can run that command itself (a verified, fixed installer). */
             can_install: boolean;
             docs_url: string;
@@ -5188,6 +5190,8 @@ export interface components {
             installed: boolean;
             /** @description How to sign in on the host. */
             login: string;
+            /** @description How the app can drive that sign-in: `device_code`, `paste_code`, `browser` or `manual`. */
+            login_flow: string;
             name: string;
             /** @description `None` when the CLI offers no safe way to check. */
             signed_in?: boolean | null;
@@ -5209,6 +5213,11 @@ export interface components {
         };
         /** @description `GET/POST/DELETE /v1/admin/cli-engines/{id}/login`: where the sign-in stands. */
         AdminCliLoginDto: {
+            /**
+             * @description The account this engine is signed in as (an e-mail or user name), when the CLI names
+             *     one. Never a token or key.
+             */
+            account?: string | null;
             /** @description The one-time code to type on that page (device-code flow). */
             code?: string | null;
             /** @description The exact command to run over SSH for a `manual` engine. */
@@ -5217,8 +5226,9 @@ export interface components {
             /** @description Stable code of the failure (`login_start_timeout`, `login_code_rejected`, ...). */
             error?: string | null;
             /**
-             * @description How this engine can be signed in from the desktop: `device_code`, `paste_code` or
-             *     `manual` (it cannot be driven remotely: run `command` over SSH).
+             * @description How this engine can be signed in from the desktop: `device_code`, `paste_code`,
+             *     `browser` (open the link, nothing to type) or `manual` (it cannot be driven remotely:
+             *     run `command` over SSH).
              */
             flow: string;
             /** @description Found on the host right now. */

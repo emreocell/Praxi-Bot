@@ -19,6 +19,7 @@
     "doc": "agent-tools.md",
     "title": "Notes",
     "headings": [
+      "Interactive terminal sessions",
       "Memory tools",
       "Clock and calculator"
     ],
@@ -168,6 +169,7 @@
     "doc": "cli-engines.md",
     "title": "Coding CLI engines",
     "headings": [
+      "Install and sign in on a server",
       "Security boundary",
       "Local evidence and attribution",
       "Running a CLI with its own tools (engine mode)"

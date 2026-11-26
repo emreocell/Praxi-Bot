@@ -4053,11 +4053,13 @@
       "installing": "Installing on the server (Node.js is downloaded first when it is missing)…",
       "loading": "Asking the server…",
       "needNode": "The server has no Node.js (npm) and Praxi cannot install it on this system. Install Node.js 22 LTS by hand, then try again.",
+      "needsSignIn": "Installed · sign-in needed",
       "none": "The server reported no coding CLIs.",
       "notInstalled": "Not installed.",
       "note": "These are the server's own tools. Installing and signing in happens on {{name}}.",
       "officialPage": "Install {{name}} from the official page",
       "ready": "Ready",
+      "readyAs": "Ready · {{account}}",
       "reinstall": "Reinstall on server",
       "runOnServer": "On the server run:",
       "signIn": "To sign in, run on the server:",
@@ -5636,6 +5638,7 @@
     "codeLabel": "Your one-time code",
     "copyLink": "Copy link",
     "done": "{{name}} is signed in on {{server}}.",
+    "doneAs": "{{name}} is signed in on {{server}} as {{account}}.",
     "error": {
       "cancelled": "The sign-in was cancelled.",
       "device_auth_disabled": "Device sign-in is turned off for this account. Enable it in your account's security settings, then try again.",
@@ -5654,6 +5657,7 @@
     },
     "lead": "The sign-in runs on {{server}} itself, so its bots can use your account when this computer is off. Nothing is copied from this computer.",
     "manual": {
+      "fallback": "This sign-in did not start by itself. Run this once over SSH on {{server}}, or ask your bot to run it: it can answer the prompts.",
       "generic": "{{name}} cannot be signed in from this window: its login needs a browser on the server itself. Run this once over SSH on {{server}}:",
       "opencode": "OpenCode asks which provider to connect, so it is not driven from here. Use an API key below, or run this once over SSH on {{server}}:"
     },
@@ -5669,6 +5673,7 @@
     "title": "Sign in to {{name}} on {{server}}",
     "typeCode": "Type this code on that page.",
     "verifying": "Checking the sign-in on the server…",
+    "waitingBrowser": "Waiting for you to finish signing in on that page. This window updates by itself.",
     "waitingDevice": "Waiting for you to finish on that page. This window updates by itself."
   },
   "servers": {

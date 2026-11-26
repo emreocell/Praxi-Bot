@@ -1504,13 +1504,14 @@ export class MockApiClient extends ApiClient {
     if (seg[0] === "admin" && seg[1] === "cli-engines") {
       if (seg[3] === "install") return ok({ engine: seg[2] ?? "", state: "done", error: null, output: "", installed: true, signed_in: false });
       if (seg[3] === "login") {
-        // Review states for the server sign-in: ?signin=device|paste|verifying|done|failed|manual.
+        // Review states for the server sign-in: ?signin=device|paste|browser|verifying|done|failed|manual.
         const engine = seg[2] ?? "";
         const scenario = new URLSearchParams(window.location.search).get("signin") ?? (engine === "codex" ? "device" : "paste");
-        const base = { engine, job_id: "mock-job", flow: engine === "codex" ? "device_code" : "paste_code", url: null, code: null, error: null, command: null, installed: true, signed_in: false };
-        if (engine === "opencode" || scenario === "manual") {
-          if (method === "POST" && seg[4] === undefined) throw new ApiError(409, "login_manual", "run `opencode auth login` on the server");
-          return ok({ ...base, state: "idle", flow: "manual", command: "opencode auth login" });
+        const flow = engine === "codex" || engine === "kimi" ? "device_code" : engine === "qoder" || engine === "cursor" ? "browser" : "paste_code";
+        const base = { engine, job_id: "mock-job", flow, url: null, code: null, error: null, command: null, installed: true, signed_in: false, account: null };
+        if (engine === "qwen" || scenario === "manual") {
+          if (method === "POST" && seg[4] === undefined) throw new ApiError(409, "login_manual", "run `qwen` on the server");
+          return ok({ ...base, state: "idle", flow: "manual", command: "qwen" });
         }
         if (method === "DELETE") return ok({ ...base, state: "cancelled" });
         if (seg[4] === "code") return ok({ ...base, state: "verifying" });
@@ -1518,16 +1519,17 @@ export class MockApiClient extends ApiClient {
         const device = "https://auth.openai.com/codex/device";
         switch (scenario) {
           case "verifying": return ok({ ...base, state: "verifying" });
-          case "done": return ok({ ...base, state: "done", signed_in: true });
+          case "done": return ok({ ...base, state: "done", signed_in: true, account: "ada@example.com" });
+          case "browser": return ok({ ...base, flow: "browser", state: "needs_browser", url: "https://qoder.com/device/selectAccounts?nonce=n1" });
           case "failed": return ok({ ...base, state: "failed", error: "login_code_rejected" });
           case "device": return ok({ ...base, flow: "device_code", state: "needs_browser", url: device, code: "ABCD-1234" });
           default: return ok({ ...base, flow: "paste_code", state: "needs_code", url: page });
         }
       }
       return ok([
-        { id: "claude", name: "Claude Code", installed: true, signed_in: true, version: "2.1.42", install_command: null, can_install: true, login: "claude auth login", docs_url: "https://example.com" },
-        { id: "codex", name: "Codex", installed: true, signed_in: false, version: "0.169.0", install_command: null, can_install: true, login: "codex login", docs_url: "https://example.com" },
-        { id: "opencode", name: "OpenCode", installed: false, signed_in: null, version: null, install_command: "npm install -g opencode-ai", can_install: true, login: "opencode auth login", docs_url: "https://example.com" }
+        { id: "claude", name: "Claude Code", installed: true, signed_in: true, version: "2.1.42", install_command: null, can_install: true, login: "claude auth login", login_flow: "paste_code", account: "owner@example.com", docs_url: "https://example.com" },
+        { id: "codex", name: "Codex", installed: true, signed_in: false, version: "0.169.0", install_command: null, can_install: true, login: "codex login", login_flow: "device_code", account: null, docs_url: "https://example.com" },
+        { id: "opencode", name: "OpenCode", installed: false, signed_in: null, version: null, install_command: "npm install -g opencode-ai", can_install: true, login: "opencode auth login", login_flow: "paste_code", account: null, docs_url: "https://example.com" }
       ]);
     }
     if (seg[0] === "admin" && method === "PUT") return ok({ id: seg[2] ?? "default", enabled: true, has_key: true });

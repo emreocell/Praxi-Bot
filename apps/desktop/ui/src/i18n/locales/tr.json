@@ -4053,11 +4053,13 @@
       "installing": "Sunucuda kuruluyor (gerekirse önce Node.js indirilir)…",
       "loading": "Sunucuya soruluyor…",
       "needNode": "Sunucuda Node.js (npm) yok ve Praxi bu sistemde onu kendi kuramıyor. Node.js 22 LTS'i elle kur, sonra yeniden dene.",
+      "needsSignIn": "Kurulu · giriş gerekli",
       "none": "Sunucu hiç kodlama CLI'ı bildirmedi.",
       "notInstalled": "Kurulu değil.",
       "note": "Bunlar sunucunun kendi araçları. Kurulum ve giriş {{name}} üzerinde yapılır.",
       "officialPage": "{{name}} için resmî sayfadan kur",
       "ready": "Hazır",
+      "readyAs": "Hazır · {{account}}",
       "reinstall": "Sunucuda yeniden kur",
       "runOnServer": "Sunucuda şunu çalıştır:",
       "signIn": "Giriş için sunucuda şunu çalıştır:",
@@ -5636,6 +5638,7 @@
     "codeLabel": "Tek kullanımlık kodun",
     "copyLink": "Bağlantıyı kopyala",
     "done": "{{name}} {{server}} üzerinde giriş yaptı.",
+    "doneAs": "{{name}} {{server}} üzerinde {{account}} hesabıyla giriş yaptı.",
     "error": {
       "cancelled": "Giriş iptal edildi.",
       "device_auth_disabled": "Bu hesapta cihaz girişi kapalı. Hesabının güvenlik ayarlarında açıp yeniden dene.",
@@ -5654,6 +5657,7 @@
     },
     "lead": "Giriş {{server}} üzerinde yapılır; bu bilgisayar kapalıyken de botlar hesabını kullanabilir. Bu bilgisayardan hiçbir şey kopyalanmaz.",
     "manual": {
+      "fallback": "Bu giriş kendiliğinden başlamadı. {{server}} üzerinde SSH ile bir kez şunu çalıştır ya da botundan çalıştırmasını iste: sorulara o cevap verebilir.",
       "generic": "{{name}} bu pencereden giriş yapamaz: girişi sunucunun kendisinde bir tarayıcı ister. {{server}} üzerinde SSH ile bir kez şunu çalıştır:",
       "opencode": "OpenCode hangi sağlayıcının bağlanacağını sorar, bu yüzden buradan yürütülmez. Aşağıdan bir API anahtarı kullan ya da {{server}} üzerinde SSH ile bir kez şunu çalıştır:"
     },
@@ -5669,6 +5673,7 @@
     "title": "{{server}} üzerinde {{name}} girişi",
     "typeCode": "Bu kodu o sayfaya yaz.",
     "verifying": "Giriş sunucuda doğrulanıyor…",
+    "waitingBrowser": "O sayfada girişi bitirmen bekleniyor. Bu pencere kendiliğinden güncellenir.",
     "waitingDevice": "O sayfada işlemi bitirmen bekleniyor. Bu pencere kendiliğinden güncellenir."
   },
   "servers": {

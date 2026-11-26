@@ -6,6 +6,7 @@ import { humanError } from "../../lib/humanError";
 import { useDaemon } from "../../state/DaemonContext";
 import { useActiveHost } from "../../state/useActiveHost";
 import { RunOnServer } from "../../components/RunOnServer";
+import { engineStatus } from "../../lib/serverSignIn";
 import { ServerSignInModal } from "../../components/ServerSignInModal";
 import { DetectedAccountsBlock } from "./DetectedAccountsBlock";
 import styles from "./AiPage.module.css";
@@ -248,11 +249,7 @@ function HostEnginesBlock() {
                 <div className={styles.text}>
                   <span>{e.name}</span>
                   <span className={styles.sub}>
-                    {e.installed
-                      ? e.signed_in === true
-                        ? t("home.engines.ready")
-                        : t("home.engines.installedUnknown")
-                      : t("home.engines.notInstalled")}
+                    {t(engineStatus(e).key, engineStatus(e).values)}
                     {e.installed && e.signed_in !== false && e.version ? ` · ${e.version}` : ""}
                   </span>
                   <EngineSetup engine={e} onChanged={reload} />

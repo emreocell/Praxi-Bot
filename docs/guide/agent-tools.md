@@ -9,6 +9,17 @@ Every bot has a small built-in scratchpad between runs: a plan for a long task, 
 
 Notes are different from memory: memory holds facts you told the bot; notes are the bot's own working space.
 
+## Interactive terminal sessions
+
+`shell_run` runs one command to the end and cannot answer a question. For an installer, a login or a setup wizard (`vibe --setup`, `claude auth login`, `codex login --device-auth`) the bot has `shell_interactive`: the program runs on a real terminal (a PTY) and the bot can type into it.
+
+* `start` runs the command and returns the first output and a session id. `read` waits (up to a timeout you can see) for more output. `write` types text, with `enter` to press Enter, or presses one named key (`enter`, `tab`, `esc`, `space`, the arrows, `backspace`, `ctrl_c`, `ctrl_d`). `screen` shows the whole screen, `resize` changes its size, `kill` ends the program and `list` shows the open sessions.
+* Every answer names the state: `running`, `waiting_for_input`, `finished` (exit code 0) or `failed` (another exit code, a signal or a kill). A program that waits for you never hangs the bot silently: when it shows a link or a code that **you** must act on (a browser sign-in, a device code), the bot shows it to you and waits.
+* **Same rules as `shell_run`.** It is a Shell tool: it asks for approval like `shell_run`, the never-list sees the command when it starts and every line the bot types, the environment is the same short allow-list (no API keys or vault), and the working directory is the bot's workspace.
+* **Not a shell.** A program that is itself a shell or an interpreter (`sh`, `bash`, `powershell`, `python`, `node`, `sudo`, `ssh`, `docker` and the like) is refused: typing into one would run commands one keystroke at a time, around the command check. Use `shell_run` for scripts.
+* **Bounded.** At most 4 sessions at a time, 8 KiB of text per read, 4 KiB per write, 10 minutes without a call, 1 hour in all. A bot sees only its own sessions.
+* **Secrets.** Output is masked with the same secret detector as the rest of the app before the bot sees it, and neither the typed text nor the output is ever logged. A password or a code you type for the bot is still shown on its approval card: give secrets through the secret request, not in chat.
+
 ## Memory tools
 
 A bot with memory switched on has four tools: `memory_search` (look up what it remembers), `session_search` (find something said in an earlier chat), `memory_save` and `memory_forget`. A bot whose memory is **Off** does not get them. See [Memory](memory.md).

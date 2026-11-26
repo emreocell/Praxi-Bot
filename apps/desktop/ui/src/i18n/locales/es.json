@@ -4053,11 +4053,13 @@
       "installing": "Instalando en el servidor (si falta Node.js, se descarga primero)…",
       "loading": "Consultando al servidor…",
       "needNode": "El servidor no tiene Node.js (npm) y Praxi no puede instalarlo en este sistema. Instala Node.js 22 LTS manualmente y vuelve a intentarlo.",
+      "needsSignIn": "Installed · sign-in needed",
       "none": "El servidor no encontró herramientas de programación de línea de comandos.",
       "notInstalled": "Sin instalar.",
       "note": "Estas herramientas son del servidor. La instalación y el inicio de sesión se hacen en {{name}}.",
       "officialPage": "Instalar {{name}} desde la página oficial",
       "ready": "Listo",
+      "readyAs": "Ready · {{account}}",
       "reinstall": "Reinstalar en el servidor",
       "runOnServer": "Ejecuta esto en el servidor:",
       "signIn": "Para iniciar sesión, ejecuta esto en el servidor:",
@@ -5636,6 +5638,7 @@
     "codeLabel": "Tu código de un solo uso",
     "copyLink": "Copiar enlace",
     "done": "Se inició sesión en {{name}} en el servidor {{server}}.",
+    "doneAs": "{{name}} is signed in on {{server}} as {{account}}.",
     "error": {
       "cancelled": "Se canceló el inicio de sesión.",
       "device_auth_disabled": "El inicio de sesión desde otro dispositivo está desactivado para esta cuenta. Actívalo en los ajustes de seguridad de tu cuenta e inténtalo de nuevo.",
@@ -5654,6 +5657,7 @@
     },
     "lead": "La sesión se inicia en {{server}}. Así sus bots pueden usar tu cuenta aunque este equipo esté apagado. Praxi no copia nada de este equipo.",
     "manual": {
+      "fallback": "This sign-in did not start by itself. Run this once over SSH on {{server}}, or ask your bot to run it: it can answer the prompts.",
       "generic": "Para iniciar sesión en {{name}} necesitas un navegador en el propio servidor. Ejecuta este comando una vez por SSH en {{server}}:",
       "opencode": "OpenCode te pide que elijas un proveedor. Usa una clave de API abajo o ejecuta este comando una vez por SSH en {{server}}:"
     },
@@ -5669,6 +5673,7 @@
     "title": "Inicia sesión en {{name}} en {{server}}",
     "typeCode": "Escribe este código en esa página.",
     "verifying": "Comprobando el inicio de sesión en el servidor…",
+    "waitingBrowser": "Waiting for you to finish signing in on that page. This window updates by itself.",
     "waitingDevice": "Termina el inicio de sesión en esa página. Esta ventana se actualizará sola."
   },
   "servers": {
