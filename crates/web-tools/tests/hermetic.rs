@@ -1217,3 +1217,52 @@ async fn live_keyless_chain_returns_results() {
     let results = j["results"].as_array().unwrap();
     assert!(!results.is_empty(), "expected live results: {out:?}");
 }
+
+/// A heavy or logged-in site answers a script with an error status or a login wall. The
+/// result then says the interactive browser can read it, so the run neither stops nor asks.
+#[tokio::test]
+async fn a_refused_or_empty_page_points_at_the_interactive_browser() {
+    let server = MockServer::start().await;
+    // LinkedIn answers scripts with 999.
+    Mock::given(method("GET"))
+        .and(path("/in/someone"))
+        .respond_with(ResponseTemplate::new(999))
+        .mount(&server)
+        .await;
+    // A login wall: HTTP 200 with next to no text.
+    Mock::given(method("GET"))
+        .and(path("/wall"))
+        .respond_with(html(
+            "<html><head><title>Sign in</title></head><body><div id=app></div></body></html>",
+        ))
+        .mount(&server)
+        .await;
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, cfg(loopback_ok())).unwrap();
+
+    let err = call(
+        &reg,
+        "web_extract",
+        json!({"url": format!("{}/in/someone", server.uri())}),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        err.contains("HTTP 999"),
+        "the real error stays first: {err}"
+    );
+    assert!(err.contains("browser_open"), "{err}");
+    assert!(err.contains("not a reason to ask the owner"), "{err}");
+
+    let t = text(
+        &call(
+            &reg,
+            "web_extract",
+            json!({"url": format!("{}/wall", server.uri())}),
+        )
+        .await
+        .unwrap(),
+    );
+    assert!(t.contains("Title: Sign in"), "{t}");
+    assert!(t.contains("browser_open"), "{t}");
+}
