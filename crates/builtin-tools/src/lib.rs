@@ -168,6 +168,9 @@ pub struct BuiltinConfig {
     pub account_register: account_register::AccountRegisterConfig,
     /// Ledger of files with an untrusted origin (see [`provenance`]); `None` = rules only.
     pub provenance: Option<Arc<dyn provenance::Provenance>>,
+    /// The daemon's redactor, which knows the vault's values: `shell_interactive` masks what a
+    /// program prints with it before the bot sees it. `None` = the key-shape patterns only.
+    pub output_redactor: Option<pty_shell::OutputRedactor>,
     /// Late-bound mail connector: the host binds it once the mail accounts are
     /// loaded (`email` above, when set, binds it here too). `email_wait_for` and
     /// `account_register` use it; the run loop reads the same handle.
@@ -257,6 +260,7 @@ impl BuiltinConfig {
             secret_requests: false,
             account_register: account_register::AccountRegisterConfig::default(),
             provenance: None,
+            output_redactor: None,
             mail: Arc::new(connector_email::MailHandle::new()),
             page_origin: Arc::new(connector_email::PageOriginSlot::new()),
         }
@@ -345,7 +349,11 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         cfg.provenance.clone(),
         cfg.fs_access.clone(),
     ));
-    all.push(pty_shell::tool(cfg.fs_access.clone()));
+    all.push(pty_shell::tool(
+        cfg.fs_access.clone(),
+        cfg.provenance.clone(),
+        cfg.output_redactor.clone(),
+    ));
     all.push(script::tool_with_control(
         registry.clone(),
         cfg.gate,

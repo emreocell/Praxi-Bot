@@ -388,6 +388,11 @@ impl AgentLoop {
         if let Some(secrets) = &cfg.fill_secrets {
             let _ = self.sh.fill_secrets.set(Arc::clone(secrets));
         }
+        // What a tool shows the model is masked with the loop's own redactor (the vault's values
+        // included), also by tools that print what a program wrote (`shell_interactive`).
+        if let Some(redactor) = self.sh.cfg.redactor.clone() {
+            cfg.output_redactor = Some(Arc::new(move |text: &str| redactor.redact(text)));
+        }
         // The tools and the run loop share ONE mail handle, so the host binds the
         // connector once ([`AgentLoop::mail_handle`]) and both see it.
         cfg.mail = Arc::clone(&self.sh.mail);

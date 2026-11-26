@@ -56,6 +56,11 @@ windows = { workspace = true, features = [
     "Win32_System_Threading",
 ] }
 
+# A stand-in interactive program for the `shell_interactive` integration tests.
+[[bin]]
+name = "pty-fixture"
+path = "tests/fixtures/pty_fixture.rs"
+
 [dev-dependencies]
 tempfile.workspace = true
 wiremock.workspace = true
