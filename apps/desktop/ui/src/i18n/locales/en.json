@@ -2646,10 +2646,20 @@
         "failed": "Didn't type on the computer",
         "running": "Typing on the computer"
       },
+      "doc_edit": {
+        "done": "Updated a document",
+        "failed": "Couldn't update a document",
+        "running": "Updating a document"
+      },
       "doc_read": {
         "done": "Read a document",
         "failed": "Couldn't read a document",
         "running": "Reading a document"
+      },
+      "doc_write": {
+        "done": "Wrote a document",
+        "failed": "Couldn't write a document",
+        "running": "Writing a document"
       },
       "email_draft": {
         "done": "Drafted an email",
@@ -2710,6 +2720,16 @@
         "done": "Used a tool",
         "failed": "Couldn't use a tool",
         "running": "Using a tool"
+      },
+      "git_change": {
+        "done": "Changed a code repository",
+        "failed": "Didn't change a code repository",
+        "running": "Changing a code repository"
+      },
+      "git_read": {
+        "done": "Looked at a code repository",
+        "failed": "Couldn't look at a code repository",
+        "running": "Looking at a code repository"
       },
       "knowledge_search": {
         "done": "Searched knowledge sources",

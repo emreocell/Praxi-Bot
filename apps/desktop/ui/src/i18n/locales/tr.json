@@ -2646,10 +2646,20 @@
         "failed": "Bilgisayarda yazılmadı",
         "running": "Bilgisayarda yazılıyor"
       },
+      "doc_edit": {
+        "done": "Belge güncellendi",
+        "failed": "Belge güncellenemedi",
+        "running": "Belge güncelleniyor"
+      },
       "doc_read": {
         "done": "Belge okundu",
         "failed": "Belge okunamadı",
         "running": "Belge okunuyor"
+      },
+      "doc_write": {
+        "done": "Belge yazıldı",
+        "failed": "Belge yazılamadı",
+        "running": "Belge yazılıyor"
       },
       "email_draft": {
         "done": "E-posta taslağı hazırlandı",
@@ -2710,6 +2720,16 @@
         "done": "Bir araç kullandı",
         "failed": "Bir araç kullanamadı",
         "running": "Bir araç kullanıyor"
+      },
+      "git_change": {
+        "done": "Kod deposu değiştirildi",
+        "failed": "Kod deposu değiştirilmedi",
+        "running": "Kod deposu değiştiriliyor"
+      },
+      "git_read": {
+        "done": "Kod deposuna bakıldı",
+        "failed": "Kod deposuna bakılamadı",
+        "running": "Kod deposuna bakılıyor"
       },
       "knowledge_search": {
         "done": "Bilgi kaynaklarında arandı",

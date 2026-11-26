@@ -38,3 +38,19 @@ Two small helper tools are always available to the bot, but are only loaded when
 Both only compute on the text the bot gives them and read the clock. They cannot open files, use the network or run programs, so they never ask for approval and never count as sending anything out. Expressions are limited in length and depth, and anything that is not plain arithmetic is refused.
 
 Reading a CSV, JSON or PDF file (`csv_read`, `json_query`, `pdf_extract`) works only inside the folders you allowed and is treated as reading private data: if the bot has just read a web page or mail, anything that would send data out asks you first.
+
+## Documents and code repositories
+
+Bots can read and write Word, Excel and PowerPoint files, not only text. `docx_read`, `xlsx_read`, `pptx_read`, `pdf_extract`, `csv_read` and `json_query` read them; `docx_write`, `xlsx_write` and `csv_transform` create new files. Three tools change a file you already have without touching the rest of it:
+
+* `xlsx_append_rows` adds rows after the last row of a sheet.
+* `xlsx_update_cells` sets single cells by their address (`B2`). A cell keeps its own formatting.
+* `docx_append` adds headings, paragraphs, lists and tables at the end of a Word document.
+
+Other sheets, styles, column widths and images stay as they were. Limits: the tools do not extend Excel tables, do not recalculate formulas (Excel does that when you open the file) and refuse macro files (`.xlsm`, `.docm`) and old `.xls` / `.doc` files. Like `fs_write`, every change saves an undo checkpoint first.
+
+All of these follow the same file access setting as `fs_read` and `fs_write`: a bot with "Folder only" access cannot open or change a document outside its folders, and nobody can reach credentials or Praxi's own data this way. `doc_convert` and `doc_preview` (Office to PDF, page images) also need LibreOffice and a network-isolated sandbox on the computer, and write only into the bot's workspace; without them they say so and do nothing.
+
+Developer tools are available too: `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch` and `git_commit` run `git` directly (never through a shell, with hooks switched off) and `process_list` shows running programs. With "Folder only" access the repository must be inside the bot's folders; with "This computer" access it can be any repository except one inside a credentials or settings folder. Reading a repository counts as reading private data, like reading a file.
+
+On a computer with the OCR model files already installed (`PRAXI_OCR_MODEL_DIR`, or the default Praxi models folder), the desktop tools also read on-screen text when an app's accessibility tree is weak, and number what they find (`mark:3`) so the bot can click it. Without the model files nothing changes: the tools say that no OCR engine is configured.
