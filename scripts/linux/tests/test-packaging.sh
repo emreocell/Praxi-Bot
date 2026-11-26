@@ -850,6 +850,9 @@ assert_file_contains "${SESSION_EXEC}" "xfdesktop exited"
 assert_file_contains "${SESSION_EXEC}" "xfce4-panel exited"
 assert_file_not_contains "${SESSION_EXEC}" "openbox"
 assert_file_contains "${SANDBOX}/usr/local/bin/praxi" "Slice=praxi.slice"
+# The doctor wrapper must keep the space-separated ReadWritePaths= list in one
+# argument; unquoted, systemd-run takes the second path as the command.
+assert_file_contains "${SANDBOX}/usr/local/bin/praxi" "--property='ReadWritePaths=${SANDBOX}/var/lib/praxi ${SANDBOX}/var/lib/praxi-work'"
 
 # Verify praxi-xauth-init.sh reuses existing cookie on subsequent starts and preserves 0600 mode
 : > "${SANDBOX_STATE}/xauth.log"

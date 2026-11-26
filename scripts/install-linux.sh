@@ -1000,8 +1000,9 @@ write_wrapper() { # <command name> <binary name> <env file>
   if [[ "${DESKTOP_ACTIVE:-0}" -eq 1 ]]; then
     doctor_properties+=" --property=Slice=${SLICE_NAME:-praxi.slice}"
   fi
+  # Single-quoted in the wrapper: ReadWritePaths= holds a space-separated list.
   while IFS= read -r property; do
-    doctor_properties+=" --property=${property}"
+    doctor_properties+=" --property='${property}'"
   done <<< "${HARDENING}"
   if [[ -f "${UNIT_DIR}/praxi-xvfb.service" ]]; then
     doctor_properties+=" --property=JoinsNamespaceOf=praxi-xvfb.service --property=After=praxi-xvfb.service"
