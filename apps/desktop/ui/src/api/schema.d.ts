@@ -1541,6 +1541,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/composio/apps/{slug}/bots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Choose which bots may use an app. `bots: null` = every bot. */
+        put: operations["composio_set_bots"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/composio/apps/{slug}/connect": {
         parameters: {
             query?: never;
@@ -1573,6 +1590,27 @@ export interface paths {
         /** Switch an app's tools on or off. */
         put: operations["composio_set_enabled"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/composio/apps/{slug}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test a connected app with one fixed read-only call (Drive: the account and
+         *     three file names; Gmail: the address and three subjects; GitHub: the user).
+         *     The result is for the owner's screen; no bot and no model sees it.
+         */
+        post: operations["composio_test"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6204,6 +6242,11 @@ export interface components {
              */
             tools: number;
         };
+        /** @description Body of `PUT /v1/composio/apps/{slug}/bots`. */
+        ComposioBotsInput: {
+            /** @description The bots that may use the app; `null` = every bot, an empty list = none. */
+            bots?: string[] | null;
+        };
         /** @description `GET /v1/composio/toolkits`. */
         ComposioCatalogDto: {
             /**
@@ -6290,6 +6333,16 @@ export interface components {
             login_expired?: boolean;
             /** @description How it is linked. */
             mode: components["schemas"]["ComposioLinkMode"];
+        };
+        /**
+         * @description `POST /v1/composio/apps/{slug}/test`: what a one-call read-only test found.
+         *     Shown to the owner only; the text comes from the app and is never trusted.
+         */
+        ComposioTestDto: {
+            /** @description The account the app is connected as (address or user name), when the app says. */
+            account?: string | null;
+            /** @description Up to three samples: file names, mail subjects, calendar names. */
+            items: string[];
         };
         /** @description One toolkit of the Composio catalog. */
         ComposioToolkitDto: {
@@ -16385,6 +16438,49 @@ export interface operations {
             };
         };
     };
+    composio_set_bots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Toolkit slug */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComposioBotsInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComposioAppDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not a bot id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     composio_connect: {
         parameters: {
             query?: never;
@@ -16449,6 +16545,46 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    composio_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Toolkit slug */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComposioTestDto"];
+                };
+            };
+            /** @description not connected, or no quick test for this app */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the app or Composio refused the call */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

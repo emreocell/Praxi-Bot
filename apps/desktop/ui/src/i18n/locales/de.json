@@ -774,6 +774,7 @@
     "connectApp": "{{name}} verbinden",
     "connectNow": "Verbinden",
     "connected": "Verbunden",
+    "connectedAs": "Verbunden als {{account}}",
     "connectedSection": "Verbunden",
     "connectedToast": "{{name}} verbunden",
     "custom": {
@@ -845,13 +846,18 @@
     "sheet": {
       "app": "Die eigene Seite von {{name}} wird geöffnet …",
       "cancelled": "Abgebrochen.",
+      "details": "Details",
       "failed": {
-        "app_link": "Die Seite für {{name}} konnte nicht vorbereitet werden. Versuche es erneut.",
+        "app_link": "Praxi konnte die Anmeldeseite von {{name}} nicht von Composio holen. Den genauen Grund zeigen die Details; danach erneut versuchen.",
         "app_open": "Die Seite für {{name}} konnte nicht geöffnet werden.",
+        "app_refused": "Praxi hat das Verbinden von {{name}} abgelehnt. Den Grund zeigen die Details. War {{name}} schon verbunden, trenne es und verbinde es neu.",
         "login_expired": "Composio akzeptiert die gespeicherte Anmeldung nicht mehr, deshalb kann {{name}} noch nicht verbunden werden. Melde dich erneut bei Composio an.",
         "login_failed": "Die Anmeldung wurde nicht abgeschlossen. Versuche es erneut.",
         "login_open": "Die Anmeldeseite konnte nicht geöffnet werden.",
+        "owner_key": "Apps kann nur die Praxi-Desktop-App auf diesem Computer verbinden, und sie ist hier nicht als Besitzer bestätigt. Öffne Praxi auf diesem Computer und verbinde {{name}} von dort.",
         "rate_limited": "Composio ist gerade ausgelastet. Warte eine Minute und versuche es mit {{name}} erneut.",
+        "unavailable": "App-Verbindungen sind in diesem Praxi gerade nicht verfügbar. Den Grund zeigen die Details; starte Praxi neu und versuche es erneut.",
+        "unknown_app": "Composio bietet {{name}} nicht an, deshalb lässt es sich nicht verbinden. Suche in der Liste nach einer anderen App.",
         "upstream": "Composio war nicht erreichbar oder hat nicht geantwortet. Prüfe die Verbindung des Computers, auf dem die Bots laufen, und versuche es erneut."
       },
       "login": "Die Anmeldeseite wurde in deinem Browser geöffnet. Schließe die Anmeldung dort ab, danach öffnet sich {{name}} von selbst.",
@@ -867,6 +873,14 @@
       "disconnected": "Getrennt",
       "error": "Fehler",
       "quarantined": "In Quarantäne"
+    },
+    "test": {
+      "noSamples": "Noch nichts anzuzeigen (das Konto ist vielleicht leer).",
+      "ok": "Es funktioniert. Die App hat geantwortet.",
+      "okAs": "Es funktioniert. Verbunden als {{account}}.",
+      "run": "Verbindung testen",
+      "running": "Teste …",
+      "samples": "Beispiele aus dem Konto"
     },
     "title": "Apps",
     "toolCount": "{{count}} Werkzeuge",

@@ -107,6 +107,8 @@ const DESKTOP_TASKS: &[(&str, &str)] = &[
     ("DELETE", "/v1/composio/apps/x"),
     ("POST", "/v1/composio/apps/x/connect"),
     ("PUT", "/v1/composio/apps/x/enabled"),
+    ("PUT", "/v1/composio/apps/x/bots"),
+    ("POST", "/v1/composio/apps/x/test"),
 ];
 
 fn is_task(list: &[(&str, &str)], method: &str, path: &str) -> bool {

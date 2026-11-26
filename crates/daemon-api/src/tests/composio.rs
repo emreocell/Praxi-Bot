@@ -16,7 +16,7 @@ use crate::composio::{
     ComposioAppDto, ComposioCatalogDto, ComposioCatalogQuery, ComposioConnState,
     ComposioConnectDto, ComposioControl, ComposioControlError, ComposioDisconnectDto,
     ComposioLinkMode, ComposioLoginDto, ComposioLoginState, ComposioLoginStatusDto,
-    ComposioStatusDto,
+    ComposioStatusDto, ComposioTestDto,
 };
 
 const KEY: &str = "ck_test_SECRETKEY_0123456789";
@@ -148,6 +148,28 @@ impl ComposioControl for Fake {
             remote_removed: true,
         })
     }
+
+    async fn test(&self, slug: &str) -> Result<ComposioTestDto, ComposioControlError> {
+        self.before("composio.app_test");
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if slug == "slack" {
+            return Err(ComposioControlError::Invalid("no quick test".into()));
+        }
+        Ok(ComposioTestDto {
+            account: Some("me@example.com".into()),
+            items: vec!["Budget".into()],
+        })
+    }
+
+    async fn set_bots(
+        &self,
+        slug: &str,
+        bots: Option<Vec<String>>,
+    ) -> Result<ComposioAppDto, ComposioControlError> {
+        self.before("composio.app_bots");
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(ComposioAppDto { bots, ..app(slug) })
+    }
 }
 
 fn routes() -> Vec<(Method, &'static str, Option<serde_json::Value>)> {
@@ -166,6 +188,12 @@ fn routes() -> Vec<(Method, &'static str, Option<serde_json::Value>)> {
             "/v1/composio/apps/github/enabled",
             Some(json!({"enabled": false})),
         ),
+        (
+            Method::PUT,
+            "/v1/composio/apps/github/bots",
+            Some(json!({"bots": null})),
+        ),
+        (Method::POST, "/v1/composio/apps/github/test", None),
         (Method::DELETE, "/v1/composio/apps/github", None),
         (Method::GET, "/v1/composio/logos/gmail", None),
     ]
@@ -258,6 +286,8 @@ async fn mutations_write_an_audit_row_first_and_never_the_key() {
         "composio.login_started",
         "composio.connect_started",
         "composio.app_enabled",
+        "composio.app_bots",
+        "composio.app_test",
         "composio.disconnected",
     ] {
         assert!(actions.contains(&want), "{want} missing in {actions:?}");
@@ -422,4 +452,26 @@ async fn legacy_provider_quarantine_is_visible_in_the_repair_api() {
             .contains("Reserved secret reference")
     );
     assert_eq!(data["configured"][1]["enabled"], true);
+}
+
+#[tokio::test]
+async fn the_test_and_bot_routes_return_the_account_and_the_chosen_bots_and_name_refusals() {
+    let t = setup();
+    t.state.set_composio(Arc::new(Fake::default()));
+    let r = call(&t, Method::POST, "/v1/composio/apps/github/test", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["account"], "me@example.com");
+    assert_eq!(r.json()["items"], json!(["Budget"]));
+    let refused = call(&t, Method::POST, "/v1/composio/apps/slack/test", None).await;
+    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(refused.json()["error"]["code"], "bad_composio_request");
+    let bots = json!({"bots": ["11111111-1111-1111-1111-111111111111"]});
+    let r = call(&t, Method::PUT, "/v1/composio/apps/github/bots", Some(bots)).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(
+        r.json()["bots"],
+        json!(["11111111-1111-1111-1111-111111111111"])
+    );
+    let bad = call(&t, Method::POST, "/v1/composio/apps/Bad%20Slug/test", None).await;
+    assert_ne!(bad.status, StatusCode::OK);
 }

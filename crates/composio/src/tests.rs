@@ -1195,3 +1195,232 @@ async fn a_fresh_login_key_that_composio_refuses_at_once_is_a_failed_login() {
     assert!(!h.svc.configured());
     assert!(h.store.get(KEY_SECRET).unwrap().is_none());
 }
+
+// ---- connect without a dead end, the test action, per-bot switch -------------------------
+
+async fn mount_google_drive_link(h: &Harness) {
+    Mock::given(method("POST"))
+        .and(path("/auth_configs"))
+        .respond_with(
+            ResponseTemplate::new(201).set_body_json(json!({"auth_config": {"id": "ac_g"}})),
+        )
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/auth_configs"))
+        .and(query_param("toolkit_slug", "googledrive"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [{"id": "ac_g"}]})))
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/connected_accounts/link"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "redirect_url": "https://connect.composio.dev/link/lk_g",
+            "expires_at": "2030-01-01T00:00:00Z", "connected_account_id": "ca_drive_1"})))
+        .mount(&h.server)
+        .await;
+}
+
+#[tokio::test]
+async fn a_pinned_app_the_search_does_not_list_still_gets_its_consent_link() {
+    let h = harness().await;
+    ok_key(&h).await;
+    h.svc.set_key(KEY).await.unwrap();
+    // The live search finds nothing for the slug Praxi pins (spelling or paging differs).
+    Mock::given(path("/toolkits"))
+        .and(query_param("search", "googledrive"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .mount(&h.server)
+        .await;
+    mount_google_drive_link(&h).await;
+    let link = h.svc.connect("googledrive").await.unwrap();
+    assert_eq!(link.redirect_url, "https://connect.composio.dev/link/lk_g");
+}
+
+#[tokio::test]
+async fn a_pinned_app_whose_lookup_errors_still_reaches_the_link_request() {
+    let h = harness().await;
+    ok_key(&h).await;
+    h.svc.set_key(KEY).await.unwrap();
+    Mock::given(path("/toolkits"))
+        .and(query_param("search", "googledrive"))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(json!({"error": {"message": "bad query"}})),
+        )
+        .mount(&h.server)
+        .await;
+    mount_google_drive_link(&h).await;
+    assert!(h.svc.connect("googledrive").await.is_ok());
+}
+
+#[tokio::test]
+async fn an_app_composio_does_not_offer_is_named_not_hidden_behind_a_generic_error() {
+    let h = harness().await;
+    ok_key(&h).await;
+    h.svc.set_key(KEY).await.unwrap();
+    Mock::given(path("/toolkits"))
+        .and(query_param("search", "someapp"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .mount(&h.server)
+        .await;
+    let err = h.svc.connect("someapp").await.unwrap_err();
+    assert!(matches!(err, ComposioError::NotFound(_)), "{err:?}");
+    assert!(err.to_string().contains("someapp"));
+    assert_eq!(
+        h.svc.apps(),
+        Vec::new(),
+        "nothing is saved for a refused app"
+    );
+}
+
+#[tokio::test]
+async fn a_slug_in_an_odd_letter_case_is_refused_as_unsupported_not_connected() {
+    let h = harness().await;
+    ok_key(&h).await;
+    h.svc.set_key(KEY).await.unwrap();
+    Mock::given(path("/toolkits"))
+        .and(query_param("search", "github"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"items": [{"slug": "GitHub", "name": "GitHub"}]})),
+        )
+        .with_priority(1)
+        .mount(&h.server)
+        .await;
+    let err = h.svc.connect("github").await.unwrap_err();
+    assert!(err.to_string().contains("unsupported"), "{err}");
+}
+
+async fn mount_user_probe(h: &Harness, execute: ResponseTemplate) {
+    let user_action = json!({"slug": "GITHUB_GET_THE_AUTHENTICATED_USER", "description": "who am I",
+        "toolkit": {"slug": "github"}, "version": "20260901_00",
+        "input_parameters": {"type": "object", "properties": {}}});
+    Mock::given(method("GET"))
+        .and(path("/tools"))
+        .and(query_param("toolkit_slug", "github"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [user_action]})))
+        .with_priority(1)
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/tools/execute/GITHUB_GET_THE_AUTHENTICATED_USER"))
+        .respond_with(execute)
+        .mount(&h.server)
+        .await;
+    h.svc.forget_discovery("github");
+}
+
+fn rows_named(h: &Harness, action: &str) -> Vec<Value> {
+    h.rows
+        .0
+        .lock()
+        .iter()
+        .filter(|r| r.0 == action)
+        .map(|r| r.1.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn the_test_action_names_the_account_and_is_audited_without_arguments() {
+    let h = harness().await;
+    connected(&h).await;
+    mount_user_probe(
+        &h,
+        ResponseTemplate::new(200).set_body_json(
+            json!({"successful": true, "data": {"response_data": {"login": "octo-user"}}}),
+        ),
+    )
+    .await;
+    let out = h.svc.test_app("github").await.unwrap();
+    assert_eq!(out.account.as_deref(), Some("octo-user"));
+    let rows = rows_named(&h, "composio.test");
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert_eq!(rows[0]["status"], "started");
+    assert_eq!(rows[1]["status"], "ok");
+    let surface = leak_surface(&h);
+    assert!(
+        !surface.contains("octo-user"),
+        "the owner's screen only, never stored"
+    );
+}
+
+#[tokio::test]
+async fn a_failing_test_action_is_an_error_not_a_green_tick() {
+    let h = harness().await;
+    connected(&h).await;
+    mount_user_probe(&h, ResponseTemplate::new(500).set_body_string("boom")).await;
+    assert!(h.svc.test_app("github").await.is_err());
+    let rows = rows_named(&h, "composio.test");
+    assert_eq!(rows.last().unwrap()["status"], "error");
+}
+
+#[tokio::test]
+async fn the_test_action_refuses_unconnected_unknown_and_unaudited_cases() {
+    let h = harness().await;
+    ok_key(&h).await;
+    h.svc.set_key(KEY).await.unwrap();
+    let not_connected = h.svc.test_app("github").await.unwrap_err();
+    assert!(
+        not_connected.to_string().contains("not connected"),
+        "{not_connected}"
+    );
+    assert!(h.svc.test_app("Bad Slug").await.is_err());
+    // An app without a fixed probe is refused rather than guessed at.
+    let no_probe = h.svc.test_app("slack").await.unwrap_err();
+    assert!(no_probe.to_string().contains("no quick test"), "{no_probe}");
+    assert_eq!(rows_named(&h, "composio.test"), Vec::<Value>::new());
+
+    connected(&h).await;
+    mount_user_probe(
+        &h,
+        ResponseTemplate::new(200)
+            .set_body_json(json!({"successful": true, "data": {"login": "x"}})),
+    )
+    .await;
+    h.rows.1.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(h.svc.test_app("github").await.is_err());
+    let sent = h
+        .server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .any(|r| r.url.path().contains("/tools/execute/"));
+    assert!(!sent, "a failed audit row sends nothing");
+}
+
+#[tokio::test]
+async fn a_bot_list_limits_who_sees_the_app_and_all_bots_restores_it() {
+    let h = harness().await;
+    connected(&h).await;
+    let allowed = "11111111-1111-1111-1111-111111111111";
+    let tool = h.registry.get("app:github/list_repository_issues").unwrap();
+    assert!(tool.visible_to(Some("bot-1")), "every bot by default");
+    let v = h
+        .svc
+        .set_bots("github", Some(vec![allowed.to_owned()]))
+        .await
+        .unwrap();
+    assert_eq!(v.bots, Some(vec![allowed.to_owned()]));
+    assert!(tool.visible_to(Some(allowed)));
+    assert!(
+        !tool.visible_to(Some("bot-1")),
+        "a bot not in the list loses the tools"
+    );
+    let v = h.svc.set_bots("github", None).await.unwrap();
+    assert_eq!(v.bots, None);
+    assert!(tool.visible_to(Some("bot-1")));
+    // Nobody at all is a valid, explicit choice.
+    h.svc.set_bots("github", Some(vec![])).await.unwrap();
+    assert!(!tool.visible_to(Some(allowed)));
+    assert!(
+        h.svc
+            .set_bots("github", Some(vec!["not-a-bot".into()]))
+            .await
+            .is_err()
+    );
+    assert!(matches!(
+        h.svc.set_bots("slack", None).await,
+        Err(ComposioError::NotFound(_))
+    ));
+}

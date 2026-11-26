@@ -13,10 +13,15 @@ use sha2::{Digest, Sha256};
 use tool_registry::{Tool, ToolRegistry};
 
 use crate::catalog::{self, CATALOG_FILE, CatalogFile, CatalogView};
-use crate::client::{Account, Auth, CliPoll, ComposioClient, Link, Redact, ToolkitPage};
+use crate::client::{
+    Account, Auth, CliPoll, ComposioClient, Link, Redact, ToolkitLookup, ToolkitPage,
+};
 use crate::curated::{Curated, display_class, short_name};
 use crate::error::{ComposioError, Result};
 use crate::keys::{KeySource, LOGIN_URL, Stored};
+use crate::probe::{
+    ProbeOutcome, Step, find_string, fit_args, primary_calendar, probe_for, sample_items,
+};
 use crate::state::{AppConfig, FILE_NAME, LoginIds, StateFile};
 use crate::tool::{ActionTool, FindActionTool, RunActionTool};
 
@@ -888,12 +893,7 @@ impl ComposioService {
             return Err(ComposioError::Invalid("invalid app slug".into()));
         }
         let client = self.client().await?;
-        let catalog = self.note(client.list_toolkits(Some(slug), None, None, 100).await)?;
-        if !catalog.items.iter().any(|toolkit| toolkit.slug == slug) {
-            return Err(ComposioError::Invalid(
-                "unknown or unsupported app toolkit; connection refused".into(),
-            ));
-        }
+        self.check_toolkit(&client, slug).await?;
         let link = if self.linkage() == Linkage::Login {
             self.note(self.router_link(&client, slug).await)?
         } else {
@@ -926,6 +926,25 @@ impl ComposioService {
         Ok(link)
     }
 
+    /// Refuse a slug Composio does not offer as an ordinary app.  The search
+    /// can miss an app Praxi itself pins (the live slug spelling is not
+    /// guaranteed), so for those a miss or a refused lookup is not final: the
+    /// link request that follows names Composio's real reason.
+    async fn check_toolkit(&self, client: &ComposioClient, slug: &str) -> Result<()> {
+        let pinned = self.0.curated.is_popular(slug);
+        match self.note(client.lookup_toolkit(slug).await) {
+            Ok(ToolkitLookup::Found) => Ok(()),
+            Ok(ToolkitLookup::Unsupported) => Err(ComposioError::Invalid(
+                "unknown or unsupported app toolkit; connection refused".into(),
+            )),
+            Ok(ToolkitLookup::Missing) | Err(ComposioError::Upstream(_)) if pinned => Ok(()),
+            Ok(ToolkitLookup::Missing) => Err(ComposioError::NotFound(format!(
+                "Composio does not offer an app called `{slug}`"
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
     /// A connect link through the user Tool Router session; a stale session
     /// is replaced once.
     async fn router_link(&self, client: &ComposioClient, slug: &str) -> Result<Link> {
@@ -949,6 +968,145 @@ impl ComposioService {
         Err(ComposioError::Upstream(
             "could not create a connect link".into(),
         ))
+    }
+
+    /// Prove an app works: one fixed read-only call that names the account and
+    /// lists a few items (see `probe`).  The owner asked for it, so it needs no
+    /// approval card, but it still writes its audit row first and fails closed.
+    ///
+    /// # Errors
+    /// The app is not connected and enabled, has no quick test, or Composio
+    /// failed.
+    pub async fn test_app(&self, slug: &str) -> Result<ProbeOutcome> {
+        if !valid_slug(slug) || !crate::surface::toolkit_allowed(slug) {
+            return Err(ComposioError::Invalid("invalid app slug".into()));
+        }
+        let Some(probe) = probe_for(slug) else {
+            return Err(ComposioError::Invalid(
+                "there is no quick test for this app yet".into(),
+            ));
+        };
+        let known = self.0.state.lock().apps.contains_key(slug);
+        if known {
+            self.refresh(slug).await?;
+        }
+        if !known || !self.is_usable(slug) {
+            return Err(ComposioError::Invalid(
+                "the app is not connected, or it is switched off".into(),
+            ));
+        }
+        let actions = self.discovered(slug).await?;
+        let account = self.bound_account(slug)?;
+        self.0
+            .audit
+            .record("composio.test", json!({"app": slug, "status": "started"}))
+            .map_err(|_| {
+                ComposioError::Internal("audit log unavailable; the test was not sent".into())
+            })?;
+        let mut out = ProbeOutcome::default();
+        let result = async {
+            if let Some(step) = &probe.identity {
+                match self.probe_step(&actions, step, &account).await {
+                    Ok(Some(v)) => out.account = find_string(&v, probe.identity_keys),
+                    // The sample below is the real proof; only an app that has
+                    // nothing else must fail on this step.
+                    Err(e) if probe.sample.is_none() => return Err(e),
+                    Ok(None) | Err(_) => {}
+                }
+                if probe.sample.is_none() && out.account.is_none() {
+                    return Err(ComposioError::Upstream(
+                        "the app answered but did not name the account".into(),
+                    ));
+                }
+            }
+            if let Some(step) = &probe.sample {
+                let v = self
+                    .probe_step(&actions, step, &account)
+                    .await?
+                    .ok_or_else(|| {
+                        ComposioError::Invalid("this app offers no read action to test with".into())
+                    })?;
+                out.items = sample_items(&v, probe.item_keys);
+                if out.account.is_none() && slug == "googlecalendar" {
+                    out.account = primary_calendar(&v);
+                }
+            }
+            Ok(())
+        }
+        .await;
+        match &result {
+            Ok(()) => self.audit("composio.test", json!({"app": slug, "status": "ok"})),
+            Err(_) => self.audit("composio.test", json!({"app": slug, "status": "error"})),
+        }
+        if matches!(result, Err(ComposioError::Unauthorized)) {
+            self.audit("composio.key_rejected", json!({}));
+        }
+        result.map(|()| out)
+    }
+
+    /// One step of a probe; `Ok(None)` when the action does not exist.
+    async fn probe_step(
+        &self,
+        actions: &[ActionInfo],
+        step: &Step,
+        account: &str,
+    ) -> Result<Option<Value>> {
+        let Some(action) = actions.iter().find(|a| a.tool_slug == step.action) else {
+            return Ok(None);
+        };
+        let args = fit_args(&action.schema, &step.args);
+        let data = self
+            .client()
+            .await?
+            .execute(
+                &action.tool_slug,
+                &self.user_id(),
+                &action.version,
+                account,
+                &args,
+            )
+            .await;
+        self.note(data).map(Some)
+    }
+
+    /// Choose which bots may use an app: `None` = every bot, a list = only
+    /// those bots (an empty list switches it off for all of them).
+    ///
+    /// # Errors
+    /// Unknown app, a bot id that is not a bot id, or the state file cannot
+    /// be written.
+    pub async fn set_bots(&self, slug: &str, bots: Option<Vec<String>>) -> Result<AppView> {
+        if !self.0.state.lock().apps.contains_key(slug) {
+            return Err(ComposioError::NotFound(format!(
+                "app `{slug}` is not connected"
+            )));
+        }
+        if let Some(list) = &bots
+            && (list.len() > 1000 || list.iter().any(|b| uuid::Uuid::parse_str(b).is_err()))
+        {
+            return Err(ComposioError::Invalid("not a valid bot id".into()));
+        }
+        let bots = bots.map(|mut l| {
+            l.sort();
+            l.dedup();
+            l
+        });
+        self.save_state(|st| {
+            if let Some(app) = st.apps.get_mut(slug) {
+                app.bots = bots;
+            }
+        })?;
+        self.sync_tools(slug).await;
+        self.audit("composio.bots", json!({"app": slug}));
+        let cfg = self
+            .0
+            .state
+            .lock()
+            .apps
+            .get(slug)
+            .cloned()
+            .unwrap_or_default();
+        Ok(self.view(slug, &cfg))
     }
 
     /// Switch an app's tools on or off.
@@ -1035,6 +1193,12 @@ impl ComposioService {
             .lock()
             .insert(slug.to_owned(), (Instant::now(), Arc::clone(&v)));
         Ok(v)
+    }
+
+    /// Drop the cached action list of `slug` so the next use re-reads it (tests).
+    #[cfg(test)]
+    pub(crate) fn forget_discovery(&self, slug: &str) {
+        self.0.discovered.lock().remove(slug);
     }
 
     /// The direct tools of an app: known read-only actions first, then

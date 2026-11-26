@@ -14,7 +14,8 @@ use composio::{
 use daemon_api::composio::{
     ComposioAppDto, ComposioCatalogDto, ComposioCatalogQuery, ComposioConnState,
     ComposioConnectDto, ComposioDisconnectDto, ComposioLinkMode, ComposioLoginDto,
-    ComposioLoginState, ComposioLoginStatusDto, ComposioStatusDto, ComposioToolkitDto,
+    ComposioLoginState, ComposioLoginStatusDto, ComposioStatusDto, ComposioTestDto,
+    ComposioToolkitDto,
 };
 use daemon_api::{ComposioControl, ComposioControlError};
 use secret_store::SecretStore;
@@ -244,5 +245,25 @@ impl ComposioControl for ComposioHost {
     async fn disconnect(&self, slug: &str) -> Result<ComposioDisconnectDto, ComposioControlError> {
         let remote_removed = self.svc.disconnect(slug).await.map_err(map_err)?;
         Ok(ComposioDisconnectDto { remote_removed })
+    }
+
+    async fn test(&self, slug: &str) -> Result<ComposioTestDto, ComposioControlError> {
+        let out = self.svc.test_app(slug).await.map_err(map_err)?;
+        Ok(ComposioTestDto {
+            account: out.account,
+            items: out.items,
+        })
+    }
+
+    async fn set_bots(
+        &self,
+        slug: &str,
+        bots: Option<Vec<String>>,
+    ) -> Result<ComposioAppDto, ComposioControlError> {
+        self.svc
+            .set_bots(slug, bots)
+            .await
+            .map(Self::app_dto)
+            .map_err(map_err)
     }
 }

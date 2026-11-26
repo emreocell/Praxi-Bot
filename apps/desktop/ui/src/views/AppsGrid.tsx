@@ -4,8 +4,12 @@ import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { ComposioApp, ComposioToolkit } from "../api/types";
 import { AppLogo } from "../components/AppLogo";
+import { BotAccessPicker } from "../components/BotAccessPicker";
 import { Skeleton, SkeletonLines } from "../components/Skeleton";
+import { type AppTestState, isTestable } from "../lib/appTest";
 import { GROUPS, composioTileState, tileAction, type TileState } from "../lib/appTiles";
+import { type BotScope, botScope, botSelection } from "../lib/mcpApps";
+import { useDaemon } from "../state/DaemonContext";
 import styles from "./AppsModal.module.css";
 import own from "./AppsGrid.module.css";
 
@@ -129,19 +133,29 @@ export function SkeletonTiles({ count = 8 }: { count?: number }) {
 export function ComposioCell({
   app,
   busy,
+  test,
   onEnabled,
   onReconnect,
-  onDisconnect
+  onDisconnect,
+  onTest,
+  onSaveBots
 }: {
   app: ComposioApp;
   busy: boolean;
+  /** What the last test of this app found, when one ran. */
+  test?: AppTestState;
   onEnabled: (enabled: boolean) => void;
   onReconnect: () => void;
   onDisconnect: () => void;
+  onTest: () => void;
+  onSaveBots: (bots: string[] | null) => void;
 }) {
   const { t } = useTranslation();
+  const { bots } = useDaemon();
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [scope, setScope] = useState<BotScope>(() => botScope(app));
+  const account = test?.status === "ok" ? test.account : null;
   const k = tone(app.state);
   const broken = app.state === "failed" || app.state === "expired";
   const panelId = `composio-manage-${app.slug}`;
@@ -160,7 +174,9 @@ export function ComposioCell({
                 ? t("apps.composio.failedHint")
                 : app.state === "expired"
                   ? t("apps.composio.expiredHint")
-                  : t("apps.toolCount", { count: app.tools })}
+                  : account
+                    ? t("apps.connectedAs", { account })
+                    : t("apps.toolCount", { count: app.tools })}
           </small>
         </div>
         <span className={`${styles.state} ${styles[`tone_${k}`]}`}>
@@ -179,6 +195,9 @@ export function ComposioCell({
           aria-controls={panelId}
           data-testid={`composio-manage-${app.slug}`}
           onClick={() => {
+            if (!open) {
+              setScope(botSelection(botScope(app), bots));
+            }
             setConfirm(false);
             setOpen((o) => !o);
           }}
@@ -189,6 +208,24 @@ export function ComposioCell({
       </div>
       {open ? (
         <div className={styles.panel} id={panelId}>
+          {app.state === "active" ? (
+            <>
+              <span className={styles.panelLabel}>{t("apps.access.label")}</span>
+              <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
+              <div className={styles.actions}>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={busy}
+                  data-testid={`composio-access-save-${app.slug}`}
+                  onClick={() => onSaveBots(scope.mode === "all" ? null : [...scope.ids])}
+                >
+                  {t("apps.access.save")}
+                </Button>
+              </div>
+              {isTestable(app.slug) ? <ComposioTestResult slug={app.slug} test={test} busy={busy} onTest={onTest} /> : null}
+            </>
+          ) : null}
           <div className={styles.actions}>
             {app.state === "active" ? (
               <Button
@@ -237,6 +274,64 @@ export function ComposioCell({
         </div>
       ) : null}
     </li>
+  );
+}
+
+/** The "Test connection" row of a connected app: the button, and what the last test found. */
+function ComposioTestResult({
+  slug,
+  test,
+  busy,
+  onTest
+}: {
+  slug: string;
+  test?: AppTestState;
+  busy: boolean;
+  onTest: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className={own.testBox} data-testid={`composio-test-${slug}`} data-status={test?.status ?? "idle"}>
+      <div className={styles.actions}>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy || test?.status === "running"}
+          data-testid={`composio-test-run-${slug}`}
+          onClick={onTest}
+        >
+          {test?.status === "running" ? t("apps.test.running") : t("apps.test.run")}
+        </Button>
+      </div>
+      {test?.status === "ok" ? (
+        <div role="status">
+          <p className={own.testLine}>
+            {test.account ? t("apps.test.okAs", { account: test.account }) : t("apps.test.ok")}
+          </p>
+          {test.items.length > 0 ? (
+            <ul className={own.testItems} aria-label={t("apps.test.samples")}>
+              {test.items.map((item, i) => (
+                <li key={`${i}-${item}`}>{item}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className={own.quiet}>{t("apps.test.noSamples")}</p>
+          )}
+        </div>
+      ) : null}
+      {test?.status === "failed" ? (
+        <div role="alert">
+          <p className={own.testLine}>{test.title}</p>
+          {test.hint ? <p className={own.quiet}>{test.hint}</p> : null}
+          {test.details ? (
+            <details className={own.testDetails}>
+              <summary>{t("apps.sheet.details")}</summary>
+              <p>{test.details}</p>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

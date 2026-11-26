@@ -130,6 +130,18 @@ bundled inventory. Its other apps retain the existing daemon-validated cached
 logo / neutral glyph path. Engine/provider IDs and explicit initials always
 resolve locally. Custom providers/servers keep the deterministic unknown fallback.
 
+### Composio apps pinned in the Apps grid (checked 2026-11-27)
+
+Every app of `crates/composio/src/curated.json` was looked up in Simple Icons 16.36.0
+(CC0 1.0). TikTok (`siTiktok`) was the only one missing from the bundle and now uses it.
+
+| Pinned app | Result | Why |
+| --- | --- | --- |
+| LinkedIn, Microsoft Outlook, Microsoft Teams, Salesforce | No bundled mark | Not in Simple Icons 16.36.0 (the project removed them), and no vendor licence for redistributing their artwork is verified here. They show the logo the daemon fetched from Composio's catalog and cached; until the catalog was read, or when it has none, their **initials on a neutral tile** (the old generic puzzle-piece glyph is gone). |
+
+`brandIcons.test.ts` names these four, so a new pinned app without a mark fails the test and
+has to be added to this audit. Catalog apps that are not pinned follow the same rule.
+
 ## Open maintainer note
 
 Obtain explicit redistributable artwork or permission for Groq, Together AI,

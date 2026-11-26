@@ -774,6 +774,7 @@
     "connectApp": "{{name}} uygulamasını bağla",
     "connectNow": "Bağlan",
     "connected": "Bağlandı",
+    "connectedAs": "{{account}} olarak bağlı",
     "connectedSection": "Bağlı",
     "connectedToast": "{{name}} bağlandı",
     "custom": {
@@ -845,13 +846,18 @@
     "sheet": {
       "app": "{{name}} sayfası açılıyor…",
       "cancelled": "Vazgeçildi.",
+      "details": "Ayrıntılar",
       "failed": {
-        "app_link": "{{name}} sayfası hazırlanamadı. Yeniden dene.",
+        "app_link": "Praxi, {{name}} giriş sayfasını Composio'dan alamadı. Tam nedeni için Ayrıntılar'a bak, sonra yeniden dene.",
         "app_open": "{{name}} sayfası açılamadı.",
+        "app_refused": "Praxi {{name}} bağlantısını kabul etmedi. Nedeni için Ayrıntılar'a bak. {{name}} daha önce bağlandıysa bağlantısını kes, sonra yeniden bağla.",
         "login_expired": "Composio kayıtlı girişi artık kabul etmiyor, bu yüzden {{name}} henüz bağlanamıyor. Composio'ya yeniden giriş yap.",
         "login_failed": "Giriş tamamlanmadı. Yeniden dene.",
         "login_open": "Giriş sayfası açılamadı.",
+        "owner_key": "Uygulamaları yalnızca bu bilgisayardaki Praxi masaüstü uygulaması bağlayabilir ve burada sahip olarak doğrulanmadı. Praxi'yi bu bilgisayarda açıp {{name}} uygulamasını oradan bağla.",
         "rate_limited": "Composio şu an meşgul. Bir dakika bekleyip {{name}} için yeniden dene.",
+        "unavailable": "Uygulama bağlantıları şu an bu Praxi'de kullanılamıyor. Nedeni için Ayrıntılar'a bak, Praxi'yi yeniden başlatıp yeniden dene.",
+        "unknown_app": "Composio {{name}} uygulamasını sunmuyor, bu yüzden bağlanamıyor. Listede başka bir uygulama ara.",
         "upstream": "Composio'ya ulaşılamadı ya da yanıt vermedi. Botların çalıştığı bilgisayarın bağlantısını kontrol edip yeniden dene."
       },
       "login": "Giriş sayfası tarayıcında açıldı. Orada bitir; {{name}} sayfası ardından kendiliğinden açılır.",
@@ -867,6 +873,14 @@
       "disconnected": "Bağlı değil",
       "error": "Hata",
       "quarantined": "Karantinada"
+    },
+    "test": {
+      "noSamples": "Henüz gösterilecek bir şey yok (hesap boş olabilir).",
+      "ok": "Çalışıyor. Uygulama yanıt verdi.",
+      "okAs": "Çalışıyor. {{account}} olarak bağlı.",
+      "run": "Bağlantıyı dene",
+      "running": "Deneniyor…",
+      "samples": "Hesaptan örnekler"
     },
     "title": "Uygulamalar",
     "toolCount": "{{count}} araç",

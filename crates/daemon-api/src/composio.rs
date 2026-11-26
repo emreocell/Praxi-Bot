@@ -189,6 +189,23 @@ pub struct ComposioEnabledInput {
     pub enabled: bool,
 }
 
+/// Body of `PUT /v1/composio/apps/{slug}/bots`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ComposioBotsInput {
+    /// The bots that may use the app; `null` = every bot, an empty list = none.
+    pub bots: Option<Vec<String>>,
+}
+
+/// `POST /v1/composio/apps/{slug}/test`: what a one-call read-only test found.
+/// Shown to the owner only; the text comes from the app and is never trusted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ComposioTestDto {
+    /// The account the app is connected as (address or user name), when the app says.
+    pub account: Option<String>,
+    /// Up to three samples: file names, mail subjects, calendar names.
+    pub items: Vec<String>,
+}
+
 /// `DELETE /v1/composio/apps/{slug}` result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ComposioDisconnectDto {
@@ -290,4 +307,26 @@ pub trait ComposioControl: Send + Sync {
     /// # Errors
     /// [`ComposioControlError`].
     async fn disconnect(&self, slug: &str) -> Result<ComposioDisconnectDto, ComposioControlError>;
+    /// Prove an app works with one fixed read-only call.
+    ///
+    /// # Errors
+    /// [`ComposioControlError`].
+    async fn test(&self, _slug: &str) -> Result<ComposioTestDto, ComposioControlError> {
+        Err(ComposioControlError::Invalid(
+            "this build has no connection test".into(),
+        ))
+    }
+    /// Choose which bots may use an app (`None` = all).
+    ///
+    /// # Errors
+    /// [`ComposioControlError`].
+    async fn set_bots(
+        &self,
+        _slug: &str,
+        _bots: Option<Vec<String>>,
+    ) -> Result<ComposioAppDto, ComposioControlError> {
+        Err(ComposioControlError::Invalid(
+            "this build cannot limit an app to some bots".into(),
+        ))
+    }
 }

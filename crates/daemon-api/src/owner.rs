@@ -334,6 +334,8 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/v1/composio/apps/{}"),
     ("POST", "/v1/composio/apps/{}/connect"),
     ("PUT", "/v1/composio/apps/{}/enabled"),
+    ("PUT", "/v1/composio/apps/{}/bots"),
+    ("POST", "/v1/composio/apps/{}/test"),
     // pairing, hosts, host lifecycle
     ("POST", "/v1/hosts/pair"),
     ("DELETE", "/v1/hosts/{}"),
@@ -481,6 +483,8 @@ pub const PEER_OK_DESKTOP_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/v1/composio/apps/{}"),
     ("POST", "/v1/composio/apps/{}/connect"),
     ("PUT", "/v1/composio/apps/{}/enabled"),
+    ("PUT", "/v1/composio/apps/{}/bots"),
+    ("POST", "/v1/composio/apps/{}/test"),
 ];
 
 fn pattern_matches(pattern: &str, path: &str) -> bool {

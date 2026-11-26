@@ -41,6 +41,7 @@
       "Troubleshooting a stuck or failed connection",
       "OAuth sign-in is stuck on \"Waiting for the browser sign-in…\"",
       "Composio sign-in is stuck or the catalog will not refresh",
+      "\"The page for an app could not be prepared\"",
       "A local MCP server shows \"Error\" or \"Quarantined\""
     ],
     "summary": "The Apps dialog in the desktop app connects Praxi to external services"

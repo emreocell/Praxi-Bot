@@ -19,7 +19,7 @@ test('known brands use real simple-icons paths and official brand colors', () =>
 });
 
 test('the popular apps of the Apps grid have real marks, not monograms', () => {
-  for (const name of ['Stripe', 'Atlassian', 'Jira', 'Trello', 'Asana', 'HubSpot', 'Shopify', 'Dropbox', 'Zoom', 'Telegram', 'WhatsApp', 'Spotify', 'Airtable', 'Zendesk', 'Docker', 'Vercel', 'Supabase', 'Google Sheets', 'notion-remote']) {
+  for (const name of ['Stripe', 'Atlassian', 'Jira', 'Trello', 'Asana', 'HubSpot', 'Shopify', 'Dropbox', 'Zoom', 'Telegram', 'WhatsApp', 'Spotify', 'Airtable', 'Zendesk', 'Docker', 'Vercel', 'Supabase', 'Google Sheets', 'notion-remote', 'TikTok']) {
     const b = brandIcon(name);
     assert.equal(b.known, true, name);
     assert.ok(b.path.length > 20, name);
@@ -129,4 +129,16 @@ test('unlicensed brand artwork uses an explicit neutral initial and stays offlin
     assert.equal(b.monochrome, true, id);
     assert.deepEqual(brandIcon(b.name), b, `${id}: display name must resolve to the same bundled initial`);
   }
+});
+
+// Apps the shipped Composio list pins that have no bundled mark. Simple Icons (CC0) dropped these
+// four, and no licence for the vendors' own artwork is verified (docs/design/brand-icons.md), so
+// they show the daemon-fetched Composio logo, else their initials: never a look-alike. A new gap
+// in the list must be added to the audit, so this test names it.
+test('the pinned Composio apps without a bundled mark are exactly the audited ones', () => {
+  const curated = JSON.parse(
+    readFileSync(new URL('../../../../../crates/composio/src/curated.json', import.meta.url), 'utf8')
+  ) as { popular: { slug: string; name: string }[] };
+  const missing = curated.popular.filter((p) => !brandIcon(p.name).known || !brandIcon(p.slug).known).map((p) => p.slug);
+  assert.deepEqual(missing.sort(), ['linkedin', 'microsoft_teams', 'outlook', 'salesforce']);
 });

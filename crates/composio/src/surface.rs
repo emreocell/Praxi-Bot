@@ -35,7 +35,14 @@ pub(crate) fn toolkit_allowed(slug: &str) -> bool {
         .any(|p| slug.contains(p))
 }
 
+/// The one phrase of ordinary read/write actions that contains `AUTH`
+/// (`GITHUB_GET_THE_AUTHENTICATED_USER`, `..._FOR_THE_AUTHENTICATED_USER`): it
+/// means "the account that is signed in", not an authentication control surface,
+/// and only this exact closing phrase is set aside from the `AUTH` check.
+const SIGNED_IN_USER: &str = "_THE_AUTHENTICATED_USER";
+
 pub(crate) fn action_allowed(toolkit: &str, slug: &str) -> bool {
+    let checked = slug.strip_suffix(SIGNED_IN_USER).unwrap_or(slug);
     toolkit_allowed(toolkit)
         && slug.starts_with(&format!("{}_", toolkit.to_ascii_uppercase()))
         && slug
@@ -66,7 +73,13 @@ pub(crate) fn action_allowed(toolkit: &str, slug: &str) -> bool {
             "RUN_",
         ]
         .iter()
-        .any(|p| slug.contains(p))
+        .any(|p| {
+            if *p == "AUTH" {
+                checked.contains(p)
+            } else {
+                slug.contains(p)
+            }
+        })
 }
 
 #[cfg(test)]
@@ -100,5 +113,24 @@ mod tests {
             assert!(!action_allowed("github", action), "{action}");
         }
         assert!(action_allowed("github", "GITHUB_LIST_REPOSITORY_ISSUES"));
+    }
+
+    #[test]
+    fn only_the_exact_signed_in_user_phrase_is_set_aside_from_the_auth_check() {
+        for ok in [
+            "GITHUB_GET_THE_AUTHENTICATED_USER",
+            "GITHUB_LIST_ORGANIZATIONS_FOR_THE_AUTHENTICATED_USER",
+        ] {
+            assert!(action_allowed("github", ok), "{ok}");
+        }
+        for denied in [
+            "GITHUB_AUTHENTICATE_USER",
+            "GITHUB_AUTHENTICATED_USER_TOKEN",
+            "GITHUB_AUTH_THE_AUTHENTICATED_USER",
+            "GITHUB_CREATE_AUTH_CONFIG",
+            "GITHUB_RUN_THE_AUTHENTICATED_USER",
+        ] {
+            assert!(!action_allowed("github", denied), "{denied}");
+        }
     }
 }

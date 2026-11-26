@@ -11,9 +11,10 @@ use serde_json::json;
 
 use crate::AppState;
 use crate::composio::{
-    ComposioAppDto, ComposioCatalogDto, ComposioCatalogQuery, ComposioConnectDto, ComposioControl,
-    ComposioControlError, ComposioDisconnectDto, ComposioEnabledInput, ComposioKeyInput,
-    ComposioLoginDto, ComposioLoginStatusDto, ComposioStatusDto,
+    ComposioAppDto, ComposioBotsInput, ComposioCatalogDto, ComposioCatalogQuery,
+    ComposioConnectDto, ComposioControl, ComposioControlError, ComposioDisconnectDto,
+    ComposioEnabledInput, ComposioKeyInput, ComposioLoginDto, ComposioLoginStatusDto,
+    ComposioStatusDto, ComposioTestDto,
 };
 use crate::error::{ApiError, ErrorBody};
 use crate::live_view::Actor;
@@ -22,7 +23,8 @@ use crate::routes::ApiJson;
 impl From<ComposioControlError> for ApiError {
     fn from(e: ComposioControlError) -> Self {
         match e {
-            ComposioControlError::NotFound(w) => Self::not_found(w),
+            // The message is already a sentence (`app x is not connected`): say it as is.
+            ComposioControlError::NotFound(w) => Self::new(StatusCode::NOT_FOUND, "not_found", w),
             ComposioControlError::Invalid(m) => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "bad_composio_request", m)
             }
@@ -261,6 +263,51 @@ pub(crate) async fn composio_set_enabled(
         &json!({"app": slug, "enabled": input.enabled}),
     )?;
     Ok(Json(c.set_enabled(&slug, input.enabled).await?))
+}
+
+/// Choose which bots may use an app. `bots: null` = every bot.
+#[utoipa::path(put, path = "/v1/composio/apps/{slug}/bots", tag = "composio",
+    security(("bearer" = [])),
+    params(("slug" = String, Path, description = "Toolkit slug")),
+    request_body = ComposioBotsInput,
+    responses((status = 200, body = ComposioAppDto), (status = 404, body = ErrorBody),
+              (status = 422, body = ErrorBody, description = "not a bot id")))]
+pub(crate) async fn composio_set_bots(
+    State(s): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
+    Path(slug): Path<String>,
+    ApiJson(input): ApiJson<ComposioBotsInput>,
+) -> Result<Json<ComposioAppDto>, ApiError> {
+    check_slug(&slug)?;
+    let c = composio(&s)?;
+    audit(
+        &s,
+        &actor,
+        "composio.app_bots",
+        &json!({"app": slug, "all": input.bots.is_none(),
+                "count": input.bots.as_ref().map(Vec::len)}),
+    )?;
+    Ok(Json(c.set_bots(&slug, input.bots).await?))
+}
+
+/// Test a connected app with one fixed read-only call (Drive: the account and
+/// three file names; Gmail: the address and three subjects; GitHub: the user).
+/// The result is for the owner's screen; no bot and no model sees it.
+#[utoipa::path(post, path = "/v1/composio/apps/{slug}/test", tag = "composio",
+    security(("bearer" = [])),
+    params(("slug" = String, Path, description = "Toolkit slug")),
+    responses((status = 200, body = ComposioTestDto),
+              (status = 422, body = ErrorBody, description = "not connected, or no quick test for this app"),
+              (status = 502, body = ErrorBody, description = "the app or Composio refused the call")))]
+pub(crate) async fn composio_test(
+    State(s): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
+    Path(slug): Path<String>,
+) -> Result<Json<ComposioTestDto>, ApiError> {
+    check_slug(&slug)?;
+    let c = composio(&s)?;
+    audit(&s, &actor, "composio.app_test", &json!({"app": slug}))?;
+    Ok(Json(c.test(&slug).await?))
 }
 
 /// Disconnect an app: deletes the Composio-side account when possible and

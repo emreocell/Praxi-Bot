@@ -174,6 +174,12 @@ impl Curated {
         self.read_only.contains(tool_slug)
     }
 
+    /// Whether `slug` is one of the apps Praxi pins in its popular row.
+    #[must_use]
+    pub fn is_popular(&self, slug: &str) -> bool {
+        self.popular.iter().any(|p| p.slug == slug)
+    }
+
     /// Display name of a popular slug.
     #[must_use]
     pub fn popular_name(&self, slug: &str) -> Option<&str> {

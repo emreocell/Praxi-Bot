@@ -13,6 +13,7 @@ mod curated;
 mod error;
 mod keys;
 pub mod logo;
+mod probe;
 mod schema;
 mod service;
 mod state;
@@ -22,11 +23,12 @@ mod tool;
 pub use catalog::{CATALOG_FILE, CatalogFile, CatalogSource, CatalogView, STALE_AFTER_SECS};
 pub use client::{
     API_BASE, API_ORIGIN, Account, Auth, CliPoll, CliSession, ComposioClient, Link, Redact,
-    RemoteTool, Toolkit, ToolkitPage, is_composio_https_url,
+    RemoteTool, Toolkit, ToolkitLookup, ToolkitPage, is_composio_https_url,
 };
 pub use curated::{Curated, GROUPS, Popular, display_class, group_of, short_name};
 pub use error::{ComposioError, Result};
 pub use keys::{KEY_SECRET, KEY_SETUP_URL, KeySource, LOGIN_URL, LocalKeySource, Stored};
+pub use probe::ProbeOutcome;
 pub use schema::{clean_text, sanitize, validate};
 pub use service::{
     ActionInfo, AppView, Audit, ComposioService, ConnState, Linkage, LoginStart, LoginState,

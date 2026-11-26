@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { AppLogo } from "../components/AppLogo";
-import { type FlowState, flowActive, progressDot } from "../lib/connectFlow";
+import { type FlowState, canRetry, flowActive, progressDot } from "../lib/connectFlow";
 import own from "./ConnectSheet.module.css";
 
 /**
@@ -48,6 +48,14 @@ export function ConnectSheet({
         </span>
       </div>
       <p className={own.text} role="status">{text}</p>
+      {flow.step === "failed" && flow.failure ? (
+        <details className={own.details} data-testid="connect-sheet-details">
+          <summary>{t("apps.sheet.details")}</summary>
+          {[flow.failure.title, flow.failure.hint, flow.failure.details].filter(Boolean).map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </details>
+      ) : null}
       <div className={own.actions}>
         {active || flow.step === "opened" ? (
           <Button size="sm" variant="ghost" data-testid="connect-sheet-cancel" onClick={onCancel}>
@@ -55,7 +63,7 @@ export function ConnectSheet({
           </Button>
         ) : (
           <>
-            {flow.step !== "cancelled" ? (
+            {flow.step !== "cancelled" && (flow.step !== "failed" || canRetry(flow.reason)) ? (
               <Button size="sm" variant="secondary" data-testid="connect-sheet-retry" onClick={onRetry}>
                 {flow.step === "failed" && flow.reason === "login_expired" ? t("apps.composio.relogin") : t("apps.composio.retry")}
               </Button>

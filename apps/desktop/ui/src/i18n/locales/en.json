@@ -774,6 +774,7 @@
     "connectApp": "Connect {{name}}",
     "connectNow": "Connect",
     "connected": "Connected",
+    "connectedAs": "Connected as {{account}}",
     "connectedSection": "Connected",
     "connectedToast": "{{name}} connected",
     "custom": {
@@ -845,13 +846,18 @@
     "sheet": {
       "app": "Opening {{name}}'s own page…",
       "cancelled": "Cancelled.",
+      "details": "Details",
       "failed": {
-        "app_link": "The page for {{name}} could not be prepared. Try again.",
+        "app_link": "Praxi could not get the sign-in page for {{name}} from Composio. Open Details for the exact reason, then try again.",
         "app_open": "The page for {{name}} could not be opened.",
+        "app_refused": "Praxi refused to connect {{name}}. Open Details for the reason. If {{name}} was connected before, disconnect it and connect it again.",
         "login_expired": "Composio no longer accepts the saved sign-in, so {{name}} cannot be connected yet. Sign in to Composio again.",
         "login_failed": "The sign-in did not finish. Try again.",
         "login_open": "The sign-in page could not be opened.",
+        "owner_key": "Only the Praxi desktop app on this computer can connect apps, and it is not confirmed as the owner here. Open Praxi on this computer and connect {{name}} from there.",
         "rate_limited": "Composio is busy right now. Wait a minute, then try {{name}} again.",
+        "unavailable": "App connections are not available in this Praxi right now. Open Details for the reason, restart Praxi and try again.",
+        "unknown_app": "Composio does not offer {{name}}, so it cannot be connected. Look for another app in the list.",
         "upstream": "Composio could not be reached or did not answer. Check the connection of the computer the bots run on, then try again."
       },
       "login": "The sign-in page opened in your browser. Finish it there and {{name}} opens next by itself.",
@@ -867,6 +873,14 @@
       "disconnected": "Disconnected",
       "error": "Error",
       "quarantined": "Quarantined"
+    },
+    "test": {
+      "noSamples": "Nothing to show yet (the account may be empty).",
+      "ok": "It works. The app answered.",
+      "okAs": "It works. Connected as {{account}}.",
+      "run": "Test connection",
+      "running": "Testing…",
+      "samples": "Examples from the account"
     },
     "title": "Apps",
     "toolCount": "{{count}} tools",

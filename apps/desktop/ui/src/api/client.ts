@@ -115,6 +115,7 @@ import type {
   Component,
   ComponentId,
   ComposioDisconnect,
+  ComposioTest,
   ComposioStatus,
   McpCatalogEntry,
   McpAuthState,
@@ -1743,6 +1744,16 @@ export class ApiClient {
   }
   composioDisconnect(slug: string): Promise<ComposioDisconnect> {
     return this.request("DELETE", `/composio/apps/${encodeURIComponent(slug)}`);
+  }
+  /** One fixed read-only call that names the account and lists a few items (owner only). */
+  composioTest(slug: string): Promise<ComposioTest> {
+    return this.request("POST", `/composio/apps/${encodeURIComponent(slug)}/test`);
+  }
+  /** Which bots may use the app: `null` = every bot, a list = only those (owner only). */
+  composioSetBots(slug: string, bots: string[] | null): Promise<ComposioApp> {
+    return this.request("PUT", `/composio/apps/${encodeURIComponent(slug)}/bots`, {
+      body: { bots }
+    });
   }
 
   // ---- E-mail accounts -------------------------------------------------

@@ -51,6 +51,18 @@ Clicking **Connect** opens a small progress sheet anchored to the tile:
 - **Already linked (Step 1 of 1):** Praxi opens the app's consent page right
   away.
 
+When the app's page is finished the tile becomes **Connected**, and for Google
+Drive, Gmail, Google Calendar and GitHub Praxi makes one read-only call by
+itself and shows **Connected as `<account>`** (the account name or address the
+app reports). **Manage → Test connection** repeats that call at any time and
+lists up to three examples: file names for Drive, subjects for Gmail, calendar
+names for Calendar. The examples are shown only to you; no bot sees them.
+
+The connect works the same when the bots run on a paired host: the app's page
+opens in the browser of the computer you are sitting at, Composio receives the
+answer, and the host only asks Composio whether the account is active. Nothing
+is copied between computers by hand.
+
 > **Privacy note:** For Composio-backed apps, tool inputs and results pass
 > through Composio's servers. Praxi's permission engine still asks you before
 > actions that change or send data (see
@@ -157,6 +169,10 @@ Inside **Manage** on a Composio row you can:
   re-enables the app's tools without removing your OAuth link.
 - **Reconnect** / **Retry** (when **Sign-in expired** or **Not finished**):
   reopens the consent flow in your browser.
+- **Who can use this app**: all bots, or only the bots you tick. A bot that is
+  not ticked does not get the app's tools at all. Choose **Save** to apply it.
+- **Test connection** (Drive, Gmail, Calendar, GitHub): one read-only call that
+  names the account and shows a few examples.
 - **Disconnect**: asks for confirmation and disconnects the app. If the remote
   side could not be removed automatically, Praxi tells you it was removed
   locally and reminds you to remove it in the Composio dashboard too.
@@ -217,6 +233,20 @@ A few important rules:
   offline, Composio is rate-limiting requests, or your Composio sign-in expired.
   Click **Retry** once you are back online; if sign-in expired, open
   **Advanced → Composio → Sign out of Composio** and link again.
+
+### "The page for an app could not be prepared"
+
+The connect sheet names the reason, and **Details** shows the exact text:
+
+- **Only the Praxi desktop app on this computer can connect apps:** the owner
+  confirmation is missing. Open Praxi on this computer and connect from there.
+- **Composio does not offer this app:** pick another app from the list.
+- **Praxi refused to connect it** (for example the account does not match the
+  one saved before): **Disconnect** the app, then **Connect** again.
+- **Composio is busy / could not be reached:** wait a minute, check the
+  connection of the computer the bots run on, then **Try again**.
+- **Composio no longer accepts the sign-in:** the sheet offers **Sign in to
+  Composio again** and carries on to the app by itself.
 
 ### A local MCP server shows "Error" or "Quarantined"
 

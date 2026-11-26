@@ -43,6 +43,7 @@ import { useMcp } from "../state/useMcp";
 import styles from "./AppsModal.module.css";
 import { AppTile, ComposioCell, GroupChips, SkeletonTiles } from "./AppsGrid";
 import { ConnectSheet } from "./ConnectSheet";
+import { type AppTestState, appsToTestNow, runAppTest } from "../lib/appTest";
 import { type FlowCancel, type FlowState, classifyLinkFailure, runConnectFlow } from "../lib/connectFlow";
 import { ComposioAdvanced } from "./ComposioAdvanced";
 import { MissingComponent, componentFor } from "./MissingComponent";
@@ -51,7 +52,7 @@ import { SIGN_IN_WAIT_MINUTES, composioTileState, directEntries, filterDirect, i
 import { openComposioLink } from "../lib/externalLink";
 import type { McpServer as McpServerT } from "../api/types";
 import own from "./AppsGrid.module.css";
-import { humanLine } from "../lib/humanError";
+import { humanError, humanLine } from "../lib/humanError";
 
 function errorText(e: unknown): string {
   return humanLine(e);
@@ -782,6 +783,42 @@ export function AppsModal({
   // Servers this session created for a sign-in that has not finished: they are tiles with a
   // Cancel, never "Connected", and are removed again when the sign-in is cancelled or expires.
   const [fresh, setFresh] = useState<Record<string, true>>({});
+  // What the connection test of each connected app found ("Connected as <account>").
+  const [tests, setTests] = useState<Record<string, AppTestState>>({});
+  const testing = useRef<Set<string>>(new Set());
+  const seenApps = useRef<typeof c.apps>([]);
+
+  const testApp = (slug: string) => {
+    if (!client || testing.current.has(slug)) {
+      return;
+    }
+    testing.current.add(slug);
+    void runAppTest(
+      {
+        test: (s) => client.composioTest(s),
+        describe: (e) => {
+          const h = humanError(e);
+          return { title: h.title, hint: h.hint, details: h.details };
+        }
+      },
+      slug,
+      (s, state) => setTests((m) => ({ ...m, [s]: state }))
+    ).finally(() => testing.current.delete(slug));
+  };
+
+  // An app that has just finished signing in is tested by itself; a disconnected one forgets its test.
+  useEffect(() => {
+    const now = appsToTestNow(seenApps.current, c.apps, tests);
+    seenApps.current = c.apps;
+    for (const slug of now) {
+      testApp(slug);
+    }
+    setTests((m) => {
+      const keep = Object.keys(m).filter((slug) => c.apps.some((a) => a.slug === slug));
+      return keep.length === Object.keys(m).length ? m : Object.fromEntries(keep.map((k) => [k, m[k]]));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `tests` only gates; the effect follows the app list
+  }, [c.apps]);
 
   const signIn = async (name: string) => {
     if (!client || signing[name]) {
@@ -937,6 +974,10 @@ export function AppsModal({
         configured: () => c.status?.configured === true,
         loginExpired: () => c.status?.login_expired === true,
         classify: classifyLinkFailure,
+        describe: (e) => {
+          const h = humanError(e);
+          return { title: h.title, hint: h.hint, details: h.details };
+        },
         loginStart: () => client.composioLoginStart(),
         loginStatus: () => client.composioLoginStatus(),
         appConnect: (s) => client.composioConnect(s),
@@ -973,8 +1014,19 @@ export function AppsModal({
     flowCancel.current.cancelled = true;
     setFlow(null);
     setLinking(null);
+    // Only an app that was already started has something to undo (the daemon saves it when the
+    // consent link is made); a flow cancelled before that must not ask to disconnect nothing.
+    if (!c.apps.some((a) => a.slug === slug)) {
+      return;
+    }
     void run(slug, async () => {
-      await client?.composioDisconnect(slug);
+      try {
+        await client?.composioDisconnect(slug);
+      } catch (e) {
+        if (!(e instanceof ApiError && e.status === 404)) {
+          throw e;
+        }
+      }
       await c.reloadApps();
     });
   };
@@ -1208,6 +1260,17 @@ export function AppsModal({
                         key={a.slug}
                         app={a}
                         busy={busy === a.slug}
+                        test={tests[a.slug]}
+                        onTest={() => testApp(a.slug)}
+                        onSaveBots={(bots) =>
+                          void run(a.slug, async () => {
+                            const next = await client?.composioSetBots(a.slug, bots);
+                            if (next) {
+                              c.setApps((prev) => upsertApp(prev, next));
+                              toast.show(t("apps.access.savedToast", { name: a.name }), "success");
+                            }
+                          })
+                        }
                         onEnabled={(enabled) =>
                           void run(a.slug, async () => {
                             const next = await client?.composioSetEnabled(a.slug, enabled);

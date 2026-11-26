@@ -1829,6 +1829,8 @@ fn api_routes() -> Router<AppState> {
             "/v1/composio/apps/{slug}/enabled",
             put(c::composio_set_enabled),
         )
+        .route("/v1/composio/apps/{slug}/bots", put(c::composio_set_bots))
+        .route("/v1/composio/apps/{slug}/test", post(c::composio_test))
         .route(
             "/v1/email/accounts",
             get(e::list_email_accounts).post(e::create_email_account),

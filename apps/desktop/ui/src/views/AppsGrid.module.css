@@ -19,3 +19,11 @@
 .need p { margin: var(--space-0); color: var(--color-text); line-height: var(--line-height-normal); }
 .cmd { margin: var(--space-0); padding: var(--space-2); max-width: 100%; overflow-wrap: anywhere; white-space: pre-wrap; border: var(--size-border) solid var(--color-border); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: var(--font-size-xs); color: var(--color-text); }
 .row { display: flex; gap: var(--space-2); }
+
+/* "Test connection" result of a connected app. */
+.testBox { display: flex; flex-direction: column; gap: var(--space-2); }
+.testLine { margin: var(--space-0); font-size: var(--font-size-sm); color: var(--color-text); overflow-wrap: anywhere; }
+.testItems { margin: var(--space-1) var(--space-0) var(--space-0); padding-left: var(--space-5); font-size: var(--font-size-xs); color: var(--color-text-muted); overflow-wrap: anywhere; }
+.testDetails { font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.testDetails summary { cursor: pointer; }
+.testDetails p { margin: var(--space-1) var(--space-0) var(--space-0); overflow-wrap: anywhere; white-space: pre-wrap; }

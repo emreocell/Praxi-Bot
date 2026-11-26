@@ -774,6 +774,7 @@
     "connectApp": "Conectar {{name}}",
     "connectNow": "Conectar",
     "connected": "Conectada",
+    "connectedAs": "Conectado como {{account}}",
     "connectedSection": "Conectadas",
     "connectedToast": "{{name}} conectada",
     "custom": {
@@ -845,13 +846,18 @@
     "sheet": {
       "app": "Abriendo la página propia de {{name}}…",
       "cancelled": "Cancelado.",
+      "details": "Detalles",
       "failed": {
-        "app_link": "No se pudo preparar la página de {{name}}. Inténtalo de nuevo.",
+        "app_link": "Praxi no pudo obtener de Composio la página de acceso de {{name}}. Abre Detalles para ver el motivo exacto y vuelve a intentarlo.",
         "app_open": "No se pudo abrir la página de {{name}}.",
+        "app_refused": "Praxi se negó a conectar {{name}}. Abre Detalles para ver el motivo. Si {{name}} ya estaba conectada, desconéctala y vuelve a conectarla.",
         "login_expired": "Composio ya no acepta el inicio de sesión guardado, así que {{name}} aún no se puede conectar. Inicia sesión en Composio de nuevo.",
         "login_failed": "El inicio de sesión no se completó. Inténtalo de nuevo.",
         "login_open": "No se pudo abrir la página de inicio de sesión.",
+        "owner_key": "Solo la aplicación de escritorio de Praxi de este equipo puede conectar aplicaciones, y aquí no está confirmada como propietaria. Abre Praxi en este equipo y conecta {{name}} desde allí.",
         "rate_limited": "Composio está ocupado ahora mismo. Espera un minuto y vuelve a intentar con {{name}}.",
+        "unavailable": "Las conexiones de aplicaciones no están disponibles ahora mismo en este Praxi. Abre Detalles para ver el motivo, reinicia Praxi y vuelve a intentarlo.",
+        "unknown_app": "Composio no ofrece {{name}}, así que no se puede conectar. Busca otra aplicación en la lista.",
         "upstream": "No se pudo contactar con Composio o no respondió. Revisa la conexión del equipo donde se ejecutan los bots y vuelve a intentarlo."
       },
       "login": "La página de inicio de sesión se abrió en tu navegador. Termínalo allí y {{name}} se abrirá a continuación por sí solo.",
@@ -867,6 +873,14 @@
       "disconnected": "Desconectada",
       "error": "Error",
       "quarantined": "En cuarentena"
+    },
+    "test": {
+      "noSamples": "Todavía no hay nada que mostrar (puede que la cuenta esté vacía).",
+      "ok": "Funciona. La aplicación respondió.",
+      "okAs": "Funciona. Conectado como {{account}}.",
+      "run": "Probar la conexión",
+      "running": "Probando…",
+      "samples": "Ejemplos de la cuenta"
     },
     "title": "Apps",
     "toolCount": "{{count}} herramientas",

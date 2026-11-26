@@ -85,6 +85,17 @@ pub struct ToolkitPage {
     pub next_cursor: Option<String>,
 }
 
+/// What Composio's catalog says about one app slug.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolkitLookup {
+    /// An ordinary app toolkit.
+    Found,
+    /// The slug exists but is not an ordinary app toolkit (never connected).
+    Unsupported,
+    /// The search did not list it.
+    Missing,
+}
+
 /// One tool of a toolkit, as Composio describes it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RemoteTool {
@@ -638,6 +649,36 @@ impl ComposioClient {
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned),
+        })
+    }
+
+    /// Whether Composio's catalog has an app called `slug`, and whether it is
+    /// an ordinary app toolkit.  Reads the raw answer so a toolkit of another
+    /// kind (a control surface) is told apart from one that is simply not in
+    /// the first page of the search.
+    ///
+    /// # Errors
+    /// Transport or API errors.
+    pub async fn lookup_toolkit(&self, slug: &str) -> Result<ToolkitLookup> {
+        let req = self
+            .http
+            .request(Method::GET, self.url(&["toolkits"]))
+            .query(&[("sort_by", "usage"), ("limit", "100"), ("search", slug)]);
+        let v = self.send(req).await?;
+        let found = v
+            .get("items")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|i| {
+                i.get("slug")
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| s.eq_ignore_ascii_case(slug))
+            });
+        Ok(match found {
+            None => ToolkitLookup::Missing,
+            Some(i) if parse_toolkit(i).is_some() => ToolkitLookup::Found,
+            Some(_) => ToolkitLookup::Unsupported,
         })
     }
 

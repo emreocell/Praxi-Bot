@@ -517,6 +517,7 @@ export type ComposioLoginStatus = S["ComposioLoginStatusDto"];
 export type Component = S["ComponentDto"];
 export type ComponentId = S["ComponentId"];
 export type ComposioDisconnect = S["ComposioDisconnectDto"];
+export type ComposioTest = S["ComposioTestDto"];
 
 // ---- E-mail accounts (`/v1/email/*`) ---------------------------------------
 
