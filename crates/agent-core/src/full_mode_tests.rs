@@ -41,6 +41,7 @@ fn real(name: &str, effect: Effect, category: PermissionCategory, output: &str) 
 }
 
 /// How a run starts and what it sees.
+#[allow(clippy::struct_excessive_bools)] // independent scenario switches of a test fixture
 struct Case {
     preset: &'static str,
     policy: Policy,
