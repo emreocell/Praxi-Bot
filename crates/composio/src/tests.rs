@@ -1378,15 +1378,10 @@ async fn the_test_action_refuses_unconnected_unknown_and_unaudited_cases() {
     )
     .await;
     h.rows.1.store(true, std::sync::atomic::Ordering::SeqCst);
+    let before = h.server.received_requests().await.unwrap().len();
     assert!(h.svc.test_app("github").await.is_err());
-    let sent = h
-        .server
-        .received_requests()
-        .await
-        .unwrap()
-        .iter()
-        .any(|r| r.url.path().contains("/tools/execute/"));
-    assert!(!sent, "a failed audit row sends nothing");
+    let after = h.server.received_requests().await.unwrap().len();
+    assert_eq!(before, after, "a failed audit row sends no request at all");
 }
 
 #[tokio::test]
@@ -1423,4 +1418,33 @@ async fn a_bot_list_limits_who_sees_the_app_and_all_bots_restores_it() {
         h.svc.set_bots("slack", None).await,
         Err(ComposioError::NotFound(_))
     ));
+}
+
+#[tokio::test]
+async fn bot_ids_are_stored_in_one_canonical_spelling() {
+    let h = harness().await;
+    connected(&h).await;
+    let tool = h.registry.get("app:github/list_repository_issues").unwrap();
+    let v = h
+        .svc
+        .set_bots(
+            "github",
+            Some(vec![
+                "ABCDEF00-1111-2222-3333-444444444444".into(),
+                "abcdef00111122223333444444444444".into(),
+                "abcdef00-1111-2222-3333-444444444444".into(),
+                "{22222222-2222-2222-2222-222222222222}".into(),
+            ]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        v.bots,
+        Some(vec![
+            "22222222-2222-2222-2222-222222222222".to_owned(),
+            "abcdef00-1111-2222-3333-444444444444".to_owned(),
+        ])
+    );
+    // A bot id as the runtime spells it (lower-case, hyphenated) matches.
+    assert!(tool.visible_to(Some("abcdef00-1111-2222-3333-444444444444")));
 }

@@ -21953,6 +21953,9 @@
       "ComposioBotsInput": {
         "type": "object",
         "description": "Body of `PUT /v1/composio/apps/{slug}/bots`.",
+        "required": [
+          "bots"
+        ],
         "properties": {
           "bots": {
             "type": [
@@ -21962,9 +21965,10 @@
             "items": {
               "type": "string"
             },
-            "description": "The bots that may use the app; `null` = every bot, an empty list = none."
+            "description": "The bots that may use the app; `null` = every bot, an empty list = none.\nThe field must be present: an empty body or a misspelled name is refused\ninstead of silently granting every bot."
           }
-        }
+        },
+        "additionalProperties": false
       },
       "ComposioCatalogDto": {
         "type": "object",

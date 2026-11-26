@@ -191,9 +191,24 @@ pub struct ComposioEnabledInput {
 
 /// Body of `PUT /v1/composio/apps/{slug}/bots`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ComposioBotsInput {
     /// The bots that may use the app; `null` = every bot, an empty list = none.
+    /// The field must be present: an empty body or a misspelled name is refused
+    /// instead of silently granting every bot.
+    #[serde(deserialize_with = "present_or_null")]
+    #[schema(required = true)]
     pub bots: Option<Vec<String>>,
+}
+
+/// Like `Option<T>`, but a missing key is an error (serde's default for a bare
+/// `Option` field would turn it into `None`).
+fn present_or_null<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d)
 }
 
 /// `POST /v1/composio/apps/{slug}/test`: what a one-call read-only test found.

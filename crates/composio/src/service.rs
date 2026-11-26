@@ -986,17 +986,13 @@ impl ComposioService {
                 "there is no quick test for this app yet".into(),
             ));
         };
-        let known = self.0.state.lock().apps.contains_key(slug);
-        if known {
-            self.refresh(slug).await?;
-        }
-        if !known || !self.is_usable(slug) {
+        if !self.0.state.lock().apps.contains_key(slug) {
             return Err(ComposioError::Invalid(
                 "the app is not connected, or it is switched off".into(),
             ));
         }
-        let actions = self.discovered(slug).await?;
-        let account = self.bound_account(slug)?;
+        // The row is written before the first request to Composio: a test that
+        // cannot be recorded is not sent.
         self.0
             .audit
             .record("composio.test", json!({"app": slug, "status": "started"}))
@@ -1005,6 +1001,14 @@ impl ComposioService {
             })?;
         let mut out = ProbeOutcome::default();
         let result = async {
+            self.refresh(slug).await?;
+            if !self.is_usable(slug) {
+                return Err(ComposioError::Invalid(
+                    "the app is not connected, or it is switched off".into(),
+                ));
+            }
+            let actions = self.discovered(slug).await?;
+            let account = self.bound_account(slug)?;
             if let Some(step) = &probe.identity {
                 match self.probe_step(&actions, step, &account).await {
                     Ok(Some(v)) => out.account = find_string(&v, probe.identity_keys),
@@ -1086,7 +1090,13 @@ impl ComposioService {
         {
             return Err(ComposioError::Invalid("not a valid bot id".into()));
         }
-        let bots = bots.map(|mut l| {
+        // Stored in the one spelling `bot_listed` compares with.
+        let bots = bots.map(|l| {
+            let mut l: Vec<String> = l
+                .iter()
+                .filter_map(|b| uuid::Uuid::parse_str(b).ok())
+                .map(|u| u.hyphenated().to_string())
+                .collect();
             l.sort();
             l.dedup();
             l

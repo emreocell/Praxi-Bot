@@ -107,8 +107,6 @@ const DESKTOP_TASKS: &[(&str, &str)] = &[
     ("DELETE", "/v1/composio/apps/x"),
     ("POST", "/v1/composio/apps/x/connect"),
     ("PUT", "/v1/composio/apps/x/enabled"),
-    ("PUT", "/v1/composio/apps/x/bots"),
-    ("POST", "/v1/composio/apps/x/test"),
 ];
 
 fn is_task(list: &[(&str, &str)], method: &str, path: &str) -> bool {
@@ -653,6 +651,38 @@ async fn a_paired_device_cannot_read_or_steer_a_mission_but_the_admin_desktop_ca
         r.t.state.leader().reset_admin_budget();
         let resp = peer_request(&r.t, admin, m.clone(), path, &[], body.clone()).await;
         assert_eq!(resp.status, StatusCode::OK, "{m} {path}: {:?}", resp.json());
+    }
+    r.net.shutdown().await;
+}
+
+/// Opening an app to every bot, and a live test that reads mail subjects and
+/// file names, are owner actions: an unconfirmed desktop on a host is sent to the
+/// confirmation step, the confirmed administrator desktop gets through.
+#[tokio::test]
+async fn the_app_bots_and_test_routes_need_the_confirmed_admin_desktop_on_a_host() {
+    let r = rig().await;
+    let legacy = (r.legacy_key.as_str(), PeerRole::Desktop);
+    let admin = (r.admin_key.as_str(), PeerRole::Desktop);
+    for (method, path, body) in [
+        (
+            Method::PUT,
+            "/v1/composio/apps/github/bots",
+            Some(json!({"bots": null})),
+        ),
+        (Method::POST, "/v1/composio/apps/github/test", None),
+    ] {
+        let resp = peer_request(&r.t, legacy, method.clone(), path, &[], body.clone()).await;
+        assert!(refused(&resp), "{method} {path}: {}", resp.status);
+        assert_eq!(code(&resp), "host_admin_required", "{method} {path}");
+        r.t.state.leader().reset_admin_budget();
+        let resp = peer_request(&r.t, admin, method.clone(), path, &[], body).await;
+        assert_ne!(code(&resp), "host_admin_required", "{method} {path}");
+        assert!(
+            !refused(&resp),
+            "{method} {path}: {} {}",
+            resp.status,
+            code(&resp)
+        );
     }
     r.net.shutdown().await;
 }

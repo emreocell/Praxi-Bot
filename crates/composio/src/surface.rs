@@ -35,14 +35,21 @@ pub(crate) fn toolkit_allowed(slug: &str) -> bool {
         .any(|p| slug.contains(p))
 }
 
-/// The one phrase of ordinary read/write actions that contains `AUTH`
-/// (`GITHUB_GET_THE_AUTHENTICATED_USER`, `..._FOR_THE_AUTHENTICATED_USER`): it
-/// means "the account that is signed in", not an authentication control surface,
-/// and only this exact closing phrase is set aside from the `AUTH` check.
-const SIGNED_IN_USER: &str = "_THE_AUTHENTICATED_USER";
+/// Read-only actions whose slug contains `AUTH` only as "the account that is
+/// signed in" (not an authentication control surface). Exact `(toolkit, slug)`
+/// pairs, vetted one by one: GitHub has many `..._THE_AUTHENTICATED_USER`
+/// actions that change SSH/GPG keys, emails or the account itself, so no suffix
+/// or pattern may be set aside from the `AUTH` check.
+const READ_ONLY_SIGNED_IN: &[(&str, &str)] = &[
+    ("github", "GITHUB_GET_THE_AUTHENTICATED_USER"),
+    (
+        "github",
+        "GITHUB_LIST_ORGANIZATIONS_FOR_THE_AUTHENTICATED_USER",
+    ),
+];
 
 pub(crate) fn action_allowed(toolkit: &str, slug: &str) -> bool {
-    let checked = slug.strip_suffix(SIGNED_IN_USER).unwrap_or(slug);
+    let vetted = READ_ONLY_SIGNED_IN.contains(&(toolkit, slug));
     toolkit_allowed(toolkit)
         && slug.starts_with(&format!("{}_", toolkit.to_ascii_uppercase()))
         && slug
@@ -73,13 +80,7 @@ pub(crate) fn action_allowed(toolkit: &str, slug: &str) -> bool {
             "RUN_",
         ]
         .iter()
-        .any(|p| {
-            if *p == "AUTH" {
-                checked.contains(p)
-            } else {
-                slug.contains(p)
-            }
-        })
+        .any(|p| slug.contains(p) && !(vetted && *p == "AUTH"))
 }
 
 #[cfg(test)]
@@ -116,7 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_exact_signed_in_user_phrase_is_set_aside_from_the_auth_check() {
+    fn only_vetted_read_only_signed_in_actions_are_set_aside_from_the_auth_check() {
         for ok in [
             "GITHUB_GET_THE_AUTHENTICATED_USER",
             "GITHUB_LIST_ORGANIZATIONS_FOR_THE_AUTHENTICATED_USER",
@@ -124,6 +125,14 @@ mod tests {
             assert!(action_allowed("github", ok), "{ok}");
         }
         for denied in [
+            "GITHUB_CREATE_A_PUBLIC_SSH_KEY_FOR_THE_AUTHENTICATED_USER",
+            "GITHUB_DELETE_A_PUBLIC_SSH_KEY_FOR_THE_AUTHENTICATED_USER",
+            "GITHUB_CREATE_A_GPG_KEY_FOR_THE_AUTHENTICATED_USER",
+            "GITHUB_CREATE_A_SSH_SIGNING_KEY_FOR_THE_AUTHENTICATED_USER",
+            "GITHUB_ADD_AN_EMAIL_ADDRESS_FOR_THE_AUTHENTICATED_USER",
+            "GITHUB_DELETE_AN_EMAIL_ADDRESS_FOR_THE_AUTHENTICATED_USER",
+            "GITHUB_UPDATE_THE_AUTHENTICATED_USER",
+            "GITHUB_CREATE_A_REPOSITORY_FOR_THE_AUTHENTICATED_USER",
             "GITHUB_AUTHENTICATE_USER",
             "GITHUB_AUTHENTICATED_USER_TOKEN",
             "GITHUB_AUTH_THE_AUTHENTICATED_USER",
@@ -132,5 +141,10 @@ mod tests {
         ] {
             assert!(!action_allowed("github", denied), "{denied}");
         }
+        // The pair is exact: another toolkit with the same slug shape stays denied.
+        assert!(!action_allowed(
+            "gitlab",
+            "GITLAB_GET_THE_AUTHENTICATED_USER"
+        ));
     }
 }

@@ -475,3 +475,24 @@ async fn the_test_and_bot_routes_return_the_account_and_the_chosen_bots_and_name
     let bad = call(&t, Method::POST, "/v1/composio/apps/Bad%20Slug/test", None).await;
     assert_ne!(bad.status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn the_bots_route_refuses_a_body_without_an_explicit_bots_field() {
+    let t = setup();
+    t.state.set_composio(Arc::new(Fake::default()));
+    let uri = "/v1/composio/apps/github/bots";
+    for body in [
+        json!({}),
+        json!({"bot_ids": ["11111111-1111-1111-1111-111111111111"]}),
+        json!({"bots": null, "extra": 1}),
+        json!({"bots": ["11111111-1111-1111-1111-111111111111"], "bot": []}),
+    ] {
+        let r = call(&t, Method::PUT, uri, Some(body.clone())).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{body}");
+    }
+    // An explicit `null` still means every bot, and `[]` nobody.
+    for body in [json!({"bots": null}), json!({"bots": []})] {
+        let r = call(&t, Method::PUT, uri, Some(body.clone())).await;
+        assert_eq!(r.status, StatusCode::OK, "{body}");
+    }
+}

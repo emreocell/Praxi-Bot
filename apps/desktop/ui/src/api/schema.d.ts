@@ -6244,8 +6244,12 @@ export interface components {
         };
         /** @description Body of `PUT /v1/composio/apps/{slug}/bots`. */
         ComposioBotsInput: {
-            /** @description The bots that may use the app; `null` = every bot, an empty list = none. */
-            bots?: string[] | null;
+            /**
+             * @description The bots that may use the app; `null` = every bot, an empty list = none.
+             *     The field must be present: an empty body or a misspelled name is refused
+             *     instead of silently granting every bot.
+             */
+            bots: string[] | null;
         };
         /** @description `GET /v1/composio/toolkits`. */
         ComposioCatalogDto: {
