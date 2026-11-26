@@ -73,7 +73,7 @@ fn col_index(letters: &str) -> Option<u32> {
     Some(n - 1)
 }
 
-fn col_letters(mut idx: u32) -> String {
+pub(crate) fn col_letters(mut idx: u32) -> String {
     let mut s = Vec::new();
     loop {
         s.push(b'A' + u8::try_from(idx % 26).unwrap_or(0));
@@ -87,7 +87,7 @@ fn col_letters(mut idx: u32) -> String {
 }
 
 /// `B12` -> (row 11, col 1), zero-based.
-fn parse_cell(s: &str) -> Option<(u32, u32)> {
+pub(crate) fn parse_cell(s: &str) -> Option<(u32, u32)> {
     let s = s.trim().replace('$', "");
     let split = s.find(|c: char| c.is_ascii_digit())?;
     let (letters, digits) = s.split_at(split);

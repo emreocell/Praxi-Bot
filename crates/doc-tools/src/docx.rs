@@ -448,10 +448,18 @@ fn para_xml(style: Option<&str>, text: &str, bold: bool) -> String {
     format!("<w:p>{ppr}{}</w:p>", run_xml(text, bold))
 }
 
-fn table_xml(rows: &[Vec<String>], header: bool) -> String {
+/// Table borders written into a table itself, for a document without a `TableGrid` style.
+const INLINE_BORDERS: &str = "<w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/></w:tblBorders>";
+
+fn table_xml(rows: &[Vec<String>], header: bool, table_grid: bool) -> String {
     let width = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
-    let mut out = String::from(
-        "<w:tbl><w:tblPr><w:tblStyle w:val=\"TableGrid\"/><w:tblW w:w=\"0\" w:type=\"auto\"/></w:tblPr><w:tblGrid>",
+    let (style, borders) = if table_grid {
+        ("<w:tblStyle w:val=\"TableGrid\"/>", "")
+    } else {
+        ("", INLINE_BORDERS)
+    };
+    let mut out = format!(
+        "<w:tbl><w:tblPr>{style}<w:tblW w:w=\"0\" w:type=\"auto\"/>{borders}</w:tblPr><w:tblGrid>"
     );
     for _ in 0..width {
         out.push_str("<w:gridCol w:w=\"2000\"/>");
@@ -493,13 +501,25 @@ fn styles_xml() -> String {
     s
 }
 
-pub(crate) fn build_docx(blocks: &[WBlock]) -> Result<Vec<u8>, ToolError> {
+/// Which styles the document the blocks go into defines (a new document defines them all).
+#[derive(Clone, Copy)]
+pub(crate) struct StyleSupport {
+    pub headings: bool,
+    pub table_grid: bool,
+}
+
+/// WordprocessingML for `blocks`.
+pub(crate) fn blocks_xml(blocks: &[WBlock], styles: StyleSupport) -> Result<String, ToolError> {
     let mut body = String::new();
     for b in blocks {
         match b {
             WBlock::Heading { text, level } => {
                 let l = (*level).clamp(1, 6);
-                body.push_str(&para_xml(Some(&format!("Heading{l}")), text, false));
+                if styles.headings {
+                    body.push_str(&para_xml(Some(&format!("Heading{l}")), text, false));
+                } else {
+                    body.push_str(&para_xml(None, text, true));
+                }
             }
             WBlock::Paragraph { text, bold } => body.push_str(&para_xml(None, text, *bold)),
             WBlock::Bullets { items } => {
@@ -511,12 +531,23 @@ pub(crate) fn build_docx(blocks: &[WBlock]) -> Result<Vec<u8>, ToolError> {
                 if rows.is_empty() {
                     return Err(invalid("table needs at least one row"));
                 }
-                body.push_str(&table_xml(rows, *header));
+                body.push_str(&table_xml(rows, *header, styles.table_grid));
                 // Word requires a paragraph between adjacent tables / after the last table.
                 body.push_str("<w:p/>");
             }
         }
     }
+    Ok(body)
+}
+
+pub(crate) fn build_docx(blocks: &[WBlock]) -> Result<Vec<u8>, ToolError> {
+    let body = blocks_xml(
+        blocks,
+        StyleSupport {
+            headings: true,
+            table_grid: true,
+        },
+    )?;
     let document = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>{body}<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>"
     );

@@ -109,6 +109,46 @@ pub(crate) fn write_file(
     std::fs::write(p, bytes).map_err(|e| exec(format!("cannot write {path}: {e}")))
 }
 
+/// Replace the existing file `path` with `bytes`: same checks as [`write_file`] with
+/// `overwrite`, but the bytes go to a sibling temp file that is renamed over the original
+/// (keeping its permissions), so an interrupted write never leaves a half-written document.
+pub(crate) fn replace_file(
+    cfg: &DocToolsConfig,
+    path: &str,
+    bytes: &[u8],
+) -> Result<(), ToolError> {
+    use std::io::Write as _;
+    if bytes.len() > cfg.max_output_bytes {
+        return Err(exec(format!(
+            "output would be {} bytes, over the {} byte limit",
+            bytes.len(),
+            cfg.max_output_bytes
+        )));
+    }
+    if let Some(guard) = &cfg.write_guard {
+        guard.check(path).map_err(exec)?;
+    }
+    let p = Path::new(path);
+    let meta = std::fs::metadata(p).map_err(|e| exec(format!("cannot stat {path}: {e}")))?;
+    if !meta.is_file() {
+        return Err(exec(format!("{path} is not a file")));
+    }
+    let dir = p
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)
+        .map_err(|e| exec(format!("cannot write next to {path}: {e}")))?;
+    tmp.write_all(bytes)
+        .and_then(|()| tmp.as_file().sync_all())
+        .map_err(|e| exec(format!("cannot write {path}: {e}")))?;
+    std::fs::set_permissions(tmp.path(), meta.permissions())
+        .map_err(|e| exec(format!("cannot write {path}: {e}")))?;
+    tmp.persist(p)
+        .map_err(|e| exec(format!("cannot replace {path}: {}", e.error)))?;
+    Ok(())
+}
+
 /// Truncate to at most `max` characters, adding a marker when cut.
 pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
