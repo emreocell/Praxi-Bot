@@ -179,6 +179,19 @@ fn take_matching_card(
     }
 }
 
+/// The run was cut off in the middle of a CLI-model session: what its tools did is unknown, so
+/// it cannot be continued (nor replayed).
+pub(crate) fn cli_session_interrupted(history: &[RunStep]) -> bool {
+    history.last().is_some_and(|s| {
+        s.name == STEP_MODEL
+            && status_of(s) == Some(StepStatus::Interrupted)
+            && (s.input["cli_session"] == true
+                || s.input["model"]
+                    .as_str()
+                    .is_some_and(|m| m.starts_with("cli:")))
+    })
+}
+
 fn call_key(name: &str, args: &str) -> (String, Value) {
     let v = serde_json::from_str(args).unwrap_or_else(|_| Value::String(args.to_owned()));
     (name.to_owned(), v)
@@ -433,14 +446,7 @@ impl TurnExecutor {
         let ctx = self.sh.ctx(run)?;
         // A session can have performed side effects before its model step was
         // interrupted. Replaying the prompt would replay those effects.
-        if history.last().is_some_and(|s| {
-            s.name == STEP_MODEL
-                && status_of(s) == Some(StepStatus::Interrupted)
-                && (s.input["cli_session"] == true
-                    || s.input["model"]
-                        .as_str()
-                        .is_some_and(|m| m.starts_with("cli:")))
-        }) {
+        if cli_session_interrupted(history) {
             return Err(xe(
                 "CLI session was interrupted; its tool outcomes are unknown. Start a new turn.",
             ));
@@ -811,7 +817,7 @@ impl TurnExecutor {
                 && *repeats >= g.cycle_stop
             {
                 return Err(format!(
-                    "loop detected: the calls {} were repeated {repeats} times in a row and                      their results did not change",
+                    "loop detected: the calls {} were repeated {repeats} times in a row and their results did not change",
                     names.join(" -> ")
                 ));
             }

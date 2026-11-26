@@ -330,7 +330,14 @@ impl Runtime {
         let Some(token) = tokens.get(&run_id) else {
             return false;
         };
-        self.pausing.lock().insert(run_id);
+        // A run that was cancelled and is not already pausing was stopped on
+        // purpose (`cancel` clears the pause request): it stays `Cancelled`.
+        let mut pausing = self.pausing.lock();
+        if token.is_cancelled() && !pausing.contains(&run_id) {
+            return false;
+        }
+        pausing.insert(run_id);
+        drop(pausing);
         if interrupt {
             token.cancel();
         }
@@ -1136,6 +1143,25 @@ mod tests {
         wait_for_intent(&st, run).await;
         assert!(rt.request_pause(run, false));
         rt.cancel(run).unwrap();
+        assert_eq!(handle.await.unwrap().unwrap(), RunState::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn a_pause_request_after_a_cancel_does_not_turn_the_stop_into_a_pause() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, u, b) = setup(dir.path());
+        let ex = Arc::new(Fake::new(vec![spec("a", false)]).blocking("a", Block::Pending));
+        let rt = Arc::new(Runtime::new(st.clone(), ex));
+        let run = rt.create_run(u, b, None, "turn").unwrap();
+        let handle = tokio::spawn({
+            let rt = rt.clone();
+            async move { rt.start(run).await }
+        });
+        wait_for_intent(&st, run).await;
+        // Stop lands first; a shutdown then asks the same live run to pause.
+        rt.cancel(run).unwrap();
+        assert!(!rt.request_pause(run, false));
+        assert!(!rt.request_pause(run, true));
         assert_eq!(handle.await.unwrap().unwrap(), RunState::Cancelled);
     }
 

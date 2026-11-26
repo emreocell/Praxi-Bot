@@ -836,7 +836,25 @@ impl AppState {
         for channel in self.0.channels.lock().iter() {
             channel.start();
         }
+        self.auto_resume_interrupted_runs();
         Ok(())
+    }
+
+    /// Continue the runs a restart interrupted (Full-level bots only, bounded
+    /// per run). Only a node that drives runs gets here: a standby node or a
+    /// client never resumes anything, and the stale takeover of the previous
+    /// process has been dealt with by now.
+    fn auto_resume_interrupted_runs(&self) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let agent = self.0.agent.clone();
+        runtime.spawn(async move {
+            let resumed = agent.auto_resume_after_restart().await;
+            if !resumed.is_empty() {
+                support_logs::tracing::info!(target: "praxi_support", phase = "runs_auto_resumed", count = resumed.len());
+            }
+        });
     }
 
     pub(crate) async fn stop_components(&self) {

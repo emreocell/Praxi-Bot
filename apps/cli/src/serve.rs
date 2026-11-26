@@ -1539,18 +1539,6 @@ pub fn serve(
         let addr = listener.local_addr()?;
         step("port bound");
         step("listening");
-        // Runs the restart interrupted continue by themselves when their bot is at
-        // the Full level (bounded per run); the rest stay paused with a reason.
-        // Safe mode gives the model no tools, so nothing is continued there.
-        if !safe_mode {
-            let resuming = agent.clone();
-            tokio::spawn(async move {
-                let resumed = resuming.auto_resume_after_restart().await;
-                if !resumed.is_empty() {
-                    support_logs::tracing::info!(target: "praxi_support", phase = "runs_auto_resumed", count = resumed.len());
-                }
-            });
-        }
         if json {
             println!(
                 "{}",
@@ -1565,7 +1553,7 @@ pub fn serve(
             println!("token file: <data dir>/api-token");
             if !recovered.is_empty() {
                 println!(
-                    "{} interrupted run(s) were paused; Full-level bots continue by themselves,                      resume the others via POST /v1/runs/{{id}}/resume",
+                    "{} interrupted run(s) were paused; Full-level bots continue by themselves, resume the others via POST /v1/runs/{{id}}/resume",
                     recovered.len()
                 );
             }

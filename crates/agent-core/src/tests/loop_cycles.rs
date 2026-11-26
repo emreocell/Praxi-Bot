@@ -254,5 +254,8 @@ async fn identical_untrusted_pages_in_fresh_frames_are_still_a_cycle() {
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
     assert!(lp.stopped_by_guard(run).unwrap());
     let ran = clicker.count.load(Ordering::SeqCst) + snapper.count.load(Ordering::SeqCst);
-    assert!(ran < 16, "the framed cycle must stop early, {ran} calls ran");
+    assert!(
+        ran < 16,
+        "the framed cycle must stop early, {ran} calls ran"
+    );
 }

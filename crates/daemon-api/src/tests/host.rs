@@ -1364,3 +1364,92 @@ async fn activate_while_verifying_needs_the_epoch_check_and_force() {
     net.shutdown().await;
     other_net.shutdown().await;
 }
+
+/// A paused run a restart interrupted, of a Full-level bot.
+async fn restart_interrupted_full_run(t: &T) -> protocol::RunId {
+    let r = call(
+        t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({ "profile_toml": format!("{PROFILE}\n[permissions]\npreset = \"full\"\n") })),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let bot = r.json()["id"].as_str().unwrap().to_owned();
+    let chat = call(t, Method::POST, "/v1/chats", Some(json!({ "bot_id": bot }))).await;
+    assert_eq!(chat.status, StatusCode::CREATED);
+    let run = protocol::RunId::new();
+    t.state
+        .storage()
+        .insert_run(&storage::Run {
+            id: run,
+            user_id: t.state.user_id(),
+            bot_id: protocol::BotId(bot.parse().unwrap()),
+            chat_id: Some(protocol::ChatId(
+                chat.json()["id"].as_str().unwrap().parse().unwrap(),
+            )),
+            parent_run_id: None,
+            kind: "turn".into(),
+            spec: None,
+            state: "paused".into(),
+            created_at_ms: storage::now_ms(),
+            updated_at_ms: storage::now_ms(),
+            error: None,
+            computer_target: None,
+            computer_node: None,
+            computer_node_name: None,
+            paused_at_ms: Some(storage::now_ms()),
+            pause_reason: Some(task_runtime::RESTART_PAUSE_REASON.into()),
+        })
+        .unwrap();
+    run
+}
+
+fn auto_resume_attempts(t: &T, run: protocol::RunId) -> usize {
+    t.state
+        .storage()
+        .list_audit_for_run(t.state.user_id(), run)
+        .unwrap()
+        .iter()
+        .filter(|a| a.action == "run.auto_resumed")
+        .count()
+}
+
+#[tokio::test]
+async fn a_standby_node_does_not_resume_interrupted_runs_until_it_becomes_the_leader() {
+    let t = setup_with(|data| {
+        HostConfig {
+            state: HostState::Standby,
+            ..HostConfig::default()
+        }
+        .save(data)
+        .unwrap();
+    });
+    let run = restart_interrupted_full_run(&t).await;
+    t.state.start_leader_components().unwrap();
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        auto_resume_attempts(&t, run),
+        0,
+        "a standby node drives nothing"
+    );
+    assert_eq!(
+        t.state.storage().get_run(run).unwrap().unwrap().state,
+        "paused"
+    );
+    // Taking over as the leader starts the components, and with them the resume.
+    t.state.leader().activate(false).await.unwrap();
+    let mut attempts = 0;
+    for _ in 0..200 {
+        attempts = auto_resume_attempts(&t, run);
+        if attempts > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(attempts, 1, "the leader continues the interrupted run once");
+    t.state.stop_components().await;
+}
