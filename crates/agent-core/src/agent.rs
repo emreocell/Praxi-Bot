@@ -55,6 +55,10 @@ pub(crate) enum Start {
     Resume,
 }
 
+/// Audit action written for each automatic resume after a restart; its count
+/// per run bounds [`AgentLoop::auto_resume_after_restart`].
+const AUTO_RESUMED_ACTION: &str = "run.auto_resumed";
+
 /// Runs bot turns: model -> tool calls -> permission -> execute -> repeat.
 ///
 /// Cheap to clone (shared handles).  Spawning methods must be called inside a
@@ -2613,8 +2617,10 @@ impl AgentLoop {
     }
 
     /// Startup recovery: every run left `Running` **or** `WaitingApproval` gets
-    /// its unfinished steps marked `Interrupted` and becomes `Paused`;
-    /// dangling approvals expire.  Nothing is replayed or resumed.
+    /// its unfinished steps marked `Interrupted` and becomes `Paused` with the
+    /// pause reason [`task_runtime::RESTART_PAUSE_REASON`]; dangling approvals
+    /// expire.  Nothing is replayed or resumed (the daemon also calls this while
+    /// it shuts down); see [`Self::auto_resume_after_restart`] for the resume.
     ///
     /// # Errors
     /// Fails on storage errors.
@@ -2633,6 +2639,7 @@ impl AgentLoop {
                 }
             }
             st.update_run_state(run.id, RunState::Paused.as_str(), None)?;
+            st.set_run_pause_reason(run.id, Some(task_runtime::RESTART_PAUSE_REASON))?;
             st.append_audit(
                 run.user_id,
                 Some(run.id),
@@ -2672,6 +2679,91 @@ impl AgentLoop {
             }
         }
         Ok(())
+    }
+
+    /// After a daemon restart, continue the runs the restart interrupted
+    /// (paused with [`task_runtime::RESTART_PAUSE_REASON`], by a graceful
+    /// shutdown or found `Running` after a crash) when their bot is at the Full
+    /// level, at most `LoopConfig::max_auto_resumes` times per run (counted in
+    /// the audit log, so a run that keeps crashing the daemon stops being
+    /// resumed). Every other run stays paused and keeps its reason for the
+    /// owner to resume.
+    ///
+    /// Call it once, after the daemon is up. It never runs while the loop is
+    /// shutting down, and it is separate from [`Self::recover`] on purpose:
+    /// recovery also runs during shutdown, where resuming would undo the pause.
+    /// Subagent runs are left to their parent. Returns the resumed run ids.
+    pub async fn auto_resume_after_restart(&self) -> Vec<RunId> {
+        let limit = self.sh.cfg.max_auto_resumes;
+        let mut resumed = Vec::new();
+        if limit == 0 || self.sh.shutting_down.load(Ordering::SeqCst) {
+            return resumed;
+        }
+        let Ok(paused) = self
+            .sh
+            .storage
+            .list_paused_runs_with_reason(task_runtime::RESTART_PAUSE_REASON)
+        else {
+            return resumed;
+        };
+        for run in paused {
+            if run.parent_run_id.is_some() {
+                continue;
+            }
+            let full = self
+                .sh
+                .profile_for(run.bot_id)
+                .is_ok_and(|p| p.permissions.mode() == permission_engine::AutonomyMode::Full);
+            if !full {
+                continue;
+            }
+            let done = self
+                .sh
+                .storage
+                .list_audit_for_run(run.user_id, run.id)
+                .map_or(0, |rows| {
+                    rows.iter()
+                        .filter(|r| r.action == AUTO_RESUMED_ACTION)
+                        .count()
+                });
+            let done = u32::try_from(done).unwrap_or(u32::MAX);
+            if done >= limit {
+                let _ = self
+                    .sh
+                    .storage
+                    .set_run_pause_reason(run.id, Some(task_runtime::RESTART_LIMIT_PAUSE_REASON));
+                let _ = self.sh.storage.append_audit(
+                    run.user_id,
+                    Some(run.id),
+                    "system",
+                    "run.auto_resume_limit",
+                    &serde_json::json!({ "attempts": done }),
+                );
+                continue;
+            }
+            for attempt in 0..5 {
+                match self.resume(run.id) {
+                    Ok(()) => {
+                        let _ = self.sh.storage.append_audit(
+                            run.user_id,
+                            Some(run.id),
+                            "system",
+                            AUTO_RESUMED_ACTION,
+                            &serde_json::json!({ "attempt": done + 1, "of": limit }),
+                        );
+                        resumed.push(run.id);
+                        break;
+                    }
+                    Err(LoopError::StillFinishing(_)) if attempt < 4 => {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    // Not configured yet, chat busy, shutting down...: it stays
+                    // paused with its reason and the owner can resume it.
+                    Err(_) => break,
+                }
+            }
+        }
+        resumed
     }
 
     /// Resume any runs paused with `waiting_for_pc` whose target PC desktop is
@@ -2908,6 +3000,14 @@ impl AgentLoop {
             }
             self.expire_approvals(run);
             if let Ok(Some(r)) = self.sh.storage.get_run(run) {
+                // Paused by the restart, not by the owner: the next start may
+                // continue it (a reason set by something else is kept).
+                if r.pause_reason.is_none() {
+                    let _ = self
+                        .sh
+                        .storage
+                        .set_run_pause_reason(run, Some(task_runtime::RESTART_PAUSE_REASON));
+                }
                 let _ = self.sh.storage.append_audit(
                     r.user_id,
                     Some(run),

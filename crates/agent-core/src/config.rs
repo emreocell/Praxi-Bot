@@ -339,6 +339,9 @@ impl JournalSlot {
 /// Default total wait of a model step for a provider that keeps failing transiently (10 minutes).
 pub const DEFAULT_TRANSIENT_OUTAGE_BUDGET: Duration = Duration::from_secs(10 * 60);
 
+/// Default number of automatic resumes of one restart-interrupted run.
+pub const DEFAULT_MAX_AUTO_RESUMES: u32 = 3;
+
 /// Default max time a run waits for an offline PC node before failing (24 hours).
 pub const DEFAULT_WAIT_FOR_PC_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -361,6 +364,11 @@ pub struct LoopConfig {
     /// and a provider's `Retry-After` counts toward this budget only. `ZERO`
     /// fails the step as soon as the per-call retries are used up.
     pub transient_outage_budget: Duration,
+    /// How often one run interrupted by a daemon restart is resumed automatically
+    /// (Full-level bots only, see `AgentLoop::auto_resume_after_restart`); `0`
+    /// turns the automatic resume off. A run that still does not finish stays
+    /// paused for the owner.
+    pub max_auto_resumes: u32,
     /// Prices keyed by the full model reference (`provider/model`).
     pub prices: HashMap<String, ModelPrice>,
     /// Tools with `Effect::Read` skip an `Ask` that comes from the policy level
@@ -435,6 +443,7 @@ impl Default for LoopConfig {
                 max_backoff_ms: 8_000,
             },
             transient_outage_budget: DEFAULT_TRANSIENT_OUTAGE_BUDGET,
+            max_auto_resumes: DEFAULT_MAX_AUTO_RESUMES,
             prices: HashMap::new(),
             read_tools_skip_ask: true,
             max_tokens: None,

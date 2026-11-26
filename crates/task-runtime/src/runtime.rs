@@ -58,6 +58,14 @@ impl Drop for TokenGuard<'_> {
     }
 }
 
+/// `pause_reason` of a run a daemon restart (or crash) left `Paused`: the run
+/// was interrupted, not stopped by the user, and may be resumed automatically.
+pub const RESTART_PAUSE_REASON: &str = "daemon_restart";
+
+/// `pause_reason` of a restart-interrupted run that was resumed automatically
+/// as often as allowed and still did not finish: it now waits for the owner.
+pub const RESTART_LIMIT_PAUSE_REASON: &str = "restart_resume_limit";
+
 /// Durable run runtime.  Storage calls are synchronous and short; they run
 /// inline on the async task.
 pub struct Runtime {
@@ -359,7 +367,10 @@ impl Runtime {
     }
 
     /// Startup recovery: every run left `Running` gets its un-finished steps
-    /// marked `Interrupted` and moves to `Paused`.  Nothing is replayed.
+    /// marked `Interrupted` and moves to `Paused` with the pause reason
+    /// [`RESTART_PAUSE_REASON`].  Nothing is replayed or resumed here (this
+    /// also runs while the daemon shuts down); the owner of the runtime
+    /// decides which of these runs may continue by themselves.
     /// Returns the recovered run ids.
     ///
     /// # Errors
@@ -376,6 +387,8 @@ impl Runtime {
                 StepStatus::Interrupted.as_str(),
             )?;
             self.transition(run.id, RunState::Paused, None)?;
+            self.storage
+                .set_run_pause_reason(run.id, Some(RESTART_PAUSE_REASON))?;
             self.storage.append_audit(
                 run.user_id,
                 Some(run.id),
@@ -843,6 +856,11 @@ mod tests {
         let rt = Runtime::new(st.clone(), ex.clone());
         assert_eq!(rt.recover().unwrap(), vec![run]);
         assert_eq!(rt.state(run).unwrap(), RunState::Paused);
+        assert_eq!(
+            st.get_run(run).unwrap().unwrap().pause_reason.as_deref(),
+            Some(RESTART_PAUSE_REASON),
+            "a recovered run says why it is paused"
+        );
         assert_eq!(
             statuses(&st, run),
             vec![("send_mail".into(), "interrupted".into(), 1)]

@@ -2,6 +2,7 @@
 
 #![allow(clippy::assert_is_empty)]
 
+mod auto_resume;
 mod c225;
 mod c382;
 mod c812;
