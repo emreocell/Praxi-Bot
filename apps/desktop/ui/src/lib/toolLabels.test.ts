@@ -89,6 +89,8 @@ test("writing, scripting and typing tools are not worded as reads or generic use
   // The pointer tools have their own wording, not "looked at a page".
   assert.equal(describeTool("browser_hover", {}).key, "chat.step.browser_hover");
   assert.equal(describeTool("browser_select_text", {}).key, "chat.step.browser_select_text");
+  assert.equal(describeTool("browser_pointer", {}).key, "chat.step.browser_pointer");
+  assert.equal(describeTool("browser_attach", {}).key, "chat.step.browser_attach");
   assert.equal(describeTool("browser_dismiss_consent", {}).key, "chat.step.browser_dismiss_consent");
   assert.notEqual(describeTool("skill_write", {}).key, describeTool("skill_read", {}).key);
   assert.notEqual(describeTool("memory_save", {}).key, describeTool("memory_search", {}).key);

@@ -2184,6 +2184,11 @@
         "failed": "No terminó los pasos en el navegador",
         "running": "Realizando varios pasos en el navegador"
       },
+      "browser_attach": {
+        "done": "Chose which browser to use",
+        "failed": "Couldn't choose which browser to use",
+        "running": "Choosing which browser to use"
+      },
       "browser_click": {
         "done": "Hizo clic en una página",
         "failed": "No pudo hacer clic en la página",
@@ -2218,6 +2223,11 @@
         "done": "Abrió una página",
         "failed": "No pudo abrir la página",
         "running": "Abriendo una página"
+      },
+      "browser_pointer": {
+        "done": "Used the pointer on a page",
+        "failed": "Couldn't use the pointer on a page",
+        "running": "Using the pointer on a page"
       },
       "browser_press": {
         "done": "Pulsó una tecla en el navegador",

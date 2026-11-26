@@ -139,7 +139,7 @@ wildcards. The built-in tool groups:
 | --- | --- |
 | Files | `fs_read`, `fs_list`, `fs_search`, `fs_write`, `fs_edit`, `fs_move`, `fs_delete`, `checkpoint_list`, `checkpoint_restore` |
 | Shell | `shell_run` |
-| Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_tabs`, `browser_screenshot`, `browser_eval` |
+| Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_tabs`, `browser_screenshot`, `browser_pointer`, `browser_attach`, `browser_eval` |
 | Web (read-only, no browser) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata` (see [Web tools](web.md)) |
 | Schedules (General preset only) | `schedule_list`, `schedule_create`, `schedule_update`, `schedule_pause`, `schedule_resume`, `schedule_delete` (see [Scheduled tasks](scheduled-tasks.md)) |
 | Desktop (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
@@ -158,6 +158,26 @@ live view and so that menus that only open while the pointer is over them can op
 - `browser_select_text` marks a sentence, a word (double click) or a paragraph (triple click) with the mouse (input-like, asks like `browser_click`, and is only allowed on the page you approved it for).
 - `browser_scroll` can go by screens (`pages`), to the top or bottom (`to`), or bring an element into view (`ref` with `into_view`), and says where on the page you are now. A longer scroll is made of small steps with short pauses.
 - Clicks glide the pointer to the element and pause briefly before and while pressing; typing into a field is still set in one step on the approved field (so a page cannot steal what is typed), after a short pause.
+
+### When there is nothing to click by name
+
+Most controls are clicked by the reference the page snapshot gives them (`browser_click`, `browser_fill`). Some have none: a checkbox inside another site's frame (an "Are you human?" box), a canvas, a toggle drawn without a role. For those the assistant takes a screenshot, picks a point and acts there:
+
+- `browser_screenshot` saves the picture, says its size and lists the frames and canvases on screen with their boxes. A model that can see images is shown the picture itself for the next step (one picture at a time, only that step; a text-only model works from the description and the page text).
+- `browser_pointer` clicks, double-clicks, right-clicks, moves, drags, scrolls the wheel, types into the focused field or presses a key, at a point of that picture. It asks like `browser_click` and goes through the same checks: it refuses to type into a password, one-time-code or card field, and the result names what the browser found under the point and ends with a fresh screenshot. A stored secret is still typed only with `browser_fill`.
+- `desktop_click` and `desktop_drag` take screen points for the desktop in the same way (screenshot with `desktop_get_state`, then points inside the observed window).
+
+No CAPTCHA is solved. A single "I'm not a robot" checkbox may be clicked like any checkbox, at most twice; an image, tile, slider or press-and-hold puzzle goes to you (`browser_handover`), and a run that you are not there for is told to report the item as blocked and move on instead of retrying.
+
+### When a step fails
+
+A failed click or fill keeps the page: the error is followed by what the browser shows now (the controls with their values, a screenshot) and by the ways to carry on without a reload. The assistant is told not to open the same address again (that empties the form) and to repair the one step in place; the same step failing three times in a row makes it stop and tell you. `browser_open` with `reload: true` is still there for a page that is really broken.
+
+### Using the browser you already have open
+
+Tell the assistant "use this browser" and it calls `browser_attach` instead of starting a browser of its own. It connects to a Chrome or Edge on **this computer** that was started with remote debugging (`chrome --remote-debugging-port=9222`, or switch remote debugging on in `chrome://inspect`) and drives the tab you are looking at. Each attach asks you to confirm, because that browser holds your signed-in sessions; what it shows counts as your private data for the rest of the run, so the safety rules for private data apply. A debugging port on another machine is never connected to. While attached, every browser result says that it came from your own browser. `browser_attach` with `detach: true` goes back to the assistant's own browser; your browser keeps running either way.
+
+If the page reader (see Settings > Safety) cannot summarise a heavy page, the assistant gets the page's controls and addresses instead and carries on in the interactive browser. It no longer stops to ask you. A `web_extract` that a site refuses (LinkedIn answers scripts with an error, or only a login wall) is followed by the same advice: open the address with `browser_open`.
 
 The setting is `human_like` and has three values: `off` (instant, no pauses), `auto` (the default: natural movement only while somebody can watch, that is a visible browser window or an open live view) and `high` (slower and more deliberate, always, for demos and recordings). Set it in `host.toml` (`[browser]` `human_like = "auto"`) or with `BOT_BROWSER_HUMAN_LIKE`; the environment wins.
 This is for a watchable, demo-quality feel. It does not hide that the browser is automated and is not a way around bot detection.

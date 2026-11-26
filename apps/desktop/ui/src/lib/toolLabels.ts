@@ -126,6 +126,8 @@ const TABLE: Record<string, Entry> = {
   browser_dismiss_consent: { id: "browser_dismiss_consent", icon: "globe" },
   browser_hover: { id: "browser_hover", icon: "globe" },
   browser_select_text: { id: "browser_select_text", icon: "globe" },
+  browser_pointer: { id: "browser_pointer", icon: "globe" },
+  browser_attach: { id: "browser_attach", icon: "globe" },
   browser_back: { id: "browser_view", icon: "globe" },
   browser_tabs: { id: "browser_view", icon: "globe" },
   browser_wait: { id: "browser_view", icon: "globe" },

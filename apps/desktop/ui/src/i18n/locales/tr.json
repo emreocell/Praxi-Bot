@@ -2184,6 +2184,11 @@
         "failed": "Tarayıcıdaki adımları tamamlamadı",
         "running": "Tarayıcıda birkaç adım yapıyor"
       },
+      "browser_attach": {
+        "done": "Kullanılacak tarayıcı seçildi",
+        "failed": "Kullanılacak tarayıcı seçilemedi",
+        "running": "Kullanılacak tarayıcı seçiliyor"
+      },
       "browser_click": {
         "done": "Sayfada tıklandı",
         "failed": "Sayfada tıklanmadı",
@@ -2218,6 +2223,11 @@
         "done": "Sayfa açıldı",
         "failed": "Sayfa açılmadı",
         "running": "Sayfa açılıyor"
+      },
+      "browser_pointer": {
+        "done": "Sayfada işaretçiyle işlem yapıldı",
+        "failed": "Sayfada işaretçiyle işlem yapılamadı",
+        "running": "Sayfada işaretçiyle işlem yapılıyor"
       },
       "browser_press": {
         "done": "Tarayıcıda tuşa basıldı",

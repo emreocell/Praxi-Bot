@@ -134,7 +134,7 @@ Araç adları yerleşik adlardır, örneğin `fs_read`, `fs_write`, `shell_run`,
 | --- | --- |
 | Dosyalar | `fs_read`, `fs_list`, `fs_search`, `fs_write`, `fs_edit`, `fs_move`, `fs_delete`, `checkpoint_list`, `checkpoint_restore` |
 | Kabuk | `shell_run` |
-| Tarayıcı | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_tabs`, `browser_screenshot`, `browser_eval` |
+| Tarayıcı | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_tabs`, `browser_screenshot`, `browser_pointer`, `browser_attach`, `browser_eval` |
 | Web (salt okunur, tarayıcısız) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata` (bkz. [Web araçları](web.md)) |
 | Zamanlamalar (yalnızca Genel hazır ayar) | `schedule_list`, `schedule_create`, `schedule_update`, `schedule_pause`, `schedule_resume`, `schedule_delete` (bkz. [Zamanlanmış görevler](scheduled-tasks.md)) |
 | Masaüstü (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
@@ -164,6 +164,26 @@ izleyebilirsin ve yalnızca imleç üzerindeyken açılan menüler açılabilir:
 - Tıklamalarda imleç öğeye süzülür ve basmadan önce ve basarken kısa bir süre durur; bir alana
   yazma ise kısa bir duraklamanın ardından, onaylanan alanda hâlâ tek adımda yapılır (böylece
   bir sayfa yazılanı çalamaz).
+
+### Adıyla tıklanacak bir şey olmadığında
+
+Çoğu öğeye, sayfa görüntüsünün verdiği başvuruyla tıklanır (`browser_click`, `browser_fill`). Bazılarının başvurusu yoktur: başka bir sitenin çerçevesindeki bir onay kutusu ("Robot değilim" kutusu), bir tuval ya da rolü olmadan çizilmiş bir anahtar. Bunlar için asistan ekran görüntüsü alır, bir nokta seçer ve orada işlem yapar:
+
+- `browser_screenshot` görüntüyü kaydeder, boyutunu söyler ve ekrandaki çerçeveleri ve tuvalleri kutularıyla listeler. Görüntü görebilen bir modele bir sonraki adım için görüntünün kendisi de gösterilir (aynı anda tek görüntü, yalnızca o adım için; yalnızca metin bilen bir model açıklamadan ve sayfa metninden çalışır).
+- `browser_pointer`, bu görüntüdeki bir noktada tıklar, çift tıklar, sağ tıklar, imleci götürür, sürükler, fare tekerleğini çevirir, odaktaki alana yazar ya da bir tuşa basar. `browser_click` gibi sorar ve aynı denetimlerden geçer: parola, tek kullanımlık kod ya da kart alanına yazmayı reddeder; sonuç tarayıcının o noktada bulduğunu söyler ve yeni bir ekran görüntüsüyle biter. Saklanan bir gizli bilgi yine yalnızca `browser_fill` ile yazılır.
+- `desktop_click` ve `desktop_drag`, masaüstü için de aynı şekilde ekran noktaları alır (`desktop_get_state` ile ekran görüntüsü, sonra incelenen pencerenin içindeki noktalar).
+
+Hiçbir CAPTCHA çözülmez. Tek bir "Robot değilim" kutusu, her onay kutusu gibi en çok iki kez tıklanabilir; görsel, kutucuk, kaydırıcı ya da basılı tutma bulmacaları sana devredilir (`browser_handover`); sen başında değilsen çalışmaya, yeniden denemek yerine öğeyi engellenmiş diye bildirmesi ve devam etmesi söylenir.
+
+### Bir adım başarısız olduğunda
+
+Başarısız bir tıklama ya da doldurma sayfayı korur: hatanın ardından tarayıcının şimdi gösterdiği (öğeler ve değerleri, bir ekran görüntüsü) ve yeniden yüklemeden devam etmenin yolları gelir. Asistana aynı adresi yeniden açmaması (bu, formu boşaltır) ve yalnızca o adımı yerinde onarması söylenir; aynı adım üst üste üç kez başarısız olursa durur ve sana bildirir. Gerçekten bozulmuş bir sayfa için `browser_open` ile `reload: true` hâlâ vardır.
+
+### Zaten açık olan tarayıcıyı kullanmak
+
+Asistana "bu tarayıcıyı kullan" dersen kendi tarayıcısını başlatmak yerine `browser_attach` çağırır. **Bu bilgisayardaki**, uzaktan hata ayıklamayla başlatılmış (`chrome --remote-debugging-port=9222` ya da `chrome://inspect` içinde uzaktan hata ayıklamayı aç) bir Chrome ya da Edge'e bağlanır ve baktığın sekmeyi yönetir. Bu tarayıcı oturum açtığın hesapları taşıdığı için her bağlanma onayını ister; gösterdiği şey çalışmanın geri kalanında özel verin sayılır, yani özel veri için güvenlik kuralları geçerlidir. Başka bir makinedeki hata ayıklama portuna asla bağlanılmaz. Bağlıyken her tarayıcı sonucu kendi tarayıcından geldiğini söyler. `browser_attach` ile `detach: true` asistanın kendi tarayıcısına döner; her iki durumda da tarayıcın çalışmaya devam eder.
+
+Sayfa okuyucu (Ayarlar > Güvenlik) ağır bir sayfayı özetleyemezse asistan sayfanın öğelerini ve adreslerini alır ve etkileşimli tarayıcıda devam eder; artık sana sormak için durmaz. Bir sitenin reddettiği `web_extract` (LinkedIn betiklere hata ya da yalnızca bir giriş duvarı döndürür) için de aynı öneri verilir: adresi `browser_open` ile aç.
 
 Ayarın adı `human_like` ve üç değeri var: `off` (anlık, duraksama yok), `auto` (varsayılan:
 doğal hareket yalnızca birinin izleyebildiği durumda, yani görünür bir tarayıcı penceresi ya da
