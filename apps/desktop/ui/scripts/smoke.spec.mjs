@@ -233,7 +233,7 @@ export async function flows(ctx) {
 
   // ---- the day-to-day flows (wizard done)
   const s = await newSession(ctx, { onboarded: true });
-  const composer = (page) => page.getByRole('combobox', { name: /message/i });
+  const composer = (page) => page.locator('[data-composer-input]');
   const send = async (page, text) => {
     const c = composer(page);
     await c.fill(text);
@@ -494,7 +494,7 @@ export async function flows(ctx) {
     // then and the keystroke would be dropped): wait for it to be idle, send, wait for the box to empty.
     await page.getByRole('button', { name: /^send$/i }).and(page.locator(':enabled')).waitFor({ timeout: 90000 });
     await c.press('Enter');
-    await page.waitForFunction(() => { const el = document.querySelector('textarea[role="combobox"]'); return !el || el.value === ''; }, null, { timeout: 30000 });
+    await page.waitForFunction(() => { const el = document.querySelector('textarea[data-composer-input]'); return !el || el.value === ''; }, null, { timeout: 30000 });
   };
   const cards = (page) => page.getByTestId('approval-card');
   await run(s, 'Full level: a read, then shell_run with no untrusted content, asks nothing', async (page) => {
@@ -626,7 +626,7 @@ export async function flows(ctx) {
   const holdScript = join(ctx.workDir, 'hold.js');
   writeFileSync(holdScript, "require('fs').writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000);\n");
   const STOP_WITHIN = 3000;
-  const composerEmpty = (page) => page.waitForFunction(() => { const el = document.querySelector('textarea[role="combobox"]'); return !el || el.value === ''; }, null, { timeout: 30000 });
+  const composerEmpty = (page) => page.waitForFunction(() => { const el = document.querySelector('textarea[data-composer-input]'); return !el || el.value === ''; }, null, { timeout: 30000 });
   const openCount = () => ctx.stubLog.filter((l) => l === 'MODEL_OPEN').length;
   const abortCount = () => ctx.stubLog.filter((l) => l === 'MODEL_ABORTED').length;
   /** Press Stop and verify daemon cancellation, settled UI and an enabled composer. */

@@ -73,7 +73,7 @@ try {
     }
   }
   await page.goto(base + query, { waitUntil: 'domcontentloaded', timeout: 120000 });
-  const input = page.getByRole('combobox');
+  const input = page.locator('[data-composer-input]');
   await input.fill('@');
   const menu = page.getByTestId('composer-menu');
   await menu.waitFor();

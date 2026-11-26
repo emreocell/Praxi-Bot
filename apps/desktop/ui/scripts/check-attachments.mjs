@@ -39,7 +39,7 @@ try {
   page.on('pageerror', (error) => errors.push(String(error)));
   await page.route('**/*', (route) => route.request().url().startsWith(base) ? route.continue() : route.abort());
   await page.goto(base + '/?mock=1&screen=empty&theme=obsidian&rt=ignore&lang=en');
-  const input = page.getByRole('combobox');
+  const input = page.locator('[data-composer-input]');
   await input.waitFor();
   await page.evaluate(async () => {
     const { ApiClient } = await import('/src/api/client.ts');

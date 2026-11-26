@@ -44,7 +44,7 @@ if (!chromePath) { process.stdout.write('check:visual needs Chrome (set CHROME_B
 const THEMES = ['obsidian', 'cobalt', 'raven', 'clay'];
 const VIEWPORTS = [{ w: 1280, h: 800 }, { w: 640, h: 800 }];
 const composerMenu = (text) => async (page) => {
-  await page.getByRole('combobox').fill(text);
+  await page.locator('[data-composer-input]').fill(text);
   await page.getByTestId('composer-menu').waitFor({ timeout: 15000 });
 };
 const SCREENS = [

@@ -2236,7 +2236,16 @@ export function ChatView({
             }}
           >
           <ComposerFiles files={files} onRemove={removeFile} onRetry={(key) => attachments.retry(key)} disabled={sending} />
-          <div className={styles.inputWrap}>
+          {/* ARIA 1.1 combobox: a <textarea> may not carry role="combobox", so the wrapper does and owns the list. */}
+          <div
+            className={styles.inputWrap}
+            role="combobox"
+            aria-haspopup="listbox"
+            aria-expanded={menuOpen}
+            aria-owns={menuOpen ? menuId : undefined}
+            aria-controls={menuOpen ? menuId : undefined}
+            aria-label={t("chat.placeholder")}
+          >
           {paintsMentions ? (
             <div className={styles.mirror} aria-hidden="true">
               <div style={{ transform: `translateY(-${inputScroll}px)` }}>
@@ -2258,9 +2267,7 @@ export function ChatView({
             onScroll={(e) => setInputScroll(e.currentTarget.scrollTop)}
             value={text}
             rows={1}
-            role="combobox"
             aria-autocomplete="list"
-            aria-expanded={menuOpen}
             aria-controls={menuOpen ? menuId : undefined}
             aria-activedescendant={
               menuOpen && menuItems.length > 0 ? `${menuId}-${menuActive}` : undefined
