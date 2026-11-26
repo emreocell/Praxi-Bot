@@ -404,7 +404,12 @@ pub fn launch(app: &AppSpec) -> Result<Pid, DesktopError> {
     let started = thread::Builder::new()
         .name("desktop-launch".into())
         .spawn(move || {
-            match Command::new(&exe)
+            let mut command = Command::new(&exe);
+            // Its own process group: a signal meant for the daemon or the tool call that started
+            // it (stop, timeout) must not take the window the bot opened down with it.
+            #[cfg(unix)]
+            std::os::unix::process::CommandExt::process_group(&mut command, 0);
+            match command
                 .args(&args)
                 .env("DISPLAY", &dpy)
                 .env("GTK_MODULES", "gail:atk-bridge")

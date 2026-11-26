@@ -857,28 +857,36 @@ impl Shared {
     /// stable sample that ends the wait. `deadline` is absolute: the caller
     /// starts it before `launch()` so `WaitForInputIdle` counts toward
     /// `launch_settle` and the worst case is not slower than the old fixed sleep.
+    ///
+    /// When the wait ends with no window of `pid`, the new windows of other
+    /// processes are returned separately: a program that hands its window to an
+    /// already running instance (a single-instance terminal, a browser) opens
+    /// it under another pid, and the caller must report that instead of "nothing".
     async fn poll_launched_windows(
         &self,
         run_id: &str,
         before: &HashSet<u64>,
         pid: u32,
         deadline: tokio::time::Instant,
-    ) -> Result<Vec<desktop_api::WindowInfo>, ToolError> {
+    ) -> Result<LaunchedWindows, ToolError> {
         let backend = self.backend(run_id)?;
-        let matches_launch = |w: &desktop_api::WindowInfo| -> bool {
-            !before.contains(&w.id) && !w.title.is_empty() && (pid == 0 || w.pid == pid)
+        let is_new = |w: &desktop_api::WindowInfo| -> bool {
+            !before.contains(&w.id) && !w.title.is_empty()
         };
         async {
             loop {
                 let wins = backend.windows().await.map_err(|e| derr(&e))?;
-                let found: Vec<_> = wins.into_iter().filter(&matches_launch).collect();
+                let (matched, other): (Vec<_>, Vec<_>) = wins
+                    .into_iter()
+                    .filter(is_new)
+                    .partition(|w| pid == 0 || w.pid == pid);
                 let now = tokio::time::Instant::now();
-                if !found.is_empty() || now >= deadline {
-                    return Ok(found);
+                if !matched.is_empty() || now >= deadline {
+                    return Ok(LaunchedWindows { matched, other });
                 }
                 let remaining = deadline.saturating_duration_since(now);
                 if remaining.is_zero() {
-                    return Ok(found);
+                    return Ok(LaunchedWindows { matched, other });
                 }
                 tokio::time::sleep(LAUNCH_POLL.min(remaining)).await;
             }
@@ -886,6 +894,42 @@ impl Shared {
         .instrument(tracing::info_span!("desktop.settle", op = "launch"))
         .await
     }
+}
+
+/// The windows a launch produced: those owned by the launched pid, and the other new ones.
+struct LaunchedWindows {
+    matched: Vec<desktop_api::WindowInfo>,
+    other: Vec<desktop_api::WindowInfo>,
+}
+
+/// The model-facing result of `desktop_launch`. It states what is true on the display, so the bot
+/// reports that and does not guess a cause when no window of the launched process showed up.
+fn launch_report(pid: u32, found: &LaunchedWindows) -> String {
+    let mut out = format!("launched pid={pid}\nwindows:\n");
+    for w in found.matched.iter().take(MAX_WINDOWS_SHOWN) {
+        let _ = writeln!(out, "{}", window_line(w));
+    }
+    if !found.matched.is_empty() {
+        return out;
+    }
+    if found.other.is_empty() {
+        let _ = writeln!(
+            out,
+            "(no new window appeared on the display when the wait ended: the program may have exited at once, \
+failed to open on this display, or still be starting. Check desktop_list_apps and a screenshot before \
+telling the user why; do not guess a cause.)"
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "(no window owned by pid {pid}; the program probably handed over to an already running instance. \
+New windows from other processes:)"
+        );
+        for w in found.other.iter().take(MAX_WINDOWS_SHOWN) {
+            let _ = writeln!(out, "{}", window_line(w));
+        }
+    }
+    out
 }
 
 /// Build the desktop tools with a fixed default backend.
@@ -1489,11 +1533,7 @@ impl DesktopTool {
                 let wins = sh
                     .poll_launched_windows(run_id, &before, pid, deadline)
                     .await?;
-                let mut out = format!("launched pid={pid}\nwindows:\n");
-                for w in wins.iter().take(MAX_WINDOWS_SHOWN) {
-                    let _ = writeln!(out, "{}", window_line(w));
-                }
-                Ok(out)
+                Ok(launch_report(pid, &wins))
             }
             Op::Focus => {
                 let FocusIn { window_id } = parse(input)?;
@@ -2982,7 +3022,12 @@ mod tests {
             "expected wait until cap ({cap:?}) and not past it, got {elapsed:?}"
         );
         let s = text(&out);
-        assert_eq!(s, "launched pid=4242\nwindows:\n");
+        assert!(s.starts_with("launched pid=4242\nwindows:\n"), "{s}");
+        assert!(
+            s.contains("no new window appeared"),
+            "the bot must be told nothing opened: {s}"
+        );
+        assert!(!s.contains("\nid="), "{s}");
     }
 
     #[tokio::test(start_paused = true)]
@@ -3051,7 +3096,13 @@ mod tests {
             elapsed >= cap.saturating_sub(Duration::from_millis(50)) && elapsed <= cap,
             "a different pid is not the launched window; waited {elapsed:?}, cap {cap:?}"
         );
-        assert_eq!(text(&out), "launched pid=4242\nwindows:\n");
+        let s = text(&out);
+        assert!(s.starts_with("launched pid=4242\nwindows:\n"), "{s}");
+        assert!(s.contains("no window owned by pid 4242"), "{s}");
+        assert!(
+            s.contains("id=88 pid=9999"),
+            "a window another process opened is reported, not hidden: {s}"
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -3110,7 +3161,11 @@ mod tests {
             elapsed < Duration::from_millis(50),
             "zero settings must skip wait, got {elapsed:?}"
         );
-        assert_eq!(text(&out), "launched pid=4242\nwindows:\n");
+        assert!(
+            text(&out).starts_with("launched pid=4242\nwindows:\n"),
+            "{}",
+            text(&out)
+        );
     }
 
     #[tokio::test]
