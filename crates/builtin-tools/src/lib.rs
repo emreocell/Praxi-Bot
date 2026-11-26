@@ -620,6 +620,8 @@ mod tests {
             ("browser_tabs", W, B),
             ("browser_screenshot", R, B),
             ("browser_handover", R, Me),
+            ("browser_pointer", W, B),
+            ("browser_attach", W, B),
             ("browser_eval", W, Sc),
             ("fs_read", R, Fs),
             ("fs_list", R, Fs),
@@ -1231,7 +1233,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 41 + 7 + 2 + 2 + 1 + 1);
+        assert_eq!(added, 43 + 7 + 2 + 2 + 1 + 1);
 
         // Verification of email tools and their effects
         let send_tool = reg

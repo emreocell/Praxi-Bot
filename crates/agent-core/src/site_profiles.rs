@@ -72,6 +72,9 @@ pub(crate) const BROWSER_CLASSES: &[(&str, Capability)] = &[
     ("browser_dismiss_consent", Capability::Interact),
     ("browser_press", Capability::Submit),
     ("browser_act", Capability::Submit),
+    // A coordinate click can press any button, so it is judged like a key press / batch.
+    ("browser_pointer", Capability::Submit),
+    ("browser_attach", Capability::Read),
     ("browser_eval", Capability::Submit),
 ];
 

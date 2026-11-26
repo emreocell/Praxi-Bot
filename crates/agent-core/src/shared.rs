@@ -760,6 +760,7 @@ pub(crate) fn is_page_action(name: &str) -> bool {
             | "browser_select_text"
             | "browser_dismiss_consent"
             | "browser_act"
+            | "browser_pointer"
     )
 }
 

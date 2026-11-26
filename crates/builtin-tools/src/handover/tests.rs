@@ -134,6 +134,18 @@ impl BrowserDriver for Page {
     async fn eval(&self, _js: &str) -> Result<Value, String> {
         Ok(Value::Null)
     }
+    async fn pointer(&self, _o: &crate::browser::PointerOpts) -> Result<String, String> {
+        Ok("pointed".into())
+    }
+    async fn grounded_screenshot(&self) -> Result<crate::browser::GroundedShot, String> {
+        Ok(crate::browser::GroundedShot {
+            bytes: b"\xff\xd8jpeg".to_vec(),
+            ext: "jpg",
+            width: 800,
+            height: 600,
+            notes: "image 800x600 px".into(),
+        })
+    }
     async fn current_url(&self) -> Option<String> {
         self.url.lock().unwrap().clone()
     }
@@ -676,4 +688,55 @@ async fn regression_desktop_is_not_read_while_a_typed_code_is_on_screen() {
         .await
         .unwrap();
     handover_hub().forget(&context.run_id);
+}
+
+/// A pointer action ends with a fresh screenshot, except while a typed one-time code is
+/// visible on the page: the same rule as `browser_screenshot`.
+#[tokio::test]
+async fn a_pointer_result_carries_no_screenshot_while_a_typed_code_is_visible() {
+    let _serial = serial().await;
+    let page = Page::new(CODE_PAGE, "https://bank.example/2fa");
+    let context = ctx("pointer-latch");
+    let dir = tempfile::tempdir().unwrap();
+    let tools = crate::browser::tools(page.clone(), dir.path(), None);
+    let get = |name: &str| {
+        tools
+            .iter()
+            .find(|t| t.spec().name == name)
+            .unwrap()
+            .clone()
+    };
+    let click = json!({"action": "click", "x": 5, "y": 5});
+    let shown = get("browser_pointer")
+        .call(&context, click.clone())
+        .await
+        .unwrap();
+    assert!(
+        text_of(&shown).contains("\nscreenshot: "),
+        "{}",
+        text_of(&shown)
+    );
+
+    get("browser_handover")
+        .call(&context, json!({"kind": "code"}))
+        .await
+        .unwrap();
+    handover_hub()
+        .type_code(&context.run_id, "123456")
+        .await
+        .unwrap();
+    let hidden = get("browser_pointer").call(&context, click).await.unwrap();
+    assert!(
+        !text_of(&hidden).contains("screenshot:"),
+        "{}",
+        text_of(&hidden)
+    );
+    handover_hub().forget(&context.run_id);
+}
+
+fn text_of(out: &tool_registry::ToolOutput) -> String {
+    match &out.content[0] {
+        ContentPart::Text { text } => text.clone(),
+        _ => panic!(),
+    }
 }

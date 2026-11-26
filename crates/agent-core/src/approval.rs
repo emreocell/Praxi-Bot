@@ -72,7 +72,7 @@ const FULL_BROWSE_REASON: &str = "mode.full.owner_browse";
 /// open, go back, click, type, select, press, select text, tabs and the batch. NOT
 /// `browser_eval` (a page script can send anything anywhere) and not the user's own computer
 /// (`pc_*`).
-pub(crate) const FULL_BROWSER_CALLS: [&str; 10] = [
+pub(crate) const FULL_BROWSER_CALLS: [&str; 11] = [
     "browser_open",
     "browser_back",
     "browser_click",
@@ -83,6 +83,7 @@ pub(crate) const FULL_BROWSER_CALLS: [&str; 10] = [
     "browser_dismiss_consent",
     "browser_tabs",
     "browser_act",
+    "browser_pointer",
 ];
 
 /// The public-web READ tools (`web-tools`): a search, a page, a feed, a sitemap, a page's

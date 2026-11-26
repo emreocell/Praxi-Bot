@@ -81,6 +81,10 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         | "browser_act"
         | "browser_select_text"
         | "browser_dismiss_consent"
+        // Pointer actions click, drag and type by coordinates like `browser_click` / `browser_press`;
+        // attaching to the owner's browser opens every tab and session it holds.
+        | "browser_pointer"
+        | "browser_attach"
         // `email_wait_for` reads the bot's own inbox: untrusted (a stranger's mail), private
         // (a mailbox) and, like `email_read`, a call to a remote mailbox. No text the model
         // wrote is sent (filters run locally), but the class stays the same as `email_read`

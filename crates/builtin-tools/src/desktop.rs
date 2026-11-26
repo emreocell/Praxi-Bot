@@ -1017,7 +1017,7 @@ pub fn tools_dynamic_with_secrets(
             Op::Click,
             spec(
                 "desktop_click",
-                "Click by element index and gen. If the accessibility tree lacks the target, pass screen x and y within the observed window. Returns the refreshed UI tree. Example: {\"index\":12,\"gen\":3}",
+                "Click by element index and gen. If the accessibility tree lacks the target (a canvas, a custom-drawn control, an Electron app), take desktop_get_state with screenshot:true, read the point off that picture (its coordinate line maps picture pixels to the screen) and pass screen x and y within the observed window: the real cursor moves and clicks. Returns the refreshed UI tree. Example: {\"index\":12,\"gen\":3}",
                 json!({"type":"object","properties":{
                     "index":index_prop,"gen":gen_prop,"method":method_prop,
                     "x":{"type":"number","description":"Physical screen x within the observed window."},
@@ -1097,13 +1097,17 @@ pub fn tools_dynamic_with_secrets(
             Op::Drag,
             spec(
                 "desktop_drag",
-                "Drag from one element to another (moves the real cursor). Pass gen from the observation you read the indexes from. Example: {\"from\":3,\"to\":9,\"gen\":3}",
+                "Drag from one element to another, or from one screen point to another when the accessibility tree has nothing to name (moves the real cursor). With indexes pass gen from the observation you read them from. With points read x,y off the screenshot of desktop_get_state (screenshot:true; its coordinate line says how picture pixels map to the screen) and give from_x, from_y, to_x, to_y inside the observed window. Example: {\"from\":3,\"to\":9,\"gen\":3} or {\"from_x\":300,\"from_y\":400,\"to_x\":600,\"to_y\":400}",
                 json!({"type":"object","properties":{
                     "from":index_prop,
                     "to":index_prop,
                     "gen":gen_prop,
+                    "from_x":{"type":"number","description":"Screen x where the drag starts (instead of `from`)."},
+                    "from_y":{"type":"number"},
+                    "to_x":{"type":"number","description":"Screen x where it is released (instead of `to`)."},
+                    "to_y":{"type":"number"},
                     "method":method_prop
-                },"required":["from","to","gen"]}),
+                },"oneOf":[{"required":["from","to","gen"]},{"required":["from_x","from_y","to_x","to_y"]}]}),
                 Effect::Write,
                 d,
             ),
@@ -1205,8 +1209,12 @@ struct ScrollIn {
 struct DragIn {
     #[serde(rename = "gen")]
     expect_gen: Option<u64>,
-    from: Value,
-    to: Value,
+    from: Option<Value>,
+    to: Option<Value>,
+    from_x: Option<f64>,
+    from_y: Option<f64>,
+    to_x: Option<f64>,
+    to_y: Option<f64>,
     method: Option<String>,
 }
 
@@ -1837,16 +1845,48 @@ impl DesktopTool {
             }
             Op::Drag => {
                 let i: DragIn = parse(input)?;
-                if i.expect_gen.is_none() {
-                    return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
-                }
-                let (a, b) = (parse_ref(&i.from)?, parse_ref(&i.to)?);
                 let method = parse_method(i.method.as_deref(), ClickMethod::Global)?;
-                let (from, to) = (
-                    sh.target(run_id, a, i.expect_gen)?,
-                    sh.target(run_id, b, i.expect_gen)?,
-                );
-                let ((la, ra), (lb, rb)) = (sh.describe(run_id, a)?, sh.describe(run_id, b)?);
+                let ((from, la, ra), (to, lb, rb)) = match (
+                    &i.from,
+                    &i.to,
+                    i.from_x.zip(i.from_y),
+                    i.to_x.zip(i.to_y),
+                ) {
+                    (Some(from), Some(to), None, None) => {
+                        if i.expect_gen.is_none() {
+                            return Err(ToolError::InvalidInput(MISSING_GEN_MSG.into()));
+                        }
+                        let (a, b) = (parse_ref(from)?, parse_ref(to)?);
+                        let ((la, ra), (lb, rb)) =
+                            (sh.describe(run_id, a)?, sh.describe(run_id, b)?);
+                        (
+                            (sh.target(run_id, a, i.expect_gen)?, la, ra),
+                            (sh.target(run_id, b, i.expect_gen)?, lb, rb),
+                        )
+                    }
+                    // The pointer fallback: both ends are screen points inside the observed
+                    // window, like `desktop_click` with x and y.
+                    (None, None, Some((fx, fy)), Some((tx, ty))) => {
+                        let end = |x: f64, y: f64| {
+                            sh.locate(
+                                run_id,
+                                &PointerIn {
+                                    index: None,
+                                    expect_gen: i.expect_gen,
+                                    x: Some(x),
+                                    y: Some(y),
+                                },
+                            )
+                        };
+                        let (a, b) = (end(fx, fy)?, end(tx, ty)?);
+                        ((a.0, a.1, a.2), (b.0, b.1, b.2))
+                    }
+                    _ => {
+                        return Err(ToolError::InvalidInput(
+                            "give `from` and `to` (element indexes with gen), or from_x, from_y, to_x and to_y (screen points inside the observed window)".into(),
+                        ));
+                    }
+                };
                 let permit = sh
                     .gate(run_id, "drag", format!("{la} to {lb}"), union(ra, rb))
                     .await?;
@@ -2378,6 +2418,55 @@ mod tests {
                     generation: 1
                 },
                 method: ClickMethod::Accessibility
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn drag_by_screen_points_stays_inside_the_observed_window() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (_d, t) = build(fake.clone(), None);
+        let ctx = ToolContext::default();
+        let points = json!({"from_x": 150, "from_y": 250, "to_x": 170, "to_y": 260});
+        // Like a coordinate click, it needs an observation of the window first.
+        let err = get(&t, "desktop_drag")
+            .call(&ctx, points.clone())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("desktop_get_state"), "{err}");
+        get(&t, "desktop_get_state")
+            .call(&ctx, json!({}))
+            .await
+            .unwrap();
+        // One end outside the window: refused, nothing dragged.
+        let err = get(&t, "desktop_drag")
+            .call(
+                &ctx,
+                json!({"from_x": 150, "from_y": 250, "to_x": 5, "to_y": 5}),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("outside the observed window"),
+            "{err}"
+        );
+        // Indexes and points do not mix, and an end is never half given.
+        for bad in [
+            json!({"from": 1, "to": 2, "gen": 1, "from_x": 150, "from_y": 250}),
+            json!({"from_x": 150, "from_y": 250}),
+            json!({}),
+        ] {
+            let err = get(&t, "desktop_drag").call(&ctx, bad).await.unwrap_err();
+            assert!(matches!(err, ToolError::InvalidInput(_)), "{err}");
+        }
+        assert!(fake.actions.lock().is_empty());
+        get(&t, "desktop_drag").call(&ctx, points).await.unwrap();
+        assert!(matches!(
+            &fake.actions.lock()[0],
+            Action::Drag {
+                from: Target::ByCoordinate { .. },
+                to: Target::ByCoordinate { .. },
+                method: ClickMethod::Global
             }
         ));
     }
