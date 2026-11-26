@@ -79,11 +79,13 @@ const CHANGES = new Set([
 export function approvalRisk(tool: string, input: unknown, details?: unknown): ApprovalRisk | null {
   const kind = approvalRiskKind(tool, input, details);
   if (kind === "delete" || kind === "run" || kind === "send") return kind;
+  // A schedule card is about setting up a task, not about sending: when the taint gate also rides
+  // on it (the egress review stays in Details), the chip must still say what the owner is allowing.
+  const schedule = scheduleDetails(details);
+  if (schedule) return schedule.action === "delete" ? "delete" : "change";
   if (mailSendDetails(details) || egressDetails(details)) return "send";
   const bot = botDetails(details);
   if (bot) return bot.action === "delete" ? "delete" : "change";
-  const schedule = scheduleDetails(details);
-  if (schedule) return "change";
   const kindOfDetails = (details as { kind?: unknown } | null | undefined)?.kind;
   if (kindOfDetails === "control_grant" || kindOfDetails === "app_action") return "change";
   const name = resolveToolCall(tool, input).name;

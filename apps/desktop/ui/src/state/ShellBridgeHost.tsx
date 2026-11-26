@@ -1,7 +1,12 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import type { GlobalEnvelope } from "../api/types";
-import { scheduleNotifyOf } from "../lib/scheduleNotify";
+import type { GlobalEnvelope, Schedule } from "../api/types";
+import {
+  readScheduleNotify,
+  suggestScheduleNotify,
+  type ScheduleNotify
+} from "../lib/scheduleNotify";
+import { parsePayload, parseSpec } from "../lib/schedules";
 import {
   decideNotification,
   type NotifyPrefs,
@@ -55,6 +60,32 @@ export interface ShellBridgeSettings extends NotifyPrefs {
  * need the user while the window is not focused, the tray's "needs you"
  * count and labels, and the tray / notification clicks.  Renders nothing.
  */
+/**
+ * What to announce for a finished run of schedule `id`: the owner's stored choice, else a
+ * reminder-aware default (a reminder is announced every time), else only problems.
+ */
+async function scheduleNotifyFor(
+  client: { listSchedules(): Promise<Schedule[]> } | null,
+  id: string
+): Promise<ScheduleNotify> {
+  const stored = readScheduleNotify()[id];
+  if (stored) return stored;
+  try {
+    const found = (await client?.listSchedules())?.find((s) => s.id === id);
+    if (found) {
+      const payload = parsePayload(found.payload);
+      const spec = parseSpec(found.spec);
+      return suggestScheduleNotify(
+        payload.kind === "agent_prompt" ? payload.text : "",
+        spec !== null && "at" in spec
+      );
+    }
+  } catch {
+    // daemon unreachable: the default applies
+  }
+  return suggestScheduleNotify("", false);
+}
+
 export function ShellBridgeHost({
   settings,
   onOpenChat,
@@ -67,7 +98,9 @@ export function ShellBridgeHost({
   onTrayNoticeShown: () => void;
 }) {
   const { t, i18n } = useTranslation();
-  const { bots, needs, onDaemonEvent, refreshRuns } = useDaemon();
+  const { bots, needs, onDaemonEvent, refreshRuns, client } = useDaemon();
+  const clientRef = useRef(client);
+  clientRef.current = client;
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -154,14 +187,17 @@ export function ShellBridgeHost({
       ) {
         return;
       }
-      void isAppFocused().then((focused) => {
+      const choice: Promise<ScheduleNotify | undefined> = run?.scheduleId
+        ? scheduleNotifyFor(clientRef.current, run.scheduleId)
+        : Promise.resolve(undefined);
+      void Promise.all([isAppFocused(), choice]).then(([focused, scheduleNotify]) => {
         const s = settingsRef.current;
         const d = decideNotification(env, {
           run,
           appStartMs,
           focused,
           prefs: s,
-          ...(run?.scheduleId ? { scheduleNotify: scheduleNotifyOf(run.scheduleId) } : {})
+          ...(scheduleNotify ? { scheduleNotify } : {})
         });
         if (!d) {
           return;

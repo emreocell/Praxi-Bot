@@ -606,3 +606,57 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
 }
+
+.scheduleLink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface-elevated);
+  color: var(--color-text);
+  text-align: start;
+  cursor: pointer;
+}
+
+.scheduleLink:hover {
+  border-color: var(--color-accent);
+}
+
+.scheduleLink:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.scheduleLink > svg:first-child {
+  flex: none;
+  width: var(--space-5);
+  height: var(--space-5);
+  color: var(--color-accent);
+}
+
+.scheduleLink > svg:last-child {
+  flex: none;
+  width: var(--space-4);
+  height: var(--space-4);
+  color: var(--color-text-muted);
+}
+
+.scheduleLinkText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--space-half);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.scheduleLinkText b {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}

@@ -93,17 +93,90 @@ export interface SpecLabel {
   values: Record<string, string | number>;
 }
 
+/** Whether a stored spec fires once (`at`). */
+export function isOneShotSpec(raw: unknown): boolean {
+  const spec = parseSpec(raw);
+  return spec !== null && "at" in spec;
+}
+
+/** Whether `name` is a timezone this runtime knows (`Europe/Istanbul`, `UTC`). */
+export function isTimeZoneName(name: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: name });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A stored cron as `{ cron: five fields, tz }`: the zone may ride as a sixth word. */
+export function splitCronZone(raw: string): { cron: string; tz: string } {
+  const words = raw.trim().split(/\s+/);
+  if (words.length === 6 && isTimeZoneName(words[5])) {
+    return { cron: words.slice(0, 5).join(" "), tz: words[5] };
+  }
+  return { cron: raw.trim(), tz: "" };
+}
+
+const CRON_NUMBER = /^\d{1,2}$/;
+
+/**
+ * The common cron shapes in plain words (daily, weekdays, one weekday, one day of the month),
+ * `null` for anything else so the caller shows the raw expression.
+ */
+export function describeCron(raw: string, locale?: string): SpecLabel | null {
+  const { cron, tz } = splitCronZone(raw);
+  const f = cron.split(/\s+/);
+  if (f.length !== 5) {
+    return null;
+  }
+  const [min, hour, dom, mon, dow] = f;
+  if (!CRON_NUMBER.test(min) || !CRON_NUMBER.test(hour) || mon !== "*") {
+    return null;
+  }
+  const m = Number(min);
+  const h = Number(hour);
+  if (m > 59 || h > 23) {
+    return null;
+  }
+  const time = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  const zone = tz ? ` (${tz})` : "";
+  if (dom === "*" && dow === "*") {
+    return { i18nKey: "schedules.spec.cronDaily", values: { time, zone } };
+  }
+  if (dom === "*" && (dow === "1-5" || dow === "MON-FRI")) {
+    return { i18nKey: "schedules.spec.cronWeekdays", values: { time, zone } };
+  }
+  if (dom === "*" && CRON_NUMBER.test(dow) && Number(dow) <= 7) {
+    // 2024-01-07 was a Sunday: day 0 and 7 are Sunday, 1 is Monday.
+    const day = new Intl.DateTimeFormat(locale, { weekday: "long", timeZone: "UTC" }).format(
+      new Date(Date.UTC(2024, 0, 7 + Number(dow)))
+    );
+    return { i18nKey: "schedules.spec.cronWeekly", values: { time, zone, day } };
+  }
+  if (dow === "*" && CRON_NUMBER.test(dom) && Number(dom) >= 1 && Number(dom) <= 31) {
+    return { i18nKey: "schedules.spec.cronMonthly", values: { time, zone, day: Number(dom) } };
+  }
+  return null;
+}
+
 /** The label of a spec: `cron`, `every` (with unit), `at` or `unknown`. */
 export function specLabel(
   raw: unknown,
-  formatDate: (ms: number) => string
+  formatDate: (ms: number) => string,
+  locale?: string
 ): SpecLabel {
   const spec = parseSpec(raw);
   if (!spec) {
     return { i18nKey: "schedules.spec.unknown", values: {} };
   }
   if ("cron" in spec) {
-    return { i18nKey: "schedules.spec.cron", values: { cron: spec.cron } };
+    return (
+      describeCron(spec.cron, locale) ?? {
+        i18nKey: "schedules.spec.cron",
+        values: { cron: spec.cron }
+      }
+    );
   }
   if ("every" in spec) {
     const p = intervalParts(spec.every.seconds);
@@ -217,6 +290,8 @@ export function emptyDraft(botId: string): ScheduleDraft {
 export function draftFromSchedule(s: Schedule): ScheduleDraft {
   const spec = parseSpec(s.spec);
   const payload = parsePayload(s.payload);
+  // The stored zone rides as a sixth word of the cron: show it in the zone picker, not as "UTC".
+  const zoned = spec && "cron" in spec ? splitCronZone(spec.cron) : null;
   const misfire =
     MISFIRE_POLICIES.find((m) => m === s.misfire_policy) ?? "skip";
   return {
@@ -225,7 +300,8 @@ export function draftFromSchedule(s: Schedule): ScheduleDraft {
     kind: spec && "cron" in spec ? "cron" : "keep",
     simple: { ...DEFAULT_SIMPLE },
     text: "",
-    cron: spec && "cron" in spec ? spec.cron : "",
+    cron: zoned ? zoned.cron : "",
+    ...(zoned?.tz ? { tz: zoned.tz } : {}),
     prompt: payload.kind === "agent_prompt" ? payload.text : "",
     enabled: s.enabled,
     misfire,

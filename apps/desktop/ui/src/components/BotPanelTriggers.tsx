@@ -61,7 +61,7 @@ export function BotPanelTriggers({ botId }: { botId: string }) {
   const source = draft?.config.source;
   const quiet = draft?.config.quiet_hours;
   const daily = source ? dailyTime(source) : null;
-  const timing = source?.kind === "time" ? specLabel(source.spec, ms => new Date(ms).toLocaleString(i18n.language)) : null;
+  const timing = source?.kind === "time" ? specLabel(source.spec, ms => new Date(ms).toLocaleString(i18n.language), i18n.language) : null;
   const setSource = (next: TriggerSource) => { if (draft) change({ ...draft, config: { ...draft.config, source: next } }); };
 
   return <section className={styles.section} aria-labelledby="triggers-heading" data-testid="bot-triggers">

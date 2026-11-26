@@ -1362,6 +1362,10 @@
     "profile": "Bot profile",
     "runsOnHost": "Runs on {{name}} (host)",
     "runsOnLocal": "Runs on this computer",
+    "schedulesLink": {
+      "hint": "Every morning, every week or once: create and manage them here.",
+      "title": "Scheduled tasks"
+    },
     "screenListFailed": "{{name}}'s screen list could not be loaded. It will be tried again in a moment.",
     "searchChats": "Search chats…",
     "serverIssue": {
@@ -5396,7 +5400,7 @@
       "noFirstRun": "no upcoming run",
       "notify": {
         "always": "Every time",
-        "hint": "Saved on this computer. If the bot needs your OK, you are always told.",
+        "hint": "A reminder is announced every time; other tasks only when something goes wrong. Saved on this computer; if the bot needs your OK, you are always told.",
         "label": "Tell me when it ran",
         "never": "Never",
         "problems": "Only if something goes wrong"
@@ -5422,7 +5426,9 @@
       "time": "At what time?",
       "tz": "Timezone",
       "tzCronHint": "Used if the cron expression has 5 fields without a timezone.",
+      "tzSearch": "Search a timezone, e.g. Europe/Istanbul",
       "tzShown": "Times are in {{tz}}.",
+      "tzUnknown": "Not a known timezone. Pick one from the list.",
       "weekday": "On which day of the week?",
       "when": "When"
     },
@@ -5477,6 +5483,10 @@
     "spec": {
       "at": "Once at {{when}}",
       "cron": "Cron: {{cron}}",
+      "cronDaily": "Every day at {{time}}{{zone}}",
+      "cronMonthly": "Monthly on day {{day}} at {{time}}{{zone}}",
+      "cronWeekdays": "Weekdays at {{time}}{{zone}}",
+      "cronWeekly": "Every {{day}} at {{time}}{{zone}}",
       "every": {
         "days": "Every {{count}} days",
         "days_one": "Every day",

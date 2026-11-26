@@ -1362,6 +1362,10 @@
     "profile": "Bot profili",
     "runsOnHost": "{{name}} sunucusunda çalışır",
     "runsOnLocal": "Bu bilgisayarda çalışır",
+    "schedulesLink": {
+      "hint": "Her sabah, her hafta ya da bir kez: buradan oluşturup yönetin.",
+      "title": "Zamanlanmış görevler"
+    },
     "screenListFailed": "{{name}} ekran listesi yüklenemedi. Birazdan yeniden denenecek.",
     "searchChats": "Sohbetlerde ara…",
     "serverIssue": {
@@ -5396,7 +5400,7 @@
       "noFirstRun": "yaklaşan çalışma yok",
       "notify": {
         "always": "Her seferinde",
-        "hint": "Bu bilgisayarda saklanır. Bot onayınıza ihtiyaç duyarsa size her zaman haber verilir.",
+        "hint": "Hatırlatma her seferinde bildirilir; diğer görevler yalnızca bir şey ters giderse. Bu bilgisayarda saklanır; bot onayınızı gerektirirse her zaman haberiniz olur.",
         "label": "Çalışınca bana haber ver",
         "never": "Hiçbir zaman",
         "problems": "Sadece bir sorun olursa"
@@ -5422,7 +5426,9 @@
       "time": "Saat kaçta?",
       "tz": "Saat dilimi",
       "tzCronHint": "Cron ifadesinde saat dilimi belirtilmemiş 5 alan varsa kullanılır.",
+      "tzSearch": "Saat dilimi ara, örn. Europe/Istanbul",
       "tzShown": "Saatler {{tz}} dilimine göre.",
+      "tzUnknown": "Bilinen bir saat dilimi değil. Listeden seçin.",
       "weekday": "Haftanın hangi günü?",
       "when": "Ne zaman"
     },
@@ -5477,6 +5483,10 @@
     "spec": {
       "at": "Bir kez, {{when}}",
       "cron": "Cron: {{cron}}",
+      "cronDaily": "Her gün {{time}}{{zone}}",
+      "cronMonthly": "Her ayın {{day}}. günü {{time}}{{zone}}",
+      "cronWeekdays": "Hafta içi her gün {{time}}{{zone}}",
+      "cronWeekly": "Her {{day}} {{time}}{{zone}}",
       "every": {
         "days": "Her {{count}} günde bir",
         "days_one": "Her gün",

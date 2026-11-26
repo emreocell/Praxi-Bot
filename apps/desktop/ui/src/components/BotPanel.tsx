@@ -1,6 +1,7 @@
 import {
   Bell,
   BellOff,
+  CalendarClock,
   ChevronRight,
   Lightbulb,
   Lock,
@@ -131,6 +132,7 @@ export function BotPanel({
   onManageSkills,
   onAddSkill,
   onOpenMail,
+  onOpenSchedules,
   isMain = false,
   mainBotName,
   onMakeMain,
@@ -166,6 +168,8 @@ export function BotPanel({
   onAddSkill: () => void;
   /** Open Settings, Mail (connect, edit or remove a mailbox). */
   onOpenMail: () => void;
+  /** Open the Scheduled tasks page (the "every morning" jobs live there, not under Webhooks). */
+  onOpenSchedules?: () => void;
   /** This bot is the main bot (first in the list). */
   isMain?: boolean;
   /** Name of the main bot (the computer card says who is main). */
@@ -383,7 +387,16 @@ export function BotPanel({
             })}
           </>
         ) : tab === "automation" ? (
-          <><BotPanelTriggers botId={bot.id} /><details><summary>{t("botPanel.triggers.manageHooks")}</summary><BotPanelWebhooks botId={bot.id} /></details></>
+          <>{onOpenSchedules ? (
+            <button type="button" className={styles.scheduleLink} data-testid="bot-panel-schedules" onClick={onOpenSchedules}>
+              <CalendarClock aria-hidden="true" />
+              <span className={styles.scheduleLinkText}>
+                <b>{t("botPanel.schedulesLink.title")}</b>
+                <span>{t("botPanel.schedulesLink.hint")}</span>
+              </span>
+              <ChevronRight aria-hidden="true" />
+            </button>
+          ) : null}<BotPanelTriggers botId={bot.id} /><details><summary>{t("botPanel.triggers.manageHooks")}</summary><BotPanelWebhooks botId={bot.id} /></details></>
         ) : tab === "tools" ? (
           <BotBrowserProfile key={bot.id} botId={bot.id} />
         ) : (

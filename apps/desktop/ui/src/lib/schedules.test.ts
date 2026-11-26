@@ -393,3 +393,34 @@ test("catch-up window: sent with run_once/run_all, cleared for skip, restored on
   assert.equal(d.catchupWindow, 3600);
   assert.equal(draftFromSchedule(sched()).catchupWindow, 0);
 });
+
+test("a plain cron reads as words and a zone rides along", async () => {
+  const { describeCron, splitCronZone } = await import("./schedules.ts");
+  assert.deepEqual(describeCron("0 9 * * * Europe/Istanbul"), {
+    i18nKey: "schedules.spec.cronDaily",
+    values: { time: "09:00", zone: " (Europe/Istanbul)" }
+  });
+  assert.equal(describeCron("30 8 * * 1-5")?.i18nKey, "schedules.spec.cronWeekdays");
+  assert.equal(describeCron("0 7 * * 1", "en")?.values.day, "Monday");
+  assert.equal(describeCron("0 7 15 * *")?.i18nKey, "schedules.spec.cronMonthly");
+  // Anything more exotic stays as the raw expression.
+  assert.equal(describeCron("*/5 * * * *"), null);
+  assert.deepEqual(splitCronZone("0 9 * * * Europe/Istanbul"), { cron: "0 9 * * *", tz: "Europe/Istanbul" });
+});
+
+test("editing a zoned cron schedule keeps its zone instead of showing UTC", () => {
+  const s = {
+    id: "s1",
+    bot_id: "b1",
+    name: "Quote",
+    spec: { cron: "0 9 * * * Europe/Istanbul" },
+    payload: { kind: "agent_prompt", text: "a quote" },
+    enabled: true,
+    misfire_policy: "skip"
+  } as unknown as Schedule;
+  const d = draftFromSchedule(s);
+  assert.equal(d.kind, "cron");
+  assert.equal(d.tz, "Europe/Istanbul");
+  assert.equal(d.cron, "0 9 * * *");
+  assert.deepEqual(buildInput(d, undefined, s).spec, { cron: "0 9 * * * Europe/Istanbul" });
+});

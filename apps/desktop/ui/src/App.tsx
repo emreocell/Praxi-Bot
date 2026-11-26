@@ -1,4 +1,4 @@
-import { BellDot, BellRing, Bot, ChevronDown, FlaskConical, GripVertical, Star, LoaderCircle, MessageSquare, Plus, Search, Server, ServerOff, Settings2 } from "lucide-react";
+import { BellDot, BellRing, Bot, CalendarClock, ChevronDown, FlaskConical, GripVertical, Star, LoaderCircle, MessageSquare, Plus, Search, Server, ServerOff, Settings2 } from "lucide-react";
 import { effectiveWallpaperMotion } from "./lib/accessibility";
 import { unreadBotIds } from "./lib/unread";
 import { useReadState } from "./store/readStateStore";
@@ -1303,6 +1303,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
               onManageSkills={() => setSkillsOpen(true)}
               onAddSkill={() => setAddSkillOpen(true)}
               onOpenMail={() => setSettingsOpen("mail")}
+              onOpenSchedules={() => go({ kind: "schedules" })}
               isMain={bots[0]?.id === selectedBot.id}
               mainBotName={bots[0] ? botView(bots[0]).name : undefined}
               onMakeMain={botIds.length > 1 ? () => saveBotOrder(makeBotMain(botIds, selectedBot.id)) : undefined}
@@ -1363,6 +1364,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
             <div ref={reorder.containerRef} className={styles.botList} data-stale={homeStale ? "true" : undefined}>
             {needs.length > 0 ? <SidebarItem className={`${styles.railItem} ${styles.railLink}`} active={route.kind === "needs"} title={t("sidebar.needsYou")} aria-label={mini ? t("sidebar.needsYouCount", { count: needs.length }) : undefined} onClick={openNeeds}><BellDot /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.needsYou")}</span><span className={styles.needsBadge} data-testid="needs-you-badge" aria-label={t("sidebar.needsYouCount", { count: needs.length })}>{needs.length}</span></SidebarItem> : null}
             {notifyHistory.length > 0 || route.kind === "notifications" ? <SidebarItem className={`${styles.railItem} ${styles.railLink}`} active={route.kind === "notifications"} title={t("sidebar.notifications")} aria-label={mini && notifyActionCount > 0 ? t("sidebar.notificationsCount", { count: notifyActionCount }) : mini ? t("sidebar.notifications") : undefined} onClick={() => go({ kind: "notifications" })} data-testid="sidebar-notifications"><BellRing /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.notifications")}</span>{notifyActionCount > 0 ? <span className={styles.notifyBadge} data-testid="notify-history-badge" aria-label={t("sidebar.notificationsCount", { count: notifyActionCount })}>{notifyActionCount}</span> : null}</SidebarItem> : null}
+            <SidebarItem className={`${styles.railItem} ${styles.railLink}`} active={route.kind === "schedules"} title={t("sidebar.schedules")} aria-label={mini ? t("sidebar.schedules") : undefined} onClick={() => go({ kind: "schedules" })} data-testid="sidebar-schedules"><CalendarClock /><span className={`${styles.botName} ${styles.railText}`}>{t("sidebar.schedules")}</span></SidebarItem>
             {bots.map((bot) => {
               const view = botView(bot);
               const latest = botChats(chats, bot.id).find((c) => !c.archived);

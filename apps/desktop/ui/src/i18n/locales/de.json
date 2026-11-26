@@ -1362,6 +1362,10 @@
     "profile": "Bot-Profil",
     "runsOnHost": "Läuft auf {{name}} (Host)",
     "runsOnLocal": "Läuft auf diesem Computer",
+    "schedulesLink": {
+      "hint": "Jeden Morgen, jede Woche oder einmalig: hier anlegen und verwalten.",
+      "title": "Geplante Aufgaben"
+    },
     "screenListFailed": "Die Bildschirmliste von {{name}} konnte nicht geladen werden. Es wird gleich noch einmal versucht.",
     "searchChats": "Chats durchsuchen …",
     "serverIssue": {
@@ -5396,7 +5400,7 @@
       "noFirstRun": "kein bevorstehender Lauf",
       "notify": {
         "always": "Jedes Mal",
-        "hint": "Wird auf diesem Computer gespeichert. Braucht der Bot dein OK, erfährst du es immer.",
+        "hint": "Eine Erinnerung wird jedes Mal gemeldet, andere Aufgaben nur bei Problemen. Wird auf diesem Computer gespeichert; braucht der Bot Ihr OK, erfahren Sie das immer.",
         "label": "Mich benachrichtigen",
         "never": "Nie",
         "problems": "Nur bei Problemen"
@@ -5422,7 +5426,9 @@
       "time": "Um wie viel Uhr?",
       "tz": "Zeitzone",
       "tzCronHint": "Wird verwendet, wenn der Cron-Ausdruck 5 Felder ohne Zeitzone hat.",
+      "tzSearch": "Zeitzone suchen, z. B. Europe/Istanbul",
       "tzShown": "Die Zeiten gelten in {{tz}}.",
+      "tzUnknown": "Keine bekannte Zeitzone. Bitte aus der Liste wählen.",
       "weekday": "An welchem Wochentag?",
       "when": "Wann"
     },
@@ -5477,6 +5483,10 @@
     "spec": {
       "at": "Einmalig am {{when}}",
       "cron": "Cron: {{cron}}",
+      "cronDaily": "Jeden Tag um {{time}}{{zone}}",
+      "cronMonthly": "Monatlich am {{day}}. um {{time}}{{zone}}",
+      "cronWeekdays": "Werktags um {{time}}{{zone}}",
+      "cronWeekly": "Jeden {{day}} um {{time}}{{zone}}",
       "every": {
         "days": "Alle {{count}} Tage",
         "days_one": "Jeden Tag",

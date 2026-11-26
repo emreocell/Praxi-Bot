@@ -30,3 +30,16 @@ test("data that leaves the computer is a send even when the tool name is plain",
     "send"
   );
 });
+
+test("a schedule card that carries an egress review is still a change, never a send", () => {
+  const details = {
+    kind: "schedule",
+    action: "create",
+    name: "Daily quote",
+    prompt: "Tell me a quote",
+    schedule: "Every day at 09:00",
+    timezone: "Europe/Istanbul",
+    egress: { kind: "egress", reason: "egress", host: "this bot's scheduler", payload: "x" }
+  };
+  assert.equal(approvalRisk("schedule_create", {}, details), "change");
+});

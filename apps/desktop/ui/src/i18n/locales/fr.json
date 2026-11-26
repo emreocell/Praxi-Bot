@@ -1362,6 +1362,10 @@
     "profile": "Profil du bot",
     "runsOnHost": "S'exécute sur {{name}} (hôte)",
     "runsOnLocal": "S'exécute sur cet ordinateur",
+    "schedulesLink": {
+      "hint": "Chaque matin, chaque semaine ou une seule fois : créez-les et gérez-les ici.",
+      "title": "Tâches planifiées"
+    },
     "screenListFailed": "La liste des écrans de {{name}} n'a pas pu être chargée. Une nouvelle tentative aura lieu dans un instant.",
     "searchChats": "Rechercher des conversations…",
     "serverIssue": {
@@ -5396,7 +5400,7 @@
       "noFirstRun": "aucune exécution à venir",
       "notify": {
         "always": "À chaque fois",
-        "hint": "Enregistré sur cet ordinateur. Si le bot a besoin de votre accord, vous en êtes toujours informé.",
+        "hint": "Un rappel est signalé à chaque fois ; les autres tâches seulement en cas de problème. Enregistré sur cet ordinateur ; si le bot a besoin de votre accord, vous en êtes toujours informé.",
         "label": "Me prévenir quand elle s'est exécutée",
         "never": "Jamais",
         "problems": "Uniquement en cas de problème"
@@ -5422,7 +5426,9 @@
       "time": "À quelle heure ?",
       "tz": "Fuseau horaire",
       "tzCronHint": "Utilisé si l'expression cron comporte 5 champs sans fuseau horaire.",
+      "tzSearch": "Rechercher un fuseau horaire, p. ex. Europe/Istanbul",
       "tzShown": "Les heures sont en {{tz}}.",
+      "tzUnknown": "Fuseau horaire inconnu. Choisissez-en un dans la liste.",
       "weekday": "Quel jour de la semaine ?",
       "when": "Quand"
     },
@@ -5477,6 +5483,10 @@
     "spec": {
       "at": "Une fois le {{when}}",
       "cron": "Cron : {{cron}}",
+      "cronDaily": "Tous les jours à {{time}}{{zone}}",
+      "cronMonthly": "Chaque mois le {{day}} à {{time}}{{zone}}",
+      "cronWeekdays": "En semaine à {{time}}{{zone}}",
+      "cronWeekly": "Chaque {{day}} à {{time}}{{zone}}",
       "every": {
         "days": "Tous les {{count}} jours",
         "days_one": "Tous les jours",

@@ -19,7 +19,7 @@ import {
   Trash2,
   TrendingDown
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button, Card } from "ui";
 import { ApiError } from "../api/client";
@@ -43,6 +43,7 @@ import {
   type ScheduleNotify,
   SCHEDULE_NOTIFY_CHOICES,
   scheduleNotifyOf,
+  suggestScheduleNotify,
   writeScheduleNotify
 } from "../lib/scheduleNotify";
 import { type ScheduleTemplate, templateText } from "../lib/scheduleTemplates";
@@ -52,6 +53,8 @@ import {
   buildMonthGrid,
   draftFromSchedule,
   emptyDraft,
+  isOneShotSpec,
+  isTimeZoneName,
   filterScheduleHistory,
   formatDurationParts,
   type HistoryFilter,
@@ -89,18 +92,67 @@ const TEMPLATE_ICONS: Record<string, LucideIcon> = {
 
 const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
-const COMMON_TIMEZONES = Array.from(
+/** Every zone this runtime knows (the full IANA list), the local one first. */
+const ALL_TIMEZONES: string[] = Array.from(
   new Set([
     LOCAL_TZ,
     "UTC",
-    "Europe/Istanbul",
-    "Europe/Berlin",
-    "Europe/London",
-    "America/New_York",
-    "America/Los_Angeles",
-    "Asia/Tokyo"
+    ...(typeof Intl.supportedValuesOf === "function"
+      ? Intl.supportedValuesOf("timeZone")
+      : ["Europe/Istanbul", "Europe/Berlin", "Europe/London", "America/New_York", "Asia/Tokyo"])
   ])
 );
+
+/**
+ * Timezone field with type-to-search over the whole IANA list. A value that is not a zone is kept
+ * as typed (so typing works) but never reaches the draft: the last good zone stays until a valid
+ * one is picked.
+ */
+function TimezonePicker({
+  value,
+  allowEmpty,
+  onChange
+}: {
+  value: string;
+  /** `true`: an empty field means UTC (a 5-field cron). */
+  allowEmpty: boolean;
+  onChange: (tz: string) => void;
+}) {
+  const { t } = useTranslation();
+  const listId = useId();
+  const [text, setText] = useState(value || (allowEmpty ? "UTC" : ""));
+  useEffect(() => {
+    setText(value || (allowEmpty ? "UTC" : ""));
+  }, [value, allowEmpty]);
+  const typed = text.trim();
+  const valid = typed !== "" && isTimeZoneName(typed);
+  return (
+    <>
+      <input
+        className={formStyles.input}
+        list={listId}
+        value={text}
+        spellCheck={false}
+        autoComplete="off"
+        aria-label={t("schedules.form.tz")}
+        aria-invalid={!valid}
+        placeholder={t("schedules.form.tzSearch")}
+        data-testid="schedule-tz"
+        onChange={(e) => {
+          setText(e.target.value);
+          const v = e.target.value.trim();
+          if (v !== "" && isTimeZoneName(v)) onChange(v === "UTC" && allowEmpty ? "" : v);
+        }}
+      />
+      <datalist id={listId}>
+        {ALL_TIMEZONES.map((tz) => (
+          <option key={tz} value={tz} />
+        ))}
+      </datalist>
+      {!valid ? <span className={formStyles.error} role="alert">{t("schedules.form.tzUnknown")}</span> : null}
+    </>
+  );
+}
 
 function historyToneClass(status: string): string {
   const tone = historyStatusTone(status);
@@ -340,7 +392,7 @@ export function SchedulesView({
               const bot = bots.find((b) => b.id === s.bot_id);
               const view = bot ? botView(bot) : null;
               const status = scheduleStatus(s);
-              const label = specLabel(s.spec, fmt);
+              const label = specLabel(s.spec, fmt, i18n.language);
               const payload = parsePayload(s.payload);
               const liveRuns = runsOfSchedule(events.runs, s.id, 20);
               const mergedHistory = mergeLiveRunsIntoHistory(
@@ -1110,9 +1162,28 @@ function ScheduleForm({
   } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [notify, setNotify] = useState<ScheduleNotify>(() =>
-    editing ? scheduleNotifyOf(editing.id) : "problems"
+  const [notify, setNotifyState] = useState<ScheduleNotify>(() =>
+    editing
+      ? scheduleNotifyOf(editing.id, {
+          prompt: draftFromSchedule(editing).prompt,
+          oneShot: isOneShotSpec(editing.spec)
+        })
+      : "problems"
   );
+  // Until the owner picks one, the choice follows the schedule's purpose: a reminder is announced
+  // every time, background work only when something goes wrong.
+  const [notifyTouched, setNotifyTouched] = useState(false);
+  const setNotify = (c: ScheduleNotify) => {
+    setNotifyTouched(true);
+    setNotifyState(c);
+  };
+  const suggested = suggestScheduleNotify(
+    draft.prompt,
+    draft.kind === "simple" && draft.simple.freq === "once"
+  );
+  useEffect(() => {
+    if (!editing && !notifyTouched) setNotifyState(suggested);
+  }, [editing, notifyTouched, suggested]);
   const patchSimple = (p: Partial<ScheduleDraft["simple"]>) =>
     setDraft((d) => ({ ...d, simple: { ...d.simple, ...p } }));
   const pickFrequency = (f: Frequency) =>
@@ -1406,7 +1477,7 @@ function ScheduleForm({
           {draft.kind === "keep" && editing ? (
             <p className={formStyles.hint}>
               {(() => {
-                const l = specLabel(editing.spec, (ms) => fmt(ms));
+                const l = specLabel(editing.spec, (ms) => fmt(ms), i18n.language);
                 return t("schedules.form.keepHint", {
                   spec: t(l.i18nKey, l.values)
                 });
@@ -1417,19 +1488,11 @@ function ScheduleForm({
           {draft.kind !== "keep" ? (
             <label className={formStyles.field}>
               <span className={formStyles.label}>{t("schedules.form.tz")}</span>
-              <select
-                className={formStyles.select}
+              <TimezonePicker
                 value={draft.tz ?? ""}
-                aria-label={t("schedules.form.tz")}
-                onChange={(e) => patch({ tz: e.target.value })}
-              >
-                {draft.kind === "cron" ? <option value="">UTC</option> : null}
-                {COMMON_TIMEZONES.map((tz) => (
-                  <option key={tz} value={tz}>
-                    {tz}
-                  </option>
-                ))}
-              </select>
+                allowEmpty={draft.kind === "cron"}
+                onChange={(tz) => patch({ tz })}
+              />
               {draft.kind === "cron" ? (
                 <span className={formStyles.hint}>
                   {t("schedules.form.tzCronHint")}
@@ -1571,7 +1634,7 @@ function ScheduleForm({
               {activePreview ? (
                 <p className={formStyles.success}>
                   {(() => {
-                    const l = specLabel(activePreview.spec, (ms) => fmt(ms));
+                    const l = specLabel(activePreview.spec, (ms) => fmt(ms), i18n.language);
                     const next = activePreview.next_run_at_ms;
                     return `${t(l.i18nKey, l.values)} · ${
                       next !== null && next !== undefined
