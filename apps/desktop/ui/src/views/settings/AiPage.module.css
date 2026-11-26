@@ -1,7 +1,9 @@
 /* Settings > AI: sections of the v6 prototype (label, card, list, paste box, chips). */
 .sec { display: flex; flex-direction: column; }
-.head { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-0) var(--space-0) var(--space-2); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text-muted); }
+.head { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-0) var(--space-0) var(--space-2); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text-secondary); }
 .head h3 { margin: var(--space-0); font: inherit; }
+/* The section heading and its action sit straight on the (translucent, glass) dialog, not in a card: secondary ink keeps them readable on any wallpaper (muted fell to 4.4:1 on Clay). */
+.head .textBtn { color: var(--color-text-secondary); }
 .grow { flex: 1; }
 .textBtn { display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); border: none; border-radius: var(--radius-pill); background: none; color: var(--color-text-muted); font: inherit; cursor: pointer; transition: color var(--motion-duration-fast) var(--motion-easing-standard), background-color var(--motion-duration-fast) var(--motion-easing-standard); }
 .textBtn:hover:not(:disabled) { color: var(--color-text); background-color: var(--color-surface-active); }
