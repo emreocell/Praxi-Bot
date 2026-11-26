@@ -5833,15 +5833,14 @@ async fn approving_a_shell_call_after_shell_is_denied_does_not_run_or_grant() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn retry_after_beyond_budget_is_one_request_and_surfaces_rate_limited() {
+async fn retry_after_beyond_backoff_budget_is_honoured() {
     let env = setup();
     let fake = Fake::new(vec![
         Reply::RateLimited(Some(Duration::from_secs(60))),
-        text("should not be asked"),
+        text("recovered"),
     ]);
     let mut config = cfg(Policy::full());
-    // More than one attempt, with a budget far below 60s, so the old loop
-    // would send again after a short backoff.
+    // The server delay exceeds the backoff budget but fits the model timeout.
     config.model_retry.max_attempts = 3;
     config.model_retry.initial_backoff_ms = 500;
     config.model_retry.multiplier = 2;
@@ -5855,16 +5854,26 @@ async fn retry_after_beyond_budget_is_one_request_and_surfaces_rate_limited() {
         config,
     );
     let run = lp.run_turn(env.chat, "hi").unwrap();
-    let state = tokio::time::timeout(Duration::from_secs(3), lp.wait(run))
+    let started = tokio::time::Instant::now();
+    let state = tokio::time::timeout(Duration::from_secs(70), lp.wait(run))
         .await
-        .expect("must not sleep for Retry-After: 60")
+        .expect("must retry after the server delay")
         .unwrap();
-    assert_eq!(state, RunState::Failed);
-    assert_eq!(
-        fake.n_requests(),
-        1,
-        "no second request after a 60s Retry-After"
-    );
+    assert_eq!(state, RunState::Succeeded);
+    assert_eq!(fake.n_requests(), 2);
+    assert!(started.elapsed() >= Duration::from_secs(60));
+}
+
+#[tokio::test(start_paused = true)]
+async fn retry_after_beyond_model_timeout_does_not_retry() {
+    let env = setup();
+    let fake = Fake::new(vec![Reply::RateLimited(Some(Duration::from_secs(300)))]);
+    let mut config = cfg(Policy::full());
+    config.model_retry.max_attempts = 2;
+    let lp = make_loop(&env.storage, env.bot, &fake, &[], profile(""), config);
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
+    assert_eq!(fake.n_requests(), 1);
     let err = env.storage.get_run(run).unwrap().unwrap().error.unwrap();
     assert!(err.contains("rate limited"), "{err}");
 }

@@ -1337,7 +1337,7 @@ impl TurnExecutor {
         let attempts = policy.max_attempts.max(1);
         let budget = retry_time_budget(policy);
         let started = tokio::time::Instant::now();
-        let mut slept = Duration::ZERO;
+        let mut backoff_slept = Duration::ZERO;
         let mut attempt = 1;
         let mut malformed_retried = false;
         let light = self.light_model(ctx) == Some(req.model.0.as_str());
@@ -1364,15 +1364,14 @@ impl TurnExecutor {
             {
                 return Err(error);
             }
-            let delay = error
-                .retry_after()
-                .unwrap_or_else(|| jittered_backoff(policy.backoff(attempt)));
+            let retry_after = error.retry_after();
+            let delay = retry_after.unwrap_or_else(|| jittered_backoff(policy.backoff(attempt)));
             let sleep_budget = if light_repair {
                 budget.max(policy.backoff(attempt))
             } else {
                 budget
             };
-            if slept.saturating_add(delay) > sleep_budget
+            if (retry_after.is_none() && backoff_slept.saturating_add(delay) > sleep_budget)
                 || started.elapsed().saturating_add(delay) >= self.sh.cfg.guards.model_timeout
             {
                 return Err(error);
@@ -1384,7 +1383,9 @@ impl TurnExecutor {
                 }
                 () = tokio::time::sleep(delay) => {}
             }
-            slept += delay;
+            if retry_after.is_none() {
+                backoff_slept += delay;
+            }
             malformed_retried |= malformed;
             attempt += 1;
         }
