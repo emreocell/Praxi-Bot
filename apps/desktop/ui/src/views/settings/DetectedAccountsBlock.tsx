@@ -235,6 +235,14 @@ export function DetectedAccountsBlock({ local = false }: { local?: boolean } = {
                   {t("settingsModal.ai.detected.copyCommand")}
                 </button>
                 {!install.verified ? <span className={styles.sub}> {t("settingsModal.ai.detected.noteUnverified")}</span> : null}
+                {status === "not_installed" && install.executable ? (
+                  <>
+                    {" "}
+                    <button type="button" className={styles.pill} disabled={installing || approval !== null} onClick={() => void previewInstall(row.id)} data-testid={`install-${row.id}`}>
+                      {t("settingsModal.ai.detected.install")}
+                    </button>
+                  </>
+                ) : null}
               </dd>
             </> : null}
             <dt>{t("settingsModal.ai.detected.loginLabel")}</dt>

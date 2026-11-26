@@ -231,8 +231,8 @@ pub const CLI_ENGINES: &[CliEngineSpec] = &[
         version_args: &["--version"],
         auth_args: &[],
         minimum_version: None,
-        install_windows: npm(&["install", "-g", "@qwen-code/qwen-code"], false),
-        install_unix: npm(&["install", "-g", "@qwen-code/qwen-code"], false),
+        install_windows: npm(&["install", "-g", "@qwen-code/qwen-code"], true),
+        install_unix: npm(&["install", "-g", "@qwen-code/qwen-code"], true),
         models: &["default"],
         login: "qwen",
         docs_url: "https://qwenlm.github.io/qwen-code-docs/",
@@ -250,14 +250,16 @@ pub const CLI_ENGINES: &[CliEngineSpec] = &[
         version_args: &["--version"],
         auth_args: &[],
         minimum_version: None,
-        install_windows: npm(&["install", "-g", "@github/copilot"], false),
-        install_unix: npm(&["install", "-g", "@github/copilot"], false),
+        install_windows: npm(&["install", "-g", "@github/copilot"], true),
+        install_unix: npm(&["install", "-g", "@github/copilot"], true),
         models: &["default"],
         login: "copilot login",
         docs_url: "https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli",
     },
     // Kiro CLI (AWS). Runs with its own tools through `kiro-cli acp` (CLI V3). Interface
-    // read from kiro.dev/docs/cli, not from an install. `whoami` has a status output but
+    // read from kiro.dev/docs/cli, not from an install. The installer is the vendor's
+    // documented `https://cli.kiro.dev/install` script (read 2026-11-26: it fetches the
+    // `kiro-cli` binary from `prod.download.cli.kiro.dev`). `whoami` has a status output but
     // its signed-out exit code is undocumented, so sign-in stays unverified.
     CliEngineSpec {
         id: "kiro",
@@ -275,8 +277,8 @@ pub const CLI_ENGINES: &[CliEngineSpec] = &[
                 "-c",
                 "curl --proto =https --proto-redir =https --tlsv1.2 -fsSL https://cli.kiro.dev/install | bash",
             ],
-            verified: false,
-            executable: false,
+            verified: true,
+            executable: true,
         }),
         models: &["default"],
         login: "kiro-cli login",
@@ -295,8 +297,8 @@ pub const CLI_ENGINES: &[CliEngineSpec] = &[
         version_args: &["--version"],
         auth_args: &[],
         minimum_version: None,
-        install_windows: npm(&["install", "-g", "@moonshot-ai/kimi-code"], false),
-        install_unix: npm(&["install", "-g", "@moonshot-ai/kimi-code"], false),
+        install_windows: npm(&["install", "-g", "@moonshot-ai/kimi-code"], true),
+        install_unix: npm(&["install", "-g", "@moonshot-ai/kimi-code"], true),
         models: &["default"],
         login: "kimi login",
         docs_url: "https://moonshotai.github.io/kimi-code/",
@@ -314,8 +316,8 @@ pub const CLI_ENGINES: &[CliEngineSpec] = &[
         version_args: &["--version"],
         auth_args: &["status", "-o", "json"],
         minimum_version: None,
-        install_windows: npm(&["install", "-g", "@qoder-ai/qodercli"], false),
-        install_unix: npm(&["install", "-g", "@qoder-ai/qodercli"], false),
+        install_windows: npm(&["install", "-g", "@qoder-ai/qodercli"], true),
+        install_unix: npm(&["install", "-g", "@qoder-ai/qodercli"], true),
         models: &["default"],
         login: "qodercli login",
         docs_url: "https://qoder.com/cli",
@@ -395,11 +397,11 @@ mod tests {
                     assert!(install.verified);
                     if install.program != "npm" {
                         assert!(matches!(install.program, "powershell.exe" | "sh"));
-                        assert!(matches!(spec.id, "cursor" | "agy"));
-                        let url = if spec.id == "cursor" {
-                            "https://cursor.com/install"
-                        } else {
-                            "https://antigravity.google/cli/install.sh"
+                        assert!(matches!(spec.id, "cursor" | "agy" | "kiro"));
+                        let url = match spec.id {
+                            "cursor" => "https://cursor.com/install",
+                            "kiro" => "https://cli.kiro.dev/install",
+                            _ => "https://antigravity.google/cli/install.sh",
                         };
                         assert!(install.args.last().unwrap().contains(url));
                         continue;
