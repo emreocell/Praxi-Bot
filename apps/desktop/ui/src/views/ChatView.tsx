@@ -171,6 +171,7 @@ import styles from "./ChatView.module.css";
 import { type ErrorAction, type HumanError, humanError, humanLine, humanToolError } from "../lib/humanError";
 import type { ApiClient } from "../api/client";
 import { sendWithHostRecovery } from "../lib/hostRecovery";
+import { BotFilesCard } from "../components/BotFilesCard";
 import { ComputerUseOffCard } from "../components/ComputerAccess";
 import { ComputerTargetChip, computerTargetOf } from "../components/ComputerTargetChip";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -2016,6 +2017,7 @@ export function ChatView({
         data-dragover={dragOver ? "true" : undefined}
       >
         {bot && computerTargetOf(bot) === "mine" ? <ComputerUseOffCard /> : null}
+        {bot ? <BotFilesCard bot={bot} /> : null}
         {error ? (
           <p className={styles.error} role="alert">
             {error}

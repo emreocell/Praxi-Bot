@@ -15,6 +15,7 @@ import { useDaemon } from "../state/DaemonContext";
 import formStyles from "./Form.module.css";
 import styles from "./BotEngineBlock.module.css";
 import { humanLine } from "../lib/humanError";
+import { BotFilesCard } from "./BotFilesCard";
 
 /** Static keys keep `check:i18n` honest. */
 function levelText(t: (key: string) => string, level: ApprovalLevel): { name: string; text: string } {
@@ -69,6 +70,7 @@ export function BotEngineBlock({ bot }: { bot: Bot }) {
 
   return (
     <section className={styles.block} data-testid="bot-engine-block">
+      <BotFilesCard bot={bot} />
       <p className={formStyles.hint}>{t("botEngine.hint")}</p>
       {current.mode === "native_tools" ? (
         <p className={styles.label} role="status">
