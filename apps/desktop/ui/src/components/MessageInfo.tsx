@@ -11,6 +11,7 @@ import {
   userInfoRows
 } from "../lib/messageInfo";
 import type { RunState } from "../state/timeline";
+import tipStyles from "./ActionTip.module.css";
 import styles from "./MessageInfo.module.css";
 import { Popover } from "./Popover";
 
@@ -109,11 +110,11 @@ export function MessageInfo({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={t("messageInfo.label")}
-        title={t("messageInfo.label")}
         data-testid="message-info"
         onClick={() => setOpen((o) => !o)}
       >
         <Info aria-hidden="true" />
+        <span className={tipStyles.tip} aria-hidden="true">{t("messageInfo.label")}</span>
       </button>
       <Popover
         open={open}

@@ -80,12 +80,19 @@ export function messageTimeLabel(
     return null;
   }
   const hover = formatClock(ts, lang, true);
-  const finished =
-    finishedTs !== undefined && finishedTs > ts ? ` → ${formatStamp(finishedTs, lang)}` : "";
+  const start = formatStamp(ts, lang);
+  // The finish only when it adds something: a clock on the same day, the full stamp on a later one.
+  const end =
+    finishedTs === undefined || finishedTs <= ts
+      ? ""
+      : dayStart(finishedTs) === dayStart(ts)
+        ? formatClock(finishedTs, lang, true)
+        : formatStamp(finishedTs, lang);
+  const finished = end && end !== hover ? ` → ${end}` : "";
   return {
     text: mode === "seconds" ? hover : formatClock(ts, lang, false),
     hover,
-    title: `${formatStamp(ts, lang)}${finished}`
+    title: `${start}${finished}`
   };
 }
 

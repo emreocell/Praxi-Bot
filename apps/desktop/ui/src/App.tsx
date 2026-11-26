@@ -1400,8 +1400,8 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
           <SidebarFooter className={styles.railFoot}>
             {import.meta.env.DEV && new URLSearchParams(window.location.search).get("dev") === "1" ? <Button variant="ghost" onClick={handleSimulateBotRun}><FlaskConical />{mini ? null : t("dev.simulateBotRun")}</Button> : null}
             <div className={styles.footRow}>
-              <AppsPill connected={appServers.filter(s => s.status === "connected").map(s => s.name)} onClick={() => setAppsOpen(true)} />
               <AccountMenu name={settings.accountName} computerTarget={settings.computerTarget} compact={mini} onAction={handleAccountAction} />
+              <AppsPill connected={appServers.filter(s => s.status === "connected").map(s => s.name)} onClick={() => setAppsOpen(true)} />
             </div>
           </SidebarFooter>
         </Sidebar>

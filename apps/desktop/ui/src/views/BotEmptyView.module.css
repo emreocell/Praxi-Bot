@@ -119,13 +119,29 @@
   }
 }
 
-/* Plates only over a backdrop (see ChatView.module.css): on the plain theme the words sit on the page. */
-.title, .text, .suggestTitle {
+/* Over a backdrop the title and its line share ONE soft card (like the chat greeting), not a pill per
+   line; on the plain theme the words sit on the page.  The small section label keeps its own plate. */
+.copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  border-radius: var(--radius-card);
+}
+:global(:root[data-backdrop="on"]) .copy {
+  padding: var(--space-3) var(--space-6) var(--space-4);
+  background-color: var(--on-wallpaper-fill);
+  box-shadow: var(--shadow-card);
+}
+.copy > .title { margin-top: var(--space-0); }
+.copy > .text { margin-bottom: var(--space-0); }
+.suggestTitle {
   padding: var(--chat-plate-pad, var(--space-0));
   border-radius: var(--radius-md);
   background-color: var(--chat-plate-fill, transparent);
-  color: var(--on-wallpaper-muted);
 }
 .title { color: var(--on-wallpaper-text); }
+.text, .suggestTitle { color: var(--on-wallpaper-muted); }
 .suggestChip { background-color: var(--chat-plate-fill, transparent); color: var(--color-text-secondary); border-color: var(--color-border); }
 .suggestChip:hover:not(:disabled) { background-color: var(--state-hover); border-color: var(--color-border-hover); color: var(--color-text); }

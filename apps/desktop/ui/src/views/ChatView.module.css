@@ -7,10 +7,12 @@
 :global(:root) {
   --chat-plate-fill: transparent;
   --chat-plate-pad: var(--space-0);
+  --chat-plate-pad-sm: var(--space-0);
 }
 :global(:root[data-backdrop="on"]) {
   --chat-plate-fill: var(--on-wallpaper-fill);
   --chat-plate-pad: var(--space-1) var(--space-3);
+  --chat-plate-pad-sm: calc(var(--space-1) * 0.5) var(--space-2);
 }
 
 .root {
@@ -491,8 +493,27 @@
   color: var(--color-text);
 }
 
+/* The greeting and its line share ONE surface over a wallpaper (a soft card, no pill per line); on the
+   plain theme background there is nothing to hide, so the card has no fill and no padding. */
+.welcomeCopy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  margin-top: var(--space-2);
+  border-radius: var(--radius-card);
+}
+
+:global(:root[data-backdrop="on"]) .welcomeCopy {
+  padding: var(--space-3) var(--space-6) var(--space-4);
+  background-color: var(--on-wallpaper-fill);
+  box-shadow: var(--shadow-card);
+}
+
 .emptyConversation h1 {
-  margin: var(--space-2) var(--space-0) var(--space-0);
+  margin: var(--space-0);
+  overflow-wrap: anywhere;
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
   letter-spacing: var(--letter-spacing-display);
@@ -557,6 +578,14 @@
   gap: var(--space-2);
   padding: var(--space-3) var(--space-6) var(--space-5);
   background: transparent;
+}
+
+/* Floating panels over a see-through chat area: the composer is the chat's bottom edge, so it lines up
+   exactly with the bottom edges of the rail and the right panel (all end at the shell's outer gap,
+   FLOAT_PAD; the clear main pane drops its invisible bottom border, Sidebar.module.css).  In a solid chat
+   card the composer keeps its inner padding: the card's own edge is the one that lines up. */
+:global(:root[data-window-kind="main"][data-float="on"][data-chat="clear"]) .root:not([data-live-dock="true"]) .composer {
+  padding-bottom: var(--space-0);
 }
 
 .boxWrap {
@@ -1049,8 +1078,6 @@
 
 /* One wallpaper plate contract: over a backdrop an opaque fill, readable secondary ink and padding;
    on the plain theme background (no backdrop) the same lines are bare text. */
-.hint,
-.emptyConversation h1,
 .conversationLabel,
 .runStopped,
 .rememberDone,
@@ -1067,6 +1094,7 @@
 .authorName { align-self: flex-start; }
 
 .emptyConversation h1 { color: var(--on-wallpaper-text); }
+.hint { color: var(--on-wallpaper-muted); }
 
 .rememberRow { flex-wrap: wrap; }
 .rememberRow > button {

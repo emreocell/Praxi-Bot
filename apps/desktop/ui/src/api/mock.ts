@@ -3542,9 +3542,11 @@ export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["even
       { type: "run_started", run_id: runId, bot_id: "11111111-1111-4111-8111-111111111111", chat_id: "33333333-3333-4333-8333-333333333333" },
       { type: "tool_call_requested", run_id: runId, call_id: "mock-tool", tool_name: screen === "changes" ? "fs_edit" : "github.search", input: screen === "changes" ? { path: "docs/haftalik-ozet.md" } : { query: "is:closed updated:this-week" } },
       { type: "tool_call_completed", run_id: runId, call_id: "mock-tool", error: null },
+      // Like the daemon, a failed run also reports its error as an `error` event (the chat shows it once).
+      ...(screen === "errors-run" ? [{ type: "error", run_id: runId, message: "Error: execution error: The user is controlling the screen right now (observation paused), so this read was not performed: screenshot", recoverable: false } as GlobalEnvelope["event"]] : []),
       { type: "run_finished", run_id: runId, error: screen === "errors-run" ? "Error: execution error: The user is controlling the screen right now (observation paused), so this read was not performed: screenshot" : null }
     ];
-    events.forEach((event, i) => out.push({ ts_ms: 1750000000000 + (i === 3 ? 2000 : 200 + i * 100), event }));
+    events.forEach((event, i) => out.push({ ts_ms: 1750000000000 + (event.type === "run_finished" ? 2000 : 200 + i * 100), event }));
   }
   return out;
 }

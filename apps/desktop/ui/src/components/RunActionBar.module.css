@@ -1,23 +1,35 @@
+/* The actions under the latest answer: the same clear 28 px buttons as the message actions; over a
+   wallpaper they sit on one small readable plate (the bar is as wide as its buttons). */
 .bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  align-self: flex-start;
+  width: fit-content;
   gap: calc(var(--space-1) * 0.5);
   min-height: var(--size-info-button);
+  padding: calc(var(--space-1) * 0.5);
+  border-radius: var(--radius-md);
+}
+
+:global(:root[data-backdrop="on"]) .bar {
+  border: var(--size-border) solid var(--color-border);
+  background-color: var(--on-wallpaper-fill);
 }
 
 .icon {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: var(--space-6);
-  height: var(--space-6);
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
   padding: var(--space-0);
   border: none;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition:
     color var(--motion-duration-fast) var(--motion-easing-standard),
@@ -41,8 +53,8 @@
 }
 
 .icon > svg {
-  width: calc(var(--space-1) * 4);
-  height: calc(var(--space-1) * 4);
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
 }
 
 @media (prefers-reduced-motion: reduce) {

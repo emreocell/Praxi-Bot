@@ -1,32 +1,36 @@
 /*
- * A labelled row, like the rows above it.  What follows the label depends on the rail's width tier
- * (data-rail-tier on the rail, see `railTier` in lib/shellLayout.ts): the connected apps' logos
- * (three from "medium", five from "large"), nothing when narrow; the collapsed rail shows only the icon.
+ * The Apps button sits immediately to the right of the profile row (App.module.css .footRow) and keeps
+ * its own size there.  What it shows depends on the rail's width tier (data-rail-tier on the rail, see
+ * `railTier` in lib/shellLayout.ts): the icon on a narrow or medium rail, icon and label from "large",
+ * plus up to three connected apps' logos on a wide rail.  The name is always in the tooltip.
  */
 .pill {
-  display: flex;
+  display: inline-flex;
+  flex: none;
   align-items: center;
-  gap: var(--space-3);
-  width: 100%;
-  height: var(--size-control-md);
-  /* The icon sits under the account avatar's centre. */
-  padding: 0 var(--space-3) 0 calc(var(--space-3) + var(--space-half));
-  border: none;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: var(--size-control-lg);
+  height: var(--size-control-lg);
+  padding: 0 var(--space-3);
+  border: var(--size-border) solid transparent;
   border-radius: var(--radius-md);
   background: none;
   color: var(--color-text-muted);
   font-family: inherit;
   font-size: var(--font-size-ui);
   font-weight: var(--font-weight-medium);
-  text-align: left;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background-color var(--motion-duration-fast) var(--motion-easing-standard),
+    border-color var(--motion-duration-fast) var(--motion-easing-standard),
     color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .pill:hover {
   background-color: var(--state-hover);
+  border-color: var(--color-border);
   color: var(--color-text);
 }
 
@@ -46,44 +50,34 @@
 }
 
 .label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: none;
+}
+
+:global([data-rail-tier="large"]) .label,
+:global([data-rail-tier="wide"]) .label {
+  display: inline;
 }
 
 .stack {
   display: none;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
 .stack > :nth-child(n + 4) {
   display: none;
 }
 
-:global([data-rail-tier="medium"]) .stack,
-:global([data-rail-tier="large"]) .stack,
 :global([data-rail-tier="wide"]) .stack {
   display: flex;
 }
 
-:global([data-rail-tier="large"]) .stack > :nth-child(n + 4),
-:global([data-rail-tier="wide"]) .stack > :nth-child(n + 4) {
-  display: inline-flex;
-}
-
-/* Collapsed to icons: a square icon button, no label. */
+/* Collapsed to icons: a square icon button above the avatar. */
 :global([data-rail-tier="mini"]) .pill {
-  justify-content: center;
   width: var(--size-control-md);
+  min-width: var(--size-control-md);
+  height: var(--size-control-md);
   padding: 0;
-}
-
-:global([data-rail-tier="mini"]) .label,
-:global([data-rail-tier="mini"]) .stack {
-  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

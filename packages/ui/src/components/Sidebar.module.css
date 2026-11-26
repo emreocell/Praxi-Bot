@@ -187,6 +187,12 @@
   background-image: none;
 }
 
+/* Its edge is invisible then, so it drops the bottom one: the composer (the chat's bottom edge) ends
+   exactly where the rail and the right panel end (ChatView.module.css drops the padding under it). */
+:global(:root[data-float="on"][data-chat="clear"]) .mainPane {
+  border-bottom: none;
+}
+
 /* ── v6 shell: resizable rail, collapsible right panel ── */
 .sidebar {
   position: relative;

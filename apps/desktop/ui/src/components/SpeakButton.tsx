@@ -5,6 +5,7 @@ import { effectiveVoice } from "../lib/botVoice";
 import { markdownToSpeech } from "../lib/speechText";
 import { currentSpeakingId, speak, speechSupported, stopSpeaking, subscribeSpeaking } from "../lib/speaker";
 import { DEFAULT_SETTINGS, loadSettingsSync } from "../store/settingsStore";
+import tipStyles from "./ActionTip.module.css";
 import styles from "./MessageInfo.module.css";
 
 function voiceOptions(botId: string | null | undefined, prefs: { voiceName: string; voiceRate: number }) {
@@ -42,7 +43,6 @@ export function SpeakButton({ id, text, botId }: { id: string; text: string; bot
       className={styles.info}
       aria-pressed={active}
       aria-label={label}
-      title={label}
       data-testid="speak-reply"
       onClick={() => {
         if (active) {
@@ -53,6 +53,7 @@ export function SpeakButton({ id, text, botId }: { id: string; text: string; bot
       }}
     >
       {active ? <Square aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
+      <span className={tipStyles.tip} aria-hidden="true">{label}</span>
     </button>
   );
 }

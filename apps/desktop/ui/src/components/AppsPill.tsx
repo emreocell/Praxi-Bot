@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { BrandMark } from "./BrandMark";
 import styles from "./AppsPill.module.css";
 
-/** Apps row at the bottom of the rail: icon and label, plus the connected apps' logos while the rail is wide enough; one icon when it is collapsed. */
+/** Apps button right of the profile row: icon, the label from a large rail, connected apps' logos on a wide rail. */
 export function AppsPill({ connected, onClick }: { connected: readonly string[]; onClick: () => void }) {
   const { t } = useTranslation();
   const label = t("sidebar.apps");

@@ -174,6 +174,7 @@ import { sendWithHostRecovery } from "../lib/hostRecovery";
 import { ComputerUseOffCard } from "../components/ComputerAccess";
 import { ComputerTargetChip, computerTargetOf } from "../components/ComputerTargetChip";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { itemsWithoutDuplicateError } from "../lib/runErrorNotice";
 
 /** Empty-chat prompt starters (plain text for the composer, not commands). */
 const STARTERS = [
@@ -191,13 +192,20 @@ const SLASH_ICONS: Record<string, typeof Plus> = {
   settings: Settings2, models: Brain, apps: LayoutGrid, schedules: CalendarClock
 };
 
+/** A specific, known failure (the same one in two wordings); the catch-all codes say nothing. */
+const failureCode = (message: string): string | null => {
+  const code = humanToolError(message).code;
+  return code === "toolFailed" || code === "generic" || code === "http_error" ? null : code;
+};
+
 // Immutable run snapshots retain their grouped rows across unrelated runs' deltas.
 // Weak keys release cached Markdown/step data when a chat is left.
 const runSegments = new WeakMap<RunState, ReturnType<typeof groupRunItems>>();
 function segmentsFor(run: RunState) {
   let segments = runSegments.get(run);
   if (!segments) {
-    segments = groupRunItems(run.items, run.finishedMs !== undefined, run.startedMs);
+    // A failed run's error is drawn once, as the card under the run (not also as a notice line above it).
+    segments = groupRunItems(itemsWithoutDuplicateError(run, failureCode), run.finishedMs !== undefined, run.startedMs);
     runSegments.set(run, segments);
   }
   return segments;
@@ -1734,8 +1742,11 @@ export function ChatView({
                 size="hero"
                 state="idle"
               />
-              <h1>{t("chat.emptyGreeting", { name: view?.name ?? "" })}</h1>
-              <p className={styles.hint}>{t("chat.emptySub")}</p>
+              {/* One readable surface for the greeting and its line (over a wallpaper), not a pill per line. */}
+              <div className={styles.welcomeCopy} data-testid="welcome-copy">
+                <h1>{t("chat.emptyGreeting", { name: view?.name ?? "" })}</h1>
+                <p className={styles.hint}>{t("chat.emptySub")}</p>
+              </div>
               <div className={styles.starters}>
                 {STARTERS.map((k) => (
                   <button

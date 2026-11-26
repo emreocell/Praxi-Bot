@@ -18,6 +18,7 @@ import { EditMessage } from "./ResendTurn";
 import { SpeakButton } from "./SpeakButton";
 import { FoldedBody, UserBubble } from "./UserBubble";
 import styles from "../views/ChatView.module.css";
+import tipStyles from "./ActionTip.module.css";
 import msgStyles from "./MessageActions.module.css";
 
 /** Primitive props and stable message ids let completed rows sit out token and draft updates. */
@@ -49,8 +50,9 @@ export const UserMessageRow = memo(function UserMessageRow({
         <CopyButton text={text} />
         {editable && !editing ? (
           <button type="button" className={msgStyles.copyBtn} aria-label={t("chat.resend.edit")}
-            title={t("chat.resend.edit")} data-testid="edit-message-button" onClick={() => onEdit(msgId)}>
+            data-testid="edit-message-button" onClick={() => onEdit(msgId)}>
             <Pencil aria-hidden="true" />
+            <span className={tipStyles.tip} aria-hidden="true">{t("chat.resend.edit")}</span>
           </button>
         ) : null}
         <MessageInfo client={client} side="me" ts={ts} source={source} />

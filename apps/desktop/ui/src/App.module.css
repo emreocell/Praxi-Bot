@@ -629,11 +629,18 @@
   padding: var(--space-3);
 }
 
+/* The profile row with the Apps button immediately to its right, at every rail width: the profile
+   takes the room (its name truncates), Apps keeps its own size (see AppsPill.module.css). */
 .footRow {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  flex-direction: row;
+  align-items: center;
   gap: var(--space-1);
+  min-width: 0;
+}
+
+.footRow > :first-child {
+  flex: 1 1 0;
   min-width: 0;
 }
 
@@ -678,9 +685,15 @@
   right: var(--space-2);
 }
 
+/* The icon rail is too narrow for two controls side by side: Apps sits right above the avatar. */
 .railMini .footRow {
+  flex-direction: column-reverse;
   align-items: center;
   justify-content: center;
+}
+
+.railMini .footRow > :first-child {
+  flex: none;
 }
 
 .railMini .footRow > * {

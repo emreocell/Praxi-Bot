@@ -1,14 +1,26 @@
+/* Tool steps are quiet: one compact line ("2 steps · 11 seconds"), the list only when opened. */
 .chain {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   align-self: stretch;
   font-size: var(--font-size-sm);
+}
+
+.chain > .steps,
+.chain > .showAll {
+  align-self: stretch;
 }
 
 .head {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1);
+  max-width: 100%;
+  min-height: var(--size-control-sm);
+  padding: var(--space-0) var(--space-3) var(--space-0) var(--space-1);
+  font-size: var(--font-size-xs);
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
@@ -31,7 +43,10 @@
 }
 
 .title {
+  overflow: hidden;
   color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chev {
@@ -404,15 +419,34 @@
 }
 
 /* The step list is not a card: on the plain theme background it is a quiet list under its heading line
-   (a hairline rule on the left, no box).  Over a backdrop it gets the readable plate again. */
+   (a hairline rule on the left, no box).  Over a backdrop the closed chain is ONE small pill (the heading
+   line on a readable plate, as wide as its words); the plate under the list appears only once opened. */
 .chain {
   color: var(--color-text);
 }
 :global(:root[data-backdrop="on"]) .chain {
-  padding: var(--space-2);
+  color: var(--on-wallpaper-text);
+}
+:global(:root[data-backdrop="on"]) .head {
+  background-color: var(--on-wallpaper-fill);
+}
+:global(:root[data-backdrop="on"]) .steps {
+  margin: var(--space-1) var(--space-0) var(--space-0);
+  padding: var(--space-2) var(--space-3);
+  border-left: none;
   border-radius: var(--radius-card);
   background-color: var(--on-wallpaper-fill);
-  color: var(--on-wallpaper-text);
+}
+:global(:root[data-backdrop="on"]) .steps .steps {
+  margin: var(--space-1) var(--space-0) var(--space-1) var(--space-2);
+  padding: var(--space-0) var(--space-0) var(--space-0) var(--space-3);
+  border-left: var(--size-border) solid var(--on-wallpaper-border);
+  border-radius: var(--space-0);
+}
+:global(:root[data-backdrop="on"]) .showAll {
+  align-self: flex-start;
+  margin: var(--space-1) var(--space-0) var(--space-0);
+  background-color: var(--on-wallpaper-fill);
 }
 .head, .thought, .stepTime, .more { color: var(--on-wallpaper-muted); }
 :global(:root[data-backdrop="on"]) :is(.head:hover, .step:hover, .step:focus-within) { background-color: var(--on-wallpaper-hover); }

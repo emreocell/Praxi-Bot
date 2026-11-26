@@ -1,0 +1,51 @@
+/*
+ * The label of a small icon action, shown right above it on hover or keyboard focus (no OS tooltip
+ * delay, no second tooltip: the buttons carrying one have no `title`).  It is decoration for sighted
+ * pointer and keyboard users; the button's accessible name stays its aria-label.  The host button
+ * must be `position: relative` (MessageActions.module.css, RunActionBar.module.css).
+ */
+.tip {
+  position: absolute;
+  bottom: calc(100% + var(--space-1));
+  left: 50%;
+  z-index: 4;
+  padding: var(--space-1) var(--space-2);
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-elevated);
+  box-shadow: var(--shadow-popover);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-ui);
+  white-space: nowrap;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transform: translate(-50%, var(--space-1));
+  transition:
+    opacity var(--motion-duration-fast) var(--motion-easing-standard),
+    transform var(--motion-duration-fast) var(--motion-easing-standard),
+    visibility var(--motion-duration-fast);
+}
+
+:global(button):hover > .tip,
+:global(button):focus-visible > .tip {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(-50%, var(--space-0));
+}
+
+/* While a popover of the same button is open (message info), its label would sit on top of it; a
+   button that already says what happened ("Copied") needs no label above it either. */
+:global(button)[aria-expanded="true"] > .tip,
+:global(button)[data-copied="true"] > .tip {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tip {
+    transition: none;
+  }
+}

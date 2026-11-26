@@ -9,7 +9,7 @@
 .tile:focus-visible { outline: none; }
 .tile:focus-visible .preview { box-shadow: var(--shadow-focus); }
 
-.preview { position: relative; display: grid; place-items: center; height: calc(var(--space-12) * 1.35); overflow: hidden; border: var(--size-border) solid var(--color-border-strong); border-radius: var(--radius-card); background: var(--color-background); color: var(--color-text-muted); transition: transform var(--motion-duration-fast) var(--motion-easing-standard), box-shadow var(--motion-duration-fast) var(--motion-easing-standard); }
+.preview { position: relative; display: grid; place-items: center; height: calc(var(--space-12) * 1.35); padding: var(--space-0); overflow: hidden; border: var(--size-border) solid var(--color-border-strong); border-radius: var(--radius-card); background: var(--color-background); color: var(--color-text-muted); transition: transform var(--motion-duration-fast) var(--motion-easing-standard), box-shadow var(--motion-duration-fast) var(--motion-easing-standard); }
 .preview canvas { display: block; width: 100%; height: 100%; }
 .more { border-style: dashed; }
 .more svg { width: var(--size-icon); height: var(--size-icon); }
@@ -64,7 +64,8 @@
 .sliders .range { display: contents; }
 /* Full-width rows must not size the slider columns (width 0, then stretch). */
 .sliders > :not(.range) { grid-column: 1 / -1; width: var(--space-0); min-width: 100%; }
-.preview { margin: var(--space-0); padding: var(--space-3); border: var(--size-border) solid var(--color-border-strong); border-radius: var(--radius-modal); color: var(--color-text); font-size: var(--font-size-md); line-height: var(--line-height-normal); }
+/* The accessibility text sample (its own class: sharing `.preview` padded every picture tile). */
+.textSample { margin: var(--space-0); padding: var(--space-3); border: var(--size-border) solid var(--color-border-strong); border-radius: var(--radius-modal); color: var(--color-text); font-size: var(--font-size-md); line-height: var(--line-height-normal); }
 .rangeName { color: var(--color-text-secondary); font-weight: var(--font-weight-medium); }
 .note { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-0); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .note svg { flex: none; width: var(--size-icon-sm); height: var(--size-icon-sm); }

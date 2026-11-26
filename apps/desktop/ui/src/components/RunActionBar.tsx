@@ -1,5 +1,6 @@
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
+import tipStyles from "./ActionTip.module.css";
 import styles from "./RunActionBar.module.css";
 
 /** One compact row for the actions under the latest answer (timeline, remember, workflow, regenerate). */
@@ -11,7 +12,7 @@ export function RunActionBar({ label, children }: { label: string; children: Rea
   );
 }
 
-/** A small icon-only button: the name lives in the tooltip and in the accessible name. */
+/** A small icon button: its name shows right above it on hover / focus and is its accessible name. */
 export function IconAction({
   icon: Icon,
   label,
@@ -31,7 +32,6 @@ export function IconAction({
     <button
       type="button"
       className={styles.icon}
-      title={label}
       aria-label={label}
       aria-pressed={pressed}
       disabled={disabled}
@@ -39,6 +39,7 @@ export function IconAction({
       onClick={onClick}
     >
       <Icon aria-hidden="true" />
+      <span className={tipStyles.tip} aria-hidden="true">{label}</span>
     </button>
   );
 }

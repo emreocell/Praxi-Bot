@@ -24,6 +24,14 @@ test("message time label: off / minutes / seconds, tr and en", () => {
   assert.match(messageTimeLabel(ts, "minutes", "en")?.text ?? "", /^0?9:05/);
   const done = messageTimeLabel(ts, "minutes", "tr", ts + 12_000);
   assert.match(done?.title ?? "", /09:05:07.*09:05:19/);
+  // Same day: the finish is a clock, not the whole date again.
+  assert.equal((done?.title.match(/2026/g) ?? []).length, 1);
+  // Finished within the same second: one stamp, never "X → X".
+  const same = messageTimeLabel(ts, "minutes", "tr", ts + 400);
+  assert.doesNotMatch(same?.title ?? "", /→/);
+  // Finished on a later day: the full date-time of the finish.
+  const late = messageTimeLabel(ts, "minutes", "tr", local(2026, 11, 18, 0, 1, 2));
+  assert.match(late?.title ?? "", /→ .*18.*00:01:02/);
   assert.equal(parseMessageTimes("garbage"), "minutes");
   assert.equal(parseMessageTimes("seconds"), "seconds");
 });

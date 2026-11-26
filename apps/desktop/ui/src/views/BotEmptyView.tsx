@@ -44,8 +44,10 @@ export function BotEmptyView({
       <div className={styles.pane} data-testid="bot-gone-state">
         <div className={styles.stage}>
           <Ghost aria-hidden="true" />
-          <h1 className={styles.title}>{t("botEmpty.goneTitle")}</h1>
-          <p className={styles.text}>{t("botEmpty.goneHint")}</p>
+          <div className={styles.copy}>
+            <h1 className={styles.title}>{t("botEmpty.goneTitle")}</h1>
+            <p className={styles.text}>{t("botEmpty.goneHint")}</p>
+          </div>
           <div className={styles.suggestList}>
             {firstBot && onGoFirst ? (
               <Button variant="primary" onClick={() => onGoFirst(firstBot.id)}>
@@ -67,8 +69,10 @@ export function BotEmptyView({
     <div className={styles.pane} data-testid="bot-empty-state">
       <div className={styles.stage}>
         <BotAvatar bot={bot} size="hero" decorative />
-        <h1 className={styles.title}>{t("botEmpty.title", { name: bot.name })}</h1>
-        <p className={styles.text}>{t("botEmpty.body")}</p>
+        <div className={styles.copy}>
+          <h1 className={styles.title}>{t("botEmpty.title", { name: bot.name })}</h1>
+          <p className={styles.text}>{t("botEmpty.body")}</p>
+        </div>
         <Button
           variant="primary"
           size="lg"

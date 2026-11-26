@@ -66,6 +66,9 @@ const REVIEWED = new Set([
   `${FLOAT} .foregroundContainer`,
   ".mainPane",
   `${FLOAT} .mainPane`,
+  // Vertical only (the model never reads bottom borders): a see-through chat area drops its invisible
+  // bottom edge so the composer ends exactly where the rail and the panel end.
+  ':global(:root[data-float="on"][data-chat="clear"]) .mainPane',
   ".sidebar",
   `${FLOAT} .sidebar`,
   ".panel",

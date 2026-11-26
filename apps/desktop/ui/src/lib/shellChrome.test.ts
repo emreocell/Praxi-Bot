@@ -32,7 +32,25 @@ test("rail rows: selected is the accent state layer with a straight marker, not 
   assert.match(block(css, ".rail .railItem"), /border-radius:\s*var\(--radius-md\)/);
 });
 
-test("the Apps row always carries its label; the wordmark steps aside on a narrow rail", () => {
-  assert.doesNotMatch(block(appsPillCss, ".label"), /display:\s*none/);
+test("Apps sits immediately to the right of the profile row at every rail width (icon rail: stacked above it)", () => {
+  // One row, profile first: the account trigger takes the room, the Apps button keeps its own size.
+  const footer = app.slice(app.indexOf("className={styles.footRow}"), app.indexOf("</SidebarFooter>"));
+  assert.ok(footer.indexOf("<AccountMenu") >= 0 && footer.indexOf("<AppsPill") > footer.indexOf("<AccountMenu"), "AccountMenu, then AppsPill");
+  assert.match(block(css, ".footRow"), /flex-direction:\s*row/);
+  assert.match(block(css, ".footRow"), /align-items:\s*center/);
+  assert.doesNotMatch(block(css, ".footRow"), /flex-wrap:\s*wrap/);
+  assert.match(block(appsPillCss, ".pill"), /flex:\s*none/);
+  // Only the icon rail is too narrow for two controls side by side: Apps goes above the avatar there.
+  assert.match(block(css, ".railMini .footRow"), /flex-direction:\s*column-reverse/);
+});
+
+test("the Apps button: label from the large rail tier, logos only on a wide rail, never wraps", () => {
+  assert.match(appsPillCss, /\.label \{[^}]*display:\s*none/);
+  assert.match(appsPillCss, /\[data-rail-tier="large"\]\) \.label,\s*:global\(\[data-rail-tier="wide"\]\) \.label \{\s*display:\s*inline/);
+  assert.match(appsPillCss, /\[data-rail-tier="wide"\]\) \.stack \{\s*display:\s*flex/);
+  assert.match(block(appsPillCss, ".pill"), /white-space:\s*nowrap/);
+});
+
+test("the wordmark steps aside on a narrow rail", () => {
   assert.match(css, /\[data-rail-tier="narrow"\]\) \.brandName \{\s*display:\s*none/);
 });

@@ -67,7 +67,9 @@ test("type-to-focus leaves shortcuts, other inputs, dialogs, selections and the 
 
 test("action icons carry a tooltip and an accessible name, and the actions share one wrapping row", () => {
   const bar = readFileSync(new URL("../components/RunActionBar.tsx", import.meta.url), "utf8");
-  assert.match(bar, /title=\{label\}/);
+  // The label shows right above the icon on hover / focus (one tooltip, no OS `title` on top of it).
+  assert.match(bar, /<span className=\{tipStyles\.tip\} aria-hidden="true">\{label\}<\/span>/);
+  assert.doesNotMatch(bar, /title=\{label\}/);
   assert.match(bar, /aria-label=\{label\}/);
   assert.match(bar, /role="group"/);
   const css = readFileSync(new URL("../components/RunActionBar.module.css", import.meta.url), "utf8");

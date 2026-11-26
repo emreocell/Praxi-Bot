@@ -557,7 +557,7 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
             </div>
           ))}
           <p className={pickerStyles.hint}>{t("appearance.accessibility.highContrastHint")}</p>
-          <p className={pickerStyles.preview} data-testid="a11y-preview">
+          <p className={pickerStyles.textSample} data-testid="a11y-preview">
             {t("appearance.accessibility.previewSample")}
           </p>
         </div>
