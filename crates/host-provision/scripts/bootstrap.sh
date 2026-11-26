@@ -7,6 +7,57 @@
 #   3. VERIFIES the installer's signed build provenance before running it
 #   4. installs the always-on preset and prints ONE pairing code (valid 30 minutes, one use)
 # The only value filled in by the app is the release tag on the first line. Nothing private is in here.
+
+# The GitHub CLI's package-signing key (see docs/install_linux.md in github.com/cli/cli; it also signs
+# the repository metadata). Only this fingerprint is trusted: the downloaded key file may hold other
+# keys, and none of them is installed. If GitHub rotates the key this stops with a message instead of
+# trusting a new key blindly.
+praxi_gh_key_fpr=7F38BBB59D064DBCB3D84D725612B36462313325
+
+# praxi_pin_gh_key <downloaded key file> <output key file>
+# Writes only the pinned key (with its subkeys) to the output file; fails when it is not in the download.
+praxi_pin_gh_key() {
+  local home found
+  home="$(mktemp -d)" || return 1
+  chmod 700 "${home}"
+  if gpg --homedir "${home}" --batch --quiet --import "$1" >/dev/null 2>&1 \
+    && found="$(gpg --homedir "${home}" --batch --with-colons --fingerprint 2>/dev/null \
+      | awk -F: '$1 == "pub" {primary = 1; next} primary && $1 == "fpr" {print $10; primary = 0}')" \
+    && printf '%s\n' "${found}" | grep -qx "${praxi_gh_key_fpr}" \
+    && gpg --homedir "${home}" --batch --export "${praxi_gh_key_fpr}" >"$2" 2>/dev/null \
+    && [ -s "$2" ]; then
+    rm -rf "${home}"
+    return 0
+  fi
+  rm -rf "${home}"
+  rm -f "$2"
+  return 1
+}
+
+# praxi_clean_env <home> <command> [args...]
+# Runs a command with a clean environment: fixed PATH, an isolated HOME and GitHub CLI config, no
+# tokens or other variables from the caller. Only proxy settings are kept. Extra NAME=value words
+# before the command are passed on as they are (env syntax).
+praxi_clean_env() {
+  local home="$1" keep v
+  shift
+  keep=()
+  for v in HTTPS_PROXY https_proxy NO_PROXY no_proxy; do
+    [ -z "${!v:-}" ] || keep+=("${v}=${!v}")
+  done
+  /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME="${home}" GH_CONFIG_DIR="${home}/gh-config" \
+    GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 ${keep[@]+"${keep[@]}"} "$@"
+}
+
+# praxi_run_installer <install-linux.sh> <release tag>
+# Runs the verified installer as root through praxi_clean_env. The installer then looks for the
+# GitHub CLI at /usr/bin/gh only, so nothing planted in the caller's PATH or home can answer for its
+# signature check.
+praxi_run_installer() {
+  praxi_clean_env "$(dirname "$1")" DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 \
+    bash "$1" --version "$2" --headless
+}
+
 praxi_main() {
   set -euo pipefail
   say() { printf '\n[praxi] %s\n' "$*"; }
@@ -25,7 +76,7 @@ praxi_main() {
       fail "curl is missing; install curl and ca-certificates with your system's package manager, then run this again"
     fi
   fi
-  curl -fsI --max-time 15 --proto '=https' --tlsv1.2 https://github.com >/dev/null 2>&1 \
+  curl -fsI --max-time 15 --proto '=https' --proto-redir '=https' --tlsv1.2 https://github.com >/dev/null 2>&1 \
     || fail "this server cannot reach github.com; check its internet access"
 
   need_gh=1
@@ -38,19 +89,34 @@ praxi_main() {
     if command -v apt-get >/dev/null 2>&1; then
       export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1
       apt-get update -qq
-      apt-get install -y -qq curl ca-certificates
+      apt-get install -y -qq curl ca-certificates gnupg
+      keys="$(mktemp -d)"
+      curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 60 \
+        https://cli.github.com/packages/githubcli-archive-keyring.gpg -o "${keys}/download.gpg" \
+        || fail "could not download the GitHub CLI signing key"
+      praxi_pin_gh_key "${keys}/download.gpg" "${keys}/pinned.gpg" \
+        || fail "the GitHub CLI signing key is not the one Praxi expects (${praxi_gh_key_fpr}); install the GitHub CLI (2.80 or newer) from https://cli.github.com yourself, then run this again"
       install -d -m 755 /etc/apt/keyrings
-      curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
-      chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+      install -m 644 "${keys}/pinned.gpg" /etc/apt/keyrings/githubcli-archive-keyring.gpg
+      rm -rf "${keys}"
       echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list
       apt-get update -qq
       apt-get install -y -qq gh
     elif command -v dnf >/dev/null 2>&1; then
-      dnf install -y -q curl 'dnf-command(config-manager)' || true
-      dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo >/dev/null 2>&1 \
-        || dnf config-manager addrepo --from-repofile=https://cli.github.com/packages/rpm/gh-cli.repo
+      dnf install -y -q curl ca-certificates gnupg2
+      keys="$(mktemp -d)"
+      curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 60 \
+        https://cli.github.com/packages/githubcli-archive-keyring.asc -o "${keys}/download.asc" \
+        || fail "could not download the GitHub CLI signing key"
+      praxi_pin_gh_key "${keys}/download.asc" "${keys}/pinned.gpg" \
+        || fail "the GitHub CLI signing key is not the one Praxi expects (${praxi_gh_key_fpr}); install the GitHub CLI (2.80 or newer) from https://cli.github.com yourself, then run this again"
+      install -d -m 755 /etc/pki/rpm-gpg
+      install -m 644 "${keys}/pinned.gpg" /etc/pki/rpm-gpg/RPM-GPG-KEY-github-cli
+      rm -rf "${keys}"
+      rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-github-cli
+      printf '%s\n' '[gh-cli]' 'name=packages for the GitHub CLI' 'baseurl=https://cli.github.com/packages/rpm' \
+        'enabled=1' 'gpgcheck=1' 'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-github-cli' >/etc/yum.repos.d/gh-cli.repo
       dnf install -y -q gh --repo gh-cli
     else
       fail "no apt-get or dnf found; install the GitHub CLI (2.80 or newer) yourself, then run this again"
@@ -70,7 +136,7 @@ praxi_main() {
   done
 
   say "step 3 of 4: checking the signature (nothing runs if this fails)"
-  /usr/bin/env -i PATH=/usr/bin:/bin HOME="${work}" GH_CONFIG_DIR="${work}" GH_PROMPT_DISABLED=1 \
+  praxi_clean_env "${work}" \
     /usr/bin/gh attestation verify "${work}/install-linux.sh" --bundle "${work}/praxi-linux.sigstore.json" \
     --repo emreocell/Praxi-Bot --hostname github.com \
     --signer-workflow github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml \
@@ -80,8 +146,7 @@ praxi_main() {
     || fail "the signature check failed, so nothing was installed"
 
   say "step 4 of 4: installing Praxi (a few minutes)"
-  DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 \
-    bash "${work}/install-linux.sh" --version "${PRAXI_TAG}" --headless
+  praxi_run_installer "${work}/install-linux.sh" "${PRAXI_TAG}"
 
   port=47821
   if [ -r /etc/praxi/praxi.env ] && grep -q '^BOT_PORT=' /etc/praxi/praxi.env; then

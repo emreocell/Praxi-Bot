@@ -3,6 +3,8 @@
 # (x86_64 or aarch64; Debian/Ubuntu or Fedora/RHEL/Oracle Linux family).
 #
 # Trust: use independently installed GitHub CLI >= 2.80.0 (https://cli.github.com).
+# An installation verifies with /usr/bin/gh only (it must be root-owned, in directories that only
+# root can write) and runs it with a clean environment; --verify-only uses the gh on your PATH.
 # Verify the installer itself BEFORE running it, including with sudo. Copy this
 # bootstrap from a reviewed copy of this repository; replace the example tag:
 #   (
@@ -57,6 +59,12 @@ readonly REPO="emreocell/Praxi-Bot"
 readonly SIGNER_WORKFLOW="github.com/emreocell/Praxi-Bot/.github/workflows/linux-release.yml"
 readonly BUNDLE_ASSET="praxi-linux.sigstore.json"
 readonly MIN_GH_VERSION="2.80.0"
+# An installation (anything but --verify-only) verifies with the system package's gh only, never one
+# found through the caller's PATH, and runs it with a clean environment.
+readonly TRUSTED_GH="/usr/bin/gh"
+readonly TRUSTED_UID=0
+readonly TRUSTED_ROOT_DIR="/"
+readonly VERIFIER_PATH="/usr/sbin:/usr/bin:/sbin:/bin"
 PREFIX="/opt/praxi"
 LIBEXEC_DIR="${PREFIX}/libexec"
 DATA_DIR="/var/lib/praxi"
@@ -107,6 +115,27 @@ log() { printf '[praxi-install] %s\n' "$*"; }
 warn() { printf '[praxi-install] warning: %s\n' "$*" >&2; }
 die() { printf '[praxi-install] error: %s\n' "$*" >&2; exit 1; }
 
+# Print the real path of ${TRUSTED_GH} after checking every component: owned by ${TRUSTED_UID}, not a
+# symbolic link and not writable by group or others (a root-owned program in a writable directory can
+# still be replaced). Mirrors trusted_verifier() of `bot self-update`.
+trusted_gh_path() {
+  local resolved p owner mode
+  [[ -e "${TRUSTED_GH}" ]] \
+    || die "the GitHub CLI is required at ${TRUSTED_GH}: install the official package from https://cli.github.com (a gh found through PATH is not used for an installation)"
+  resolved="$(readlink -f -- "${TRUSTED_GH}")" || die "cannot resolve ${TRUSTED_GH}"
+  [[ -f "${resolved}" && -x "${resolved}" ]] || die "${TRUSTED_GH} is not an executable file"
+  p="${resolved}"
+  while :; do
+    [[ ! -L "${p}" ]] || die "untrusted GitHub CLI path: ${p} is a symbolic link"
+    read -r owner mode < <(stat -c '%u %a' -- "${p}") || die "cannot inspect ${p}"
+    [[ "${owner}" == "${TRUSTED_UID}" ]] || die "untrusted GitHub CLI path: ${p} is not owned by root"
+    (( (8#${mode} & 8#022) == 0 )) || die "untrusted GitHub CLI path: ${p} is writable by group or others"
+    [[ "${p}" != "${TRUSTED_ROOT_DIR}" && "${p}" != "/" ]] || break
+    p="$(dirname -- "${p}")"
+  done
+  printf '%s\n' "${resolved}"
+}
+
 # Versions before this one wrote a host-wide journald cap. Remove that file only
 # when it carries our marker line (never a file an admin wrote under that name),
 # and never restart journald as a side effect.
@@ -129,6 +158,8 @@ Usage (as root):
 Install trusted GitHub CLI >= 2.80.0 independently (https://cli.github.com).
 This is the supported floor for all required identity/offline flags. No verifier is
 downloaded or installed by this script. Old releases without provenance fail.
+An installation uses /usr/bin/gh only: it must be root-owned, in directories only root can
+write, and runs with a clean PATH, HOME and gh config. --verify-only uses the gh on your PATH.
 
 Verified bootstrap (copy from a reviewed repository, choose a release tag):
   (
@@ -620,17 +651,17 @@ install_packages() {
 # ---------------------------------------------------------- verify release
 # curl/gh must already be trusted and installed. Do not change packages, users,
 # services or installation paths until the private copy passes verification.
-command -v gh >/dev/null 2>&1 || die "trusted GitHub CLI (gh) is required; install it independently from https://cli.github.com"
+if [[ "${VERIFY_ONLY}" -eq 1 ]]; then
+  # A check that installs nothing (and needs no root) uses the gh the caller already trusts.
+  command -v gh >/dev/null 2>&1 || die "trusted GitHub CLI (gh) is required; install it independently from https://cli.github.com"
+  GH_BIN="$(command -v gh)"
+else
+  GH_BIN="$(trusted_gh_path)" || exit 1
+fi
 # Disable optional CLI update checks as well as explicit downloads offline.
 if [[ "${OFFLINE}" -eq 1 ]]; then
   export GH_NO_UPDATE_NOTIFIER=1 GH_NO_EXTENSION_UPDATE_NOTIFIER=1
 fi
-gh_version="$(gh --version)" || die "could not determine GitHub CLI version"
-gh_version="${gh_version%%$'\n'*}"
-[[ "$gh_version" =~ ^gh[[:space:]]version[[:space:]]([0-9]+)\.([0-9]+)\.([0-9]+)([[:space:]]|$) ]] \
-  || die "GitHub CLI >= ${MIN_GH_VERSION} is required (unrecognized version)"
-(( 10#${BASH_REMATCH[1]} > 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} >= 80) )) \
-  || die "GitHub CLI >= ${MIN_GH_VERSION} is required"
 if [[ "${OFFLINE}" -eq 1 ]]; then
   [[ -n "${LOCAL_FILE}" && "${VERSION}" != latest && -n "${TRUSTED_ROOT}" ]] \
     || die "--offline requires --file, an explicit --version, and --custom-trusted-root"
@@ -788,6 +819,31 @@ trap on_exit EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Installations run the verifier with a clean environment: fixed PATH, an isolated HOME and gh config,
+# and no tokens or other variables from the caller (only proxy settings are kept).
+GH_ENV=()
+if [[ "${VERIFY_ONLY}" -eq 0 ]]; then
+  mkdir -m 0700 "${WORK}/gh-home"
+  GH_ENV=(PATH="${VERIFIER_PATH}" HOME="${WORK}/gh-home" GH_CONFIG_DIR="${WORK}/gh-home" GH_HOST=github.com
+    GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 GH_NO_EXTENSION_UPDATE_NOTIFIER=1)
+  for proxy_var in HTTPS_PROXY https_proxy NO_PROXY no_proxy; do
+    [[ -z "${!proxy_var:-}" ]] || GH_ENV+=("${proxy_var}=${!proxy_var}")
+  done
+fi
+run_gh() {
+  if [[ "${VERIFY_ONLY}" -eq 1 ]]; then
+    "${GH_BIN}" "$@"
+  else
+    /usr/bin/env -i "${GH_ENV[@]}" "${GH_BIN}" "$@"
+  fi
+}
+gh_version="$(run_gh --version)" || die "could not determine GitHub CLI version"
+gh_version="${gh_version%%$'\n'*}"
+[[ "$gh_version" =~ ^gh[[:space:]]version[[:space:]]([0-9]+)\.([0-9]+)\.([0-9]+)([[:space:]]|$) ]] \
+  || die "GitHub CLI >= ${MIN_GH_VERSION} is required (unrecognized version)"
+(( 10#${BASH_REMATCH[1]} > 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} >= 80) )) \
+  || die "GitHub CLI >= ${MIN_GH_VERSION} is required"
 BASE="https://github.com/${REPO}/releases/download/${VERSION}"
 
 download_release_asset() {
@@ -836,24 +892,15 @@ if [[ -n "${TRUSTED_ROOT}" ]]; then
   trust_args=(--custom-trusted-root "${WORK}/trusted_root.jsonl")
 fi
 # Identity constraints remain fixed in both online and offline verification. The only accepted
-# source ref is the release tag itself; a PRE-RELEASE tag (v1.2.3-alpha.1, any suffix) may also
-# carry provenance from this repository's linux-release workflow run on main, which is how a
-# maintainer republishes the Linux assets of an existing pre-release. Final tags never do.
-source_refs=("refs/tags/${VERSION}")
-[[ "${VERSION}" == *-* ]] && source_refs+=("refs/heads/main")
-verified=0
-for source_ref in "${source_refs[@]}"; do
-  if gh attestation verify "${WORK}/${ASSET}" --bundle "${WORK}/${BUNDLE_ASSET}" ${trust_args[@]+"${trust_args[@]}"} \
-    --repo "${REPO}" --hostname github.com \
-    --signer-workflow "${SIGNER_WORKFLOW}" \
-    --source-ref "${source_ref}" --deny-self-hosted-runners \
-    --cert-oidc-issuer https://token.actions.githubusercontent.com \
-    --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256; then
-    verified=1
-    break
-  fi
-done
-[[ "${verified}" -eq 1 ]] || die "provenance verification failed; refusing to install (a checksum is not proof of origin)"
+# source ref is the release tag itself, for final and pre-release tags alike: a build of main (or of
+# any other ref) never stands in for a tag, because an older build can carry a flaw a newer tag fixed.
+run_gh attestation verify "${WORK}/${ASSET}" --bundle "${WORK}/${BUNDLE_ASSET}" ${trust_args[@]+"${trust_args[@]}"} \
+  --repo "${REPO}" --hostname github.com \
+  --signer-workflow "${SIGNER_WORKFLOW}" \
+  --source-ref "refs/tags/${VERSION}" --deny-self-hosted-runners \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com \
+  --predicate-type https://slsa.dev/provenance/v1 --digest-alg sha256 \
+  || die "provenance verification failed; refusing to install (a checksum is not proof of origin)"
 log "verified release provenance for ${VERSION}"
 if [[ "${VERIFY_ONLY}" -eq 1 ]]; then
   log "verification complete; no installation performed"
@@ -1009,7 +1056,17 @@ fi
 if systemctl is-active --quiet praxi.service 2>/dev/null; then
   systemctl stop praxi.service
 fi
+# `bot self-update` keeps versioned generations behind current/previous links and launcher symlinks.
+# This installer writes a flat tree and is authoritative for it: drop the stale links and generations so
+# that the next managed update adopts the files installed here instead of re-pointing the launchers at an
+# older release (a downgrade) or rolling back to one.
+[[ ! -L "${PREFIX}/bin" ]] || rm -f -- "${PREFIX}/bin"
+rm -rf -- "${PREFIX}/current" "${PREFIX}/previous" "${PREFIX}/versions"
 install -d -m 0755 "${PREFIX}/bin"
+# Never write through a launcher symlink left by a managed update.
+for launcher in bot bot-node; do
+  [[ ! -L "${PREFIX}/bin/${launcher}" ]] || rm -f -- "${PREFIX}/bin/${launcher}"
+done
 install -m 0755 "${SRC}/bin/bot" "${PREFIX}/bin/bot"
 install -m 0755 "${SRC}/bin/bot-node" "${PREFIX}/bin/bot-node"
 for f in VERSION LICENSE NOTICE THIRD_PARTY_NOTICES.md; do
@@ -1268,6 +1325,8 @@ Description=Praxi managed update request
 
 [Service]
 ExecStart=${PREFIX}/bin/bot self-update --managed-port ${PORT}
+# A killed or timed-out run must not leave the status on "running" (it disables the update button).
+ExecStopPost=${PREFIX}/bin/bot self-update --managed-port ${PORT} --recover
 StandardInput=socket
 StandardOutput=socket
 StandardError=journal
@@ -1285,6 +1344,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=${PREFIX}/bin/bot self-update --managed-port ${PORT} --scheduled
+ExecStopPost=${PREFIX}/bin/bot self-update --managed-port ${PORT} --recover
 StateDirectory=praxi-updates
 PrivateTmp=true
 ProtectSystem=full

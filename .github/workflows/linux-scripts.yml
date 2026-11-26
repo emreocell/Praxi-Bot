@@ -74,8 +74,15 @@ jobs:
           set -euo pipefail
           ulimit -u "$PRAXI_NPROC_LIMIT"
           timeout -k 10s 120s bash scripts/linux/tests/test-install-searxng.sh
+      # Hermetic: sources bootstrap.sh and exercises its helpers (clean environment, pinned GitHub CLI
+      # key with throwaway GPG keys). No root, no network, nothing installed.
+      - name: scripts/linux/tests/test-bootstrap.sh
+        run: |
+          set -euo pipefail
+          ulimit -u "$PRAXI_NPROC_LIMIT"
+          timeout -k 10s 120s bash scripts/linux/tests/test-bootstrap.sh
 
       - name: Skipped tests
         if: success() || failure()
         run: |
-          echo "No tracked shell test is skipped: scripts/linux/tests/test-packaging.sh and scripts/linux/tests/test-install-searxng.sh need no root, systemd, Docker, network or built binary."
+          echo "No tracked shell test is skipped: scripts/linux/tests/test-packaging.sh, scripts/linux/tests/test-install-searxng.sh and scripts/linux/tests/test-bootstrap.sh need no root, systemd, Docker, network or built binary."

@@ -324,13 +324,18 @@ jobs:
           # Only pre-releases published: "latest" is a 404, the pinned repository's API names the tag.
           env FIXTURE_LATEST_404=1 bash "$script" --verify-only
           echo 'PASS: latest falls back to the newest (pre-)release of the pinned repository'
-          # Provenance of a run on main is accepted for a PRE-RELEASE tag only, never for a final one.
+          # Only the release tag itself is an accepted source ref: provenance of a run on main never stands
+          # in for a tag, final or pre-release (an older main build could carry a flaw the tag fixes).
           expect_rejected main-ref-for-a-final-tag 'provenance verification failed' \
             bash "$script" --verify-only --version v0.0.0 --file "$FIXTURE_RELEASE/$asset" \
               --bundle "$fixture_root/main-ref.bundle"
+          expect_rejected main-ref-for-a-prerelease-tag 'provenance verification failed' \
+            bash "$script" --verify-only --version v0.0.0-pre.1 --file "$FIXTURE_RELEASE/$asset" \
+              --bundle "$fixture_root/main-ref.bundle"
+          make_bundle "$fixture_root/pre-tag.bundle" emreocell/Praxi-Bot refs/tags/v0.0.0-pre.1 github-hosted
           bash "$script" --verify-only --version v0.0.0-pre.1 --file "$FIXTURE_RELEASE/$asset" \
-            --bundle "$fixture_root/main-ref.bundle"
-          echo 'PASS: main-ref provenance accepted for a pre-release tag only'
+            --bundle "$fixture_root/pre-tag.bundle"
+          echo 'PASS: only the release tag is accepted as provenance source ref (final and pre-release)'
           # Offline verification must pass an explicitly trusted root and cannot
           # reach curl, package managers, services, or extraction.
           printf '{"fixture":"independently acquired root"}\n' > "$fixture_root/trusted_root.jsonl"

@@ -447,9 +447,19 @@ make_sandboxed_script() {
     -e "s|@SB_O@|${SANDBOX}/etc/os-release|g" \
     -e "s|@SB_A@|${SANDBOX}/etc/apparmor.d|g" \
     -e "s|@SB_J@|${SANDBOX}/etc/systemd/journald.conf.d|g" \
+    -e "s|^readonly TRUSTED_GH=.*|readonly TRUSTED_GH=\"${SANDBOX}/usr/bin/gh\"|" \
+    -e "s|^readonly TRUSTED_UID=.*|readonly TRUSTED_UID=${REAL_UID}|" \
+    -e "s|^readonly TRUSTED_ROOT_DIR=.*|readonly TRUSTED_ROOT_DIR=\"${SANDBOX}\"|" \
     "${src}" > "${dst}"
   chmod +x "${dst}"
 }
+
+# The installer verifies with the system's /usr/bin/gh only (root-owned, no group/other write). The
+# sandbox maps that path, "root" (the test user) and the trust anchor into the sandbox; the shim on PATH
+# stays what a caller's PATH offers and must never be used for an installation.
+chmod 755 "${SANDBOX}" "${SANDBOX}/usr" "${SANDBOX}/usr/bin"
+cp "${FAKE_BIN}/gh" "${SANDBOX}/usr/bin/gh"
+chmod 755 "${SANDBOX}/usr/bin/gh"
 
 SB_INSTALL="${TMP_ROOT}/install-linux.sh"
 SB_SETUP="${TMP_ROOT}/setup-headless.sh"
@@ -587,9 +597,114 @@ assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "/.local/bin:
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "Environment=NPM_CONFIG_PREFIX=${SANDBOX}/var/lib/praxi/.npm-global"
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi-update.socket" "SocketMode=0660"
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi-update@.service" "StandardInput=socket"
+assert_file_contains "${SANDBOX}/etc/systemd/system/praxi-update@.service" "ExecStopPost=${SANDBOX}/opt/praxi/bin/bot self-update --managed-port 47821 --recover"
+assert_file_contains "${SANDBOX}/etc/systemd/system/praxi-update-check.service" "ExecStopPost=${SANDBOX}/opt/praxi/bin/bot self-update --managed-port 47821 --recover"
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi-update-check.timer" "OnCalendar=daily"
 run_timed bash "${SB_INSTALL}" --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz"   --skip-packages --no-start > "${TMP_ROOT}/host-mode-keep.log" 2>&1
 assert_file_contains "${SANDBOX}/etc/systemd/system/praxi.service" "/bot serve --host"
+
+# 5b-verify. An installation verifies with the trusted /usr/bin/gh only, under a clean environment, and
+# accepts exactly refs/tags/<tag> as provenance source (never refs/heads/main, even for a pre-release).
+GH_LOG="${TMP_ROOT}/trusted-gh.log"
+GH_FAIL_FLAG="${TMP_ROOT}/trusted-gh-fail"
+cat > "${SANDBOX}/usr/bin/gh" <<EOF
+#!${BASH_BIN}
+if [[ "\${1:-}" == "--version" ]]; then echo "gh version 2.82.0"; exit 0; fi
+{
+  printf 'PATH=%s\n' "\${PATH:-}"
+  printf 'HOME=%s\n' "\${HOME:-}"
+  printf 'GH_CONFIG_DIR=%s\n' "\${GH_CONFIG_DIR:-}"
+  printf 'GH_TOKEN=%s\n' "\${GH_TOKEN:-}"
+  printf 'ARGS=%s\n' "\$*"
+} >> "${GH_LOG}"
+[[ ! -e "${GH_FAIL_FLAG}" ]]
+EOF
+chmod 755 "${SANDBOX}/usr/bin/gh"
+PLANTED_BIN="${TMP_ROOT}/planted"
+mkdir -p "${PLANTED_BIN}"
+printf '#!%s\ntouch "%s"\necho "gh version 9.9.9"\nexit 0\n' "${BASH_BIN}" "${TMP_ROOT}/planted-ran" > "${PLANTED_BIN}/gh"
+chmod +x "${PLANTED_BIN}/gh"
+rm -f "${GH_LOG}" "${TMP_ROOT}/planted-ran"
+PATH="${PLANTED_BIN}:${PATH}" GH_TOKEN=caller-token GH_CONFIG_DIR="${TMP_ROOT}/caller-gh-config" \
+  run_timed bash "${SB_INSTALL}" --version v0.1.0-alpha.1 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
+  --skip-packages --no-start > "${TMP_ROOT}/verify-clean.log" 2>&1 \
+  || { cat "${TMP_ROOT}/verify-clean.log" >&3; fail "install with the trusted gh failed"; }
+[[ ! -e "${TMP_ROOT}/planted-ran" ]] || fail "a gh from the caller's PATH was used for an installation"
+assert_file_contains "${GH_LOG}" "PATH=/usr/sbin:/usr/bin:/sbin:/bin"
+assert_file_contains "${GH_LOG}" "GH_TOKEN="
+assert_file_not_contains "${GH_LOG}" "caller-token"
+assert_file_not_contains "${GH_LOG}" "caller-gh-config"
+assert_file_not_contains "${GH_LOG}" "HOME=${HOME}"
+assert_file_contains "${GH_LOG}" "attestation verify"
+assert_file_contains "${GH_LOG}" "--source-ref refs/tags/v0.1.0-alpha.1 "
+assert_file_not_contains "${GH_LOG}" "refs/heads/main"
+[[ "$(grep -c '^ARGS=attestation verify' "${GH_LOG}")" -eq 1 ]] || fail "a pre-release tag must be verified once, against its tag only"
+pass "installation verifies with /usr/bin/gh under a clean environment against refs/tags/<tag> only"
+
+: > "${GH_FAIL_FLAG}"
+rm -f "${GH_LOG}"
+if run_timed bash "${SB_INSTALL}" --version v0.1.0-alpha.1 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
+  --skip-packages --no-start > "${TMP_ROOT}/verify-fail.log" 2>&1; then
+  fail "a failed provenance check must stop the installation"
+fi
+assert_file_contains "${TMP_ROOT}/verify-fail.log" "provenance verification failed"
+[[ "$(grep -c '^ARGS=attestation verify' "${GH_LOG}")" -eq 1 ]] || fail "a failed pre-release check must not retry against refs/heads/main"
+rm -f "${GH_FAIL_FLAG}"
+pass "a failed provenance check is final: no refs/heads/main retry for pre-releases"
+
+for bad_mode in 777 775 757; do
+  chmod "${bad_mode}" "${SANDBOX}/usr/bin/gh"
+  if run_timed bash "${SB_INSTALL}" --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
+    --skip-packages --no-start > "${TMP_ROOT}/verify-untrusted-${bad_mode}.log" 2>&1; then
+    fail "a gh writable by group or others (${bad_mode}) must be refused"
+  fi
+  assert_file_contains "${TMP_ROOT}/verify-untrusted-${bad_mode}.log" "writable by group or others"
+done
+chmod 755 "${SANDBOX}/usr/bin/gh"
+chmod 775 "${SANDBOX}/usr/bin"
+if run_timed bash "${SB_INSTALL}" --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
+  --skip-packages --no-start > "${TMP_ROOT}/verify-untrusted-dir.log" 2>&1; then
+  fail "a gh in a directory writable by others must be refused"
+fi
+assert_file_contains "${TMP_ROOT}/verify-untrusted-dir.log" "${SANDBOX}/usr/bin is writable by group or others"
+chmod 755 "${SANDBOX}/usr/bin"
+mv "${SANDBOX}/usr/bin/gh" "${SANDBOX}/usr/bin/gh.away"
+if PATH="${PLANTED_BIN}:${PATH}" run_timed bash "${SB_INSTALL}" --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
+  --skip-packages --no-start > "${TMP_ROOT}/verify-missing.log" 2>&1; then
+  fail "a missing /usr/bin/gh must stop the installation even when PATH offers a gh"
+fi
+assert_file_contains "${TMP_ROOT}/verify-missing.log" "a gh found through PATH is not used"
+[[ ! -e "${TMP_ROOT}/planted-ran" ]] || fail "a gh from the caller's PATH was used instead of /usr/bin/gh"
+mv "${SANDBOX}/usr/bin/gh.away" "${SANDBOX}/usr/bin/gh"
+pass "an untrusted or missing /usr/bin/gh stops the installation; PATH is never searched"
+
+# --verify-only changes nothing and needs no root: it keeps using the gh the caller trusts.
+PATH="${PLANTED_BIN}:${PATH}" run_timed bash "${SB_INSTALL}" --verify-only --version v0.1.0 \
+  --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" > "${TMP_ROOT}/verify-only.log" 2>&1 \
+  || { cat "${TMP_ROOT}/verify-only.log" >&3; fail "--verify-only with the caller's gh failed"; }
+[[ -e "${TMP_ROOT}/planted-ran" ]] || fail "--verify-only should use the gh on PATH"
+rm -f "${TMP_ROOT}/planted-ran"
+cp "${FAKE_BIN}/gh" "${SANDBOX}/usr/bin/gh"
+chmod 755 "${SANDBOX}/usr/bin/gh"
+pass "--verify-only keeps using the caller's gh"
+
+# 5b-flat. The flat tree this installer writes is authoritative: stale managed generations are dropped,
+# so a later managed update adopts these files instead of re-pointing the launchers at an older release.
+mkdir -p "${SANDBOX}/opt/praxi/versions/v0.0.1/bin"
+printf 'stale\n' > "${SANDBOX}/opt/praxi/versions/v0.0.1/bin/bot"
+ln -sfn versions/v0.0.1 "${SANDBOX}/opt/praxi/current"
+ln -sfn versions/v0.0.1 "${SANDBOX}/opt/praxi/previous"
+ln -sfn ../current/bin/bot "${SANDBOX}/opt/praxi/bin/bot"
+run_timed bash "${SB_INSTALL}" --version v0.1.0 --file "${RELEASE_DIR}/praxi-linux-x86_64.tar.gz" \
+  --skip-packages --no-start > "${TMP_ROOT}/flat-after-managed.log" 2>&1 \
+  || { cat "${TMP_ROOT}/flat-after-managed.log" >&3; fail "install over a managed layout failed"; }
+for stale in current previous versions; do
+  [[ ! -e "${SANDBOX}/opt/praxi/${stale}" && ! -L "${SANDBOX}/opt/praxi/${stale}" ]] || fail "stale ${stale} survived a flat installation"
+done
+[[ -f "${SANDBOX}/opt/praxi/bin/bot" && ! -L "${SANDBOX}/opt/praxi/bin/bot" ]] || fail "bin/bot must be a regular file after a flat installation"
+assert_file_contains "${SANDBOX}/opt/praxi/bin/bot" "fixture bot"
+assert_file_contains "${SANDBOX}/opt/praxi/VERSION" "0.1.0-fixture"
+pass "a flat installation clears stale current/previous/versions"
 
 # 5c. Comprehensive rollback tests across failure stages
 setup_prev_install() {
