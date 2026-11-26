@@ -25,10 +25,11 @@ import { BrandIcon } from "../../components/BrandIcon";
 import { botView } from "../../lib/botProfile";
 import { MAIL_CHANGED_EVENT, mailToolsOn, mailToolsPatch, nextStep } from "../../lib/botMail";
 import { isSharedDomain } from "../../lib/mailIdentity";
+import { mailboxStatus } from "../../lib/mailboxStatus";
+import { HintBadge } from "../../components/HintBadge";
 import type { Bot, EmailAccount, EmailTestReport } from "../../api/types";
 import { openExternal } from "../../lib/externalLink";
 import { BotAccessPicker } from "../../components/BotAccessPicker";
-import { ConnectionTestButton } from "../../components/ConnectionTest";
 import formStyles from "../../components/Form.module.css";
 import { Segmented } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
@@ -778,17 +779,16 @@ function AddChoice({
  * What the bound bot can do with this mailbox, in one plain line: connecting a mailbox gives the
  * bot the e-mail tools by itself, and the owner can take them away (or give them back) here.
  */
-function MailToolsLine({ account, bot }: { account: EmailAccount; bot: Bot }) {
+/** Turns a bound bot's mail tools on (the fix for "Praxi cannot use this mailbox yet"). */
+function useTurnOnMailTools(bot: Bot | undefined) {
   const { t } = useTranslation();
   const toast = useToast();
   const { client, refreshBots } = useDaemon();
   const [saving, setSaving] = useState(false);
-  const on = mailToolsOn(bot.config);
-  const toggle = async () => {
-    const patch = mailToolsPatch(bot, !on);
-    if (!client || patch.ops.length === 0) {
-      return;
-    }
+  const turnOn = async () => {
+    if (!bot || !client) return;
+    const patch = mailToolsPatch(bot, true);
+    if (patch.ops.length === 0) return;
     setSaving(true);
     try {
       await client.patchBot(bot.id, patch);
@@ -800,31 +800,13 @@ function MailToolsLine({ account, bot }: { account: EmailAccount; bot: Bot }) {
       setSaving(false);
     }
   };
-  return (
-    <p
-      className={`${styles.meta} ${styles.toolsLine}`}
-      data-testid={`email-bot-tools-${account.name}`}
-      data-on={on ? "true" : "false"}
-    >
-      {on ? <CircleCheck aria-hidden="true" /> : <Info aria-hidden="true" />}
-      <span>
-        {on
-          ? t("settingsModal.email.botTools.on", { name: bot.name })
-          : t("settingsModal.email.botTools.off", { name: bot.name })}
-      </span>
-      <button
-        type="button"
-        className={styles.link}
-        disabled={saving}
-        data-testid={`email-bot-tools-toggle-${account.name}`}
-        onClick={() => void toggle()}
-      >
-        {on ? t("settingsModal.email.botTools.turnOff") : t("settingsModal.email.botTools.turnOn")}
-      </button>
-    </p>
-  );
+  return { turnOn, saving };
 }
 
+/**
+ * One mailbox: name and a few chips on the first line, one status line under it ("Connected as …"
+ * or "Needs attention" with the one button that fixes it), and Test / Edit / Delete on the right.
+ */
 function AccountRow({
   account,
   busy,
@@ -839,7 +821,7 @@ function AccountRow({
   onTest: () => Promise<EmailTestReport | null>;
 }) {
   const { t } = useTranslation();
-  const { bots, client } = useDaemon();
+  const { bots } = useDaemon();
   const [confirm, setConfirm] = useState(false);
   const [alsoRemote, setAlsoRemote] = useState(false);
   const isAgentmail = account.provider === "agentmail";
@@ -847,6 +829,49 @@ function AccountRow({
   const [report, setReport] = useState<EmailTestReport | null>(null);
   const botName = accountBotName(account, bots, t("settingsModal.email.deletedBot"));
   const boundBot = account.bot ? bots.find((b) => b.id === account.bot) : undefined;
+  const tools = useTurnOnMailTools(boundBot);
+  const status = mailboxStatus(account, {
+    report,
+    boundBotToolsOn: boundBot ? mailToolsOn(boundBot.config) : null
+  });
+  const runTest = () => {
+    setTesting(true);
+    void onTest()
+      .then(setReport)
+      .finally(() => setTesting(false));
+  };
+  const statusText =
+    status.tone === "ok"
+      ? t(status.tested ? "settingsModal.email.status.checked" : "settingsModal.email.status.connected", {
+          address: account.address
+        })
+      : status.reason === "secretMissing"
+        ? isAgentmail
+          ? t("settingsModal.email.agentmail.keyMissing")
+          : t("settingsModal.email.passwordMissing")
+        : status.reason === "toolsOff"
+          ? t("settingsModal.email.status.toolsOff", { name: boundBot?.name ?? "" })
+          : t(`settingsModal.email.next.${status.step}`);
+  const fixLabel =
+    status.tone === "ok"
+      ? null
+      : status.fix === "turnOnTools"
+        ? t("settingsModal.email.status.turnOn", { name: boundBot?.name ?? "" })
+        : status.fix === "test"
+          ? t("settingsModal.email.status.tryAgain")
+          : status.reason === "secretMissing"
+            ? isAgentmail
+              ? t("settingsModal.email.status.addKey")
+              : t("settingsModal.email.status.addPassword")
+            : t("settingsModal.email.status.fixSettings");
+  const fix =
+    status.tone === "ok"
+      ? undefined
+      : status.fix === "turnOnTools"
+        ? () => void tools.turnOn()
+        : status.fix === "test"
+          ? runTest
+          : onEdit;
   return (
     <li className={styles.row} data-testid={`email-account-${account.name}`}>
       {/gmail|google/i.test(account.imap.host) ? (
@@ -859,8 +884,13 @@ function AccountRow({
       <div className={styles.main}>
         <div className={styles.title}>
           <span className={styles.name}>{account.name}</span>
-          <span className={styles.address}>{account.address}</span>
           {isAgentmail ? <span className={styles.tag}>AgentMail</span> : null}
+          <span className={styles.tag}>
+            {boundBot ? <BotAvatar bot={botView(boundBot)} size="xs" decorative /> : <Users aria-hidden="true" />}
+            {botName === null
+              ? t("settingsModal.email.allBots")
+              : t("settingsModal.email.onlyBot", { name: botName })}
+          </span>
           {account.send_mode === "draft_only" ? (
             <span className={styles.tag} data-testid={`email-draft-only-${account.name}`}>
               <FilePen aria-hidden="true" />
@@ -873,52 +903,41 @@ function AccountRow({
               {t("settingsModal.email.defaultTag", { count: (account.default_for ?? []).length })}
             </span>
           ) : null}
-          <span className={styles.tag}>
-            {boundBot ? <BotAvatar bot={botView(boundBot)} size="xs" decorative /> : <Users aria-hidden="true" />}
-            {botName === null
-              ? t("settingsModal.email.allBots")
-              : t("settingsModal.email.onlyBot", { name: botName })}
+          {isSharedDomain(account) ? (
+            <HintBadge
+              label={t("settingsModal.email.sharedDomainBadge")}
+              hint={t("settingsModal.email.sharedDomain")}
+              testId={`email-shared-domain-${account.name}`}
+            />
+          ) : null}
+        </div>
+        <p
+          className={[styles.status, status.tone === "ok" ? styles.statusOk : styles.statusAttention].join(" ")}
+          role="status"
+          data-testid={`email-status-${account.name}`}
+          data-tone={status.tone}
+          title={isAgentmail ? undefined : `${account.imap.host} · ${account.smtp.host}`}
+        >
+          {status.tone === "ok" ? <CircleCheck aria-hidden="true" /> : <CircleAlert aria-hidden="true" />}
+          <span>
+            {status.tone === "attention" ? (
+              <strong className={styles.statusLead}>{t("settingsModal.email.status.attention")}</strong>
+            ) : null}
+            {statusText}
           </span>
-        </div>
-        <div className={styles.meta}>
-          {isAgentmail ? (
-            <span>{t("settingsModal.email.agentmail.viaApi")}</span>
-          ) : (
-            <>
-              <span>{account.imap.host}</span>
-              <span aria-hidden="true">·</span>
-              <span>{account.smtp.host}</span>
-            </>
-          )}
-          {account.password_set ? null : (
-            <>
-              <span aria-hidden="true">·</span>
-              <span className={styles.missing}>
-                {isAgentmail
-                  ? t("settingsModal.email.agentmail.keyMissing")
-                  : t("settingsModal.email.passwordMissing")}
-              </span>
-            </>
-          )}
-        </div>
-        {isSharedDomain(account) ? (
-          <p className={`${styles.meta} ${styles.warn}`} data-testid={`email-shared-domain-${account.name}`}>
-            <TriangleAlert aria-hidden="true" />
-            <span>{t("settingsModal.email.sharedDomain")}</span>
-          </p>
-        ) : null}
-        {boundBot ? <MailToolsLine account={account} bot={boundBot} /> : null}
-        {report ? <TestResult report={report} /> : null}
-        {isAgentmail ? (
-          <ConnectionTestButton
-            testId={`email-connection-test-${account.name}`}
-            disabled={busy}
-            run={() =>
-              client
-                ? client.testConnection("email", { name: account.name })
-                : Promise.reject(new Error("daemon not connected"))
-            }
-          />
+        </p>
+        {fix && fixLabel ? (
+          <div>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy || testing || tools.saving}
+              data-testid={`email-fix-${account.name}`}
+              onClick={fix}
+            >
+              {fixLabel}
+            </Button>
+          </div>
         ) : null}
       </div>
       <div className={styles.rowActions}>
@@ -927,12 +946,7 @@ function AccountRow({
           variant="ghost"
           disabled={busy || testing}
           data-testid={`email-test-${account.name}`}
-          onClick={() => {
-            setTesting(true);
-            void onTest()
-              .then(setReport)
-              .finally(() => setTesting(false));
-          }}
+          onClick={runTest}
         >
           <PlugZap />
           {testing ? t("settingsModal.email.testing") : t("settingsModal.email.test")}

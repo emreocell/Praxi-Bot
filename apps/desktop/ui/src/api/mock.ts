@@ -1042,6 +1042,21 @@ export class MockApiClient extends ApiClient {
       allowed_senders: ["alex@gmail.com"],
       password_set: true,
       custom_ca: false
+    },
+    {
+      // A shared-domain AgentMail inbox whose key was never saved: the card shows the badge and one fix.
+      name: "nova-outreach",
+      provider: "agentmail",
+      inbox_id: "nova@agentmail.to",
+      address: "nova@agentmail.to",
+      username: "",
+      imap: { host: "", port: 993 },
+      smtp: { host: "", port: 465, security: "implicit" },
+      drafts_folder: "Drafts",
+      bot: NOVA,
+      allowed_senders: [],
+      password_set: false,
+      custom_ca: false
     }
   ];
 

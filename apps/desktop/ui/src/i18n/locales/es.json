@@ -796,6 +796,8 @@
     "disconnectConfirm": "¿Quieres desconectar este servidor?",
     "disconnectedToast": "{{name}} desconectada",
     "error": {
+      "close": "Close",
+      "fix": "Fix",
       "generic": "Esta app no pudo iniciarse. Abre los detalles para ver el motivo.",
       "hideDetails": "Ocultar detalles",
       "hint": {
@@ -812,6 +814,7 @@
       },
       "message": "Error",
       "noStderr": "El servidor no imprimió nada antes de detenerse.",
+      "short": "Could not start.",
       "showDetails": "Mostrar detalles",
       "stderr": "Lo que imprimió el servidor"
     },
@@ -6257,16 +6260,11 @@
         "scopedKeyHint": "Esta clave pertenece a un solo buzón, así que no puede crear direcciones nuevas. Conecta en su lugar el buzón que ya tienes.",
         "suggested": "Prueba con «{{name}}».",
         "title": "Dar a un bot su propia dirección",
-        "useExisting": "Conectar un buzón existente",
-        "viaApi": "Buzón de AgentMail"
+        "useExisting": "Conectar un buzón existente"
       },
       "allBots": "Cualquier bot con el correo activado",
       "botTools": {
-        "error": "No se pudieron cambiar las herramientas de correo: {{message}}",
-        "off": "{{name}} todavía no puede usar este buzón: sus herramientas de correo están desactivadas.",
-        "on": "{{name}} ya puede leer y buscar en este buzón; enviar siempre te pregunta.",
-        "turnOff": "Desactivar",
-        "turnOn": "Activar"
+        "error": "No se pudieron cambiar las herramientas de correo: {{message}}"
       },
       "choice": {
         "agentmail": "Dar una dirección a este bot (AgentMail)",
@@ -6361,6 +6359,18 @@
         "unreachable": "No se puede conectar"
       },
       "sharedDomain": "Esta dirección compartida no sirve para correo en frío. Usa tu propio dominio para la prospección.",
+      "sharedDomainBadge": "Shared address",
+      "status": {
+        "addKey": "Add the API key",
+        "addPassword": "Add the password",
+        "attention": "Needs attention:",
+        "checked": "Connected as {{address}} · checked just now",
+        "connected": "Connected as {{address}}",
+        "fixSettings": "Fix the settings",
+        "toolsOff": "{{name}} cannot use this mailbox yet.",
+        "tryAgain": "Try again",
+        "turnOn": "Let {{name}} use it"
+      },
       "test": "Probar conexión",
       "testing": "Probando…",
       "title": "Correo",

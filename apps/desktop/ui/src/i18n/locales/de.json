@@ -796,6 +796,8 @@
     "disconnectConfirm": "Diesen Server trennen?",
     "disconnectedToast": "{{name}} getrennt",
     "error": {
+      "close": "Close",
+      "fix": "Fix",
       "generic": "Diese App konnte nicht gestartet werden. Öffne die Details, um den Grund zu sehen.",
       "hideDetails": "Details ausblenden",
       "hint": {
@@ -812,6 +814,7 @@
       },
       "message": "Fehler",
       "noStderr": "Der Server hat vor dem Stopp nichts ausgegeben.",
+      "short": "Could not start.",
       "showDetails": "Details anzeigen",
       "stderr": "Was der Server ausgegeben hat"
     },
@@ -6257,16 +6260,11 @@
         "scopedKeyHint": "Dieser Schlüssel gehört zu einem einzelnen Postfach und kann deshalb keine neuen Adressen erstellen. Verbinde stattdessen das Postfach, das du bereits hast.",
         "suggested": "Versuche stattdessen „{{name}}“.",
         "title": "Einem Bot eine eigene Adresse geben",
-        "useExisting": "Vorhandenes Postfach verbinden",
-        "viaApi": "AgentMail-Postfach"
+        "useExisting": "Vorhandenes Postfach verbinden"
       },
       "allBots": "Jeder Bot mit aktivierter E-Mail",
       "botTools": {
-        "error": "Die E-Mail-Werkzeuge konnten nicht geändert werden: {{message}}",
-        "off": "{{name}} kann dieses Postfach noch nicht nutzen: Die E-Mail-Werkzeuge sind aus.",
-        "on": "{{name}} kann dieses Postfach jetzt lesen und durchsuchen; das Senden fragt immer zuerst dich.",
-        "turnOff": "Ausschalten",
-        "turnOn": "Einschalten"
+        "error": "Die E-Mail-Werkzeuge konnten nicht geändert werden: {{message}}"
       },
       "choice": {
         "agentmail": "Diesem Bot eine Adresse geben (AgentMail)",
@@ -6361,6 +6359,18 @@
         "unreachable": "Verbindung nicht möglich"
       },
       "sharedDomain": "Diese gemeinsame Adresse eignet sich nicht für Kaltakquise. Nutze dafür deine eigene Domain.",
+      "sharedDomainBadge": "Shared address",
+      "status": {
+        "addKey": "Add the API key",
+        "addPassword": "Add the password",
+        "attention": "Needs attention:",
+        "checked": "Connected as {{address}} · checked just now",
+        "connected": "Connected as {{address}}",
+        "fixSettings": "Fix the settings",
+        "toolsOff": "{{name}} cannot use this mailbox yet.",
+        "tryAgain": "Try again",
+        "turnOn": "Let {{name}} use it"
+      },
       "test": "Verbindung testen",
       "testing": "Wird getestet …",
       "title": "E-Mail",

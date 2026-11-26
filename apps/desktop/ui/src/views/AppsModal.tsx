@@ -188,16 +188,23 @@ function McpErrorBlock({
           </Button>
         </form>
       ) : null}
-      <button
-        type="button"
-        className={styles.errorToggle}
-        aria-expanded={open}
-        aria-controls={id}
-        data-testid={`mcp-error-toggle-${server.name}`}
-        onClick={() => setOpen((o) => !o)}
-      >
-        {open ? t("apps.error.hideDetails") : t("apps.error.showDetails")}
-      </button>
+      <div className={styles.actions}>
+        {server.error_kind === "needs_folder" || missing ? null : (
+          <Button size="sm" variant="primary" disabled={busy} data-testid={`mcp-error-reconnect-${server.name}`} onClick={onReconnect}>
+            {t("apps.reconnect")}
+          </Button>
+        )}
+        <button
+          type="button"
+          className={styles.errorToggle}
+          aria-expanded={open}
+          aria-controls={id}
+          data-testid={`mcp-error-toggle-${server.name}`}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? t("apps.error.hideDetails") : t("apps.error.showDetails")}
+        </button>
+      </div>
       {open ? (
         <div className={styles.errorDetails} id={id}>
           <span className={styles.errorLabel}>{t("apps.error.message")}</span>
@@ -253,6 +260,7 @@ function ConnectedCell({
   const { bots, client } = useDaemon();
   const [confirm, setConfirm] = useState(false);
   const [open, setOpen] = useState(false);
+  const [fixOpen, setFixOpen] = useState(false);
   const [auth, setAuth] = useState<McpAuthState | null>(null);
   const [pasted, setPasted] = useState("");
   const isHttp = server.transport === "http";
@@ -295,6 +303,7 @@ function ConnectedCell({
       : t("apps.botsSome", { names: access.names.join(", ") });
   const known = brandIcon(server.name);
   const panelId = `mcp-manage-${server.name}`;
+  const broken = Boolean(server.error) && !signingIn && !needsSignIn;
   return (
     <li
       className={`${styles.cell} ${open ? styles.cellOpen : ""}`}
@@ -314,6 +323,11 @@ function ConnectedCell({
               ) : null}
             </span>
           </b>
+          {broken ? (
+            <small className={`${styles.cellSub} ${styles.tone_bad}`} data-testid={`mcp-error-short-${server.name}`}>
+              {t("apps.error.short")}
+            </small>
+          ) : (
           <small className={styles.cellSub}>
             {description ?? t("apps.toolCount", { count: server.tool_count })}
             {" · "}
@@ -326,11 +340,25 @@ function ConnectedCell({
               {server.trust_hints ? t("apps.trust.badgeTrusted") : t("apps.trust.badgeAsks")}
             </span>
           </small>
+          )}
         </div>
-        <span className={`${styles.state} ${styles[signingIn ? "tone_busy" : `tone_${tone}`]}`}>
-          {tone === "ok" && !signingIn ? <Check aria-hidden="true" /> : <span className={styles.dot} aria-hidden="true" />}
-          {signingIn ? t("apps.composio.waiting") : t(`apps.status.${server.status}`)}
-        </span>
+        {broken ? null : (
+          <span className={`${styles.state} ${styles[signingIn ? "tone_busy" : `tone_${tone}`]}`}>
+            {tone === "ok" && !signingIn ? <Check aria-hidden="true" /> : <span className={styles.dot} aria-hidden="true" />}
+            {signingIn ? t("apps.composio.waiting") : t(`apps.status.${server.status}`)}
+          </span>
+        )}
+        {broken ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-expanded={fixOpen}
+            data-testid={`mcp-fix-${server.name}`}
+            onClick={() => setFixOpen((v) => !v)}
+          >
+            {fixOpen ? t("apps.error.close") : t("apps.error.fix")}
+          </Button>
+        ) : null}
         <button
           type="button"
           className={`${styles.manage} ${needsReconnect ? styles.manageShown : ""}`}
@@ -350,7 +378,7 @@ function ConnectedCell({
           <ChevronDown aria-hidden="true" />
         </button>
       </div>
-      {server.error && !signingIn && !needsSignIn ? (
+      {broken && fixOpen ? (
         <McpErrorBlock server={server} busy={busy} onChooseFolder={onChooseFolder} onReconnect={onReconnect} />
       ) : null}
       {(server.changed_tools ?? []).length > 0 ? (

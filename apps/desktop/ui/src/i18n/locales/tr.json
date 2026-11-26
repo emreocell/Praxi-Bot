@@ -796,6 +796,8 @@
     "disconnectConfirm": "Bu sunucunun bağlantısı kesilsin mi?",
     "disconnectedToast": "{{name}} bağlantısı kesildi",
     "error": {
+      "close": "Kapat",
+      "fix": "Düzelt",
       "generic": "Bu uygulama başlatılamadı. Nedenini görmek için ayrıntıları aç.",
       "hideDetails": "Ayrıntıları gizle",
       "hint": {
@@ -812,6 +814,7 @@
       },
       "message": "Hata",
       "noStderr": "Sunucu durmadan önce hiçbir şey yazmadı.",
+      "short": "Başlatılamadı.",
       "showDetails": "Ayrıntıları göster",
       "stderr": "Sunucunun yazdıkları"
     },
@@ -871,7 +874,7 @@
       "connected": "Bağlı",
       "connecting": "Bağlanıyor",
       "disconnected": "Bağlı değil",
-      "error": "Hata",
+      "error": "Dikkat gerekiyor",
       "quarantined": "Karantinada"
     },
     "test": {
@@ -6244,7 +6247,7 @@
         "inbox": "Gelen kutusu adresi",
         "inboxHint": "Zaten sahip olduğun gelen kutusunun adresi, örneğin praxi@agentmail.to. Tek bir gelen kutusuna ait anahtar (am_us_inbox_ ile başlar) burada çalışır.",
         "inboxPlaceholder": "praxi@agentmail.to",
-        "keyMissing": "Kayıtlı API anahtarı yok",
+        "keyMissing": "Kayıtlı API anahtarı yok.",
         "limits": "Yazıldığı sırada ücretsiz plan: 3 gelen kutusu, ayda 3.000 e-posta, günde 100. Sınırlar değişebilir.",
         "modeConnect": "Mevcut bir gelen kutusunu bağla",
         "modeCreate": "Yeni adres oluştur",
@@ -6257,16 +6260,11 @@
         "scopedKeyHint": "Bu anahtar tek bir gelen kutusuna ait, bu yüzden yeni adres oluşturamaz. Bunun yerine zaten sahip olduğun gelen kutusunu bağla.",
         "suggested": "Bunun yerine “{{name}}” adını dene.",
         "title": "Bota kendi adresini ver",
-        "useExisting": "Mevcut bir gelen kutusunu bağla",
-        "viaApi": "AgentMail gelen kutusu"
+        "useExisting": "Mevcut bir gelen kutusunu bağla"
       },
       "allBots": "E-postası açık her bot",
       "botTools": {
-        "error": "E-posta araçları değiştirilemedi: {{message}}",
-        "off": "{{name}} bu gelen kutusunu henüz kullanamaz: e-posta araçları kapalı.",
-        "on": "{{name}} artık bu gelen kutusunu okuyup arayabilir; göndermeden önce her zaman sana sorar.",
-        "turnOff": "Kapat",
-        "turnOn": "Aç"
+        "error": "E-posta araçları değiştirilemedi: {{message}}"
       },
       "choice": {
         "agentmail": "Bu bota bir adres ver (AgentMail)",
@@ -6348,7 +6346,7 @@
       },
       "note": "Bir posta kutusunu bir bota bağla; bot o postaları okuyup arayabilir. Göndermeden önce her zaman sorar.",
       "onlyBot": "Yalnızca {{name}}",
-      "passwordMissing": "Kayıtlı parola yok",
+      "passwordMissing": "Kayıtlı parola yok.",
       "result": {
         "api": "AgentMail",
         "auth_failed": "Giriş reddedildi",
@@ -6361,6 +6359,18 @@
         "unreachable": "Bağlanılamıyor"
       },
       "sharedDomain": "Bu ortak adres toplu ya da soğuk e-posta için uygun değil. Tanıtım için kendi alan adını kullan.",
+      "sharedDomainBadge": "Ortak adres",
+      "status": {
+        "addKey": "API anahtarını ekle",
+        "addPassword": "Parolayı ekle",
+        "attention": "Dikkat gerekiyor:",
+        "checked": "{{address}} olarak bağlı · az önce denendi",
+        "connected": "{{address}} olarak bağlı",
+        "fixSettings": "Ayarları düzelt",
+        "toolsOff": "{{name}} bu posta kutusunu henüz kullanamıyor.",
+        "tryAgain": "Tekrar dene",
+        "turnOn": "{{name}} kullanabilsin"
+      },
       "test": "Bağlantıyı dene",
       "testing": "Deneniyor…",
       "title": "E-posta",

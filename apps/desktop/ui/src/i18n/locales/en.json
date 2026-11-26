@@ -796,6 +796,8 @@
     "disconnectConfirm": "Disconnect this server?",
     "disconnectedToast": "{{name}} disconnected",
     "error": {
+      "close": "Close",
+      "fix": "Fix",
       "generic": "This app could not start. Open the details to see why.",
       "hideDetails": "Hide details",
       "hint": {
@@ -812,6 +814,7 @@
       },
       "message": "Error",
       "noStderr": "The server printed nothing before it stopped.",
+      "short": "Could not start.",
       "showDetails": "Show details",
       "stderr": "What the server printed"
     },
@@ -871,7 +874,7 @@
       "connected": "Connected",
       "connecting": "Connecting",
       "disconnected": "Disconnected",
-      "error": "Error",
+      "error": "Needs attention",
       "quarantined": "Quarantined"
     },
     "test": {
@@ -6244,7 +6247,7 @@
         "inbox": "Inbox address",
         "inboxHint": "The address of the inbox you already have, for example praxi@agentmail.to. A key that belongs to one inbox (it starts with am_us_inbox_) works here.",
         "inboxPlaceholder": "praxi@agentmail.to",
-        "keyMissing": "No API key stored",
+        "keyMissing": "No API key saved.",
         "limits": "Free plan at the time of writing: 3 inboxes, 3,000 e-mails a month, 100 a day. Limits can change.",
         "modeConnect": "Connect an existing inbox",
         "modeCreate": "Create a new address",
@@ -6257,16 +6260,11 @@
         "scopedKeyHint": "This key belongs to a single inbox, so it cannot create new addresses. Connect the inbox you already have instead.",
         "suggested": "Try “{{name}}” instead.",
         "title": "Give a bot its own address",
-        "useExisting": "Connect an existing inbox",
-        "viaApi": "AgentMail inbox"
+        "useExisting": "Connect an existing inbox"
       },
       "allBots": "Any bot with e-mail enabled",
       "botTools": {
-        "error": "Could not change the e-mail tools: {{message}}",
-        "off": "{{name}} cannot use this inbox yet: its e-mail tools are off.",
-        "on": "{{name}} can now read and search this inbox; sending always asks you.",
-        "turnOff": "Turn off",
-        "turnOn": "Turn on"
+        "error": "Could not change the e-mail tools: {{message}}"
       },
       "choice": {
         "agentmail": "Give this bot an address (AgentMail)",
@@ -6348,7 +6346,7 @@
       },
       "note": "Connect a mailbox to a bot and it can read and search that mail. It always asks before sending.",
       "onlyBot": "Only {{name}}",
-      "passwordMissing": "No password stored",
+      "passwordMissing": "No password saved.",
       "result": {
         "api": "AgentMail",
         "auth_failed": "Login rejected",
@@ -6361,6 +6359,18 @@
         "unreachable": "Cannot connect"
       },
       "sharedDomain": "This shared address is not suitable for cold mail. Use your own domain for outreach.",
+      "sharedDomainBadge": "Shared address",
+      "status": {
+        "addKey": "Add the API key",
+        "addPassword": "Add the password",
+        "attention": "Needs attention:",
+        "checked": "Connected as {{address}} · checked just now",
+        "connected": "Connected as {{address}}",
+        "fixSettings": "Fix the settings",
+        "toolsOff": "{{name}} cannot use this mailbox yet.",
+        "tryAgain": "Try again",
+        "turnOn": "Let {{name}} use it"
+      },
       "test": "Test connection",
       "testing": "Testing…",
       "title": "Email",

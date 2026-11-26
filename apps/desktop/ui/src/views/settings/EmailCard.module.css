@@ -114,21 +114,42 @@
   color: var(--color-text);
 }
 
-.address {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-}
-
-.meta {
+.status {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin: var(--space-0);
   font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  overflow-wrap: anywhere;
+}
+
+.status svg {
+  flex: none;
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  margin-top: var(--space-half);
+}
+
+.statusOk {
   color: var(--color-text-muted);
 }
 
-.missing {
-  color: var(--color-danger);
+.statusOk svg {
+  color: var(--color-success);
+}
+
+.statusAttention {
+  color: var(--color-text);
+}
+
+.statusAttention svg {
+  color: var(--color-warning);
+}
+
+.statusLead {
+  margin-right: var(--space-1);
+  font-weight: var(--font-weight-semibold);
 }
 
 .rowActions {
@@ -290,16 +311,6 @@
 
 .warn {
   color: var(--color-warning);
-}
-
-.toolsLine {
-  align-items: center;
-}
-
-.toolsLine svg {
-  flex: none;
-  width: var(--size-icon-sm);
-  height: var(--size-icon-sm);
 }
 
 .link {

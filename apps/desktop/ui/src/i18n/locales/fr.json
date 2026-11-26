@@ -6075,16 +6075,11 @@
         "scopedKeyHint": "Cette clé appartient à une seule boîte, elle ne peut donc pas créer de nouvelles adresses. Connectez plutôt la boîte que vous avez déjà.",
         "suggested": "Essayez plutôt « {{name}} ».",
         "title": "Donner à un bot sa propre adresse",
-        "useExisting": "Connecter une boîte existante",
-        "viaApi": "Boîte AgentMail"
+        "useExisting": "Connecter une boîte existante"
       },
       "allBots": "Tout bot avec l'e-mail activé",
       "botTools": {
-        "error": "Impossible de modifier les outils e-mail : {{message}}",
-        "off": "{{name}} ne peut pas encore utiliser cette boîte : ses outils e-mail sont désactivés.",
-        "on": "{{name}} peut maintenant lire et chercher dans cette boîte ; l'envoi vous demande toujours.",
-        "turnOff": "Désactiver",
-        "turnOn": "Activer"
+        "error": "Impossible de modifier les outils e-mail : {{message}}"
       },
       "choice": {
         "agentmail": "Donner une adresse à ce bot (AgentMail)",

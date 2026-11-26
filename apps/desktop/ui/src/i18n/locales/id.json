@@ -5961,16 +5961,11 @@
         "scopedKeyHint": "Kunci ini hanya milik satu kotak masuk, jadi tidak bisa membuat alamat baru. Hubungkan kotak masuk yang sudah kamu punya.",
         "suggested": "Coba “{{name}}” sebagai gantinya.",
         "title": "Give a bot its own address",
-        "useExisting": "Hubungkan kotak masuk yang sudah ada",
-        "viaApi": "AgentMail inbox"
+        "useExisting": "Hubungkan kotak masuk yang sudah ada"
       },
       "allBots": "Any bot with e-mail enabled",
       "botTools": {
-        "error": "Alat e-mail tidak bisa diubah: {{message}}",
-        "off": "{{name}} belum bisa memakai kotak masuk ini: alat e-mailnya mati.",
-        "on": "{{name}} sekarang bisa membaca dan mencari di kotak masuk ini; mengirim selalu bertanya kepadamu.",
-        "turnOff": "Matikan",
-        "turnOn": "Nyalakan"
+        "error": "Alat e-mail tidak bisa diubah: {{message}}"
       },
       "choice": {
         "agentmail": "Give this bot an address (AgentMail)",

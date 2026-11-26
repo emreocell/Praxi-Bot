@@ -5988,16 +5988,11 @@
         "scopedKeyHint": "Esta chave pertence a uma única caixa de entrada, então não pode criar novos endereços. Conecte a caixa de entrada que você já tem.",
         "suggested": "Tente “{{name}}” no lugar.",
         "title": "Give a bot its own address",
-        "useExisting": "Conectar uma caixa de entrada existente",
-        "viaApi": "AgentMail inbox"
+        "useExisting": "Conectar uma caixa de entrada existente"
       },
       "allBots": "Any bot with e-mail enabled",
       "botTools": {
-        "error": "Não foi possível alterar as ferramentas de e-mail: {{message}}",
-        "off": "{{name}} ainda não pode usar esta caixa de entrada: as ferramentas de e-mail estão desligadas.",
-        "on": "{{name}} agora pode ler e pesquisar esta caixa de entrada; enviar sempre pergunta a você.",
-        "turnOff": "Desligar",
-        "turnOn": "Ligar"
+        "error": "Não foi possível alterar as ferramentas de e-mail: {{message}}"
       },
       "choice": {
         "agentmail": "Give this bot an address (AgentMail)",

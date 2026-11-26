@@ -1,0 +1,57 @@
+.badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-0) var(--space-2);
+  border: var(--size-border) solid var(--color-warning);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-warning);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-ui);
+  cursor: help;
+}
+
+.badge > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.badge:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.tip {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: var(--space-0);
+  z-index: 4;
+  width: max-content;
+  max-width: var(--size-info-popover);
+  padding: var(--space-2) var(--space-3);
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-elevated);
+  box-shadow: var(--shadow-popover);
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-normal);
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--motion-duration-fast) var(--motion-easing-standard),
+    visibility var(--motion-duration-fast);
+}
+
+.badge:hover > .tip,
+.badge:focus-visible > .tip {
+  visibility: visible;
+  opacity: 1;
+}
