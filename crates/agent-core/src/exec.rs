@@ -841,6 +841,14 @@ impl TurnExecutor {
             let at = messages.len() - usize::from(note.is_some());
             messages.insert(at, Message::text(MessageRole::User, digest));
         }
+        // The newest screenshot a browser step made, for this call only (see `grounding`).
+        if !primary.starts_with("cli:")
+            && let Some(file) = crate::grounding::latest(&steps, self.sh.storage.data_dir())
+            && let Some(shot) = crate::grounding::message(&file)
+        {
+            let at = messages.len() - usize::from(note.is_some());
+            messages.insert(at, shot);
+        }
         if let Some(from) = origin {
             if let Some(reason) = step.input["tier_upgrade_reason"].as_str() {
                 self.emit_tier_upgrade(&ctx, from, reason)?;
@@ -968,24 +976,37 @@ impl TurnExecutor {
             req.tools = tool_defs(offered, using_deferred);
             note_metadata(&ctx, offered, &mut metadata);
             let timeout = self.sh.cfg.guards.model_timeout;
-            let attempt = tokio::time::timeout(
-                timeout,
-                self.call_with_retries(
-                    &ctx,
-                    run,
-                    &req,
-                    offered,
-                    purpose,
-                    tier_active.then_some(if tier_light && name.as_str() == primary {
-                        crate::tiering::LIGHT
-                    } else {
-                        crate::tiering::STANDARD
-                    }),
-                    cancel,
-                ),
-            )
-            .await
-            .unwrap_or(Err(ProviderError::Timeout));
+            let mut attempt;
+            loop {
+                attempt = tokio::time::timeout(
+                    timeout,
+                    self.call_with_retries(
+                        &ctx,
+                        run,
+                        &req,
+                        offered,
+                        purpose,
+                        tier_active.then_some(if tier_light && name.as_str() == primary {
+                            crate::tiering::LIGHT
+                        } else {
+                            crate::tiering::STANDARD
+                        }),
+                        cancel,
+                    ),
+                )
+                .await
+                .unwrap_or(Err(ProviderError::Timeout));
+                // A model without vision cannot take the screenshot: ask again without it.
+                if matches!(
+                    &attempt,
+                    Err(ProviderError::Unsupported { capability })
+                        if crate::grounding::is_vision_refusal(capability)
+                ) && crate::grounding::strip(&mut req.messages)
+                {
+                    continue;
+                }
+                break;
+            }
             match attempt {
                 Ok(mut out) => {
                     if using_deferred {

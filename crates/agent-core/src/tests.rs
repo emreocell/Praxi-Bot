@@ -9,6 +9,7 @@ mod c821;
 mod composio_approvals;
 mod external_agent;
 mod fill_secret;
+mod grounding;
 mod offline;
 mod page_guard;
 mod planning_pause;
@@ -136,6 +137,9 @@ impl ChatProvider for Fake {
                 "malformed" => ProviderError::MalformedToolCall("finish reason x".into()),
                 "unsupported" => ProviderError::Unsupported {
                     capability: "tools".into(),
+                },
+                "vision" => ProviderError::Unsupported {
+                    capability: "vision".into(),
                 },
                 "invalid" => ProviderError::InvalidRequest("bad request".into()),
                 _ => ProviderError::Api {

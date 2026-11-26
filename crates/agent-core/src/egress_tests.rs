@@ -15,7 +15,15 @@ use tool_registry::{ContentClass, Effect};
 use crate::taint::{self, ContentTaint};
 use crate::tests::{Fake, cfg, profile, setup, t, text, tool_messages, until, with_class};
 use crate::tests::{calls, make_loop};
-use crate::{GrantTarget, ScheduleWork};
+use crate::{GrantTarget, LoopConfig, ScheduleWork};
+
+/// These tests call `script_run` directly. The built-in set (browser tools included) is near the
+/// direct-exposure limit, so the loop is given room: what is tested is the script's inner calls,
+/// not which tools the model sees without searching.
+fn direct_surface(mut config: LoopConfig) -> LoopConfig {
+    config.discovery_threshold = 64;
+    config
+}
 
 #[tokio::test]
 async fn trigger_mail_injection_waits_for_approval_even_when_the_model_requests_egress() {
@@ -1844,7 +1852,7 @@ async fn a_script_inner_call_with_a_hidden_character_is_refused() {
         &fake,
         &[],
         profile(""),
-        cfg(Policy::full()),
+        direct_surface(cfg(Policy::full())),
     )
     .with_builtin_tools(tools);
     let mut rx = lp.subscribe();
@@ -2930,7 +2938,7 @@ async fn a_script_listing_an_untrusted_skill_taints_its_next_inner_shell() {
         &fake,
         &[],
         waived(),
-        cfg(Policy::full()),
+        direct_surface(cfg(Policy::full())),
     )
     .with_skills(index.clone())
     .with_builtin_tools(tools);

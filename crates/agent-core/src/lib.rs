@@ -28,6 +28,7 @@ mod discovery_prompt;
 mod embedding;
 mod exec;
 mod full_autonomy;
+mod grounding;
 mod history;
 mod knowledge;
 mod ledger;
