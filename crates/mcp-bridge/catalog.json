@@ -449,6 +449,45 @@
     }
   },
   {
+    "id": "deepwiki",
+    "name": "DeepWiki",
+    "description": "Ask questions about any public GitHub repository and read its generated wiki.",
+    "category": "remote",
+    "homepage": "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+    "icon": null,
+    "install": {
+      "transport": "http",
+      "url": "https://mcp.deepwiki.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "microsoft-learn",
+    "name": "Microsoft Learn",
+    "description": "Search Microsoft Learn documentation and code samples, and fetch reference pages.",
+    "category": "remote",
+    "homepage": "https://github.com/microsoftdocs/mcp",
+    "icon": null,
+    "install": {
+      "transport": "http",
+      "url": "https://learn.microsoft.com/api/mcp",
+      "required_secrets": []
+    }
+  },
+  {
+    "id": "cloudflare-docs",
+    "name": "Cloudflare Docs",
+    "description": "Search Cloudflare's documentation for Workers, Pages and the rest of the platform.",
+    "category": "remote",
+    "homepage": "https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/docs-ai-search",
+    "icon": "cloudflare",
+    "install": {
+      "transport": "http",
+      "url": "https://docs.mcp.cloudflare.com/mcp",
+      "required_secrets": []
+    }
+  },
+  {
     "id": "notion-remote",
     "name": "Notion",
     "description": "Search, read and edit Notion pages. Sign in with your Notion account.",
