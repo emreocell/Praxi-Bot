@@ -61,7 +61,7 @@ test("a dialog opened while the message search is open closes it (App wiring)", 
   // Every dialog the shell can open, including the bot dialogs (edit, profile, skills, add skill).
   assert.match(
     app,
-    /const dialogOpen = settingsOpen !== null \|\| appsOpen \|\| newBotOpen \|\| helpOpen \|\| botEditOpen \|\| botProfileOpen \|\| skillsOpen \|\| addSkillOpen \|\| marketOpen \|\| vaultOpen;/
+    /const dialogOpen = settingsOpen !== null \|\| appsOpen \|\| newBotOpen \|\| recipeOpen \|\| helpOpen \|\| botEditOpen \|\| botProfileOpen \|\| skillsOpen \|\| addSkillOpen \|\| marketOpen \|\| vaultOpen;/
   );
   assert.match(app, /if \(dialogOpen\) setSearchOpen\(false\);/);
   const popover = read("../components/Popover.tsx");

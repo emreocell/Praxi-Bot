@@ -5843,6 +5843,89 @@
     "resets": "Wird zurückgesetzt {{when}}",
     "title": "Verbleibendes Kontingent"
   },
+  "recipes": {
+    "blocked": "Connect what is marked above to start.",
+    "checking": "Checking what is connected...",
+    "createTitle": "What will be created",
+    "entry": "Start from a goal",
+    "entryHint": "Say what you want done. Praxi sets up a bot for it and starts working.",
+    "error": {
+      "bot": "The bot could not be created. Nothing was started. Try again.",
+      "chat": "The bot was created, but its chat could not be opened. Try again; no second bot will be made.",
+      "check": "Some answers are missing. Go back and fill them in.",
+      "message": "The bot and its chat are ready, but the task could not be sent. Try again; nothing is created twice."
+    },
+    "hints": {
+      "pick": "Pick what you want. You review everything before anything is created.",
+      "questions": "A few questions, asked once.",
+      "review": "Check what it needs and what will be created."
+    },
+    "levelRaised": "You chose a freer level than this goal asks for ({{level}}). The bot will ask you less often.",
+    "levelTitle": "How freely it may work",
+    "need": {
+      "app": {
+        "fix": "Connect an app",
+        "missing": "Not connected. The task still works without it, just without this part.",
+        "name": "A connected app"
+      },
+      "browser": {
+        "fix": "Computer settings",
+        "missing": "No browser was found on this computer.",
+        "name": "A browser the bot can use"
+      },
+      "emailInbox": {
+        "fix": "Connect your inbox",
+        "missing": "Connect the inbox you want sorted. The bot only reads it and writes drafts.",
+        "name": "Your inbox, connected as a mailbox"
+      },
+      "emailOwn": {
+        "fix": "Add a mailbox",
+        "missing": "The bot signs up with its own email address, so it needs a mailbox. Your personal inbox is not used.",
+        "name": "A mailbox of its own"
+      },
+      "model": {
+        "fix": "Connect an AI",
+        "missing": "No AI model is connected yet.",
+        "name": "An AI model"
+      }
+    },
+    "needsTitle": "What it needs",
+    "next": "Continue",
+    "optional": "optional",
+    "preview": {
+      "bot": "A new bot named \"{{name}}\".",
+      "folder": "The bot can read and write only inside {{folder}}.",
+      "later": "You can change the bot's name, look and settings afterwards.",
+      "ownMail": "It uses the mailbox you connect for the bot, never your personal accounts.",
+      "task": "The task \"{{name}}\" starts right away in a new chat."
+    },
+    "problem": {
+      "invalidChoice": "Pick one of the options.",
+      "invalidFolder": "Enter the full path of a folder, like /home/me/Documents or C:\\Users\\me\\Documents.",
+      "invalidUrl": "Enter a full web address, like https://example.com.",
+      "required": "This is needed.",
+      "tooLong": "This is too long."
+    },
+    "questionsIntro": "Your answers go straight into the task for \"{{name}}\", so the bot will not ask them again.",
+    "recheck": "Check again",
+    "repeat": {
+      "daily": "Every day at",
+      "label": "Repeat it",
+      "monthly": "Every month at",
+      "time": "Time of day",
+      "weekdays": "Every weekday at",
+      "weekly": "Every {{day}} at"
+    },
+    "scheduleFailed": "The task started, but the repeat could not be set up. You can add it under Schedules.",
+    "start": "Create bot and start",
+    "starting": "Starting...",
+    "status": {
+      "ok": "Ready",
+      "unknown": "Could not check this just now."
+    },
+    "stepOf": "Step {{n}} of {{total}}.",
+    "title": "Start from a goal"
+  },
   "runLocation": {
     "addHint": "Optional. Deine Bots laufen weiter, auch wenn dieser Computer aus ist.",
     "on": "Auf {{name}}",

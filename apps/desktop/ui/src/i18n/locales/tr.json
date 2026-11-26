@@ -5843,6 +5843,89 @@
     "resets": "Yenilenme: {{when}}",
     "title": "Kalan kota"
   },
+  "recipes": {
+    "blocked": "Başlamak için yukarıda işaretlenenleri bağlayın.",
+    "checking": "Nelerin bağlı olduğuna bakılıyor...",
+    "createTitle": "Neler oluşturulacak",
+    "entry": "Hedefle başla",
+    "entryHint": "Ne istediğinizi söyleyin. Praxi bunun için bir bot kurar ve işe başlar.",
+    "error": {
+      "bot": "Bot oluşturulamadı. Hiçbir şey başlatılmadı. Yeniden deneyin.",
+      "chat": "Bot oluşturuldu ama sohbeti açılamadı. Yeniden deneyin; ikinci bir bot oluşturulmaz.",
+      "check": "Bazı cevaplar eksik. Geri dönüp doldurun.",
+      "message": "Bot ve sohbeti hazır ama görev gönderilemedi. Yeniden deneyin; hiçbir şey iki kez oluşturulmaz."
+    },
+    "hints": {
+      "pick": "İstediğiniz şeyi seçin. Hiçbir şey oluşturulmadan önce her şeyi gözden geçirirsiniz.",
+      "questions": "Bir kez sorulan birkaç soru.",
+      "review": "Neler gerektiğine ve nelerin oluşturulacağına bakın."
+    },
+    "levelRaised": "Bu hedefin istediğinden ({{level}}) daha serbest bir düzey seçtiniz. Bot size daha seyrek soracak.",
+    "levelTitle": "Ne kadar serbest çalışsın",
+    "need": {
+      "app": {
+        "fix": "Uygulama bağla",
+        "missing": "Bağlı değil. Görev onsuz da çalışır, yalnızca bu kısım eksik kalır.",
+        "name": "Bağlı bir uygulama"
+      },
+      "browser": {
+        "fix": "Bilgisayar ayarları",
+        "missing": "Bu bilgisayarda tarayıcı bulunamadı.",
+        "name": "Botun kullanabileceği bir tarayıcı"
+      },
+      "emailInbox": {
+        "fix": "Gelen kutumu bağla",
+        "missing": "Ayıklanmasını istediğiniz gelen kutusunu bağlayın. Bot yalnızca okur ve taslak yazar.",
+        "name": "Posta kutusu olarak bağlı gelen kutunuz"
+      },
+      "emailOwn": {
+        "fix": "Posta kutusu ekle",
+        "missing": "Bot kendi e-posta adresiyle üye olur, bu yüzden bir posta kutusuna ihtiyacı var. Kişisel gelen kutunuz kullanılmaz.",
+        "name": "Botun kendi posta kutusu"
+      },
+      "model": {
+        "fix": "Yapay zekâ bağla",
+        "missing": "Henüz bağlı bir yapay zekâ modeli yok.",
+        "name": "Bir yapay zekâ modeli"
+      }
+    },
+    "needsTitle": "Nelere ihtiyacı var",
+    "next": "Devam",
+    "optional": "isteğe bağlı",
+    "preview": {
+      "bot": "\"{{name}}\" adında yeni bir bot.",
+      "folder": "Bot yalnızca {{folder}} içinde okuyup yazabilir.",
+      "later": "Botun adını, görünümünü ve ayarlarını sonradan değiştirebilirsiniz.",
+      "ownMail": "Botun için bağladığınız posta kutusunu kullanır, kişisel hesaplarınızı asla.",
+      "task": "\"{{name}}\" görevi yeni bir sohbette hemen başlar."
+    },
+    "problem": {
+      "invalidChoice": "Seçeneklerden birini seçin.",
+      "invalidFolder": "Bir klasörün tam yolunu girin, örneğin /home/ben/Belgeler ya da C:\\Users\\ben\\Belgeler.",
+      "invalidUrl": "Tam bir web adresi girin, örneğin https://ornek.com.",
+      "required": "Bu alan gerekli.",
+      "tooLong": "Bu çok uzun."
+    },
+    "questionsIntro": "Cevaplarınız doğrudan \"{{name}}\" görevine yazılır; bot bunları size tekrar sormaz.",
+    "recheck": "Yeniden kontrol et",
+    "repeat": {
+      "daily": "Her gün saat",
+      "label": "Tekrarla",
+      "monthly": "Her ay saat",
+      "time": "Günün saati",
+      "weekdays": "Her hafta içi saat",
+      "weekly": "Her {{day}} saat"
+    },
+    "scheduleFailed": "Görev başladı ama tekrarı kurulamadı. Zamanlamalar bölümünden ekleyebilirsiniz.",
+    "start": "Botu oluştur ve başlat",
+    "starting": "Başlatılıyor...",
+    "status": {
+      "ok": "Hazır",
+      "unknown": "Şu an kontrol edilemedi."
+    },
+    "stepOf": "Adım {{n}} / {{total}}.",
+    "title": "Hedefle başla"
+  },
   "runLocation": {
     "addHint": "İsteğe bağlı. Bu bilgisayar kapalıyken de botların çalışmaya devam eder.",
     "on": "{{name}} üzerinde",

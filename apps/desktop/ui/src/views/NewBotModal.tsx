@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, FileUp, Plus, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, FileUp, Plus, ShieldCheck, Target } from "lucide-react";
 import { BotAvatar, Button } from "ui";
 import { ProfileImportView, type ProfileSource } from "../components/ProfileImportView";
 import {
@@ -52,10 +52,12 @@ const NEW_BOT_SUBTITLE_ID = "new-bot-subtitle";
 
 function NewBotDialogContent({
   onDone,
-  onClose
+  onClose,
+  onStartFromGoal
 }: {
   onDone: (botId: string) => void;
   onClose: () => void;
+  onStartFromGoal?: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const { client, bots, conn, refreshBots, activeComputerId, activeHostName } = useDaemon();
@@ -319,6 +321,23 @@ function NewBotDialogContent({
                 </span>
                 <ChevronRight className={styles.cardChevron} aria-hidden="true" />
               </button>
+              {onStartFromGoal && !createdBot ? (
+                <button
+                  type="button"
+                  className={styles.card}
+                  data-testid="new-bot-start-goal"
+                  onClick={onStartFromGoal}
+                >
+                  <span className={styles.cardIcon} aria-hidden="true">
+                    <Target />
+                  </span>
+                  <span className={styles.cardText}>
+                    <span className={styles.cardName}>{t("recipes.entry")}</span>
+                    <span className={styles.cardDesc}>{t("recipes.entryHint")}</span>
+                  </span>
+                  <ChevronRight className={styles.cardChevron} aria-hidden="true" />
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={styles.card}
@@ -634,16 +653,19 @@ function NewBotDialogContent({
 export function NewBotModal({
   open,
   onDone,
-  onClose
+  onClose,
+  onStartFromGoal
 }: {
   open: boolean;
   onDone: (botId: string) => void;
   onClose: () => void;
+  /** Opens "Start from a goal" instead (this dialog closes). */
+  onStartFromGoal?: () => void;
 }) {
   const { t } = useTranslation();
   return (
     <Modal open={open} onClose={onClose} size="md" label={t("newBot.title")} describedBy={NEW_BOT_SUBTITLE_ID}>
-      {open ? <NewBotDialogContent onDone={onDone} onClose={onClose} /> : null}
+      {open ? <NewBotDialogContent onDone={onDone} onClose={onClose} onStartFromGoal={onStartFromGoal} /> : null}
     </Modal>
   );
 }

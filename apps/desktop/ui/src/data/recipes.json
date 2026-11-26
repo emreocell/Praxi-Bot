@@ -1,0 +1,508 @@
+{
+  "schema_version": 1,
+  "empty": {
+    "en": "(nothing specified)",
+    "tr": "(belirtilmedi)"
+  },
+  "guidance": {
+    "en": "How to work on this:\n- Work through it on your own, step by step. Do not stop to ask about things you can find out or decide yourself.\n- Ask me only when you are truly blocked: a CAPTCHA or login code only I can give, a payment, or a choice that is mine to make. Ask one clear question, then carry on with the rest while you wait.\n- Keep a short progress file (what is done, what is left, what failed and why) and update it as you go, so you can pick up where you left off.\n- Never put passwords or secret keys in the progress file or in your messages.\n- Never pay for anything, and never send or post anything in my name that I have not agreed to above.\n- When you finish a round, tell me in a few plain lines what you did, what is left and what you need from me.",
+    "tr": "Bu işi şöyle yürüt:\n- İşi kendi başına, adım adım ilerlet. Kendin bulabileceğin ya da karar verebileceğin şeyleri bana sorma.\n- Yalnızca gerçekten takıldığında sor: sadece benim verebileceğim bir CAPTCHA ya da giriş kodu, bir ödeme ya da bana ait bir karar. Tek ve net bir soru sor, cevabı beklerken işin geri kalanına devam et.\n- Kısa bir ilerleme dosyası tut (neler bitti, neler kaldı, neler neden başarısız oldu) ve ilerledikçe güncelle; böylece kaldığın yerden devam edebilirsin.\n- Şifreleri ya da gizli anahtarları ilerleme dosyasına veya mesajlarına asla yazma.\n- Hiçbir şey için ödeme yapma; yukarıda onay vermediğim hiçbir şeyi benim adıma gönderme ya da yayınlama.\n- Bir tur bitince neler yaptığını, neyin kaldığını ve benden ne beklediğini birkaç sade satırda anlat."
+  },
+  "recipes": [
+    {
+      "id": "backlinks",
+      "icon": "link",
+      "level": "balanced",
+      "bot": {
+        "shape": "diamond",
+        "color": "#2fc4b2",
+        "name": {
+          "en": "Link builder",
+          "tr": "Bağlantı kurucu"
+        }
+      },
+      "needs": [
+        {
+          "kind": "model"
+        },
+        {
+          "kind": "browser"
+        },
+        {
+          "kind": "email",
+          "purpose": "own"
+        }
+      ],
+      "questions": [
+        {
+          "id": "site",
+          "kind": "url",
+          "required": true,
+          "text": {
+            "en": {
+              "label": "Your website",
+              "hint": "The address people should land on.",
+              "placeholder": "https://example.com"
+            },
+            "tr": {
+              "label": "Web siteniz",
+              "hint": "İnsanların ulaşmasını istediğiniz adres.",
+              "placeholder": "https://ornek.com"
+            }
+          }
+        },
+        {
+          "id": "about",
+          "kind": "longtext",
+          "required": true,
+          "text": {
+            "en": {
+              "label": "What the site is about",
+              "hint": "Two or three sentences the bot can use for profiles and listings.",
+              "placeholder": "We sell handmade candles..."
+            },
+            "tr": {
+              "label": "Site ne hakkında",
+              "hint": "Bot profillerde ve listelerde kullanabilsin diye iki üç cümle.",
+              "placeholder": "El yapımı mum satıyoruz..."
+            }
+          }
+        },
+        {
+          "id": "count",
+          "kind": "choice",
+          "required": true,
+          "default": "10",
+          "options": [
+            "5",
+            "10",
+            "25"
+          ],
+          "text": {
+            "en": {
+              "label": "How many sites to try",
+              "hint": "You can ask for more later.",
+              "options": {
+                "5": "5 sites",
+                "10": "10 sites",
+                "25": "25 sites"
+              }
+            },
+            "tr": {
+              "label": "Kaç site denensin",
+              "hint": "Sonradan daha fazlasını isteyebilirsiniz.",
+              "options": {
+                "5": "5 site",
+                "10": "10 site",
+                "25": "25 site"
+              }
+            }
+          }
+        }
+      ],
+      "text": {
+        "en": {
+          "name": "Get backlinks for my site",
+          "blurb": "Finds sites that welcome listings, signs up with the bot's own email and tracks every step.",
+          "goal": "Get legitimate backlinks for my website {{site}}.\n\nAbout the site: {{about}}\n\nAim for {{count}} sites in this round.\n1. Find sites where a listing, directory entry or profile with a link is welcome and free (business directories, niche directories, community profiles). Skip anything that needs payment, link exchanges or comment spam.\n2. Before registering anywhere, check whether an account for this site already exists on that site (try the sign-in or password-reset page with your own email) and use it instead of making a duplicate.\n3. Register with your own mailbox, not mine. Confirm the sign-up emails when they arrive and finish the listing.\n4. Keep a tracker file with one row per site: site, link to my page, account email, status (found, registered, confirmed, live, failed) and date.\n5. Never write passwords in the tracker. Tell me if a site needs a CAPTCHA or a code only I can give."
+        },
+        "tr": {
+          "name": "Sitem için geri bağlantı kazan",
+          "blurb": "Kayıt kabul eden siteleri bulur, botun kendi e-postasıyla üye olur ve her adımı takip eder.",
+          "goal": "{{site}} web sitem için meşru geri bağlantılar (backlink) kazan.\n\nSite hakkında: {{about}}\n\nBu turda {{count}} site hedefle.\n1. Bağlantılı bir liste, dizin kaydı ya da profile açık ve ücretsiz siteleri bul (işletme dizinleri, niş dizinler, topluluk profilleri). Ödeme isteyen, bağlantı takası öneren ya da yorum spamı gerektiren her şeyi atla.\n2. Bir yere kayıt olmadan önce, o sitede bu site için zaten bir hesap olup olmadığına bak (kendi e-postanla giriş ya da şifre sıfırlama sayfasını dene) ve yenisini açmak yerine varsa onu kullan.\n3. Benim değil, kendi posta kutunla kayıt ol. Kayıt e-postaları gelince onayla ve kaydı tamamla.\n4. Her site için bir satır olan bir takip dosyası tut: site, sayfamın bağlantısı, hesap e-postası, durum (bulundu, kayıt olundu, onaylandı, yayında, başarısız) ve tarih.\n5. Takip dosyasına asla şifre yazma. Bir site CAPTCHA ya da sadece benim verebileceğim bir kod isterse bana söyle."
+        }
+      }
+    },
+    {
+      "id": "inbox-triage",
+      "icon": "inbox",
+      "level": "ask",
+      "bot": {
+        "shape": "cloud",
+        "color": "#f25fa8",
+        "name": {
+          "en": "Inbox helper",
+          "tr": "Gelen kutusu yardımcısı"
+        }
+      },
+      "needs": [
+        {
+          "kind": "model"
+        },
+        {
+          "kind": "email",
+          "purpose": "inbox"
+        }
+      ],
+      "schedule": {
+        "freq": "weekdays",
+        "time": "08:00"
+      },
+      "questions": [
+        {
+          "id": "important",
+          "kind": "longtext",
+          "required": false,
+          "text": {
+            "en": {
+              "label": "Who or what is always important?",
+              "hint": "People, companies or words that must never be missed. Optional.",
+              "placeholder": "My manager, invoices, anything from the school"
+            },
+            "tr": {
+              "label": "Her zaman önemli olanlar kimler ya da neler?",
+              "hint": "Kaçırılmaması gereken kişiler, şirketler ya da sözcükler. İsteğe bağlı.",
+              "placeholder": "Yöneticim, faturalar, okuldan gelen her şey"
+            }
+          }
+        },
+        {
+          "id": "ignore",
+          "kind": "longtext",
+          "required": false,
+          "text": {
+            "en": {
+              "label": "What can be ignored?",
+              "hint": "Newsletters, promotions and so on. Optional.",
+              "placeholder": "Newsletters and shop promotions"
+            },
+            "tr": {
+              "label": "Neler görmezden gelinebilir?",
+              "hint": "Bültenler, kampanyalar gibi. İsteğe bağlı.",
+              "placeholder": "Bültenler ve mağaza kampanyaları"
+            }
+          }
+        }
+      ],
+      "text": {
+        "en": {
+          "name": "Triage my inbox every morning",
+          "blurb": "Reads new mail, sorts it by what needs you and drafts replies. It never sends or deletes.",
+          "goal": "Go through my new email and sort it for me.\n\nAlways important: {{important}}\nCan be ignored: {{ignore}}\n\nGive me a short list in three groups: needs my answer today, good to know, and ignorable. For each mail that needs an answer, write a draft reply I can review. Do not send, delete or move any email; only read and draft."
+        },
+        "tr": {
+          "name": "Gelen kutumu her sabah ayıkla",
+          "blurb": "Yeni postaları okur, size ne kadar gerektiğine göre sıralar, yanıt taslakları yazar. Hiçbir şeyi göndermez ya da silmez.",
+          "goal": "Yeni e-postalarımı gözden geçir ve benim için ayıkla.\n\nHer zaman önemli: {{important}}\nGörmezden gelinebilir: {{ignore}}\n\nBana üç gruplu kısa bir liste ver: bugün yanıtım gerekenler, bilmekte fayda olanlar ve görmezden gelinebilecekler. Yanıt gereken her posta için inceleyebileceğim bir taslak yaz. Hiçbir e-postayı gönderme, silme ya da taşıma; yalnızca oku ve taslak hazırla."
+        }
+      }
+    },
+    {
+      "id": "daily-brief",
+      "icon": "sun",
+      "level": "ask",
+      "bot": {
+        "shape": "flower",
+        "color": "#f5803e",
+        "name": {
+          "en": "Daily brief",
+          "tr": "Günlük özet"
+        }
+      },
+      "needs": [
+        {
+          "kind": "model"
+        },
+        {
+          "kind": "app",
+          "apps": [
+            "googlecalendar",
+            "google_calendar",
+            "google-calendar",
+            "outlook",
+            "calendar"
+          ],
+          "label": {
+            "en": "A calendar app",
+            "tr": "Bir takvim uygulaması"
+          },
+          "optional": true
+        }
+      ],
+      "schedule": {
+        "freq": "daily",
+        "time": "07:30"
+      },
+      "questions": [
+        {
+          "id": "topics",
+          "kind": "text",
+          "required": true,
+          "text": {
+            "en": {
+              "label": "News topics you care about",
+              "hint": "A few words, separated by commas.",
+              "placeholder": "AI, local news, football"
+            },
+            "tr": {
+              "label": "İlgilendiğiniz haber konuları",
+              "hint": "Virgülle ayrılmış birkaç sözcük.",
+              "placeholder": "Yapay zekâ, yerel haberler, futbol"
+            }
+          }
+        },
+        {
+          "id": "tasks",
+          "kind": "longtext",
+          "required": false,
+          "text": {
+            "en": {
+              "label": "Open tasks to keep in view",
+              "hint": "Anything you are working on. Optional: the bot also remembers what you told it.",
+              "placeholder": "Finish the tax forms, call the plumber"
+            },
+            "tr": {
+              "label": "Gözden kaçmaması gereken işler",
+              "hint": "Üzerinde çalıştığınız her şey. İsteğe bağlı: bot size söylediklerinizi de hatırlar.",
+              "placeholder": "Vergi formlarını bitir, tesisatçıyı ara"
+            }
+          }
+        }
+      ],
+      "text": {
+        "en": {
+          "name": "Daily brief (news + calendar + open tasks)",
+          "blurb": "One short message each morning: today's calendar, the news you care about and what is still open.",
+          "goal": "Write me a brief for today in this order: 1) what is on my calendar today (skip this part if no calendar is connected), 2) five short headlines about {{topics}} with a link each, 3) my open tasks: {{tasks}}. Add anything you remember I am working on. Keep it under one screen and put the most urgent thing first."
+        },
+        "tr": {
+          "name": "Günlük özet (haberler + takvim + açık işler)",
+          "blurb": "Her sabah tek kısa mesaj: bugünkü takvim, ilgilendiğiniz haberler ve açık işleriniz.",
+          "goal": "Bugün için bana şu sırayla bir özet yaz: 1) takvimimde bugün neler var (takvim bağlı değilse bu kısmı atla), 2) {{topics}} hakkında her biri bağlantılı beş kısa başlık, 3) açık işlerim: {{tasks}}. Üzerinde çalıştığımı hatırladığın başka şeyler varsa ekle. Bir ekranı geçmesin, en acil olanı en başa koy."
+        }
+      }
+    },
+    {
+      "id": "price-watch",
+      "icon": "eye",
+      "level": "balanced",
+      "bot": {
+        "shape": "gem",
+        "color": "#4c8dff",
+        "name": {
+          "en": "Watcher",
+          "tr": "Gözcü"
+        }
+      },
+      "needs": [
+        {
+          "kind": "model"
+        },
+        {
+          "kind": "browser"
+        }
+      ],
+      "schedule": {
+        "freq": "daily",
+        "time": "09:00"
+      },
+      "questions": [
+        {
+          "id": "pages",
+          "kind": "longtext",
+          "required": true,
+          "text": {
+            "en": {
+              "label": "Pages to watch",
+              "hint": "One web address per line: competitor price lists, product or pricing pages.",
+              "placeholder": "https://competitor.com/pricing"
+            },
+            "tr": {
+              "label": "İzlenecek sayfalar",
+              "hint": "Her satıra bir web adresi: rakip fiyat listeleri, ürün ya da fiyat sayfaları.",
+              "placeholder": "https://rakip.com/fiyatlar"
+            }
+          }
+        },
+        {
+          "id": "focus",
+          "kind": "text",
+          "required": false,
+          "text": {
+            "en": {
+              "label": "What counts as a change?",
+              "hint": "Optional. Leave empty to be told about any price or plan change.",
+              "placeholder": "Only price drops over 5%"
+            },
+            "tr": {
+              "label": "Neyi değişiklik sayalım?",
+              "hint": "İsteğe bağlı. Boş bırakırsanız her fiyat ya da paket değişikliği bildirilir.",
+              "placeholder": "Yalnızca yüzde 5'ten büyük fiyat düşüşleri"
+            }
+          }
+        }
+      ],
+      "text": {
+        "en": {
+          "name": "Monitor competitor prices and pages",
+          "blurb": "Checks the pages you list on a schedule and tells you only when something changed.",
+          "goal": "Watch these pages and tell me when something changes:\n{{pages}}\n\nWhat counts as a change: {{focus}}\n\nOn the first run, read each page and save what you found (prices, plans, key wording) in a notes file as the baseline. On every later run, compare with that file. If nothing changed, say so in one line. If something changed, tell me what it was before and after, with the link. Update the notes file each time."
+        },
+        "tr": {
+          "name": "Rakip fiyatlarını ve sayfalarını izle",
+          "blurb": "Listelediğiniz sayfaları düzenli olarak kontrol eder, yalnızca bir şey değişince haber verir.",
+          "goal": "Şu sayfaları izle ve bir şey değişince bana söyle:\n{{pages}}\n\nDeğişiklik sayılacak şeyler: {{focus}}\n\nİlk çalışmada her sayfayı oku, bulduklarını (fiyatlar, paketler, önemli ifadeler) başlangıç olarak bir not dosyasına kaydet. Sonraki her çalışmada bu dosyayla karşılaştır. Değişen bir şey yoksa bunu tek satırla söyle. Bir şey değişmişse önceki ve şimdiki halini bağlantısıyla bildir. Not dosyasını her seferinde güncelle."
+        }
+      }
+    },
+    {
+      "id": "leads",
+      "icon": "table",
+      "level": "balanced",
+      "bot": {
+        "shape": "pebble",
+        "color": "#34c77b",
+        "name": {
+          "en": "Lead collector",
+          "tr": "Potansiyel müşteri toplayıcı"
+        }
+      },
+      "needs": [
+        {
+          "kind": "model"
+        },
+        {
+          "kind": "browser"
+        }
+      ],
+      "questions": [
+        {
+          "id": "sites",
+          "kind": "longtext",
+          "required": true,
+          "text": {
+            "en": {
+              "label": "Websites to look through",
+              "hint": "One web address per line.",
+              "placeholder": "https://example-company.com"
+            },
+            "tr": {
+              "label": "İncelenecek web siteleri",
+              "hint": "Her satıra bir web adresi.",
+              "placeholder": "https://ornek-sirket.com"
+            }
+          }
+        },
+        {
+          "id": "fields",
+          "kind": "text",
+          "required": true,
+          "default": "company name, website, public contact email, what they do",
+          "text": {
+            "en": {
+              "label": "What to collect for each",
+              "hint": "These become the spreadsheet columns.",
+              "placeholder": "company name, website, public contact email"
+            },
+            "tr": {
+              "label": "Her biri için neler toplansın",
+              "hint": "Bunlar tablonun sütunları olur.",
+              "placeholder": "şirket adı, web sitesi, herkese açık iletişim e-postası"
+            }
+          }
+        },
+        {
+          "id": "filename",
+          "kind": "text",
+          "required": true,
+          "default": "leads.csv",
+          "text": {
+            "en": {
+              "label": "File name",
+              "hint": "A spreadsheet-friendly CSV file, saved in the bot's workspace.",
+              "placeholder": "leads.csv"
+            },
+            "tr": {
+              "label": "Dosya adı",
+              "hint": "Tablo programında açılan bir CSV dosyası; botun çalışma alanına kaydedilir.",
+              "placeholder": "musteriler.csv"
+            }
+          }
+        }
+      ],
+      "text": {
+        "en": {
+          "name": "Collect leads from a website list into a spreadsheet",
+          "blurb": "Visits each site, picks out the details you asked for and fills a spreadsheet file.",
+          "goal": "Visit each of these websites and collect leads into the file {{filename}} (CSV, one row per site):\n{{sites}}\n\nColumns: {{fields}}\n\nOnly use information that is publicly shown on the site. Leave a cell empty rather than guessing. Do not fill in contact forms or send any message. Add a column with the page the information came from. When done, tell me how many rows you wrote and which sites you could not read."
+        },
+        "tr": {
+          "name": "Site listesinden potansiyel müşterileri tabloya topla",
+          "blurb": "Her siteyi gezer, istediğiniz bilgileri ayıklar ve bir tablo dosyasını doldurur.",
+          "goal": "Şu web sitelerini tek tek gez ve potansiyel müşteri bilgilerini {{filename}} dosyasına topla (CSV, her site için bir satır):\n{{sites}}\n\nSütunlar: {{fields}}\n\nYalnızca sitede herkese açık gösterilen bilgileri kullan. Emin olmadığın hücreyi tahmin etmek yerine boş bırak. İletişim formu doldurma, mesaj gönderme. Bilginin alındığı sayfayı gösteren bir sütun ekle. Bitince kaç satır yazdığını ve hangi siteleri okuyamadığını söyle."
+        }
+      }
+    },
+    {
+      "id": "weekly-report",
+      "icon": "file-text",
+      "level": "balanced",
+      "bot": {
+        "shape": "cloud",
+        "color": "#a78bfa",
+        "name": {
+          "en": "Weekly reporter",
+          "tr": "Haftalık raporcu"
+        }
+      },
+      "needs": [
+        {
+          "kind": "model"
+        }
+      ],
+      "schedule": {
+        "freq": "weekly",
+        "time": "17:00",
+        "weekday": 5
+      },
+      "questions": [
+        {
+          "id": "folder",
+          "kind": "folder",
+          "required": true,
+          "text": {
+            "en": {
+              "label": "Folder with your files",
+              "hint": "The bot reads and writes only inside this folder.",
+              "placeholder": "/home/me/Documents/work"
+            },
+            "tr": {
+              "label": "Dosyalarınızın klasörü",
+              "hint": "Bot yalnızca bu klasörün içinde okur ve yazar.",
+              "placeholder": "/home/ben/Belgeler/is"
+            }
+          }
+        },
+        {
+          "id": "audience",
+          "kind": "text",
+          "required": false,
+          "text": {
+            "en": {
+              "label": "Who is the report for?",
+              "hint": "Optional. It changes the tone and the detail.",
+              "placeholder": "My team lead"
+            },
+            "tr": {
+              "label": "Rapor kimin için?",
+              "hint": "İsteğe bağlı. Üslubu ve ayrıntıyı etkiler.",
+              "placeholder": "Ekip liderim"
+            }
+          }
+        }
+      ],
+      "text": {
+        "en": {
+          "name": "Weekly report from my files",
+          "blurb": "Looks at what changed in a folder this week and writes a short report file.",
+          "goal": "Look at the files in my folder and write this week's report. Find what was added or changed in the last 7 days, read the important ones and write a short report with: what got done, what is still open and what to start with next week. The report is for: {{audience}}. Save it in the same folder as report-YYYY-MM-DD.md and give me the main points here. Do not change or delete any of my existing files."
+        },
+        "tr": {
+          "name": "Dosyalarımdan haftalık rapor",
+          "blurb": "Bir klasörde bu hafta nelerin değiştiğine bakar ve kısa bir rapor dosyası yazar.",
+          "goal": "Klasörümdeki dosyalara bak ve bu haftanın raporunu yaz. Son 7 günde eklenen ya da değişen dosyaları bul, önemlilerini oku ve şunları içeren kısa bir rapor yaz: neler bitti, neler açık kaldı, gelecek hafta nereden başlanmalı. Rapor şu kişi için: {{audience}}. Raporu aynı klasöre rapor-YYYY-AA-GG.md adıyla kaydet, ana noktaları da burada bana anlat. Mevcut hiçbir dosyamı değiştirme ya da silme."
+        }
+      }
+    }
+  ]
+}

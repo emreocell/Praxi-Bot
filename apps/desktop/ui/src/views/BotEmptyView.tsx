@@ -1,4 +1,4 @@
-import { Ghost, Plus } from "lucide-react";
+import { Ghost, Plus, Target } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, type BotIdentity, Button } from "ui";
@@ -20,6 +20,7 @@ export function BotEmptyView({
   firstBot,
   onGoFirst,
   onCreateBot,
+  onStartFromGoal,
   onDemo,
   extra
 }: {
@@ -33,6 +34,8 @@ export function BotEmptyView({
   firstBot?: { id: string; name: string };
   onGoFirst?: (botId: string) => void;
   onCreateBot?: () => void;
+  /** Opens "Start from a goal": pick what you want and a bot is set up for it. */
+  onStartFromGoal?: () => void;
   /** Set only while no real model is connected: the sample cards then start the offline demo. */
   onDemo?: (task: DemoTaskId) => void;
   /** Quiet extra below the actions (the "Getting started" checklist). */
@@ -83,6 +86,12 @@ export function BotEmptyView({
           <Plus aria-hidden="true" />
           {t("bots.newChat")}
         </Button>
+        {onStartFromGoal ? (
+          <Button variant="secondary" disabled={busy} data-testid="bot-empty-start-from-goal" onClick={onStartFromGoal}>
+            <Target aria-hidden="true" />
+            {t("recipes.entry")}
+          </Button>
+        ) : null}
         {onDemo ? <DemoCards onPick={onDemo} heading testId="bot-empty-demo" /> : null}
         {onSuggest && !onDemo ? (
           <section className={styles.suggest} aria-label={t("botEmpty.suggestionsTitle")}>

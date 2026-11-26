@@ -1,4 +1,4 @@
-import { BellDot, BellRing, Bot, CalendarClock, ChevronDown, FlaskConical, GripVertical, Star, LoaderCircle, MessageSquare, Plus, Search, Server, ServerOff, Settings2 } from "lucide-react";
+import { BellDot, BellRing, Bot, CalendarClock, ChevronDown, FlaskConical, GripVertical, Star, LoaderCircle, MessageSquare, Plus, Search, Server, ServerOff, Settings2, Target } from "lucide-react";
 import { effectiveWallpaperMotion } from "./lib/accessibility";
 import { unreadBotIds } from "./lib/unread";
 import { useReadState } from "./store/readStateStore";
@@ -163,6 +163,8 @@ import { SchedulesView } from "./views/SchedulesView";
 import { WorkflowsView } from "./views/WorkflowsView";
 import { AppsModal } from "./views/AppsModal";
 import { NewBotModal } from "./views/NewBotModal";
+import { RecipeFlow } from "./views/RecipeFlow";
+import type { PrereqFix } from "./lib/recipePrereqs";
 import { MyBotsView } from "./views/MyBotsView";
 import { nativePauseAction } from "./lib/myBots";
 import { SettingsModal, type SettingsTargetRequest } from "./views/SettingsModal";
@@ -302,6 +304,17 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     setSettingsOpen(page);
   }, []);
   const [appsOpen, setAppsOpen] = useState(false);
+  // "Start from a goal": the recipe dialog stays open under the screen a fix opens (answers are kept)
+  // and checks again once that screen closes.
+  const [recipeOpen, setRecipeOpen] = useState(false);
+  const [recipeRecheck, setRecipeRecheck] = useState(0);
+  useEffect(() => {
+    if (settingsOpen === null && !appsOpen) setRecipeRecheck((k) => k + 1);
+  }, [settingsOpen, appsOpen]);
+  const openRecipeFix = (fix: PrereqFix) => {
+    if (fix.kind === "apps") setAppsOpen(true);
+    else setSettingsOpen(fix.section);
+  };
   const [vaultOpen, setVaultOpen] = useState(false);
   // The model picker's "Install <CLI>" rows open Settings > AI models, where the install flow lives.
   useEffect(() => {
@@ -379,7 +392,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         key: linkSession, refreshBots, refreshChats, refreshRuns
       },
       open: (destination) => {
-        if (settingsOpen !== null || newBotOpen || newChatBusy || pendingChatIds.size > 0) return false;
+        if (settingsOpen !== null || newBotOpen || recipeOpen || newChatBusy || pendingChatIds.size > 0) return false;
         return leave.attemptSilently(() => {
           if (destination.kind === "run") {
             setLinkedRun(destination.run);
@@ -1077,7 +1090,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   const railWidth = fitRail(viewportWidth, layout.rail, panelWidth, float, panelReserve);
   const fitStored = (candidate: number) => fitRail(viewportWidth, candidate, panelWidth, float, panelReserve);
   // A dialog opened by a shortcut sits above the message search: close the search instead of leaving it beneath.
-  const dialogOpen = settingsOpen !== null || appsOpen || newBotOpen || helpOpen || botEditOpen || botProfileOpen || skillsOpen || addSkillOpen || marketOpen || vaultOpen;
+  const dialogOpen = settingsOpen !== null || appsOpen || newBotOpen || recipeOpen || helpOpen || botEditOpen || botProfileOpen || skillsOpen || addSkillOpen || marketOpen || vaultOpen;
   useEffect(() => {
     if (dialogOpen) setSearchOpen(false);
   }, [dialogOpen]);
@@ -1587,11 +1600,20 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
                         : t("main.selectBotDescription")}
                     </p>
                     {bots.length === 0 ? (
-                      <HomeFirstSteps
-                        onConnectModel={() => handleOpenOnboarding(false)}
-                        onNewBot={() => setNewBotOpen(true)}
-                        onRefresh={() => void refreshBots()}
-                      />
+                      <>
+                        <HomeFirstSteps
+                          onConnectModel={() => handleOpenOnboarding(false)}
+                          onNewBot={() => setNewBotOpen(true)}
+                          onRefresh={() => void refreshBots()}
+                        />
+                        <Button
+                          variant="secondary"
+                          data-testid="home-start-from-goal"
+                          onClick={() => setRecipeOpen(true)}
+                        >
+                          <Target />{t("recipes.entry")}
+                        </Button>
+                      </>
                     ) : (
                       <div className={styles.optionRow}>
                         <Button
@@ -1599,6 +1621,13 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
                           onClick={() => setNewBotOpen(true)}
                         >
                           <Plus />{t("sidebar.newBot")}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          data-testid="home-start-from-goal"
+                          onClick={() => setRecipeOpen(true)}
+                        >
+                          <Target />{t("recipes.entry")}
                         </Button>
                       </div>
                     )}
@@ -1618,6 +1647,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
             firstBot={bots[0] ? { id: bots[0].id, name: bots[0].name } : undefined}
             onGoFirst={goToBot}
             onCreateBot={() => setNewBotOpen(true)}
+            onStartFromGoal={() => setRecipeOpen(true)}
             onDemo={showDemoOffer ? (task) => setDemo({ task }) : undefined}
             extra={
               <GettingStarted
@@ -1724,8 +1754,22 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         onClose={() => setVaultOpen(false)}
         onManageEmail={() => setSettingsOpen("mail")}
       />
+      <RecipeFlow
+        open={recipeOpen}
+        recheckKey={recipeRecheck}
+        onFix={openRecipeFix}
+        onClose={() => setRecipeOpen(false)}
+        onDone={(botId, chatId) => {
+          setRecipeOpen(false);
+          go({ kind: "chat", chatId, botId });
+        }}
+      />
       <NewBotModal
         open={newBotOpen}
+        onStartFromGoal={() => {
+          setNewBotOpen(false);
+          setRecipeOpen(true);
+        }}
         onClose={() => setNewBotOpen(false)}
         onDone={(botId) => {
           setNewBotOpen(false);

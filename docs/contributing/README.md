@@ -15,6 +15,7 @@ Start here, then pick the page for what you want to do. The top-level
 
 - [Writing a channel adapter](writing-a-channel.md)
 - [Adding a coding CLI adapter](adding-cli-engine.md)
+- [Writing a goal recipe](writing-a-recipe.md): "Start from a goal" recipes are data
 - [Adding a language to the desktop app](adding-a-language.md)
 - [Translation glossary](translation-glossary.md)
 - [Translating the user guide](translating-the-guide.md)
