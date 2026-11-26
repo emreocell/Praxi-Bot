@@ -4420,7 +4420,9 @@
       "shortcuts": "Atajos de teclado",
       "takeoverHint": "Toma tú mismo el control de esta pantalla (Ctrl+Shift+D). Los bots se pausan hasta que lo devuelvas.",
       "view": "Vista",
+      "viewport": "Remote screen (scrollable)",
       "zoomIn": "Zoom in",
+      "zoomLevel": "Zoom: {{percent}}%",
       "zoomOut": "Zoom out"
     },
     "viewOnly": "Solo ver",

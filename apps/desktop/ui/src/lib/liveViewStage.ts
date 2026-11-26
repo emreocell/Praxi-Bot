@@ -127,6 +127,17 @@ export function focusLeftScope(
   return !extraContainers.some((extra) => extra?.contains(related as never) ?? false);
 }
 
+/**
+ * Whether the browser's own scrolling must be stopped for a wheel event. While the owner drives the
+ * remote screen the wheel belongs to that screen alone: it is forwarded by the stage's `onWheel`,
+ * and must not also scroll the zoomed picture here. While only watching, the wheel scrolls the
+ * zoomed picture (Shift+wheel sideways) as the browser does. React's `onWheel` is passive, so this
+ * is applied by a native, non-passive listener on the scroll area.
+ */
+export function wheelBelongsToRemote(interactive: boolean, overStage: boolean): boolean {
+  return interactive && overStage;
+}
+
 export function createStageController(getDeps: () => StageDeps): StageHandlers {
   const keys = new KeyForwarder();
   let activePointerId: number | null = null;

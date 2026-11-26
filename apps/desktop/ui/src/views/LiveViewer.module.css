@@ -720,3 +720,8 @@
   overflow-wrap: anywhere;
   font-size: var(--font-size-sm);
 }
+
+.stageViewport:focus-visible {
+  outline: var(--size-border-thick) solid var(--color-focus);
+  outline-offset: calc(var(--size-border-thick) * -1);
+}

@@ -4420,7 +4420,9 @@
       "shortcuts": "Klavye kısayolları",
       "takeoverHint": "Bu ekranın kontrolünü kendin al (Ctrl+Shift+D). Sen geri verene kadar botlar durur.",
       "view": "Görünüm",
+      "viewport": "Uzak ekran (kaydırılabilir)",
       "zoomIn": "Yakınlaştır",
+      "zoomLevel": "Yakınlaştırma: %{{percent}}",
       "zoomOut": "Uzaklaştır"
     },
     "viewOnly": "Salt izleme",

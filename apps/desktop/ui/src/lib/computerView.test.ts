@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deriveView, formatLive, IDLE_PAUSE_MS, measureFps, SCREEN_START_TIMEOUT_MS, type ViewInputs } from "./computerView.ts";
+import { cardPanelShown, deriveView, formatLive, IDLE_PAUSE_MS, measureFps, SCREEN_START_TIMEOUT_MS, type ViewInputs } from "./computerView.ts";
 import { gradientBase, gradientVars, hexToOklch, NEUTRAL_CHROMA } from "./botGradient.ts";
 
 const base: ViewInputs = {
@@ -86,4 +86,12 @@ test("the gradient keeps a white bot tinted and mid-light, so it never washes ou
   assert.match(vars["--bot"], /^oklch\(/);
   assert.match(vars["--bot2"], /calc\(h \+ 48\)/);
   assert.match(vars["--bot3"], /calc\(l - \.22\)/);
+});
+
+test("the viewer hiding the bot panel does not count as the owner closing it (the card keeps its state)", () => {
+  assert.equal(cardPanelShown(true, false, false), true, "panel open");
+  assert.equal(cardPanelShown(false, false, false), false, "panel closed by the owner: the view ends");
+  assert.equal(cardPanelShown(false, true, false), true, "viewer open, panel stepped aside");
+  assert.equal(cardPanelShown(false, false, true), true, "viewer just closed, panel not back yet");
+  assert.equal(cardPanelShown(true, true, true), true);
 });

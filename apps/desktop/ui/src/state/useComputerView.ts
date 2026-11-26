@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { serverScreenIssue } from "../lib/botComputer";
 import { noScreenCode } from "../lib/computerLabel";
 import {
-  type ComputerView, deriveView, IDLE_PAUSE_MS, measureFps, SCREEN_START_TIMEOUT_MS, type UnavailableReason
+  cardPanelShown, type ComputerView, deriveView, IDLE_PAUSE_MS, measureFps, SCREEN_START_TIMEOUT_MS, type UnavailableReason
 } from "../lib/computerView";
 import { resolutionLabel } from "../lib/liveViewScale";
 import { summarizeTarget } from "../lib/liveViewState";
@@ -41,7 +41,17 @@ export function useComputerView(opts: {
   const { selectedTarget, targetsStatus, targetsError, availability, frameUrl, state, viewerOpen } = view;
   const summary = selectedTarget ? summarizeTarget(selectedTarget) : null;
   const issue = onHost ? serverScreenIssue(hostState) : null;
-  const asked = wanted && opts.visible;
+  // The large viewer takes the whole window and steps the panel aside; that is not the owner closing
+  // the panel, so the card keeps its state (the wish to watch and its last frame) and is as it was
+  // when the viewer closes. `heldByViewer` bridges the render where the viewer is already gone and
+  // the panel is not back yet; it is cleared in the same batch that restores the panel.
+  const anyViewerOpen = homeView.viewerOpen || localView.viewerOpen;
+  const [heldByViewer, setHeldByViewer] = useState(false);
+  useEffect(() => {
+    setHeldByViewer(anyViewerOpen);
+  }, [anyViewerOpen]);
+  const shown = cardPanelShown(opts.visible, anyViewerOpen, heldByViewer);
+  const asked = wanted && shown;
   const derived = useMemo(
     () =>
       deriveView({
@@ -72,11 +82,11 @@ export function useComputerView(opts: {
 
   // The panel closing ends the view (it is not "paused": nobody was left looking at a card).
   useEffect(() => {
-    if (!opts.visible && wanted) {
+    if (!shown && wanted) {
       setWanted(false);
       setStartFailure(null);
     }
-  }, [opts.visible, wanted]);
+  }, [shown, wanted]);
   // Switching to the other computer (or bot) ends the view of this one.
   useEffect(() => {
     setWanted(false);
@@ -86,10 +96,10 @@ export function useComputerView(opts: {
   }, [opts.side, opts.botId, activeComputerId]);
 
   useEffect(() => {
-    if (!opts.visible) {
+    if (!shown) {
       lastFrame.current = null;
     }
-  }, [opts.visible]);
+  }, [shown]);
 
   useEffect(() => {
     if (demanding && !frameUrl && (view.streamFailure === "unauthorized" || view.streamFailure === "forbidden")) {
@@ -143,14 +153,14 @@ export function useComputerView(opts: {
   }, [live, viewerOpen, frameBlob]);
   useEffect(() => {
     const retained = lastFrame.current;
-    if (!opts.visible || live || !retained) {
+    if (!shown || live || !retained) {
       setPreviewUrl(null);
       return undefined;
     }
     const url = URL.createObjectURL(retained);
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
-  }, [opts.visible, live, opts.side, opts.botId, activeComputerId]);
+  }, [shown, live, opts.side, opts.botId, activeComputerId]);
   useEffect(() => {
     setLiveSinceMs((prev) => (live ? (prev ?? Date.now()) : null));
     if (!live) {

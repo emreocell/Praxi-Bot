@@ -21,6 +21,7 @@ export function LiveViewMenu({
   onToggleFit,
   scale,
   onScale,
+  zoom,
   onRefresh,
   refreshing,
   infoPanel
@@ -32,6 +33,8 @@ export function LiveViewMenu({
   /** How the remote screen is sized: the whole screen in the free area (`fit`) or a zoom (1 = 1:1). */
   scale: ViewScale;
   onScale: (action: "fit" | "actual" | "in" | "out") => void;
+  /** The zoom shown right now (whole percent, null while unknown) and whether it can go further. */
+  zoom: { percent: number | null; canIn: boolean; canOut: boolean };
   onRefresh: () => void;
   refreshing: boolean;
   /** The bot panel beside the viewer; absent when the viewer has none. */
@@ -64,6 +67,11 @@ export function LiveViewMenu({
             <StreamQuality mode={quality} onChange={onQuality} />
           </section>
           <div className={styles.rows}>
+            {zoom.percent !== null ? (
+              <p className={styles.label} aria-live="polite" data-testid="live-viewer-zoom-level">
+                {t("liveView.toolbar.zoomLevel", { percent: zoom.percent })}
+              </p>
+            ) : null}
             <button
               type="button"
               className={styles.row}
@@ -107,7 +115,8 @@ export function LiveViewMenu({
             <button
               type="button"
               className={styles.row}
-              aria-keyshortcuts="+"
+              aria-keyshortcuts="Plus Equal"
+              disabled={!zoom.canIn}
               data-testid="live-viewer-zoom-in"
               onClick={() => onScale("in")}
             >
@@ -118,7 +127,8 @@ export function LiveViewMenu({
             <button
               type="button"
               className={styles.row}
-              aria-keyshortcuts="-"
+              aria-keyshortcuts="Minus"
+              disabled={!zoom.canOut}
               data-testid="live-viewer-zoom-out"
               onClick={() => onScale("out")}
             >

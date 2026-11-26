@@ -59,9 +59,8 @@ export function viewerShortcut(
   if (key === "f" && !event.shiftKey) {
     return "fit";
   }
-  if (event.shiftKey && key !== "+") {
-    return null;
-  }
+  // `key` is the character the keyboard produced, so Shift needs no guard of its own: it is how "+"
+  // and "_" are typed on many layouts, and how "0" and "1" are typed on AZERTY.
   if (key === "0") return "zoomFit";
   if (key === "1") return "zoomActual";
   if (key === "+" || key === "=") return "zoomIn";

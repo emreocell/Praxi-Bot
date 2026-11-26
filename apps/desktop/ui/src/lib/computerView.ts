@@ -58,6 +58,16 @@ export interface ComputerViewActions {
 export type ComputerView = ComputerViewModel & ComputerViewActions;
 
 /** No interaction for this long ends a view (the design says three minutes). */
+/**
+ * Whether the computer card still counts as "on screen". Closing the panel ends the view, but the
+ * large viewer steps the panel aside itself: that is not the owner closing it, so the card keeps
+ * what it had (the wish to watch, the last frame) while the viewer is open, and for the one render
+ * after it closed in which the panel has not come back yet (`heldByViewer`).
+ */
+export function cardPanelShown(panelVisible: boolean, viewerOpen: boolean, heldByViewer: boolean): boolean {
+  return panelVisible || viewerOpen || heldByViewer;
+}
+
 export const IDLE_PAUSE_MS = 3 * 60 * 1000;
 export const SCREEN_START_TIMEOUT_MS = 6_000;
 

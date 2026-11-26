@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { isOsFullscreen, setOsFullscreen, watchOsFullscreen } from "../lib/osFullscreen";
+import { useEffect, useMemo, useState } from "react";
+import { createFullscreenController, osFullscreenBackend } from "../lib/osFullscreen";
 
 /**
- * True fullscreen of the app window while `enabled` (the live view is open). Leaving the view always
- * leaves fullscreen too, so closing the screen never strands the app in a mode the owner did not ask for.
+ * True fullscreen of the app window while `enabled` (the live view is open). Leaving the view, or
+ * the view going away altogether (another computer, a reconnect, a closed pop-out), always leaves
+ * fullscreen too, so the app is never stranded in a mode the owner did not ask for. The rules live
+ * in `createFullscreenController`.
+ *
+ * While fullscreen, `<html data-os-fullscreen="true">` lets the custom window controls step aside.
  */
 export function useOsFullscreen(enabled: boolean): {
   fullscreen: boolean;
@@ -11,45 +15,27 @@ export function useOsFullscreen(enabled: boolean): {
   exit: () => void;
 } {
   const [fullscreen, setFullscreen] = useState(false);
-  const fullscreenRef = useRef(false);
-  fullscreenRef.current = fullscreen;
+  const controller = useMemo(() => createFullscreenController(osFullscreenBackend, setFullscreen), []);
 
+  // The cleanup runs both when `enabled` turns false and when the component unmounts.
   useEffect(() => {
     if (!enabled) {
       return undefined;
     }
-    let cancelled = false;
-    void isOsFullscreen().then((on) => !cancelled && setFullscreen(on));
-    const stop = watchOsFullscreen((on) => !cancelled && setFullscreen(on));
-    return () => {
-      cancelled = true;
-      stop();
-    };
-  }, [enabled]);
+    controller.enable();
+    return () => controller.disable();
+  }, [enabled, controller]);
 
-  // Only a fullscreen this hook entered is undone on close; a window the owner already had in
-  // fullscreen before opening the view stays that way.
-  const enteredHere = useRef(false);
   useEffect(() => {
-    if (enabled) {
+    if (!fullscreen) {
       return undefined;
     }
-    if (enteredHere.current) {
-      enteredHere.current = false;
-      void setOsFullscreen(false).then(setFullscreen);
-    }
-    return undefined;
-  }, [enabled]);
+    const root = document.documentElement;
+    root.dataset.osFullscreen = "true";
+    return () => {
+      delete root.dataset.osFullscreen;
+    };
+  }, [fullscreen]);
 
-  const toggle = useCallback(() => {
-    const next = !fullscreenRef.current;
-    if (next) {
-      enteredHere.current = true;
-    }
-    void setOsFullscreen(next).then(setFullscreen);
-  }, []);
-  const exit = useCallback(() => {
-    void setOsFullscreen(false).then(setFullscreen);
-  }, []);
-  return { fullscreen, toggle, exit };
+  return { fullscreen, toggle: controller.toggle, exit: controller.exit };
 }

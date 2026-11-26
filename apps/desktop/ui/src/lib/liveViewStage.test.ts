@@ -4,7 +4,8 @@ import type { InputEvent } from "../api/types.ts";
 import {
   createStageController,
   focusLeftScope,
-  type StageDeps
+  type StageDeps,
+  wheelBelongsToRemote
 } from "./liveViewStage.ts";
 
 type Props = Record<string, ((e: never) => void) | undefined>;
@@ -252,4 +253,21 @@ test("focus scope: moving focus onto a toolbar button inside the stage is not le
   assert.equal(focusLeftScope("releaseFocus", container, hintBar), false);
   assert.equal(focusLeftScope("chatInput", container, hintBar), true);
   assert.equal(focusLeftScope(null, container, hintBar), true);
+});
+
+test("the wheel scrolls the zoomed picture only while watching; driving, it belongs to the remote screen", () => {
+  assert.equal(wheelBelongsToRemote(true, true), true, "driving, over the stage: remote only");
+  assert.equal(wheelBelongsToRemote(false, true), false, "watching: the browser scrolls the picture");
+  assert.equal(wheelBelongsToRemote(true, false), false, "outside the stage nothing is forwarded");
+  assert.equal(wheelBelongsToRemote(false, false), false);
+});
+
+test("a wheel over the stage is forwarded while driving and ignored while watching", () => {
+  const wheel = { clientX: 1, clientY: 1, deltaX: 0, deltaY: 120, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false };
+  const driving = harness({ interactive: true });
+  dispatch([driving.ctl.stage as never], "onWheel", wheel);
+  assert.equal(driving.events.filter((e) => e.type === "wheel").length, 1);
+  const watching = harness({ interactive: false });
+  dispatch([watching.ctl.stage as never], "onWheel", wheel);
+  assert.equal(watching.events.length, 0);
 });

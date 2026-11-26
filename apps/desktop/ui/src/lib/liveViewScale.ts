@@ -110,8 +110,28 @@ export function stageGeometry(
 }
 
 /**
+ * Device pixels per remote pixel the picture is shown at, or `null` while that is not known (the
+ * free area or the frame has not been measured yet).
+ */
+export function shownFactor(scale: ViewScale, area: Size, content: Size | null, dpr = 1): number | null {
+  if (scale.kind === "zoom") {
+    return scale.factor;
+  }
+  const ratio = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  const fit = content ? fitFactor(area, content) * ratio : 0;
+  return fit > 0 ? fit : null;
+}
+
+/** The zoom shown to the owner, as a whole percent (100 = 1:1), or `null` while it is not known. */
+export function zoomPercent(scale: ViewScale, area: Size, content: Size | null, dpr = 1): number | null {
+  const factor = shownFactor(scale, area, content, dpr);
+  return factor === null ? null : Math.round(factor * 100);
+}
+
+/**
  * Next zoom level from `scale`: from "fit" the step is taken from the factor the picture is shown
- * at right now, so the first press always changes the size. Stays within `ZOOM_STEPS`.
+ * at right now, so the first press always changes the size (an unmeasured area counts as 1:1).
+ * Stays within `ZOOM_STEPS`.
  */
 export function stepZoom(
   scale: ViewScale,
@@ -120,9 +140,7 @@ export function stepZoom(
   content: Size | null,
   dpr = 1
 ): ViewScale {
-  const ratio = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
-  const shown =
-    scale.kind === "zoom" ? scale.factor : content ? fitFactor(area, content) * ratio : 1;
+  const shown = shownFactor(scale, area, content, dpr) ?? 1;
   const first = ZOOM_STEPS[0] as number;
   const last = ZOOM_STEPS[ZOOM_STEPS.length - 1] as number;
   const next =
@@ -130,6 +148,18 @@ export function stepZoom(
       ? ZOOM_STEPS.find((s) => s > shown + EPS) ?? last
       : [...ZOOM_STEPS].reverse().find((s) => s < shown - EPS) ?? first;
   return { kind: "zoom", factor: next };
+}
+
+/** True when `direction` cannot go any further (the first or last level of `ZOOM_STEPS`). */
+export function atZoomLimit(
+  scale: ViewScale,
+  direction: 1 | -1,
+  area: Size,
+  content: Size | null,
+  dpr = 1
+): boolean {
+  const next = stepZoom(scale, direction, area, content, dpr);
+  return scale.kind === "zoom" && next.kind === "zoom" && Math.abs(next.factor - scale.factor) < EPS;
 }
 
 export function isFit(scale: ViewScale): boolean {

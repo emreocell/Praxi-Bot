@@ -33,6 +33,7 @@ const actions: [string, (window: Window) => Promise<void>][] = [
   ["minimize", (window) => window.minimize()],
   ["toggle-maximize", (window) => window.toggleMaximize()],
   ["close", (window) => window.close()],
+  ["is-fullscreen", async (window) => { await window.isFullscreen(); }],
   ["set-fullscreen", (window) => window.setFullscreen(true)]
 ];
 
@@ -58,6 +59,36 @@ for (const [action, perform] of actions) {
     }
   });
 }
+
+const permissionsFor = (label: string) => capabilities
+  .filter((capability) => capability.windows?.some((pattern) =>
+    pattern.endsWith("*") ? label.startsWith(pattern.slice(0, -1)) : pattern === label))
+  .flatMap(identifiers);
+
+// The live view's fullscreen (lib/osFullscreen.ts) asks the window whether it is fullscreen, sets it,
+// and follows its resize events (a listener), so every window that can show the live view needs all four.
+for (const label of ["main", "live-home", "live-local"]) {
+  test(`the ${label} window may read and set fullscreen and follow its resizes`, () => {
+    const granted = permissionsFor(label);
+    for (const permission of [
+      "core:window:allow-is-fullscreen",
+      "core:window:allow-set-fullscreen",
+      "core:event:allow-listen",
+      "core:event:allow-unlisten"
+    ]) {
+      const viaDefault = permission.startsWith("core:event:") && granted.includes("core:default");
+      assert.ok(granted.includes(permission) || viaDefault, `${label} lacks ${permission}`);
+    }
+  });
+}
+
+test("fullscreen is not granted to windows that never show the live view", () => {
+  for (const label of ["widget", "overlay-0", "quick-ask", "chat-1"]) {
+    const granted = permissionsFor(label);
+    assert.ok(!granted.includes("core:window:allow-set-fullscreen"), `${label} must not set fullscreen`);
+    assert.ok(!granted.includes("core:window:allow-is-fullscreen"), `${label} must not read fullscreen`);
+  }
+});
 
 test("window chrome grants stay local to the main window and pop-out windows", () => {
   const grants = new Set(actions.map(([action]) => `core:window:allow-${action}`));

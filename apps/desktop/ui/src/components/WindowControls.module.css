@@ -12,6 +12,16 @@
   height: var(--titlebar-h);
 }
 
+/* The live view in true fullscreen (`useOsFullscreen` sets the attribute) owns the whole screen: the
+   strip and the room reserved for it step aside, and the owner leaves with F11, Esc or the toolbar. */
+:global(:root[data-os-fullscreen="true"]) {
+  --titlebar-h: var(--space-0);
+}
+
+:global(:root[data-os-fullscreen="true"]) .strip {
+  display: none;
+}
+
 .controls {
   display: flex;
   align-items: stretch;

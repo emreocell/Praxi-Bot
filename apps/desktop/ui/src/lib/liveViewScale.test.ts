@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { mapClientPointToNormalized } from "./liveViewInput.ts";
 import {
   ACTUAL_SCALE,
+  atZoomLimit,
   FIT_SCALE,
   fitFactor,
   isActualSize,
@@ -10,7 +11,8 @@ import {
   resolutionLabel,
   stageGeometry,
   stepZoom,
-  type ViewScale
+  type ViewScale,
+  zoomPercent
 } from "./liveViewScale.ts";
 
 const near = (actual: number, expected: number, eps = 1e-9) =>
@@ -99,6 +101,44 @@ test("zoom steps move up and down through the levels and clamp at the ends", () 
   assert.deepEqual(stepZoom(s, 1, area, content), { kind: "zoom", factor: 4 });
   assert.deepEqual(stepZoom({ kind: "zoom", factor: 0.5 }, -1, area, content), { kind: "zoom", factor: 0.5 });
   assert.ok(isActualSize(ACTUAL_SCALE) && !isActualSize(FIT_SCALE) && !isActualSize({ kind: "zoom", factor: 2 }));
+});
+
+test("stepping from fit on a 2x display counts device pixels, so the first press always changes the size", () => {
+  const content = { width: 1280, height: 800 };
+  const area = { width: 1500, height: 700 };
+  // Fit shows 0.875 css px per remote pixel = 1.75 device pixels per remote pixel on a 2x display.
+  assert.deepEqual(stepZoom(FIT_SCALE, 1, area, content, 2), { kind: "zoom", factor: 2 });
+  assert.deepEqual(stepZoom(FIT_SCALE, -1, area, content, 2), { kind: "zoom", factor: 1.5 });
+  assert.equal(zoomPercent(FIT_SCALE, area, content, 2), 175);
+  assert.equal(zoomPercent(FIT_SCALE, area, content, 1), 88);
+});
+
+test("an unmeasured area (the first frame, before the viewer is measured) steps from 1:1 on any display", () => {
+  const content = { width: 1280, height: 800 };
+  const unmeasured = { width: 0, height: 0 };
+  for (const dpr of [1, 2, 1.5]) {
+    assert.deepEqual(stepZoom(FIT_SCALE, 1, unmeasured, content, dpr), { kind: "zoom", factor: 1.5 });
+    assert.deepEqual(stepZoom(FIT_SCALE, -1, unmeasured, content, dpr), { kind: "zoom", factor: 0.75 });
+  }
+  assert.deepEqual(stepZoom(FIT_SCALE, 1, unmeasured, null, 2), { kind: "zoom", factor: 1.5 });
+  // Nonsense device ratios fall back to 1 instead of poisoning the step.
+  for (const dpr of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.deepEqual(stepZoom(FIT_SCALE, 1, { width: 1280, height: 800 }, content, dpr), { kind: "zoom", factor: 1.5 });
+  }
+  assert.equal(zoomPercent(FIT_SCALE, unmeasured, content, 2), null);
+  assert.equal(zoomPercent(FIT_SCALE, { width: 1500, height: 700 }, null, 2), null);
+});
+
+test("the zoom buttons know when the first or last level is reached", () => {
+  const area = { width: 1500, height: 700 };
+  const content = { width: 1280, height: 800 };
+  assert.equal(atZoomLimit(FIT_SCALE, 1, area, content), false);
+  assert.equal(atZoomLimit(FIT_SCALE, -1, area, content), false);
+  assert.equal(atZoomLimit({ kind: "zoom", factor: 4 }, 1, area, content), true);
+  assert.equal(atZoomLimit({ kind: "zoom", factor: 4 }, -1, area, content), false);
+  assert.equal(atZoomLimit({ kind: "zoom", factor: 0.5 }, -1, area, content), true);
+  assert.equal(atZoomLimit({ kind: "zoom", factor: 0.5 }, 1, area, content), false);
+  assert.equal(zoomPercent({ kind: "zoom", factor: 1.5 }, area, content, 2), 150);
 });
 
 /** A picture element laid out at `geometry` inside a viewport at (vx, vy), scrolled by (sx, sy). */
