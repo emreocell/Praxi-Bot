@@ -511,6 +511,7 @@ export type ComposioStatus = S["ComposioStatusDto"];
 export type ComposioConnState = S["ComposioConnState"];
 export type ComposioToolkit = S["ComposioToolkitDto"];
 export type ComposioCatalog = S["ComposioCatalogDto"];
+export type ComposioAction = S["ComposioActionDto"];
 export type ComposioApp = S["ComposioAppDto"];
 export type ComposioConnect = S["ComposioConnectDto"];
 export type ComposioLogin = S["ComposioLoginDto"];

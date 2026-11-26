@@ -10,17 +10,18 @@ Bazı uygulamalara **MCP sunucusu** denir. Bu yalnızca teknik bir addır: "bir 
 
 1. Sol çubukta **Uygulamalar**'a tıkla.
 2. Uygulamayı bulmak için **Uygulamalarda ara**'yı ya da kategori etiketlerini kullan. Ekleyebileceğin uygulamalar **Keşfet** altındadır.
-3. Uygulamada **Bağlan**'a bas.
+3. Uygulamanın sayfasını aç ve **Bağlan**'a bas.
 4. Tarayıcında bir sayfa açılır. Orada giriş yap ve erişime izin ver. Sonra Praxi'ye dön.
-5. Uygulama **Bağlı** bölümüne geçer.
+5. Uygulama **Bağlı** durumuna geçer ve **Uygulamaların** altında görünür.
 
-Bazı uygulamalarda Praxi önce senden Composio adlı ücretsiz bir servise bir kez giriş yapmanı ister. Sonra uygulamanın kendi sayfasını kendiliğinden açar. "Adım 1 / 2" ve "Adım 2 / 2" görürsün.
-
-> **Resim:** **Uygulamalarda ara**, **Keşfet** ve **Bağlı** ile **Uygulamalar** penceresi.
+**Uygulamalar** penceresinin üstünden Composio hesabını bir kez bağla. Tarayıcıda
+giriş yapabilir veya proje API anahtarı kullanabilirsin. Ardından uygulamanın
+kendi sayfasından izin ver.
 
 ## Uygulamayı kimler kullanabilir
 
-Bağlı bir uygulamada **Yönet**'e bas. **Bu uygulamayı kimler kullanabilir** altında şunu seç:
+Bağlı uygulamanın sayfasını aç. Doğrudan MCP sunucusu için **MCP sunucuları**
+bölümünde **Yönet**'i seç. **Bu uygulamayı kimler kullanabilir** altında şunu seç:
 
 - **Tüm botlar**, ya da
 - **Yalnızca seçilen botlar**; botları işaretle. Sonra **Kaydet**'e bas.

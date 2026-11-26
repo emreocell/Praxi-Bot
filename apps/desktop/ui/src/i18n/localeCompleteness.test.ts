@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { usesEnglishFallback } from "./englishFallback.ts";
 
-// Every strict language must have exactly the keys English has, with the same {{placeholders}}.
+// Every strict language must provide English's keys and {{placeholders}}, except feature copy
+// that ships with an explicit English fallback for that language.
 // A missing key silently shows the English text (or the raw key). Scaffold locales (English copies
 // being translated part by part, listed in scaffold-locales.json) may lag: the app falls back to
 // English for them and scripts/check-i18n.mjs only warns. A locale that leaves that list is strict.
@@ -36,13 +38,20 @@ test("the strict locales include tr, de and es", () => {
   for (const code of ["tr", "de", "es"]) assert.ok(TRANSLATED_LOCALES.includes(code), `${code} must stay strict`);
 });
 
-test("every strict locale has the same keys as English", () => {
+test("every strict locale has all required English keys and no extras", () => {
   for (const lng of TRANSLATED_LOCALES) {
-    const missing = [...maps.en.keys()].filter((k) => !maps[lng].has(k));
+    const missing = [...maps.en.keys()].filter((k) => !maps[lng].has(k) && !usesEnglishFallback(lng, k));
     const extra = [...maps[lng].keys()].filter((k) => !maps.en.has(k));
     assert.deepEqual(missing, [], `${lng} is missing keys: ${missing.slice(0, 10).join(", ")}`);
     assert.deepEqual(extra, [], `${lng} has keys en does not: ${extra.slice(0, 10).join(", ")}`);
   }
+});
+
+test("the Composio hub uses English fallback only for German and Spanish", () => {
+  assert.equal(usesEnglishFallback("de", "apps.composioHub.linkAccount"), true);
+  assert.equal(usesEnglishFallback("es", "apps.composioHub.linkAccount"), true);
+  assert.equal(usesEnglishFallback("tr", "apps.composioHub.linkAccount"), false);
+  assert.equal(usesEnglishFallback("de", "apps.connect"), false);
 });
 
 test("no translation is empty and placeholders match English", () => {

@@ -1606,8 +1606,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Test a connected app with one fixed read-only call (Drive: the account and
-         *     three file names; Gmail: the address and three subjects; GitHub: the user).
+         * Verify the bound authorization and run a fixed read-only probe where available.
          *     The result is for the owner's screen; no bot and no model sees it.
          */
         post: operations["composio_test"];
@@ -1674,6 +1673,23 @@ export interface paths {
          *     background.
          */
         get: operations["composio_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/composio/toolkits/{slug}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The actions a toolkit offers to bots once connected. */
+        get: operations["composio_actions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6251,8 +6267,17 @@ export interface components {
          * @enum {string}
          */
         ComponentInstallState: "idle" | "installing" | "done" | "failed";
+        /** @description A catalog action available after connecting a toolkit. */
+        ComposioActionDto: {
+            /** @description Short description from Composio. */
+            description: string;
+            /** @description Action name, scoped to the toolkit. */
+            name: string;
+        };
         /** @description A connected (or connecting) app. */
         ComposioAppDto: {
+            /** @description Display identity of the bound account, when available. */
+            account?: string | null;
             /** @description Bots allowed; `null` = all. */
             bots?: string[] | null;
             /** @description The owner enabled it (tools exist only while enabled and active). */
@@ -6355,9 +6380,11 @@ export interface components {
         };
         /** @description `GET /v1/composio`. */
         ComposioStatusDto: {
+            /** @description Display name of the linked organization or project. */
+            account?: string | null;
             /** @description Praxi is linked to Composio (the credential itself is never returned). */
             configured: boolean;
-            /** @description Where an owner who wants their own project key creates it (advanced). */
+            /** @description Where the owner can create a Composio project key. */
             key_setup_url: string;
             /**
              * @description Composio refused the saved credential (401/403) and nothing renewed it:
@@ -6368,12 +6395,14 @@ export interface components {
             mode: components["schemas"]["ComposioLinkMode"];
         };
         /**
-         * @description `POST /v1/composio/apps/{slug}/test`: what a one-call read-only test found.
+         * @description `POST /v1/composio/apps/{slug}/test`: result of the authorization check or read-only probe.
          *     Shown to the owner only; the text comes from the app and is never trusted.
          */
         ComposioTestDto: {
             /** @description The account the app is connected as (address or user name), when the app says. */
             account?: string | null;
+            /** @description Only the active authorization record was checked. */
+            authorization_only?: boolean;
             /** @description Up to three samples: file names, mail subjects, calendar names. */
             items: string[];
         };
@@ -16665,7 +16694,7 @@ export interface operations {
                     "application/json": components["schemas"]["ComposioTestDto"];
                 };
             };
-            /** @description not connected, or no quick test for this app */
+            /** @description not connected or no supported probe action */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -16816,6 +16845,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ComposioCatalogDto"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    composio_actions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Toolkit slug */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComposioActionDto"][];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             502: {

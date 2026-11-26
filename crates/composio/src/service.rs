@@ -124,6 +124,8 @@ pub struct AppView {
     pub bots: Option<Vec<String>>,
     /// Direct tools currently registered for the model.
     pub tools: usize,
+    /// Owner-facing alias of the bound active account, when Composio supplies one.
+    pub account: Option<String>,
 }
 
 /// One action discovered from Composio.
@@ -181,8 +183,11 @@ pub(crate) struct Inner {
     pub(crate) curated: Curated,
     state: Mutex<StateFile>,
     client: Mutex<Option<Arc<ComposioClient>>>,
+    client_load: tokio::sync::Mutex<()>,
     key_present: std::sync::atomic::AtomicBool,
     statuses: Mutex<HashMap<String, ConnState>>,
+    account_labels: Mutex<HashMap<String, String>>,
+    connection_change: tokio::sync::Mutex<()>,
     discovered: Mutex<HashMap<String, Discovered>>,
     registered: Mutex<HashMap<String, Vec<String>>>,
     catalog: Mutex<HashMap<String, (Instant, ToolkitPage)>>,
@@ -233,8 +238,11 @@ impl ComposioService {
             curated: Curated::builtin(),
             state: Mutex::new(state),
             client: Mutex::new(None),
+            client_load: tokio::sync::Mutex::new(()),
             key_present: key_present.into(),
             statuses: Mutex::new(HashMap::new()),
+            account_labels: Mutex::new(HashMap::new()),
+            connection_change: tokio::sync::Mutex::new(()),
             discovered: Mutex::new(HashMap::new()),
             registered: Mutex::new(HashMap::new()),
             catalog: Mutex::new(HashMap::new()),
@@ -315,6 +323,7 @@ impl ComposioService {
     }
 
     async fn client(&self) -> Result<Arc<ComposioClient>> {
+        let _load = self.0.client_load.lock().await;
         if let Some(c) = self.0.client.lock().clone() {
             return Ok(c);
         }
@@ -325,8 +334,12 @@ impl ComposioService {
             .await?
             .ok_or(ComposioError::NotConfigured)?;
         let auth = match Stored::parse(&stored) {
-            Stored::Project(key) => Auth::Project(key),
+            Stored::Project(key) => {
+                (self.0.register_secret)(&key);
+                Auth::Project(key)
+            }
             Stored::User(key) => {
+                (self.0.register_secret)(&key);
                 let ids = self.repaired_ids(&key).await?;
                 Auth::User {
                     key,
@@ -360,8 +373,8 @@ impl ComposioService {
             org_id: None,
             project_id: None,
         })?;
-        let (org_id, project_id) = match probe.session_info().await {
-            Ok(found) => found,
+        let fresh = match probe.session_info().await {
+            Ok(found) => found.ids,
             Err(e) => {
                 tracing_warn(&format!(
                     "could not refresh the Composio login ids, will retry: {}",
@@ -370,7 +383,6 @@ impl ComposioService {
                 return Err(e);
             }
         };
-        let fresh = LoginIds { org_id, project_id };
         if let Err(e) = self.save_state(|st| st.login = Some(fresh.clone())) {
             tracing_warn(&format!(
                 "could not save the refreshed Composio login ids: {}",
@@ -417,6 +429,7 @@ impl ComposioService {
     /// # Errors
     /// Composio is unreachable or answers an error.
     pub async fn login_start(&self) -> Result<LoginStart> {
+        let _change = self.0.connection_change.lock().await;
         let anon = self.build_with(&Auth::Anonymous)?;
         let session = anon.create_cli_session().await?;
         let login_url = format!("{LOGIN_URL}?cliKey={}", session.id);
@@ -436,12 +449,13 @@ impl ComposioService {
     /// # Errors
     /// Only local failures (secret store, state file).
     pub async fn login_poll(&self) -> Result<LoginState> {
-        if self.linkage() == Linkage::Login && !self.login_expired() {
-            return Ok(LoginState::Linked);
-        }
+        let _change = self.0.connection_change.lock().await;
         let id = {
             let mut g = self.0.login.lock();
             match g.as_ref() {
+                None if self.linkage() == Linkage::Login && !self.login_expired() => {
+                    return Ok(LoginState::Linked);
+                }
                 None => return Ok(LoginState::Idle),
                 Some(l) if l.started.elapsed() > PENDING_TIMEOUT => {
                     *g = None;
@@ -473,7 +487,7 @@ impl ComposioService {
             .session_info()
             .await
         {
-            Ok((org_id, project_id)) => LoginIds { org_id, project_id },
+            Ok(info) => info.ids,
             Err(_) => LoginIds::default(),
         };
         // A fresh key that Composio refuses at once is a failed login, not a
@@ -499,8 +513,10 @@ impl ComposioService {
             // Accepted, or any other answer: it says nothing against the key.
             Ok(()) | Err(_) => {}
         }
+        let _load = self.0.client_load.lock().await;
         self.0.keys.set(&Stored::encode_user(&key)).await?;
         self.save_state(|st| st.login = Some(ids.clone()))?;
+        self.reset_connections();
         *self.0.client.lock() = None;
         *self.0.router_session.lock() = None;
         *self.0.login.lock() = None;
@@ -535,6 +551,7 @@ impl ComposioService {
     /// # Errors
     /// [`ComposioError::Invalid`] for a malformed or rejected key.
     pub async fn set_key(&self, key: &str) -> Result<()> {
+        let change = self.0.connection_change.lock().await;
         let key = key.trim();
         if key.is_empty()
             || key.len() > 512
@@ -555,7 +572,9 @@ impl ComposioService {
             }
             Err(e) => return Err(e),
         }
+        let load = self.0.client_load.lock().await;
         self.0.keys.set(key).await?;
+        self.reset_connections();
         *self.0.client.lock() = Some(client);
         *self.0.router_session.lock() = None;
         self.0
@@ -565,7 +584,10 @@ impl ComposioService {
             .key_present
             .store(true, std::sync::atomic::Ordering::Relaxed);
         self.save_state(|st| st.login = None)?;
+        *self.0.login.lock() = None;
         self.spawn_catalog_refresh();
+        drop(load);
+        drop(change);
         self.refresh_all().await;
         Ok(())
     }
@@ -575,6 +597,8 @@ impl ComposioService {
     /// # Errors
     /// The secret store failed.
     pub async fn remove_key(&self) -> Result<()> {
+        let _change = self.0.connection_change.lock().await;
+        let _load = self.0.client_load.lock().await;
         self.0.keys.clear().await?;
         *self.0.client.lock() = None;
         self.0
@@ -583,17 +607,43 @@ impl ComposioService {
         self.0
             .key_present
             .store(false, std::sync::atomic::Ordering::Relaxed);
-        self.0.statuses.lock().clear();
-        self.0.auth_configs.lock().clear();
+        self.reset_connections();
         *self.0.router_session.lock() = None;
         *self.0.login.lock() = None;
-        self.0.pending_since.lock().clear();
         self.save_state(|st| st.login = None)?;
+        Ok(())
+    }
+
+    fn reset_connections(&self) {
+        self.0.statuses.lock().clear();
+        self.0.account_labels.lock().clear();
+        self.0.auth_configs.lock().clear();
+        self.0.pending_since.lock().clear();
+        self.0.discovered.lock().clear();
+        self.0.prepared.lock().clear();
         let slugs: Vec<String> = self.0.registered.lock().keys().cloned().collect();
         for s in slugs {
             self.unregister_app(&s);
         }
-        Ok(())
+    }
+
+    /// Display identity of the linked Composio organization or project, when available.
+    pub async fn account_label(&self) -> Option<String> {
+        let mode = self.linkage();
+        if mode == Linkage::None || self.login_expired() {
+            return None;
+        }
+        let client = tokio::time::timeout(Duration::from_secs(3), self.client())
+            .await
+            .ok()?
+            .ok()?;
+        let label = client.account_label(mode == Linkage::Login).await;
+        self.0
+            .client
+            .lock()
+            .as_ref()
+            .filter(|current| Arc::ptr_eq(current, &client) && mode == self.linkage())?;
+        label
     }
 
     /// One page of Composio's toolkit catalog (cached for 15 minutes).
@@ -680,14 +730,15 @@ impl ComposioService {
             .lock()
             .as_ref()
             .is_none_or(CatalogFile::is_stale)
-            // A failed refresh is retried by the next request, at most every 10 s.
-            || (self.catalog_error().is_some()
-                && self
-                    .0
-                    .catalog_attempt
-                    .lock()
-                    .is_none_or(|t| t.elapsed() > Duration::from_secs(10)));
-        if !due || !self.configured() || self.catalog_refreshing() {
+            || self.catalog_error().is_some();
+        // A failed refresh is retried by the next request, at most every 10 s.
+        let cooling_down = self.catalog_error().is_some()
+            && self
+                .0
+                .catalog_attempt
+                .lock()
+                .is_some_and(|t| t.elapsed() < Duration::from_secs(10));
+        if !due || cooling_down || !self.configured() || self.catalog_refreshing() {
             return;
         }
         let Ok(rt) = tokio::runtime::Handle::try_current() else {
@@ -722,6 +773,7 @@ impl ComposioService {
             let mut items: Vec<crate::client::Toolkit> = Vec::new();
             let mut seen = std::collections::HashSet::new();
             let mut cursor: Option<String> = None;
+            let mut seen_cursors = std::collections::HashSet::new();
             for _ in 0..CATALOG_PAGES {
                 let page = client
                     .list_toolkits(None, None, cursor.as_deref(), 100)
@@ -732,9 +784,17 @@ impl ComposioService {
                         .filter(|t| seen.insert(t.slug.clone())),
                 );
                 cursor = page.next_cursor;
-                if cursor.is_none() {
+                if !cursor
+                    .as_ref()
+                    .is_some_and(|next| seen_cursors.insert(next.clone()))
+                {
                     break;
                 }
+            }
+            if cursor.is_some() {
+                return Err(ComposioError::Upstream(
+                    "toolkit catalog is incomplete".into(),
+                ));
             }
             if items.is_empty() {
                 return Err(ComposioError::Upstream("empty catalog".into()));
@@ -784,6 +844,7 @@ impl ComposioService {
             native_first: self.0.curated.is_native_first(slug),
             bots: cfg.bots.clone(),
             tools: self.0.registered.lock().get(slug).map_or(0, Vec::len),
+            account: self.0.account_labels.lock().get(slug).cloned(),
         }
     }
 
@@ -799,6 +860,7 @@ impl ComposioService {
     /// # Errors
     /// Unknown app, not configured, Composio errors.
     pub async fn app_status(&self, slug: &str) -> Result<AppView> {
+        self.refresh(slug).await?;
         let cfg = self
             .0
             .state
@@ -807,7 +869,6 @@ impl ComposioService {
             .get(slug)
             .cloned()
             .ok_or_else(|| ComposioError::NotFound(format!("app `{slug}` is not connected")))?;
-        self.refresh(slug).await?;
         Ok(self.view(slug, &cfg))
     }
 
@@ -836,6 +897,16 @@ impl ComposioService {
     }
 
     async fn refresh(&self, slug: &str) -> Result<()> {
+        let _change = self.0.connection_change.lock().await;
+        self.refresh_connection(slug).await
+    }
+
+    async fn refresh_connection(&self, slug: &str) -> Result<()> {
+        if !self.0.state.lock().apps.contains_key(slug) {
+            return Err(ComposioError::NotFound(format!(
+                "app `{slug}` is not connected"
+            )));
+        }
         let accounts = self.note(
             self.client()
                 .await?
@@ -844,6 +915,7 @@ impl ComposioService {
         )?;
         if let Err(e) = self.check_accounts(slug, &accounts) {
             self.0.statuses.lock().remove(slug);
+            self.0.account_labels.lock().remove(slug);
             self.unregister_app(slug);
             return Err(e);
         }
@@ -871,6 +943,16 @@ impl ComposioService {
             }
         }
         let old = self.0.statuses.lock().insert(slug.to_owned(), new);
+        {
+            let mut labels = self.0.account_labels.lock();
+            if new == ConnState::Active
+                && let Some(label) = accounts.into_iter().find_map(|a| a.label)
+            {
+                labels.insert(slug.to_owned(), label);
+            } else {
+                labels.remove(slug);
+            }
+        }
         if old != Some(new) {
             match new {
                 ConnState::Active => self.audit("composio.connected", json!({"app": slug})),
@@ -889,11 +971,26 @@ impl ComposioService {
     /// # Errors
     /// Invalid slug, not configured, Composio errors.
     pub async fn connect(&self, slug: &str) -> Result<Link> {
+        let _change = self.0.connection_change.lock().await;
         if !valid_slug(slug) || !crate::surface::toolkit_allowed(slug) {
             return Err(ComposioError::Invalid("invalid app slug".into()));
         }
         let client = self.client().await?;
         self.check_toolkit(&client, slug).await?;
+        // A retry replaces only the installation's own unfinished/expired account.
+        // An active or foreign account is never removed to make room for a new link.
+        if self.bound_account(slug).is_ok() {
+            let accounts = self.note(client.list_accounts(&self.user_id(), Some(slug)).await)?;
+            self.check_accounts(slug, &accounts)?;
+            for account in accounts {
+                if account.status == "ACTIVE" {
+                    return Err(ComposioError::Invalid(
+                        "the app is already connected".into(),
+                    ));
+                }
+                self.note(client.delete_account(&account.id).await)?;
+            }
+        }
         let link = if self.linkage() == Linkage::Login {
             self.note(self.router_link(&client, slug).await)?
         } else {
@@ -919,6 +1016,8 @@ impl ComposioService {
             .statuses
             .lock()
             .insert(slug.to_owned(), ConnState::Pending);
+        self.0.account_labels.lock().remove(slug);
+        self.unregister_app(slug);
         self.0
             .pending_since
             .lock()
@@ -970,26 +1069,19 @@ impl ComposioService {
         ))
     }
 
-    /// Prove an app works: one fixed read-only call that names the account and
-    /// lists a few items (see `probe`).  The owner asked for it, so it needs no
-    /// approval card, but it still writes its audit row first and fails closed.
+    /// Check the installation's account binding. For apps with a vetted probe,
+    /// also run their fixed read-only call (see `probe`). Audit first.
     ///
     /// # Errors
-    /// The app is not connected and enabled, has no quick test, or Composio
-    /// failed.
+    /// The app is not connected or Composio failed.
     pub async fn test_app(&self, slug: &str) -> Result<ProbeOutcome> {
+        let _change = self.0.connection_change.lock().await;
         if !valid_slug(slug) || !crate::surface::toolkit_allowed(slug) {
             return Err(ComposioError::Invalid("invalid app slug".into()));
         }
-        let Some(probe) = probe_for(slug) else {
-            return Err(ComposioError::Invalid(
-                "there is no quick test for this app yet".into(),
-            ));
-        };
+        let probe = probe_for(slug);
         if !self.0.state.lock().apps.contains_key(slug) {
-            return Err(ComposioError::Invalid(
-                "the app is not connected, or it is switched off".into(),
-            ));
+            return Err(ComposioError::Invalid("the app is not connected".into()));
         }
         // The row is written before the first request to Composio: a test that
         // cannot be recorded is not sent.
@@ -1001,12 +1093,15 @@ impl ComposioService {
             })?;
         let mut out = ProbeOutcome::default();
         let result = async {
-            self.refresh(slug).await?;
-            if !self.is_usable(slug) {
-                return Err(ComposioError::Invalid(
-                    "the app is not connected, or it is switched off".into(),
-                ));
+            self.refresh_connection(slug).await?;
+            if self.0.statuses.lock().get(slug) != Some(&ConnState::Active) {
+                return Err(ComposioError::Invalid("the app is not connected".into()));
             }
+            let Some(probe) = probe.filter(|_| self.is_usable(slug)) else {
+                out.account = self.0.account_labels.lock().get(slug).cloned();
+                out.authorization_only = true;
+                return Ok(());
+            };
             let actions = self.discovered(slug).await?;
             let account = self.bound_account(slug)?;
             if let Some(step) = &probe.identity {
@@ -1080,6 +1175,7 @@ impl ComposioService {
     /// Unknown app, a bot id that is not a bot id, or the state file cannot
     /// be written.
     pub async fn set_bots(&self, slug: &str, bots: Option<Vec<String>>) -> Result<AppView> {
+        let _change = self.0.connection_change.lock().await;
         if !self.0.state.lock().apps.contains_key(slug) {
             return Err(ComposioError::NotFound(format!(
                 "app `{slug}` is not connected"
@@ -1124,6 +1220,7 @@ impl ComposioService {
     /// # Errors
     /// Unknown app or the state file cannot be written.
     pub async fn set_enabled(&self, slug: &str, enabled: bool) -> Result<AppView> {
+        let _change = self.0.connection_change.lock().await;
         if !self.0.state.lock().apps.contains_key(slug) {
             return Err(ComposioError::NotFound(format!(
                 "app `{slug}` is not connected"
@@ -1152,6 +1249,7 @@ impl ComposioService {
     /// # Errors
     /// Unknown app or the state file cannot be written.
     pub async fn disconnect(&self, slug: &str) -> Result<bool> {
+        let _change = self.0.connection_change.lock().await;
         if !self.0.state.lock().apps.contains_key(slug) {
             return Err(ComposioError::NotFound(format!(
                 "app `{slug}` is not connected"
@@ -1172,6 +1270,8 @@ impl ComposioService {
             s.apps.remove(slug);
         })?;
         self.0.statuses.lock().remove(slug);
+        self.0.account_labels.lock().remove(slug);
+        self.0.pending_since.lock().remove(slug);
         self.0.discovered.lock().remove(slug);
         self.unregister_app(slug);
         Ok(remote)
@@ -1184,6 +1284,17 @@ impl ComposioService {
             return Err(ComposioError::Invalid(
                 "app is not connected and enabled".into(),
             ));
+        }
+        self.toolkit_actions(slug).await
+    }
+
+    /// Catalog actions available to bots after the owner connects this app.
+    ///
+    /// # Errors
+    /// Unsupported toolkit or failed discovery.
+    pub async fn toolkit_actions(&self, slug: &str) -> Result<Arc<Vec<ActionInfo>>> {
+        if !crate::surface::toolkit_allowed(slug) {
+            return Err(ComposioError::Invalid("invalid app slug".into()));
         }
         if let Some((at, v)) = self.0.discovered.lock().get(slug)
             && at.elapsed() < DISCOVERY_TTL

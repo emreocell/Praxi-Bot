@@ -525,6 +525,197 @@ async fn the_catalog_is_paged_searchable_and_cached() {
 }
 
 #[tokio::test]
+async fn the_hub_searches_later_native_pages_without_exposing_control_toolkits() {
+    use wiremock::matchers::query_param_is_missing;
+    let h = harness().await;
+    h.store.set(KEY_SECRET, KEY).unwrap();
+    Mock::given(path("/toolkits"))
+        .and(query_param_is_missing("cursor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "items": [
+                {"slug": "gmail", "name": "Gmail", "type": "native", "toolkit_type": "api"},
+                {"slug": "composio", "name": "Composio", "type": "native", "toolkit_type": "api"},
+                {"slug": "vendor_mcp", "name": "Vendor MCP", "type": "native", "toolkit_type": "mcp"}
+            ],
+            "next_cursor": "page2"
+        })))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    Mock::given(path("/toolkits"))
+        .and(query_param("cursor", "page2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "items": [
+                {"slug": "helpdesk", "name": "Helpdesk", "type": "native", "toolkit_type": "api",
+                 "meta": {"description": "Make customer support tickets", "categories": [{"id": "crm", "name": "CRM"}]}},
+                {"slug": "helpmate", "name": "Helpmate", "type": "native", "toolkit_type": "api",
+                 "meta": {"description": "Customer support", "categories": [{"id": "crm", "name": "CRM"}]}}
+            ]
+        })))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    h.svc.refresh_catalog().await.unwrap();
+    let first = h.svc.catalog_view(Some("HELP"), Some("business"), None, 1);
+    assert_eq!(first.items[0].0.slug, "helpdesk");
+    let next = h.svc.catalog_view(
+        Some("help"),
+        Some("business"),
+        first.next_cursor.as_deref(),
+        1,
+    );
+    assert_eq!(next.items[0].0.slug, "helpmate");
+    assert!(next.next_cursor.is_none());
+    assert!(
+        h.svc
+            .catalog_view(Some("vendor_mcp"), None, None, 10)
+            .items
+            .is_empty()
+    );
+    let all = h.svc.catalog_view(None, None, None, 100);
+    assert_eq!(all.items[0].0.slug, "gmail");
+    assert!(!all.items.iter().any(|(t, _)| t.slug == "composio"));
+}
+
+#[tokio::test]
+async fn actions_can_be_previewed_before_connecting_and_use_the_bot_filter_on_every_page() {
+    use wiremock::matchers::query_param_is_missing;
+    let h = harness().await;
+    ok_key(&h).await;
+    h.svc.set_key(KEY).await.unwrap();
+    let action = |slug, toolkit| {
+        json!({
+            "slug": slug, "description": "Find records", "toolkit": {"slug": toolkit},
+            "version": "20260901_00", "input_parameters": {"type": "object", "properties": {}}
+        })
+    };
+    Mock::given(path("/tools"))
+        .and(query_param("toolkit_slug", "github"))
+        .and(query_param_is_missing("cursor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "items": [action("GITHUB_LIST_REPOSITORY_ISSUES", "github")],
+            "next_cursor": "p2"
+        })))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    Mock::given(path("/tools"))
+        .and(query_param("toolkit_slug", "github"))
+        .and(query_param("cursor", "p2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "items": [
+                action("GITHUB_GET_THE_AUTHENTICATED_USER", "github"),
+                action("GITHUB_CREATE_A_PUBLIC_SSH_KEY_FOR_THE_AUTHENTICATED_USER", "github"),
+                action("GITHUB_LIST_REPOSITORIES", "slack")
+            ]
+        })))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    let actions = h.svc.toolkit_actions("github").await.unwrap();
+    assert_eq!(
+        actions.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+        ["list_repository_issues", "get_the_authenticated_user",]
+    );
+    assert!(h.svc.discovered("github").await.is_err());
+    assert!(
+        h.registry
+            .get("app:github/list_repository_issues")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn a_disabled_app_checks_authorization_without_executing_its_probe() {
+    let h = harness().await;
+    connected(&h).await;
+    h.svc.set_enabled("github", false).await.unwrap();
+    let result = h.svc.test_app("github").await.unwrap();
+    assert!(result.authorization_only);
+    assert!(result.items.is_empty());
+    assert!(
+        !h.server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .any(|req| req.url.path().starts_with("/tools/execute/"))
+    );
+}
+
+#[tokio::test]
+async fn reconnect_replaces_only_the_bound_inactive_account() {
+    let h = harness().await;
+    connected(&h).await;
+    assert!(matches!(
+        h.svc.connect("github").await,
+        Err(ComposioError::Invalid(_))
+    ));
+    assert!(
+        !h.server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .any(|req| req.method == wiremock::http::Method::POST
+                || req.method == wiremock::http::Method::DELETE)
+    );
+
+    mount_accounts(&h, "EXPIRED").await;
+    Mock::given(method("DELETE"))
+        .and(path("/connected_accounts/ca_secret_conn_1"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/connected_accounts/link"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "redirect_url": "https://app.composio.dev/link/lt_new",
+            "connected_account_id": "ca_replacement"
+        })))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    assert_eq!(
+        h.svc.connect("github").await.unwrap().redirect_url,
+        "https://app.composio.dev/link/lt_new"
+    );
+    let state = crate::StateFile::load(h.svc.state_path()).unwrap();
+    assert_eq!(
+        state.apps["github"].account_id.as_deref(),
+        Some("ca_replacement")
+    );
+    assert_eq!(h.svc.apps()[0].state, ConnState::Pending);
+    assert!(h.svc.registered_tools("github").is_empty());
+}
+
+#[tokio::test]
+async fn project_identity_uses_display_name_without_exposing_other_metadata() {
+    let h = harness().await;
+    ok_key(&h).await;
+    Mock::given(path("/org/project/config"))
+        .and(header("x-api-key", KEY))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "display_name": "Example Workspace", "api_key": KEY
+        })))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    h.svc.set_key(KEY).await.unwrap();
+    assert_eq!(
+        h.svc.account_label().await.as_deref(),
+        Some("Example Workspace")
+    );
+    assert_eq!(
+        h.svc.account_label().await.as_deref(),
+        Some("Example Workspace")
+    );
+    h.svc.remove_key().await.unwrap();
+    assert!(h.svc.account_label().await.is_none());
+}
+
+#[tokio::test]
 async fn candidate_is_registered_before_validation_and_upstream_bodies_are_never_relayed() {
     for status in [400, 500] {
         let h = harness().await;
@@ -1365,9 +1556,9 @@ async fn the_test_action_refuses_unconnected_unknown_and_unaudited_cases() {
         "{not_connected}"
     );
     assert!(h.svc.test_app("Bad Slug").await.is_err());
-    // An app without a fixed probe is refused rather than guessed at.
+    // Authorization checks still refuse an app that was never connected.
     let no_probe = h.svc.test_app("slack").await.unwrap_err();
-    assert!(no_probe.to_string().contains("no quick test"), "{no_probe}");
+    assert!(no_probe.to_string().contains("not connected"), "{no_probe}");
     assert_eq!(rows_named(&h, "composio.test"), Vec::<Value>::new());
 
     connected(&h).await;

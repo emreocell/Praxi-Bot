@@ -7,6 +7,7 @@ import { execPath } from "node:process";
 import { test } from "node:test";
 
 const checker = new URL("../../scripts/check-i18n.mjs", import.meta.url);
+const englishFallback = new URL("../i18n/englishFallback.ts", import.meta.url);
 
 const translation = (key: string) => ["t", "(", JSON.stringify(key), ")"].join("");
 
@@ -24,6 +25,7 @@ function check(
     mkdirSync(localeDir, { recursive: true });
     const script = join(scriptsDir, "check-i18n.mjs");
     copyFileSync(checker, script);
+    copyFileSync(englishFallback, join(srcDir, "i18n", "englishFallback.ts"));
     for (const [name, content] of Object.entries(locales)) {
       writeFileSync(join(localeDir, name + ".json"), JSON.stringify(content));
     }
@@ -58,6 +60,15 @@ test("a scaffold locale only warns about missing keys; a strict one fails", () =
   const strict = check({ en, id: lagging });
   assert.equal(strict.status, 1);
   assert.match(strict.stderr, /missing in id: chat\.stop/);
+});
+
+test("the hub uses English fallback in German and Spanish while Turkish stays required", () => {
+  const en = { apps: { composioHub: { linkAccount: "Connect Composio" } } };
+  const tr = { apps: { composioHub: { linkAccount: "Composio hesabını bağla" } } };
+  assert.equal(check({ en, tr, de: {}, es: {} }).status, 0);
+  const missingTurkish = check({ en, tr: {}, de: {}, es: {} });
+  assert.equal(missingTurkish.status, 1);
+  assert.match(missingTurkish.stderr, /missing in tr: apps\.composioHub\.linkAccount/);
 });
 
 test("reports a static unknown key once, independent of the number of locales", () => {

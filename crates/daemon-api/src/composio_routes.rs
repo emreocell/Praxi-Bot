@@ -11,7 +11,7 @@ use serde_json::json;
 
 use crate::AppState;
 use crate::composio::{
-    ComposioAppDto, ComposioBotsInput, ComposioCatalogDto, ComposioCatalogQuery,
+    ComposioActionDto, ComposioAppDto, ComposioBotsInput, ComposioCatalogDto, ComposioCatalogQuery,
     ComposioConnectDto, ComposioControl, ComposioControlError, ComposioDisconnectDto,
     ComposioEnabledInput, ComposioKeyInput, ComposioLoginDto, ComposioLoginStatusDto,
     ComposioStatusDto, ComposioTestDto,
@@ -112,7 +112,7 @@ fn audit(
 pub(crate) async fn composio_status(
     State(s): State<AppState>,
 ) -> Result<Json<ComposioStatusDto>, ApiError> {
-    Ok(Json(composio(&s)?.status()))
+    Ok(Json(composio(&s)?.status().await))
 }
 
 /// Start the one-time browser login: Composio makes a session, the caller
@@ -154,7 +154,7 @@ pub(crate) async fn composio_set_key(
     let c = composio(&s)?;
     audit(&s, &actor, "composio.key_set", &json!({}))?;
     c.set_key(&input.value).await?;
-    Ok(Json(c.status()))
+    Ok(Json(c.status().await))
 }
 
 /// Delete the key; every Composio tool disappears.
@@ -167,7 +167,7 @@ pub(crate) async fn composio_remove_key(
     let c = composio(&s)?;
     audit(&s, &actor, "composio.key_removed", &json!({}))?;
     c.remove_key().await?;
-    Ok(Json(c.status()))
+    Ok(Json(c.status().await))
 }
 
 fn short(field: &str, v: Option<&str>, max: usize) -> Result<(), ApiError> {
@@ -195,6 +195,22 @@ pub(crate) async fn composio_catalog(
     short("group", q.group.as_deref(), 60)?;
     short("cursor", q.cursor.as_deref(), 512)?;
     Ok(Json(composio(&s)?.catalog(q).await?))
+}
+
+/// The actions a toolkit offers to bots once connected.
+#[utoipa::path(get, path = "/v1/composio/toolkits/{slug}/actions", tag = "composio",
+    security(("bearer" = [])), params(("slug" = String, Path, description = "Toolkit slug")),
+    responses((status = 200, body = Vec<ComposioActionDto>),
+              (status = 409, body = ErrorBody), (status = 502, body = ErrorBody)))]
+pub(crate) async fn composio_actions(
+    State(s): State<AppState>,
+    axum::Extension(actor): axum::Extension<Actor>,
+    Path(slug): Path<String>,
+) -> Result<Json<Vec<ComposioActionDto>>, ApiError> {
+    check_slug(&slug)?;
+    let c = composio(&s)?;
+    audit(&s, &actor, "composio.actions_viewed", &json!({"app": slug}))?;
+    Ok(Json(c.actions(&slug).await?))
 }
 
 /// Apps the owner connected or started to connect.
@@ -290,14 +306,13 @@ pub(crate) async fn composio_set_bots(
     Ok(Json(c.set_bots(&slug, input.bots).await?))
 }
 
-/// Test a connected app with one fixed read-only call (Drive: the account and
-/// three file names; Gmail: the address and three subjects; GitHub: the user).
+/// Verify the bound authorization and run a fixed read-only probe where available.
 /// The result is for the owner's screen; no bot and no model sees it.
 #[utoipa::path(post, path = "/v1/composio/apps/{slug}/test", tag = "composio",
     security(("bearer" = [])),
     params(("slug" = String, Path, description = "Toolkit slug")),
     responses((status = 200, body = ComposioTestDto),
-              (status = 422, body = ErrorBody, description = "not connected, or no quick test for this app"),
+              (status = 422, body = ErrorBody, description = "not connected or no supported probe action"),
               (status = 502, body = ErrorBody, description = "the app or Composio refused the call")))]
 pub(crate) async fn composio_test(
     State(s): State<AppState>,

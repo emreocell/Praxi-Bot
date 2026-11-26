@@ -89,6 +89,8 @@ pub(crate) fn probe_for(slug: &str) -> Option<Probe> {
 /// What a test found, as plain text for the owner's screen.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProbeOutcome {
+    /// Checked Composio's authorization record without executing a provider action.
+    pub authorization_only: bool,
     /// The account the app is connected as.
     pub account: Option<String>,
     /// Up to three sample names (file names, subjects, calendars).

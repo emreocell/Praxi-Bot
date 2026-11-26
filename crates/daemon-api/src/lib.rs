@@ -1815,6 +1815,10 @@ fn api_routes() -> Router<AppState> {
             get(c::composio_login_status).post(c::composio_login_start),
         )
         .route("/v1/composio/toolkits", get(c::composio_catalog))
+        .route(
+            "/v1/composio/toolkits/{slug}/actions",
+            get(c::composio_actions),
+        )
         .route("/v1/composio/logos/{slug}", get(c::composio_logo))
         .route("/v1/favicons/{domain}", get(favicon::get_favicon))
         .route("/v1/composio/apps", get(c::composio_list_apps))

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ApiError } from "../api/client";
 import type { ComposioApp, ComposioCatalog, ComposioStatus, ComposioToolkit } from "../api/types";
 import { appendPage, pendingSlugs, upsertApp } from "../lib/composioApps";
 import { openComposioLink } from "../lib/externalLink";
@@ -29,9 +30,11 @@ export function useComposio(active: boolean, query: string, group: string) {
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [pollErrors, setPollErrors] = useState<Record<string, string>>({});
   const [login, setLogin] = useState<LoginPhase>("idle");
   const seq = useRef(0);
-  const onLinked = useRef<(() => void) | null>(null);
+  const loginAttempt = useRef(0);
 
   const reloadApps = useCallback(async () => {
     if (!client) {
@@ -51,9 +54,10 @@ export function useComposio(active: boolean, query: string, group: string) {
     try {
       const s = await client.composioStatus();
       setStatus(s);
+      setStatusError(null);
       return s;
     } catch (e) {
-      setError(humanLine(e));
+      setStatusError(humanLine(e));
       return null;
     }
   }, [client]);
@@ -100,10 +104,7 @@ export function useComposio(active: boolean, query: string, group: string) {
     if (!active) {
       return;
     }
-    void (async () => {
-      await reloadStatus();
-      await reloadApps();
-    })();
+    void Promise.all([reloadStatus(), reloadApps()]);
   }, [active, reloadApps, reloadStatus]);
 
   // The catalog follows search and chip (debounced).  The daemon answers from memory.
@@ -111,12 +112,18 @@ export function useComposio(active: boolean, query: string, group: string) {
     if (!active) {
       return undefined;
     }
+    setLoading(true);
+    setCursor(null);
     const id = setTimeout(() => void loadCatalog(query, group, null), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(id);
+    return () => {
+      clearTimeout(id);
+      seq.current += 1;
+    };
   }, [active, query, group, status?.configured, loadCatalog]);
 
   // While the daemon refreshes the cache, pick the result up when it lands.
-  const refreshing = meta?.refreshing === true;
+  const refreshing = meta?.refreshing === true ||
+    (status?.configured === true && meta?.source === "bundled" && !meta.error);
   useEffect(() => {
     if (!active || !refreshing) {
       return undefined;
@@ -128,24 +135,47 @@ export function useComposio(active: boolean, query: string, group: string) {
   // Poll pending sign-ins until they settle.
   const pending = pendingSlugs(apps).join(",");
   useEffect(() => {
-    if (!active || !client || pending === "") {
+    if (!active || !client || pending === "" || status?.login_expired) {
       return undefined;
     }
     const started = Date.now();
-    const id = setInterval(() => {
-      if (Date.now() - started > POLL_GIVE_UP_MS) {
-        clearInterval(id);
-        return;
-      }
-      for (const slug of pending.split(",")) {
-        void client
-          .composioApp(slug)
-          .then((a) => setApps((prev) => upsertApp(prev, a)))
-          .catch((e: unknown) => setError(humanLine(e)));
-      }
-    }, POLL_MS);
-    return () => clearInterval(id);
-  }, [active, client, pending]);
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      const expired = Date.now() - started >= POLL_GIVE_UP_MS;
+      await Promise.all(pending.split(",").map(async (slug) => {
+        try {
+          const app = await client.composioApp(slug);
+          if (!disposed) {
+            setPollErrors((prev) => {
+              if (!(slug in prev)) return prev;
+              const next = { ...prev };
+              delete next[slug];
+              return next;
+            });
+            setApps((prev) => prev.some((a) => a.slug === slug && a.state === "pending")
+              ? upsertApp(prev, expired && app.state === "pending" ? { ...app, state: "failed" } : app)
+              : prev);
+          }
+        } catch (e) {
+          if (!disposed) {
+            setPollErrors((prev) => ({ ...prev, [slug]: humanLine(e) }));
+            if (e instanceof ApiError && e.code === "composio_login_expired") void reloadStatus();
+            if (expired) {
+              setApps((prev) => prev.map((a) => a.slug === slug && a.state === "pending"
+                ? { ...a, state: "failed" } : a));
+            }
+          }
+        }
+      }));
+      if (!disposed && !expired) timer = setTimeout(() => void poll(), POLL_MS);
+    };
+    timer = setTimeout(() => void poll(), POLL_MS);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [active, client, pending, reloadStatus, status?.login_expired]);
 
   // The one-time browser login: open the page, poll until Composio says linked.
   useEffect(() => {
@@ -153,71 +183,78 @@ export function useComposio(active: boolean, query: string, group: string) {
       return undefined;
     }
     const started = Date.now();
-    const id = setInterval(() => {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const attempt = loginAttempt.current;
+    const poll = async () => {
       if (Date.now() - started > POLL_GIVE_UP_MS) {
         setLogin("failed");
         return;
       }
-      void client
-        .composioLoginStatus()
-        .then(async (r) => {
-          if (r.state === "linked") {
-            setLogin("idle");
-            await reloadStatus();
-            const next = onLinked.current;
-            onLinked.current = null;
-            next?.();
-          } else if (r.state === "failed") {
-            setLogin("failed");
-          }
-        })
-        .catch(() => undefined);
-    }, POLL_MS);
-    return () => clearInterval(id);
-  }, [active, client, login, reloadStatus]);
-
-  /** Start the one-time login; `then` runs once Composio is linked. */
-  const startLogin = useCallback(
-    async (then?: () => void): Promise<boolean> => {
-      if (!client) {
-        return false;
+      try {
+        const { state } = await client.composioLoginStatus();
+        if (disposed || attempt !== loginAttempt.current) return;
+        if (state === "linked") {
+          await Promise.all([reloadStatus(), reloadApps()]);
+          if (attempt === loginAttempt.current) setLogin("idle");
+          return;
+        }
+        if (state === "failed" || state === "idle") {
+          setLogin("failed");
+          return;
+        }
+      } catch {
+        // The next poll can recover a transient transport failure.
       }
+      if (!disposed && attempt === loginAttempt.current) timer = setTimeout(() => void poll(), POLL_MS);
+    };
+    timer = setTimeout(() => void poll(), POLL_MS);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [active, client, login, reloadStatus, reloadApps]);
+
+  /** Start the one-time account login, without starting any toolkit connection. */
+  const startLogin = useCallback(
+    async () => {
+      if (!client) {
+        return;
+      }
+      const attempt = ++loginAttempt.current;
       setLogin("starting");
-      onLinked.current = then ?? null;
       try {
         const r = await client.composioLoginStart();
-        if (!(await openComposioLink(r.login_url, true))) {
-          setLogin("failed");
-          return false;
-        }
-        setLogin("waiting");
-        return true;
+        if (attempt !== loginAttempt.current) return;
+        const opened = await openComposioLink(r.login_url, true);
+        if (attempt === loginAttempt.current) setLogin(opened ? "waiting" : "failed");
       } catch {
-        setLogin("failed");
-        return false;
+        if (attempt === loginAttempt.current) setLogin("failed");
       }
     },
     [client]
   );
 
   const cancelLogin = useCallback(() => {
-    onLinked.current = null;
+    loginAttempt.current += 1;
     setLogin("idle");
   }, []);
 
   return {
     status,
+    statusError,
+    pollErrors,
     apps,
     items,
     meta,
     hasMore: cursor !== null,
-    loading,
+    loading: loading || refreshing,
     error,
     login,
     startLogin,
     cancelLogin,
     retryCatalog: () => loadCatalog(query, group, null),
-    loadMore: () => loadCatalog(query, group, cursor),
+    loadMore: () => cursor === null || loading || refreshing ? undefined : loadCatalog(query, group, cursor),
     setApps,
     reloadApps,
     reloadStatus

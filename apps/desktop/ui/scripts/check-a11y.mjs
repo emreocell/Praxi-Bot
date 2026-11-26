@@ -42,6 +42,7 @@ const screens = [
   { name: 'schedules', query: 'screen=schedules' },
   { name: 'needs', query: 'screen=needs' },
   { name: 'apps', query: 'screen=apps' },
+  { name: 'apps-detail', query: 'screen=apps&composio=connected', expect: '[data-testid=composio-app-gmail]', act: [{ click: '[data-testid=composio-tile-gmail] button' }] },
   { name: 'new-bot-dialog', query: 'screen=newbot' },
   { name: 'bot-edit-dialog', query: 'screen=botform' },
   { name: 'bot-profile-dialog', query: 'screen=botprofile' },

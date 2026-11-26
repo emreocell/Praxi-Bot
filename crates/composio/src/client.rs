@@ -45,6 +45,14 @@ pub struct Account {
     pub toolkit: String,
     /// Raw status (`ACTIVE`, `INITIATED`, `EXPIRED`, ...).
     pub status: String,
+    /// Optional owner-facing alias. Never read from provider credential state.
+    pub label: Option<String>,
+}
+
+/// Non-secret fields of the Composio browser session.
+pub(crate) struct SessionInfo {
+    pub ids: crate::state::LoginIds,
+    pub label: Option<String>,
 }
 
 /// A fresh connect link.
@@ -163,6 +171,7 @@ pub struct ComposioClient {
     http: Client,
     base: Url,
     redact: Redact,
+    label: Arc<tokio::sync::OnceCell<Option<String>>>,
 }
 
 impl std::fmt::Debug for ComposioClient {
@@ -177,17 +186,21 @@ pub fn is_composio_https_url(url: &str) -> bool {
     let Ok(u) = Url::parse(url) else {
         return false;
     };
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let hosted_link = rest
+        .strip_prefix("app.composio.dev/link/")
+        .and_then(|path| path.split(['?', '#']).next())
+        .is_some_and(valid_id);
     !url.chars().any(|c| c.is_control() || c == '\\')
-        && url
-            .strip_prefix("https://")
-            .and_then(|s| s.split(['/', '?', '#']).next())
-            .is_some_and(|h| matches!(h, "connect.composio.dev" | "backend.composio.dev"))
+        && (matches!(authority, "connect.composio.dev" | "backend.composio.dev") || hosted_link)
         && u.scheme() == "https"
         && u.username().is_empty()
         && u.password().is_none()
         && u.port().is_none()
-        && u.host_str()
-            .is_some_and(|h| matches!(h, "connect.composio.dev" | "backend.composio.dev"))
+        && u.host_str() == Some(authority)
 }
 
 impl ComposioClient {
@@ -285,7 +298,12 @@ impl ComposioClient {
             .user_agent(concat!("praxi-bot-composio/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|e| ComposioError::Internal(format!("http client: {e}")))?;
-        Ok(Self { http, base, redact })
+        Ok(Self {
+            http,
+            base,
+            redact,
+            label: Arc::default(),
+        })
     }
 
     /// `base` + path segments, percent-encoded.  Segments are checked by the
@@ -310,6 +328,12 @@ impl ComposioClient {
             out.push('…');
         }
         out
+    }
+
+    fn display_label(&self, value: Option<&Value>) -> Option<String> {
+        let label = (self.redact)(value?.as_str()?);
+        let label = crate::schema::clean_text(label.trim(), 120);
+        (!label.is_empty()).then_some(label)
     }
 
     async fn send(&self, req: RequestBuilder) -> Result<Value> {
@@ -481,7 +505,7 @@ impl ComposioClient {
     ///
     /// # Errors
     /// API or transport errors.
-    pub async fn session_info(&self) -> Result<(Option<String>, Option<String>)> {
+    pub(crate) async fn session_info(&self) -> Result<SessionInfo> {
         let req = self
             .http
             .request(Method::GET, self.url(&["auth", "session", "info"]));
@@ -492,10 +516,46 @@ impl ComposioClient {
                 .filter(|s| valid_id(s) && !looks_like_uuid(s))
                 .map(str::to_owned)
         };
-        Ok((
-            pick("/project/org/id"),
-            pick("/project/nano_id").or_else(|| pick("/project/id")),
-        ))
+        Ok(SessionInfo {
+            ids: crate::state::LoginIds {
+                org_id: pick("/project/org/id"),
+                project_id: pick("/project/nano_id").or_else(|| pick("/project/id")),
+            },
+            label: [
+                "/project/org/name",
+                "/org_member/name",
+                "/org_member/email",
+                "/project/name",
+            ]
+            .into_iter()
+            .find_map(|path| self.display_label(v.pointer(path))),
+        })
+    }
+
+    pub(crate) async fn project_label(&self) -> Result<Option<String>> {
+        let req = self
+            .http
+            .request(Method::GET, self.url(&["org", "project", "config"]));
+        let v = self.send(req).await?;
+        Ok(self.display_label(v.get("display_name")))
+    }
+
+    pub(crate) async fn account_label(&self, browser_login: bool) -> Option<String> {
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            self.label.get_or_try_init(|| async {
+                if browser_login {
+                    self.session_info().await.map(|info| info.label)
+                } else {
+                    self.project_label().await
+                }
+            }),
+        )
+        .await
+        .ok()
+        .and_then(std::result::Result::ok)
+        .cloned()
+        .flatten()
     }
 
     /// A Tool Router session for `user_id` (used to create connect links when
@@ -576,10 +636,18 @@ impl ComposioClient {
             .iter()
             .map(|i| {
                 let parse = || {
+                    let status = i.get("status")?.as_str()?;
+                    let status =
+                        if status == "ACTIVE" && i.get("is_disabled") == Some(&Value::Bool(true)) {
+                            "INACTIVE"
+                        } else {
+                            status
+                        };
                     Some(Account {
                         id: i.get("id")?.as_str()?.to_owned(),
                         toolkit: i.pointer("/toolkit/slug")?.as_str()?.to_owned(),
-                        status: i.get("status")?.as_str()?.to_owned(),
+                        status: status.to_owned(),
+                        label: self.display_label(i.get("alias")),
                     })
                 };
                 let account = parse()
@@ -652,14 +720,31 @@ impl ComposioClient {
         })
     }
 
-    /// Whether Composio's catalog has an app called `slug`, and whether it is
-    /// an ordinary app toolkit.  Reads the raw answer so a toolkit of another
-    /// kind (a control surface) is told apart from one that is simply not in
-    /// the first page of the search.
+    /// Check the exact toolkit without depending on catalog search ranking.
+    /// The v3.1 list remains a fallback for deployments that only expose the
+    /// toolkit there. An explicit unsupported kind is always refused.
     ///
     /// # Errors
     /// Transport or API errors.
     pub async fn lookup_toolkit(&self, slug: &str) -> Result<ToolkitLookup> {
+        let exact = self
+            .http
+            .request(Method::GET, self.url(&["toolkits", slug]));
+        match self.send(exact).await {
+            Ok(found) => {
+                return Ok(
+                    if found.get("slug").and_then(Value::as_str) == Some(slug)
+                        && parse_toolkit(&found).is_some()
+                    {
+                        ToolkitLookup::Found
+                    } else {
+                        ToolkitLookup::Unsupported
+                    },
+                );
+            }
+            Err(ComposioError::Upstream(m)) if m == "Composio request failed (404)" => {}
+            Err(e) => return Err(e),
+        }
         let req = self
             .http
             .request(Method::GET, self.url(&["toolkits"]))
@@ -684,35 +769,47 @@ impl ComposioClient {
 
     /// The tools of one toolkit, in Composio's order.
     ///
-    /// UNVERIFIED: the size of this answer for big toolkits (it includes every
-    /// input schema).  It is read with an 8 MiB cap, first with `limit=1000`,
-    /// then with `limit=100` when that is too large.
+    /// Pages include input schemas and are capped at 8 MiB each.
     ///
     /// # Errors
     /// Transport or API errors.
     pub async fn list_tools(&self, toolkit: &str) -> Result<Vec<RemoteTool>> {
         const CAP: usize = 8 * 1024 * 1024;
-        let mut last = None;
-        for limit in ["1000", "100"] {
+        let mut tools = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut cursor = None;
+        // Bound the total work as well as the size of each upstream response.
+        for _ in 0..30 {
             let req = self
                 .http
                 .request(Method::GET, self.url(&["tools"]))
-                .query(&[("toolkit_slug", toolkit), ("limit", limit)]);
-            match self.send_capped(req, CAP).await {
-                Ok(v) => {
-                    return Ok(v
-                        .get("items")
-                        .and_then(Value::as_array)
-                        .map(|items| items.iter().filter_map(parse_tool).collect())
-                        .unwrap_or_default());
-                }
-                Err(ComposioError::Upstream(m)) if m.contains("allowed size") => {
-                    last = Some(ComposioError::Upstream(m));
-                }
-                Err(e) => return Err(e),
+                .query(&[("toolkit_slug", toolkit), ("limit", "100")]);
+            let req = match cursor.as_deref() {
+                Some(c) => req.query(&[("cursor", c)]),
+                None => req,
+            };
+            let v = self.send_capped(req, CAP).await?;
+            let items = v
+                .get("items")
+                .and_then(Value::as_array)
+                .ok_or_else(|| ComposioError::Upstream("invalid action list".into()))?;
+            tools.extend(items.iter().filter_map(parse_tool).map(|mut tool| {
+                tool.description = (self.redact)(&tool.description);
+                tool
+            }));
+            let Some(next) = v
+                .get("next_cursor")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            else {
+                return Ok(tools);
+            };
+            if !seen.insert(next.to_owned()) {
+                break;
             }
+            cursor = Some(next.to_owned());
         }
-        Err(last.unwrap_or_else(|| ComposioError::Upstream("no tools".into())))
+        Err(ComposioError::Upstream("action list is incomplete".into()))
     }
 
     /// Delete a connected account (its Composio-side tokens).
@@ -824,9 +921,11 @@ fn parse_link(v: &Value) -> Result<Link> {
 fn parse_toolkit(i: &Value) -> Option<Toolkit> {
     let slug = i.get("slug")?.as_str()?.to_owned();
     if !crate::surface::toolkit_allowed(&slug)
-        || ["kind", "type"]
-            .iter()
-            .any(|key| i.get(key).is_some_and(|v| v != "toolkit"))
+        || i.get("kind").is_some_and(|v| v != "toolkit")
+        || i.get("type")
+            .is_some_and(|v| v != "toolkit" && v != "native")
+        || i.get("toolkit_type").is_some_and(|v| v != "api")
+        || i.get("is_local_toolkit").and_then(Value::as_bool) == Some(true)
     {
         return None;
     }
@@ -925,8 +1024,14 @@ mod tests {
     #[test]
     fn only_composio_https_hosts_are_accepted() {
         assert!(is_composio_https_url("https://connect.composio.dev/link/x"));
+        assert!(is_composio_https_url(
+            "https://app.composio.dev/link/lt_example"
+        ));
         assert!(!is_composio_https_url("https://composio.dev/a"));
         for bad in [
+            "https://app.composio.dev/",
+            "https://app.composio.dev/link/../settings",
+            "https://app.composio.dev/link/lt_example/other",
             "http://connect.composio.dev/x",
             "http://169.254.169.254/latest",
             "https://evilcomposio.dev/x",

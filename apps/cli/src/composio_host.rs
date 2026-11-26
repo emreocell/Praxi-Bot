@@ -12,7 +12,7 @@ use composio::{
     Linkage, LocalKeySource, LoginState, Redact, ServiceConfig, Toolkit,
 };
 use daemon_api::composio::{
-    ComposioAppDto, ComposioCatalogDto, ComposioCatalogQuery, ComposioConnState,
+    ComposioActionDto, ComposioAppDto, ComposioCatalogDto, ComposioCatalogQuery, ComposioConnState,
     ComposioConnectDto, ComposioDisconnectDto, ComposioLinkMode, ComposioLoginDto,
     ComposioLoginState, ComposioLoginStatusDto, ComposioStatusDto, ComposioTestDto,
     ComposioToolkitDto,
@@ -81,6 +81,7 @@ impl ComposioHost {
             native_first: v.native_first,
             bots: v.bots,
             tools: u32::try_from(v.tools).unwrap_or(u32::MAX),
+            account: v.account,
         }
     }
 
@@ -127,7 +128,8 @@ fn map_err(e: ComposioError) -> ComposioControlError {
 
 #[async_trait]
 impl ComposioControl for ComposioHost {
-    fn status(&self) -> ComposioStatusDto {
+    async fn status(&self) -> ComposioStatusDto {
+        let account = self.svc.account_label().await;
         ComposioStatusDto {
             configured: self.svc.configured(),
             mode: match self.svc.linkage() {
@@ -137,6 +139,7 @@ impl ComposioControl for ComposioHost {
             },
             key_setup_url: KEY_SETUP_URL.to_owned(),
             login_expired: self.svc.login_expired(),
+            account,
         }
     }
 
@@ -210,6 +213,20 @@ impl ComposioControl for ComposioHost {
         }))
     }
 
+    async fn actions(&self, slug: &str) -> Result<Vec<ComposioActionDto>, ComposioControlError> {
+        Ok(self
+            .svc
+            .toolkit_actions(slug)
+            .await
+            .map_err(map_err)?
+            .iter()
+            .map(|action| ComposioActionDto {
+                name: action.name.clone(),
+                description: action.description.clone(),
+            })
+            .collect())
+    }
+
     fn apps(&self) -> Vec<ComposioAppDto> {
         self.svc.apps().into_iter().map(Self::app_dto).collect()
     }
@@ -250,6 +267,7 @@ impl ComposioControl for ComposioHost {
     async fn test(&self, slug: &str) -> Result<ComposioTestDto, ComposioControlError> {
         let out = self.svc.test_app(slug).await.map_err(map_err)?;
         Ok(ComposioTestDto {
+            authorization_only: out.authorization_only,
             account: out.account,
             items: out.items,
         })

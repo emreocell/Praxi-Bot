@@ -10,6 +10,16 @@ fn allowed(href: &str, dashboard: bool) -> bool {
             matches!(host, "platform.composio.dev" | "dashboard.composio.dev")
         } else {
             matches!(host, "connect.composio.dev" | "backend.composio.dev")
+                || rest
+                    .strip_prefix("app.composio.dev/link/")
+                    .and_then(|path| path.split(['?', '#']).next())
+                    .is_some_and(|token| {
+                        !token.is_empty()
+                            && token.len() <= 128
+                            && token
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                    })
         }
 }
 
@@ -101,11 +111,16 @@ mod tests {
     #[test]
     fn exact_browser_hosts_and_separate_dashboard() {
         assert!(allowed("https://connect.composio.dev/link/x", false));
+        assert!(allowed("https://app.composio.dev/link/lt_example", false));
+        assert!(!allowed("https://app.composio.dev/link/lt_example", true));
         assert!(allowed("https://platform.composio.dev/", true));
         assert!(allowed("https://dashboard.composio.dev/?cliKey=abc", true));
         assert!(!allowed("https://dashboard.composio.dev/", false));
         assert!(!allowed("https://platform.composio.dev/", false));
         for bad in [
+            "https://app.composio.dev/",
+            "https://app.composio.dev/link/../settings",
+            "https://app.composio.dev/link/lt_example/other",
             "https://logos.composio.dev/x",
             "https://unexpected.composio.dev/x",
             "https://user@connect.composio.dev/x",

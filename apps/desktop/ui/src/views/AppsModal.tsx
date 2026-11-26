@@ -1,7 +1,7 @@
 import { wordDiff, type DiffPart } from "../lib/textDiff.ts";
-import { Check, ChevronDown, Search, Server, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Search, Server, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { upsertApp } from "../lib/composioApps";
+import { upsertApp, withoutConnected } from "../lib/composioApps";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button } from "ui";
 import { BrandIcon } from "../components/BrandIcon";
@@ -9,7 +9,7 @@ import { brandIcon } from "../lib/brandIcons";
 import { botView } from "../lib/botProfile";
 import { McpToolList } from "./McpToolList.tsx";
 import { ApiError } from "../api/client";
-import type { McpAuthState, McpCatalogEntry, McpServer } from "../api/types";
+import type { ComposioToolkit, McpAuthState, McpCatalogEntry, McpServer } from "../api/types";
 import { ConnectionTestButton } from "../components/ConnectionTest";
 import formStyles from "../components/Form.module.css";
 import { BotAccessPicker } from "../components/BotAccessPicker";
@@ -45,14 +45,14 @@ import {
 import { useDaemon } from "../state/DaemonContext";
 import { useMcp } from "../state/useMcp";
 import styles from "./AppsModal.module.css";
-import { AppTile, ComposioCell, GroupChips, SkeletonTiles } from "./AppsGrid";
-import { ConnectSheet } from "./ConnectSheet";
+import { AppTile, ComposioCard, GroupChips, SkeletonTiles } from "./AppsGrid";
+import { ComposioAppPage } from "./ComposioAppPage";
 import { type AppTestState, appsToTestNow, runAppTest } from "../lib/appTest";
-import { type FlowCancel, type FlowState, classifyLinkFailure, runConnectFlow } from "../lib/connectFlow";
-import { ComposioAdvanced } from "./ComposioAdvanced";
+import { type FlowCancel, type FlowState, runConnectFlow } from "../lib/connectFlow";
+import { ComposioAccount } from "./ComposioAccount";
 import { MissingComponent, componentFor } from "./MissingComponent";
 import { useComposio } from "../state/useComposio";
-import { composioTileState, directEntries, filterDirect, isRemoteServer, settledApps, unsettledApps, visibleToolkits } from "../lib/appTiles";
+import { directEntries, filterDirect, isRemoteServer } from "../lib/appTiles";
 import { openComposioLink } from "../lib/externalLink";
 import type { McpServer as McpServerT } from "../api/types";
 import own from "./AppsGrid.module.css";
@@ -792,17 +792,17 @@ function CustomServerForm({
   );
 }
 
-/**
- * "Uygulamalar": search, Connected and Discover.  Apps connect in one click;
- * "Your own MCP server" adds a custom stdio / http server.
- */
-export function AppsModal({
+type AppsModalProps = { open: boolean; onClose: () => void };
+
+export function AppsModal(props: AppsModalProps) {
+  const { activeComputerId } = useDaemon();
+  return <AppsDialog key={activeComputerId} {...props} />;
+}
+
+function AppsDialog({
   open,
   onClose
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+}: AppsModalProps) {
   const { t } = useTranslation();
   const toast = useToast();
   const { client } = useDaemon();
@@ -812,10 +812,18 @@ export function AppsModal({
   const [group, setGroup] = useState("all");
   const [busy, setBusy] = useState<string | null>(null);
   const c = useComposio(open, query, group);
+  const [selected, setSelected] = useState<{ slug: string; name: string; toolkit?: ComposioToolkit } | null>(null);
   const [linking, setLinking] = useState<string | null>(null);
-  // The one connect flow that runs now (anchored to its tile), and its stop flag.
+  const findInput = useRef<HTMLInputElement>(null);
+  const accountSection = useRef<HTMLDivElement>(null);
+  const linked = c.status?.configured === true && !c.status.login_expired;
+  const selectedApp = c.apps.find((app) => app.slug === selected?.slug);
+  // A hosted app consent request, separate from sign-in to the hub.
   const [flow, setFlow] = useState<FlowState | null>(null);
   const flowCancel = useRef<FlowCancel>({ cancelled: false });
+  useEffect(() => () => {
+    flowCancel.current.cancelled = true;
+  }, []);
   // Pending sign-ins by server; the flag stops the poll and cancels the flow.
   const [signing, setSigning] = useState<Record<string, SignInControl>>({});
   // The sign-in shown in the status card at the top, and whether its app has a test to run after.
@@ -843,7 +851,9 @@ export function AppsModal({
       },
       slug,
       (s, state) => setTests((m) => ({ ...m, [s]: state }))
-    ).finally(() => testing.current.delete(slug));
+    ).then((state) => {
+      if (state.status === "failed") void Promise.all([c.reloadApps(), c.reloadStatus()]);
+    }).finally(() => testing.current.delete(slug));
   };
 
   // An app that has just finished signing in is tested by itself; a disconnected one forgets its test.
@@ -951,7 +961,7 @@ export function AppsModal({
     if (open) {
       setQuery("");
       setGroup("all");
-      setFlow(null);
+      setSelected(null);
       setAdvanced(false);
     }
   }, [open]);
@@ -969,14 +979,10 @@ export function AppsModal({
   // Apps that need the owner's own sign-in client (Google) have their own section under Advanced.
   const ownClient = useMemo(() => googleEntries(catalog), [catalog]);
   const mainCatalog = useMemo(() => catalog.filter((e) => !e.install.oauth_client), [catalog]);
-  const allDirect = useMemo(
-    () => mainCatalog.filter((e) => e.install.transport === "http" && e.install.required_secrets.length === 0),
-    [mainCatalog]
-  );
   const pendingNames = useMemo(() => new Set([...Object.keys(signing), ...Object.keys(fresh)]), [signing, fresh]);
   const directShown = useMemo(
-    () => filterDirect(directEntries(mainCatalog, servers.filter((s) => !pendingNames.has(s.name))), query, group),
-    [mainCatalog, servers, query, group, pendingNames]
+    () => filterDirect(directEntries(mainCatalog, servers.filter((s) => !pendingNames.has(s.name))), query, "all"),
+    [mainCatalog, servers, query, pendingNames]
   );
   const shownCatalog = useMemo(
     () =>
@@ -994,10 +1000,26 @@ export function AppsModal({
     [shownServers, pendingNames]
   );
   const localServers = useMemo(() => shownServers.filter((s) => !isRemoteServer(s)), [shownServers]);
-  const toolkits = useMemo(
-    () => visibleToolkits(c.items, c.apps, allDirect, []),
-    [c.items, c.apps, allDirect]
-  );
+  const firstCatalogPage = !query.trim() && group === "all";
+  const featured = linked && firstCatalogPage
+    ? c.apps.filter((app) => app.state !== "not_connected")
+    : [];
+  const appBySlug = new Map(c.apps.map((app) => [app.slug, app]));
+  const toolkits = withoutConnected(c.items, featured);
+  const summary = (toolkit?: ComposioToolkit) => toolkit
+    ? t(`apps.composioHub.summaries.${toolkit.slug}`, { defaultValue: toolkit.description })
+    : undefined;
+
+  const backToCatalog = () => {
+    setSelected(null);
+    requestAnimationFrame(() => findInput.current?.focus());
+  };
+  const focusAccount = () => {
+    setSelected(null);
+    setFlow(null);
+    setAdvanced(false);
+    requestAnimationFrame(() => accountSection.current?.focus());
+  };
   const entryOf = (name: string) => catalog.find((e) => e.id === name);
   // A server is that catalog entry only when the transport is the same: an old stdio server that
   // happens to carry the name of a newer remote app (Google Drive) is not it.
@@ -1041,82 +1063,76 @@ export function AppsModal({
     }
   };
 
-  /**
-   * One continuous Connect flow anchored to the app's tile: with a Composio credential the app's
-   * own consent page opens at once; without one the Composio sign-in opens first and the flow
-   * carries on to the app by itself when it finishes (nothing to press twice).
-   */
   const connectApp = (slug: string, name: string) => {
-    if (!client) {
-      return;
-    }
-    flowCancel.current.cancelled = true; // a flow of another tile is replaced
+    if (!client || linking !== null) return;
     const cancel: FlowCancel = { cancelled: false };
     flowCancel.current = cancel;
     setLinking(slug);
+    setTests((old) => {
+      const next = { ...old };
+      delete next[slug];
+      return next;
+    });
     void runConnectFlow(
       {
         configured: () => c.status?.configured === true,
         loginExpired: () => c.status?.login_expired === true,
-        classify: classifyLinkFailure,
         describe: (e) => {
           const h = humanError(e);
           return { title: h.title, hint: h.hint, details: h.details };
         },
-        loginStart: () => client.composioLoginStart(),
-        loginStatus: () => client.composioLoginStatus(),
         appConnect: (s) => client.composioConnect(s),
-        open: (url, login) => openComposioLink(url, login),
-        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-        now: () => Date.now()
+        open: openComposioLink
       },
       slug,
       name,
       (state) => {
-        if (flowCancel.current !== cancel) {
-          return;
-        }
-        setFlow(state);
-        if (state.step === "app" || state.step === "failed") {
-          void c.reloadStatus();
-        }
-        if (state.step === "opened") {
-          c.setApps((prev) =>
-            upsertApp(prev, { slug, name, state: "pending", enabled: true, native_first: false, bots: null, tools: 0 })
-          );
-        }
+        if (flowCancel.current === cancel && state.step !== "cancelled") setFlow(state);
       },
       cancel
-    ).finally(() => {
-      if (flowCancel.current === cancel) {
-        setLinking(null);
-      }
-    });
-  };
-
-  /** Stop the flow of this tile; a consent page that was already opened is cancelled too. */
-  const cancelFlow = (slug: string) => {
-    flowCancel.current.cancelled = true;
-    setFlow(null);
-    setLinking(null);
-    // Only an app that was already started has something to undo (the daemon saves it when the
-    // consent link is made); a flow cancelled before that must not ask to disconnect nothing.
-    if (!c.apps.some((a) => a.slug === slug)) {
-      return;
-    }
-    void run(slug, async () => {
-      try {
-        await client?.composioDisconnect(slug);
-      } catch (e) {
-        if (!(e instanceof ApiError && e.status === 404)) {
-          throw e;
+    ).then(async (state) => {
+      if (state.step === "opened") {
+        c.setApps((prev) => upsertApp(prev, {
+          slug, name, state: "pending", enabled: true, native_first: false,
+          bots: prev.find((app) => app.slug === slug)?.bots ?? null, tools: 0
+        }));
+      } else if (state.hasLink) {
+        try {
+          await client.composioDisconnect(slug);
+          c.setApps((prev) => prev.filter((app) => app.slug !== slug));
+        } catch (e) {
+          toast.show(errorText(e), "danger");
+          await c.reloadApps();
         }
       }
-      await c.reloadApps();
+      if (state.reason === "login_expired") await c.reloadStatus();
+    }).finally(() => {
+      if (flowCancel.current === cancel) setLinking(null);
     });
   };
 
-  const pressComposio = (slug: string, name: string) => connectApp(slug, name);
+  const disconnectApp = (slug: string, name: string, quiet = false) => {
+    if (!client) return;
+    void run(slug, async () => {
+      const result = await client.composioDisconnect(slug);
+      c.setApps((prev) => prev.filter((app) => app.slug !== slug));
+      if (!result.remote_removed) {
+        toast.show(t("apps.composio.disconnectedLocal", { name }), "info");
+      } else if (!quiet) {
+        toast.show(t("apps.disconnectedToast", { name }), "info");
+      }
+    });
+  };
+
+  const cancelFlow = (slug: string, name: string) => {
+    setFlow(null);
+    if (linking === slug) {
+      // The in-flight request owns cleanup after it learns whether a link was made.
+      flowCancel.current.cancelled = true;
+    } else if (c.apps.some((app) => app.slug === slug && app.state === "pending")) {
+      disconnectApp(slug, name, true);
+    }
+  };
 
   const connectDirect = async (entry: McpCatalogEntry) => {
     if (!client) {
@@ -1236,9 +1252,20 @@ export function AppsModal({
     <Modal open={open} onClose={onClose} label={t("apps.title")} size="apps">
       <div className={styles.root}>
         <header className={styles.top}>
+          {selected ? (
+            <>
+              <Button size="sm" variant="ghost" onClick={backToCatalog}>
+                <ArrowLeft aria-hidden="true" />
+                {t("apps.composioHub.back")}
+              </Button>
+              <span className={styles.grow} />
+            </>
+          ) : (
+          <>
           <div className={styles.find}>
             <Search aria-hidden="true" />
             <input
+              ref={findInput}
               type="search"
               data-autofocus
               value={query}
@@ -1255,8 +1282,10 @@ export function AppsModal({
             onClick={() => setAdvanced((a) => !a)}
           >
             <Server aria-hidden="true" />
-            {t("apps.mcpServers")}
+            {t("apps.composioHub.mcpServers")}
           </button>
+          </>
+          )}
           <button
             type="button"
             className={styles.close}
@@ -1268,8 +1297,8 @@ export function AppsModal({
           </button>
         </header>
 
-        <div className={styles.body}>
-          {error ? (
+        <div className={styles.body} key={selected?.slug ?? (advanced ? "mcp" : "hub")}>
+          {advanced && error ? (
             <p className={formStyles.error} role="alert">
               {error}
             </p>
@@ -1300,7 +1329,39 @@ export function AppsModal({
             </McpSignInPanel>
           ) : null}
 
-          {advanced ? (
+          {selected ? (
+            <ComposioAppPage
+              key={selected.slug}
+              slug={selected.slug}
+              name={selected.name}
+              description={summary(selected.toolkit)}
+              app={selectedApp}
+              flow={flow?.slug === selected.slug && (
+                flow.step !== "opened" || selectedApp?.state === "pending"
+              ) ? flow : null}
+              test={tests[selected.slug]}
+              pollError={c.pollErrors[selected.slug]}
+              linked={linked}
+              busy={busy !== null || linking !== null}
+              onAccount={focusAccount}
+              onConnect={() => connectApp(selected.slug, selected.name)}
+              onCancel={() => cancelFlow(selected.slug, selected.name)}
+              onCloseFlow={() => setFlow(null)}
+              onTest={() => testApp(selected.slug)}
+              onSaveBots={(bots) => void run(selected.slug, async () => {
+                if (!client) return;
+                const next = await client.composioSetBots(selected.slug, bots);
+                c.setApps((prev) => upsertApp(prev, next));
+                toast.show(t("apps.access.savedToast", { name: selected.name }), "success");
+              })}
+              onEnabled={(enabled) => void run(selected.slug, async () => {
+                if (!client) return;
+                const next = await client.composioSetEnabled(selected.slug, enabled);
+                c.setApps((prev) => upsertApp(prev, next));
+              })}
+              onDisconnect={() => disconnectApp(selected.slug, selected.name)}
+            />
+          ) : advanced ? (
             <>
             <h3 className={styles.sectionLabel}>{t("apps.advanced.title")}</h3>
             <CustomServerForm
@@ -1359,103 +1420,11 @@ export function AppsModal({
                 </ul>
               </section>
             ) : null}
-            <ComposioAdvanced
-              status={c.status}
-              onChanged={async () => {
-                await c.reloadStatus();
-                await c.reloadApps();
-              }}
-            />
-            </>
-          ) : (
-            <>
-              {settledApps(c.apps).length > 0 || remoteServers.length > 0 ? (
-                <section className={styles.section} aria-labelledby="apps-connected-h">
-                  <h3 className={styles.sectionLabel} id="apps-connected-h">{t("apps.connectedSection")}</h3>
-                  <ul className={styles.grid}>
-                    {settledApps(c.apps).map((a) => (
-                      <ComposioCell
-                        key={a.slug}
-                        app={a}
-                        busy={busy === a.slug}
-                        test={tests[a.slug]}
-                        onTest={() => testApp(a.slug)}
-                        onSaveBots={(bots) =>
-                          void run(a.slug, async () => {
-                            const next = await client?.composioSetBots(a.slug, bots);
-                            if (next) {
-                              c.setApps((prev) => upsertApp(prev, next));
-                              toast.show(t("apps.access.savedToast", { name: a.name }), "success");
-                            }
-                          })
-                        }
-                        onEnabled={(enabled) =>
-                          void run(a.slug, async () => {
-                            const next = await client?.composioSetEnabled(a.slug, enabled);
-                            if (next) {
-                              c.setApps((prev) => upsertApp(prev, next));
-                            }
-                          })
-                        }
-                        onReconnect={() => pressComposio(a.slug, a.name)}
-                        onDisconnect={() =>
-                          void run(a.slug, async () => {
-                            const r = await client?.composioDisconnect(a.slug);
-                            toast.show(
-                              r && !r.remote_removed
-                                ? t("apps.composio.disconnectedLocal", { name: a.name })
-                                : t("apps.disconnectedToast", { name: a.name }),
-                              "info"
-                            );
-                            await c.reloadApps();
-                          })
-                        }
-                      />
-                    ))}
-                    {remoteServers.map(renderServer)}
-                  </ul>
-                </section>
-              ) : null}
-
-              <GroupChips value={group} onChange={setGroup} />
-
-              <section className={styles.section} aria-labelledby="apps-all-h">
-                <h3 className={styles.sectionLabel} id="apps-all-h">{t("apps.catalogSection")}</h3>
-                {firstLoad ? (
-                  <SkeletonTiles />
-                ) : c.error && c.items.length === 0 && directShown.length === 0 ? (
-                  <p className={own.quiet} role="alert">
-                    {t("apps.composio.loadFailed")}
-                    <Button size="sm" variant="secondary" onClick={() => void c.retryCatalog()}>
-                      {t("apps.composio.retry")}
-                    </Button>
-                  </p>
-                ) : toolkits.length === 0 && directShown.length === 0 ? (
-                  <p className={styles.empty}><Search aria-hidden="true" />{t("apps.composio.noResults")}</p>
-                ) : (
-                  <ul className={styles.grid} data-testid="apps-grid">
-                    {unsettledApps(c.apps).map((a) => (
-                      <AppTile
-                        key={`pending-${a.slug}`}
-                        testId={`composio-tile-${a.slug}`}
-                        slug={a.slug}
-                        name={a.name}
-                        description={a.name}
-                        state={composioTileState(a, false)}
-                        onConnect={() => pressComposio(a.slug, a.name)}
-                        onCancel={() => cancelFlow(a.slug)}
-                        sheet={
-                          flow?.slug === a.slug ? (
-                            <ConnectSheet
-                              flow={flow}
-                              onCancel={() => cancelFlow(a.slug)}
-                              onRetry={() => pressComposio(a.slug, a.name)}
-                              onClose={() => setFlow(null)}
-                            />
-                          ) : null
-                        }
-                      />
-                    ))}
+            {remoteServers.length > 0 || directShown.length > 0 || pendingNames.size > 0 ? (
+              <section className={styles.section} aria-labelledby="apps-remote-h">
+                <h3 className={styles.sectionLabel} id="apps-remote-h">{t("apps.composioHub.remoteServers")}</h3>
+                <ul className={styles.grid}>
+                  {remoteServers.map(renderServer)}
                     {[...Object.keys(signing), ...Object.keys(fresh)]
                       .filter((n, i, all) => all.indexOf(n) === i)
                       .map((n) => {
@@ -1489,58 +1458,88 @@ export function AppsModal({
                         onConnect={() => void connectDirect(e)}
                       />
                     ))}
-                    {toolkits.map((tk) => (
-                      <AppTile
-                        key={tk.slug}
-                        testId={`composio-tile-${tk.slug}`}
-                        slug={tk.slug}
-                        name={tk.name}
-                        description={tk.description || tk.categories.join(", ")}
-                        state={composioTileState(undefined, linking === tk.slug)}
-                        onConnect={() => pressComposio(tk.slug, tk.name)}
-                        onCancel={() => cancelFlow(tk.slug)}
-                        sheet={
-                          flow?.slug === tk.slug ? (
-                            <ConnectSheet
-                              flow={flow}
-                              onCancel={() => cancelFlow(tk.slug)}
-                              onRetry={() => pressComposio(tk.slug, tk.name)}
-                              onClose={() => setFlow(null)}
-                            />
-                          ) : null
-                        }
-                      />
+                </ul>
+              </section>
+            ) : null}
+            </>
+          ) : (
+            <>
+              <div ref={accountSection} tabIndex={-1}>
+                <ComposioAccount
+                  status={c.status}
+                  login={c.login}
+                  startLogin={c.startLogin}
+                  cancelLogin={c.cancelLogin}
+                  disabled={linking !== null || busy !== null || (linked && c.apps.some((app) => app.state === "pending"))}
+                  onChanged={async () => {
+                    await Promise.all([c.reloadStatus(), c.reloadApps()]);
+                    await c.retryCatalog();
+                  }}
+                />
+                {c.statusError ? (
+                  <div className={styles.actions}>
+                    <p className={formStyles.error} role="alert">{c.statusError}</p>
+                    <Button size="sm" variant="secondary" onClick={() => void c.reloadStatus()}>
+                      {t("apps.composio.retry")}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+              {featured.length > 0 ? (
+                <section className={styles.section} aria-labelledby="apps-connected-h">
+                  <h3 className={styles.sectionLabel} id="apps-connected-h">{t("apps.composioHub.yourApps")}</h3>
+                  <ul className={styles.grid}>
+                    {featured.map((app) => {
+                      const toolkit = c.items.find((item) => item.slug === app.slug);
+                      return (
+                        <ComposioCard key={app.slug} name={app.name} slug={app.slug} app={app}
+                          description={app.account ?? summary(toolkit)}
+                          onOpen={() => setSelected({ name: app.name, slug: app.slug, toolkit })} />
+                      );
+                    })}
+                  </ul>
+                </section>
+              ) : null}
+              <section className={styles.section} aria-labelledby="apps-all-h">
+                <h3 className={styles.sectionLabel} id="apps-all-h">{t("apps.catalogSection")}</h3>
+                <GroupChips value={group} onChange={setGroup} />
+                {firstLoad ? (
+                  <SkeletonTiles />
+                ) : c.error && c.items.length === 0 ? (
+                  <p className={own.quiet} role="alert">
+                    {t("apps.composio.loadFailed")}
+                    <Button size="sm" variant="secondary" onClick={() => void c.retryCatalog()}>
+                      {t("apps.composio.retry")}
+                    </Button>
+                  </p>
+                ) : toolkits.length === 0 && featured.length === 0 ? (
+                  <p className={styles.empty}><Search aria-hidden="true" />{t("apps.composio.noResults")}</p>
+                ) : (
+                  <ul className={styles.grid} data-testid="apps-grid">
+                    {toolkits.map((toolkit) => (
+                      <ComposioCard key={toolkit.slug} name={toolkit.name} slug={toolkit.slug}
+                        app={linked ? appBySlug.get(toolkit.slug) : undefined} description={summary(toolkit)}
+                        onOpen={() => setSelected({ name: toolkit.name, slug: toolkit.slug, toolkit })} />
                     ))}
                   </ul>
                 )}
-                {catalogError ? (
-                  <p className={own.quiet} data-testid="apps-catalog-notice">
+                {catalogError && (catalogError !== "unauthorized" || linked) ? (
+                  <p className={own.quiet} data-testid="apps-catalog-notice" role="status">
                     {t(`apps.composio.catalogError.${catalogError}`)}
-                    {catalogError === "unauthorized" ? (
-                      // A retry cannot succeed with a login Composio refuses: sign in again.
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        data-testid="apps-composio-relogin"
-                        disabled={c.login === "starting" || c.login === "waiting"}
-                        onClick={() => void c.startLogin(() => void c.retryCatalog())}
-                      >
-                        {c.login === "waiting" ? t("apps.composio.link.waiting") : t("apps.composio.relogin")}
-                      </Button>
-                    ) : (
+                    {catalogError !== "unauthorized" ? (
                       <Button size="sm" variant="ghost" onClick={() => void c.retryCatalog()}>
                         {t("apps.composio.retry")}
                       </Button>
-                    )}
+                    ) : null}
                   </p>
                 ) : null}
-                <div className={styles.actions}>
-                  {c.hasMore ? (
+                {c.hasMore ? (
+                  <div className={styles.actions}>
                     <Button size="sm" variant="secondary" disabled={c.loading} onClick={() => void c.loadMore()}>
                       {t("apps.composio.loadMore")}
                     </Button>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
               </section>
             </>
           )}

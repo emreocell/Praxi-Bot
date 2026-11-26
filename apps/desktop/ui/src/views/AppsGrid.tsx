@@ -1,15 +1,11 @@
-import { Check, ChevronDown } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { Check, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
-import type { ComposioApp, ComposioToolkit } from "../api/types";
+import type { ComposioApp } from "../api/types";
 import { AppLogo } from "../components/AppLogo";
-import { BotAccessPicker } from "../components/BotAccessPicker";
 import { Skeleton, SkeletonLines } from "../components/Skeleton";
-import { type AppTestState, isTestable } from "../lib/appTest";
-import { GROUPS, composioTileState, tileAction, type TileState } from "../lib/appTiles";
-import { type BotScope, botScope, botSelection } from "../lib/mcpApps";
-import { useDaemon } from "../state/DaemonContext";
+import { type AppTestState } from "../lib/appTest";
+import { GROUPS, tileAction, type TileState } from "../lib/appTiles";
 import styles from "./AppsModal.module.css";
 import own from "./AppsGrid.module.css";
 
@@ -22,7 +18,7 @@ export function GroupChips({ value, onChange }: { value: string; onChange: (g: s
   const { t } = useTranslation();
   return (
     <div className={own.chips} role="group" aria-label={t("apps.group.label")}>
-      {["all", ...GROUPS].map((g) => (
+      {["all", ...GROUPS, "other"].map((g) => (
         <button
           key={g}
           type="button"
@@ -46,7 +42,6 @@ export function AppTile({
   testId,
   slug,
   logo,
-  sheet,
   onConnect,
   onCancel
 }: {
@@ -58,8 +53,6 @@ export function AppTile({
   slug?: string;
   /** What the logo is looked up by when it differs from the shown name (a catalog icon id). */
   logo?: string;
-  /** The connect sheet anchored to this tile while Connect runs. */
-  sheet?: ReactNode;
   onConnect: () => void;
   /** Stops a pending sign-in (shown next to the waiting state). */
   onCancel?: () => void;
@@ -67,7 +60,7 @@ export function AppTile({
   const { t } = useTranslation();
   const action = tileAction(state);
   return (
-    <li className={`${styles.cell} ${own.anchor} ${sheet ? styles.cellOpen : ""}`} data-testid={testId} data-state={state}>
+    <li className={`${styles.cell}`} data-testid={testId} data-state={state}>
       <div className={styles.cellRow}>
         <AppLogo name={logo ?? name} slug={slug} size={26} />
         <div className={styles.cellText}>
@@ -105,7 +98,6 @@ export function AppTile({
           </>
         )}
       </div>
-      {sheet}
     </li>
   );
 }
@@ -129,156 +121,38 @@ export function SkeletonTiles({ count = 8 }: { count?: number }) {
   );
 }
 
-/** A Composio app in the Connected section: state, and a small Manage menu. */
-export function ComposioCell({
-  app,
-  busy,
-  test,
-  onEnabled,
-  onReconnect,
-  onDisconnect,
-  onTest,
-  onSaveBots
-}: {
-  app: ComposioApp;
-  busy: boolean;
-  /** What the last test of this app found, when one ran. */
-  test?: AppTestState;
-  onEnabled: (enabled: boolean) => void;
-  onReconnect: () => void;
-  onDisconnect: () => void;
-  onTest: () => void;
-  onSaveBots: (bots: string[] | null) => void;
+/** One entry point for a toolkit, whether it has been connected or not. */
+export function ComposioCard({ slug, name, description, app, onOpen }: {
+  slug: string;
+  name: string;
+  description?: string;
+  app?: ComposioApp;
+  onOpen: () => void;
 }) {
   const { t } = useTranslation();
-  const { bots } = useDaemon();
-  const [open, setOpen] = useState(false);
-  const [confirm, setConfirm] = useState(false);
-  const [scope, setScope] = useState<BotScope>(() => botScope(app));
-  const account = test?.status === "ok" ? test.account : null;
-  const k = tone(app.state);
-  const broken = app.state === "failed" || app.state === "expired";
-  const panelId = `composio-manage-${app.slug}`;
+  const state = app?.state ?? "not_connected";
   return (
-    <li className={`${styles.cell} ${open ? styles.cellOpen : ""}`} data-testid={`composio-app-${app.slug}`} data-state={app.state}>
-      <div className={styles.cellRow}>
-        <AppLogo name={app.name} slug={app.slug} size={26} />
-        <div className={styles.cellText}>
-          <b className={styles.cellName}>
-            <span className={styles.cellTitle}>{app.name}</span>
-          </b>
-          <small className={styles.cellSub}>
-            {app.state === "pending"
-              ? t("apps.composio.waiting")
-              : app.state === "failed"
-                ? t("apps.composio.failedHint")
-                : app.state === "expired"
-                  ? t("apps.composio.expiredHint")
-                  : account
-                    ? t("apps.connectedAs", { account })
-                    : t("apps.toolCount", { count: app.tools })}
-          </small>
-        </div>
-        <span className={`${styles.state} ${styles[`tone_${k}`]}`}>
-          {k === "ok" ? <Check aria-hidden="true" /> : <span className={styles.dot} aria-hidden="true" />}
-          {t(`apps.composio.state.${app.state}`)}
+    <li className={styles.cell} data-testid={`composio-tile-${slug}`} data-state={state}>
+      <button className={`${styles.cellRow} ${own.cardButton}`} type="button" onClick={onOpen}>
+        <AppLogo name={name} slug={slug} />
+        <span className={styles.cellText}>
+          <span className={styles.cellName}><span className={styles.cellTitle}>{name}</span></span>
+          {description ? <span className={styles.cellSub}>{description}</span> : null}
         </span>
-        {broken ? (
-          <Button size="sm" variant="secondary" disabled={busy} onClick={onReconnect}>
-            {app.state === "failed" ? t("apps.composio.retry") : t("apps.reconnect")}
-          </Button>
+        {state !== "not_connected" ? (
+          <span className={`${styles.state} ${styles[`tone_${tone(state)}`]}`}>
+            {state === "active" ? <Check aria-hidden="true" /> : <span className={styles.dot} aria-hidden="true" />}
+            {t(`apps.composio.state.${state}`)}
+          </span>
         ) : null}
-        <button
-          type="button"
-          className={`${styles.manage} ${broken || app.state === "pending" ? styles.manageShown : ""}`}
-          aria-expanded={open}
-          aria-controls={panelId}
-          data-testid={`composio-manage-${app.slug}`}
-          onClick={() => {
-            if (!open) {
-              setScope(botSelection(botScope(app), bots));
-            }
-            setConfirm(false);
-            setOpen((o) => !o);
-          }}
-        >
-          {t("apps.manage")}
-          <ChevronDown aria-hidden="true" />
-        </button>
-      </div>
-      {open ? (
-        <div className={styles.panel} id={panelId}>
-          {app.state === "active" ? (
-            <>
-              <span className={styles.panelLabel}>{t("apps.access.label")}</span>
-              <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
-              <div className={styles.actions}>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  disabled={busy}
-                  data-testid={`composio-access-save-${app.slug}`}
-                  onClick={() => onSaveBots(scope.mode === "all" ? null : [...scope.ids])}
-                >
-                  {t("apps.access.save")}
-                </Button>
-              </div>
-              {isTestable(app.slug) ? <ComposioTestResult slug={app.slug} test={test} busy={busy} onTest={onTest} /> : null}
-            </>
-          ) : null}
-          <div className={styles.actions}>
-            {app.state === "active" ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy}
-                aria-pressed={app.enabled}
-                data-testid={`composio-enabled-${app.slug}`}
-                onClick={() => onEnabled(!app.enabled)}
-              >
-                {app.enabled ? t("apps.composio.disable") : t("apps.composio.enable")}
-              </Button>
-            ) : null}
-            <span className={styles.grow} />
-            {confirm ? (
-              <>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  disabled={busy}
-                  data-testid={`composio-disconnect-confirm-${app.slug}`}
-                  onClick={() => {
-                    setConfirm(false);
-                    setOpen(false);
-                    onDisconnect();
-                  }}
-                >
-                  {t("apps.disconnectConfirm")}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>
-                  {t("common.cancel")}
-                </Button>
-              </>
-            ) : (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy}
-                data-testid={`composio-disconnect-${app.slug}`}
-                onClick={() => setConfirm(true)}
-              >
-                {t("apps.disconnect")}
-              </Button>
-            )}
-          </div>
-        </div>
-      ) : null}
+        <ChevronRight className={own.cardArrow} aria-hidden="true" />
+      </button>
     </li>
   );
 }
 
 /** The "Test connection" row of a connected app: the button, and what the last test found. */
-function ComposioTestResult({
+export function ComposioTestResult({
   slug,
   test,
   busy,
@@ -306,7 +180,9 @@ function ComposioTestResult({
       {test?.status === "ok" ? (
         <div role="status">
           <p className={own.testLine}>
-            {test.account ? t("apps.test.okAs", { account: test.account }) : t("apps.test.ok")}
+            {test.authorizationOnly
+              ? t("apps.composioHub.authorizationVerified")
+              : test.account ? t("apps.test.okAs", { account: test.account }) : t("apps.test.ok")}
           </p>
           {test.items.length > 0 ? (
             <ul className={own.testItems} aria-label={t("apps.test.samples")}>
@@ -314,9 +190,7 @@ function ComposioTestResult({
                 <li key={`${i}-${item}`}>{item}</li>
               ))}
             </ul>
-          ) : (
-            <p className={own.quiet}>{t("apps.test.noSamples")}</p>
-          )}
+          ) : null}
         </div>
       ) : null}
       {test?.status === "failed" ? (
@@ -332,17 +206,5 @@ function ComposioTestResult({
         </div>
       ) : null}
     </div>
-  );
-}
-
-/** Whether this toolkit is a tile that shows a Connect button (kept for callers that build tiles). */
-export function toolkitTileState(
-  toolkit: ComposioToolkit,
-  apps: readonly ComposioApp[],
-  linking: string | null
-): TileState {
-  return composioTileState(
-    apps.find((a) => a.slug === toolkit.slug),
-    linking === toolkit.slug
   );
 }

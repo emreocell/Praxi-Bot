@@ -13,13 +13,16 @@ export function isComposioLink(href: string, dashboard = false): boolean {
     return false;
   }
   const host = href.match(/^https:\/\/([^/?#]+)/)?.[1];
+  const hostedLink = /^https:\/\/app\.composio\.dev\/link\/[a-zA-Z0-9_-]{1,128}(?:[?#]|$)/.test(href);
   return (
     url.protocol === "https:" &&
     url.username === "" &&
     url.password === "" &&
     url.port === "" &&
     !/[\p{Cc}\\]/u.test(href) &&
-    (dashboard ? host === "platform.composio.dev" || host === "dashboard.composio.dev" : host === "connect.composio.dev" || host === "backend.composio.dev")
+    (dashboard
+      ? host === "platform.composio.dev" || host === "dashboard.composio.dev"
+      : host === "connect.composio.dev" || host === "backend.composio.dev" || hostedLink)
   );
 }
 
@@ -54,5 +57,12 @@ export function appendPage(
   page: readonly ComposioToolkit[]
 ): ComposioToolkit[] {
   const seen = new Set(items.map((t) => t.slug));
-  return [...items, ...page.filter((t) => !seen.has(t.slug))];
+  const next = [...items];
+  for (const toolkit of page) {
+    if (!seen.has(toolkit.slug)) {
+      seen.add(toolkit.slug);
+      next.push(toolkit);
+    }
+  }
+  return next;
 }

@@ -29,14 +29,12 @@
     "doc": "apps.md",
     "title": "Connecting apps (the Apps dialog)",
     "headings": [
-      "Three ways apps connect",
-      "1. Direct OAuth apps",
-      "2. Composio apps",
-      "3. Advanced: MCP servers and token-based services",
-      "What \"Connected\" means",
+      "Connect Composio once",
+      "Connect and manage an app",
+      "MCP servers",
+      "MCP server status",
       "Managing connections and signing out",
       "Direct OAuth and MCP servers",
-      "Composio apps",
       "Per-bot access",
       "Troubleshooting a stuck or failed connection",
       "OAuth sign-in is stuck on \"Waiting for the browser sign-in…\"",
@@ -44,7 +42,7 @@
       "\"The page for an app could not be prepared\"",
       "A local MCP server shows \"Error\" or \"Quarantined\""
     ],
-    "summary": "The Apps dialog in the desktop app connects Praxi to external services"
+    "summary": "Open Apps from the left rail or the command palette (Ctrl/Cmd+K)."
   },
   {
     "doc": "automate.md",

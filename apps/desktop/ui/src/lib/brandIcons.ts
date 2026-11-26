@@ -22,6 +22,8 @@ const aliases: Record<string, string> = {
   google: 'googlegemini',
   notionremote: 'notion',
   twitter: 'x',
+  xtwitter: 'x',
+  whatsappbusiness: 'whatsapp',
   googlecal: 'googlecalendar',
   atlassianjira: 'jira',
   jiracloud: 'jira',

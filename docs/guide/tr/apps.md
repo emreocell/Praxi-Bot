@@ -1,66 +1,48 @@
 # Uygulamaları bağlama (Uygulamalar penceresi)
 
-Masaüstü uygulamasındaki **Uygulamalar** penceresi, Praxi'yi dış servislere
-(Linear, Notion, Stripe, Atlassian, GitLab ya da Composio üzerinden yüzlerce uygulama gibi)
-ve yerel ya da özel [MCP sunucularına](mcp-servers.md) bağlar.
+Sol çubuktan ya da komut paletinden (`Ctrl/Cmd+K`) **Uygulamalar**'ı aç.
+Ana görünümde Composio üzerinden uygulama bağlayabilirsin. Doğrudan, yerel ve
+özel bağlantılar için üst çubuktaki **MCP sunucuları** düğmesini kullan.
 
-Pencereyi sol çubuğun altındaki **Uygulamalar** düğmesinden açabilirsin. Çubuk genişken
-bu düğmede bağlı MCP sunucularının en çok beş logosu, darken bir ızgara simgesi görünür.
-Komut paletinden de (`Ctrl/Cmd+K`) açılır.
+## Composio hesabını bağla
 
-Pencerenin üstünde şunlar bulunur:
+**Composio hesabını bağla** ile tarayıcında oturum aç ya da **Proje API anahtarı
+kullan** seçeneğini seç. Daemon anahtarı doğrular ve gizli bilgi deposunda
+saklar. Composio kuruluş veya proje adını verdiğinde bu ad bağlantı kartında görünür.
 
-- **Uygulamalarda ara**: bağlı uygulamaları ve keşif listesini ada ya da açıklamaya göre süzer.
-- **Gelişmiş**: ana Uygulamalar görünümü ile gelişmiş görünüm arasında geçiş yapar. Gelişmiş
-  görünümde özel MCP sunucuları, yerel geliştirici sunucuları, anahtarla çalışan servisler ve
-  Composio hesap ayarları bulunur.
+## Uygulamayı bağla ve yönet
 
-## Uygulamalar üç yolla bağlanır
+1. **Keşfet** bölümünden uygulamayı bul. Popüler uygulamalar başta görünür.
+   Arama, kategoriler ve **Daha fazla göster** ile kataloğu gezebilirsin.
+2. Uygulama sayfasını aç. Botların yapabileceği işlemleri incele ve **Bağlan**'ı seç.
+3. Tarayıcıda uygulamaya izin ver. Praxi, izin tamamlanana veya süresi dolana
+   kadar durumu Composio'dan denetler.
 
-> **Google (Gmail, Drive, Takvim), kendi Google kurulumunla:** **Gelişmiş** altında, kendi
-> oluşturduğun bir istemciyle Google'ın kendi MCP sunucularını bağlayan yönlendirmeli bir kurulum
-> vardır. Bkz. [Google Workspace](google-workspace.md). Ana listedeki tek tıklık Gmail, Drive ve
-> Takvim kutucukları Composio kullanır ve kurulum gerektirmez.
+Botların eşleştirilmiş bir sunucuda çalışırken de aynı akışı kullanırsın.
+Tarayıcı masaüstünde açılır, yanıtı Composio alır ve sunucu sonucu HTTPS
+üzerinden sorgular.
 
-### 1. Doğrudan OAuth uygulamaları
+Uygulamayı denemek, bağlantıyı kesmek veya bot erişimini ayarlamak için
+**Uygulamaların** bölümünden sayfasını aç. Composio hesap adını verdiğinde veya
+salt okunur bir deneme bunu bulduğunda hesap adı görünür. **Bağlantıyı dene**,
+uygulama izninin geçerli olduğunu doğrular. Gmail, Google Drive, Google Takvim
+ve GitHub için salt okunur denemeler hesap adını veya en çok üç örneği sana
+gösterebilir. Araç girdileri ve sonuçları Composio sunucularından geçer.
+Praxi'nin bot erişimi ve onay kuralları geçerlidir.
 
-Yerleşik katalogdaki, API anahtarı istemeyen uzak HTTP MCP sunucuları ana ekranda doğrudan
-**Keşfet** altında görünür (örneğin **Atlassian**, **GitLab**, **Linear**, **Notion** ve **Stripe**).
+Composio kartından oturumu kapatırsan botların Composio uygulamalarına erişimi
+duraklar. Uygulama ayarları ve hangi botların erişebildiği saklanır.
 
-1. Uygulama kutusunda **Bağlan**'a tıkla.
-2. Sistem tarayıcın, servisin giriş ve izin sayfasını açar.
-3. Tarayıcıda girişi bitir. Daemon yanıtı aldığında uygulama **Bağlı** bölümüne geçer.
+## MCP sunucuları
 
-Doğrudan OAuth uygulamaları, arada hiçbir aracı olmadan servisin kendi uzak MCP sunucusuyla
-konuşur. Bir servis hem doğrudan hem Composio üzerinden kullanılabiliyorsa Praxi yalnızca
-doğrudan kutuyu gösterir. Böylece her ürün listede bir kez yer alır.
+Doğrudan ve kendin yönettiğin bağlantılar için üst çubukta **MCP sunucuları**'na tıkla:
 
-### 2. Composio uygulamaları
-
-**Keşfet** ızgarasının geri kalanı, Composio üzerinden kullanılabilen üçüncü taraf
-uygulamaları listeler. Bunları kategori etiketleriyle (**Tümü**, **İletişim**, **Sosyal**,
-**Verimlilik**, **Geliştirme**, **Finans**, **İş**) ya da arama kutusuyla süzebilirsin.
-Daha fazla sayfa yüklemek için **Daha fazla göster**'e bas.
-
-**Bağlan**'a tıklayınca kutunun yanında küçük bir ilerleme penceresi açılır:
-
-- **İlk kez (Adım 1 / 2):** Praxi, bir kerelik ücretsiz Composio girişini tarayıcında açar.
-  Bu bitince akış kendiliğinden uygulamanın kendi izin sayfasına geçer (**Adım 2 / 2**).
-  **Bağlan**'a yeniden basman gerekmez.
-- **Zaten bağlıysan (Adım 1 / 1):** Praxi uygulamanın izin sayfasını hemen açar.
-
-> **Gizlilik notu:** Composio üzerinden çalışan uygulamalarda araç girdileri ve sonuçları
-> Composio sunucularından geçer. Praxi'nin izin sistemi, veri değiştiren ya da gönderen
-> işlemlerden önce yine sana sorar (bkz. [Sohbet ve onaylar](chatting-and-approvals.md)).
-
-Tarayıcıyla giriş yapmak yerine kendi Composio proje anahtarını kullanmak istersen
-**Gelişmiş → Composio → Kendi proje anahtarımı kullan** yolunu izle. Anahtar hemen
-denetlenir, işletim sisteminin anahtarlığında saklanır ve bir daha hiç gösterilmez.
-
-### 3. Gelişmiş: MCP sunucuları ve anahtarla çalışan servisler
-
-Geliştiriciye yönelik ve kendin yönettiğin bağlantılar için üst çubukta **Gelişmiş**'e tıkla:
-
+- **Uzak MCP sunucuları:** Atlassian, Linear, Notion ve Stripe gibi doğrudan OAuth
+  sunucularını ekleyebilir, tarayıcıda giriş yapabilir ve mevcut bağlantıları yönetebilirsin.
+- **Kendi Google kurulumunla:** Google'ın kendi MCP sunucularını (Gmail, Drive, Takvim)
+  kendi oluşturduğun bir istemciyle bağlayan yönlendirmeli bir kurulum. Bkz.
+  [Google Workspace](google-workspace.md). Ana listedeki Gmail, Drive ve Takvim uygulamaları
+  Composio kullanır ve kurulum gerektirmez.
 - **Özel MCP sunucusu:** Elle bir `Stdio` (yerel bir komut, istersen `KEY=value` biçiminde
   ortam değişkeni satırları) ya da `HTTP` (sunucu URL'si) MCP sunucusu ekle ve hangi botların
   kullanabileceğini seç. Altta yatan `mcp.toml` biçimi ve güvenlik ayarları için
@@ -77,22 +59,11 @@ Geliştiriciye yönelik ve kendin yönettiğin bağlantılar için üst çubukta
   **API anahtarı al** bağlantısı da görünür. Gizli bilgiler işletim sisteminin anahtarlığına
   kaydedilir ve bir daha hiç gösterilmez.
 
-## “Bağlı” ne demek
+## MCP sunucusunun durumu
 
-Ana ekranın üstündeki **Bağlı** bölümü yalnızca **tamamlanmış** uzak bağlantıları gösterir:
-
-- **Doğrudan OAuth / uzak HTTP MCP sunucuları**, giriş bittikten sonra (ya da zaten
-  `mcp.toml` içinde kayıtlıysa) burada görünür. Yepyeni bir OAuth girişi sürerken uygulama
-  **Bağlı** bölümüne geçmez. **Keşfet** içinde **İptal** düğmeli bir **Giriş yapılıyor**
-  kutusu olarak kalır. Girişi iptal edersen ya da **10 dakika** içinde bitirmezsen Praxi
-  yarım kalan sunucu kaydını kendiliğinden siler.
-- **Composio uygulamaları**, durumları **Bağlı** (`active`) ya da **Giriş süresi doldu**
-  (`expired`) olduğunda burada görünür. Bitmemiş bir Composio girişi (**Giriş yapılıyor** ya da
-  **Tamamlanmadı**), Composio hesabın etkin olduğunu doğrulayana kadar **İptal** ya da
-  **Yeniden dene** düğmesiyle **Keşfet** içinde kalır.
-
-Yerel stdio sunucuları ana **Bağlı** bölümünde görünmez. Onları
-**Gelişmiş → Yerel geliştirici sunucuları** altında yönetirsin.
+Yeni bir OAuth bağlantısı, izin tamamlanana kadar **Giriş yapılıyor** durumunda
+kalır. İptal edersen veya beş dakika içinde bitmezse Praxi yarım kalan sunucu
+kaydını siler.
 
 MCP sunucularındaki durum etiketlerinin anlamı:
 
@@ -107,10 +78,7 @@ MCP sunucularındaki durum etiketlerinin anlamı:
 
 ## Bağlantıları yönetmek ve oturumu kapatmak
 
-**Bağlı** bölümündeki (ya da **Gelişmiş → Yerel geliştirici sunucuları** altındaki) bir
-satırın üstüne gel ya da ona odaklan, sonra **Yönet**'e tıkla. İlgi bekleyen satırlarda
-(**Hata**, **Oturum açılması gerekiyor**, **Giriş süresi doldu** ya da **Karantinada** gibi) **Yönet** her zaman
-görünür kalır.
+**MCP sunucuları** içinde bağlı sunucunun satırına odaklan ve **Yönet**'i seç.
 
 ### Doğrudan OAuth ve MCP sunucuları
 
@@ -131,25 +99,11 @@ görünür kalır.
 - **Bağlantıyı kes**: önce onay ister (**Bu sunucunun bağlantısı kesilsin mi?**), sonra sunucu
   ayarını `mcp.toml` dosyasından siler.
 
-### Composio uygulamaları
-
-Bir Composio satırının **Yönet** bölümünde şunları yapabilirsin:
-
-- **Kapat** / **Aç** (**Bağlı** olduğunda): OAuth bağını silmeden uygulamanın araçlarını geçici
-  olarak kapatır ya da yeniden açar.
-- **Yeniden bağlan** / **Yeniden dene** (**Giriş süresi doldu** ya da **Tamamlanmadı**
-  olduğunda): izin akışını tarayıcında yeniden açar.
-- **Bağlantıyı kes**: onay ister ve uygulamanın bağlantısını keser. Uzak taraftaki kayıt
-  kendiliğinden silinemezse Praxi, uygulamanın yalnızca bu bilgisayarda kaldırıldığını söyler
-  ve onu Composio panelinden de kaldırmanı hatırlatır.
-
-Composio hesabının kendisinin bağlantısını kesmek için (tarayıcı girişiyle de bağlamış olsan
-proje anahtarıyla da) **Gelişmiş → Composio** bölümünü aç ve **Composio'dan çıkış yap**'a tıkla.
-
 ## Bot başına erişim
 
-Her MCP sunucusu (doğrudan OAuth uygulamaları dahil) tüm botlarla paylaşılabilir ya da belirli
-botlarla sınırlanabilir. Bağlı satırlarda en çok dört bot avatarı (daha fazla botun erişimi
+Composio uygulamalarını ve MCP sunucularını tüm botlarla paylaşabilir ya da
+belirli botlarla sınırlayabilirsin. Composio için uygulama sayfasını aç,
+botları seç ve **Kaydet**. Aşağıdaki denetimler MCP sunucuları içindir. Bağlı satırlarda en çok dört bot avatarı (daha fazla botun erişimi
 varsa `+n`) ile birlikte **Tüm botlar**, **Hiçbir bot** ya da **Botlar: …** yazısı görünür.
 
 Erişimi iki yerden değiştirebilirsin:
@@ -200,7 +154,7 @@ Birkaç önemli kural:
 - **“Uygulama listesi yenilenemedi: kayıtlı liste gösteriliyor.”:** Çevrimdışısın, Composio
   istekleri sınırlıyor ya da Composio girişinin süresi doldu. İnternete döndüğünde
   **Yeniden dene**'ye tıkla. Girişin süresi dolduysa
-  **Gelişmiş → Composio → Composio'dan çıkış yap** yolunu izle ve yeniden bağlan.
+  **Uygulamalar** ekranındaki Composio kartından yeniden bağlan.
 
 ### Yerel bir MCP sunucusu “Hata” ya da “Karantinada” gösteriyor
 

@@ -28,21 +28,19 @@
     "doc": "tr/apps.md",
     "title": "Uygulamaları bağlama (Uygulamalar penceresi)",
     "headings": [
-      "Uygulamalar üç yolla bağlanır",
-      "1. Doğrudan OAuth uygulamaları",
-      "2. Composio uygulamaları",
-      "3. Gelişmiş: MCP sunucuları ve anahtarla çalışan servisler",
-      "“Bağlı” ne demek",
+      "Composio hesabını bağla",
+      "Uygulamayı bağla ve yönet",
+      "MCP sunucuları",
+      "MCP sunucusunun durumu",
       "Bağlantıları yönetmek ve oturumu kapatmak",
       "Doğrudan OAuth ve MCP sunucuları",
-      "Composio uygulamaları",
       "Bot başına erişim",
       "Takılan ya da başarısız bir bağlantıyı düzeltmek",
       "OAuth girişi “Tarayıcıda oturum açılması bekleniyor…” ekranında takıldı",
       "Composio girişi takıldı ya da katalog yenilenmiyor",
       "Yerel bir MCP sunucusu “Hata” ya da “Karantinada” gösteriyor"
     ],
-    "summary": "Masaüstü uygulamasındaki Uygulamalar penceresi, Praxi'yi dış servislere"
+    "summary": "Sol çubuktan ya da komut paletinden (Ctrl/Cmd+K) Uygulamalar'ı aç."
   },
   {
     "doc": "tr/automate.md",

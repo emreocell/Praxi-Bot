@@ -32,9 +32,14 @@ const kit = (slug: string): ComposioToolkit => ({
 
 test("only https links on composio.dev may be opened", () => {
   assert.equal(isComposioLink("https://connect.composio.dev/link/x"), true);
+  assert.equal(isComposioLink("https://app.composio.dev/link/lt_example"), true);
+  assert.equal(isComposioLink("https://app.composio.dev/link/lt_example", true), false);
   assert.equal(isComposioLink("https://platform.composio.dev/", true), true);
   assert.equal(isComposioLink("https://platform.composio.dev/"), false);
   for (const bad of [
+    "https://app.composio.dev/",
+    "https://app.composio.dev/link/../settings",
+    "https://app.composio.dev/link/lt_example/other",
     "http://connect.composio.dev/x",
     "https://evilcomposio.dev/x",
     "https://composio.dev.evil.com/x",
@@ -54,7 +59,7 @@ test("only https links on composio.dev may be opened", () => {
   }
 });
 
-test("pending apps, upsert and catalog helpers", () => {
+test("pending apps are polled and the catalog never repeats entries shown under Your apps", () => {
   const apps = [app("a", "active"), app("b", "pending")];
   assert.deepEqual(pendingSlugs(apps), ["b"]);
   assert.equal(upsertApp(apps, app("b", "active"))[1]?.state, "active");
@@ -64,7 +69,7 @@ test("pending apps, upsert and catalog helpers", () => {
     ["z"]
   );
   assert.deepEqual(
-    appendPage([kit("a")], [kit("a"), kit("b")]).map((t) => t.slug),
+    appendPage([kit("a")], [kit("a"), kit("b"), kit("b")]).map((t) => t.slug),
     ["a", "b"]
   );
 });

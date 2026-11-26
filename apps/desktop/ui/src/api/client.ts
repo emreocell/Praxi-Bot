@@ -107,6 +107,7 @@ import type {
   EmailTestReport,
   InputBatch,
   InputResult,
+  ComposioAction,
   ComposioApp,
   ComposioCatalog,
   ComposioConnect,
@@ -1740,6 +1741,9 @@ export class ApiClient {
   }
   composioApps(): Promise<ComposioApp[]> {
     return this.request("GET", "/composio/apps");
+  }
+  composioActions(slug: string): Promise<ComposioAction[]> {
+    return this.request("GET", `/composio/toolkits/${encodeURIComponent(slug)}/actions`);
   }
   /** The app's logo as the daemon fetched, validated and cached it (404 when none is known). */
   composioLogo(slug: string): Promise<Blob> {
