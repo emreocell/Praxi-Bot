@@ -23,6 +23,8 @@ after(async () => {
   await server?.close();
 });
 
+const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+
 const NONE = { hasModel: false, runCount: 0, decidedApprovals: 0, appCount: 0, scheduleCount: 0, serverCount: 0 };
 
 test("every step has real text in en, tr and de, with the same ids", () => {
@@ -67,12 +69,32 @@ test("the optional server step never blocks the finish; the next step skips it",
   assert.equal(m.progressOf(part).next, "approval");
 });
 
+test("the approval step does not promise a card to a bot that runs at the Full level", () => {
+  const body = (botsAsk: boolean | null | undefined, lang = "en") =>
+    m.buildSteps(lang, { ...NONE, botsAsk }).find((s) => s.id === "approval")!.body;
+  assert.match(body(true), /stop and ask you first/);
+  assert.match(body(null), /stop and ask you first/);
+  assert.match(body(false), /Full level/);
+  assert.doesNotMatch(body(false), /create a file/);
+  for (const lang of ["tr", "de"]) {
+    assert.notEqual(body(false, lang), body(true, lang), `${lang} has a Full-level wording`);
+  }
+  assert.equal(m.botsAsk([]), null);
+  assert.equal(m.botsAsk([{ config: { permissions: { preset: "full" } } }]), false);
+  assert.equal(m.botsAsk([{ config: { permissions: { preset: "full" } } }, { config: {} }]), true);
+  assert.equal(m.botsAsk([{ config: { permissions: { preset: "approve_destructive" } } }]), true);
+});
+
+test("a decision made in the app completes the approval step (the daemon lists only waiting cards)", () => {
+  const hook = read("../state/useGettingStarted.ts");
+  assert.match(hook, /decidedHere \? Math\.max\(1/);
+  assert.match(read("../components/PendingDecisions.tsx"), /decideApproval\([^)]*\);\s*markApprovalDecided\(\)/);
+});
+
 test("only decided approvals count", () => {
   assert.equal(m.countDecided([{ decision: null }, {}]), 0);
   assert.equal(m.countDecided([{ decision: null }, { decision: "approved" }, { decision: "denied" }]), 2);
 });
-
-const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 
 test("the checklist shows only on the empty chat and in Help, can be put away and back, and is accessible", () => {
   const view = read("../components/GettingStarted.tsx");

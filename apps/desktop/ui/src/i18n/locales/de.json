@@ -1131,7 +1131,7 @@
       "name": "Von Praxi gesteuert",
       "text": "Praxi führt Dateien und Shell mit seinen eigenen Werkzeugen aus und fragt dich pro Aktion. Die eigenen Werkzeuge der CLI sind aus."
     },
-    "hint": "Wer die Dateien und Shell-Befehle dieses Bots ausführt. Die eigenen Werkzeuge von Praxi (Browser, Apps, Zugangsdaten, Gedächtnis) behalten immer die Genehmigungen von Praxi.",
+    "hint": "Optional. Praxis eigene Datei- und Befehlswerkzeuge funktionieren ohne jede CLI; eine Coding-CLI kann sie stattdessen ausführen. Praxis eigene Werkzeuge (Browser, Apps, Geheimnisse, Gedächtnis) behalten immer Praxis Freigaben.",
     "kill": "Stoppen und ausschalten",
     "label": "Dateien und Shell: gesteuert von {{cli}}",
     "level": {
@@ -1160,10 +1160,16 @@
       "name": "{{cli}} mit eigenen Werkzeugen",
       "text": "{{cli}} liest, bearbeitet und führt Befehle selbst im Arbeitsordner aus, unter der unten gewählten Genehmigungsstufe. Praxi sieht oder kontrolliert diese Aktionen nicht."
     },
-    "needCli": "Wähle oben ein Coding-CLI-Modell für diesen Bot und speichere zuerst (ein Modell, das mit cli: beginnt). Aktiviere die CLI unter Einstellungen, KI, Erkannte Konten.",
+    "needCli": "Es ist keine Coding-CLI eingerichtet, und es wird keine gebraucht: Dieser Bot nutzt Praxis eigene Datei- und Befehlswerkzeuge. Um sie stattdessen einer CLI zu übergeben, wähle oben ein Coding-CLI-Modell für diesen Bot und speichere zuerst.",
     "workspace": "Arbeitsordner",
     "workspaceHint": "Das Programmier-Werkzeug arbeitet in diesem Ordner. Die eigenen Daten von Praxi, dein Home-Ordner, ganze Laufwerke und Ordner mit Passwörtern oder Anmeldungen sind nicht erlaubt.",
     "workspacePlaceholder": "Leer: Praxi legt einen Ordner für diesen Bot an. Oder gib einen Pfad ein, etwa C:/Projects/my-app"
+  },
+  "botFiles": {
+    "action": "Diesen Bot Dateien und Befehle nutzen lassen",
+    "error": "Der Bot konnte nicht geändert werden: {{message}}",
+    "hint": "Seine Werkzeugliste lässt sie aus. Er fragt dich weiterhin zuerst, wenn es seine Berechtigungsstufe verlangt.",
+    "title": "Dieser Bot kann noch keine Dateien erstellen oder Befehle ausführen"
   },
   "botForm": {
     "allowEgressAfterReads": {
@@ -3781,7 +3787,7 @@
     "prompts": {
       "draft": "Hilf mir, eine kurze, freundliche Nachricht an einen Nachbarn zu schreiben",
       "folder": "Fasse diesen Ordner zusammen",
-      "news": "Finde die wichtigsten KI-Nachrichten von heute",
+      "plan": "Plane mir eine dreitägige Reise nach Lissabon",
       "screen": "Was ist gerade auf meinem Bildschirm?"
     },
     "service": {

@@ -1131,7 +1131,7 @@
       "name": "Praxi yönetir",
       "text": "Praxi dosya ve komutları kendi araçlarıyla yürütür ve her işlem için sana sorar. CLI'nin kendi araçları kapalıdır."
     },
-    "hint": "Bu botun dosya ve komut işlerini kimin yürüttüğü. Praxi'nin kendi araçları (tarayıcı, uygulamalar, gizli bilgiler, hafıza) her zaman Praxi onaylarıyla çalışır.",
+    "hint": "İsteğe bağlı. Praxi'nin kendi dosya ve komut araçları herhangi bir CLI olmadan çalışır; istersen bunları bir kodlama CLI'si çalıştırabilir. Praxi'nin kendi araçları (tarayıcı, uygulamalar, sırlar, bellek) her zaman Praxi'nin onaylarına tabi kalır.",
     "kill": "Durdur ve kapat",
     "label": "Dosya ve komutlar: {{cli}} yönetiyor",
     "level": {
@@ -1160,10 +1160,16 @@
       "name": "{{cli}} kendi araçlarıyla",
       "text": "{{cli}} çalışma klasöründe dosyaları okur, düzenler ve komut çalıştırır; aşağıdaki onay düzeyine tabidir. Praxi bu işlemleri görmez ve denetlemez."
     },
-    "needCli": "Önce yukarıdan bu bota bir kodlama CLI modeli seçip kaydet (cli: ile başlayan). CLI'yi Ayarlar → Yapay zekâ → Algılanan hesaplar bölümünden aç.",
+    "needCli": "Kurulu bir kodlama CLI'si yok ve gerek de yok: bu bot Praxi'nin kendi dosya ve komut araçlarını kullanır. Bunları bir CLI'ye devretmek istersen yukarıdan bu bot için bir kodlama CLI modeli seç ve önce kaydet.",
     "workspace": "Çalışma klasörü",
     "workspaceHint": "Kodlama aracı bu klasörde çalışır. Praxi'nin kendi verileri, ana klasörün, tüm sürücüler ve parola ya da oturum bilgisi tutan klasörler kabul edilmez.",
     "workspacePlaceholder": "Boş: Praxi bu bot için bir klasör açar. Ya da C:/Projeler/uygulamam gibi bir yol yaz"
+  },
+  "botFiles": {
+    "action": "Bu bot dosya ve komut kullanabilsin",
+    "error": "Bot değiştirilemedi: {{message}}",
+    "hint": "Araç listesi bunları dışarıda bırakıyor. İzin düzeyi gerektiriyorsa yine de önce sana soracak.",
+    "title": "Bu bot henüz dosya oluşturamıyor ya da komut çalıştıramıyor"
   },
   "botForm": {
     "allowEgressAfterReads": {
@@ -3781,7 +3787,7 @@
     "prompts": {
       "draft": "Bir komşuma kısa ve samimi bir mesaj yazmama yardım et",
       "folder": "Bu klasörü özetle",
-      "news": "Bugünün en önemli yapay zekâ haberlerini bul",
+      "plan": "Bana üç günlük bir Lizbon gezisi planla",
       "screen": "Şu an ekranımda ne var?"
     },
     "service": {

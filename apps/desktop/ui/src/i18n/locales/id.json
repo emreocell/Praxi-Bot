@@ -1131,7 +1131,7 @@
       "name": "Praxi-governed",
       "text": "Praxi runs files and shell with its own tools and asks you per action. The CLI's own tools are off."
     },
-    "hint": "Who runs this bot's files and shell commands. Praxi's own tools (browser, apps, secrets, memory) always keep Praxi's approvals.",
+    "hint": "Opsional. Alat berkas dan perintah bawaan Praxi bekerja tanpa CLI apa pun; CLI pemrograman bisa menjalankannya sebagai gantinya. Alat bawaan Praxi (peramban, aplikasi, rahasia, memori) selalu memakai persetujuan Praxi.",
     "kill": "Stop and turn off",
     "label": "Files and shell: governed by {{cli}}",
     "level": {
@@ -1160,10 +1160,16 @@
       "name": "{{cli}} with its own tools",
       "text": "{{cli}} reads, edits and runs commands itself in the workspace folder, under the approval level below. Praxi does not see or control those actions."
     },
-    "needCli": "Choose a coding CLI model for this bot above and save it first (a model that starts with cli:). Enable the CLI in Settings, AI, Detected accounts.",
+    "needCli": "Tidak ada CLI pemrograman yang disiapkan, dan memang tidak perlu: bot ini memakai alat berkas dan perintah bawaan Praxi. Untuk menyerahkannya ke CLI, pilih model CLI pemrograman untuk bot ini di atas dan simpan dulu.",
     "workspace": "Workspace folder",
     "workspaceHint": "The coding tool works in this folder. Praxi's own data, your home folder, whole drives and folders that hold passwords or sign-ins are not allowed.",
     "workspacePlaceholder": "Empty: Praxi makes a folder for this bot. Or type a path such as C:/Projects/my-app"
+  },
+  "botFiles": {
+    "action": "Izinkan bot ini memakai berkas dan perintah",
+    "error": "Tidak bisa mengubah bot ini: {{message}}",
+    "hint": "Daftar alatnya tidak memuatnya. Bot tetap bertanya dulu bila tingkat izinnya mengharuskan.",
+    "title": "Bot ini belum bisa membuat berkas atau menjalankan perintah"
   },
   "botForm": {
     "allowEgressAfterReads": {
@@ -3668,7 +3674,7 @@
     "prompts": {
       "draft": "Help me write a short, friendly message to a neighbour",
       "folder": "Summarise this folder",
-      "news": "Find today's top AI news",
+      "plan": "Rencanakan perjalanan tiga hari ke Lisbon untuk saya",
       "screen": "What is on my screen right now?"
     },
     "service": {

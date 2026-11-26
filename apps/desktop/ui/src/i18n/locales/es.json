@@ -1131,7 +1131,7 @@
       "name": "Controlado por Praxi",
       "text": "Praxi opera con archivos y ejecuta comandos con sus propias herramientas. Te pide permiso para cada acción. Las herramientas propias de la CLI quedan desactivadas."
     },
-    "hint": "Elige quién se encarga de los archivos y los comandos de este bot. Las herramientas propias de Praxi (navegador, apps, secretos y memoria) siempre siguen el sistema de aprobaciones de Praxi.",
+    "hint": "Opcional. Las herramientas de archivos y comandos de Praxi funcionan sin ninguna CLI; una CLI de programación puede ejecutarlas en su lugar. Las herramientas propias de Praxi (navegador, apps, secretos, memoria) siempre conservan las aprobaciones de Praxi.",
     "kill": "Detener y desactivar",
     "label": "Archivos y comandos: bajo el control de {{cli}}",
     "level": {
@@ -1160,10 +1160,16 @@
       "name": "{{cli}} con sus propias herramientas",
       "text": "{{cli}} lee, edita y ejecuta comandos por su cuenta en la carpeta del espacio de trabajo, con el nivel de aprobación de abajo. Praxi no puede ver ni controlar esas acciones."
     },
-    "needCli": "Elige arriba un modelo de CLI de programación para este bot (debe empezar por cli:) y guárdalo. Activa la CLI en Ajustes → IA → Cuentas detectadas.",
+    "needCli": "No hay ninguna CLI de programación configurada y no hace falta: este bot usa las herramientas de archivos y comandos de Praxi. Para pasárselas a una CLI, elige arriba un modelo de CLI de programación para este bot y guárdalo primero.",
     "workspace": "Carpeta del espacio de trabajo",
     "workspaceHint": "La herramienta de programación trabaja en esta carpeta. No se permiten los datos de Praxi, tu carpeta de usuario, unidades completas ni carpetas que contengan contraseñas o datos de inicio de sesión.",
     "workspacePlaceholder": "Déjalo vacío para que Praxi cree una carpeta para este bot, o escribe una ruta como C:/Projects/my-app"
+  },
+  "botFiles": {
+    "action": "Dejar que este bot use archivos y comandos",
+    "error": "No se pudo cambiar este bot: {{message}}",
+    "hint": "Su lista de herramientas los deja fuera. Seguirá preguntándote primero cuando su nivel de permisos lo exija.",
+    "title": "Este bot todavía no puede crear archivos ni ejecutar comandos"
   },
   "botForm": {
     "allowEgressAfterReads": {
@@ -3781,7 +3787,7 @@
     "prompts": {
       "draft": "Ayúdame a escribirle un mensaje breve y amable a un vecino",
       "folder": "Resume el contenido de esta carpeta",
-      "news": "Busca las noticias de IA más importantes de hoy",
+      "plan": "Planifica un viaje de tres días a Lisboa para mí",
       "screen": "¿Qué hay ahora en mi pantalla?"
     },
     "service": {

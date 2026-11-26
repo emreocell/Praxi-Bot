@@ -1,7 +1,7 @@
 [
   { "id": "model", "title": "Ein Modell verbinden", "body": "Das Modell ist das Gehirn deines Bots. Wähle ein kostenloses oder füge einen Schlüssel ein.", "action": "Modell verbinden" },
   { "id": "message", "title": "Die erste Nachricht senden", "body": "Bitte um etwas Kleines, zum Beispiel die Zusammenfassung einer Webseite oder einen kurzen E-Mail-Entwurf.", "action": "Chat starten" },
-  { "id": "approval", "title": "Eine Freigabe ausprobieren", "body": "Bitte den Bot, eine Datei zu erstellen. Er hält an und fragt dich zuerst; du entscheidest.", "action": "Chat starten" },
+  { "id": "approval", "title": "Eine Freigabe ausprobieren", "body": "Bitte den Bot, eine Datei zu erstellen. Er hält an und fragt dich zuerst; du entscheidest.", "bodyFull": "Dein Bot arbeitet auf der Stufe Voll und fragt bei gewöhnlichen Aktionen nicht nach. Bei großen Dingen, etwa dem Einrichten eines Zeitplans, hält er trotzdem an. Bitte ihn um eine tägliche Erinnerung und entscheide auf der Karte.", "action": "Chat starten" },
   { "id": "app", "title": "Eine App hinzufügen", "body": "Mit Apps kann der Bot zum Beispiel mit deinem Kalender oder deinen Notizen arbeiten.", "action": "Apps öffnen" },
   { "id": "schedule", "title": "Einen Auftrag planen", "body": "Lass den Bot etwas von allein erledigen, zum Beispiel jeden Morgen eine Zusammenfassung.", "action": "Zeitpläne öffnen" },
   { "id": "server", "title": "Einen Server hinzufügen (optional)", "body": "Ein Server hält deine Bots am Laufen, auch wenn dieser Computer aus ist.", "action": "Computer öffnen" }

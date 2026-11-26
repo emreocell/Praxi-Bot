@@ -1131,7 +1131,7 @@
       "name": "Praxi-governed",
       "text": "Praxi runs files and shell with its own tools and asks you per action. The CLI's own tools are off."
     },
-    "hint": "Who runs this bot's files and shell commands. Praxi's own tools (browser, apps, secrets, memory) always keep Praxi's approvals.",
+    "hint": "Optional. Praxi's own file and command tools work without any CLI; a coding CLI can run them instead. Praxi's own tools (browser, apps, secrets, memory) always keep Praxi's approvals.",
     "kill": "Stop and turn off",
     "label": "Files and shell: governed by {{cli}}",
     "level": {
@@ -1160,10 +1160,16 @@
       "name": "{{cli}} with its own tools",
       "text": "{{cli}} reads, edits and runs commands itself in the workspace folder, under the approval level below. Praxi does not see or control those actions."
     },
-    "needCli": "Choose a coding CLI model for this bot above and save it first (a model that starts with cli:). Enable the CLI in Settings, AI, Detected accounts.",
+    "needCli": "No coding CLI is set up, and none is needed: this bot uses Praxi's own file and command tools. To hand them to a CLI instead, choose a coding CLI model for this bot above and save it first.",
     "workspace": "Workspace folder",
     "workspaceHint": "The coding tool works in this folder. Praxi's own data, your home folder, whole drives and folders that hold passwords or sign-ins are not allowed.",
     "workspacePlaceholder": "Empty: Praxi makes a folder for this bot. Or type a path such as C:/Projects/my-app"
+  },
+  "botFiles": {
+    "action": "Let this bot use files and commands",
+    "error": "Could not change this bot: {{message}}",
+    "hint": "Its tool list leaves them out. It still asks you first whenever its permission level says so.",
+    "title": "This bot can't create files or run commands yet"
   },
   "botForm": {
     "allowEgressAfterReads": {
@@ -3781,7 +3787,7 @@
     "prompts": {
       "draft": "Help me write a short, friendly message to a neighbour",
       "folder": "Summarise this folder",
-      "news": "Find today's top AI news",
+      "plan": "Plan a three-day trip to Lisbon for me",
       "screen": "What is on my screen right now?"
     },
     "service": {

@@ -1,3 +1,4 @@
+import { markApprovalDecided } from "../lib/approvalTried";
 import { MessageSquare, Minimize2, Maximize2, X } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -33,6 +34,7 @@ function PendingApproval({ approval, client }: { approval: NeedsYouEntry; client
     setError(null);
     try {
       await client.decideApproval(approval.callId, decision, decision === "approve" ? "once" : undefined);
+      markApprovalDecided();
     } catch (err) {
       if (isAlreadyDecidedError(err)) {
         setLocked(true);

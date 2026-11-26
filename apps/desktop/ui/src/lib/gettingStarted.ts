@@ -28,6 +28,8 @@ export interface StepText {
   id: string;
   title: string;
   body: string;
+  /** The approval step when the bot runs at the Full level and does not ask for a file. */
+  bodyFull?: string;
   action: string;
 }
 
@@ -46,6 +48,11 @@ export interface Signals {
   appCount: number | null;
   scheduleCount: number | null;
   serverCount: number | null;
+  /**
+   * `false` when every bot runs at the Full level (it does not stop to ask before creating a file,
+   * so "ask the bot to create a file" would not show an approval); `null` when not known.
+   */
+  botsAsk?: boolean | null;
 }
 
 export interface Step {
@@ -87,7 +94,7 @@ export function buildSteps(language: string, signals: Signals): Step[] {
       target: def.target,
       optional: def.optional === true,
       title: t.title,
-      body: t.body,
+      body: def.id === "approval" && signals.botsAsk === false ? (t.bodyFull ?? t.body) : t.body,
       action: t.action,
       done: isDone(def.id, signals)
     };
@@ -113,4 +120,19 @@ export function progressOf(steps: readonly Step[]): Progress {
 /** Decided approvals only: a pending one does not mean the person has tried the choice yet. */
 export function countDecided(approvals: readonly { decision?: string | null }[]): number {
   return approvals.filter((a) => a.decision != null).length;
+}
+
+/**
+ * Whether the bots stop to ask: `false` when every bot is set to the Full level, `null` when there
+ * is no bot yet. Only the stored preset counts; a custom policy is treated as "asks".
+ */
+export function botsAsk(bots: readonly { config?: unknown }[]): boolean | null {
+  if (bots.length === 0) {
+    return null;
+  }
+  const isFull = (b: { config?: unknown }): boolean => {
+    const perms = (b.config as { permissions?: { preset?: unknown } } | undefined)?.permissions;
+    return typeof perms?.preset === "string" && perms.preset.replace(/_/g, "-") === "full";
+  };
+  return !bots.every(isFull);
 }

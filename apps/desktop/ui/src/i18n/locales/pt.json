@@ -1131,7 +1131,7 @@
       "name": "Praxi-governed",
       "text": "Praxi runs files and shell with its own tools and asks you per action. The CLI's own tools are off."
     },
-    "hint": "Who runs this bot's files and shell commands. Praxi's own tools (browser, apps, secrets, memory) always keep Praxi's approvals.",
+    "hint": "Opcional. As ferramentas de arquivos e comandos do Praxi funcionam sem nenhuma CLI; uma CLI de programação pode executá-las no lugar. As ferramentas próprias do Praxi (navegador, apps, segredos, memória) sempre mantêm as aprovações do Praxi.",
     "kill": "Stop and turn off",
     "label": "Files and shell: governed by {{cli}}",
     "level": {
@@ -1160,10 +1160,16 @@
       "name": "{{cli}} with its own tools",
       "text": "{{cli}} reads, edits and runs commands itself in the workspace folder, under the approval level below. Praxi does not see or control those actions."
     },
-    "needCli": "Choose a coding CLI model for this bot above and save it first (a model that starts with cli:). Enable the CLI in Settings, AI, Detected accounts.",
+    "needCli": "Nenhuma CLI de programação está configurada, e não precisa: este bot usa as ferramentas de arquivos e comandos do Praxi. Para entregá-las a uma CLI, escolha acima um modelo de CLI de programação para este bot e salve primeiro.",
     "workspace": "Workspace folder",
     "workspaceHint": "The coding tool works in this folder. Praxi's own data, your home folder, whole drives and folders that hold passwords or sign-ins are not allowed.",
     "workspacePlaceholder": "Empty: Praxi makes a folder for this bot. Or type a path such as C:/Projects/my-app"
+  },
+  "botFiles": {
+    "action": "Deixar este bot usar arquivos e comandos",
+    "error": "Não foi possível alterar este bot: {{message}}",
+    "hint": "A lista de ferramentas dele os deixa de fora. Ele continua perguntando antes quando o nível de permissão exigir.",
+    "title": "Este bot ainda não consegue criar arquivos nem executar comandos"
   },
   "botForm": {
     "allowEgressAfterReads": {
@@ -3695,7 +3701,7 @@
     "prompts": {
       "draft": "Help me write a short, friendly message to a neighbour",
       "folder": "Summarise this folder",
-      "news": "Find today's top AI news",
+      "plan": "Planeje uma viagem de três dias para Lisboa para mim",
       "screen": "What is on my screen right now?"
     },
     "service": {

@@ -1,3 +1,4 @@
+import { markApprovalDecided } from "../lib/approvalTried";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useDaemon } from "../state/DaemonContext";
 import { isLocalBaseUrl } from "../lib/liveViewState";
@@ -38,6 +39,7 @@ export function useDecisionActions() {
         const key = standing ? await ownerKey(client.baseUrl) : undefined;
         try {
           await client.decideApproval(callId, decision, scope, reason, key);
+          markApprovalDecided();
         } catch (err) {
           if (isAlreadyDecidedError(err)) {
             void refreshRuns();

@@ -214,7 +214,7 @@ export function refLabel(ref: string): string {
 }
 
 /** Prompts that exercise real abilities; the chat offers them as one-click starters. */
-export const FIRST_PROMPT_KEYS = ["draft", "screen", "folder", "news"] as const;
+export const FIRST_PROMPT_KEYS = ["draft", "screen", "folder", "plan"] as const;
 
 /** What is visibly wrong with a key while it is being typed, so the person hears it before pressing Connect. */
 export type KeyShapeProblem = "address" | "short" | "prefix";
