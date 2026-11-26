@@ -95,7 +95,7 @@ pub fn tool(registry: ToolRegistry, gate: Arc<dyn ToolGate>, data_dir: PathBuf) 
     Arc::new(SelfCheck {
         spec: spec(
             TOOL_SELF_CHECK,
-            "Check which of your tools really work. Runs one harmless, read-only sample call per tool that this bot may use without asking (nothing is changed or sent, and no web search is made) and returns, per tool, `ok`, `failed` with a reason and a fix hint, or `skipped` with the reason, plus yes/no facts about this computer (data folder, home folder, shell). Run it when a tool failed in a way you cannot explain, before a long task, or when the owner asks 'which tools work?'. Tell the owner the failed ones with their fix hints in plain words. `tool` limits the check to one tool. Example: {} or {\"tool\":\"email_search\"}",
+            "Check which of your tools work: one harmless read-only sample call per tool you may use without asking, answered as `ok`, `failed` (reason and fix hint) or `skipped`, plus yes/no facts about this computer. Use it when a tool fails inexplicably or the owner asks 'which tools work?'. `tool` limits it to one tool. Example: {}",
             json!({"type":"object","additionalProperties":false,"properties":{
                 "tool":{"type":"string","description":"Check only this tool."}
             }}),
