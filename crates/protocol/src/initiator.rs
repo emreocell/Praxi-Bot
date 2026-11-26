@@ -30,6 +30,11 @@ pub enum InitiatorKind {
     ExternalAgent,
     /// A schedule supplied external trigger/precheck data; every tool needs once-only approval.
     ExternalSchedule,
+    /// An unattended session of a long-running mission. Its first message is a brief the
+    /// runtime built from a ledger that earlier sessions filled with text from pages and mails,
+    /// so it is never the owner's own typing: it gets the owner's autonomy only through the
+    /// explicit, narrow waivers in `agent-core`, never as `Human`.
+    Mission,
 }
 
 /// The entity that initiated an agent run, including the specific identifier.

@@ -152,6 +152,7 @@ mod tests {
             result: Some(r.into()),
             error: (st == ItemStatus::Failed).then(|| r.to_owned()),
             blocked_reason: (st == ItemStatus::Blocked).then(|| r.to_owned()),
+            live_only: None,
         };
         s.update_item(
             &m.id,

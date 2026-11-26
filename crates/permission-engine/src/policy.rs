@@ -95,15 +95,20 @@ impl Rule {
     ///
     /// Uses the per-initiator override if present, otherwise the base level.
     /// A [`InitiatorKind::Schedule`] run behaves like the user by default: with
-    /// no override of its own it follows the `Human` override, if any.
+    /// no override of its own it follows the `Human` override, if any. A
+    /// [`InitiatorKind::Mission`] session is unattended like a schedule: with no
+    /// override of its own it follows the `Schedule` override, then the `Human` one.
     #[must_use]
     pub fn level_for(&self, initiator: InitiatorKind) -> &Level {
         self.by_initiator
             .get(&initiator)
-            .or_else(|| {
-                (initiator == InitiatorKind::Schedule)
-                    .then(|| self.by_initiator.get(&InitiatorKind::Human))
-                    .flatten()
+            .or_else(|| match initiator {
+                InitiatorKind::Schedule => self.by_initiator.get(&InitiatorKind::Human),
+                InitiatorKind::Mission => self
+                    .by_initiator
+                    .get(&InitiatorKind::Schedule)
+                    .or_else(|| self.by_initiator.get(&InitiatorKind::Human)),
+                _ => None,
             })
             .unwrap_or(&self.level)
     }
@@ -222,5 +227,20 @@ mod tests {
             .insert(InitiatorKind::Schedule, Level::Deny);
         assert_eq!(rule.level_for(InitiatorKind::Schedule), &Level::Deny);
         assert_eq!(rule.level_for(InitiatorKind::Human), &Level::Allow);
+    }
+
+    #[test]
+    fn mission_follows_schedule_then_human_unless_overridden() {
+        let mut rule = Rule::new(Level::Ask);
+        assert_eq!(rule.level_for(InitiatorKind::Mission), &Level::Ask);
+        rule.by_initiator.insert(InitiatorKind::Human, Level::Allow);
+        assert_eq!(rule.level_for(InitiatorKind::Mission), &Level::Allow);
+        rule.by_initiator
+            .insert(InitiatorKind::Schedule, Level::Deny);
+        assert_eq!(rule.level_for(InitiatorKind::Mission), &Level::Deny);
+        rule.by_initiator
+            .insert(InitiatorKind::Mission, Level::Allow);
+        assert_eq!(rule.level_for(InitiatorKind::Mission), &Level::Allow);
+        assert_eq!(rule.level_for(InitiatorKind::Schedule), &Level::Deny);
     }
 }

@@ -31,6 +31,9 @@ pub enum MissionError {
         /// Requested state.
         to: MissionState,
     },
+    /// Another supervisor holds the mission (a session is in flight, or it is not `running`).
+    #[error("mission {0} is not free for a new session")]
+    Busy(String),
     /// The database was written by a newer build.
     #[error("mission database schema {found} is newer than this build supports ({supported})")]
     SchemaTooNew {

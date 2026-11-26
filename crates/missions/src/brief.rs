@@ -261,6 +261,7 @@ mod tests {
             last_error: None,
             blocked_reason: None,
             owner_answer: None,
+            live_only: false,
             updated_at_ms: 0,
         }
     }

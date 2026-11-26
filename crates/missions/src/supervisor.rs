@@ -9,23 +9,26 @@
 //! The step limit of the agent loop is a *session* end here, not a failure:
 //! that is how a mission gets past the 40-model-call wall of one run.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::sync::Notify;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::brief::{BRIEF_ITEMS, BriefInput, build_brief};
 use crate::digest;
 use crate::error::{MissionError, Result};
+pub use crate::model::MAX_ITEM_ATTEMPTS;
 use crate::model::{ItemStatus, Mission, MissionState};
-use crate::store::{MissionStore, SessionEndRecord};
+use crate::store::{MissionStore, SESSION_LEASE_PREFIX, SessionEndRecord};
 
-/// Attempts an item gets (sessions that left it `doing`) before it is given up.
-pub const MAX_ITEM_ATTEMPTS: u32 = 3;
+/// How long the loop waits for the drivers of running sessions after `shutdown` before it
+/// aborts them (their runs are cancelled the moment `shutdown` fires, so this is a backstop).
+const DRIVER_JOIN_GRACE: Duration = Duration::from_secs(15);
 
 /// Source of "now".
 pub trait Clock: Send + Sync {
@@ -58,6 +61,10 @@ pub struct SessionRequest {
     pub brief: String,
     /// 1-based number of this session.
     pub session_no: u32,
+    /// Fires when the session has to stop: the owner paused or stopped the mission, or the
+    /// daemon is shutting down. A runner that is still waiting for the chat to be free (no
+    /// run, no lease yet) must give up then.
+    pub cancel: CancellationToken,
 }
 
 /// How a session's run ended.
@@ -116,6 +123,10 @@ pub trait SessionRunner: Send + Sync {
 
     /// Run one session to the end. `on_started` is called with the run id as
     /// soon as the run exists, so the lease survives in the database.
+    ///
+    /// `req.cancel` firing before the run exists: return
+    /// `SessionResult { end: SessionEnd::Cancelled, model_steps: 0, cost_usd: 0.0 }` without
+    /// starting a run. Firing after: cancel the run and return its result.
     async fn run_session(
         &self,
         req: SessionRequest,
@@ -147,6 +158,14 @@ impl Default for SupervisorConfig {
     }
 }
 
+/// How `run_one_session` ended.
+enum Ran {
+    /// The session ran; the ledger decides what follows.
+    Ended(SessionEnd),
+    /// Nothing more to do for now.
+    Stop(Step),
+}
+
 /// What one step of the supervisor did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
@@ -167,6 +186,9 @@ pub struct Supervisor {
     cfg: SupervisorConfig,
     shutdown: CancellationToken,
     driving: Mutex<HashSet<String>>,
+    /// The session in flight per mission: fired by pause, stop and shutdown. An entry also
+    /// keeps two `step`s of one supervisor off the same mission.
+    active: Mutex<HashMap<String, CancellationToken>>,
     wake: Notify,
     on_change: Mutex<Option<ChangeHook>>,
 }
@@ -194,6 +216,7 @@ impl Supervisor {
             cfg,
             shutdown,
             driving: Mutex::new(HashSet::new()),
+            active: Mutex::new(HashMap::new()),
             wake: Notify::new(),
             on_change: Mutex::new(None),
         }
@@ -234,11 +257,24 @@ impl Supervisor {
             Some("paused by the owner"),
             self.clock.now_ms(),
         )?;
-        if let Some(run) = &m.lease_run_id {
-            self.runner.cancel_run(run);
-        }
+        self.stop_session(&m);
         self.changed(id);
         Ok(m)
+    }
+
+    /// Stop the session in flight, if any: the runner is told through the session's token
+    /// (it may still be waiting for the chat) and the run, once it exists, is cancelled.
+    fn stop_session(&self, m: &Mission) {
+        if let Some(token) = self.active.lock().get(&m.id) {
+            token.cancel();
+        }
+        if let Some(run) = m
+            .lease_run_id
+            .as_deref()
+            .filter(|r| !r.starts_with(SESSION_LEASE_PREFIX))
+        {
+            self.runner.cancel_run(run);
+        }
     }
 
     /// Resume a paused or blocked mission.
@@ -265,9 +301,7 @@ impl Supervisor {
             Some("stopped by the owner"),
             self.clock.now_ms(),
         )?;
-        if let Some(run) = &m.lease_run_id {
-            self.runner.cancel_run(run);
-        }
+        self.stop_session(&m);
         self.conclude(id).await?;
         self.get(id)
     }
@@ -296,7 +330,9 @@ impl Supervisor {
     // ---- the loop ----
 
     /// Recover after a restart, then run until `shutdown`: every `running`
-    /// mission is driven by its own task, one session at a time.
+    /// mission is driven by its own task, one session at a time. The returned
+    /// handle completes only after every driver is gone: the sessions in flight
+    /// are cancelled the moment `shutdown` fires and joined here.
     pub fn spawn(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
         let this = Arc::clone(self);
         tokio::spawn(async move {
@@ -315,13 +351,14 @@ impl Supervisor {
                 }
                 Err(e) => tracing::warn!("missions: recovery failed: {e}"),
             }
-            loop {
+            let mut drivers: JoinSet<()> = JoinSet::new();
+            while !this.shutdown.is_cancelled() {
                 match this.store.list_by_state(MissionState::Running) {
                     Ok(list) => {
                         for m in list {
                             if this.driving.lock().insert(m.id.clone()) {
                                 let driver = Arc::clone(&this);
-                                tokio::spawn(async move {
+                                drivers.spawn(async move {
                                     if let Err(e) = driver.drive(&m.id).await {
                                         tracing::warn!("missions: {}: {e}", m.id);
                                     }
@@ -334,11 +371,24 @@ impl Supervisor {
                     }
                     Err(e) => tracing::warn!("missions: listing failed: {e}"),
                 }
+                // Reap the drivers that ended (a panicked one is already logged by tokio).
+                while drivers.try_join_next().is_some() {}
                 tokio::select! {
+                    biased;
                     () = this.shutdown.cancelled() => break,
                     () = this.wake.notified() => {}
                     () = tokio::time::sleep(this.cfg.poll) => {}
                 }
+            }
+            let joined = async { while drivers.join_next().await.is_some() {} };
+            if tokio::time::timeout(DRIVER_JOIN_GRACE, joined)
+                .await
+                .is_err()
+            {
+                tracing::warn!("missions: a session did not stop in time; aborting it");
+                drivers.abort_all();
+                while drivers.join_next().await.is_some() {}
+                this.active.lock().clear();
             }
         })
     }
@@ -373,6 +423,11 @@ impl Supervisor {
         if m.state != MissionState::Running {
             return Ok(Step::Stopped(m.state));
         }
+        // No new session once the daemon is going down (it would be cancelled at once and
+        // still count against the session budget).
+        if self.shutdown.is_cancelled() {
+            return Ok(Step::Stopped(MissionState::Running));
+        }
         let now = self.clock.now_ms();
         if let Some(reason) = budget_block(&m, now) {
             return self.block(id, &reason).await;
@@ -387,7 +442,39 @@ impl Supervisor {
 
         let brief = self.brief_for(&m)?;
 
-        let session = self.store.begin_session(id, now)?;
+        // The token is registered before the session row exists, so a pause or stop that
+        // lands at any point from here on reaches the runner.
+        let cancel = {
+            let mut active = self.active.lock();
+            if active.contains_key(id) {
+                return Ok(Step::Stopped(MissionState::Running));
+            }
+            let token = self.shutdown.child_token();
+            active.insert(id.to_owned(), token.clone());
+            token
+        };
+        let ran = self.run_one_session(&m, brief, cancel).await;
+        self.active.lock().remove(id);
+        match ran? {
+            Ran::Ended(end) => self.after_session(id, &end).await,
+            Ran::Stop(step) => Ok(step),
+        }
+    }
+
+    /// Begin, run and close one session of `m`.
+    async fn run_one_session(
+        &self,
+        m: &Mission,
+        brief: String,
+        cancel: CancellationToken,
+    ) -> Result<Ran> {
+        let id = m.id.as_str();
+        let session = match self.store.begin_session(id, self.clock.now_ms()) {
+            Ok(session) => session,
+            // Another supervisor holds the mission, or it was paused a moment ago.
+            Err(MissionError::Busy(_)) => return Ok(Ran::Stop(Step::Stopped(self.get(id)?.state))),
+            Err(e) => return Err(e),
+        };
         self.changed(id);
         let store = Arc::clone(&self.store);
         let mission_id = id.to_owned();
@@ -404,19 +491,27 @@ impl Supervisor {
                     chat_id: m.chat_id.clone(),
                     brief,
                     session_no: m.sessions + 1,
+                    cancel,
                 },
                 &on_started,
             )
             .await;
 
         let now = self.clock.now_ms();
-        // The daemon is going down: leave the mission running, the session
-        // interrupted. It continues from its ledger after the restart.
-        let outcome = if self.shutdown.is_cancelled() && result.end == SessionEnd::Cancelled {
+        // The daemon is going down: its shutdown cancels or pauses the run. Leave the mission
+        // running and the session interrupted; it continues from its ledger after the restart.
+        let interrupted = self.shutdown.is_cancelled()
+            && matches!(result.end, SessionEnd::Cancelled | SessionEnd::Paused);
+        let outcome = if interrupted {
             "interrupted"
         } else {
             result.end.name()
         };
+        // The run of a paused session (read before `end_session` releases the lease).
+        let paused_run = (!interrupted && result.end == SessionEnd::Paused)
+            .then(|| self.get(id).ok().and_then(|m| m.lease_run_id))
+            .flatten()
+            .filter(|r| !r.starts_with(SESSION_LEASE_PREFIX));
         self.store.requeue_stale_doing(id, MAX_ITEM_ATTEMPTS, now)?;
         self.store.end_session(
             id,
@@ -430,11 +525,15 @@ impl Supervisor {
             now,
         )?;
         self.changed(id);
-        if outcome == "interrupted" {
-            return Ok(Step::Stopped(MissionState::Running));
+        if interrupted {
+            return Ok(Ran::Stop(Step::Stopped(MissionState::Running)));
         }
-
-        self.after_session(id, &result.end).await
+        // A session paused by an unanswered approval is abandoned: the next session starts from
+        // a fresh brief, so nobody must be able to resume the old run next to it.
+        if let Some(run) = paused_run {
+            self.runner.cancel_run(&run);
+        }
+        Ok(Ran::Ended(result.end))
     }
 
     /// Decide what follows a session that ended normally, from the ledger.
@@ -460,7 +559,10 @@ impl Supervisor {
             }
             SessionEnd::Paused => {
                 return self
-                    .block(id, "a session paused while waiting for an approval nobody answered; approve it or resume")
+                    .block(
+                        id,
+                        "a session stopped because an approval was not answered in time; resume the mission when you are ready to decide it",
+                    )
                     .await;
             }
             SessionEnd::Failed(e) if m.failed_sessions >= m.budgets.max_failed_sessions => {
@@ -573,8 +675,18 @@ impl Supervisor {
     /// Storage failures.
     pub async fn conclude(&self, id: &str) -> Result<()> {
         let m = self.get(id)?;
+        // One digest per ending: the owner's stop and the session winding down both end up
+        // here, and the first one to write it is the only one that announces it.
+        if m.digest
+            .as_ref()
+            .is_some_and(|d| d.outcome == m.state.as_str())
+        {
+            return Ok(());
+        }
         let d = digest::build(&self.store, &m, m.state.as_str(), self.clock.now_ms())?;
-        self.store.set_digest(id, &d, self.clock.now_ms())?;
+        if !self.store.set_digest_once(id, &d, self.clock.now_ms())? {
+            return Ok(());
+        }
         let m = self.get(id)?;
         self.changed(id);
         self.runner.announce(&m, &digest::render_text(&m, &d)).await;

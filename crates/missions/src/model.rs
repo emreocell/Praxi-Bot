@@ -23,6 +23,8 @@ pub const MAX_ITEMS_PER_CALL: usize = 100;
 pub const MAX_NOTE_CHARS: usize = 400;
 /// Most notes one mission keeps (the oldest unpinned are dropped).
 pub const MAX_NOTES: usize = 60;
+/// Attempts an item gets (sessions that left it `doing`) before it is given up.
+pub const MAX_ITEM_ATTEMPTS: u32 = 3;
 
 /// Where a mission is in its life.
 ///
@@ -291,6 +293,10 @@ pub struct Item {
     pub blocked_reason: Option<String>,
     /// What the owner answered for a blocked item.
     pub owner_answer: Option<String>,
+    /// Parked for a step only the owner can do live (a 2FA / verification code is typed
+    /// into the page by the owner, never stored or shown to the bot): no typed answer
+    /// is accepted for it, the owner finishes it on the site and skips it here.
+    pub live_only: bool,
     /// Last change.
     pub updated_at_ms: i64,
 }
@@ -403,6 +409,92 @@ pub fn clip(s: &str, max: usize) -> String {
     format!("{cut}…")
 }
 
+/// The text of a blocked reason talks about a one-time code the owner would have to type
+/// (2FA, OTP, a verification or security code, an SMS, in English, Turkish or German). A bare
+/// "code" is not enough: "the postal code" or "the promo code" is an ordinary answer.
+#[must_use]
+pub fn mentions_code(reason: &str) -> bool {
+    let r = reason.to_lowercase();
+    [
+        "2fa",
+        "two-factor",
+        "two factor",
+        "otp",
+        "one-time",
+        "one time",
+        "security code",
+        "confirmation code",
+        "login code",
+        "sign-in code",
+        "sms",
+        "passcode",
+        "authenticator",
+        "verification",
+        "doğrulama",
+        "dogrulama",
+        "bestätigungscode",
+        "sicherheitscode",
+        "güvenlik kodu",
+        "tek kullanımlık",
+    ]
+    .iter()
+    .any(|w| r.contains(w))
+}
+
+/// The text is (or is mostly) a one-time code: a short answer that holds a run of 4 to 10
+/// digits, possibly split by spaces or hyphens ("123456", "123 456", "code is 4829-1033").
+/// A code never goes into the ledger: it would be stored in clear text and read back by the
+/// model in the next brief. Long texts, phone numbers (`+`, more than 10 digits), dates
+/// (`2024-05-17`), addresses and links are not codes.
+#[must_use]
+pub fn looks_like_one_time_code(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty()
+        || t.chars().count() > 80
+        || t.contains(['+', '@', '/'])
+        || t.to_lowercase().contains("http")
+    {
+        return false;
+    }
+    let words = t
+        .split_whitespace()
+        .filter(|w| !w.chars().all(|c| c.is_ascii_digit() || c == '-'))
+        .count();
+    if words > 6 {
+        return false;
+    }
+    // Digit runs: groups of digits joined by a single space or hyphen.
+    let chars: Vec<char> = t.chars().collect();
+    let mut runs: Vec<Vec<usize>> = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if !chars[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let mut groups = Vec::new();
+        loop {
+            let start = i;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+            groups.push(i - start);
+            let joined = i + 1 < chars.len()
+                && matches!(chars[i], ' ' | '-')
+                && chars[i + 1].is_ascii_digit();
+            if !joined {
+                break;
+            }
+            i += 1;
+        }
+        runs.push(groups);
+    }
+    runs.iter().any(|g| {
+        let total: usize = g.iter().sum();
+        (4..=10).contains(&total) && g.as_slice() != [4, 2, 2]
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,6 +587,59 @@ mod tests {
     fn clip_counts_characters() {
         assert_eq!(clip("  abc ", 10), "abc");
         assert_eq!(clip("çğışöü", 4), "çğı…");
+    }
+
+    #[test]
+    fn one_time_codes_are_recognised() {
+        for text in [
+            "123456",
+            " 123 456 ",
+            "4829-1033",
+            "code is 123456",
+            "kod: 123 456",
+            "my otp 4829 1033",
+            "The code: 0042",
+            "doğrulama kodu 554433",
+            "G-123456",
+        ] {
+            assert!(looks_like_one_time_code(text), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn ordinary_answers_are_not_one_time_codes() {
+        for text in [
+            "",
+            "use the second address",
+            "I am 34 years old",
+            "pick option 2 or 3",
+            "+49 170 1234567",
+            "0170 1234567",
+            "the date is 2024-05-17",
+            "mail me at 123456@example.com",
+            "see https://example.com/12345",
+            "use 1234 5678 9012 3456 as the reference number for the order and nothing else please",
+            "the second one",
+        ] {
+            assert!(!looks_like_one_time_code(text), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn reasons_that_talk_about_a_code_are_recognised() {
+        for r in [
+            "2FA code needed",
+            "a verification code for example.com",
+            "needs an OTP from the authenticator app",
+            "doğrulama kodu gerekiyor",
+            "SMS code on the sign-up form",
+        ] {
+            assert!(mentions_code(r), "{r}");
+        }
+        assert!(!mentions_code("CAPTCHA on the sign-up form"));
+        assert!(!mentions_code("which e-mail address should I use?"));
+        assert!(!mentions_code("the form asks for your postal code"));
+        assert!(!mentions_code("needs the promo code from the owner"));
     }
 
     #[test]

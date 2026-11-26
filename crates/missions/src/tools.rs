@@ -306,6 +306,7 @@ impl MissionTool {
                     result: i.result,
                     error: i.error,
                     blocked_reason: i.reason,
+                    live_only: None,
                 },
                 false,
                 self.clock.now_ms(),
@@ -552,6 +553,44 @@ mod tests {
         .await
         .unwrap();
         assert!(r.contains("parked for the owner") && r.contains("next item"));
+    }
+
+    #[tokio::test]
+    async fn an_item_started_too_often_is_refused_with_what_to_do_instead() {
+        let f = fixture();
+        call(
+            &f,
+            "mission_plan",
+            "run-1",
+            json!({"items":[{"key":"a.com","title":"x"}]}),
+        )
+        .await
+        .unwrap();
+        for _ in 0..crate::model::MAX_ITEM_ATTEMPTS {
+            for status in ["doing", "todo"] {
+                call(
+                    &f,
+                    "mission_item",
+                    "run-1",
+                    json!({"key":"a.com","status":status}),
+                )
+                .await
+                .unwrap();
+            }
+        }
+        let err = call(
+            &f,
+            "mission_item",
+            "run-1",
+            json!({"key":"a.com","status":"doing"}),
+        )
+        .await
+        .unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.contains("mark it failed") && text.contains("blocked"),
+            "{text}"
+        );
     }
 
     #[tokio::test]

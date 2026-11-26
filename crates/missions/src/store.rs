@@ -10,15 +10,20 @@ use std::path::Path;
 use std::time::Duration;
 
 use parking_lot::{Mutex, MutexGuard};
-use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehavior, params};
 use serde_json::{Value, json};
 
 use crate::error::{MissionError, Result};
 use crate::model::{
-    Budgets, Digest, Item, ItemStatus, MAX_ITEMS, MAX_ITEMS_PER_CALL, MAX_KEY_CHARS,
-    MAX_NOTE_CHARS, MAX_NOTES, MAX_PAYLOAD_BYTES, MAX_TEXT_CHARS, MAX_TITLE_CHARS, Mission,
-    MissionState, Note, Progress, can_transition, clip,
+    Budgets, Digest, Item, ItemStatus, MAX_ITEM_ATTEMPTS, MAX_ITEMS, MAX_ITEMS_PER_CALL,
+    MAX_KEY_CHARS, MAX_NOTE_CHARS, MAX_NOTES, MAX_PAYLOAD_BYTES, MAX_TEXT_CHARS, MAX_TITLE_CHARS,
+    Mission, MissionState, Note, Progress, can_transition, clip, looks_like_one_time_code,
+    mentions_code,
 };
+
+/// Prefix of the lease a session holds from [`MissionStore::begin_session`] until its run
+/// exists (the run id replaces it): the mission is taken while the session waits for the chat.
+pub const SESSION_LEASE_PREFIX: &str = "session:";
 
 const MIGRATIONS: &[(&str, &str)] = &[(
     "0001_missions",
@@ -70,6 +75,9 @@ pub struct ItemUpdate {
     pub error: Option<String>,
     /// Why it is parked.
     pub blocked_reason: Option<String>,
+    /// Parked for a step only the owner can do live (see [`Item::live_only`]); only the
+    /// runtime sets it, the model's `mission_item` tool never does.
+    pub live_only: Option<bool>,
 }
 
 /// What `upsert_items` did.
@@ -126,7 +134,7 @@ const MISSION_COLS: &str = "id, user_id, bot_id, chat_id, title, goal_text, targ
     started_at_ms, updated_at_ms, finished_at_ms";
 
 const ITEM_COLS: &str = "key, kind, title, status, attempts, payload_json, result, last_error, \
-    blocked_reason, owner_answer, updated_at_ms";
+    blocked_reason, owner_answer, updated_at_ms, live_only";
 
 #[allow(clippy::cast_precision_loss)] // micro-USD fits an f64 mantissa for any realistic spend
 fn usd(micro: i64) -> f64 {
@@ -198,6 +206,7 @@ fn item_of(row: &Row<'_>) -> rusqlite::Result<Item> {
         blocked_reason: row.get(8)?,
         owner_answer: row.get(9)?,
         updated_at_ms: row.get(10)?,
+        live_only: row.get::<_, i64>(11)? != 0,
     })
 }
 
@@ -382,6 +391,21 @@ impl MissionStore {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// The mission whose chat is `chat_id` (its sessions and digest live there), if any.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn mission_for_chat(&self, chat_id: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT id FROM missions WHERE chat_id = ?1 LIMIT 1",
+                [chat_id],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
     /// Move a mission to `to` (checked by [`can_transition`]).
     ///
     /// # Errors
@@ -500,6 +524,16 @@ impl MissionStore {
                 cur.status
             )));
         }
+        if !by_owner
+            && to == ItemStatus::Doing
+            && cur.status != ItemStatus::Doing
+            && cur.attempts >= MAX_ITEM_ATTEMPTS
+        {
+            return Err(MissionError::Invalid(format!(
+                "item {key:?} was started {} times without a result; do not start it again: mark it failed (with the error) or blocked (with what the owner has to do)",
+                cur.attempts
+            )));
+        }
         let reason = match (to, upd.blocked_reason.as_deref()) {
             (ItemStatus::Blocked, Some(r)) => {
                 Some(check_text("blocked reason", r, MAX_TEXT_CHARS)?)
@@ -527,13 +561,37 @@ impl MissionStore {
             .or(cur.last_error.clone());
         let attempts =
             cur.attempts + u32::from(to == ItemStatus::Doing && cur.status != ItemStatus::Doing);
+        // The flag lives only while the item stays parked.
+        let live_only = to == ItemStatus::Blocked && upd.live_only.unwrap_or(cur.live_only);
         tx.execute(
             "UPDATE mission_items SET status = ?3, attempts = ?4, result = ?5, last_error = ?6, \
-             blocked_reason = ?7, updated_at_ms = ?8 WHERE mission_id = ?1 AND key = ?2",
-            params![id, key, to.as_str(), attempts, result, error, reason, now],
+             blocked_reason = ?7, live_only = ?8, updated_at_ms = ?9 WHERE mission_id = ?1 AND key = ?2",
+            params![
+                id,
+                key,
+                to.as_str(),
+                attempts,
+                result,
+                error,
+                reason,
+                i64::from(live_only),
+                now
+            ],
         )?;
         if to != cur.status {
-            bump(&tx, id, now)?;
+            // Only a move that settles an item counts as progress. Flipping an item between
+            // `todo` and `doing` must not reset the stalled-session count.
+            if by_owner
+                || matches!(
+                    to,
+                    ItemStatus::Done
+                        | ItemStatus::Failed
+                        | ItemStatus::Skipped
+                        | ItemStatus::Blocked
+                )
+            {
+                bump(&tx, id, now)?;
+            }
             event(
                 &tx,
                 id,
@@ -589,19 +647,43 @@ impl MissionStore {
     }
 
     /// The owner answered blocked items: each named item goes back to `todo`
-    /// carrying the answer, and a `blocked` mission runs again. Returns how
-    /// many items were released.
+    /// carrying the answer (with a fresh attempt budget: the answer is new information),
+    /// and a `blocked` mission runs again. Returns how many items were released.
     ///
     /// # Errors
     /// Unknown mission, SQLite failure.
     pub fn answer_blocked(&self, id: &str, answers: &[(String, String)], now: i64) -> Result<u32> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let mut released = 0;
+        // Everything is checked before anything changes: a refused answer changes nothing.
+        let mut checked = Vec::with_capacity(answers.len());
         for (key, answer) in answers {
             let answer = check_text("answer", answer, MAX_TEXT_CHARS)?;
+            let item = match item_in(&tx, id, key) {
+                Ok(item) => Some(item),
+                Err(MissionError::NotFound(_)) => None,
+                Err(e) => return Err(e),
+            };
+            if let Some(item) = item.filter(|i| i.status == ItemStatus::Blocked) {
+                if item.live_only {
+                    return Err(MissionError::Invalid(format!(
+                        "item {key:?} waits for a step you have to do yourself on the site: a code is never stored or shown to the bot. Finish that step there, then skip the item here"
+                    )));
+                }
+                if item.blocked_reason.as_deref().is_some_and(mentions_code)
+                    && looks_like_one_time_code(&answer)
+                {
+                    return Err(MissionError::Invalid(format!(
+                        "item {key:?}: that looks like a one-time code. A code is never stored or shown to the bot: enter it on the site yourself, then skip the item here, or answer with something other than the code"
+                    )));
+                }
+            }
+            checked.push((key, answer));
+        }
+        let mut released = 0;
+        for (key, answer) in checked {
             let n = tx.execute(
-                "UPDATE mission_items SET status = 'todo', owner_answer = ?3, updated_at_ms = ?4 \
+                "UPDATE mission_items SET status = 'todo', owner_answer = ?3, live_only = 0, attempts = 0, updated_at_ms = ?4 \
                  WHERE mission_id = ?1 AND key = ?2 AND status = 'blocked'",
                 params![id, key, answer, now],
             )?;
@@ -641,6 +723,8 @@ impl MissionStore {
     /// being worked on (the only one `doing`) as blocked, so the session moves on
     /// instead of waiting for the owner. Returns its key; `None` when no single
     /// item is `doing` (the caller then tells the model to park it itself).
+    /// `live_only` marks a step the owner has to do live (a code): the item takes no
+    /// typed answer (see [`Item::live_only`]).
     ///
     /// # Errors
     /// SQLite failure.
@@ -648,6 +732,7 @@ impl MissionStore {
         &self,
         id: &str,
         reason: &str,
+        live_only: bool,
         now: i64,
     ) -> Result<Option<String>> {
         let doing = self.items(id, Some(ItemStatus::Doing))?;
@@ -660,6 +745,7 @@ impl MissionStore {
             &ItemUpdate {
                 status: Some(ItemStatus::Blocked),
                 blocked_reason: Some(reason.to_owned()),
+                live_only: Some(live_only),
                 ..ItemUpdate::default()
             },
             false,
@@ -677,43 +763,9 @@ impl MissionStore {
     pub fn requeue_stale_doing(&self, id: &str, max_attempts: u32, now: i64) -> Result<(u32, u32)> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let stale: Vec<(String, u32)> = {
-            let mut stmt = tx.prepare(
-                "SELECT key, attempts FROM mission_items WHERE mission_id = ?1 AND status = 'doing'",
-            )?;
-            stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<rusqlite::Result<_>>()?
-        };
-        let (mut requeued, mut gave_up) = (0, 0);
-        for (key, attempts) in stale {
-            let (to, err) = if attempts >= max_attempts {
-                gave_up += 1;
-                (
-                    "failed",
-                    Some(format!(
-                        "gave up after {attempts} attempts without a result"
-                    )),
-                )
-            } else {
-                requeued += 1;
-                ("todo", None)
-            };
-            tx.execute(
-                "UPDATE mission_items SET status = ?3, last_error = COALESCE(?4, last_error), updated_at_ms = ?5 \
-                 WHERE mission_id = ?1 AND key = ?2",
-                params![id, key, to, err, now],
-            )?;
-            event(
-                &tx,
-                id,
-                now,
-                "item",
-                Some(&key),
-                &json!({"from": "doing", "to": to, "by": "supervisor"}),
-            )?;
-        }
+        let counts = requeue_in(&tx, id, max_attempts, now)?;
         tx.commit()?;
-        Ok((requeued, gave_up))
+        Ok(counts)
     }
 
     // ---- notes ----
@@ -767,19 +819,24 @@ impl MissionStore {
 
     // ---- sessions ----
 
-    /// Start a session: counts it and returns its row id. The session row is
+    /// Start a session: counts it, takes the mission's lease and returns the session row id.
+    /// It only succeeds for a `running` mission that no session holds, in one transaction,
+    /// so two supervisors can never run the same mission at once. The lease is a
+    /// [`SESSION_LEASE_PREFIX`] placeholder until [`Self::set_lease`] records the run id;
+    /// [`Self::end_session`] and [`Self::recover_interrupted`] release it. The session row is
     /// the durable record that a session was in flight (see [`Self::recover_interrupted`]).
     ///
     /// # Errors
-    /// Unknown mission, SQLite failure.
+    /// Unknown mission, [`MissionError::Busy`] when the mission is not `running` or already
+    /// has a session, SQLite failure.
     pub fn begin_session(&self, id: &str, now: i64) -> Result<i64> {
         let mut conn = self.conn();
-        let tx = conn.transaction()?;
-        let n = tx.execute(
-            "UPDATE missions SET sessions = sessions + 1, updated_at_ms = ?2 WHERE id = ?1",
-            params![id, now],
-        )?;
-        if n == 0 {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let exists: i64 =
+            tx.query_row("SELECT COUNT(*) FROM missions WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })?;
+        if exists == 0 {
             return Err(MissionError::NotFound(id.to_owned()));
         }
         tx.execute(
@@ -787,6 +844,15 @@ impl MissionStore {
             params![id, now],
         )?;
         let sid = tx.last_insert_rowid();
+        let n = tx.execute(
+            "UPDATE missions SET sessions = sessions + 1, lease_run_id = ?3, updated_at_ms = ?2 \
+             WHERE id = ?1 AND state = 'running' AND lease_run_id IS NULL",
+            params![id, now, format!("{SESSION_LEASE_PREFIX}{sid}")],
+        )?;
+        if n == 0 {
+            // Dropping the transaction rolls the session row back.
+            return Err(MissionError::Busy(id.to_owned()));
+        }
         event(
             &tx,
             id,
@@ -864,9 +930,11 @@ impl MissionStore {
     /// After a restart: sessions that never ended are `interrupted` (the run
     /// itself is already paused by the run recovery; it is abandoned, not
     /// resumed, because its model context is gone and side effects are never
-    /// replayed). Their missions go on with a fresh brief. Returns the run ids
-    /// of the abandoned sessions, so the caller can cancel those paused runs
-    /// (nobody must be able to resume one next to its replacement).
+    /// replayed). Their missions go on with a fresh brief, and an item the
+    /// crash left `doing` is requeued (or given up after [`MAX_ITEM_ATTEMPTS`]).
+    /// Returns the run ids of the abandoned sessions, so the caller can cancel
+    /// those paused runs (nobody must be able to resume one next to its
+    /// replacement).
     ///
     /// # Errors
     /// SQLite failure.
@@ -880,6 +948,7 @@ impl MissionStore {
             stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
                 .collect::<rusqlite::Result<_>>()?
         };
+        let mut missions: Vec<&str> = Vec::new();
         for (sid, mission, _) in &open {
             tx.execute(
                 "UPDATE mission_sessions SET ended_at_ms = ?2, outcome = 'interrupted' WHERE id = ?1",
@@ -897,12 +966,58 @@ impl MissionStore {
                 None,
                 &json!({"session": sid, "outcome": "interrupted"}),
             )?;
+            if !missions.contains(&mission.as_str()) {
+                missions.push(mission);
+            }
+        }
+        for mission in missions {
+            requeue_in(&tx, mission, MAX_ITEM_ATTEMPTS, now)?;
         }
         tx.commit()?;
         Ok(open.into_iter().filter_map(|(_, _, run)| run).collect())
     }
 
     // ---- digest and timeline ----
+
+    /// Store the owner digest unless this outcome already has one: the first of two racing
+    /// callers (the owner's stop and the session winding down) writes it and gets `true`, the
+    /// other gets `false` and must not announce it again. A mission that runs again forgets
+    /// its digest (see [`MissionStore::set_state`]), so its next end gets a fresh one.
+    ///
+    /// # Errors
+    /// Unknown mission, SQLite failure.
+    pub fn set_digest_once(&self, id: &str, digest: &Digest, now: i64) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<String> = tx
+            .query_row(
+                "SELECT digest_json FROM missions WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| MissionError::NotFound(id.to_owned()))?;
+        let same_outcome = current
+            .and_then(|d| serde_json::from_str::<Digest>(&d).ok())
+            .is_some_and(|d| d.outcome == digest.outcome);
+        if same_outcome {
+            return Ok(false);
+        }
+        tx.execute(
+            "UPDATE missions SET digest_json = ?2, updated_at_ms = ?3 WHERE id = ?1",
+            params![id, serde_json::to_string(digest)?, now],
+        )?;
+        event(
+            &tx,
+            id,
+            now,
+            "digest",
+            None,
+            &json!({"outcome": digest.outcome}),
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
 
     /// Store the owner digest.
     ///
@@ -955,6 +1070,50 @@ impl MissionStore {
     }
 }
 
+/// [`MissionStore::requeue_stale_doing`] inside a transaction. Giving an item up settles it,
+/// so it counts as progress.
+fn requeue_in(tx: &Transaction<'_>, id: &str, max_attempts: u32, now: i64) -> Result<(u32, u32)> {
+    let stale: Vec<(String, u32)> = {
+        let mut stmt = tx.prepare(
+            "SELECT key, attempts FROM mission_items WHERE mission_id = ?1 AND status = 'doing'",
+        )?;
+        stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    let (mut requeued, mut gave_up) = (0, 0);
+    for (key, attempts) in stale {
+        let (to, err) = if attempts >= max_attempts {
+            gave_up += 1;
+            (
+                "failed",
+                Some(format!(
+                    "gave up after {attempts} attempts without a result"
+                )),
+            )
+        } else {
+            requeued += 1;
+            ("todo", None)
+        };
+        tx.execute(
+            "UPDATE mission_items SET status = ?3, last_error = COALESCE(?4, last_error), updated_at_ms = ?5 \
+             WHERE mission_id = ?1 AND key = ?2",
+            params![id, key, to, err, now],
+        )?;
+        event(
+            tx,
+            id,
+            now,
+            "item",
+            Some(&key),
+            &json!({"from": "doing", "to": to, "by": "supervisor"}),
+        )?;
+    }
+    if gave_up > 0 {
+        bump(tx, id, now)?;
+    }
+    Ok((requeued, gave_up))
+}
+
 fn bump(tx: &Transaction<'_>, id: &str, now: i64) -> Result<()> {
     tx.execute(
         "UPDATE missions SET ledger_version = ledger_version + 1, updated_at_ms = ?2 WHERE id = ?1",
@@ -999,7 +1158,8 @@ fn transition_in(
         "UPDATE missions SET state = ?2, state_reason = ?3, updated_at_ms = ?4, \
          finished_at_ms = CASE WHEN ?5 THEN ?4 ELSE NULL END, \
          stalled_sessions = CASE WHEN ?2 = 'running' THEN 0 ELSE stalled_sessions END, \
-         failed_sessions = CASE WHEN ?2 = 'running' THEN 0 ELSE failed_sessions END \
+         failed_sessions = CASE WHEN ?2 = 'running' THEN 0 ELSE failed_sessions END, \
+         digest_json = CASE WHEN ?2 = 'running' THEN NULL ELSE digest_json END \
          WHERE id = ?1",
         params![id, to.as_str(), reason, now, to.is_terminal()],
     )?;
@@ -1260,6 +1420,32 @@ mod tests {
     }
 
     #[test]
+    fn an_answered_item_gets_a_fresh_attempt_budget() {
+        let s = store();
+        let m = s.create(&new_mission(&[("a.com", "x")]), 1).unwrap();
+        let go = |to: ItemStatus, t: i64| {
+            let upd = ItemUpdate {
+                status: Some(to),
+                blocked_reason: (to == ItemStatus::Blocked).then(|| "needs a phone number".into()),
+                ..ItemUpdate::default()
+            };
+            s.update_item(&m.id, "a.com", &upd, false, t)
+        };
+        // Started and given back until the cap is reached, then parked for the owner.
+        for t in 0..MAX_ITEM_ATTEMPTS {
+            go(ItemStatus::Doing, i64::from(t) * 2 + 2).unwrap();
+            go(ItemStatus::Todo, i64::from(t) * 2 + 3).unwrap();
+        }
+        assert!(go(ItemStatus::Doing, 20).is_err(), "the cap holds");
+        go(ItemStatus::Blocked, 21).unwrap();
+        s.answer_blocked(&m.id, &[("a.com".into(), "use +49 30 1234567".into())], 22)
+            .unwrap();
+        let it = &s.items(&m.id, None).unwrap()[0];
+        assert_eq!((it.status, it.attempts), (ItemStatus::Todo, 0));
+        go(ItemStatus::Doing, 23).expect("the owner's answer reopens the item for the bot");
+    }
+
+    #[test]
     fn state_changes_follow_the_table_and_write_the_timeline() {
         let s = store();
         let m = s.create(&new_mission(&[]), 1).unwrap();
@@ -1373,6 +1559,263 @@ mod tests {
         let it = &s.items(&m.id, None).unwrap()[0];
         assert_eq!(it.status, ItemStatus::Failed);
         assert_eq!(it.attempts, 2);
+    }
+
+    fn status(
+        s: &MissionStore,
+        id: &str,
+        key: &str,
+        st: ItemStatus,
+        by_owner: bool,
+    ) -> Result<Item> {
+        s.update_item(
+            id,
+            key,
+            &ItemUpdate {
+                status: Some(st),
+                blocked_reason: (st == ItemStatus::Blocked).then(|| "needs a look".to_owned()),
+                ..ItemUpdate::default()
+            },
+            by_owner,
+            9,
+        )
+    }
+
+    #[test]
+    fn begin_session_is_a_compare_and_swap_on_the_lease() {
+        let s = store();
+        let m = s.create(&new_mission(&[]), 1).unwrap();
+        let sid = s.begin_session(&m.id, 2).unwrap();
+        let held = s.get(&m.id).unwrap().unwrap();
+        assert_eq!(
+            held.lease_run_id.as_deref(),
+            Some(format!("{SESSION_LEASE_PREFIX}{sid}").as_str()),
+            "the session holds the mission before its run exists"
+        );
+        assert!(matches!(
+            s.begin_session(&m.id, 3),
+            Err(MissionError::Busy(_))
+        ));
+        let m1 = s.get(&m.id).unwrap().unwrap();
+        assert_eq!(m1.sessions, 1, "the refused session is not counted");
+        let rows: i64 = s
+            .conn()
+            .query_row("SELECT COUNT(*) FROM mission_sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "and leaves no session row behind");
+        // The run id replaces the placeholder; ending the session frees the mission.
+        s.set_lease(&m.id, Some("run-1")).unwrap();
+        assert!(matches!(
+            s.begin_session(&m.id, 3),
+            Err(MissionError::Busy(_))
+        ));
+        let end = SessionEndRecord {
+            outcome: "finished".into(),
+            model_steps: 1,
+            cost_usd: 0.0,
+        };
+        s.end_session(&m.id, sid, 0, &end, 4).unwrap();
+        assert!(s.begin_session(&m.id, 5).is_ok());
+    }
+
+    #[test]
+    fn begin_session_needs_a_running_mission() {
+        let s = store();
+        let m = s.create(&new_mission(&[]), 1).unwrap();
+        s.set_state(&m.id, MissionState::Paused, None, 2).unwrap();
+        assert!(matches!(
+            s.begin_session(&m.id, 3),
+            Err(MissionError::Busy(_))
+        ));
+        assert!(matches!(
+            s.begin_session("nope", 3),
+            Err(MissionError::NotFound(_))
+        ));
+        assert_eq!(s.get(&m.id).unwrap().unwrap().sessions, 0);
+    }
+
+    #[test]
+    fn a_mission_is_found_by_its_chat() {
+        let s = store();
+        let m = s.create(&new_mission(&[]), 1).unwrap();
+        assert_eq!(s.mission_for_chat("c").unwrap(), Some(m.id));
+        assert_eq!(s.mission_for_chat("other").unwrap(), None);
+    }
+
+    #[test]
+    fn flipping_todo_and_doing_is_not_progress_and_attempts_are_capped() {
+        let s = store();
+        let m = s.create(&new_mission(&[("a.com", "x")]), 1).unwrap();
+        let v0 = s.get(&m.id).unwrap().unwrap().ledger_version;
+        for _ in 0..MAX_ITEM_ATTEMPTS {
+            status(&s, &m.id, "a.com", ItemStatus::Doing, false).unwrap();
+            status(&s, &m.id, "a.com", ItemStatus::Todo, false).unwrap();
+        }
+        assert_eq!(
+            s.get(&m.id).unwrap().unwrap().ledger_version,
+            v0,
+            "starting and putting back is no progress"
+        );
+        let err = status(&s, &m.id, "a.com", ItemStatus::Doing, false).unwrap_err();
+        assert!(
+            err.to_string().contains("failed") && err.to_string().contains("blocked"),
+            "{err}"
+        );
+        // The model can still settle it; the owner can always reopen it.
+        let it = status(&s, &m.id, "a.com", ItemStatus::Failed, false).unwrap();
+        assert_eq!(it.attempts, MAX_ITEM_ATTEMPTS);
+        assert!(s.get(&m.id).unwrap().unwrap().ledger_version > v0);
+        let it = status(&s, &m.id, "a.com", ItemStatus::Doing, true).unwrap();
+        assert_eq!(it.status, ItemStatus::Doing);
+    }
+
+    #[test]
+    fn settling_an_item_is_progress() {
+        let s = store();
+        let m = s
+            .create(
+                &new_mission(&[
+                    ("a.com", "x"),
+                    ("b.com", "x"),
+                    ("c.com", "x"),
+                    ("d.com", "x"),
+                ]),
+                1,
+            )
+            .unwrap();
+        for (key, st) in [
+            ("a.com", ItemStatus::Done),
+            ("b.com", ItemStatus::Blocked),
+            ("c.com", ItemStatus::Failed),
+            ("d.com", ItemStatus::Skipped),
+        ] {
+            let before = s.get(&m.id).unwrap().unwrap().ledger_version;
+            status(&s, &m.id, key, st, false).unwrap();
+            assert!(
+                s.get(&m.id).unwrap().unwrap().ledger_version > before,
+                "{st}"
+            );
+        }
+    }
+
+    #[test]
+    fn recover_requeues_items_a_crash_left_doing() {
+        let s = store();
+        let m = s
+            .create(&new_mission(&[("a.com", "x"), ("b.com", "x")]), 1)
+            .unwrap();
+        // a.com was started for the third time, b.com for the first.
+        for _ in 0..MAX_ITEM_ATTEMPTS {
+            status(&s, &m.id, "a.com", ItemStatus::Doing, false).unwrap();
+            if s.items(&m.id, None).unwrap()[0].attempts < MAX_ITEM_ATTEMPTS {
+                status(&s, &m.id, "a.com", ItemStatus::Todo, false).unwrap();
+            }
+        }
+        status(&s, &m.id, "b.com", ItemStatus::Doing, false).unwrap();
+        s.begin_session(&m.id, 2).unwrap();
+        s.recover_interrupted(3).unwrap();
+        let items = s.items(&m.id, None).unwrap();
+        assert_eq!(items[0].status, ItemStatus::Failed, "attempts used up");
+        assert_eq!(items[1].status, ItemStatus::Todo, "worked again");
+        // A mission without an open session is left alone.
+        status(&s, &m.id, "b.com", ItemStatus::Doing, false).unwrap();
+        s.recover_interrupted(4).unwrap();
+        assert_eq!(s.items(&m.id, None).unwrap()[1].status, ItemStatus::Doing);
+    }
+
+    #[test]
+    fn a_code_is_never_taken_as_an_answer() {
+        let s = store();
+        let m = s
+            .create(
+                &new_mission(&[("a.com", "x"), ("b.com", "x"), ("c.com", "x")]),
+                1,
+            )
+            .unwrap();
+        for key in ["a.com", "b.com", "c.com"] {
+            status(&s, &m.id, key, ItemStatus::Doing, false).unwrap();
+        }
+        // a.com: parked by a code handover (live only); b.com: the model wrote a code reason;
+        // c.com: an ordinary question.
+        s.update_item(
+            &m.id,
+            "a.com",
+            &ItemUpdate {
+                status: Some(ItemStatus::Blocked),
+                blocked_reason: Some("a 2FA code for a.com".into()),
+                live_only: Some(true),
+                ..ItemUpdate::default()
+            },
+            false,
+            2,
+        )
+        .unwrap();
+        s.update_item(
+            &m.id,
+            "b.com",
+            &ItemUpdate {
+                status: Some(ItemStatus::Blocked),
+                blocked_reason: Some("needs the SMS verification code".into()),
+                ..ItemUpdate::default()
+            },
+            false,
+            2,
+        )
+        .unwrap();
+        s.update_item(
+            &m.id,
+            "c.com",
+            &ItemUpdate {
+                status: Some(ItemStatus::Blocked),
+                blocked_reason: Some("which phone number?".into()),
+                ..ItemUpdate::default()
+            },
+            false,
+            2,
+        )
+        .unwrap();
+        assert!(s.items(&m.id, None).unwrap()[0].live_only);
+
+        let live = s
+            .answer_blocked(&m.id, &[("a.com".into(), "the second address".into())], 3)
+            .unwrap_err();
+        assert!(live.to_string().contains("never stored"), "{live}");
+        let code = s
+            .answer_blocked(&m.id, &[("b.com".into(), "code is 123456".into())], 3)
+            .unwrap_err();
+        assert!(code.to_string().contains("one-time code"), "{code}");
+
+        // One refused answer changes nothing, not even the good ones next to it.
+        let both = s.answer_blocked(
+            &m.id,
+            &[
+                ("c.com".into(), "555-0100".into()),
+                ("b.com".into(), "123 456".into()),
+            ],
+            3,
+        );
+        assert!(both.is_err());
+        assert_eq!(s.progress(&m.id).unwrap().blocked, 3);
+
+        // An answer that is not a code goes through, also to an item that mentions a code.
+        assert_eq!(
+            s.answer_blocked(
+                &m.id,
+                &[
+                    ("c.com".into(), "123456".into()),
+                    (
+                        "b.com".into(),
+                        "skip the SMS step, use the e-mail link".into()
+                    ),
+                ],
+                4
+            )
+            .unwrap(),
+            2
+        );
+        // The owner finishes the live step on the site and skips the item.
+        let it = status(&s, &m.id, "a.com", ItemStatus::Skipped, true).unwrap();
+        assert!(!it.live_only, "the flag does not outlive the parking");
     }
 
     #[test]

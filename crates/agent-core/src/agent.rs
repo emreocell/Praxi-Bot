@@ -961,11 +961,15 @@ impl AgentLoop {
     /// the `mission_*` tools and to start from an untrusted-exposure state: the
     /// ledger holds text earlier sessions copied from pages and mails).
     ///
-    /// The message counts as the owner's own, which is what lets the Full level's
-    /// autonomy apply to unattended sessions: the mission was started by the owner
-    /// through an owner-only route, its bot is checked to be at the Full level
-    /// before every session ([`Self::bot_is_full`]), and the brief fences every
-    /// ledger value as data (`missions::brief`).
+    /// The brief is stored with the source `mission_brief`, never `owner`: it carries
+    /// ledger text that earlier sessions copied from pages and mails, so it must not count
+    /// as the owner's words (named sites, typed URLs, "words the owner typed") anywhere
+    /// the approval code reads them. Only the goal the owner wrote when starting the mission
+    /// is tagged `owner` (by the route). The run's initiator is [`InitiatorKind::Mission`]:
+    /// the Full level's unattended autonomy comes from the narrow waivers of
+    /// `Shared::mission_full_started`, whose bot is checked to be at the Full level before
+    /// every session ([`Self::bot_is_full`]); the brief fences every ledger value as data
+    /// (`missions::brief`).
     ///
     /// # Errors
     /// As [`Self::run_turn`]; [`LoopError::Busy`] while the chat has an active turn.
@@ -981,7 +985,7 @@ impl AgentLoop {
             &missions::run_kind(mission_id),
             None,
             None,
-            "owner",
+            "mission_brief",
         )
     }
 
@@ -1033,8 +1037,17 @@ impl AgentLoop {
             .filter(|s| s.name == STEP_MODEL)
             .filter_map(step_output::<ModelOut>)
             .collect();
+        // Subagents (and their own subagents) spend the mission's budget too: a session
+        // cannot escape `max_model_steps` or `max_cost_usd` by delegating the work.
+        let descendants: Vec<ModelOut> = crate::subagent::descendant_runs(&self.sh.storage, run_id)
+            .into_iter()
+            .flat_map(|kid| self.sh.storage.list_steps(kid).unwrap_or_default())
+            .filter(|s| s.name == STEP_MODEL)
+            .filter_map(|s| step_output::<ModelOut>(&s))
+            .collect();
         let cost_usd = model
             .iter()
+            .chain(&descendants)
             .filter_map(|m| {
                 let u = m.usage.as_ref()?;
                 self.sh
@@ -1043,7 +1056,7 @@ impl AgentLoop {
             })
             .sum();
         SessionStats {
-            model_steps: u32::try_from(model.len()).unwrap_or(u32::MAX),
+            model_steps: u32::try_from(model.len() + descendants.len()).unwrap_or(u32::MAX),
             guard_stopped: model.last().is_some_and(|m| m.stopped_by_guard),
             cost_usd,
         }

@@ -1406,6 +1406,7 @@ pub(crate) fn kind_for(i: InitiatorKind) -> String {
         InitiatorKind::Schedule => format!("{KIND_PREFIX}:schedule"),
         InitiatorKind::ExternalAgent => format!("{KIND_PREFIX}:external_agent"),
         InitiatorKind::ExternalSchedule => format!("{KIND_PREFIX}:external_schedule"),
+        InitiatorKind::Mission => format!("{KIND_PREFIX}:mission"),
     }
 }
 
@@ -1483,6 +1484,9 @@ pub fn initiator_of(kind: &str) -> InitiatorKind {
             InitiatorKind::ExternalSchedule
         }
         Some(s) if s == "schedule" || s.starts_with("schedule:") => InitiatorKind::Schedule,
+        // A mission session is unattended and its brief is built from a ledger that holds
+        // text copied from pages and mails: never the owner at the keyboard.
+        Some(s) if s == "mission" || s.starts_with("mission:") => InitiatorKind::Mission,
         Some(s) if s == "external_agent" || s.starts_with("external_agent:") => {
             InitiatorKind::ExternalAgent
         }

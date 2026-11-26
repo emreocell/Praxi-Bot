@@ -545,8 +545,12 @@ impl TurnExecutor {
 
     /// The turn ended with work left: answer "yes, continue" (a plan with open
     /// steps, or a request for permission at the Full level) instead of
-    /// stopping. Only for the owner's own top-level turn, inside the step,
-    /// token and time budgets, never for money (see [`crate::auto_continue`]).
+    /// stopping. Only for the owner's own top-level turn (typed by the owner in the
+    /// desktop app, the admin desktop or the owner's paired Telegram chat: never a
+    /// schedule, routine, channel peer, webhook, mail, external agent or mission session,
+    /// whose own supervisor starts the next session), inside the step, token and time
+    /// budgets, never after a guard closed the turn and never for money (see
+    /// [`crate::auto_continue`]).
     fn auto_continue_step(
         &self,
         ctx: &RunCtx,
@@ -561,13 +565,8 @@ impl TurnExecutor {
             || ctx.sub.is_some()
             || ctx.parent_run_id.is_some()
             || self.sh.cfg.safe_mode
-            || !matches!(
-                ctx.initiator,
-                protocol::InitiatorKind::Human
-                    | protocol::InitiatorKind::Schedule
-                    | protocol::InitiatorKind::Routine
-                    | protocol::InitiatorKind::Channel
-            )
+            || ctx.initiator != protocol::InitiatorKind::Human
+            || !self.sh.full_owner_started(ctx)
         {
             return None;
         }
@@ -592,9 +591,15 @@ impl TurnExecutor {
         {
             return None;
         }
-        let text = step_output::<ModelOut>(history.last()?)?.text;
+        let out = step_output::<ModelOut>(history.last()?)?;
+        // A guard (repeat stop, step or token limit) closed this turn on purpose: it is not
+        // re-opened with tools.
+        if out.stopped_by_guard {
+            return None;
+        }
         let full = ctx.profile.permissions.mode() == permission_engine::AutonomyMode::Full;
-        let reason = ac::verdict(&text, open_steps, full)?;
+        let untrusted = ctx.taint.lock().exposure.untrusted;
+        let reason = ac::verdict(&out.text, open_steps, full, untrusted)?;
         Some(StepSpec {
             name: STEP_NUDGE.to_owned(),
             input: json!({

@@ -33,6 +33,7 @@ CREATE TABLE missions (
 );
 
 CREATE INDEX missions_user_state ON missions(user_id, state);
+CREATE INDEX missions_chat ON missions(chat_id);
 
 CREATE TABLE mission_items (
     mission_id     TEXT NOT NULL REFERENCES missions(id),
@@ -47,6 +48,8 @@ CREATE TABLE mission_items (
     last_error     TEXT,
     blocked_reason TEXT,
     owner_answer   TEXT,
+    -- Parked for a step only the owner can do live (a 2FA / verification code): no typed answer.
+    live_only      INTEGER NOT NULL DEFAULT 0,
     updated_at_ms  INTEGER NOT NULL,
     PRIMARY KEY (mission_id, key)
 );

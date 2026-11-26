@@ -535,7 +535,7 @@ impl Shared {
         // A site the user remembered for this bot (owner-confirmed) satisfies the egress
         // gate for a plain navigation to exactly that origin, like a URL they typed.
         let remembered = must_ask
-            && ctx.initiator == InitiatorKind::Human
+            && matches!(ctx.initiator, InitiatorKind::Human | InitiatorKind::Mission)
             && self.remembered_origin(ctx, name, category, input);
         // "Allow for this task" for this one MCP tool: the egress term and a plain policy ask,
         // until the run reads something new. Always-ask tools, external callers and floors are
@@ -678,6 +678,44 @@ impl Shared {
             return false;
         }
         owner_started_run_from(&self.storage, ctx.run_id, ctx.parent_run_id, true)
+    }
+
+    /// A top-level session of a mission on a bot at the Full level: the mission's own, narrow
+    /// counterpart of [`Self::full_owner_started`].
+    ///
+    /// A mission session is never the owner at the keyboard: its first message is a brief
+    /// built from a ledger that earlier sessions filled with text copied from pages and mails
+    /// (stored with the source `mission_brief`, which never counts as the owner's words, see
+    /// `Storage::owner_message_texts`). It gets the Full level's web, mail-link and shell
+    /// waivers (so an unattended task can go on after reading a page) and nothing else of the
+    /// owner's authority: no `pc_*` tools, no `ask_bot`, no typed-URL trust beyond what the owner
+    /// wrote in the goal, no subagents or helpers. Fails closed: every message of the run must be
+    /// the brief or the owner's own steering.
+    pub(crate) fn mission_full_started(&self, ctx: &RunCtx) -> bool {
+        if ctx.initiator != InitiatorKind::Mission
+            || ctx.mission.is_none()
+            || ctx.parent_run_id.is_some()
+            || ctx.delegation().is_some()
+            || ctx.profile.permissions.mode() != AutonomyMode::Full
+        {
+            return false;
+        }
+        match self.storage.run_user_message_sources(ctx.run_id) {
+            Ok(sources) => {
+                sources.iter().any(|s| s == "mission_brief")
+                    && sources
+                        .iter()
+                        .all(|s| matches!(s.as_str(), "mission_brief" | "owner" | "peer_admin"))
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Who may use the Full level's waivers: an owner-started run
+    /// ([`Self::full_owner_started`]) or an unattended session of the owner's mission
+    /// ([`Self::mission_full_started`]).
+    pub(crate) fn full_waivers_apply(&self, ctx: &RunCtx) -> bool {
+        self.full_owner_started(ctx) || self.mission_full_started(ctx)
     }
 
     /// Record that the autonomy mode, not an approval, let this call run: the
@@ -1162,7 +1200,7 @@ impl Shared {
             || ctx.delegation().is_some()
             || !(web_read || FULL_BROWSER_CALLS.contains(&name))
             || ctx.profile.permissions.mode() != AutonomyMode::Full
-            || !self.full_owner_started(ctx)
+            || !self.full_waivers_apply(ctx)
         {
             return false;
         }
@@ -1296,7 +1334,7 @@ impl Shared {
         if ctx.parent_run_id.is_some()
             || ctx.delegation().is_some()
             || ctx.profile.permissions.mode() != AutonomyMode::Full
-            || !self.full_owner_started(ctx)
+            || !self.full_waivers_apply(ctx)
             || !self.is_host_homed()
             || !matches!(
                 ctx.resolved_computer.label,
@@ -1405,7 +1443,11 @@ impl Shared {
     /// destination, or by a URL the user typed.
     fn gate_waived(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
         // A helper bot never inherits the owner's typed URLs, chat grants or Full-level waivers.
-        if ctx.initiator != InitiatorKind::Human || ctx.delegation().is_some() {
+        // A mission session reads the owner's goal (and approvals given in its chat) the same
+        // way; the brief is not the owner's text, so it adds nothing to either list.
+        if !(ctx.initiator == InitiatorKind::Human || self.mission_full_started(ctx))
+            || ctx.delegation().is_some()
+        {
             return false;
         }
         if self.own_mail_waived(ctx, name, input) {
@@ -1435,7 +1477,7 @@ impl Shared {
     fn own_mail_waived(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
         if ctx.delegation().is_some()
             || ctx.profile.permissions.mode() != AutonomyMode::Full
-            || !self.full_owner_started(ctx)
+            || !self.full_waivers_apply(ctx)
         {
             return false;
         }
@@ -1985,9 +2027,11 @@ impl Shared {
         (approval_id, guard, rx)
     }
 
-    /// Wait for the user's verdict.  A schedule-started run only waits
+    /// Wait for the user's verdict.  A schedule-started run, and an unattended mission
+    /// session, only wait
     /// [`LoopConfig::schedule_approval_timeout`](crate::LoopConfig); then the
-    /// run is asked to pause (resumable).  Any other run waits at most
+    /// run is asked to pause (resumable; the mission supervisor reads the pause and
+    /// blocks the mission for the owner).  Any other run waits at most
     /// [`LoopConfig::approval_timeout`](crate::LoopConfig) (zero = no limit);
     /// then the call is denied as expired and the run carries on.
     async fn wait_verdict(&self, ctx: &RunCtx, rx: oneshot::Receiver<Verdict>) -> Waited {
@@ -1997,7 +2041,7 @@ impl Shared {
         }
         if !matches!(
             ctx.initiator,
-            InitiatorKind::Schedule | InitiatorKind::ExternalSchedule
+            InitiatorKind::Schedule | InitiatorKind::ExternalSchedule | InitiatorKind::Mission
         ) {
             let limit = self.cfg.approval_timeout;
             if limit.is_zero() {
@@ -2787,12 +2831,16 @@ impl Shared {
                 "secret_request.refused",
                 &json!({"name": name, "reason": why}),
             );
-            secret_outcome(name, false, why)
+            if ctx.mission.is_some() {
+                (mission_refusal_text(why), true)
+            } else {
+                secret_outcome(name, false, why)
+            }
         };
         if !self.cfg.secret_requests {
             return refuse("secret requests are switched off");
         }
-        if ctx.initiator != InitiatorKind::Human {
+        if ctx.initiator != InitiatorKind::Human && ctx.mission.is_none() {
             return refuse(
                 "only a run the owner started at the desktop can ask for a credential; ask the owner to add it in the app instead",
             );
@@ -2804,6 +2852,11 @@ impl Shared {
                 return refuse("this run has asked for credentials too often");
             }
             st.secret_requests += 1;
+        }
+        // Nobody is at the keyboard in a mission: the item that needs the credential is
+        // parked in the ledger and the session moves on.
+        if let Some(mission) = &ctx.mission {
+            return self.park_item_for_secret(ctx, mission, name);
         }
         let tainted = self
             .root_run_id(ctx)
@@ -2886,6 +2939,26 @@ impl Shared {
     }
 }
 
+/// What the model reads when a mission asked for help or a credential more often than the run
+/// allows: nothing was shown, and it has to park the item itself.
+fn mission_refusal_text(why: &str) -> String {
+    format!(
+        "Not asked: {why}. This is a mission, so nobody waits for an answer: mark the item you are working on as blocked with mission_item (say what the owner has to do), do not retry it, and take the next open item now."
+    )
+}
+
+/// What the model reads when a mission session parks an item for the owner instead of waiting.
+fn mission_park_text(key: Option<&str>, reason: &str) -> String {
+    match key {
+        Some(key) => format!(
+            "Not waiting: this is a mission, so a person is not asked right now. Item {key:?} is parked as blocked ({reason}); the owner sees it in the blocked list. Do not retry it. Take the next open item now."
+        ),
+        None => format!(
+            "Not waiting: this is a mission, so a person is not asked right now. Mark the item you are working on as blocked with mission_item (reason: {reason}), do not retry it, and take the next open item now."
+        ),
+    }
+}
+
 /// What the model reads when a `browser_handover` ends. Never a code.
 fn handover_outcome(kind: HandoverKind, done: bool, why: &str) -> (String, bool) {
     match (kind, done) {
@@ -2921,15 +2994,22 @@ impl Shared {
         let site = truncate_utf8(&card.site, 80);
         let reason = match kind {
             HandoverKind::Captcha => format!("a CAPTCHA on {site} has to be solved by the owner"),
-            HandoverKind::Code => {
-                format!("a 2FA / verification code for {site} has to be entered by the owner")
-            }
+            // A one-time code is never typed into a mission answer (it would sit in the ledger
+            // and reach the model): the owner finishes this step live on the site or skips it.
+            HandoverKind::Code => format!(
+                "a 2FA / verification code for {site} is needed; Praxi never stores it or shows it to the bot, so finish this step yourself on the site, or skip the item"
+            ),
         };
         let store = self.mission_store.read().clone();
         let key = store.and_then(|s| {
-            s.block_sole_doing_item(mission, &reason, storage::now_ms())
-                .ok()
-                .flatten()
+            s.block_sole_doing_item(
+                mission,
+                &reason,
+                kind == HandoverKind::Code,
+                storage::now_ms(),
+            )
+            .ok()
+            .flatten()
         });
         self.audit(
             ctx,
@@ -2937,15 +3017,29 @@ impl Shared {
             "handover.parked",
             &json!({"kind": kind, "site": card.site, "item": key}),
         );
-        let text = match key {
-            Some(key) => format!(
-                "Not waiting: this is a mission, so a person is not asked right now. Item {key:?} is parked as blocked ({reason}); the owner sees it in the blocked list. Do not retry this site. Take the next open item now."
-            ),
-            None => format!(
-                "Not waiting: this is a mission, so a person is not asked right now. Mark the item you are working on as blocked with mission_item (reason: {reason}), do not retry this site, and take the next open item now."
-            ),
-        };
-        (text, true)
+        (mission_park_text(key.as_deref(), &reason), true)
+    }
+
+    /// A credential the bot needs in a mission session: park the item being worked on, like a
+    /// CAPTCHA. The owner adds the secret in the app (never in the answer text) and releases the item.
+    fn park_item_for_secret(&self, ctx: &RunCtx, mission: &str, name: &str) -> (String, bool) {
+        let name = truncate_utf8(name, 80);
+        let reason = format!(
+            "needs the credential {name:?}: add it in the app (never write a password in the answer), then release this item"
+        );
+        let store = self.mission_store.read().clone();
+        let key = store.and_then(|s| {
+            s.block_sole_doing_item(mission, &reason, false, storage::now_ms())
+                .ok()
+                .flatten()
+        });
+        self.audit(
+            ctx,
+            "system",
+            "secret_request.parked",
+            &json!({"name": name, "item": key}),
+        );
+        (mission_park_text(key.as_deref(), &reason), true)
     }
 
     /// Run a `browser_handover`: show the owner's card and park the run until the
@@ -2973,16 +3067,19 @@ impl Shared {
                 "handover.refused",
                 &json!({"kind": kind, "reason": why}),
             );
-            handover_outcome(kind, false, why)
+            if ctx.mission.is_some() {
+                (mission_refusal_text(why), true)
+            } else {
+                handover_outcome(kind, false, why)
+            }
         };
-        if let Some(mission) = &ctx.mission {
-            return self.park_item_for_handover(ctx, mission, kind, card);
-        }
-        if ctx.initiator != InitiatorKind::Human {
+        if ctx.initiator != InitiatorKind::Human && ctx.mission.is_none() {
             return refuse(
                 "only a run the owner started at the desktop can hand a step over; tell the owner in your answer instead",
             );
         }
+        // The per-run limit counts parked handovers of a mission too: a page that throws a
+        // CAPTCHA at every item cannot make a session park without end.
         {
             let mut st = ctx.state.lock();
             if st.handovers >= self.cfg.max_handovers_per_run {
@@ -2990,6 +3087,9 @@ impl Shared {
                 return refuse("this run has asked for help too often");
             }
             st.handovers += 1;
+        }
+        if let Some(mission) = &ctx.mission {
+            return self.park_item_for_handover(ctx, mission, kind, card);
         }
         let tainted = self
             .root_run_id(ctx)

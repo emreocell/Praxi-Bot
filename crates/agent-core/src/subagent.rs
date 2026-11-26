@@ -530,24 +530,30 @@ pub(crate) fn model_tokens(steps: &[storage::RunStep]) -> u64 {
         })
 }
 
-/// Tokens spent by every descendant of `run_id` (children, grandchildren, ...),
-/// finished ones included: a parent pays for what its subtree burned.
-pub(crate) fn descendant_tokens(storage: &storage::Storage, run_id: RunId) -> u64 {
-    let mut total = 0u64;
+/// Every descendant run of `run_id` (children, grandchildren, ...), finished ones included.
+pub(crate) fn descendant_runs(storage: &storage::Storage, run_id: RunId) -> Vec<RunId> {
+    let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut todo = vec![run_id];
     while let Some(id) = todo.pop() {
         for kid in storage.list_child_runs(id).unwrap_or_default() {
-            if !seen.insert(kid.id) {
-                continue;
+            if seen.insert(kid.id) {
+                out.push(kid.id);
+                todo.push(kid.id);
             }
-            total = total.saturating_add(model_tokens(
-                &storage.list_steps(kid.id).unwrap_or_default(),
-            ));
-            todo.push(kid.id);
         }
     }
-    total
+    out
+}
+
+/// Tokens spent by every descendant of `run_id` (children, grandchildren, ...),
+/// finished ones included: a parent pays for what its subtree burned.
+pub(crate) fn descendant_tokens(storage: &storage::Storage, run_id: RunId) -> u64 {
+    descendant_runs(storage, run_id)
+        .into_iter()
+        .fold(0u64, |total, kid| {
+            total.saturating_add(model_tokens(&storage.list_steps(kid).unwrap_or_default()))
+        })
 }
 
 /// Last model text of a run.

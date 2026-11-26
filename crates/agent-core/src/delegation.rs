@@ -251,7 +251,7 @@ const CATEGORIES: [PermissionCategory; 10] = [
     PermissionCategory::Script,
 ];
 
-const INITIATORS: [InitiatorKind; 7] = [
+const INITIATORS: [InitiatorKind; 8] = [
     InitiatorKind::Human,
     InitiatorKind::Routine,
     InitiatorKind::Channel,
@@ -259,6 +259,7 @@ const INITIATORS: [InitiatorKind; 7] = [
     InitiatorKind::Schedule,
     InitiatorKind::ExternalAgent,
     InitiatorKind::ExternalSchedule,
+    InitiatorKind::Mission,
 ];
 
 /// The helper's policy: for every category and every kind of initiator, the

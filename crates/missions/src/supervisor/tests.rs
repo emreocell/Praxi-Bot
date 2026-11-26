@@ -528,6 +528,8 @@ async fn pause_stops_the_live_session_and_starts_no_new_one() {
     h.store.set_lease(&h.mission, Some("run-live")).unwrap();
     h.sup.pause(&h.mission).unwrap();
     assert_eq!(h.runner.cancelled.lock().as_slice(), ["run-live"]);
+    // The stopped session winds down and releases the mission.
+    h.store.set_lease(&h.mission, None).unwrap();
     assert_eq!(
         h.sup.step(&h.mission).await.unwrap(),
         Step::Stopped(MissionState::Paused)
@@ -649,4 +651,424 @@ async fn the_loop_drives_several_missions_independently() {
         h.store.get(&second.id).unwrap().unwrap().state,
         MissionState::Done
     );
+}
+
+/// A runner whose session lasts until the supervisor stops it, like a model that is busy.
+/// Without `with_run` it never gets a run (it is still waiting for the chat to be free).
+struct WaitingRunner {
+    with_run: bool,
+    started: AtomicU32,
+    announced: AtomicU32,
+    cancelled: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl SessionRunner for WaitingRunner {
+    fn bot_ready(&self, _bot_id: &str) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    async fn run_session(
+        &self,
+        req: SessionRequest,
+        on_started: &(dyn for<'a> Fn(&'a str) + Send + Sync),
+    ) -> SessionResult {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        if self.with_run {
+            on_started("run-w");
+        }
+        req.cancel.cancelled().await;
+        SessionResult {
+            end: SessionEnd::Cancelled,
+            model_steps: 0,
+            cost_usd: 0.0,
+        }
+    }
+
+    fn cancel_run(&self, run_id: &str) {
+        self.cancelled.lock().push(run_id.to_owned());
+    }
+
+    async fn announce(&self, _m: &Mission, _text: &str) {
+        self.announced.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+struct Waiting {
+    store: Arc<MissionStore>,
+    runner: Arc<WaitingRunner>,
+    sup: Arc<Supervisor>,
+    shutdown: CancellationToken,
+    mission: String,
+}
+
+fn waiting(with_run: bool) -> Waiting {
+    let store = Arc::new(MissionStore::open_in_memory().unwrap());
+    let m = store
+        .create(
+            &NewMission {
+                user_id: "u".into(),
+                bot_id: "bot".into(),
+                chat_id: "chat".into(),
+                title: "Backlinks".into(),
+                goal_text: "Get backlinks for my site".into(),
+                target_done: None,
+                budgets: Budgets::default(),
+                items: sites(3),
+            },
+            1_000,
+        )
+        .unwrap();
+    let runner = Arc::new(WaitingRunner {
+        with_run,
+        started: AtomicU32::new(0),
+        announced: AtomicU32::new(0),
+        cancelled: Mutex::new(vec![]),
+    });
+    let shutdown = CancellationToken::new();
+    let sup = Arc::new(Supervisor::new(
+        Arc::clone(&store),
+        Arc::clone(&runner) as Arc<dyn SessionRunner>,
+        Arc::new(ManualClock(AtomicI64::new(2_000))),
+        SupervisorConfig {
+            session_gap: Duration::ZERO,
+            poll: Duration::from_millis(10),
+        },
+        shutdown.clone(),
+    ));
+    Waiting {
+        store,
+        runner,
+        sup,
+        shutdown,
+        mission: m.id,
+    }
+}
+
+async fn until(what: &str, cond: impl Fn() -> bool) {
+    for _ in 0..500 {
+        if cond() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("timed out waiting for {what}");
+}
+
+fn session_outcomes(store: &MissionStore, mission: &str) -> Vec<String> {
+    store
+        .events(mission, 0, 100)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "session_ended")
+        .map(|e| e.data["outcome"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_pause_reaches_a_session_that_is_still_waiting_for_the_chat() {
+    // No run and no real lease yet: only the session's token can stop the runner.
+    let w = waiting(false);
+    let sup = Arc::clone(&w.sup);
+    let id = w.mission.clone();
+    let session = tokio::spawn(async move { sup.step(&id).await.unwrap() });
+    let store = Arc::clone(&w.store);
+    let mission = w.mission.clone();
+    until("the session to take the mission", move || {
+        store
+            .get(&mission)
+            .unwrap()
+            .unwrap()
+            .lease_run_id
+            .is_some_and(|l| l.starts_with("session:"))
+    })
+    .await;
+    w.sup.pause(&w.mission).unwrap();
+    assert_eq!(
+        session.await.unwrap(),
+        Step::Stopped(MissionState::Paused),
+        "the runner gave up waiting"
+    );
+    assert!(
+        w.runner.cancelled.lock().is_empty(),
+        "the placeholder lease is not a run id"
+    );
+    assert_eq!(session_outcomes(&w.store, &w.mission), ["cancelled"]);
+    assert_eq!(w.store.get(&w.mission).unwrap().unwrap().lease_run_id, None);
+}
+
+#[tokio::test]
+async fn one_mission_never_has_two_sessions_at_once() {
+    let w = waiting(true);
+    let sup = Arc::clone(&w.sup);
+    let id = w.mission.clone();
+    let first = tokio::spawn(async move { sup.step(&id).await.unwrap() });
+    let store = Arc::clone(&w.store);
+    let mission = w.mission.clone();
+    until("the first session", move || {
+        store
+            .get(&mission)
+            .unwrap()
+            .unwrap()
+            .lease_run_id
+            .as_deref()
+            == Some("run-w")
+    })
+    .await;
+    // The same supervisor, and a second one on the same ledger (a leader that came back).
+    assert_eq!(
+        w.sup.step(&w.mission).await.unwrap(),
+        Step::Stopped(MissionState::Running)
+    );
+    let other = Arc::new(Supervisor::new(
+        Arc::clone(&w.store),
+        Arc::clone(&w.runner) as Arc<dyn SessionRunner>,
+        Arc::new(ManualClock(AtomicI64::new(2_000))),
+        SupervisorConfig::default(),
+        CancellationToken::new(),
+    ));
+    assert_eq!(
+        other.step(&w.mission).await.unwrap(),
+        Step::Stopped(MissionState::Running)
+    );
+    assert_eq!(w.runner.started.load(Ordering::SeqCst), 1);
+    assert_eq!(w.store.get(&w.mission).unwrap().unwrap().sessions, 1);
+    w.sup.pause(&w.mission).unwrap();
+    assert_eq!(w.runner.cancelled.lock().as_slice(), ["run-w"]);
+    assert_eq!(first.await.unwrap(), Step::Stopped(MissionState::Paused));
+}
+
+#[tokio::test]
+async fn a_shutdown_pause_interrupts_the_session_instead_of_blocking_the_mission() {
+    // The agent loop's own shutdown pauses the run: the session ends `Paused` while the
+    // supervisor is shutting down. That is an interruption, not an unanswered approval.
+    let slot: Arc<std::sync::OnceLock<CancellationToken>> = Arc::default();
+    let script_slot = Arc::clone(&slot);
+    let h = harness(
+        sites(3),
+        Budgets::default(),
+        Box::new(move |_, _, _| {
+            script_slot.get().unwrap().cancel();
+            SessionResult {
+                end: SessionEnd::Paused,
+                model_steps: 3,
+                cost_usd: 0.0,
+            }
+        }),
+    );
+    slot.set(h.shutdown.clone()).unwrap();
+    assert_eq!(
+        h.sup.step(&h.mission).await.unwrap(),
+        Step::Stopped(MissionState::Running)
+    );
+    let m = h.store.get(&h.mission).unwrap().unwrap();
+    assert_eq!(m.state, MissionState::Running);
+    assert_eq!(m.digest, None);
+    assert_eq!(session_outcomes(&h.store, &h.mission), ["interrupted"]);
+    assert!(h.runner.announced.lock().is_empty());
+    assert!(h.runner.cancelled.lock().is_empty());
+}
+
+#[tokio::test]
+async fn an_unanswered_approval_blocks_the_mission_and_abandons_the_paused_run() {
+    let h = harness(
+        sites(3),
+        Budgets::default(),
+        Box::new(|_, _, _| SessionResult {
+            end: SessionEnd::Paused,
+            model_steps: 4,
+            cost_usd: 0.0,
+        }),
+    );
+    assert_eq!(
+        h.sup.step(&h.mission).await.unwrap(),
+        Step::Stopped(MissionState::Blocked)
+    );
+    assert_eq!(
+        h.runner.cancelled.lock().as_slice(),
+        ["run-1"],
+        "nobody can resume the old run next to its replacement"
+    );
+    let m = h.store.get(&h.mission).unwrap().unwrap();
+    assert!(m.state_reason.unwrap().contains("approval"));
+    assert_eq!(session_outcomes(&h.store, &h.mission), ["paused"]);
+    assert_eq!(h.runner.announced.lock().len(), 1, "one digest");
+}
+
+#[tokio::test]
+async fn shutdown_stops_and_joins_the_drivers() {
+    let w = waiting(true);
+    let handle = w.sup.spawn();
+    let store = Arc::clone(&w.store);
+    let mission = w.mission.clone();
+    until("the session to start", move || {
+        store
+            .get(&mission)
+            .unwrap()
+            .unwrap()
+            .lease_run_id
+            .as_deref()
+            == Some("run-w")
+    })
+    .await;
+    w.shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("the loop joins its drivers")
+        .unwrap();
+    assert!(w.sup.driving.lock().is_empty(), "no driver is left alive");
+    assert!(w.sup.active.lock().is_empty());
+    let m = w.store.get(&w.mission).unwrap().unwrap();
+    assert_eq!(
+        m.state,
+        MissionState::Running,
+        "continues after the restart"
+    );
+    assert_eq!(m.lease_run_id, None);
+    assert_eq!(session_outcomes(&w.store, &w.mission), ["interrupted"]);
+}
+
+#[tokio::test]
+async fn stopping_a_mission_during_a_session_posts_one_digest() {
+    let w = waiting(true);
+    let sup = Arc::clone(&w.sup);
+    let id = w.mission.clone();
+    let driver = tokio::spawn(async move { sup.step(&id).await.unwrap() });
+    let store = Arc::clone(&w.store);
+    let mission = w.mission.clone();
+    until("the session to start", move || {
+        store
+            .get(&mission)
+            .unwrap()
+            .unwrap()
+            .lease_run_id
+            .as_deref()
+            == Some("run-w")
+    })
+    .await;
+    let m = w.sup.cancel(&w.mission).await.unwrap();
+    assert_eq!(m.state, MissionState::Cancelled);
+    // The session winds down and sees a stopped mission: it must not announce again.
+    assert_eq!(
+        driver.await.unwrap(),
+        Step::Stopped(MissionState::Cancelled)
+    );
+    assert_eq!(w.runner.announced.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        w.store
+            .get(&w.mission)
+            .unwrap()
+            .unwrap()
+            .digest
+            .unwrap()
+            .outcome,
+        "cancelled"
+    );
+}
+
+#[tokio::test]
+async fn a_mission_that_runs_again_gets_a_fresh_digest_for_its_next_ending() {
+    let h = harness(sites(2), Budgets::default(), worker(5));
+    h.sup.block(&h.mission, "needs a look").await.unwrap();
+    assert_eq!(h.runner.announced.lock().len(), 1);
+    // Concluding the same ending again does not post it again.
+    h.sup.conclude(&h.mission).await.unwrap();
+    assert_eq!(h.runner.announced.lock().len(), 1);
+    // Stopping a blocked mission is a different ending: a new digest.
+    h.sup.cancel(&h.mission).await.unwrap();
+    assert_eq!(h.runner.announced.lock().len(), 2);
+    assert_eq!(
+        h.store
+            .get(&h.mission)
+            .unwrap()
+            .unwrap()
+            .digest
+            .unwrap()
+            .outcome,
+        "cancelled"
+    );
+
+    let h = harness(sites(2), Budgets::default(), worker(5));
+    h.sup.block(&h.mission, "needs a look").await.unwrap();
+    h.sup.resume(&h.mission).unwrap();
+    assert_eq!(
+        h.store.get(&h.mission).unwrap().unwrap().digest,
+        None,
+        "a running mission shows no old digest"
+    );
+    h.sup.block(&h.mission, "needs a look again").await.unwrap();
+    assert_eq!(h.runner.announced.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn flipping_an_item_between_todo_and_doing_is_not_progress() {
+    // A model that keeps "starting" and "putting back" an item would reset the stalled-session
+    // count forever and burn the session budget. The attempt cap ends it, and the stall
+    // detector blocks the mission.
+    let flip: Box<Script> = Box::new(|_, req, store| {
+        let it = store
+            .items(&req.mission_id, None)
+            .unwrap()
+            .into_iter()
+            .find(|i| i.status.is_open())
+            .unwrap();
+        for status in [ItemStatus::Doing, ItemStatus::Todo] {
+            let _ = store.update_item(
+                &req.mission_id,
+                &it.key,
+                &ItemUpdate {
+                    status: Some(status),
+                    ..ItemUpdate::default()
+                },
+                false,
+                7,
+            );
+        }
+        ok(5)
+    });
+    let h = harness(sites(3), Budgets::default(), flip);
+    assert_eq!(
+        h.sup.drive(&h.mission).await.unwrap(),
+        MissionState::Blocked
+    );
+    assert_eq!(
+        h.runner.calls.load(Ordering::SeqCst),
+        4,
+        "max_stalled_sessions"
+    );
+    let m = h.store.get(&h.mission).unwrap().unwrap();
+    assert!(m.state_reason.unwrap().contains("no progress"));
+    assert_eq!(
+        h.store.items(&h.mission, None).unwrap()[0].attempts,
+        MAX_ITEM_ATTEMPTS
+    );
+}
+
+#[tokio::test]
+async fn restart_requeues_an_item_the_crash_left_doing() {
+    let h = harness(sites(2), Budgets::default(), worker(5));
+    let lost = h.store.begin_session(&h.mission, 1_500).unwrap();
+    h.store.set_session_run(lost, "run-lost").unwrap();
+    set(
+        &h.store,
+        &h.mission,
+        "site-0.example",
+        ItemStatus::Doing,
+        None,
+    );
+    let handle = h.sup.spawn();
+    until("the mission to finish", {
+        let store = Arc::clone(&h.store);
+        let id = h.mission.clone();
+        move || store.get(&id).unwrap().unwrap().state == MissionState::Done
+    })
+    .await;
+    h.shutdown.cancel();
+    handle.await.unwrap();
+    let p = h.store.progress(&h.mission).unwrap();
+    assert_eq!(
+        p.done, 2,
+        "the stranded item was worked again, not left doing"
+    );
+    assert_eq!(p.doing, 0);
 }
