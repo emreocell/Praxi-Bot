@@ -198,6 +198,8 @@ pub(crate) struct TestTool {
     pub(crate) fails: bool,
     /// The browser tab this tool reports as the one it just observed (`landed_tab`).
     pub(crate) tab: Option<String>,
+    /// Append the call number to the output, so every call answers differently.
+    pub(crate) numbered: bool,
 }
 
 pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
@@ -240,6 +242,7 @@ pub(crate) fn with_class(
         notes_screenshot: None,
         fails: false,
         tab: None,
+        numbered: false,
     }
 }
 
@@ -296,7 +299,11 @@ impl Tool for TestTool {
         if self.fails {
             return Err(ToolError::Execution(self.output.clone()));
         }
-        let mut out = ToolOutput::text(self.output.clone());
+        let mut out = ToolOutput::text(if self.numbered {
+            format!("{} #{}", self.output, self.count.load(Ordering::SeqCst))
+        } else {
+            self.output.clone()
+        });
         out.exposure = self.exposure.clone();
         Ok(out)
     }

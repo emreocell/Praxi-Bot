@@ -192,3 +192,67 @@ button",
         .collect();
     assert_eq!(tabs, vec![Some("TAB-7".to_owned()), None]);
 }
+
+#[tokio::test]
+async fn a_progressing_loop_is_never_stopped() {
+    // The click always answers "clicked", but every snapshot is a new page:
+    // that is progress, however long it goes on.
+    let env = setup();
+    let clicker = Arc::new(tool("t.click", Effect::Read, "clicked"));
+    let mut snapper = tool("t.snap", Effect::Read, "# Page (http://a/)\nitem");
+    snapper.numbered = true;
+    let snapper = Arc::new(snapper);
+    let mut replies: Vec<Reply> = (0..9).flat_map(|i| [click(i), snap(i)]).collect();
+    replies.push(text("done paging"));
+    let fake = Fake::new(replies);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[&clicker, &snapper],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(!lp.stopped_by_guard(run).unwrap());
+    assert_eq!(snapper.count.load(Ordering::SeqCst), 9);
+    let last = fake.request(fake.n_requests() - 1);
+    assert!(
+        tool_messages(&last)
+            .iter()
+            .all(|m| !m.contains("[loop-hint:")),
+        "no hint for a loop that makes progress"
+    );
+}
+
+#[tokio::test]
+async fn identical_untrusted_pages_in_fresh_frames_are_still_a_cycle() {
+    // Every observation of an outside page is framed with a new random block
+    // id, so the stored texts differ byte for byte though the page does not.
+    let env = setup();
+    let clicker = Arc::new(tool("t.click", Effect::Read, "clicked"));
+    let snapper = Arc::new(with_class(
+        "t.snap",
+        Effect::Read,
+        PermissionCategory::Fs,
+        ContentClass::declared(true, false, false),
+        "# Page (http://a/)\nbutton e1",
+    ));
+    let mut replies: Vec<Reply> = (0..8).flat_map(|i| [click(i), snap(i)]).collect();
+    replies.push(text("I am stuck on this page"));
+    let fake = Fake::new(replies);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[&clicker, &snapper],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(lp.stopped_by_guard(run).unwrap());
+    let ran = clicker.count.load(Ordering::SeqCst) + snapper.count.load(Ordering::SeqCst);
+    assert!(ran < 16, "the framed cycle must stop early, {ran} calls ran");
+}

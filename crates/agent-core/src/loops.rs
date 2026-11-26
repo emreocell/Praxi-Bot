@@ -18,21 +18,22 @@ pub(crate) const REPEAT_WARN_MARK: &str = "\n[warning: this exact call";
 /// Longest cycle (in calls) that is looked for.
 const MAX_PERIOD: usize = 3;
 /// Tools that poll on purpose: the same results while waiting are not a loop.
-const WAITING_TOOLS: [&str; 2] = ["wait", "email_wait_for"];
+const WAITING_TOOLS: [&str; 4] = ["wait", "email_wait_for", "browser_wait", "pc_browser_wait"];
 
 /// One call of the run, oldest first, as far as cycle detection cares.
 #[derive(Debug, Clone)]
 pub(crate) struct Entry {
-    /// Tool name and parsed arguments.
+    /// Tool name and parsed arguments, with a `use_tool` wrapper looked through.
     key: (String, Value),
     /// Hash of the result without loop-authored notes; `None`: not run yet.
     result: Option<u64>,
 }
 
 impl Entry {
-    pub(crate) fn new(key: (String, Value), result_text: Option<&str>) -> Self {
+    /// `name` and `arguments` are the call as the model made it.
+    pub(crate) fn new(name: &str, arguments: &str, result_text: Option<&str>) -> Self {
         Self {
-            key,
+            key: crate::compaction::resolve_call(name, arguments),
             result: result_text.map(fingerprint),
         }
     }
@@ -48,8 +49,9 @@ impl Entry {
     }
 }
 
-/// Hash of a result text with the notes the loop appended itself removed, so
-/// a hint on one repetition does not make it differ from the next.
+/// Hash of a result text with the notes the loop appended itself removed and
+/// the per-call frame of an untrusted page (its random nonce differs on every
+/// call) taken off, so two identical pages hash the same.
 pub(crate) fn fingerprint(text: &str) -> u64 {
     let end = [CYCLE_HINT_MARK, REPEAT_WARN_MARK]
         .iter()
@@ -57,7 +59,7 @@ pub(crate) fn fingerprint(text: &str) -> u64 {
         .min()
         .unwrap_or(text.len());
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    text[..end].hash(&mut h);
+    crate::page_guard::unframe(&text[..end]).hash(&mut h);
     h.finish()
 }
 
@@ -65,8 +67,11 @@ pub(crate) fn fingerprint(text: &str) -> u64 {
 /// repeated with unchanged results (counting the block itself) and the tools
 /// in it. `None`: no block repeated.
 ///
-/// The last entry may be a call that has not run yet (no result): it matches
-/// on the call alone.
+/// Neighbouring blocks are compared with each other, so a result that changes
+/// anywhere in the history (a page that moves on after every click) ends the
+/// count there. The last entries may be calls that have not run yet (no
+/// result): they match on the call alone, but only against the block just
+/// before them.
 pub(crate) fn trailing_cycle(seq: &[Entry]) -> Option<(u32, Vec<String>)> {
     let n = seq.len();
     let mut best: Option<(usize, usize)> = None; // (repeats, period)
@@ -82,9 +87,10 @@ pub(crate) fn trailing_cycle(seq: &[Entry]) -> Option<(u32, Vec<String>)> {
         }
         let mut repeats = 1;
         while n >= period * (repeats + 1) {
-            let start = n - period * (repeats + 1);
-            let earlier = &seq[start..start + period];
-            if !earlier.iter().zip(block).all(|(a, b)| a.matches(b)) {
+            let later_start = n - period * repeats;
+            let later = &seq[later_start..later_start + period];
+            let earlier = &seq[later_start - period..later_start];
+            if !earlier.iter().zip(later).all(|(a, b)| a.matches(b)) {
                 break;
             }
             repeats += 1;
@@ -121,7 +127,7 @@ mod tests {
     use super::*;
 
     fn call(name: &str, arg: u32, result: Option<&str>) -> Entry {
-        Entry::new((name.to_owned(), json!({ "a": arg })), result)
+        Entry::new(name, &json!({ "a": arg }).to_string(), result)
     }
 
     fn click_snapshot(times: usize) -> Vec<Entry> {
@@ -226,6 +232,127 @@ mod tests {
         let (_, names) = trailing_cycle(&click_snapshot(3)).unwrap();
         assert_eq!(names, ["browser_click", "browser_snapshot"]);
         assert!(trailing_cycle(&click_snapshot(1)).is_none());
+    }
+
+    #[test]
+    fn a_progressing_loop_with_a_pending_call_is_not_a_cycle() {
+        // click(next) always answers "ok", but every snapshot is a new page.
+        let mut seq: Vec<Entry> = (0..4)
+            .flat_map(|i| {
+                [
+                    call("browser_click", 1, Some("ok")),
+                    call(
+                        "browser_snapshot",
+                        0,
+                        Some(&format!("# Page {i} (http://a/{i})")),
+                    ),
+                ]
+            })
+            .collect();
+        // The next click and snapshot are queued and have no result yet.
+        seq.push(call("browser_click", 1, None));
+        assert_eq!(repeats(&seq), 1);
+        seq.push(call("browser_snapshot", 0, None));
+        assert_eq!(
+            repeats(&seq),
+            2,
+            "only the neighbouring block is a wildcard match"
+        );
+    }
+
+    #[test]
+    fn a_batch_whose_results_change_is_not_a_cycle() {
+        let seq: Vec<Entry> = (0..6)
+            .flat_map(|i| {
+                [
+                    call("a", 0, Some(&format!("a{i}"))),
+                    call("b", 0, Some(&format!("b{i}"))),
+                ]
+            })
+            .chain([call("a", 0, None), call("b", 0, None)])
+            .collect();
+        // The queued pair matches the block before it and nothing older: 2, far below the stop.
+        assert_eq!(repeats(&seq), 2);
+    }
+
+    #[test]
+    fn identical_pages_in_fresh_frames_are_the_same_result() {
+        let page = "# Page (http://a/)\nbutton e1";
+        let framed = |tool| crate::page_guard::wrap_data_block(tool, page);
+        assert_ne!(
+            framed("browser_snapshot"),
+            framed("browser_snapshot"),
+            "nonce differs"
+        );
+        assert_eq!(
+            fingerprint(&framed("browser_snapshot")),
+            fingerprint(&framed("browser_snapshot"))
+        );
+        assert_eq!(fingerprint(&framed("browser_snapshot")), fingerprint(page));
+        let seq: Vec<Entry> = (0..3)
+            .flat_map(|_| {
+                [
+                    call("browser_click", 1, Some("clicked")),
+                    call("browser_snapshot", 0, Some(&framed("browser_snapshot"))),
+                ]
+            })
+            .collect();
+        assert_eq!(repeats(&seq), 3);
+        // A hint appended after the frame does not break it either.
+        let hinted = format!(
+            "{}{}",
+            framed("browser_snapshot"),
+            hint(3, &["a".into(), "b".into()])
+        );
+        assert_eq!(fingerprint(&hinted), fingerprint(page));
+    }
+
+    #[test]
+    fn browser_waits_poll_even_through_use_tool() {
+        for wait in ["browser_wait", "pc_browser_wait"] {
+            let seq: Vec<Entry> = (0..6)
+                .flat_map(|_| [call(wait, 2, Some("waited")), call("snap", 0, Some("same"))])
+                .collect();
+            assert_eq!(repeats(&seq), 1, "{wait}");
+        }
+        let wrapped = |target: &str, args: Value, result: &str| {
+            Entry::new(
+                "use_tool",
+                &json!({ "name": target, "input": args }).to_string(),
+                Some(result),
+            )
+        };
+        let seq: Vec<Entry> = (0..6)
+            .flat_map(|_| {
+                [
+                    wrapped("browser_wait", json!({"idle": true}), "waited"),
+                    wrapped("browser_snapshot", json!({}), "same"),
+                ]
+            })
+            .collect();
+        assert_eq!(repeats(&seq), 1, "a wait behind use_tool still polls");
+    }
+
+    #[test]
+    fn use_tool_wrapped_calls_are_compared_by_their_target() {
+        let wrapped = |target: &str, result: &str| {
+            Entry::new(
+                "use_tool",
+                &json!({ "name": target, "input": {} }).to_string(),
+                Some(result),
+            )
+        };
+        let seq: Vec<Entry> = (0..3)
+            .flat_map(|_| {
+                [
+                    wrapped("browser_click", "ok"),
+                    wrapped("browser_snapshot", "same"),
+                ]
+            })
+            .collect();
+        let (n, names) = trailing_cycle(&seq).expect("a stuck wrapped cycle is still found");
+        assert_eq!(n, 3);
+        assert_eq!(names, ["browser_click", "browser_snapshot"]);
     }
 
     #[test]

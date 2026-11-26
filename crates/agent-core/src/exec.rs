@@ -201,10 +201,7 @@ fn cycle_entries(history: &[RunStep]) -> Vec<crate::loops::Entry> {
                 .iter()
                 .find(|r| r.id == call.id)
                 .map(|r| r.text.as_str());
-            out.push(crate::loops::Entry::new(
-                call_key(&call.name, &call.arguments),
-                text,
-            ));
+            out.push(crate::loops::Entry::new(&call.name, &call.arguments, text));
         }
     }
     out
@@ -807,7 +804,7 @@ impl TurnExecutor {
                     c.name
                 ));
             }
-            cycle_seq.push(crate::loops::Entry::new(key.clone(), None));
+            cycle_seq.push(crate::loops::Entry::new(&c.name, &c.arguments, None));
             let cycle = crate::loops::trailing_cycle(&cycle_seq);
             if g.cycle_stop > 0
                 && let Some((repeats, names)) = &cycle
@@ -1076,10 +1073,9 @@ impl TurnExecutor {
             for (i, &name) in models.iter().enumerate() {
                 // Only the owner's configured fallback chain is eligible. Unknown/CLI providers
                 // keep their normal path; HTTP responses such as 401/429 never count as offline.
-                if reachability
-                    .iter()
-                    .any(|r| Some(r.id.as_str()) == ModelRef(name.clone()).provider() && !r.reachable)
-                {
+                if reachability.iter().any(|r| {
+                    Some(r.id.as_str()) == ModelRef(name.clone()).provider() && !r.reachable
+                }) {
                     other_failure = true;
                     last_model = name;
                     last_err = Some(ProviderError::Connection("The model service cannot be reached. Your message has not been answered; try again when the connection returns.".into()));
@@ -1137,7 +1133,8 @@ impl TurnExecutor {
                     &alternative
                 // Only the standard (executor) attempt gets the full deferred surface;
                 // later fallback models keep the light tier's direct-only surface.
-                } else if deferred && tier_light && i == 1 && !ctx.profile.models.direct_tools_only {
+                } else if deferred && tier_light && i == 1 && !ctx.profile.models.direct_tools_only
+                {
                     alternative =
                         self.sh
                             .deferred_specs(&ctx, &crate::discovery::activations(&steps), false);
@@ -1185,7 +1182,8 @@ impl TurnExecutor {
                 match attempt {
                     Ok(mut out) => {
                         if using_deferred {
-                            out.offered_tools = Some(offered.iter().map(|s| s.name.clone()).collect());
+                            out.offered_tools =
+                                Some(offered.iter().map(|s| s.name.clone()).collect());
                         }
                         result = Some(out);
                         break;
