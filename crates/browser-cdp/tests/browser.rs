@@ -1316,6 +1316,181 @@ async fn pointer_typing_and_drag_and_wheel_work_and_secret_fields_are_refused() 
     b.close().await.unwrap();
 }
 
+/// Review finding 1: a point over another site's frame is judged by THAT frame's origin (not the
+/// top page's), for a click, a hover and both ends of a drag.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn a_pointer_action_into_another_origins_frame_is_judged_by_that_frame() {
+    use browser_cdp::{Feel, PointerButton, PointerOp, PointerRequest};
+    let port = common::serve().await;
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = b
+        .new_page(&format!("http://127.0.0.1:{port}/widgets"))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let shot = p.grounded_screenshot().await.unwrap();
+    let human = shot
+        .regions
+        .iter()
+        .find(|r| r.label == "Human check")
+        .expect("the cross-origin frame is listed");
+    let canvas = shot.regions.iter().find(|r| r.kind == "canvas").unwrap();
+    let in_frame = (f64::from(human.x) + 37.0, f64::from(human.y) + 37.0);
+    let on_top = (f64::from(canvas.x) + 20.0, f64::from(canvas.y) + 20.0);
+    let top_origin = format!("http://127.0.0.1:{port}");
+    let frame_origin = format!("http://localhost:{port}");
+
+    // The browser says which origin receives an event at each point.
+    assert_eq!(
+        p.pointer_origin(on_top, None).await.unwrap().as_deref(),
+        Some(top_origin.as_str())
+    );
+    assert_eq!(
+        p.pointer_origin(in_frame, None).await.unwrap().as_deref(),
+        Some(frame_origin.as_str())
+    );
+    // A drag whose two ends are in different origins has no single origin.
+    assert_eq!(
+        p.pointer_origin(on_top, Some(in_frame)).await.unwrap(),
+        None
+    );
+
+    let act = |op: PointerOp, at: (f64, f64), expected: Option<&str>| {
+        let p = &p;
+        let expected = expected.map(str::to_owned);
+        async move {
+            p.pointer(
+                &PointerRequest {
+                    op,
+                    at,
+                    feel: Feel::Instant,
+                    expected: expected.as_deref(),
+                },
+                &DialogOptions::default(),
+            )
+            .await
+            .unwrap()
+            .0
+        }
+    };
+    let click = PointerOp::Click {
+        button: PointerButton::Left,
+        count: 1,
+    };
+    // Approved for the TOP page only: the click into the frame, the hover and the drag end are
+    // all refused, and the frame saw nothing.
+    for (op, what) in [
+        (click, "click"),
+        (PointerOp::Move, "hover"),
+        (PointerOp::Wheel { dx: 0.0, dy: 5.0 }, "wheel"),
+        (PointerOp::Drag { to: in_frame }, "drag end"),
+    ] {
+        let at = if what == "drag end" { on_top } else { in_frame };
+        let r = act(op, at, Some(top_origin.as_str())).await;
+        assert!(!r.ok, "{what} into the frame must be refused");
+        let e = r.error.unwrap_or_default();
+        assert!(e.contains("receiving frame origin changed"), "{what}: {e}");
+    }
+    assert!(
+        !text_of(&p, "document.getElementById('picked').textContent")
+            .await
+            .contains("|human"),
+        "the refused click reached the frame"
+    );
+    // A drag that STARTS in the frame is refused for a top-page approval too.
+    let r = act(
+        PointerOp::Drag { to: on_top },
+        in_frame,
+        Some(top_origin.as_str()),
+    )
+    .await;
+    assert!(!r.ok);
+    // Approved for the frame's own origin the same click goes through.
+    let r = act(click, in_frame, Some(frame_origin.as_str())).await;
+    assert!(r.ok, "{:?}", r.error);
+    let mut seen = String::new();
+    for _ in 0..20 {
+        seen = text_of(&p, "document.getElementById('picked').textContent").await;
+        if seen.contains("|human") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(seen.contains("|human"), "{seen}");
+    b.close().await.unwrap();
+}
+
+/// Review finding 2: a page script that moves focus to a password field while text is typed
+/// stops the typing at that character.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+#[allow(clippy::many_single_char_names)]
+async fn typing_stops_when_focus_moves_to_a_password_field_mid_string() {
+    let port = common::serve().await;
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = b
+        .new_page(&format!("http://127.0.0.1:{port}/widgets"))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let view = p.pointer_view().await.unwrap();
+    let s = view.scale();
+    let r = p
+        .evaluate(
+            "(()=>{const r=document.getElementById('free').getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]})()",
+        )
+        .await
+        .unwrap();
+    assert!(
+        point_click(&p, r[0].as_f64().unwrap() * s, r[1].as_f64().unwrap() * s)
+            .await
+            .0
+            .ok
+    );
+    // After the first character the page hands focus to the password field.
+    p.evaluate(
+        "document.getElementById('free').addEventListener('input',()=>document.getElementById('pw').focus())",
+    )
+    .await
+    .unwrap();
+    let typed = p
+        .pointer_type("abcdef", Some(&format!("http://127.0.0.1:{port}")))
+        .await
+        .unwrap();
+    assert!(!typed.ok, "typing must stop");
+    let e = typed.error.unwrap_or_default();
+    assert!(e.contains("refused"), "{e}");
+    assert_eq!(
+        text_of(&p, "document.getElementById('pw').value").await,
+        "",
+        "nothing may reach the password field"
+    );
+    assert_eq!(
+        text_of(&p, "document.getElementById('free').value").await,
+        "a",
+        "only the character before the shift was typed"
+    );
+
+    // Focus moving to another harmless field is stopped too: the text was meant for the first.
+    p.evaluate(
+        "(()=>{const o=document.createElement('input');o.id='other';document.body.append(o);const f=document.getElementById('free');f.value='';f.focus();f.addEventListener('input',()=>o.focus(),{once:true})})()",
+    )
+    .await
+    .unwrap();
+    let typed = p
+        .pointer_type("xyz", Some(&format!("http://127.0.0.1:{port}")))
+        .await
+        .unwrap();
+    assert!(!typed.ok, "typing must stop at the focus change");
+    assert_eq!(
+        text_of(&p, "document.getElementById('other').value").await,
+        "",
+        "the rest of the text must not reach the field focus moved to"
+    );
+    b.close().await.unwrap();
+}
+
 #[tokio::test]
 #[ignore = "needs Chrome/Edge"]
 async fn a_failed_send_is_recovered_in_place_without_reloading_the_page() {

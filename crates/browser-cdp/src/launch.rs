@@ -380,17 +380,50 @@ pub async fn resolve_endpoint(endpoint: &str) -> Result<String> {
 
 /// Minimal HTTP/1.1 GET over a raw socket (avoids an HTTP client dependency).
 async fn http_get(hostport: &str, path: &str) -> Result<String> {
+    http_get_from(
+        hostport,
+        || async { TcpStream::connect(hostport).await },
+        path,
+    )
+    .await
+}
+
+/// [`http_get`] to an address the caller already resolved and checked (nothing is resolved
+/// again, so a name cannot answer differently the second time). The reply is capped: a
+/// debugging endpoint that never stops talking cannot fill memory.
+pub(crate) async fn http_get_at(
+    addr: std::net::SocketAddr,
+    host_header: &str,
+    path: &str,
+) -> Result<String> {
+    http_get_from(
+        host_header,
+        || async move { TcpStream::connect(addr).await },
+        path,
+    )
+    .await
+}
+
+/// Longest reply [`http_get_from`] reads, in bytes.
+const HTTP_REPLY_MAX: u64 = 256 * 1024;
+
+async fn http_get_from<F, Fut>(host_header: &str, connect: F, path: &str) -> Result<String>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = std::io::Result<TcpStream>>,
+{
     let fut = async {
-        let mut s = TcpStream::connect(hostport).await?;
-        let req = format!("GET {path} HTTP/1.1\r\nHost: {hostport}\r\nConnection: close\r\n\r\n");
+        let mut s = connect().await?;
+        let req =
+            format!("GET {path} HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\n\r\n");
         s.write_all(req.as_bytes()).await?;
         let mut buf = Vec::new();
-        s.read_to_end(&mut buf).await?;
+        s.take(HTTP_REPLY_MAX).read_to_end(&mut buf).await?;
         Ok::<_, std::io::Error>(String::from_utf8_lossy(&buf).into_owned())
     };
     let raw = tokio::time::timeout(Duration::from_secs(5), fut)
         .await
-        .map_err(|_| Error::Timeout(format!("GET {hostport}{path}")))??;
+        .map_err(|_| Error::Timeout(format!("GET {host_header}{path}")))??;
     raw.split_once("\r\n\r\n")
         .map(|(_, b)| b.to_string())
         .ok_or_else(|| Error::Launch("malformed HTTP response".into()))

@@ -16,7 +16,10 @@ use std::fmt::Write as _;
 use base64::Engine as _;
 use serde_json::{Value, json};
 
-use super::{ActionResult, DialogOptions, Feel, Jitter, grant_origin_matches, human, sleep};
+use super::{
+    ActionResult, DialogOptions, Feel, Jitter, NO_FOCUS, StepGuard, grant_origin_matches, human,
+    sleep, web_origin,
+};
 use crate::error::{Error, Result};
 use crate::page::Page;
 use crate::snapshot::RefEntry;
@@ -347,10 +350,20 @@ impl Page {
         })
     }
 
-    /// What is under a CSS viewport point, as the browser reports it (never page script):
-    /// words for the model, and the entry for the frame check. A bare page background has no
-    /// node of its own: the click still goes there, with no entry to check.
-    async fn hit_at(&self, x: f64, y: f64) -> Result<(String, Option<RefEntry>)> {
+    /// What is under a CSS viewport point, as the browser reports it (never page script): words
+    /// for the model, and the origin that would receive an event there. A bare page background
+    /// has no node of its own: the click still goes to the top document.
+    ///
+    /// The origin is the one of the frame that really receives the event. A point over an
+    /// `<iframe>` hits the frame element of the TOP document, so the embedded frame is looked up
+    /// by its own id, and every frame nested inside it counts too: the origin is `Some` only when
+    /// all of them agree (an opaque or mixed stack is unknown, which no rule matches).
+    async fn hit_at(&self, x: f64, y: f64) -> Result<Hit> {
+        let background = || Hit {
+            what: "nothing but the page background".to_owned(),
+            origin: None,
+            top: true,
+        };
         let Ok(hit) = self
             .cmd(
                 "DOM.getNodeForLocation",
@@ -359,20 +372,12 @@ impl Page {
             )
             .await
         else {
-            return Ok(("nothing but the page background".to_owned(), None));
+            return Ok(background());
         };
         let Some(backend_id) = hit["backendNodeId"].as_i64() else {
-            return Ok(("nothing but the page background".to_owned(), None));
+            return Ok(background());
         };
-        let entry = RefEntry {
-            session_id: None,
-            frame_id: hit["frameId"].as_str().unwrap_or_default().to_owned(),
-            backend_id,
-            name: String::new(),
-            role: String::new(),
-            // Only a click lands here; typing re-checks the focused element itself.
-            sensitive: false,
-        };
+        let hit_frame = hit["frameId"].as_str().unwrap_or_default().to_owned();
         let d = self
             .cmd("DOM.describeNode", json!({"backendNodeId": backend_id}))
             .await?;
@@ -401,10 +406,147 @@ impl Page {
         {
             let _ = write!(what, " \"{}\"", clean(label, 60));
         }
-        if matches!(tag.as_str(), "iframe" | "frame") {
+        let embedded = node["frameId"].as_str().filter(|f| !f.is_empty());
+        let is_frame = matches!(tag.as_str(), "iframe" | "frame");
+        if is_frame {
             what.push_str(" (a frame: the click goes into it)");
         }
-        Ok((what, Some(entry)))
+        let origin = match (embedded, is_frame) {
+            (Some(child), _) => self.subtree_origin(child).await?,
+            // A frame element with no frame behind it (not loaded yet): unknown, fail closed.
+            (None, true) => None,
+            (None, false) if hit_frame.is_empty() => self.top_origin().await,
+            (None, false) => {
+                self.frame_identity(&RefEntry {
+                    session_id: None,
+                    frame_id: hit_frame,
+                    backend_id,
+                    name: String::new(),
+                    role: String::new(),
+                    sensitive: false,
+                })
+                .await?
+                .origin
+            }
+        };
+        Ok(Hit {
+            what,
+            origin,
+            top: false,
+        })
+    }
+
+    /// The origin of frame `root` when it and every frame inside it share one web origin;
+    /// `None` when any is opaque or they differ. An error when `root` is not in the frame tree.
+    async fn subtree_origin(&self, root: &str) -> Result<Option<String>> {
+        let gone = || Error::Element("the frame under the point is gone".into());
+        let top = self
+            .cmd("Page.getFrameTree", json!({}))
+            .await
+            .map_err(|e| Error::Element(format!("cannot read the frames of the page: {e}")))?;
+        let mut stack = vec![&top["frameTree"]];
+        let mut found = None;
+        while let Some(n) = stack.pop() {
+            if n["frame"]["id"].as_str() == Some(root) {
+                found = Some(n);
+                break;
+            }
+            stack.extend(n["childFrames"].as_array().into_iter().flatten());
+        }
+        // A frame of another site lives in its own process: the top page's tree stops at it, and
+        // the frame's own session reports what is inside.
+        let own;
+        let found = if let Some(n) = found {
+            n
+        } else {
+            let session = self
+                .shared
+                .oopif
+                .lock()
+                .ok()
+                .and_then(|m| m.get(root).cloned())
+                .ok_or_else(gone)?;
+            own = self
+                .cmd_on(Some(&session), "Page.getFrameTree", json!({}))
+                .await
+                .map_err(|e| {
+                    Error::Element(format!("cannot read the frame under the point: {e}"))
+                })?;
+            if own["frameTree"]["frame"]["id"].as_str() != Some(root) {
+                return Err(gone());
+            }
+            &own["frameTree"]
+        };
+        let mut origins = Vec::new();
+        let mut stack = vec![found];
+        while let Some(n) = stack.pop() {
+            origins.push(web_origin(n["frame"]["securityOrigin"].as_str()));
+            stack.extend(n["childFrames"].as_array().into_iter().flatten());
+        }
+        let first = origins.first().cloned().flatten();
+        Ok(first.filter(|f| origins.iter().all(|o| o.as_deref() == Some(f.as_str()))))
+    }
+
+    /// The origin that receives a pointer event at `hit`.
+    async fn hit_origin(&self, hit: &Hit) -> Option<String> {
+        if hit.top {
+            self.top_origin().await
+        } else {
+            hit.origin.clone()
+        }
+    }
+
+    /// Refuse when an approval named an origin and the one under the point is another (or unknown).
+    async fn check_hit_origin(&self, hit: &Hit, expected: Option<&str>) -> Result<Option<String>> {
+        let origin = self.hit_origin(hit).await;
+        if let Some(expected) = expected
+            && !grant_origin_matches(origin.as_deref(), expected)
+        {
+            return Err(Error::Element(
+                "receiving frame origin changed; ask again before input".into(),
+            ));
+        }
+        Ok(origin)
+    }
+
+    /// The point again after the pointer travelled there (a hover can open a menu, move a frame
+    /// or navigate): the receiving origin must still be the one it was, and the approved one.
+    async fn recheck_hit(
+        &self,
+        (x, y): (f64, f64),
+        before: Option<&str>,
+        expected: Option<&str>,
+    ) -> Result<()> {
+        let hit = self.hit_at(x, y).await?;
+        let now = self.check_hit_origin(&hit, expected).await?;
+        if now.as_deref() != before {
+            return Err(Error::Element(
+                "the page under the pointer changed while it moved; nothing was pressed. Take a new screenshot and look again"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Browser-reported origin that would receive the pointer events of an action at `at` (and,
+    /// for a drag, released at `to`). `None`: unknown, opaque, or the two ends differ.
+    pub async fn pointer_origin(
+        &self,
+        at: (f64, f64),
+        to: Option<(f64, f64)>,
+    ) -> Result<Option<String>> {
+        let view = self.pointer_view().await?;
+        let (x, y) = view.to_css(at)?;
+        let first = self.hit_at(x, y).await?;
+        let origin = self.hit_origin(&first).await;
+        if let Some(to) = to {
+            let (tx, ty) = view.to_css(to)?;
+            let second = self.hit_at(tx, ty).await?;
+            if self.hit_origin(&second).await != origin {
+                return Ok(None);
+            }
+        }
+        Ok(origin)
     }
 
     async fn glide_to(&self, to: (f64, f64), feel: Feel, rng: &mut Jitter) -> Result<()> {
@@ -416,26 +558,30 @@ impl Page {
             .await
     }
 
-    async fn pointer_inner(&self, req: &PointerRequest<'_>, hit: &mut String) -> Result<()> {
+    async fn pointer_inner(&self, req: &PointerRequest<'_>, hit_text: &mut String) -> Result<()> {
         let view = self.pointer_view().await?;
         let (x, y) = view.to_css(req.at)?;
         let mut rng = Jitter::from_clock();
-        let (what, entry) = self.hit_at(x, y).await?;
-        *hit = what;
-        if matches!(req.op, PointerOp::Click { .. } | PointerOp::Drag { .. })
-            && let Some(expected) = req.expected
-        {
-            // An approval named the receiving frame's origin: it must be the one under the point.
-            let origin = match &entry {
-                Some(e) => self.frame_identity(e).await?.origin,
-                None => self.top_origin().await,
-            };
-            if !grant_origin_matches(origin.as_deref(), expected) {
-                return Err(Error::Element(
-                    "receiving frame origin changed; ask again before input".into(),
-                ));
+        let hit = self.hit_at(x, y).await?;
+        hit_text.clone_from(&hit.what);
+        // Every kind of pointer action is judged by the frame under the point (a hover or a wheel
+        // reaches the page too), and a drag by where it is released as well.
+        let origin = self.check_hit_origin(&hit, req.expected).await?;
+        let drop_point = match req.op {
+            PointerOp::Drag { to } => {
+                let (tx, ty) = view.to_css(to)?;
+                let end = self.hit_at(tx, ty).await?;
+                let end_origin = self.check_hit_origin(&end, req.expected).await?;
+                if end_origin != origin {
+                    return Err(Error::Element(
+                        "the drag would end in another frame than it starts in; nothing was pressed"
+                            .into(),
+                    ));
+                }
+                Some((tx, ty))
             }
-        }
+            _ => None,
+        };
         match req.op {
             PointerOp::Move => {
                 self.glide_to((x, y), req.feel, &mut rng).await?;
@@ -443,6 +589,8 @@ impl Page {
             }
             PointerOp::Wheel { dx, dy } => {
                 self.glide_to((x, y), req.feel, &mut rng).await?;
+                self.recheck_hit((x, y), origin.as_deref(), req.expected)
+                    .await?;
                 self.wheel(x, y, dx, dy).await?;
                 // Let smooth-scrolling pages move before the picture is taken.
                 sleep(std::time::Duration::from_millis(150)).await;
@@ -450,6 +598,9 @@ impl Page {
             PointerOp::Click { button, count } => {
                 self.glide_to((x, y), req.feel, &mut rng).await?;
                 sleep(human::settle_pause(req.feel, &mut rng)).await;
+                // The mouse has arrived: what is under it now is what the press will hit.
+                self.recheck_hit((x, y), origin.as_deref(), req.expected)
+                    .await?;
                 let (name, mask) = match button {
                     PointerButton::Left => (button.cdp(), 1),
                     PointerButton::Right => (button.cdp(), 2),
@@ -462,10 +613,12 @@ impl Page {
                     self.mouse("mouseReleased", x, y, r).await?;
                 }
             }
-            PointerOp::Drag { to } => {
-                let (tx, ty) = view.to_css(to)?;
+            PointerOp::Drag { .. } => {
+                let (tx, ty) = drop_point.unwrap_or((x, y));
                 self.glide_to((x, y), req.feel, &mut rng).await?;
                 sleep(human::settle_pause(req.feel, &mut rng)).await;
+                self.recheck_hit((x, y), origin.as_deref(), req.expected)
+                    .await?;
                 self.mouse(
                     "mousePressed",
                     x,
@@ -486,6 +639,9 @@ impl Page {
                     .await?;
                     sleep(human::step_pause(req.feel, &mut rng)).await;
                 }
+                // The button is down: release it where it was approved or not at all.
+                self.recheck_hit((tx, ty), origin.as_deref(), req.expected)
+                    .await?;
                 self.mouse(
                     "mouseReleased",
                     tx,
@@ -515,17 +671,53 @@ impl Page {
         Ok((acted, hit))
     }
 
+    /// The node that has keyboard focus, after the checks typing needs: its frame is the one an
+    /// approval named, and it is not a secret field (a frame or shadow host counts as one: it
+    /// cannot be looked into). `None` when nothing has focus.
+    async fn typing_target(&self, expected: Option<&str>) -> Result<Option<(Option<String>, i64)>> {
+        match self.focused_entry().await {
+            Ok(mut e) => {
+                self.check_input_origin(&e, expected).await?;
+                // Unknown until looked at: `refuse_if_sensitive_now` reads the live node.
+                e.sensitive = true;
+                self.refuse_if_sensitive_now(&e, "typed text").await?;
+                Ok(Some((e.session_id, e.backend_id)))
+            }
+            Err(Error::Element(m)) if m == NO_FOCUS => {
+                self.refuse_if_active_element_secret().await?;
+                if let Some(expected) = expected
+                    && !grant_origin_matches(self.top_origin().await.as_deref(), expected)
+                {
+                    return Err(Error::Element(
+                        "receiving frame origin changed; ask again before input".into(),
+                    ));
+                }
+                self.focused_node().await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Type `text` into whatever has keyboard focus (after a pointer click put focus there).
     /// Refuses a focused secret field and a focused element in another frame or shadow
     /// host, the same way a key press does; the secret path is `fill` with a secret name.
+    /// The focus is verified again before EVERY character: a page script that moves focus to a
+    /// password field or another frame while the text goes in (a key handler, the Enter at a
+    /// line break) stops the typing there, with the rest NOT typed.
     pub async fn pointer_type(&self, text: &str, expected: Option<&str>) -> Result<ActionResult> {
         let before = self.baseline().await?;
         let res = async {
-            self.check_focused_origin(expected).await?;
-            self.refuse_if_active_element_secret().await?;
+            let start = self.typing_target(expected).await?;
             for ch in text.chars() {
+                if self.typing_target(expected).await? != start {
+                    return Err(Error::Element(
+                        "refused: keyboard focus moved while typing, so the rest was NOT typed. Click the field again and check the page"
+                            .into(),
+                    ));
+                }
                 if ch == '\n' {
-                    self.key_inner("Enter").await?;
+                    self.key_inner_with_origin("Enter", expected, &StepGuard::default())
+                        .await?;
                 } else {
                     let s = ch.to_string();
                     self.cmd(
@@ -542,6 +734,16 @@ impl Page {
         .await;
         self.finish(before, res).await
     }
+}
+
+/// What a pointer point lands on.
+struct Hit {
+    /// Words for the model.
+    what: String,
+    /// Origin of the receiving frame (see [`Page::hit_at`]); unused when `top`.
+    origin: Option<String>,
+    /// Nothing but the page background: the top document receives it.
+    top: bool,
 }
 
 #[cfg(test)]

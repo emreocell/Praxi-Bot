@@ -10,12 +10,13 @@
 //! * discovery only reads the places a browser announces itself (well-known ports and the
 //!   `DevToolsActivePort` file of the default profile); it never scans a network.
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::browser::Browser;
 use crate::error::{Error, Result};
-use crate::launch::{parse_devtools_active_port, resolve_endpoint};
+use crate::launch::{http_get_at, parse_devtools_active_port};
 use crate::page::Page;
 
 /// Ports an owner's browser is commonly started on (`--remote-debugging-port`).
@@ -24,7 +25,9 @@ pub const COMMON_DEBUG_PORTS: &[u16] = &[9222, 9223, 9224];
 /// Refuse an endpoint that is not on this computer.
 ///
 /// Accepts `ws://host:port/...`, `http://host:port` and `host:port`, where `host` is
-/// `localhost`, an IPv4 address in `127.0.0.0/8` or `[::1]`.
+/// `localhost`, an IPv4 address in `127.0.0.0/8` or `[::1]`. Only plain `http` / `ws`: a
+/// debugging port on this computer does not speak TLS, and the connection code below only
+/// handles those two.
 pub fn loopback_endpoint(endpoint: &str) -> Result<()> {
     let refuse = |why: &str| {
         Err(Error::Launch(format!(
@@ -43,7 +46,7 @@ pub fn loopback_endpoint(endpoint: &str) -> Result<()> {
     let Ok(url) = url::Url::parse(&with_scheme) else {
         return refuse("the endpoint is not a valid address");
     };
-    if !matches!(url.scheme(), "http" | "https" | "ws" | "wss") {
+    if !matches!(url.scheme(), "http" | "ws") {
         return refuse("the endpoint must be http or ws");
     }
     if !url.username().is_empty() || url.password().is_some() {
@@ -113,18 +116,110 @@ pub async fn discover_owner_endpoints() -> Vec<String> {
     found
 }
 
-/// Connect to the first of `candidates` that answers, within a short deadline each.
+/// The loopback addresses `url` names, resolved ONCE (a name is looked up here and never again,
+/// so it cannot answer with another address the second time). Every address that is not
+/// loopback is dropped; none left is a refusal.
+async fn pinned_addrs(url: &url::Url) -> Result<Vec<SocketAddr>> {
+    let port = url
+        .port()
+        .ok_or_else(|| Error::Launch("refused: the endpoint needs the debugging port".into()))?;
+    let found: Vec<SocketAddr> = match url.host() {
+        Some(url::Host::Ipv4(ip)) => vec![SocketAddr::new(ip.into(), port)],
+        Some(url::Host::Ipv6(ip)) => vec![SocketAddr::new(ip.into(), port)],
+        Some(url::Host::Domain(d)) => tokio::net::lookup_host((d, port))
+            .await
+            .map_err(|e| Error::Launch(format!("cannot resolve {d}: {e}")))?
+            .collect(),
+        None => Vec::new(),
+    };
+    let loopback: Vec<SocketAddr> = found.into_iter().filter(|a| a.ip().is_loopback()).collect();
+    if loopback.is_empty() {
+        return Err(Error::Launch(
+            "refused: the endpoint does not resolve to this computer".into(),
+        ));
+    }
+    Ok(loopback)
+}
+
+/// `ws` with its host replaced by the already checked address, so connecting resolves nothing.
+fn pinned_ws(ws: &url::Url, addr: SocketAddr) -> Result<String> {
+    let mut pinned = ws.clone();
+    pinned
+        .set_ip_host(addr.ip())
+        .map_err(|()| Error::Launch("refused: the endpoint cannot be pinned".into()))?;
+    Ok(pinned.to_string())
+}
+
+/// Connect to the browser at `endpoint` (loopback only, see [`loopback_endpoint`]).
+///
+/// The host is resolved once and every address used is checked to be loopback. For an
+/// `http://` endpoint the browser's own `/json/version` names the websocket to connect to; that
+/// address is validated exactly like the endpoint (loopback, `ws`, the same port) before it is
+/// used, so a debugging port that answers with another machine's address is never followed.
+pub async fn connect_loopback(endpoint: &str) -> Result<Browser> {
+    loopback_endpoint(endpoint)?;
+    let e = endpoint.trim();
+    let url = url::Url::parse(&if e.contains("://") {
+        e.to_owned()
+    } else {
+        format!("http://{e}")
+    })
+    .map_err(|_| Error::Launch("refused: the endpoint is not a valid address".into()))?;
+    let addrs = pinned_addrs(&url).await?;
+    if url.scheme() == "ws" {
+        let addr = addrs[0];
+        return Browser::connect(&pinned_ws(&url, addr)?).await;
+    }
+    let host_header = format!(
+        "{}:{}",
+        url.host_str().unwrap_or("localhost"),
+        url.port().unwrap_or(0)
+    );
+    let mut last: Option<Error> = None;
+    for addr in addrs {
+        let body = match http_get_at(addr, &host_header, "/json/version").await {
+            Ok(b) => b,
+            Err(err) => {
+                last = Some(err);
+                continue;
+            }
+        };
+        let version: serde_json::Value = serde_json::from_str(&body)?;
+        let Some(raw_ws) = version["webSocketDebuggerUrl"].as_str() else {
+            return Err(Error::Launch("endpoint has no webSocketDebuggerUrl".into()));
+        };
+        // Same rules as the endpoint itself, plus: it must be the port that was asked.
+        loopback_endpoint(raw_ws)?;
+        let ws = url::Url::parse(raw_ws)
+            .map_err(|_| Error::Launch("refused: webSocketDebuggerUrl is not an address".into()))?;
+        if ws.scheme() != "ws" || ws.port() != url.port() {
+            return Err(Error::Launch(
+                "refused: the browser named a different debugging address than the one asked"
+                    .into(),
+            ));
+        }
+        let ws_addrs = pinned_addrs(&ws).await?;
+        // Prefer the address that just answered; never one that was not checked.
+        let target = ws_addrs
+            .iter()
+            .copied()
+            .find(|a| *a == addr)
+            .unwrap_or(ws_addrs[0]);
+        return Browser::connect(&pinned_ws(&ws, target)?).await;
+    }
+    Err(last.unwrap_or_else(|| Error::Launch("no address to connect to".into())))
+}
+
+/// Connect to the first of `candidates` that answers, within a short deadline each. A candidate
+/// that is not a loopback address (a stale or hostile `DevToolsActivePort`) is skipped, not fatal.
 pub async fn connect_first(candidates: &[String]) -> Result<(Browser, String)> {
     let mut last: Option<Error> = None;
     for c in candidates {
-        loopback_endpoint(c)?;
-        match tokio::time::timeout(Duration::from_secs(5), async {
-            // Resolve first, so a closed port is a quick error and not a hang.
-            resolve_endpoint(c).await?;
-            Browser::connect(c).await
-        })
-        .await
-        {
+        if let Err(e) = loopback_endpoint(c) {
+            last = Some(e);
+            continue;
+        }
+        match tokio::time::timeout(Duration::from_secs(5), connect_loopback(c)).await {
             Ok(Ok(b)) => return Ok((b, c.clone())),
             Ok(Err(e)) => last = Some(e),
             Err(_) => last = Some(Error::Timeout(format!("connecting to {c}"))),
@@ -204,6 +299,9 @@ mod tests {
             "http://user:pw@127.0.0.1:9222",
             "http://127.0.0.1",
             "file:///etc/passwd",
+            // TLS schemes are not spoken by a local debugging port and are not handled below.
+            "https://127.0.0.1:9222",
+            "wss://127.0.0.1:9222/devtools/browser/abc",
             "http://[::ffff:10.0.0.1]:9222",
             "127.0.0.1:9222 evil.example",
             "http://0.0.0.0:9222",
@@ -225,5 +323,82 @@ mod tests {
                 && d.to_string_lossy().contains("User Data"))
         );
         assert_eq!(owner_profile_dirs(None, None), Vec::<PathBuf>::new());
+    }
+
+    /// A fake debugging port: answers every request with `/json/version` naming `ws`.
+    async fn fake_version_server(ws: impl Fn(u16) -> String + Send + 'static) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut s, _)) = l.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = s.read(&mut buf).await;
+                let body = format!("{{\"webSocketDebuggerUrl\":\"{}\"}}", ws(port));
+                let reply = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = s.write_all(reply.as_bytes()).await;
+            }
+        });
+        port
+    }
+
+    fn refusal(r: Result<Browser>) -> String {
+        match r {
+            Ok(_) => panic!("must not connect"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_debugging_port_cannot_send_the_assistant_to_another_address() {
+        // The browser named another machine, another port, a TLS address, a name that is not
+        // loopback: none is connected to.
+        for hostile in [
+            "ws://192.0.2.7:{port}/devtools/browser/x",
+            "ws://10.0.0.5:{port}/devtools/browser/x",
+            "ws://evil.example:{port}/devtools/browser/x",
+            "wss://127.0.0.1:{port}/devtools/browser/x",
+            "ws://127.0.0.1:1/devtools/browser/x",
+            "ws://user:pw@127.0.0.1:{port}/devtools/browser/x",
+            "http://127.0.0.1:{port}/devtools/browser/x",
+        ] {
+            let template = hostile.to_owned();
+            let port =
+                fake_version_server(move |p| template.replace("{port}", &p.to_string())).await;
+            let e = refusal(connect_loopback(&format!("http://127.0.0.1:{port}")).await);
+            assert!(e.contains("refused"), "{hostile}: {e}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_loopback_debugging_address_is_followed_only_after_the_same_checks() {
+        // The same host and port is accepted by the checks (there is no websocket behind the
+        // fake, so the connection itself fails: that failure is not a refusal).
+        let port = fake_version_server(|p| format!("ws://127.0.0.1:{p}/devtools/browser/x")).await;
+        let e = refusal(connect_loopback(&format!("http://127.0.0.1:{port}")).await);
+        assert!(!e.contains("refused"), "{e}");
+        // `localhost` is resolved once and only a loopback answer is used.
+        let e = refusal(connect_loopback(&format!("http://localhost:{port}")).await);
+        assert!(!e.contains("refused"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn an_invalid_candidate_is_skipped_not_fatal() {
+        let port = fake_version_server(|p| format!("ws://127.0.0.1:{}/x", p.wrapping_add(1))).await;
+        let list = vec![
+            "http://192.168.1.5:9222".to_owned(),
+            "https://127.0.0.1:9222".to_owned(),
+            format!("http://127.0.0.1:{port}"),
+        ];
+        // The last candidate is reached (its own refusal is the error), not the first one's.
+        let e = connect_first(&list)
+            .await
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(e.contains("different debugging address"), "{e}");
     }
 }
