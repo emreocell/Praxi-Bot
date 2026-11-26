@@ -137,8 +137,14 @@ impl BrowserTool {
             "{what}.\nFrom now on every browser_* tool drives this browser, starting with the tab the owner is looking at. browser_open opens a page in it; browser_tabs lists and switches the owner's tabs; browser_attach with detach:true goes back to the assistant's own browser. What it shows is private to the owner."
         );
         if self.refuse_observation_while_latched().is_ok() {
+            // Only HOW MANY tabs: the others' addresses (query tokens, sites the owner blocked
+            // for this bot) are not volunteered; browser_tabs lists them, addresses trimmed.
             if let Ok(tabs) = d.tabs(None).await {
-                let _ = write!(out, "\nTabs:\n{}", cap(&tabs, 12));
+                let n = tabs.lines().count();
+                let _ = write!(
+                    out,
+                    "\n{n} tab(s) are open in it; browser_tabs lists them (without query strings)."
+                );
             }
             if let Ok(page) = d.snapshot(true).await {
                 let _ = write!(
@@ -150,16 +156,6 @@ impl BrowserTool {
         }
         Ok(out)
     }
-}
-
-/// The first `n` lines of `text`.
-fn cap(text: &str, n: usize) -> String {
-    let lines: Vec<&str> = text.lines().collect();
-    let mut out = lines.iter().take(n).copied().collect::<Vec<_>>().join("\n");
-    if lines.len() > n {
-        let _ = write!(out, "\n... {} more tabs", lines.len() - n);
-    }
-    out
 }
 
 #[cfg(test)]
@@ -200,6 +196,5 @@ mod tests {
         let e = owner_exposure();
         assert!(e.ingests_untrusted && e.reads_private);
         assert_eq!(e.label, "signed-in browser");
-        assert_eq!(cap("a\nb\nc", 2), "a\nb\n... 1 more tabs");
     }
 }

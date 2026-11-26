@@ -46,6 +46,16 @@ impl BrowserProfiles {
         {
             return true;
         }
+        // Attached to the owner's own browser: everything it shows may be a signed-in session.
+        if root
+            .peers
+            .lock()
+            .get(bot)
+            .and_then(std::sync::Weak::upgrade)
+            .is_some_and(|d| d.is_attached())
+        {
+            return true;
+        }
         root.settings
             .profiles_root
             .join(bot)

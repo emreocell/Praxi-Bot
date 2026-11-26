@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tool_registry::ToolError;
 
@@ -24,6 +24,66 @@ const MAX_LINE_CHARS: usize = 220;
 const STATE_BUDGET: Duration = Duration::from_secs(8);
 /// Runs whose failure streak is remembered.
 const MAX_STREAKS: usize = 64;
+/// A streak nobody touched for this long is forgotten (a run that ended mid-failure).
+const STREAK_TTL: Duration = Duration::from_secs(30 * 60);
+
+/// Opens the part of a failed step's error that is the PAGE (its address, its controls, a
+/// picture). The agent loop frames that part like any other page text, through the quarantined
+/// reader for a run that holds private data; the words around it are the daemon's own.
+pub const RECOVERY_OPEN: &str = "[[praxi:page-state]]";
+/// Closes what [`RECOVERY_OPEN`] opened.
+pub const RECOVERY_CLOSE: &str = "[[praxi:end-page-state]]";
+
+/// `text` with every look-alike of the two markers broken, so a page (or an error that quotes
+/// one) cannot end the page part early and have its words read as the daemon's advice.
+pub(super) fn defuse(text: &str) -> String {
+    text.replace("[[praxi:", "[ [praxi:")
+}
+
+/// A failed step's error split at its page part: the tool's own words, the page, the advice.
+/// `None` when the error has no page part (the step failed before the page was read).
+#[must_use]
+pub fn split_recovery(text: &str) -> Option<(&str, &str, &str)> {
+    let open = text.find(RECOVERY_OPEN)?;
+    let after = open + RECOVERY_OPEN.len();
+    let close = after + text[after..].find(RECOVERY_CLOSE)?;
+    Some((
+        text[..open].trim_end(),
+        text[after..close].trim(),
+        text[close + RECOVERY_CLOSE.len()..].trim_start(),
+    ))
+}
+
+/// What identifies a step for the failure streak: the tool and its input, with a pointer
+/// action's coordinates rounded to a 16 pixel grid (the same click one pixel over is the same
+/// failing step) and the whole thing cut short.
+#[must_use]
+pub(super) fn step_key(op: Op, input: &serde_json::Value) -> String {
+    fn coarse(v: &serde_json::Value) -> serde_json::Value {
+        use serde_json::Value;
+        match v {
+            Value::Number(n) => n.as_f64().map_or_else(
+                || v.clone(),
+                #[allow(clippy::cast_possible_truncation)] // a coordinate, far below i64's range
+                |f| serde_json::json!(((f / 16.0).round() * 16.0) as i64),
+            ),
+            Value::Array(a) => Value::Array(a.iter().map(coarse).collect()),
+            Value::Object(o) => {
+                Value::Object(o.iter().map(|(k, v)| (k.clone(), coarse(v))).collect())
+            }
+            other => other.clone(),
+        }
+    }
+    let shown = if op == Op::Pointer {
+        coarse(input)
+    } else {
+        input.clone()
+    };
+    format!(
+        "{op:?} {}",
+        shown.to_string().chars().take(300).collect::<String>()
+    )
+}
 
 /// Failing the same step this many times in a row calls for another approach.
 pub(super) const SWITCH_AFTER: u32 = 2;
@@ -67,6 +127,19 @@ pub(super) fn is_recoverable(err: &ToolError) -> bool {
         "browser_idle",
         "no secrets",
         "[praxi notice] the step failed",
+        // The trust checks of the pointer and typing paths: another origin, a frame that
+        // changed under the point, focus that moved. Reading the page and trying again
+        // would be asking the same refused question.
+        "origin changed",
+        "receiving frame",
+        "no longer on",
+        "focus moved",
+        "under the pointer changed",
+        "nothing was pressed",
+        "nothing was typed",
+        "was not typed",
+        "not on this computer",
+        "another frame than it starts in",
     ]
     .iter()
     .any(|m| low.contains(m))
@@ -75,17 +148,26 @@ pub(super) fn is_recoverable(err: &ToolError) -> bool {
 /// How many times in a row the same step has now failed for this run.
 fn streak(run_id: &str, step: &str) -> u32 {
     let mut map = streaks();
+    let now = Instant::now();
     if map.len() >= MAX_STREAKS && !map.contains_key(run_id) {
-        map.clear();
+        // Forget what nobody touched for a while; when that is not enough, the longest idle.
+        map.retain(|_, v| now.duration_since(v.2) < STREAK_TTL);
+        if map.len() >= MAX_STREAKS
+            && let Some(oldest) = map.iter().min_by_key(|(_, v)| v.2).map(|(k, _)| k.clone())
+        {
+            map.remove(&oldest);
+        }
     }
     let entry = map
         .entry(run_id.to_owned())
-        .or_insert_with(|| (String::new(), 0));
-    if entry.0 == step {
+        .or_insert_with(|| (String::new(), 0, now));
+    if entry.0 == step && now.duration_since(entry.2) < STREAK_TTL {
         entry.1 += 1;
     } else {
-        *entry = (step.to_owned(), 1);
+        step.clone_into(&mut entry.0);
+        entry.1 = 1;
     }
+    entry.2 = now;
     entry.1
 }
 
@@ -94,8 +176,10 @@ pub(super) fn forget_streak(run_id: &str) {
     streaks().remove(run_id);
 }
 
-fn streaks() -> std::sync::MutexGuard<'static, HashMap<String, (String, u32)>> {
-    static STREAKS: OnceLock<Mutex<HashMap<String, (String, u32)>>> = OnceLock::new();
+type Streaks = HashMap<String, (String, u32, Instant)>;
+
+fn streaks() -> std::sync::MutexGuard<'static, Streaks> {
+    static STREAKS: OnceLock<Mutex<Streaks>> = OnceLock::new();
     STREAKS
         .get_or_init(Mutex::default)
         .lock()
@@ -178,14 +262,17 @@ impl BrowserTool {
             (state, shot)
         })
         .await;
-        let mut out = msg.clone();
-        let _ = write!(out, "\npage now: {url}");
+        // The page part is everything the page could have written: its address, its controls
+        // and the line naming the picture. It sits between two markers the loop frames.
+        let mut page = format!("page now: {}", defuse(&url));
         if let Ok((state, shot)) = gathered {
             if let Some(state) = state {
-                let _ = write!(out, "\n{}", cap_state(&state));
+                let _ = write!(page, "\n{}", defuse(&cap_state(&state)));
             }
-            out.push_str(&shot);
+            page.push_str(&defuse(&shot));
         }
+        let mut out = defuse(msg);
+        let _ = write!(out, "\n{RECOVERY_OPEN}\n{page}\n{RECOVERY_CLOSE}");
         let _ = write!(out, "\n{}", advice(failures));
         ToolError::Execution(out)
     }

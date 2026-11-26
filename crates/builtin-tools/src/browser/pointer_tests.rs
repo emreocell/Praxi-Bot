@@ -355,6 +355,65 @@ async fn a_pointer_action_is_judged_by_the_page_it_acts_on_and_stops_when_the_pa
     );
 }
 
+/// Review finding 1: a point over a frame of ANOTHER site is judged by that site (the origin the
+/// site rules and the approval use), not by the page around the frame.
+#[tokio::test]
+async fn a_point_inside_another_sites_frame_is_judged_by_that_frames_origin() {
+    let (_d, fake, t) = build();
+    *fake.url.lock() = Some("https://shop.example/checkout".into());
+    *fake.pointer_frame.lock() = Some("https://blocked.example".into());
+    let pointer = get(&t, "browser_pointer");
+    let ctx = ToolContext::default();
+    for input in [
+        json!({"action": "click", "x": 10, "y": 10}),
+        json!({"action": "move", "x": 10, "y": 10}),
+        json!({"action": "scroll", "x": 10, "y": 10, "dy": 100}),
+        json!({"action": "drag", "x": 10, "y": 10, "to_x": 90, "to_y": 90}),
+    ] {
+        assert_eq!(
+            pointer.current_origin(&ctx, &input).await.as_deref(),
+            Some("https://blocked.example:443"),
+            "{input}"
+        );
+    }
+    // An approval for the page around the frame no longer covers the click into the frame.
+    let approved_for_page = ToolContext {
+        expected_origin: Some("https://shop.example:443".into()),
+        ..ToolContext::default()
+    };
+    let err = pointer
+        .call(
+            &approved_for_page,
+            json!({"action": "click", "x": 10, "y": 10}),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("no longer on"), "{err}");
+    assert!(!calls(&fake).iter().any(|c| c.starts_with("pointer:")));
+    // Typing and keys are judged by where focus is, not by where the point would be.
+    fake.targets.lock().insert(
+        "focused".into(),
+        browser_cdp::FieldTarget {
+            name: String::new(),
+            role: String::new(),
+            frame_origin: Some("https://typing.example:443".into()),
+            top_origin: Some("https://shop.example:443".into()),
+            sensitive: false,
+        },
+    );
+    for input in [
+        json!({"action": "type", "text": "hello"}),
+        json!({"action": "key", "key": "Enter"}),
+    ] {
+        assert_eq!(
+            pointer.current_origin(&ctx, &input).await.as_deref(),
+            Some("https://typing.example:443"),
+            "{input}"
+        );
+    }
+}
+
 #[test]
 fn a_click_that_changed_nothing_says_so_and_points_at_the_pointer() {
     let quiet = browser_cdp::SnapshotDiff {

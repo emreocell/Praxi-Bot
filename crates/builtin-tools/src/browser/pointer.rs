@@ -203,6 +203,9 @@ impl BrowserTool {
             shot.ext,
             &shot.bytes,
         )?;
+        if let Some(run) = super::current_run() {
+            super::sideband::note_screenshot(&run, std::path::Path::new(&path));
+        }
         let mut out = format!("screenshot: {path} ({}x{})", shot.width, shot.height);
         let _ = write!(out, "\n{}", shot.notes);
         Ok(out)
