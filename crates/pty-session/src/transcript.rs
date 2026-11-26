@@ -133,7 +133,9 @@ impl Transcript {
                 '\r' => self.col = 0,
                 '\x08' => self.col = self.col.saturating_sub(1),
                 '\t' => {
-                    let to = (self.col / 8 + 1) * 8;
+                    // `put` ignores everything at the line limit, so the loop must stop there:
+                    // at column `MAX_LINE_CHARS` the column never moves again.
+                    let to = ((self.col / 8 + 1) * 8).min(MAX_LINE_CHARS);
                     while self.col < to {
                         self.put(' ');
                     }
@@ -190,7 +192,7 @@ impl Transcript {
                 }
                 _ => {}
             },
-            'C' => self.col = (self.col + first.max(1)).min(MAX_LINE_CHARS),
+            'C' => self.col = self.col.saturating_add(first.max(1)).min(MAX_LINE_CHARS),
             'D' => self.col = self.col.saturating_sub(first.max(1)),
             'G' => self.col = first.saturating_sub(1).min(MAX_LINE_CHARS),
             _ => {}
@@ -335,6 +337,40 @@ mod tests {
             big.feed(format!("{}\n", "y".repeat(1000)).as_bytes());
         }
         assert!(big.kept_bytes <= MAX_KEPT_BYTES);
+    }
+
+    /// Run `feed` on its own thread: a regression must fail the test, not hang the run.
+    fn feeds_within(bytes: Vec<u8>) -> Transcript {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut t = Transcript::new();
+            t.feed(&bytes);
+            let _ = tx.send(t);
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the transcript hung")
+    }
+
+    #[test]
+    fn a_tab_at_the_line_limit_does_not_hang() {
+        // Exactly at the limit, just before it, and a run of tabs past it.
+        for pad in [MAX_LINE_CHARS, MAX_LINE_CHARS - 3, MAX_LINE_CHARS + 50] {
+            let mut bytes = "x".repeat(pad).into_bytes();
+            bytes.extend_from_slice(b"\t\t\tend\n");
+            let t = feeds_within(bytes);
+            let lines = all(&t);
+            assert_eq!(lines.len(), 1, "{pad}");
+            assert!(lines[0].chars().count() <= MAX_LINE_CHARS, "{pad}");
+        }
+        // A cursor move to the limit followed by a tab.
+        let t = feeds_within(b"a\x1b[5000C\tb\n".to_vec());
+        assert_eq!(all(&t).len(), 1);
+    }
+
+    #[test]
+    fn a_huge_cursor_move_does_not_overflow() {
+        let t = feeds_within(format!("a\x1b[{}Cb\x1b[{}Gc\n", usize::MAX, usize::MAX).into_bytes());
+        assert_eq!(all(&t).len(), 1);
     }
 
     #[test]

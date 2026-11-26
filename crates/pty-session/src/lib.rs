@@ -9,13 +9,18 @@
 //! sign-in flows) check their own policy first and pass a fixed program and environment. Output
 //! is returned as the program printed it; callers redact before it leaves their process.
 
+#[cfg(windows)]
+mod job;
 pub mod transcript;
+#[cfg(unix)]
+mod tree;
 
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::mpsc::{SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -33,6 +38,10 @@ pub const MAX_ROWS: u16 = 100;
 pub const MAX_INPUT_BYTES: usize = 4096;
 /// After the program exits, how long its last output may still arrive.
 const EXIT_DRAIN: Duration = Duration::from_millis(300);
+/// Writes (typed text and terminal replies) that may wait for the program to read them.
+const WRITE_QUEUE: usize = 64;
+
+type ChildHandle = Box<dyn portable_pty::Child + Send + Sync>;
 
 /// What to run. `env` is the WHOLE environment: nothing is inherited.
 #[derive(Debug, Clone)]
@@ -94,26 +103,32 @@ struct Shared {
     reaped: bool,
 }
 
-/// A program on a PTY. Dropping it kills the program.
+/// A program on a PTY. Dropping it kills the program, and what it started.
 pub struct PtySession {
     shared: Arc<Mutex<Shared>>,
     notify: Arc<Notify>,
     master: Mutex<Box<dyn MasterPty + Send>>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Typed text goes to a writer thread through this queue: a program that does not read its
+    /// input blocks that thread, never the caller or the reader.
+    input: SyncSender<Vec<u8>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     pid: Option<u32>,
+    /// Everything the program started (Windows; see the `job` module).
+    #[cfg(windows)]
+    job: Option<job::Job>,
 }
 
 type SharedState = Arc<Mutex<Shared>>;
-type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 
-/// Feed everything the program prints into the transcript and the screen, and answer its
-/// terminal queries.
+/// Feed everything the program prints into the transcript and the screen, and hand the answers
+/// to its terminal queries to the writer thread. Nothing here ever waits for the program to read:
+/// an answer that does not fit the queue is dropped (a program that floods queries and never
+/// reads its input would otherwise stop this thread, and with it the output it is waiting on).
 fn spawn_reader(
     mut reader: Box<dyn Read + Send>,
     state: SharedState,
     notify: Arc<Notify>,
-    writer: SharedWriter,
+    replies: SyncSender<Vec<u8>>,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("pty-reader".into())
@@ -132,13 +147,11 @@ fn spawn_reader(
                         sh.last_output = Instant::now();
                         tail.extend_from_slice(&buf[..count]);
                         let fresh = tail.len() - count.min(tail.len());
-                        let replies = terminal_replies(&tail, fresh, sh.screen.screen());
+                        let answers = terminal_replies(&tail, fresh, sh.screen.screen());
                         tail.drain(..tail.len().saturating_sub(QUERY_OVERLAP));
                         drop(sh);
-                        if !replies.is_empty() {
-                            let mut out = writer.lock();
-                            let _ = out.write_all(replies.as_bytes());
-                            let _ = out.flush();
+                        if !answers.is_empty() {
+                            let _ = replies.try_send(answers.into_bytes());
                         }
                         notify.notify_one();
                     }
@@ -150,15 +163,50 @@ fn spawn_reader(
         .map(|_| ())
 }
 
-/// Record how the program ended.
+/// Type what the queue delivers into the program, one piece at a time. Ends when the program no
+/// longer takes input or the session is gone.
+fn spawn_writer(mut writer: Box<dyn Write + Send>) -> std::io::Result<SyncSender<Vec<u8>>> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(WRITE_QUEUE);
+    std::thread::Builder::new()
+        .name("pty-writer".into())
+        .spawn(move || {
+            while let Ok(bytes) = rx.recv() {
+                if writer
+                    .write_all(&bytes)
+                    .and_then(|()| writer.flush())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })?;
+    Ok(tx)
+}
+
+/// Record how the program ended. The child is taken out of `child` for the thread; when the
+/// thread cannot be started it is put back, so the caller can still reap it.
 fn spawn_waiter(
-    mut child: Box<dyn portable_pty::Child + Send + Sync>,
+    child: &mut Option<ChildHandle>,
     state: SharedState,
     notify: Arc<Notify>,
 ) -> std::io::Result<()> {
-    std::thread::Builder::new()
+    let slot = Arc::new(Mutex::new(child.take()));
+    let theirs = Arc::clone(&slot);
+    let started = std::thread::Builder::new()
         .name("pty-waiter".into())
         .spawn(move || {
+            let Some(mut child) = theirs.lock().take() else {
+                return;
+            };
+            // Linux: wait without reaping, then take down what the program left running while
+            // its pid is still its own; `reaped` is set before the reap for the same reason.
+            #[cfg(target_os = "linux")]
+            if let Some(pid) = child.process_id()
+                && tree::wait_without_reaping(pid)
+            {
+                tree::kill_tree(pid);
+                state.lock().reaped = true;
+            }
             let status = child.wait();
             let mut sh = state.lock();
             sh.reaped = true;
@@ -176,8 +224,14 @@ fn spawn_waiter(
             ));
             drop(sh);
             notify.notify_one();
-        })
-        .map(|_| ())
+        });
+    match started {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            *child = slot.lock().take();
+            Err(e)
+        }
+    }
 }
 
 /// Answers to the questions a program asks its terminal. Windows' `ConPTY` does not print a thing
@@ -221,6 +275,21 @@ fn clamp_size(cols: u16, rows: u16) -> PtySize {
     }
 }
 
+/// Take down a program that was started but could not be wired up: kill what it started and
+/// reap it, so that nothing is left running and no zombie remains.
+fn abandon(child: Option<ChildHandle>, pid: Option<u32>) {
+    #[cfg(unix)]
+    if let Some(pid) = pid {
+        tree::kill_tree(pid);
+    }
+    #[cfg(not(unix))]
+    let _ = pid;
+    if let Some(mut child) = child {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
 impl PtySession {
     /// Start the program on a new PTY.
     ///
@@ -247,16 +316,38 @@ impl PtySession {
         // The child owns the slave side now; keeping ours open would stop EOF from ever arriving.
         drop(pair.slave);
         let pid = child.process_id();
+        #[cfg(windows)]
+        let job = child.as_raw_handle().and_then(|h| job::Job::around(h).ok());
         let killer = child.clone_killer();
-        let reader = pair
-            .master
+        // From here a failure must not leave the program running or unreaped.
+        let mut child = Some(child);
+        Self::attach(pair.master, &mut child, killer, pid, size)
+            .inspect_err(|_| abandon(child.take(), pid))
+            .map(|mut session| {
+                #[cfg(windows)]
+                {
+                    session.job = job;
+                }
+                #[cfg(not(windows))]
+                let _ = &mut session;
+                session
+            })
+    }
+
+    /// Start the threads that read, type and wait for the program.
+    fn attach(
+        master: Box<dyn MasterPty + Send>,
+        child: &mut Option<ChildHandle>,
+        killer: Box<dyn ChildKiller + Send + Sync>,
+        pid: Option<u32>,
+        size: PtySize,
+    ) -> std::io::Result<Self> {
+        let reader = master
             .try_clone_reader()
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        let writer = pair
-            .master
+        let writer = master
             .take_writer()
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        let writer = Arc::new(Mutex::new(writer));
         let shared = Arc::new(Mutex::new(Shared {
             transcript: Transcript::new(),
             screen: vt100::Parser::new(nz(size.rows), nz(size.cols), 0),
@@ -270,21 +361,24 @@ impl PtySession {
         }));
         let notify = Arc::new(Notify::new());
 
+        let input = spawn_writer(writer)?;
         spawn_reader(
             reader,
             Arc::clone(&shared),
             Arc::clone(&notify),
-            Arc::clone(&writer),
+            input.clone(),
         )?;
         spawn_waiter(child, Arc::clone(&shared), Arc::clone(&notify))?;
 
         Ok(Self {
             shared,
             notify,
-            master: Mutex::new(pair.master),
-            writer,
+            master: Mutex::new(master),
+            input,
             killer: Mutex::new(killer),
             pid,
+            #[cfg(windows)]
+            job: None,
         })
     }
 
@@ -300,10 +394,12 @@ impl PtySession {
         self.shared.lock().exit.map(|(e, _)| e)
     }
 
-    /// Type bytes into the program (what a keyboard would send).
+    /// Type bytes into the program (what a keyboard would send). The bytes are queued for a
+    /// writer thread, so this never waits for the program to read them.
     ///
     /// # Errors
-    /// The input is too long, or the program is gone.
+    /// The input is too long, the program is gone, or it is not reading its input and the queue
+    /// of what it has not read yet is full.
     pub fn write(&self, bytes: &[u8]) -> std::io::Result<()> {
         if bytes.len() > MAX_INPUT_BYTES {
             return Err(std::io::Error::new(
@@ -314,9 +410,13 @@ impl PtySession {
         if self.exit().is_some() {
             return Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
         }
-        let mut writer = self.writer.lock();
-        writer.write_all(bytes)?;
-        writer.flush()
+        self.input.try_send(bytes.to_vec()).map_err(|e| match e {
+            TrySendError::Full(_) => std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "the program is not reading its input",
+            ),
+            TrySendError::Disconnected(_) => std::io::Error::from(std::io::ErrorKind::BrokenPipe),
+        })
     }
 
     /// Change the terminal size.
@@ -344,33 +444,38 @@ impl PtySession {
         (cols.get(), rows.get())
     }
 
-    /// Kill the program (the whole terminal session goes with it). Safe to call twice.
+    /// Kill the program and everything it started (its session, its descendants; on Windows its
+    /// job). Safe to call twice.
     pub fn kill(&self) {
-        {
-            let mut sh = self.shared.lock();
-            if sh.exit.is_none() {
-                // Recorded first so the waiter thread reports `killed`.
-                sh.exit = Some((
-                    ExitInfo {
-                        code: None,
-                        killed: true,
-                    },
-                    Instant::now(),
-                ));
-            }
+        let mut sh = self.shared.lock();
+        if sh.exit.is_none() {
+            // Recorded first so the waiter thread reports `killed`.
+            sh.exit = Some((
+                ExitInfo {
+                    code: None,
+                    killed: true,
+                },
+                Instant::now(),
+            ));
         }
-        // The program is a session leader, so its process group is its own: kill what it
-        // started too, also a helper that ignores the hang-up the leader's death sends.
+        // Signals go out under the lock: the waiter marks the program reaped under it BEFORE it
+        // reaps, so a pid that may already belong to somebody else is never signalled.
         #[cfg(unix)]
-        if let Some(pid) = self.pid
-            && !self.shared.lock().reaped
-            && let Some(group) = i32::try_from(pid)
-                .ok()
-                .and_then(rustix::process::Pid::from_raw)
-        {
-            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+        if !sh.reaped {
+            if let Some(pid) = self.pid {
+                tree::kill_tree(pid);
+            }
+            let _ = self.killer.lock().kill();
         }
-        let _ = self.killer.lock().kill();
+        #[cfg(not(unix))]
+        {
+            #[cfg(windows)]
+            if let Some(job) = &self.job {
+                job.terminate();
+            }
+            let _ = self.killer.lock().kill();
+        }
+        drop(sh);
         self.notify.notify_one();
     }
 
@@ -696,6 +801,138 @@ mod tests {
         let session = PtySession::spawn(&sh_spec(script)).expect("spawn");
         let seen = read_until(&session, "ok").await;
         assert!(seen.contains("café €"), "{seen:?}");
+    }
+
+    /// A program that floods terminal queries and never reads its input must not stop the reader:
+    /// the answers pile up unread (here: nobody drains the queue at all), and the output the
+    /// program is waiting on has to keep being drained.
+    #[test]
+    fn the_reader_never_waits_for_the_program_to_take_an_answer() {
+        struct Flood(usize);
+        impl Read for Flood {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0 == 0 {
+                    return Ok(0);
+                }
+                self.0 -= 1;
+                let query = b"\x1b[6n\x1b[c";
+                buf[..query.len()].copy_from_slice(query);
+                Ok(query.len())
+            }
+        }
+        let shared = Arc::new(Mutex::new(Shared {
+            transcript: Transcript::new(),
+            screen: vt100::Parser::new(nz(24), nz(80), 0),
+            received: 0,
+            delivered_bytes: 0,
+            next_line: 0,
+            last_output: Instant::now(),
+            exit: None,
+            reader_done: false,
+            reaped: false,
+        }));
+        // A queue of one that is never read: the second answer already has nowhere to go.
+        let (answers, _unread) = std::sync::mpsc::sync_channel::<Vec<u8>>(1);
+        spawn_reader(
+            Box::new(Flood(5_000)),
+            Arc::clone(&shared),
+            Arc::new(Notify::new()),
+            answers,
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !shared.lock().reader_done {
+            assert!(
+                Instant::now() < deadline,
+                "the reader is stuck on an answer"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.lock().received, 5_000 * 7);
+    }
+
+    /// A helper that started a session of its own is outside the leader's process group.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_also_takes_a_helper_that_started_its_own_session() {
+        let dir = std::env::temp_dir().join(format!("pty-session-setsid-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pids = dir.join("pids");
+        let script = format!(
+            "setsid sleep 302 & echo $! > {p}; echo ready; wait",
+            p = pids.display()
+        );
+        let session = PtySession::spawn(&sh_spec(&script)).expect("spawn");
+        read_until(&session, "ready").await;
+        let helper: u32 = std::fs::read_to_string(&pids)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(alive(helper));
+        session.kill();
+        assert!(gone(helper).await, "the helper outlived the session");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// When the program ends by itself, what it left running in its session goes too.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn what_a_program_leaves_running_ends_with_it() {
+        let dir = std::env::temp_dir().join(format!("pty-session-left-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pids = dir.join("pids");
+        let script = format!(
+            "(trap '' HUP; exec sleep 303) & echo $! > {p}; echo ready; exit 0",
+            p = pids.display()
+        );
+        let session = PtySession::spawn(&sh_spec(&script)).expect("spawn");
+        read_until(&session, "ready").await;
+        let helper: u32 = std::fs::read_to_string(&pids)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let leader = session.pid().expect("pid");
+        assert!(gone(leader).await, "the leader is reaped");
+        assert!(gone(helper).await, "the helper outlived the program");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A program that was started but could not be wired up is killed and reaped.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_abandoned_program_is_killed_and_reaped() {
+        let pair = native_pty_system().openpty(clamp_size(80, 24)).unwrap();
+        let mut cmd = CommandBuilder::new("sleep");
+        cmd.arg("304");
+        let child = pair.slave.spawn_command(cmd).unwrap();
+        let pid = child.process_id();
+        abandon(Some(child), pid);
+        assert!(gone(pid.unwrap()).await, "killed and reaped, not a zombie");
+    }
+
+    /// A program that does not read its input fills the queue; the caller gets an error and is
+    /// never blocked, and the session can still be killed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn typing_into_a_program_that_never_reads_fails_fast_instead_of_blocking() {
+        let session = PtySession::spawn(&sh_spec("echo up; sleep 30")).expect("spawn");
+        read_until(&session, "up").await;
+        let started = Instant::now();
+        let mut refused = None;
+        for _ in 0..400 {
+            if let Err(e) = session.write(&[b'a'; MAX_INPUT_BYTES]) {
+                refused = Some(e);
+                break;
+            }
+        }
+        assert!(started.elapsed() < Duration::from_secs(2), "never waits");
+        let refused = refused.expect("the queue fills up");
+        assert_eq!(refused.kind(), std::io::ErrorKind::WouldBlock);
+        let pid = session.pid().expect("pid");
+        session.kill();
+        assert!(gone(pid).await);
     }
 
     #[tokio::test]
