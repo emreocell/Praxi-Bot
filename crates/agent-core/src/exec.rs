@@ -1973,6 +1973,10 @@ impl TurnExecutor {
         let pictures_ref = &pictures;
         // Reads batched by `pending_tools` run concurrently; everything else is a single call.
         let ctx_ref: &RunCtx = &ctx;
+        // Tab of each page observation, noted right after its call ran.
+        let tabs: parking_lot::Mutex<std::collections::HashMap<ToolCallId, String>> =
+            parking_lot::Mutex::new(std::collections::HashMap::new());
+        let tabs_ref = &tabs;
         let outcomes = futures::future::join_all(slots.into_iter().map(|slot| async move {
             let not_run = taint::ExecFact::did_not_run();
             match slot {
@@ -2050,6 +2054,22 @@ impl TurnExecutor {
                         };
                     if is_error && exposure.is_none() {
                         exposure = reported.exposure;
+                    }
+                    // A full page observation is kept per browser tab when the
+                    // conversation is shortened: ask the browser which tab this was.
+                    if !is_error
+                        && tool_registry::ObservationScope::of_name(&tool.spec().name)
+                            == Some(tool_registry::ObservationScope::Page)
+                    {
+                        let tctx = ToolContext {
+                            run_id: ctx_ref.run_id.to_string(),
+                            bot_id: Some(ctx_ref.bot_id.to_string()),
+                            lane: ctx_ref.lane(),
+                            ..ToolContext::default()
+                        };
+                        if let Some(tab) = tool.landed_tab(&tctx).await {
+                            tabs_ref.lock().insert(call_id, tab);
+                        }
                     }
                     // The result is in the model context even when the tool
                     // returned an error. A denial before this point is not.
@@ -2242,6 +2262,7 @@ impl TurnExecutor {
                     .lock()
                     .ok()
                     .and_then(|mut m| m.remove(&call_uuid.to_string())),
+                tab: tabs.lock().remove(&call_uuid),
                 fact: Some(fact),
                 tier_executed: light.then_some(duration_ms.is_some()),
                 tier_invalid: light.then(|| invalid_calls.contains(&call_uuid)),

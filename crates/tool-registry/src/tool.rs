@@ -284,6 +284,14 @@ pub trait Tool: Send + Sync {
         None
     }
 
+    /// Stable id of the browser tab the call just observed, read from the
+    /// browser itself after the call ran (the loop keeps one full page
+    /// observation per tab when it shortens a long conversation). `None`: not a
+    /// browser tool, or the id is unknown.
+    async fn landed_tab(&self, _ctx: &ToolContext) -> Option<String> {
+        None
+    }
+
     /// Host the call actually contacts when the input does not name one.
     ///
     /// `OpenAPI` tools use this so the card footer shows the API host, not the

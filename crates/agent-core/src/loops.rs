@@ -158,7 +158,11 @@ mod tests {
     fn a_changed_result_is_progress_not_a_cycle() {
         let mut seq = click_snapshot(2);
         seq.push(call("browser_click", 1, Some("clicked")));
-        seq.push(call("browser_snapshot", 0, Some("# Page (http://a/)\nanother view")));
+        seq.push(call(
+            "browser_snapshot",
+            0,
+            Some("# Page (http://a/)\nanother view"),
+        ));
         // The newest block differs from the two before it.
         assert_eq!(repeats(&seq), 1);
     }
@@ -167,7 +171,11 @@ mod tests {
     fn different_arguments_break_the_cycle() {
         let mut seq = click_snapshot(3);
         seq.push(call("browser_click", 2, Some("clicked")));
-        seq.push(call("browser_snapshot", 0, Some("# Page (http://a/)\nbutton")));
+        seq.push(call(
+            "browser_snapshot",
+            0,
+            Some("# Page (http://a/)\nbutton"),
+        ));
         assert_eq!(repeats(&seq), 1);
     }
 
@@ -193,7 +201,12 @@ mod tests {
     #[test]
     fn polling_with_a_wait_is_not_a_cycle() {
         let seq: Vec<Entry> = (0..6)
-            .flat_map(|_| [call("wait", 2, Some("waited")), call("snap", 0, Some("same"))])
+            .flat_map(|_| {
+                [
+                    call("wait", 2, Some("waited")),
+                    call("snap", 0, Some("same")),
+                ]
+            })
             .collect();
         assert_eq!(repeats(&seq), 1);
     }

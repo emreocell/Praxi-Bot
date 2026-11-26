@@ -14,7 +14,11 @@ fn snap(n: u32) -> Reply {
 fn tools() -> (Arc<TestTool>, Arc<TestTool>) {
     (
         Arc::new(tool("t.click", Effect::Read, "clicked")),
-        Arc::new(tool("t.snap", Effect::Read, "# Page (http://a/)\nbutton e1")),
+        Arc::new(tool(
+            "t.snap",
+            Effect::Read,
+            "# Page (http://a/)\nbutton e1",
+        )),
     )
 }
 
@@ -68,7 +72,10 @@ async fn hint_arrives_before_the_stop_and_only_after_the_warn_threshold() {
     );
     let run = lp.run_turn(env.chat, "go").unwrap();
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
-    assert!(!lp.stopped_by_guard(run).unwrap(), "no stop below cycle_stop");
+    assert!(
+        !lp.stopped_by_guard(run).unwrap(),
+        "no stop below cycle_stop"
+    );
     let last = fake.request(fake.n_requests() - 1);
     let msgs = tool_messages(&last);
     assert_eq!(msgs.len(), 6);
@@ -109,7 +116,9 @@ async fn changing_arguments_are_progress_not_a_cycle() {
     assert!(!lp.stopped_by_guard(run).unwrap());
     let last = fake.request(fake.n_requests() - 1);
     assert!(
-        tool_messages(&last).iter().all(|m| !m.contains("[loop-hint:")),
+        tool_messages(&last)
+            .iter()
+            .all(|m| !m.contains("[loop-hint:")),
         "a different ref each time is not a loop"
     );
 }

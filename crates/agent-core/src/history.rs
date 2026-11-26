@@ -2111,6 +2111,213 @@ preset = 'approve-destructive'",
         assert!(get(&nowhere, "o").contains("/tmp/own/f.txt"));
     }
 
+    /// One page observation of `url`, read in browser tab `tab`.
+    fn site_round(
+        run: &Run,
+        idx: &mut u32,
+        id: &str,
+        url: &str,
+        tab: Option<&str>,
+    ) -> Vec<RunStep> {
+        let mut steps = round(
+            run,
+            idx,
+            id,
+            "browser_open",
+            &json!({"url": url}),
+            &page(url, 0),
+            false,
+            None,
+        );
+        if let Some(tab) = tab {
+            let out = steps[1].output.as_mut().unwrap();
+            out["results"][0]["tab"] = json!(tab);
+        }
+        steps
+    }
+
+    fn is_cut(t: &str) -> bool {
+        t.contains("[output shortened:") || is_marker(t)
+    }
+
+    #[test]
+    fn a_ten_site_walk_in_one_tab_keeps_only_the_current_page() {
+        let fx = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let spill = dir.path().to_path_buf();
+        let mut steps = start(&fx.1);
+        let mut idx = 1;
+        for i in 0..10 {
+            steps.extend(site_round(
+                &fx.1,
+                &mut idx,
+                &format!("o{i}"),
+                &format!("https://site{i}.test/"),
+                Some("tab-1"),
+            ));
+        }
+        let off = build(&fx, &steps, None, &Compaction::OFF);
+        // Pass 1 never merges different URLs; only the byte budget can help.
+        let pass1 = build(&fx, &steps, None, &comp(2, 0, Some(&spill)));
+        assert_eq!(texts(&pass1), texts(&off), "different sites are not merged");
+        let on = build(&fx, &steps, None, &comp(2, 20_000, Some(&spill)));
+        let t = texts(&on);
+        // Horizon 8: ordinals 0..8 may be cut, 8 and 9 (the newest) are after it.
+        for (i, x) in t.iter().enumerate().take(8) {
+            assert!(
+                x.contains("full output saved at"),
+                "page {i} not spilled: {x}"
+            );
+            assert!(
+                x.contains(&format!("site{i}.test")),
+                "the preview names the page"
+            );
+        }
+        assert!(!is_cut(&t[8]) && !is_cut(&t[9]), "newest pages stay whole");
+        assert!(total_bytes(&on) < total_bytes(&off) / 2);
+        assert_pairing(&on);
+        // Nothing is lost: the full text of a cut page is on disk.
+        let path = t[0]
+            .split("saved at ")
+            .nth(1)
+            .unwrap()
+            .trim_end_matches(']');
+        let saved = std::fs::read_to_string(path).unwrap();
+        assert!(saved.contains("item 0-299"), "full page was saved");
+    }
+
+    #[test]
+    fn the_latest_page_of_every_tab_stays_whole_however_old_it_is() {
+        let fx = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let spill = dir.path().to_path_buf();
+        let mut steps = start(&fx.1);
+        let mut idx = 1;
+        // Tab B is read once at the start, then the work moves to tab A.
+        steps.extend(site_round(
+            &fx.1,
+            &mut idx,
+            "b0",
+            "https://docs.test/",
+            Some("tab-b"),
+        ));
+        for i in 0..8 {
+            steps.extend(site_round(
+                &fx.1,
+                &mut idx,
+                &format!("a{i}"),
+                &format!("https://shop{i}.test/"),
+                Some("tab-a"),
+            ));
+        }
+        let on = build(&fx, &steps, None, &comp(2, 10_000, Some(&spill)));
+        let get = |id: &str| {
+            on.iter()
+                .find(|m| m.tool_call_id.as_deref() == Some(id))
+                .unwrap()
+                .content
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        assert!(!is_cut(&get("b0")), "the only page of tab B is its latest");
+        assert!(
+            is_cut(&get("a0")) && is_cut(&get("a5")),
+            "older pages of tab A go"
+        );
+        assert!(!is_cut(&get("a7")), "tab A's newest stays");
+    }
+
+    #[test]
+    fn results_without_a_tab_id_keep_only_the_newest_page() {
+        let fx = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let spill = dir.path().to_path_buf();
+        let mut steps = start(&fx.1);
+        let mut idx = 1;
+        for i in 0..6 {
+            steps.extend(site_round(
+                &fx.1,
+                &mut idx,
+                &format!("o{i}"),
+                &format!("https://site{i}.test/"),
+                None,
+            ));
+        }
+        let on = build(&fx, &steps, None, &comp(2, 5_000, Some(&spill)));
+        let t = texts(&on);
+        assert!(t[..4].iter().all(|x| is_cut(x)), "{t:?}");
+        assert!(!is_cut(&t[5]), "the newest page stays whole");
+    }
+
+    #[test]
+    fn browser_actions_and_pages_under_the_budget_are_never_cut() {
+        let fx = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let spill = dir.path().to_path_buf();
+        let mut steps = start(&fx.1);
+        let mut idx = 1;
+        // A big diff from a click is not an observation: it is never cut.
+        steps.extend(round(
+            &fx.1,
+            &mut idx,
+            "click",
+            "browser_click",
+            &json!({"ref": "e1"}),
+            &page("https://site0.test/", 9),
+            false,
+            None,
+        ));
+        for i in 0..6 {
+            steps.extend(site_round(
+                &fx.1,
+                &mut idx,
+                &format!("o{i}"),
+                &format!("https://site{i}.test/"),
+                Some("tab-1"),
+            ));
+        }
+        let tight = build(&fx, &steps, None, &comp(2, 5_000, Some(&spill)));
+        let click = tight
+            .iter()
+            .find(|m| m.tool_call_id.as_deref() == Some("click"))
+            .unwrap();
+        assert!(!is_cut(click.content.as_str().unwrap()), "click diff stays");
+        let roomy = build(&fx, &steps, None, &comp(2, 10_000_000, Some(&spill)));
+        let off = build(&fx, &steps, None, &Compaction::OFF);
+        assert_eq!(texts(&roomy), texts(&off), "under budget nothing is cut");
+    }
+
+    #[test]
+    fn a_page_cut_stays_cut_as_the_walk_goes_on() {
+        let fx = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let spill = dir.path().to_path_buf();
+        let c = comp(2, 12_000, Some(&spill));
+        let at = |n: usize| {
+            let mut steps = start(&fx.1);
+            let mut idx = 1;
+            for i in 0..n {
+                steps.extend(site_round(
+                    &fx.1,
+                    &mut idx,
+                    &format!("o{i}"),
+                    &format!("https://site{i}.test/"),
+                    Some("tab-1"),
+                ));
+            }
+            build(&fx, &steps, None, &c)
+        };
+        let builds: Vec<Vec<Message>> = (3..=12).map(at).collect();
+        for pair in builds.windows(2) {
+            for (x, y) in texts(&pair[0]).iter().zip(texts(&pair[1])) {
+                if is_cut(x) {
+                    assert_eq!(*x, y, "a cut page changed later");
+                }
+            }
+        }
+    }
+
     #[test]
     fn once_shortened_bytes_never_change_under_budget_pressure() {
         let fx = fixture();

@@ -15,10 +15,15 @@
 //! 2. *Soft byte budget*: above `soft_bytes`, the oldest results of read-only
 //!    tools outside the browser/desktop/meta categories (and that pass 1 never
 //!    touches) are cut to a preview, after their full text is on disk behind
-//!    an `[UNTRUSTED ...]` header and its path is in the shortened text.  The
-//!    set of cut results is decided on the size without pass-1 savings, so it
-//!    only ever grows with the turn (no result is restored later).  If the
-//!    full text cannot be saved the result stays whole.
+//!    an `[UNTRUSTED ...]` header and its path is in the shortened text.  Full
+//!    page observations (`browser_open` / `browser_snapshot`) are cut too,
+//!    except the newest one of each browser tab and older ones of that same
+//!    page (pass 1's business): a task that walks through many sites would
+//!    otherwise keep every page it ever read (pass 1 only merges observations
+//!    of one URL).  The set of cut results is decided on
+//!    the size without pass-1 savings, so it only ever grows with the turn (no
+//!    result is restored later).  If the full text cannot be saved the result
+//!    stays whole.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -108,6 +113,9 @@ pub(crate) struct ToolMeta {
     pub key: Option<String>,
     /// Read-only, non-meta tool: pass 2 may cut its output.
     pub cuttable: bool,
+    /// Browser tab a full page observation came from (the browser's own id,
+    /// recorded with the result); `None` on older rows and for other tools.
+    pub tab: Option<String>,
     /// Pass 1 already replaced this result.
     pub shortened: bool,
     /// Bytes pass 1 saved on this result (0 when not shortened).
@@ -205,6 +213,7 @@ pub(crate) fn tool_meta(
         scope,
         key,
         cuttable,
+        tab: r.tab.clone(),
         shortened: false,
         saved: 0,
     }
@@ -370,6 +379,67 @@ fn pass_superseded(out: &mut [Message], metas: &mut [ToolMeta], n_model: usize, 
     }
 }
 
+/// Indexes (into `metas`) of the full page observations pass 2 leaves alone:
+/// the newest one of each browser tab, and every older one of the same page
+/// (URL and view) as that newest one, which is pass 1's business. What is left
+/// are pages a tab has navigated away from. Results with no recorded tab (older
+/// rows, a driver that cannot tell) share one tab group.
+///
+/// Limit: if a tab later returns to a page that pass 2 already cut, pass 1 may
+/// replace that preview with its own marker once; it is never restored.
+fn protected_pages(metas: &[ToolMeta]) -> std::collections::HashSet<usize> {
+    let mut newest_in_tab: std::collections::HashMap<Option<&str>, usize> =
+        std::collections::HashMap::new();
+    for (i, m) in metas.iter().enumerate() {
+        if m.scope == Some(ObservationScope::Page) && !m.is_error {
+            // `metas` is in conversation order: a later one is newer.
+            newest_in_tab.insert(m.tab.as_deref(), i);
+        }
+    }
+    let mut kept = std::collections::HashSet::new();
+    for (i, m) in metas.iter().enumerate() {
+        if m.scope != Some(ObservationScope::Page) || m.is_error {
+            continue;
+        }
+        let newest = newest_in_tab[&m.tab.as_deref()];
+        if i == newest || (m.key.is_some() && m.key == metas[newest].key) {
+            kept.insert(i);
+        }
+    }
+    kept
+}
+
+/// The pass-2 replacement of one result: its short text, the file to save the
+/// full text to (`None`: it already has one) and the bytes saved. `None`: the
+/// result stays whole (too small, an untrusted notice in the middle, no place
+/// to save it).
+fn budget_cut(
+    out: &[Message],
+    m: &ToolMeta,
+    c: &Compaction,
+) -> Option<(String, Option<PathBuf>, usize)> {
+    let text = out[m.msg_idx].content.as_str()?;
+    if text.len() <= BUDGET_PREVIEW_BYTES {
+        return None;
+    }
+    // An untrusted notice somewhere in the middle of a payload would be
+    // lost by a cut: leave such a result whole.
+    if marker_label(text).is_none() && text.to_ascii_lowercase().contains("untrusted") {
+        return None;
+    }
+    let (shown, to_save) = match (&m.spill_path, c.spill_dir) {
+        (Some(p), _) => (p.clone(), None),
+        (None, Some(dir)) => {
+            let path = dir.join(format!("{}.txt", m.call_uuid));
+            (path.display().to_string(), Some(path))
+        }
+        (None, None) => return None,
+    };
+    let short = budget_preview(text, &shown);
+    let saved = text.len().saturating_sub(short.len());
+    Some((short, to_save, saved))
+}
+
 fn pass_budget(out: &mut [Message], metas: &mut [ToolMeta], n_model: usize, c: &Compaction) {
     // The one horizon both passes share: it moves only in strides.
     let limit = horizon(n_model);
@@ -396,28 +466,29 @@ fn pass_budget(out: &mut [Message], metas: &mut [ToolMeta], n_model: usize, c: &
         if m.is_error || m.shortened || !m.cuttable || m.ordinal >= limit {
             continue;
         }
-        let Some(text) = out[m.msg_idx].content.as_str() else {
-            continue;
-        };
-        if text.len() <= BUDGET_PREVIEW_BYTES {
-            continue;
+        if let Some((short, to_save, saved)) = budget_cut(out, m, c) {
+            raw = raw.saturating_sub(saved);
+            plan.push((i, short, to_save));
         }
-        // An untrusted notice somewhere in the middle of a payload would be
-        // lost by a cut: leave such a result whole.
-        if marker_label(text).is_none() && text.to_ascii_lowercase().contains("untrusted") {
-            continue;
-        }
-        let (shown, to_save) = match (&m.spill_path, c.spill_dir) {
-            (Some(p), _) => (p.clone(), None),
-            (None, Some(dir)) => {
-                let path = dir.join(format!("{}.txt", m.call_uuid));
-                (path.display().to_string(), Some(path))
+    }
+    // Still over budget with nothing else to cut: older page observations go,
+    // all of them at once. A page that a newer observation of its tab (or of
+    // its URL) replaced stays replaced, so this set only ever grows too.
+    if raw > c.soft_bytes {
+        let kept = protected_pages(metas);
+        for (i, m) in metas.iter().enumerate() {
+            if m.scope != Some(ObservationScope::Page)
+                || m.is_error
+                || m.shortened
+                || m.ordinal >= limit
+                || kept.contains(&i)
+            {
+                continue;
             }
-            (None, None) => continue,
-        };
-        let short = budget_preview(text, &shown);
-        raw = raw.saturating_sub(text.len().saturating_sub(short.len()));
-        plan.push((i, short, to_save));
+            if let Some((short, to_save, _)) = budget_cut(out, m, c) {
+                plan.push((i, short, to_save));
+            }
+        }
     }
     for (i, short, to_save) in plan {
         let m = &mut metas[i];

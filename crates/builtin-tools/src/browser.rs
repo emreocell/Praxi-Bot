@@ -333,6 +333,11 @@ pub trait BrowserDriver: Send + Sync {
     async fn current_url(&self) -> Option<String> {
         None
     }
+    /// Stable id of the tab the current session is on, as the BROWSER reports it
+    /// (the CDP target id). `None`: no session, or the driver cannot tell.
+    async fn current_tab_id(&self) -> Option<String> {
+        None
+    }
     /// Browser document identity used to release a secret capture latch on navigation.
     async fn capture_epoch(&self) -> Option<String> {
         self.current_url().await
@@ -1699,6 +1704,17 @@ impl BrowserDriver for CdpDriver {
 
     async fn eval(&self, js: &str) -> Result<Value, String> {
         with_session!(self, None, |sess| { sess.page.evaluate(js).await })
+    }
+
+    async fn current_tab_id(&self) -> Option<String> {
+        // Never starts a browser just to ask.
+        let id: Result<String, String> = async {
+            with_session!(self, None, false, |sess| {
+                Ok::<_, browser_cdp::Error>(sess.page.target_id().to_string())
+            })
+        }
+        .await;
+        id.ok()
     }
 
     async fn current_url(&self) -> Option<String> {
@@ -3808,6 +3824,15 @@ impl Tool for BrowserTool {
     async fn current_origin(&self, ctx: &ToolContext, input: &Value) -> Option<String> {
         BROWSER_LANE
             .scope(ctx.lane.clone(), self.current_origin_in_lane(ctx, input))
+            .await
+    }
+
+    async fn landed_tab(&self, ctx: &ToolContext) -> Option<String> {
+        BROWSER_LANE
+            .scope(ctx.lane.clone(), async {
+                let shared = self.select_shared(ctx).ok()?;
+                shared.driver.current_tab_id().await
+            })
             .await
     }
 
