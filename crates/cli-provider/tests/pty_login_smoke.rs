@@ -50,13 +50,13 @@ async fn an_opencode_like_menu_is_answered_and_its_link_and_code_are_found() {
     fake(
         &bin,
         "opencode",
-        r"printf '\033[?25l\033[6n'
-/bin/stty raw -echo
+        r"/bin/stty raw -echo
+printf '\033[?25l\033[6n'
 dd bs=1 count=6 2>/dev/null >/dev/null
 printf '\033[1;36m\342\227\206\033[0m  Select login method\r\n\342\224\202  \033[32m\342\227\217\033[0m OpenCode Console account\r\n\342\224\202  \342\227\213 API key (service account)\r\n'
 dd bs=1 count=1 2>/dev/null >/dev/null
 printf '\033[2K\r\342\227\207  Go to: \033[4mhttps://opencode.ai/auth/device?user_code=ABCD-1234\033[0m\r\n   Enter code: ABCD-1234\r\n'
-sleep 30",
+/bin/sleep 30",
     );
     let (prompt, output) = prompt_of("opencode", &bin, &home).await;
     assert_eq!(
@@ -84,7 +84,7 @@ async fn an_antigravity_like_run_with_a_very_long_link_is_found_in_one_piece() {
         &format!(
             r"printf 'Starting\r|\r/\r-\r\033[2KSign in with Google:\r\nhttps://accounts.google.com/o/oauth2/v2/auth?client_id=x&state={long}&scope=openid\r\nPaste the code: '
 IFS= read -r _code
-sleep 30"
+/bin/sleep 30"
         ),
     );
     let (prompt, output) = prompt_of("agy", &bin, &home).await;

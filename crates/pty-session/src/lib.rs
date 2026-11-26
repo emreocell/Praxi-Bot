@@ -680,8 +680,8 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_cursor_query_split_across_reads_is_still_answered() {
-        let script = "printf '\\033['; sleep 0.4; printf '6n'; \
-                      stty raw -echo; dd bs=1 count=6 2>/dev/null | od -c | head -1; echo done";
+        let script = "stty raw -echo; printf '\\033['; sleep 0.4; printf '6n'; \
+                      dd bs=1 count=6 2>/dev/null | od -c | head -1; echo done";
         let session = PtySession::spawn(&sh_spec(script)).expect("spawn");
         let seen = read_until(&session, "done").await;
         assert!(seen.contains("033") && seen.contains('R'), "{seen:?}");
