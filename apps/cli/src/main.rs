@@ -1169,7 +1169,9 @@ fn run_serve(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Result
     // children are spawned. Never fatal; the result is recorded in `serve`
     // and shown by `doctor`.
     // Held for the whole run so `bot backup restore` can tell a daemon is using the data dir.
-    let _daemon_lock = backup_cmd::hold_daemon_lock(data_dir)?;
+    let _daemon_lock = backup_cmd::hold_daemon_lock(data_dir).inspect_err(|_| {
+        eprintln!("Praxi is already using this data folder, or the folder cannot be locked.");
+    })?;
     support_logs::init(data_dir, "daemon").map_err(
         |_| "The service could not open its log folder. Check access to the data folder.",
     )?;
