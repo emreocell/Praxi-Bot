@@ -265,6 +265,56 @@ impl Drop for Page {
     }
 }
 
+/// Hosts whose frames are card entry or a hosted payment page (the host itself or any
+/// subdomain). A checkout built by one of these providers shows its card form inside such a
+/// frame, so the frame's presence is the signal even when its content cannot be read.
+const PAYMENT_FRAME_HOSTS: &[&str] = &[
+    "checkout.stripe.com",
+    "js.stripe.com",
+    "paypal.com",
+    "paypalobjects.com",
+    "adyen.com",
+    "braintreegateway.com",
+    "braintree-api.com",
+    "squareup.com",
+    "squarecdn.com",
+    "klarna.com",
+    "mollie.com",
+    "checkout.com",
+    "razorpay.com",
+    "pay.google.com",
+    "payments.google.com",
+    "paddle.com",
+    "lemonsqueezy.com",
+    "iyzipay.com",
+    "iyzico.com",
+    "paytr.com",
+    "authorize.net",
+    "worldpay.com",
+];
+
+/// How many frames of one page are read before the answer is "assume checkout".
+const MAX_PAYMENT_FRAMES: usize = 64;
+
+/// Whether `url` is served by a payment provider (host or subdomain, case-insensitive).
+fn payment_frame_host(url: &str) -> bool {
+    let Some((_, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority
+        .rsplit('@')
+        .next()
+        .unwrap_or_default()
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    PAYMENT_FRAME_HOSTS
+        .iter()
+        .any(|h| host == *h || host.ends_with(&format!(".{h}")))
+}
+
 impl Page {
     /// Identity of the current document, including same-URL reloads.
     pub fn capture_epoch(&self) -> String {
@@ -497,27 +547,68 @@ impl Page {
         Ok(r.pointer("/result/value").cloned().unwrap_or(Value::Null))
     }
 
-    /// Whether the active document displays a conventional checkout control.
-    /// Run in an isolated world so page scripts cannot replace the DOM methods.
+    /// Whether the page displays a conventional checkout control: a card or transaction field,
+    /// or a frame of a payment provider, in the top document or in any frame below it.
+    /// Each frame is read in an isolated world so page scripts cannot replace the DOM methods.
+    /// A frame served from another process (a cross-origin provider) is not readable here, but
+    /// its `<iframe>` element sits in the document that embeds it and is matched by its host.
     pub async fn has_payment_form(&self) -> Result<bool> {
         let tree = self.cmd("Page.getFrameTree", json!({})).await?;
+        let mut frames = vec![(&tree["frameTree"], true)];
+        let mut seen = 0usize;
+        while let Some((node, is_main)) = frames.pop() {
+            seen += 1;
+            if seen > MAX_PAYMENT_FRAMES {
+                // Too many frames to read them all: unreadable counts as checkout, never as not.
+                return Ok(true);
+            }
+            if payment_frame_host(node["frame"]["url"].as_str().unwrap_or_default()) {
+                return Ok(true);
+            }
+            match self.frame_shows_payment_input(&node["frame"]["id"]).await {
+                Ok(true) => return Ok(true),
+                // The top document must answer.
+                Err(e) if is_main => return Err(e),
+                // A child that detached while we looked is gone.
+                Ok(false) | Err(_) => {}
+            }
+            if let Some(children) = node["childFrames"].as_array() {
+                frames.extend(children.iter().map(|child| (child, false)));
+            }
+        }
+        Ok(false)
+    }
+
+    async fn frame_shows_payment_input(&self, frame_id: &Value) -> Result<bool> {
         let world = self
             .cmd(
                 "Page.createIsolatedWorld",
-                json!({"frameId": tree["frameTree"]["frame"]["id"], "worldName": "praxi-payment-check"}),
+                json!({"frameId": frame_id, "worldName": "praxi-payment-check"}),
             )
             .await?;
+        let expression = format!(
+            r#"(() => {{
+                const visible = e => e.getClientRects().length && getComputedStyle(e).visibility === "visible";
+                const hosts = {hosts};
+                const fields = "input[autocomplete^='cc-' i], input[autocomplete^='transaction-' i]";
+                const providerFrame = f => {{
+                    try {{
+                        const host = new URL(f.src, location.href).hostname.toLowerCase();
+                        return hosts.some(h => host === h || host.endsWith("." + h));
+                    }} catch (_) {{ return false; }}
+                }};
+                return Array.from(document.querySelectorAll(fields)).some(visible)
+                    || Array.from(document.querySelectorAll("iframe")).some(f => providerFrame(f) && visible(f));
+            }})()"#,
+            hosts = json!(PAYMENT_FRAME_HOSTS),
+        );
         let result = self
             .cmd(
                 "Runtime.evaluate",
                 json!({
                     "contextId": world["executionContextId"],
                     "returnByValue": true,
-                    "expression": r#"(() => {
-                        const selector = "input[autocomplete^='cc-' i], input[autocomplete^='transaction-' i], iframe[src*='checkout.stripe.com' i], iframe[src*='js.stripe.com' i]";
-                        return Array.from(document.querySelectorAll(selector))
-                            .some(e => e.getClientRects().length && getComputedStyle(e).visibility === "visible");
-                    })()"#,
+                    "expression": expression,
                 }),
             )
             .await?;
@@ -1523,6 +1614,31 @@ mod tests {
                 })
                 .into(),
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn payment_providers_are_recognised_by_host_and_subdomain_only() {
+        for url in [
+            "https://js.stripe.com/v3/elements-inner-card.html",
+            "https://www.paypal.com/smart/buttons?x=1",
+            "https://checkoutshopper-live.adyen.com/checkoutshopper/",
+            "https://assets.braintreegateway.com/web/3.97.0/html/hosted-fields-frame.min.html",
+            "https://web.squarecdn.com/v1/card.html",
+            "https://x.klarna.com:443/pay",
+            "HTTPS://PAY.GOOGLE.COM/gp/p/ui/pay",
+        ] {
+            assert!(payment_frame_host(url), "{url}");
+        }
+        for url in [
+            "about:blank",
+            "https://shop.example/checkout",
+            "https://shop.example/?next=https://www.paypal.com/",
+            "https://notpaypal.com/",
+            "https://paypal.com.evil.example/",
+            "https://user@shop.example/paypal.com",
+        ] {
+            assert!(!payment_frame_host(url), "{url}");
         }
     }
 

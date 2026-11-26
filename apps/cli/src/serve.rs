@@ -367,6 +367,10 @@ fn build_agent_with_skills(
             }
         }
     };
+    let full_access_lane = full_access_lane_enabled(
+        &host_limits,
+        std::env::var("BOT_FULL_ACCESS_LANE").ok().as_deref(),
+    );
     // The discovery threshold is `LoopConfig`'s default (40).
     Ok(AgentLoop::new(
         Arc::clone(storage),
@@ -379,6 +383,7 @@ fn build_agent_with_skills(
             secret_requests,
             memory,
             safe_mode,
+            full_access_lane,
             knowledge_decider: Some(Arc::new(agent_core::HeuristicKnowledgeDecider::new(
                 Arc::clone(storage),
             ))),
@@ -461,6 +466,33 @@ struct ExperimentalFile {
 #[derive(Default, Deserialize)]
 struct Experimental {
     secret_request: Option<bool>,
+}
+
+/// The operator's switch for the Full access lane (on by default): `host.toml`
+/// `[security] full_access_lane = false`, overridden by `BOT_FULL_ACCESS_LANE`
+/// (`on`/`1`/`true`/`yes` or `off`/`0`/`false`/`no`). Off: a bot at the Full level falls back to
+/// the older, narrower waivers and everything else asks, as before the lane existed.
+pub(crate) fn full_access_lane_enabled(host: &str, env: Option<&str>) -> bool {
+    let file = toml::from_str::<SecurityFile>(host)
+        .unwrap_or_default()
+        .security
+        .full_access_lane
+        .unwrap_or(true);
+    match env.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        Some("on" | "1" | "true" | "yes") => true,
+        Some("off" | "0" | "false" | "no") => false,
+        _ => file,
+    }
+}
+
+#[derive(Default, Deserialize)]
+struct SecurityFile {
+    #[serde(default)]
+    security: Security,
+}
+#[derive(Default, Deserialize)]
+struct Security {
+    full_access_lane: Option<bool>,
 }
 
 /// How long an unanswered approval or question waits before it expires
@@ -1859,6 +1891,31 @@ secret_request=true",
             Some("garbage")
         ));
         assert!(!secret_requests_enabled("not toml [", None));
+    }
+
+    #[test]
+    fn full_access_lane_switch_is_on_by_default_and_reads_file_and_environment() {
+        assert!(full_access_lane_enabled("", None));
+        assert!(full_access_lane_enabled(
+            "[security]\nfull_access_lane=true",
+            None
+        ));
+        assert!(!full_access_lane_enabled(
+            "[security]\nfull_access_lane=false",
+            None
+        ));
+        assert!(!full_access_lane_enabled("", Some(" OFF ")));
+        assert!(!full_access_lane_enabled("", Some("0")));
+        assert!(full_access_lane_enabled(
+            "[security]\nfull_access_lane=false",
+            Some("on")
+        ));
+        assert!(!full_access_lane_enabled(
+            "[security]\nfull_access_lane=false",
+            Some("garbage")
+        ));
+        // A host file that cannot be read keeps the default: the lane, not a silent rollback.
+        assert!(full_access_lane_enabled("not toml [", None));
     }
 
     #[test]

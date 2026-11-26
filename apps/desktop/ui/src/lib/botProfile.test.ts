@@ -38,6 +38,31 @@ test("schedule actions use Full access only when explicit or inherited", () => {
   assert.equal(botHasFullAccess(undefined, "full"), false);
 });
 
+test("an explicit ask on a Full bot is the owner's rule: it is not Full access for the schedule actions", () => {
+  const allow = { level: { level: "allow" } };
+  const ask = { level: { level: "ask" } };
+  assert.equal(botHasFullAccess(policyBot({ preset: "full", categories: { shell: allow } }), null), true);
+  assert.equal(botHasFullAccess(policyBot({ preset: "full", categories: { shell: ask } }), null), false);
+  assert.equal(
+    botHasFullAccess(policyBot({ preset: "full", categories: { fs: allow, shell: ask } }), "full"),
+    false
+  );
+  assert.equal(
+    botHasFullAccess(
+      policyBot({ preset: "full", categories: { shell: { ...allow, by_initiator: { schedule: { level: "ask" } } } } }),
+      null
+    ),
+    false
+  );
+  assert.equal(
+    botHasFullAccess(
+      policyBot({ preset: "full", categories: { shell: { ...allow, by_initiator: { schedule: { level: "allow" } } } } }),
+      null
+    ),
+    true
+  );
+});
+
 test("changing only the executor preserves preset category denials and initiator overrides", () => {
   const permissions = {
     preset: "full",

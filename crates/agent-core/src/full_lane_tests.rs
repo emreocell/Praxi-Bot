@@ -311,7 +311,8 @@ async fn full_still_asks_for_the_never_list_and_for_payments() {
 }
 
 /// A run that read untrusted content cannot mint a durable permission without the owner: the
-/// card stays for a schedule, but not before anything untrusted was read.
+/// card stays for a schedule, but not before anything untrusted was read. A trigger's payload
+/// is untrusted before the model reads anything, so its first schedule already asks.
 #[tokio::test]
 async fn a_schedule_after_untrusted_content_still_asks_but_not_before() {
     for start in TRUSTED {
@@ -354,7 +355,12 @@ async fn a_schedule_after_untrusted_content_still_asks_but_not_before() {
             panic!("{start:?}: the second schedule ran without a card");
         };
         assert_eq!(card.tool_name, "schedule_create", "{start:?}");
-        assert_eq!(schedule.count.load(Ordering::SeqCst), 1, "{start:?}");
+        let ran_before_the_card = usize::from(!matches!(start, Start::Trigger));
+        assert_eq!(
+            schedule.count.load(Ordering::SeqCst),
+            ran_before_the_card,
+            "{start:?}"
+        );
         lp.cancel(run).unwrap();
     }
 }
@@ -745,4 +751,645 @@ async fn an_unattended_full_run_is_not_parked_on_a_question_but_the_owner_is_ask
             assert!(told.contains("Nobody is available to answer"), "{told}");
         }
     }
+}
+
+// ── Gaps found by the security review (Gate A) ───────────────────────────────────────────────
+// Every test below turns the lane on with `lane_cfg`: the fixture's own default has it off.
+
+/// A browser-like tool that reports whether the page is a checkout and records the payment
+/// mode its call was given.
+struct PaymentProbe {
+    spec: tool_registry::ToolSpec,
+    checkout: Option<u64>,
+    seen: parking_lot::Mutex<Vec<tool_registry::PaymentApproval>>,
+}
+
+impl PaymentProbe {
+    fn new(name: &str, category: PermissionCategory, checkout: Option<u64>) -> Arc<Self> {
+        Arc::new(Self {
+            spec: with_class(name, Effect::Write, category, ContentClass::none(), "").spec,
+            checkout,
+            seen: parking_lot::Mutex::new(Vec::new()),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl tool_registry::Tool for PaymentProbe {
+    fn spec(&self) -> &tool_registry::ToolSpec {
+        &self.spec
+    }
+    async fn payment_page(&self, _: &tool_registry::ToolContext, _: &Value) -> Option<u64> {
+        self.checkout
+    }
+    async fn call(
+        &self,
+        ctx: &tool_registry::ToolContext,
+        _: Value,
+    ) -> Result<tool_registry::ToolOutput, tool_registry::ToolError> {
+        self.seen.lock().push(ctx.payment.clone());
+        Ok(tool_registry::ToolOutput::text("ran"))
+    }
+}
+
+/// `browser_eval` is a `Script` tool, not a `Browser` one: a checkout page asks for it like it
+/// does for `browser_click`, and approval is bound to that page. (The owner's own computer's
+/// `pc_browser_*` copies keep the decision: see `the_computers_browser_keeps_the_payment_decision`.)
+#[tokio::test]
+async fn a_checkout_page_asks_for_browser_eval() {
+    let name = "browser_eval";
+    for start in TRUSTED {
+        let env = setup();
+        let probe = PaymentProbe::new(name, PermissionCategory::Script, Some(7));
+        let fake = Fake::new(vec![calls(&[("p", name, json!({}))]), text("Done")]);
+        let lp = make_loop(
+            &env.storage,
+            env.bot,
+            &fake,
+            &[],
+            profile(FULL),
+            lane_cfg(Policy::full()),
+        );
+        assert!(lp.sh.tools.register(probe.clone()));
+        let mut rx = lp.subscribe();
+        let run = start_run(&lp, &env, start, "go");
+        let event = until(&mut rx, |e| {
+            matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+        })
+        .await;
+        let Event::ApprovalNeeded(card) = event else {
+            panic!("{start:?}: the checkout was scripted without a card: {event:?}");
+        };
+        assert_eq!(card.details.unwrap()["money_movement"], true, "{start:?}");
+        assert!(probe.seen.lock().is_empty(), "{start:?}");
+        lp.approve(card.call_id, crate::ApprovalScope::Once, env.user)
+            .unwrap();
+        until(&mut rx, |e| matches!(e, Event::RunFinished(_))).await;
+        assert!(
+            matches!(
+                probe.seen.lock().as_slice(),
+                [tool_registry::PaymentApproval::Approved(7)]
+            ),
+            "{start:?}: {:?}",
+            probe.seen.lock()
+        );
+        lp.cancel(run).ok();
+    }
+}
+
+/// Off a checkout page the call runs without a card, but with the page check armed: the tool
+/// looks again right before it acts (a page can enter checkout between the decision and the
+/// call), so `browser_eval` is never run "unchecked" on a Full bot.
+#[tokio::test]
+async fn a_full_bots_browser_call_off_checkout_runs_with_the_page_check_armed() {
+    for name in ["browser_eval", "browser_click"] {
+        for start in TRUSTED {
+            let env = setup();
+            let category = if name == "browser_eval" {
+                PermissionCategory::Script
+            } else {
+                PermissionCategory::Browser
+            };
+            let probe = PaymentProbe::new(name, category, None);
+            let fake = Fake::new(vec![calls(&[("p", name, json!({}))]), text("Done")]);
+            let lp = make_loop(
+                &env.storage,
+                env.bot,
+                &fake,
+                &[],
+                profile(FULL),
+                lane_cfg(Policy::full()),
+            );
+            assert!(lp.sh.tools.register(probe.clone()));
+            let mut rx = lp.subscribe();
+            start_run(&lp, &env, start, "go");
+            let event = until(&mut rx, |e| {
+                matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+            })
+            .await;
+            assert!(
+                matches!(event, Event::RunFinished(_)),
+                "{name}/{start:?}: {event:?}"
+            );
+            assert!(
+                matches!(
+                    probe.seen.lock().as_slice(),
+                    [tool_registry::PaymentApproval::Check]
+                ),
+                "{name}/{start:?}: {:?}",
+                probe.seen.lock()
+            );
+        }
+    }
+    // A bot below the Full level keeps the existing rules: nothing is added for it.
+    let env = setup();
+    let probe = PaymentProbe::new("browser_eval", PermissionCategory::Script, None);
+    let fake = Fake::new(vec![
+        calls(&[("p", "browser_eval", json!({}))]),
+        text("Done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(BALANCED),
+        lane_cfg(Policy::full()),
+    );
+    assert!(lp.sh.tools.register(probe.clone()));
+    let mut rx = lp.subscribe();
+    start_run(&lp, &env, Start::Owner, "go");
+    until(&mut rx, |e| {
+        matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+    })
+    .await;
+    assert!(
+        probe
+            .seen
+            .lock()
+            .iter()
+            .all(|p| matches!(p, tool_registry::PaymentApproval::Unchecked)),
+        "{:?}",
+        probe.seen.lock()
+    );
+}
+
+const MINTING: [&str; 9] = [
+    "schedule_create",
+    "schedule_update",
+    "schedule_resume",
+    "bot_create",
+    "bot_update",
+    "bot_delete",
+    "knowledge_brain_write",
+    "skill_write",
+    "skill_publish",
+];
+
+/// A trigger, webhook or mail payload is in front of the model from the first call, so the run
+/// holds untrusted content before it has read anything: it cannot mint a durable permission
+/// (a schedule, a bot, the knowledge root, a skill) without the owner, while the owner's own
+/// and a schedule's runs still can, and the trigger run still works without a card otherwise.
+#[tokio::test]
+async fn an_external_trigger_run_cannot_mint_authority_but_owner_and_schedule_runs_can() {
+    let tools: Vec<Arc<Asks>> = MINTING
+        .iter()
+        .map(|n| Asks::new(n, PermissionCategory::System, ContentClass::none()))
+        .chain([Asks::new(
+            "email_send",
+            PermissionCategory::Messaging,
+            ContentClass::none(),
+        )])
+        .collect();
+    for start in TRUSTED {
+        let (_env, lp, ctx) = ctx_of(start, FULL, lane_cfg(Policy::full()), &tools).await;
+        let untrusted = ctx.taint.lock().exposure.untrusted;
+        assert_eq!(untrusted, matches!(start, Start::Trigger), "{start:?}");
+        for tool in &tools {
+            let (decision, reason) = decide(&lp, &ctx, tool, &json!({}));
+            let mints = MINTING.contains(&tool.spec.name.as_str());
+            let label = format!("{start:?}/{}", tool.spec.name);
+            if mints && matches!(start, Start::Trigger) {
+                assert!(decision.is_ask(), "{label}: {decision:?}");
+                assert_eq!(reason, None, "{label}");
+            } else {
+                assert_eq!(decision, Decision::Allow, "{label}");
+                assert_eq!(reason, Some("mode.full.policy"), "{label}");
+            }
+        }
+    }
+}
+
+/// The same through the real loop: the first call of a trigger run is a card, not a skill.
+#[tokio::test]
+async fn a_trigger_payload_cannot_overwrite_a_skill_at_the_first_step() {
+    for start in TRUSTED {
+        let env = setup();
+        let skill = Asks::new(
+            "skill_write",
+            PermissionCategory::System,
+            ContentClass::none(),
+        );
+        let fake = Fake::new(vec![
+            calls(&[("w", "skill_write", json!({"name": "x", "replace": true}))]),
+            text("Done"),
+        ]);
+        let lp = make_loop(
+            &env.storage,
+            env.bot,
+            &fake,
+            &[],
+            profile(FULL),
+            lane_cfg(Policy::full()),
+        );
+        lp.tool_registry()
+            .register(Arc::clone(&skill) as Arc<dyn tool_registry::Tool>);
+        let mut rx = lp.subscribe();
+        let run = start_run(&lp, &env, start, "install the skill");
+        let event = until(&mut rx, |e| {
+            matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+        })
+        .await;
+        match (start, event) {
+            (Start::Trigger, Event::ApprovalNeeded(card)) => {
+                assert_eq!(card.tool_name, "skill_write");
+                assert_eq!(skill.count.load(Ordering::SeqCst), 0);
+                lp.cancel(run).unwrap();
+            }
+            (Start::Trigger, other) => {
+                panic!("the trigger wrote a skill without a card: {other:?}")
+            }
+            (_, Event::RunFinished(_)) => assert_eq!(skill.count.load(Ordering::SeqCst), 1),
+            (start, other) => panic!("{start:?}: {other:?}"),
+        }
+    }
+}
+
+/// A rule the owner wrote on a Full bot (a category, or one source within it) is theirs: the
+/// preset does not turn it into an allow, and the categories they left alone stay allowed.
+#[tokio::test]
+async fn an_explicit_ask_on_a_full_bot_still_asks() {
+    const SHELL_ASKS: &str = "[permissions]\npreset = \"full\"\n[permissions.categories]\nshell = { level = { level = \"ask\" } }\n";
+    const SCHEDULES_ASK: &str = "[permissions]\npreset = \"full\"\n[permissions.categories]\nshell = { level = { level = \"allow\" }, by_initiator = { schedule = { level = \"ask\" } } }\n";
+    const ALL_ALLOW: &str = "[permissions]\npreset = \"full\"\n[permissions.categories]\nshell = { level = { level = \"allow\" } }\n";
+    let tools = one_per_category();
+    let shell_tool = tools
+        .iter()
+        .find(|t| t.spec.category == PermissionCategory::Shell)
+        .unwrap();
+    let fs_tool = tools
+        .iter()
+        .find(|t| t.spec.category == PermissionCategory::Fs)
+        .unwrap();
+    for start in TRUSTED {
+        // The whole category.
+        let (_env, lp, ctx) = ctx_of(start, SHELL_ASKS, lane_cfg(Policy::full()), &tools).await;
+        let (decision, reason) = decide(&lp, &ctx, shell_tool, &json!({}));
+        assert!(decision.is_ask(), "{start:?}: {decision:?}");
+        assert_eq!(reason, None, "{start:?}");
+        assert_eq!(
+            decide(&lp, &ctx, fs_tool, &json!({})).0,
+            Decision::Allow,
+            "{start:?}"
+        );
+        // One source within the category: schedules, and the triggers that follow their policy.
+        let (_env, lp, ctx) = ctx_of(start, SCHEDULES_ASK, lane_cfg(Policy::full()), &tools).await;
+        let (decision, _) = decide(&lp, &ctx, shell_tool, &json!({}));
+        if matches!(start, Start::Owner) {
+            assert_eq!(decision, Decision::Allow, "{start:?}");
+        } else {
+            assert!(decision.is_ask(), "{start:?}: {decision:?}");
+        }
+        // A rule that only restates "allow" changes nothing.
+        let (_env, lp, ctx) = ctx_of(start, ALL_ALLOW, lane_cfg(Policy::full()), &tools).await;
+        assert_eq!(
+            decide(&lp, &ctx, shell_tool, &json!({})).0,
+            Decision::Allow,
+            "{start:?}"
+        );
+    }
+}
+
+/// The audit row is the authorization record: when it cannot be written the call does not run
+/// and the model is told why. That holds for a spawn (`spawn_subagent`, `ask_bot`) as for any tool.
+#[tokio::test]
+async fn an_auto_allowed_call_is_audited_and_a_failed_audit_stops_it() {
+    fn break_audit(env: &crate::tests::Env) {
+        let conn = rusqlite::Connection::open(env.dir.path().join("bot.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER fail_full_audit BEFORE INSERT ON audit_log \
+             WHEN NEW.action = 'approval.auto_allowed' \
+             BEGIN SELECT RAISE(ABORT, 'injected audit failure'); END;",
+        )
+        .unwrap();
+    }
+    // 1. A spawn that the lane allowed leaves its row, like every other call.
+    let env = setup();
+    let fake = Fake::new(vec![
+        calls(&[("s", "spawn_subagent", json!({"task": "count"}))]),
+        text("child done"),
+        text("parent done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(FULL),
+        lane_cfg(Policy::full()),
+    )
+    .with_subagents();
+    let run = start_run(&lp, &env, Start::Owner, "go");
+    lp.wait(run).await.unwrap();
+    let audit = env.storage.list_audit_for_run(env.user, run).unwrap();
+    assert!(
+        audit.iter().any(|row| row.action == "approval.auto_allowed"
+            && row.detail["tool"] == "spawn_subagent"
+            && row.detail["reason"] == "mode.full.policy"),
+        "no audit row for the spawn: {audit:?}"
+    );
+    assert_eq!(env.storage.list_child_runs(run).unwrap().len(), 1);
+
+    // 2. When the row cannot be written, no child run starts.
+    let env = setup();
+    break_audit(&env);
+    let fake = Fake::new(vec![
+        calls(&[("s", "spawn_subagent", json!({"task": "count"}))]),
+        text("parent done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(FULL),
+        lane_cfg(Policy::full()),
+    )
+    .with_subagents();
+    let run = start_run(&lp, &env, Start::Owner, "go");
+    lp.wait(run).await.unwrap();
+    assert!(
+        env.storage.list_child_runs(run).unwrap().is_empty(),
+        "a subagent started although its authorization could not be recorded"
+    );
+    let told = serde_json::to_string(&fake.request(1).messages).unwrap();
+    assert!(
+        told.contains("could not record the Full access authorization"),
+        "{told}"
+    );
+
+    // 3. The same for an ordinary tool.
+    let env = setup();
+    break_audit(&env);
+    let mail = Asks::new(
+        "email_send",
+        PermissionCategory::Messaging,
+        ContentClass::none(),
+    );
+    let fake = Fake::new(vec![
+        calls(&[("m", "email_send", json!({"to": ["a@example.net"]}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(FULL),
+        lane_cfg(Policy::full()),
+    );
+    lp.tool_registry()
+        .register(Arc::clone(&mail) as Arc<dyn tool_registry::Tool>);
+    let run = start_run(&lp, &env, Start::Owner, "go");
+    lp.wait(run).await.unwrap();
+    assert_eq!(mail.count.load(Ordering::SeqCst), 0);
+}
+
+// ── The coding CLI's own tools ──
+
+fn native(tool: &str, summary: &str, input: Value) -> cli_provider::runtime::NativePermission {
+    cli_provider::runtime::NativePermission {
+        tool: tool.into(),
+        summary: summary.into(),
+        input,
+    }
+}
+
+/// A host over a finished run of `start`, the way a CLI turn of that run would see it.
+async fn native_host(
+    start: Start,
+    preset: &str,
+) -> (
+    crate::tests::Env,
+    crate::AgentLoop,
+    crate::cli::Host,
+    tokio::sync::broadcast::Receiver<crate::StreamItem>,
+) {
+    let env = setup();
+    let fake = Fake::new(vec![text("ok")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(preset),
+        lane_cfg(Policy::full()),
+    );
+    let run = start_run(&lp, &env, start, "go");
+    lp.wait(run).await.unwrap();
+    let rx = lp.subscribe();
+    let host = crate::cli::Host {
+        sh: lp.sh.clone(),
+        run: env.storage.get_run(run).unwrap().unwrap(),
+        approved: parking_lot::Mutex::new(Vec::new()),
+        executed: parking_lot::Mutex::new(Vec::new()),
+    };
+    (env, lp, host, rx)
+}
+
+/// What a request of the CLI becomes: `Ok(allowed)` when no card was raised, `Err(())` when one was
+/// (and it was denied here).
+async fn native_outcome(
+    lp: &crate::AgentLoop,
+    env: &crate::tests::Env,
+    host: &crate::cli::Host,
+    rx: &mut tokio::sync::broadcast::Receiver<crate::StreamItem>,
+    request: cli_provider::runtime::NativePermission,
+) -> Result<bool, ()> {
+    let ask = host.native_permission(request);
+    let watch = async {
+        loop {
+            let item = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+                .await
+                .ok()?
+                .ok()?;
+            if let Event::ApprovalNeeded(card) = item.envelope.event {
+                lp.deny(card.call_id, env.user, None).unwrap();
+                return Some(());
+            }
+        }
+    };
+    tokio::pin!(ask);
+    tokio::select! {
+        allowed = &mut ask => Ok(allowed),
+        raised = watch => {
+            assert!(raised.is_some());
+            assert!(!ask.await, "a denied card must not allow the request");
+            Err(())
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_coding_clis_own_tool_runs_in_the_full_lane_and_is_audited() {
+    for start in TRUSTED {
+        let (env, lp, host, mut rx) = native_host(start, FULL).await;
+        for request in [
+            native("Bash", "list files", json!({"command": "ls -la"})),
+            native(
+                "Edit",
+                "edit a file",
+                json!({"file_path": "a.rs", "new": "x"}),
+            ),
+        ] {
+            let tool = request.tool.clone();
+            assert_eq!(
+                native_outcome(&lp, &env, &host, &mut rx, request).await,
+                Ok(true),
+                "{start:?}/{tool}"
+            );
+            let audit = env
+                .storage
+                .list_audit_for_run(env.user, host.run.id)
+                .unwrap();
+            assert!(
+                audit.iter().any(|row| row.action == "approval.auto_allowed"
+                    && row.detail["tool"] == format!("cli.native.{tool}")),
+                "{start:?}/{tool}: no audit row"
+            );
+        }
+    }
+}
+
+/// The CLI's own text is judged field by field: a command in any key, in a nested list, as an
+/// argument vector or inside a JSON string reads as the command it is.
+#[tokio::test]
+async fn a_coding_clis_tool_is_judged_from_every_field_it_sends() {
+    let (env, lp, host, mut rx) = native_host(Start::Owner, FULL).await;
+    for (what, request) in [
+        (
+            "payment under another key",
+            native(
+                "shell",
+                "run it",
+                json!({"cmd": "stripe charges create --amount 5"}),
+            ),
+        ),
+        (
+            "payment in a nested list",
+            native(
+                "shell",
+                "run it",
+                json!({"call": {"steps": [{"run": "stripe refunds create"}]}}),
+            ),
+        ),
+        (
+            "payment in the summary",
+            native("shell", "stripe charges create", json!({})),
+        ),
+        (
+            "payment through a wrapper",
+            native(
+                "Bash",
+                "x",
+                json!({"command": "sudo -u root \"stripe\" charges create"}),
+            ),
+        ),
+        (
+            "payment host in a body",
+            native(
+                "fetch",
+                "x",
+                json!({"request": {"url": "https://api.stripe.com/v1/charges"}}),
+            ),
+        ),
+        (
+            "payment in an embedded JSON string",
+            native(
+                "shell",
+                "x",
+                json!({"payload": "{\"command\": \"stripe charges create\"}"}),
+            ),
+        ),
+        (
+            "never-list under another key",
+            native("shell", "x", json!({"cmd": "rm -rf /"})),
+        ),
+        (
+            "never-list as an argument vector",
+            native("exec", "x", json!({"argv": ["rm", "-rf", "/"]})),
+        ),
+    ] {
+        assert_eq!(
+            native_outcome(&lp, &env, &host, &mut rx, request).await,
+            Err(()),
+            "{what}: raised no card"
+        );
+    }
+}
+
+/// The waiver comes after the same floors as every other call.
+#[tokio::test]
+async fn a_coding_clis_tool_obeys_a_deny_a_lock_an_explicit_ask_and_a_tainted_replay() {
+    // The bot's own deny: refused, no card.
+    let denied = "[permissions]\npreset = \"full\"\n[permissions.categories]\nshell = { level = { level = \"deny\" } }\n";
+    let (env, lp, host, mut rx) = native_host(Start::Owner, denied).await;
+    assert_eq!(
+        native_outcome(
+            &lp,
+            &env,
+            &host,
+            &mut rx,
+            native("Bash", "x", json!({"command": "ls"}))
+        )
+        .await,
+        Ok(false)
+    );
+    // The owner's own ask on the category: a card.
+    let asks = "[permissions]\npreset = \"full\"\n[permissions.categories]\nshell = { level = { level = \"ask\" } }\n";
+    let (env, lp, host, mut rx) = native_host(Start::Owner, asks).await;
+    assert_eq!(
+        native_outcome(
+            &lp,
+            &env,
+            &host,
+            &mut rx,
+            native("Bash", "x", json!({"command": "ls"}))
+        )
+        .await,
+        Err(())
+    );
+    // A policy file that could not be read locks every category: refused, no card.
+    let (env, lp, host, mut rx) = native_host(Start::Owner, FULL).await;
+    lp.sh
+        .policy_locked
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        native_outcome(
+            &lp,
+            &env,
+            &host,
+            &mut rx,
+            native("Bash", "x", json!({"command": "ls"}))
+        )
+        .await,
+        Ok(false)
+    );
+    // A run that took content from a tainted replay: a card, whatever the level.
+    let (env, lp, host, mut rx) = native_host(Start::Owner, FULL).await;
+    lp.sh.router.tainted_runs.lock().insert(host.run.id);
+    assert_eq!(
+        native_outcome(
+            &lp,
+            &env,
+            &host,
+            &mut rx,
+            native("Bash", "x", json!({"command": "ls"}))
+        )
+        .await,
+        Err(())
+    );
+    // Not served by the lane: a stranger's run keeps its card.
+    let (env, lp, host, mut rx) = native_host(Start::Stranger, FULL).await;
+    assert_eq!(
+        native_outcome(
+            &lp,
+            &env,
+            &host,
+            &mut rx,
+            native("Bash", "x", json!({"command": "ls"}))
+        )
+        .await,
+        Err(())
+    );
 }

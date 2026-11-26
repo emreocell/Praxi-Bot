@@ -2039,6 +2039,13 @@ impl Shared {
             taint.exposure.observe(true, false);
             taint.note_label("mission ledger");
         }
+        // Every other external source (a trigger, an external schedule, a precheck) feeds the
+        // run text its owner did not write: untrusted from step 0 as well, so a payload cannot
+        // hand a durable permission to a later run before the model has read anything.
+        if initiator_of(&run.kind) == InitiatorKind::ExternalSchedule && !taint.exposure.untrusted {
+            taint.exposure.observe(true, false);
+            taint.note_label("incoming external trigger");
+        }
         // A helper bot starts with untrusted exposure: its task was written
         // by another bot, whatever that bot had read.
         if run

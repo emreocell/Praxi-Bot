@@ -17,7 +17,8 @@ use protocol::{Event, RunId};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tool_registry::{
-    ContentClass, ContentPart, Effect, PermissionCategory, ToolContext, ToolError, ToolRegistry,
+    ContentClass, ContentPart, Effect, PaymentApproval, PermissionCategory, ToolContext, ToolError,
+    ToolRegistry,
 };
 
 use crate::error::{ReplayError, WorkflowError};
@@ -605,6 +606,64 @@ impl Replayer {
             control: None,
         };
         gate.authorize(&req).await.map_err(Stop::Denied)
+    }
+
+    /// [`Self::authorize`] for a browser step the replayer sends itself. It goes through the
+    /// same gate as a model's browser call ([`ToolGate::authorize_tool`]), so a page that shows
+    /// checkout is judged as money and asks once, bound to that page. The replayer then sends
+    /// through its own driver, so the page is looked at again right before the send: if it
+    /// moved on to a checkout (or to another document than the one approved), nothing is sent.
+    async fn authorize_browser(
+        &self,
+        gate: &dyn ToolGate,
+        tool: &str,
+        category: PermissionCategory,
+        effect: Effect,
+        input: Value,
+    ) -> Result<(), Stop> {
+        let content = self
+            .handles
+            .tools
+            .get(tool)
+            .map_or_else(|| content_for_unnamed(tool), |t| t.spec().content);
+        let req = GateRequest {
+            run_id: self.opts.run_id.clone(),
+            tool: tool.to_owned(),
+            category,
+            effect,
+            raw_command: raw_command_for(tool, &input),
+            input,
+            content,
+            control: None,
+        };
+        let authorization = gate.authorize_tool(&req).await.map_err(Stop::Denied)?;
+        if matches!(authorization.payment, PaymentApproval::Unchecked) {
+            return Ok(());
+        }
+        let page = match self.handles.tools.get(tool) {
+            Some(registered) => {
+                let ctx = ToolContext {
+                    run_id: self.opts.run_id.clone(),
+                    bot_id: self.opts.bot_id.clone(),
+                    ..ToolContext::default()
+                };
+                registered.payment_page(&ctx, &req.input).await
+            }
+            None => None,
+        };
+        let unchanged = match authorization.payment {
+            PaymentApproval::Unchecked => true,
+            PaymentApproval::Check => page.is_none(),
+            PaymentApproval::Approved(approved) => page == Some(approved),
+        };
+        if unchanged {
+            Ok(())
+        } else {
+            Err(Stop::Denied(
+                "Payment input withheld. The page changed to a checkout after the step was approved."
+                    .into(),
+            ))
+        }
     }
 
     /// [`Self::authorize`] for a desktop input step the replayer sends itself.
@@ -1230,7 +1289,7 @@ impl Replayer {
                     "a secret step needs a field the page still shows by its recorded role and name".into(),
                 ));
             };
-            self.authorize(
+            self.authorize_browser(
                 gate,
                 "browser_fill",
                 PermissionCategory::Browser,
@@ -1258,7 +1317,7 @@ impl Replayer {
                 .map_err(Stop::Failed)?
         } else if let Hit::Css(css) = &hit {
             let js = css_action_js(css, b.action, value.as_deref());
-            self.authorize(
+            self.authorize_browser(
                 gate,
                 "browser_eval",
                 PermissionCategory::Script,
@@ -1281,7 +1340,7 @@ impl Replayer {
                 BrowserActionKind::Press => ("browser_press", json!({"key": value})),
                 BrowserActionKind::Back => ("browser_back", json!({})),
             };
-            self.authorize(
+            self.authorize_browser(
                 gate,
                 tool,
                 PermissionCategory::Browser,

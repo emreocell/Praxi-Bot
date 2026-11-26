@@ -224,7 +224,9 @@ pub fn raw_command_for(tool: &str, input: &Value) -> String {
                 .unwrap_or_default()
                 .to_string()
         }
-        "desktop_launch" => {
+        // The owner's own computer launches a program the same way: the never-list and the
+        // money floor read the full command line there too.
+        "desktop_launch" | "pc_desktop_launch" => {
             let exe = input
                 .get("executable")
                 .and_then(Value::as_str)

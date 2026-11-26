@@ -63,6 +63,48 @@ async fn checkout_detection_uses_visible_payment_fields() {
 
 #[tokio::test]
 #[ignore = "needs Chrome/Edge"]
+async fn checkout_detection_reads_child_frames_and_any_payment_provider_frame() {
+    let browser = Browser::launch(LaunchOptions::default()).await.unwrap();
+    // A card field one frame down (srcdoc frames share the page's process).
+    let nested = open(
+        &browser,
+        r#"<iframe srcdoc="<input autocomplete='cc-number'>" width=300 height=60></iframe>"#,
+    )
+    .await;
+    assert!(nested.has_payment_form().await.unwrap());
+    // The card field itself is two frames down.
+    let deeper = open(
+        &browser,
+        r#"<iframe srcdoc="<iframe srcdoc=&quot;<input autocomplete='cc-csc'>&quot; width=200 height=40></iframe>" width=300 height=80></iframe>"#,
+    )
+    .await;
+    assert!(deeper.has_payment_form().await.unwrap());
+    // A provider other than Stripe: the frame's host is the signal, its page need not load.
+    for host in [
+        "www.paypal.com",
+        "checkoutshopper-live.adyen.com",
+        "assets.braintreegateway.com",
+        "web.squarecdn.com",
+        "x.klarna.com",
+    ] {
+        let page = open(
+            &browser,
+            &format!(r#"<iframe src="https://{host}/frame" width=300 height=60></iframe>"#),
+        )
+        .await;
+        assert!(page.has_payment_form().await.unwrap(), "{host}");
+    }
+    let plain = open(
+        &browser,
+        r#"<iframe srcdoc="<p>hello</p>" width=300 height=60></iframe><iframe src="https://example.org/embed" width=100 height=40></iframe>"#,
+    )
+    .await;
+    assert!(!plain.has_payment_form().await.unwrap());
+    browser.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
 async fn form_flow_fill_select_click_diff() {
     let b = Browser::launch(LaunchOptions::default()).await.unwrap();
     let p = open(&b, FORM).await;

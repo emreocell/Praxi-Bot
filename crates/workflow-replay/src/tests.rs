@@ -1728,3 +1728,151 @@ async fn navigate_replay_encodes_query_values_and_redacts_secret_params_on_hando
         .unwrap_err();
     assert!(matches!(err, ToolError::PermissionDenied(_)), "{err:?}");
 }
+
+/// A gate that answers the way the loop's does for a browser call on a Full bot: the page
+/// check mode it returns is the daemon's, and which entry point was used is recorded.
+struct PaymentGate {
+    mode: Mutex<tool_registry::PaymentApproval>,
+    via_authorize_tool: Mutex<Vec<String>>,
+    via_authorize: Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl builtin_tools::ToolGate for PaymentGate {
+    async fn authorize(&self, req: &builtin_tools::GateRequest) -> Result<(), String> {
+        self.via_authorize.lock().push(req.tool.clone());
+        Ok(())
+    }
+    async fn authorize_tool(
+        &self,
+        req: &builtin_tools::GateRequest,
+    ) -> Result<builtin_tools::GateAuthorization, String> {
+        self.via_authorize_tool.lock().push(req.tool.clone());
+        Ok(builtin_tools::GateAuthorization {
+            expected_origin: None,
+            unattended_mail: false,
+            payment: self.mode.lock().clone(),
+        })
+    }
+}
+
+/// The registry's browser tool, which alone can tell what page the browser is on.
+struct PageTool {
+    spec: tool_registry::ToolSpec,
+    checkout: Mutex<Option<u64>>,
+}
+
+#[async_trait::async_trait]
+impl tool_registry::Tool for PageTool {
+    fn spec(&self) -> &tool_registry::ToolSpec {
+        &self.spec
+    }
+    async fn payment_page(&self, _: &ToolContext, _: &Value) -> Option<u64> {
+        *self.checkout.lock()
+    }
+    async fn call(
+        &self,
+        _: &ToolContext,
+        _: Value,
+    ) -> Result<tool_registry::ToolOutput, ToolError> {
+        Ok(tool_registry::ToolOutput::text("clicked"))
+    }
+}
+
+/// A replayed browser step is a browser call like the model's: it goes through the loop's tool
+/// gate (so a checkout page is judged as money), and the page is read again right before the
+/// replayer sends, so a page that became a checkout in between, or is not the one approved,
+/// stops the step without a click.
+#[tokio::test]
+async fn a_replayed_browser_step_goes_through_the_tool_gate_and_stops_at_a_checkout() {
+    use tool_registry::PaymentApproval::{Approved, Check, Unchecked};
+    let page = "# Shop (https://shop.test/cart)\n  [e2] button \"Go\"\n";
+    let browser = FakeBrowser::new(page);
+    let tool = Arc::new(PageTool {
+        spec: tool_registry::ToolSpec {
+            name: "browser_click".into(),
+            description: "click".into(),
+            input_schema: json!({"type": "object"}),
+            effect: tool_registry::Effect::Write,
+            category: tool_registry::PermissionCategory::Browser,
+            platforms: vec![protocol::Platform::All],
+            content: tool_registry::ContentClass::none(),
+        },
+        checkout: Mutex::new(None),
+    });
+    let tools = ToolRegistry::new();
+    assert!(tools.register(tool.clone()));
+    let mut wf = Workflow::new("shop");
+    wf.steps = vec![Step::BrowserAction(BrowserAction {
+        url_pattern: None,
+        target: Some(BrowserLocator {
+            role: "button".into(),
+            name: "Go".into(),
+            fingerprint: fingerprint_hex("button", "Go"),
+            aria_label: None,
+            css: None,
+            nth: None,
+        }),
+        action: BrowserActionKind::Click,
+        value: None,
+        secret: None,
+    })];
+    let rp = replayer(
+        Handles {
+            desktop: None,
+            browser: Some(browser.clone()),
+            tools,
+        },
+        ReplayOptions::instant(),
+    );
+    let gate = PaymentGate {
+        mode: Mutex::new(Unchecked),
+        via_authorize_tool: Mutex::new(Vec::new()),
+        via_authorize: Mutex::new(Vec::new()),
+    };
+    let empty = params(&json!({}));
+    let run = |wf: &Workflow| {
+        let (rp, gate, empty) = (&rp, &gate, &empty);
+        let wf = wf.clone();
+        async move { rp.replay(&wf, empty, gate).await }
+    };
+    let clicks = || {
+        browser
+            .calls
+            .lock()
+            .iter()
+            .filter(|c| c.starts_with("click:"))
+            .count()
+    };
+
+    // The entry point is the tool gate, not the script one.
+    assert!(run(&wf).await.unwrap().is_completed());
+    assert_eq!(gate.via_authorize_tool.lock().as_slice(), ["browser_click"]);
+    assert!(gate.via_authorize.lock().is_empty());
+    assert_eq!(clicks(), 1);
+
+    // Full: the page was not a checkout when decided, and is one when the step sends.
+    *gate.mode.lock() = Check;
+    *tool.checkout.lock() = Some(3);
+    let report = run(&wf).await.unwrap();
+    let handover = report.handover().expect("the step must stop");
+    let HandoverReason::PermissionDenied { detail } = &handover.reason else {
+        panic!("{:?}", handover.reason);
+    };
+    assert!(detail.contains("Payment input withheld"), "{detail}");
+    assert_eq!(clicks(), 1, "nothing was sent to the checkout");
+
+    // Not a checkout: runs.
+    *tool.checkout.lock() = None;
+    assert!(run(&wf).await.unwrap().is_completed());
+    assert_eq!(clicks(), 2);
+
+    // A card approved this document: runs. Another document: stops.
+    *gate.mode.lock() = Approved(3);
+    *tool.checkout.lock() = Some(3);
+    assert!(run(&wf).await.unwrap().is_completed());
+    assert_eq!(clicks(), 3);
+    *gate.mode.lock() = Approved(4);
+    assert!(run(&wf).await.unwrap().handover().is_some());
+    assert_eq!(clicks(), 3);
+}

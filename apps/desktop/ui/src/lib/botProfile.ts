@@ -386,13 +386,29 @@ export function resolveAutoExecutorRef(
   return { provider: "", model: "" };
 }
 
-/** Full is inherited only when the bot has no preset or category rules of its own. */
+/** A stored rule that allows every call: its level, and each per-source level, is `allow`. */
+function ruleAllowsAll(rule: unknown): boolean {
+  const r = obj(rule);
+  const allows = (level: unknown) => obj(level).level === "allow";
+  return allows(r.level) && Object.values(obj(r.by_initiator)).every(allows);
+}
+
+/**
+ * Full access: an explicit `full` preset, or no preset and no category rules while the global
+ * level is Full. An `ask` (or a deny) the owner wrote for a category or a source is theirs: the
+ * daemon keeps asking there, so the bot is not "Full access" for the screens that skip a
+ * confirmation on its behalf.
+ */
 export function botHasFullAccess(bot: Bot | undefined, globalPreset: string | null | undefined): boolean {
   if (!bot) return false;
   const permissions = obj(obj(bot.config).permissions);
-  return permissions.preset === "full" || (
+  const categories = obj(permissions.categories);
+  if (permissions.preset === "full") {
+    return Object.values(categories).every(ruleAllowsAll);
+  }
+  return (
     permissions.preset == null &&
-    Object.keys(obj(permissions.categories)).length === 0 &&
+    Object.keys(categories).length === 0 &&
     globalPreset === "full"
   );
 }

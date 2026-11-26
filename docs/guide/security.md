@@ -394,7 +394,8 @@ strict allow-list.
 The Full level now asks only before spending money (see "Full access" in
 [Chatting and approvals](chatting-and-approvals.md)). The rest of this section is the older,
 narrower rule set that applies when the operator switches the Full lane off
-(`full_access_lane = false`) and to the runs the lane does not serve.
+(`[security]` `full_access_lane = false` in `host.toml`, or `BOT_FULL_ACCESS_LANE=off`) and to
+the runs the lane does not serve.
 
 The **Full** level ("Tam") is for an owner who wants the bot to do the work without a
 card per step. It never switches a hard stop off. In a run the **owner** started it

@@ -299,7 +299,9 @@ impl ToolWrapper for Renamed {
             exposure_untrusted: ctx.exposure_untrusted,
             expected_origin: None,
             unattended_mail: false,
-            payment: tool_registry::PaymentApproval::Unchecked,
+            // The daemon's payment decision for this call is about the computer's own page: it
+            // goes through as it is, never reset to "unchecked".
+            payment: ctx.payment.clone(),
             control_guard: None,
             lane: ctx.lane.clone(),
         };
@@ -314,6 +316,9 @@ impl ToolWrapper for Renamed {
     async fn standing_grant(&self, _ctx: &ToolContext, _input: &Value) -> Option<StandingGrant> {
         // Owner standing grants are written for the bot's own computer.
         None
+    }
+    async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64> {
+        self.inner.payment_page(ctx, input).await
     }
     async fn approval_details(
         &self,
@@ -746,6 +751,13 @@ impl ToolWrapper for Dispatch {
     async fn standing_grant(&self, _ctx: &ToolContext, _input: &Value) -> Option<StandingGrant> {
         None
     }
+    async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64> {
+        // The calling bot's own instance sees the page it would act on.
+        match self.family.tool(ctx, &self.spec.name) {
+            Ok(t) => t.payment_page(ctx, input).await,
+            Err(_) => None,
+        }
+    }
     async fn approval_details(
         &self,
         ctx: &ToolContext,
@@ -971,6 +983,131 @@ mod tests {
             "{ids:?}"
         );
         assert!(!ids.iter().any(String::is_empty), "{ids:?}");
+    }
+
+    /// A computer whose browser is on a fixed address.
+    struct OnPage(&'static str);
+
+    #[async_trait]
+    impl PcLink for OnPage {
+        async fn call(&self, _: &str, params: Value, _: Duration) -> Result<Value, PcError> {
+            match params["op"].as_str() {
+                Some("current_url") => Ok(json!({"url": self.0})),
+                _ => Err(PcError::Offline),
+            }
+        }
+        fn desktop(&self, _: &PcCaller) -> Result<Arc<dyn DesktopBackend>, PcError> {
+            Err(PcError::Offline)
+        }
+    }
+
+    /// The computer's own browser is a renamed copy of the managed one: it keeps the page's
+    /// payment decision. A checkout address is recognised through the family tool (the one the
+    /// loop asks), and the daemon's payment mode reaches the call instead of being reset.
+    #[tokio::test]
+    async fn the_computers_browser_keeps_the_payment_decision() {
+        let dir = tempfile::tempdir().unwrap();
+        let checkout: Arc<dyn PcLink> = Arc::new(OnPage("https://checkout.stripe.com/c/pay/cs_1"));
+        let shop: Arc<dyn PcLink> = Arc::new(OnPage("https://example.org/products"));
+        let click = |link: &Arc<dyn PcLink>| {
+            pc_tools(link, dir.path(), &no_names())
+                .into_iter()
+                .find(|t| t.spec().name == "pc_browser_click")
+                .unwrap()
+        };
+        assert!(
+            click(&checkout)
+                .payment_page(&ctx_of("bot-a"), &json!({"ref": "e1"}))
+                .await
+                .is_some()
+        );
+        assert!(
+            click(&shop)
+                .payment_page(&ctx_of("bot-a"), &json!({"ref": "e1"}))
+                .await
+                .is_none()
+        );
+    }
+
+    /// A tool that records the payment mode its call received.
+    struct Probe {
+        spec: ToolSpec,
+        seen: parking_lot::Mutex<Vec<tool_registry::PaymentApproval>>,
+    }
+
+    #[async_trait]
+    impl Tool for Probe {
+        fn spec(&self) -> &ToolSpec {
+            &self.spec
+        }
+        async fn payment_page(&self, _: &ToolContext, _: &Value) -> Option<u64> {
+            Some(5)
+        }
+        async fn call(&self, ctx: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
+            self.seen.lock().push(ctx.payment.clone());
+            Ok(ToolOutput::text("ran"))
+        }
+    }
+
+    /// The renamed copy hands the wrapped call the payment mode the daemon decided, and answers
+    /// the daemon's question about the page from the wrapped tool.
+    #[tokio::test]
+    async fn the_renamed_copy_forwards_the_payment_mode_and_the_page_question() {
+        use tool_registry::PaymentApproval;
+        let probe = Arc::new(Probe {
+            spec: ToolSpec {
+                name: "browser_click".into(),
+                description: "click".into(),
+                input_schema: json!({"type": "object"}),
+                effect: Effect::Write,
+                category: PermissionCategory::Browser,
+                platforms: vec![Platform::All],
+                content: ContentClass::none(),
+            },
+            seen: parking_lot::Mutex::new(Vec::new()),
+        });
+        let renamed = Renamed::wrap(probe.clone());
+        assert_eq!(renamed.spec().name, "pc_browser_click");
+        assert_eq!(
+            renamed.payment_page(&ctx_of("bot-a"), &json!({})).await,
+            Some(5)
+        );
+        for mode in [
+            PaymentApproval::Check,
+            PaymentApproval::Approved(5),
+            PaymentApproval::Unchecked,
+        ] {
+            let ctx = ToolContext {
+                payment: mode,
+                ..ctx_of("bot-a")
+            };
+            renamed.call(&ctx, json!({})).await.unwrap();
+        }
+        assert!(
+            matches!(
+                probe.seen.lock().as_slice(),
+                [
+                    PaymentApproval::Check,
+                    PaymentApproval::Approved(5),
+                    PaymentApproval::Unchecked
+                ]
+            ),
+            "{:?}",
+            probe.seen.lock()
+        );
+    }
+
+    /// The raw command of a program started on the owner's computer is read like the bot's own.
+    #[test]
+    fn a_program_started_on_the_owners_computer_has_its_command_line_read() {
+        let input = json!({"executable": "stripe", "args": ["charges", "create"]});
+        for tool in ["desktop_launch", "pc_desktop_launch"] {
+            assert_eq!(
+                crate::raw_command_for(tool, &input),
+                "stripe charges create",
+                "{tool}"
+            );
+        }
     }
 
     /// The family has its own names, its descriptions point at them, and an

@@ -383,6 +383,10 @@ pub trait ToolWrapper: Send + Sync {
     /// Forward [`Tool::standing_grant`] to the wrapped tool.
     async fn standing_grant(&self, ctx: &ToolContext, input: &Value) -> Option<StandingGrant>;
 
+    /// Forward [`Tool::payment_page`] to the wrapped tool: a wrapper that drops it makes the
+    /// wrapped browser tool look like it never reaches a checkout.
+    async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64>;
+
     /// Forward [`Tool::approval_details`] to the wrapped tool.
     ///
     /// # Errors
@@ -437,6 +441,10 @@ impl<W: ToolWrapper> Tool for W {
 
     async fn standing_grant(&self, ctx: &ToolContext, input: &Value) -> Option<StandingGrant> {
         ToolWrapper::standing_grant(self, ctx, input).await
+    }
+
+    async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64> {
+        ToolWrapper::payment_page(self, ctx, input).await
     }
 }
 
@@ -1018,6 +1026,13 @@ impl Tool for W {
                 input: &serde_json::Value,
             ) -> Option<crate::StandingGrant> {
                 self.0.standing_grant(ctx, input).await
+            }
+            async fn payment_page(
+                &self,
+                ctx: &crate::ToolContext,
+                input: &serde_json::Value,
+            ) -> Option<u64> {
+                self.0.payment_page(ctx, input).await
             }
             async fn approval_details(
                 &self,

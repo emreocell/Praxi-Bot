@@ -9,8 +9,8 @@ use builtin_tools::{GateAuthorization, GateRequest, ToolGate, cwd_for, raw_comma
 use computer_target::ComputerLabel;
 use parking_lot::Mutex;
 use permission_engine::{
-    ActionRequest, AllowReason, AutonomyMode, CallFacts, Decision, EgressReach, Impact, Policy,
-    balanced_lane, egress_must_ask, executes_must_ask,
+    ActionRequest, AllowReason, AutonomyMode, CallFacts, Decision, EgressReach, Impact, Level,
+    Policy, balanced_lane, egress_must_ask, executes_must_ask,
 };
 use protocol::event::{
     ApprovalNeeded, HandoverKind, QuestionAsked, ToolCallApproved, ToolCallDenied,
@@ -511,17 +511,43 @@ impl Shared {
         if self.resolver.resolve(&Policy::full(), None, None, &req) != Decision::Allow {
             return false;
         }
+        // The owner's own `Ask` on this bot (a category, or this run's initiator within it) is
+        // a rule they wrote on purpose: the Full preset does not turn it into an allow.
+        if Self::bot_asks_explicitly(ctx, &req) {
+            return false;
+        }
         if self
             .profile_verdict(ctx, name, input, target)
             .is_some_and(|v| v.action == permission_engine::ProfileAction::Ask)
         {
             return false;
         }
-        !(Self::mints_authority(name) && ctx.taint.lock().exposure.untrusted)
+        // Text from a source the owner did not write (a page, a mail, a trigger payload) must
+        // not mint a permission a later run will hold. An external source is untrusted whatever
+        // the taint says yet: its payload is in front of the model from the first call.
+        !(Self::mints_authority(name)
+            && (ctx.taint.lock().exposure.untrusted
+                || ctx.initiator == InitiatorKind::ExternalSchedule))
+    }
+
+    /// The bot's own policy resolves this call, or this run's initiator, to something other
+    /// than a plain allow: an `Ask` the owner set for the category on a bot at the Full preset.
+    /// Only a category the bot's policy names counts; a bot with no policy of its own inherits
+    /// the global level, which the lane serves.
+    fn bot_asks_explicitly(ctx: &RunCtx, req: &ActionRequest) -> bool {
+        ctx.bot_policy
+            .as_ref()
+            .and_then(|policy| policy.categories.get(&req.category))
+            .is_some_and(|rule| {
+                [req.initiator, ctx.initiator]
+                    .into_iter()
+                    .any(|initiator| *rule.level_for(initiator) != Level::Allow)
+            })
     }
 
     /// Tools that hand a durable permission to a later run: a schedule that will run
-    /// unattended, a bot's own configuration, the designated knowledge root.
+    /// unattended, a bot's own configuration, the designated knowledge root, a skill (a
+    /// skill is instructions every later run of the bot, or of every bot, reads).
     fn mints_authority(name: &str) -> bool {
         matches!(
             name,
@@ -532,6 +558,8 @@ impl Shared {
                 | "bot_update"
                 | "bot_delete"
                 | "knowledge_brain_write"
+                | "skill_write"
+                | "skill_publish"
         )
     }
 
@@ -945,7 +973,9 @@ impl Shared {
         tool: &dyn Tool,
         input: &Value,
     ) -> Option<u64> {
-        if tool.spec().category != PermissionCategory::Browser || !self.full_access(ctx) {
+        // Any tool that can act on the managed page decides for itself (the default answers
+        // `None`): `browser_eval` runs page script under `Script`, not `Browser`.
+        if !self.full_access(ctx) {
             return None;
         }
         tool.payment_page(

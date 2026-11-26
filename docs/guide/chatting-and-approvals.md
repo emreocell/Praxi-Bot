@@ -295,11 +295,21 @@ What still asks, and why:
   program (`stripe`, `paypal`, `lncli`, ...) or names a payment API host, a connector
   action of a payment app (or with a payment verb such as `charge`, `payout`, `checkout`),
   and a managed-browser page that shows checkout (a checkout or payment URL, a card
-  field or a payment button). The card is once-only and bound to that page.
-* **The never-list** (catastrophic commands), a **deny** in the bot's own rules, the
-  owner's per-site and per-app ask rules, and limits the daemon cannot evaluate.
-* **Durable permission** (a schedule, a bot change, the knowledge root) minted by a run that
-  read untrusted content.
+  field in the page or in any frame of it, a frame of a payment provider such as Stripe,
+  PayPal, Adyen, Braintree, Square or Klarna, or a payment button). A quoted, escaped or
+  wrapped program name (`"stripe"`, `\stripe`, `sudo -u root stripe`, `timeout 10 stripe`)
+  counts like the plain one. The page is checked for every browser tool, including
+  `browser_eval` and the `pc_browser_*` tools of your own computer (there by the page address
+  and the button's label only), and for replayed workflow browser steps. The same read applies to the command or arguments a coding CLI
+  engine hands over for its own tool, in any field, and to a program started on your
+  computer. The card is once-only and bound to that page.
+* **The never-list** (catastrophic commands), a **deny** in the bot's own rules, an
+  **ask you wrote yourself** (a category, or a source such as schedules, set on a bot that is
+  otherwise Full access: your rule wins over the preset), the owner's per-site and
+  per-app ask rules, and limits the daemon cannot evaluate.
+* **Durable permission** (a schedule, a bot change, the knowledge root, a skill) minted
+  by a run that read untrusted content, and by every run a webhook, trigger, external
+  schedule or inbound mail started: their text is untrusted from the first call.
 * Anything that is not served by the lane: a helper bot, an unpaired chat, an external
   agent, a Balanced or custom level.
 
@@ -309,7 +319,8 @@ unattended run; the bot is told why and nobody is asked.
 What the level cannot know: a charge behind an ordinary button, a payment made by a script
 file, a desktop window or an API Praxi does not recognise. See the threat model.
 The rest of this section describes the older, narrower waivers; they apply only if the
-operator switches the lane off (`full_access_lane = false`).
+operator switches the lane off (`[security]` `full_access_lane = false` in `host.toml`, or
+`BOT_FULL_ACCESS_LANE=off`; the environment wins).
 
 ### Full level: working on the web after a read (owner-started runs)
 

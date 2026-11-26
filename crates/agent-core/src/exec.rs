@@ -93,6 +93,8 @@ enum Slot {
         call: ToolCallId,
         model_call_id: String,
         permit: Option<ExecPermit>,
+        /// Why the Full lane let the call through without a card, audited before it runs.
+        auto_reason: Option<&'static str>,
     },
 }
 
@@ -1819,9 +1821,12 @@ impl TurnExecutor {
             } else {
                 PermissionCategory::Script
             };
+            // Every call on a Full bot re-checks the page right before it acts, whatever the
+            // tool's category: `browser_eval` is a `Script`, a `pc_browser_*` call a renamed
+            // `Browser` one, and neither may reach a checkout unchecked.
             let payment = payment_page.map_or_else(
                 || {
-                    if category == PermissionCategory::Browser && self.sh.full_access(&ctx) {
+                    if self.sh.full_access(&ctx) {
                         tool_registry::PaymentApproval::Check
                     } else {
                         tool_registry::PaymentApproval::Unchecked
@@ -2037,13 +2042,17 @@ impl TurnExecutor {
             };
             let slot = match slot {
                 Slot::Run {
-                    call: c, permit, ..
+                    call: c,
+                    permit,
+                    auto_reason,
+                    ..
                 } if is_spawn => Slot::Spawn {
                     name: spawn_name,
                     input: spawn_input,
                     call: c,
                     model_call_id: call.id.clone(),
                     permit,
+                    auto_reason,
                 },
                 other => other,
             };
@@ -2082,9 +2091,16 @@ impl TurnExecutor {
                     call: call_id,
                     model_call_id,
                     permit,
+                    auto_reason,
                 } => {
                     if let Err(reason) = commit_or_deny(permit) {
                         return (user_denied(reason), true, None, None, not_run);
+                    }
+                    // Same record as any other auto-allowed call: no audit row, no spawn.
+                    if let Some(reason) = auto_reason
+                        && let Err(error) = self.sh.audit_auto_allow(ctx_ref, &name, reason)
+                    {
+                        return (error, true, None, None, not_run);
                     }
                     if name == crate::delegation::ASK_BOT {
                         let (t, e, d, fact) = self
