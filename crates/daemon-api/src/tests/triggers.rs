@@ -237,9 +237,17 @@ async fn trigger_preview_returns_the_production_wrapped_projection_and_never_run
     );
 }
 
+/// A webhook secret lives in the secret store, so a webhook needs one.
+fn setup_with_secret_store() -> super::T {
+    let t = super::setup();
+    t.state
+        .set_secret_store(std::sync::Arc::new(secret_store::MemoryStore::new()));
+    t
+}
+
 #[tokio::test]
 async fn registry_webhook_reference_never_returns_the_signing_secret() {
-    let t = super::setup();
+    let t = setup_with_secret_store();
     let (bot, _) = make_chat(&t).await;
     let hook = call(
         &t,
@@ -271,7 +279,7 @@ async fn registry_webhook_reference_never_returns_the_signing_secret() {
 async fn signed_webhook_adapter_queues_the_linked_rule_and_keeps_replay_protection() {
     use axum::body::Body;
     use tower::ServiceExt;
-    let t = super::setup();
+    let t = setup_with_secret_store();
     let (bot, _) = make_chat(&t).await;
     let hook = call(
         &t,
