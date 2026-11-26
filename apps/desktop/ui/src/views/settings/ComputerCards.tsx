@@ -159,7 +159,11 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       title: t("settingsModal.siteRules.title"),
       description: t("settingsModal.siteRules.lead"),
       keywords: "site website program app rule always allow block ask domain kural site program izin engelle erlauben sperren regel webseite programm",
-      node: <SettingsCard title={t("settingsModal.siteRules.title")}><SiteRulesCard /></SettingsCard>
+      node: (
+        <SettingsCard title={t("settingsModal.siteRules.title")} description={t("settingsModal.siteRules.lead")}>
+          <SiteRulesCard />
+        </SettingsCard>
+      )
     },
     {
       id: "target",

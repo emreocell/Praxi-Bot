@@ -1607,7 +1607,6 @@
     "siteHint": "Un cookie enregistré ne prouve pas que vous êtes toujours connecté. Les sites qui n’utilisent que d’autres stockages peuvent ne pas apparaître ici. Oublier un site efface aussi ses autres données de navigateur enregistrées.",
     "sites": "Sites avec cookies enregistrés",
     "sitesUnavailable": "Les noms des sites enregistrés ne peuvent pas être lus pour le moment. Terminez la connexion, fermez le navigateur, puis actualisez. Vous pouvez toujours tout oublier.",
-    "size": "Taille du profil : {{bytes}} octets",
     "title": "Profil du navigateur",
     "warning": "Sur les sites où vous êtes connecté, ce bot peut agir en votre nom. Vos règles d’approbation s’appliquent toujours. Ne vous connectez qu’aux comptes que ce bot doit utiliser."
   },

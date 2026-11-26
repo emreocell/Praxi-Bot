@@ -51,6 +51,15 @@
   color: var(--color-text-muted);
 }
 
+.inlineCode {
+  padding: var(--space-0) var(--space-1);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: inherit;
+}
+
 .rowControl {
   display: flex;
   flex-wrap: wrap;

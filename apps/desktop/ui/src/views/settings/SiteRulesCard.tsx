@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Card } from "ui";
+import { Button } from "ui";
 import type { SiteRule, SiteRuleSuggestion } from "../../api/types";
 import form from "../../components/Form.module.css";
 import { humanLine } from "../../lib/humanError";
@@ -93,9 +93,7 @@ export function SiteRulesCard() {
     }, t("settingsModal.siteRules.added"));
 
   return (
-    <Card padding="md" className={styles.root} data-testid="site-rules">
-      <h3 className={styles.heading}>{t("settingsModal.siteRules.title")}</h3>
-      <p className={form.hint}>{t("settingsModal.siteRules.lead")}</p>
+    <div className={styles.root} data-testid="site-rules">
       <p className={form.hint}>{t("settingsModal.siteRules.scope")}</p>
       <label className={form.field}>
         {t("settingsModal.siteRules.bot")}
@@ -240,6 +238,6 @@ export function SiteRulesCard() {
         </ul>
       )}
       <p className={form.hint}>{t("settingsModal.siteRules.limits")}</p>
-    </Card>
+    </div>
   );
 }

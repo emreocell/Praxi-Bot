@@ -27,4 +27,10 @@ void i18n.use(initReactI18next).init({
   }
 });
 
+// The page language follows the app language, so `text-transform: uppercase` uses the right rules
+// ("bilgisayarlar" is "BİLGİSAYARLAR" in Turkish, not "BILGISAYARLAR") and screen readers pick the voice.
+i18n.on("languageChanged", (language: string) => {
+  if (typeof document !== "undefined") document.documentElement.lang = language;
+});
+
 export { i18n };

@@ -1529,7 +1529,6 @@
     "siteHint": "Um cookie salvo não prova que você continua conectado. Sites que usam apenas outros tipos de armazenamento podem não aparecer aqui. Esquecer um site também apaga os outros dados de navegador salvos dele.",
     "sites": "Sites com cookies salvos",
     "sitesUnavailable": "Os nomes dos sites salvos não podem ser lidos agora. Termine de entrar, feche o navegador e atualize. Você ainda pode esquecer tudo.",
-    "size": "Tamanho do perfil: {{bytes}} bytes",
     "title": "Perfil do navegador",
     "warning": "Nos sites em que você entrou, este bot pode agir em seu nome. Suas regras de aprovação continuam valendo. Entre apenas nas contas que você quer que este bot use."
   },

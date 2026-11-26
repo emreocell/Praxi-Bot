@@ -1743,7 +1743,7 @@
     "siteHint": "Ein gespeichertes Cookie bestätigt keine gültige Anmeldung. Websites, die nur andere Speicherarten verwenden, erscheinen hier möglicherweise nicht. Beim Vergessen werden auch die anderen gespeicherten Browserdaten der Website gelöscht.",
     "sites": "Websites mit gespeicherten Cookies",
     "sitesUnavailable": "Gespeicherte Websitenamen können derzeit nicht gelesen werden. Schließen Sie die Anmeldung und den Browser ab und aktualisieren Sie dann. Sie können weiterhin alles vergessen.",
-    "size": "Profilgröße: {{bytes}} Byte",
+    "sizeHuman": "Profilgröße: {{size}}",
     "title": "Browserprofil",
     "warning": "Auf angemeldeten Websites kann dieser Bot in Ihrem Namen handeln. Ihre bisherigen Genehmigungsregeln gelten weiterhin. Melden Sie sich nur bei Konten an, die dieser Bot nutzen soll."
   },
@@ -2248,6 +2248,7 @@
       "editLabel": "Deine Nachricht bearbeiten",
       "regenerate": "Neu erzeugen",
       "regenerateAnyway": "Trotzdem neu erzeugen",
+      "retry": "Erneut versuchen",
       "save": "Speichern und erneut senden"
     },
     "resume": "Fortsetzen",

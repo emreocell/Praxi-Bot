@@ -506,7 +506,10 @@
 
 .tab[aria-selected="true"] {
   background-color: var(--color-surface-active);
+  /* A hairline and a heavier weight, so the open tab reads at a glance on a busy wallpaper too. */
+  box-shadow: inset 0 0 0 var(--size-border) var(--color-border-strong);
   color: var(--color-text);
+  font-weight: var(--font-weight-medium);
 }
 
 .tab:focus-visible {

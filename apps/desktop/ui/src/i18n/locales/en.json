@@ -1743,7 +1743,7 @@
     "siteHint": "A saved cookie does not prove you are still signed in. Sites that use only other storage may not appear here. Forgetting a site also clears its other saved browser data.",
     "sites": "Sites with saved cookies",
     "sitesUnavailable": "Saved site names cannot be read right now. Finish signing in, close the browser, then refresh. You can still forget everything.",
-    "size": "Profile size: {{bytes}} bytes",
+    "sizeHuman": "Profile size: {{size}}",
     "title": "Browser profile",
     "warning": "On signed-in sites, this bot can act as you. Your existing approval rules still apply. Only sign in to accounts you want this bot to use."
   },
@@ -2248,6 +2248,7 @@
       "editLabel": "Edit your message",
       "regenerate": "Regenerate",
       "regenerateAnyway": "Regenerate anyway",
+      "retry": "Try again",
       "save": "Save and resend"
     },
     "resume": "Resume",

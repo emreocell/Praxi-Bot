@@ -106,7 +106,7 @@ import {
   showJumpToLatest,
   showRouteChip
 } from "../lib/chatLogic";
-import { lastTurn, supersededGroups, supersededRunIds, type SupersededGroup } from "../lib/resendTurn";
+import { lastTurn, offersRegenerate, supersededGroups, supersededRunIds, type SupersededGroup } from "../lib/resendTurn";
 import { botWriteMessage, writeBotProfile } from "../lib/botWrite";
 import { splitMentions } from "../lib/mentionText";
 import { saveChatExport } from "../lib/chatHistory";
@@ -358,9 +358,11 @@ export function ChatView({
   };
 
   // A failed turn: only the actions this view can carry out get a button.
-  const runErrorFor = (message: string): HumanError => {
+  const runErrorFor = (message: string, latest: boolean): HumanError => {
     const h = humanToolError(message);
-    return h.action === "fixEngine" || h.action === "settings" ? h : { ...h, action: undefined };
+    if (h.action !== "fixEngine" && h.action !== "settings") return { ...h, action: undefined };
+    // An older failed turn: its hint points at a button it no longer has, so only the title and details stay.
+    return latest ? h : { ...h, action: undefined, hint: "" };
   };
   const onRunErrorAction = (action: ErrorAction) => {
     if (action === "fixEngine" && bot) {
@@ -741,6 +743,15 @@ export function ChatView({
   const lastActionsKey = useMemo(() => {
     for (let i = entries.length - 1; i >= 0; i -= 1) {
       if (entries[i].kind === "timeline") return entries[i].key;
+    }
+    return null;
+  }, [entries]);
+  // Only the newest run's error offers its fix; an older failed turn keeps the text but no button
+  // (the fix may be done already, and a second "Fix" under an old card reads as an open problem).
+  const lastRunId = useMemo(() => {
+    for (let i = entries.length - 1; i >= 0; i -= 1) {
+      const entry = entries[i];
+      if (entry.kind === "timeline") return entry.run.id;
     }
     return null;
   }, [entries]);
@@ -1860,7 +1871,7 @@ export function ChatView({
                     {parseLimitReached(e.message) ? (
                       <BotLimitCard limit={parseLimitReached(e.message)!} />
                     ) : (
-                      <ErrorNotice compact error={runErrorFor(e.message)} onAction={onRunErrorAction} />
+                      <ErrorNotice compact error={runErrorFor(e.message, e.key === `${lastRunId}-error`)} onAction={onRunErrorAction} />
                     )}
                   </div>
                 );
@@ -1913,7 +1924,7 @@ export function ChatView({
               }
               case "timeline": {
                 const st = remember[e.run.id] ?? "idle";
-                const regen = canResend && turn?.answered === true && e.key === lastActionsKey;
+                const regen = canResend && offersRegenerate(turn, Boolean(e.run.error)) && e.key === lastActionsKey;
                 return (
                   <div key={e.key} className={styles.rememberRow}>
                     <RunActionBar label={t("chat.runActions")}>
@@ -1945,6 +1956,7 @@ export function ChatView({
                         <RegenerateAction
                           key={turn?.user.id}
                           usedWriteTools={turn?.usedWriteTools === true}
+                          failed={turn?.answered !== true}
                           busy={resending}
                           onRegenerate={() => void resendTurn()}
                         />

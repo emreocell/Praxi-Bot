@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Message } from "../api/types";
-import { lastTurn, supersededGroups, supersededRunIds } from "./resendTurn.ts";
+import { lastTurn, offersRegenerate, supersededGroups, supersededRunIds } from "./resendTurn.ts";
 
 function msg(id: string, role: string, extra: Partial<Message> = {}): Message {
   return { id, chat_id: "c", role, content: id, created_at_ms: Number(id.replace(/\D/g, "")) || 0, ...extra } as Message;
@@ -35,4 +35,15 @@ test("superseded messages group per consecutive stretch and name their runs", ()
   ];
   assert.deepEqual(supersededGroups(all).map((g) => g.messages.length), [2, 1]);
   assert.deepEqual([...supersededRunIds(all)].sort(), ["r1", "r3"]);
+});
+
+test("regenerate is offered after an answer, and after a failed run with no answer, but not for a foreign message", () => {
+  const answered = lastTurn([msg("u1", "user", { source: "owner" }), msg("a1", "assistant")]);
+  const failed = lastTurn([msg("u1", "user", { source: "owner" })]);
+  const foreign = lastTurn([msg("u1", "user", { source: "telegram" })]);
+  assert.equal(offersRegenerate(answered, false), true);
+  assert.equal(offersRegenerate(failed, true), true);
+  assert.equal(offersRegenerate(failed, false), false);
+  assert.equal(offersRegenerate(foreign, true), false);
+  assert.equal(offersRegenerate(null, true), false);
 });

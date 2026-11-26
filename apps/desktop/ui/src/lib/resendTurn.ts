@@ -35,6 +35,15 @@ export function lastTurn(messages: readonly Message[]): LastTurn | null {
   };
 }
 
+/**
+ * Whether the finished last run gets its "regenerate" action: the turn can be resent and either the bot
+ * answered or the run failed (nothing to replace, but the owner can try the same message again after
+ * fixing what the error said). `runFailed` is the last run's error, if any.
+ */
+export function offersRegenerate(turn: LastTurn | null, runFailed: boolean): boolean {
+  return turn !== null && turn.resendable && (turn.answered || runFailed);
+}
+
 /** Runs whose messages were superseded: their live events must not render as the current answer. */
 export function supersededRunIds(messages: readonly Message[]): Set<string> {
   const ids = new Set<string>();

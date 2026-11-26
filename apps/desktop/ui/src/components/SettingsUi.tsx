@@ -1,6 +1,18 @@
 import { ChevronDown, TriangleAlert } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
+import { splitInlineCode } from "../lib/inlineCode";
 import styles from "./SettingsUi.module.css";
+
+/** A description line; a `command` in backticks is drawn as code, never with the raw backticks. */
+function Description({ text }: { text: string }) {
+  return (
+    <p className={styles.rowDesc}>
+      {splitInlineCode(text).map((part, i) =>
+        part.code ? <code key={i} className={styles.inlineCode}>{part.text}</code> : part.text
+      )}
+    </p>
+  );
+}
 
 /** One setting: icon-less title and one-line description on the left, control on the right. */
 export function SettingRow({
@@ -19,7 +31,7 @@ export function SettingRow({
     <div className={[styles.row, stacked ? styles.stacked : ""].filter(Boolean).join(" ")}>
       <div className={styles.rowText}>
         <h3 className={styles.rowTitle}>{title}</h3>
-        {description ? <p className={styles.rowDesc}>{description}</p> : null}
+        {description ? <Description text={description} /> : null}
       </div>
       {children ? <div className={styles.rowControl}>{children}</div> : null}
     </div>
@@ -148,7 +160,7 @@ export function SettingsCard({
     >
       <header className={styles.cardHead}>
         <h3 className={styles.cardTitle}>{title}</h3>
-        {description ? <p className={styles.rowDesc}>{description}</p> : null}
+        {description ? <Description text={description} /> : null}
       </header>
       {children}
     </section>

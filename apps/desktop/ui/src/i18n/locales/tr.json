@@ -1743,7 +1743,7 @@
     "siteHint": "Kayıtlı çerez, oturumunuzun hâlâ açık olduğunu kanıtlamaz. Yalnızca başka depolama türlerini kullanan siteler burada görünmeyebilir. Bir siteyi unutmak, tarayıcıdaki diğer kayıtlı verilerini de temizler.",
     "sites": "Çerezleri kayıtlı siteler",
     "sitesUnavailable": "Kayıtlı site adları şu anda okunamıyor. Oturum açmayı bitirin, tarayıcıyı kapatın ve yenileyin. Yine de her şeyi unutabilirsiniz.",
-    "size": "Profil boyutu: {{bytes}} bayt",
+    "sizeHuman": "Profil boyutu: {{size}}",
     "title": "Tarayıcı profili",
     "warning": "Oturum açtığınız sitelerde bu bot sizin adınıza işlem yapabilir. Mevcut onay kurallarınız geçerliliğini korur. Yalnızca bu botun kullanmasını istediğiniz hesaplarda oturum açın."
   },
@@ -2248,6 +2248,7 @@
       "editLabel": "Mesajınızı düzenleyin",
       "regenerate": "Yeniden oluştur",
       "regenerateAnyway": "Yine de yeniden oluştur",
+      "retry": "Tekrar dene",
       "save": "Kaydet ve yeniden gönder"
     },
     "resume": "Devam et",

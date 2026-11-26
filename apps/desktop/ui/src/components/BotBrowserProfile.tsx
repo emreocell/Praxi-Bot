@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { BrowserProfileStatus } from "../api/types";
 import { humanError, type HumanError } from "../lib/humanError";
+import { formatBytes } from "../lib/workspaceFormat";
 import { useDaemon } from "../state/DaemonContext";
 import { ConfirmDialog } from "./DialogParts";
 import { ErrorNotice } from "./ErrorNotice";
@@ -11,7 +12,7 @@ import styles from "./BotBrowserProfile.module.css";
 
 /** Owner-only housekeeping; credentials are typed in the native browser, never this form. */
 export function BotBrowserProfile({ botId }: { botId: string }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { client } = useDaemon();
   const [profile, setProfile] = useState<BrowserProfileStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -87,7 +88,7 @@ export function BotBrowserProfile({ botId }: { botId: string }) {
           <summary>{t("browserProfile.about")}</summary>
           <p>{t("browserProfile.isolation")}</p>
           <p>{t(profile.directory_encrypted ? "browserProfile.encrypted" : "browserProfile.protection")}</p>
-          <p>{t("browserProfile.size", { bytes: profile.size_bytes.toLocaleString(i18n.language) })}</p>
+          <p>{t("browserProfile.sizeHuman", { size: formatBytes(profile.size_bytes) })}</p>
         </details>
         {/* Destructive, but behind a danger confirmation: a quiet button, not a red bar. */}
         <Button variant="secondary" size="sm" className={styles.forgetAll} disabled={!client || busy || profile.signing_in || profile.size_bytes === 0}

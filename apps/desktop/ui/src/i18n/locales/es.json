@@ -1743,7 +1743,7 @@
     "siteHint": "Una cookie guardada no demuestra que la sesión siga abierta. Los sitios que solo usan otros tipos de almacenamiento podrían no aparecer aquí. Al olvidar un sitio también se borran sus otros datos guardados en el navegador.",
     "sites": "Sitios con cookies guardadas",
     "sitesUnavailable": "No se pueden leer los nombres de los sitios guardados. Termina de iniciar sesión, cierra el navegador y actualiza. Puedes seguir usando Olvidar todo.",
-    "size": "Tamaño del perfil: {{bytes}} bytes",
+    "sizeHuman": "Tamaño del perfil: {{size}}",
     "title": "Perfil del navegador",
     "warning": "En los sitios donde hayas iniciado sesión, este bot puede actuar en tu nombre. Tus reglas de aprobación siguen vigentes. Inicia sesión solo en las cuentas que quieras que use este bot."
   },
@@ -2248,6 +2248,7 @@
       "editLabel": "Edita tu mensaje",
       "regenerate": "Volver a generar",
       "regenerateAnyway": "Volver a generar de todos modos",
+      "retry": "Intentar de nuevo",
       "save": "Guardar y reenviar"
     },
     "resume": "Reanudar",

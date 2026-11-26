@@ -23,10 +23,13 @@ function ActedNotice() {
 export function RegenerateAction({
   usedWriteTools,
   busy,
+  failed = false,
   onRegenerate
 }: {
   usedWriteTools: boolean;
   busy: boolean;
+  /** The run failed with no answer: the action reads "Try again". */
+  failed?: boolean;
   onRegenerate: () => void;
 }) {
   const { t } = useTranslation();
@@ -36,7 +39,7 @@ export function RegenerateAction({
       setConfirming(false);
     }
   }, [busy]);
-  const label = t(confirming ? "chat.resend.regenerateAnyway" : "chat.resend.regenerate");
+  const label = t(confirming ? "chat.resend.regenerateAnyway" : failed ? "chat.resend.retry" : "chat.resend.regenerate");
   return (
     <>
       {confirming ? <ActedNotice /> : null}
