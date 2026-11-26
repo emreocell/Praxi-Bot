@@ -26,6 +26,7 @@ axum = "0.8"
 regex = "1"
 url.workspace = true
 secret-store.workspace = true
+pty-session = { path = "../pty-session", version = "0.1.0" }
 tool-registry = { path = "../tool-registry", version = "0.1.0" }
 process-wrap = { version = "10.0.1", features = ["tokio1"] }
 reqwest.workspace = true

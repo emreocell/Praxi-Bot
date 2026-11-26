@@ -1254,16 +1254,19 @@ fn job_path(engine: &str, job: &str) -> String {
 }
 
 async fn wait_login_state(r: &Rig, engine: &str, job: &str, want: &[&str]) -> Value {
-    for _ in 0..200 {
+    // The admin routes allow 60 calls a minute: poll the way the app does, not in a tight loop.
+    let mut last = Value::Null;
+    for _ in 0..55 {
         let v = admin_call(r, Method::GET, &job_path(engine, job), None)
             .await
             .json();
         if want.contains(&v["state"].as_str().unwrap_or("")) {
             return v;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        last = v;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
-    panic!("never reached {want:?}");
+    panic!("never reached {want:?}; last answer: {last}");
 }
 
 fn pid_alive(pid: u32) -> bool {
@@ -1520,18 +1523,11 @@ async fn only_the_admin_desktop_can_sign_in_and_manual_engines_say_what_to_run()
         .status,
         StatusCode::NOT_FOUND
     );
-    // OpenCode, Cursor, Antigravity, Qwen Code, Copilot CLI, Kiro, Kimi Code CLI, Qoder,
-    // Mistral Vibe and Goose
-    // have no flow that can be driven from here.
+    // Qwen Code, Copilot CLI, Mistral Vibe and Goose have no flow that can be driven from here
+    // (the others run on a terminal: see the PTY sign-in tests below).
     for (engine, command) in [
-        ("opencode", "opencode auth login"),
-        ("cursor", "cursor-agent login"),
-        ("agy", "agy"),
         ("qwen", "qwen"),
-        ("kiro", "kiro-cli login"),
-        ("qoder", "qodercli login"),
         ("copilot", "copilot login"),
-        ("kimi", "kimi login"),
         ("vibe", "vibe --setup"),
         ("goose", "goose configure"),
     ] {
@@ -1554,6 +1550,187 @@ async fn only_the_admin_desktop_can_sign_in_and_manual_engines_say_what_to_run()
                 .contains(command)
         );
     }
+    r.net.shutdown().await;
+}
+
+// ------------------------------------ sign-in of the engines that talk on a terminal (PTY)
+
+/// A host whose `names` are the hermetic fixture (their command names, as the registry has
+/// them), with its own HOME, pinned as the install flow would.
+async fn install_fake_terminal_clis(
+    r: &Rig,
+    names: &[&str],
+) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    for name in names {
+        std::fs::copy(
+            login_fixture(),
+            bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)),
+        )
+        .unwrap();
+    }
+    let env = cli_provider::detect::PathEnv::for_test(bin)
+        .with_env_var("HOME", home.to_string_lossy())
+        .with_env_var("USERPROFILE", home.to_string_lossy());
+    r.t.state
+        .set_detector(Arc::new(cli_provider::Detector::with_env(env)));
+    for engine in ["cursor", "agy", "opencode", "kiro", "qoder", "kimi"] {
+        crate::cli_login::record_install_pin(&r.t.state, engine).await;
+    }
+    (dir, home)
+}
+
+#[tokio::test]
+async fn a_terminal_device_flow_shows_link_and_code_and_confirms_with_the_cli_s_own_line() {
+    let _turn = LOGIN_TURN.lock().await;
+    let r = rig().await;
+    let (_dir, home) = install_fake_terminal_clis(&r, &["kimi"]).await;
+    let job = start_job(&r, "kimi").await;
+    let waiting = wait_login_state(&r, "kimi", &job, &["needs_browser"]).await;
+    assert_eq!(waiting["flow"], "device_code");
+    assert_eq!(
+        waiting["url"],
+        "https://www.kimi.com/code/authorize_device?user_code=WXYZ-5678"
+    );
+    assert_eq!(waiting["code"], "WXYZ-5678");
+    std::fs::write(home.join("approve"), "yes").unwrap();
+    let done = wait_login_state(&r, "kimi", &job, &["done", "failed"]).await;
+    assert_eq!(done["state"], "done", "{done}");
+    // The process is gone, and nothing it printed is in the answer.
+    expect_dead(read_pid(&home, "login-pid")).await;
+    assert!(!done.to_string().contains("Waiting for authorization"));
+    r.net.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_browser_flow_needs_no_code_and_names_the_account() {
+    let _turn = LOGIN_TURN.lock().await;
+    let r = rig().await;
+    let (_dir, home) = install_fake_terminal_clis(&r, &["qodercli", "cursor-agent"]).await;
+    let job = start_job(&r, "qoder").await;
+    let waiting = wait_login_state(&r, "qoder", &job, &["needs_browser"]).await;
+    assert_eq!(waiting["flow"], "browser");
+    assert!(
+        waiting["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://qoder.com/device/selectAccounts?")
+    );
+    assert!(waiting["code"].is_null());
+    // There is nothing to paste in this flow.
+    let paste = admin_call(
+        &r,
+        Method::POST,
+        "/v1/admin/cli-engines/qoder/login/code",
+        Some(json!({"job_id": job, "code": "ABCD1234XYZ"})),
+    )
+    .await;
+    assert_eq!(paste.status, StatusCode::CONFLICT);
+    std::fs::write(home.join("approve"), "yes").unwrap();
+    let done = wait_login_state(&r, "qoder", &job, &["done", "failed"]).await;
+    assert_eq!(done["state"], "done", "{done}");
+    assert_eq!(done["account"], "owner@example.test");
+    assert_eq!(done["signed_in"], true);
+
+    // Cursor: the same flow, confirmed by its own status command.
+    let job = start_job(&r, "cursor").await;
+    let waiting = wait_login_state(&r, "cursor", &job, &["needs_browser", "done"]).await;
+    if waiting["state"] == "needs_browser" {
+        assert!(
+            waiting["url"]
+                .as_str()
+                .unwrap()
+                .starts_with("https://cursor.com/loginDeepControl?")
+        );
+        let done = wait_login_state(&r, "cursor", &job, &["done", "failed"]).await;
+        assert_eq!(done["state"], "done", "{done}");
+    }
+    r.net.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_terminal_that_keeps_running_is_confirmed_by_its_token_folder_and_then_stopped() {
+    let _turn = LOGIN_TURN.lock().await;
+    let r = rig().await;
+    let (_dir, home) = install_fake_terminal_clis(&r, &["agy"]).await;
+    let path = "/v1/admin/cli-engines/agy/login";
+    let job = start_job(&r, "agy").await;
+    let waiting = wait_login_state(&r, "agy", &job, &["needs_code"]).await;
+    assert_eq!(waiting["flow"], "paste_code");
+    assert!(
+        waiting["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://accounts.google.com/o/oauth2/v2/auth?")
+    );
+    // Not signed in before the code: the folder does not exist yet.
+    assert!(!home.join(".gemini").exists());
+    let code = "4/0AGYCODE-1234";
+    let sent = admin_call(
+        &r,
+        Method::POST,
+        &format!("{path}/code"),
+        Some(json!({"job_id": job, "code": code})),
+    )
+    .await;
+    assert_eq!(sent.status, StatusCode::ACCEPTED, "{:?}", sent.json());
+    assert!(!String::from_utf8_lossy(&sent.body).contains(code));
+    let done = wait_login_state(&r, "agy", &job, &["done", "failed"]).await;
+    assert_eq!(done["state"], "done", "{done}");
+    // The code reached the program's terminal input, and the program (which never exits by
+    // itself) was stopped.
+    assert_eq!(
+        std::fs::read_to_string(home.join("stdin-code")).unwrap(),
+        code
+    );
+    expect_dead(read_pid(&home, "login-pid")).await;
+    let audit = format!(
+        "{:?}",
+        r.t.state.storage().list_audit(r.t.state.user_id()).unwrap()
+    );
+    assert!(!audit.contains("AGYCODE"));
+    r.net.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_scripted_menu_is_answered_with_enter_and_the_console_link_is_shown() {
+    let _turn = LOGIN_TURN.lock().await;
+    let r = rig().await;
+    let (_dir, home) = install_fake_terminal_clis(&r, &["opencode"]).await;
+    let job = start_job(&r, "opencode").await;
+    let waiting = wait_login_state(&r, "opencode", &job, &["needs_browser"]).await;
+    assert_eq!(waiting["flow"], "browser");
+    assert_eq!(waiting["url"], "https://opencode.ai/auth/device");
+    assert_eq!(waiting["code"], "ABCD-5678");
+    // The menu was answered by the host (Enter), not by the person.
+    let answered = std::fs::read_to_string(home.join("stdin-code")).unwrap();
+    assert_eq!(answered, "\"\"", "Enter alone reached the menu");
+    std::fs::write(home.join("approve"), "yes").unwrap();
+    let done = wait_login_state(&r, "opencode", &job, &["done", "failed"]).await;
+    assert_eq!(done["state"], "done", "{done}");
+    r.net.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_device_flow_of_a_cli_without_a_status_command_is_confirmed_by_its_success_line() {
+    let _turn = LOGIN_TURN.lock().await;
+    let r = rig().await;
+    let (_dir, home) = install_fake_terminal_clis(&r, &["kiro-cli"]).await;
+    let job = start_job(&r, "kiro").await;
+    let waiting = wait_login_state(&r, "kiro", &job, &["needs_browser"]).await;
+    assert_eq!(
+        waiting["url"],
+        "https://device.sso.us-east-1.amazonaws.com/?user_code=ABCD-1234"
+    );
+    assert_eq!(waiting["code"], "ABCD-1234");
+    std::fs::write(home.join("approve"), "yes").unwrap();
+    // "Logged in successfully" is the success line the registry knows for Kiro.
+    let done = wait_login_state(&r, "kiro", &job, &["done", "failed"]).await;
+    assert_eq!(done["state"], "done", "{done}");
     r.net.shutdown().await;
 }
 

@@ -19040,9 +19040,17 @@
           "installed",
           "can_install",
           "login",
+          "login_flow",
           "docs_url"
         ],
         "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The account the CLI says it is signed in as (an e-mail or user name), when it names one."
+          },
           "can_install": {
             "type": "boolean",
             "description": "The host can run that command itself (a verified, fixed installer)."
@@ -19066,6 +19074,10 @@
           "login": {
             "type": "string",
             "description": "How to sign in on the host."
+          },
+          "login_flow": {
+            "type": "string",
+            "description": "How the app can drive that sign-in: `device_code`, `paste_code`, `browser` or `manual`."
           },
           "name": {
             "type": "string"
@@ -19136,6 +19148,13 @@
           "installed"
         ],
         "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The account this engine is signed in as (an e-mail or user name), when the CLI names\none. Never a token or key."
+          },
           "code": {
             "type": [
               "string",
@@ -19162,7 +19181,7 @@
           },
           "flow": {
             "type": "string",
-            "description": "How this engine can be signed in from the desktop: `device_code`, `paste_code` or\n`manual` (it cannot be driven remotely: run `command` over SSH)."
+            "description": "How this engine can be signed in from the desktop: `device_code`, `paste_code`,\n`browser` (open the link, nothing to type) or `manual` (it cannot be driven remotely:\nrun `command` over SSH)."
           },
           "installed": {
             "type": "boolean",

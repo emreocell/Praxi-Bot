@@ -217,6 +217,10 @@ pub struct AdminCliEngineDto {
     pub can_install: bool,
     /// How to sign in on the host.
     pub login: String,
+    /// How the app can drive that sign-in: `device_code`, `paste_code`, `browser` or `manual`.
+    pub login_flow: String,
+    /// The account the CLI says it is signed in as (an e-mail or user name), when it names one.
+    pub account: Option<String>,
     pub docs_url: String,
 }
 
@@ -603,6 +607,8 @@ pub(crate) async fn cli_engines(
                                 || cli_provider::node_runtime::supported_target().is_some())
                     }),
                     login: spec.login.into(),
+                    login_flow: crate::cli_login::flow_name(spec.id).into(),
+                    account: row.account_label.clone(),
                     docs_url: spec.docs_url.into(),
                     id: row.id,
                     name: row.display_name,

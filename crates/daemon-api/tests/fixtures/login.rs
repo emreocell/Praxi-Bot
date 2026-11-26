@@ -1,4 +1,5 @@
-//! Hermetic stand-in for the `claude` / `codex` login commands. Never a vendor binary and never
+//! Hermetic stand-in for the `claude` / `codex` login commands (and, on a terminal, for the
+//! `kimi`, `qodercli`, `cursor-agent`, `kiro-cli`, `agy` and `opencode` ones). Never a vendor binary and never
 //! the network. Which CLI it plays is the executable's file name; `FAKE_MODE` picks a scenario.
 //! State lives under `$HOME` (the service user's home, as for the real CLIs).
 use std::io::{BufRead, Write};
@@ -17,6 +18,17 @@ fn flush(text: &str) {
     std::io::stdout().flush().unwrap();
 }
 
+/// "The owner approved it in the browser": the test drops an `approve` file into the home.
+fn wait_for_approval() -> bool {
+    for _ in 0..600 {
+        if home().join("approve").exists() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    false
+}
+
 /// A child that outlives the leader unless the whole tree is killed.
 fn spawn_grandchild() {
     let exe = std::env::current_exe().unwrap();
@@ -28,6 +40,7 @@ fn spawn_grandchild() {
     std::fs::write(home().join("grandchild-pid"), child.id().to_string()).unwrap();
 }
 
+#[allow(clippy::too_many_lines)] // one flat table of fixture commands
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let name = std::env::current_exe()
@@ -104,6 +117,109 @@ fn main() {
                     return;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            std::process::exit(1);
+        }
+        // ---- engines whose login only talks on a terminal (the host runs them on a PTY) ----
+        ("kimi", ["login"]) => {
+            std::fs::write(home().join("login-pid"), std::process::id().to_string()).unwrap();
+            flush(
+                "\nOpening browser for Kimi device login: https://www.kimi.com/code/authorize_device?user_code=WXYZ-5678\n",
+            );
+            flush("If the browser did not open, paste the URL above and enter code: WXYZ-5678\n");
+            flush("Waiting for authorization to complete…\n");
+            if wait_for_approval() {
+                let dir = home().join(".kimi-code").join("credentials");
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("kimi-code.json"), "fixture only").unwrap();
+                flush("Logged in to Kimi Code.\n");
+                return;
+            }
+            std::process::exit(1);
+        }
+        ("qodercli", ["login"]) => {
+            std::fs::write(home().join("login-pid"), std::process::id().to_string()).unwrap();
+            flush(
+                "Starting browser login...\n  https://qoder.com/device/selectAccounts?nonce=n1&challenge=c1\n\n",
+            );
+            flush("Waiting for login in browser...\n");
+            if wait_for_approval() {
+                std::fs::write(home().join("authenticated"), "fixture only").unwrap();
+                flush("\nLogin successful! Welcome, owner@example.test.\n");
+                return;
+            }
+            std::process::exit(1);
+        }
+        ("qodercli", ["status", "-o", "json"]) => {
+            println!("{{\"logged_in\":{signed_in}}}");
+        }
+        ("cursor-agent", ["login"]) => {
+            std::fs::write(home().join("login-pid"), std::process::id().to_string()).unwrap();
+            flush(
+                "Opening browser to log in...\nIf it does not open, visit:\n  https://cursor.com/loginDeepControl?challenge=abc123&uuid=u-1&mode=login\n",
+            );
+            if wait_for_approval() {
+                std::fs::write(home().join("authenticated"), "fixture only").unwrap();
+                flush("Login successful\n");
+                return;
+            }
+            std::process::exit(1);
+        }
+        ("cursor-agent", ["status", "--format", "json"]) => {
+            println!("{{\"isAuthenticated\":{signed_in}}}");
+            std::process::exit(i32::from(!signed_in));
+        }
+        ("kiro-cli", ["login", "--license", "free", "--use-device-flow"]) => {
+            std::fs::write(home().join("login-pid"), std::process::id().to_string()).unwrap();
+            flush("Confirm the following code in the browser\nCode: ABCD-1234\n");
+            flush(
+                "Open this URL: https://device.sso.us-east-1.amazonaws.com/?user_code=ABCD-1234\n",
+            );
+            if wait_for_approval() {
+                flush("Logged in successfully\n");
+                return;
+            }
+            std::process::exit(1);
+        }
+        // A TUI that keeps running after it signed in (so the host watches the token folder).
+        ("agy", []) => {
+            std::fs::write(home().join("login-pid"), std::process::id().to_string()).unwrap();
+            flush(
+                "Welcome to Antigravity\nSign in to continue:\nhttps://accounts.google.com/o/oauth2/v2/auth?client_id=x&response_type=code&state=s1\n",
+            );
+            flush("Enter the authorization code: ");
+            let mut typed = String::new();
+            std::io::stdin().lock().read_line(&mut typed).unwrap();
+            std::fs::write(home().join("stdin-code"), typed.trim()).unwrap();
+            if typed.trim() == "4/0AGYCODE-1234" {
+                let dir = home().join(".gemini").join("antigravity-cli");
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("token"), "fixture only").unwrap();
+                flush("\nSigned in. Starting the agent...\n");
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+            }
+            std::process::exit(1);
+        }
+        // A login-method menu that Enter answers, then the console link and a code.
+        ("opencode", ["auth", "login", "opencode"]) => {
+            std::fs::write(home().join("login-pid"), std::process::id().to_string()).unwrap();
+            flush(
+                "T  Connect an integration\n|\n*  Select login method\n|  > OpenCode Console account\n|    API key (service account)\n",
+            );
+            let mut choice = String::new();
+            std::io::stdin().lock().read_line(&mut choice).unwrap();
+            std::fs::write(home().join("stdin-code"), format!("{:?}", choice.trim())).unwrap();
+            flush(
+                "\nOpen https://opencode.ai/auth/device in your browser\nEnter code: ABCD-5678\n",
+            );
+            if wait_for_approval() {
+                let dir = home().join(".local").join("share").join("opencode");
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("auth.json"), "fixture only").unwrap();
+                flush("Logged in\n");
+                return;
             }
             std::process::exit(1);
         }
