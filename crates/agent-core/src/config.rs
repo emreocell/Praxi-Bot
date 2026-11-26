@@ -359,10 +359,12 @@ pub struct LoopConfig {
     pub model_retry: RetryPolicy,
     /// How long in total a model step may wait, with exponential backoff, for a
     /// provider that keeps failing for transient reasons (a rate limit with a
-    /// long `Retry-After`, an outage, no network) before the run fails. The
-    /// waits are separate from the short per-call retries of `model_retry`
-    /// and a provider's `Retry-After` counts toward this budget only. `ZERO`
-    /// fails the step as soon as the per-call retries are used up.
+    /// long `Retry-After`, an outage, no network) before the run fails. It is
+    /// wall time from the step's first attempt, so a provider's `Retry-After`
+    /// served inside a call and the model timeouts count too; the waits
+    /// themselves are separate from the short per-call retries of
+    /// `model_retry`. `ZERO` fails the step as soon as the per-call retries
+    /// are used up.
     pub transient_outage_budget: Duration,
     /// How often one run interrupted by a daemon restart is resumed automatically
     /// (Full-level bots only, see `AgentLoop::auto_resume_after_restart`); `0`

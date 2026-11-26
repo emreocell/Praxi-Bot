@@ -1069,10 +1069,12 @@ impl TurnExecutor {
         let connectivity = self.sh.providers.read().connectivity.clone();
         // A whole chain that failed only for transient reasons (rate limit, a
         // provider or network outage) is not the end of the run: wait, with
-        // exponential backoff and within `transient_outage_budget`, and try the
-        // chain again. The sleeps of this wait never count against the
-        // per-call retry budget of `call_with_retries`.
-        let mut outage_slept = Duration::ZERO;
+        // exponential backoff, and try the chain again. The whole wait is bounded by
+        // `transient_outage_budget` of wall time, counted from here: it includes the
+        // time the attempts themselves took (a provider's `Retry-After` inside
+        // `call_with_retries`, model timeouts). A provider that asked for a pause
+        // keeps its cooldown across the rounds.
+        let outage_started = tokio::time::Instant::now();
         let mut outage_round = 0u32;
         'outage: loop {
             let reachability = connectivity.check().await;
@@ -1112,7 +1114,9 @@ impl TurnExecutor {
                 {
                     continue;
                 }
-                if let Some(prev) = &last_err {
+                if i > 0
+                    && let Some(prev) = &last_err
+                {
                     if tier_light && i == 1 {
                         let reason = match prev {
                             ProviderError::Unsupported { .. } => "unsupported",
@@ -1224,7 +1228,7 @@ impl TurnExecutor {
                 && let Some(delay) = outage_delay(
                     error,
                     outage_round,
-                    outage_slept,
+                    outage_started.elapsed(),
                     self.sh.cfg.transient_outage_budget,
                 )
             {
@@ -1243,13 +1247,10 @@ impl TurnExecutor {
                     }
                     () = tokio::time::sleep(delay) => {}
                 }
-                outage_slept = outage_slept.saturating_add(delay);
                 outage_round += 1;
                 result = None;
-                last_err = None;
                 misses.clear();
                 other_failure = false;
-                cooldowns.clear();
                 last_model = &primary;
                 continue 'outage;
             }
@@ -2704,15 +2705,16 @@ const OUTAGE_INITIAL_BACKOFF: Duration = Duration::from_secs(5);
 const OUTAGE_MAX_BACKOFF: Duration = Duration::from_secs(60);
 
 /// How long to wait before running the whole model chain again after it failed
-/// with `error`; `None`: fail the step (not transient, or the sleep budget is
-/// used up). `round` counts the waits so far, `slept` is their total.
+/// with `error`; `None`: fail the step (not transient, or the wait would end after
+/// the budget). `round` counts the waits so far, `elapsed` is the wall time since the
+/// first attempt of the step (the attempts' own time counts, not only the waits).
 ///
 /// A provider's `Retry-After` is honoured as the minimum, however long the
 /// per-call retry budget is: only `budget` bounds it.
 fn outage_delay(
     error: &ProviderError,
     round: u32,
-    slept: Duration,
+    elapsed: Duration,
     budget: Duration,
 ) -> Option<Duration> {
     if !error.is_retryable() || matches!(error, ProviderError::MalformedToolCall(_)) {
@@ -2722,7 +2724,7 @@ fn outage_delay(
         .saturating_mul(2u32.saturating_pow(round))
         .min(OUTAGE_MAX_BACKOFF);
     let delay = jittered_backoff(backoff).max(error.retry_after().unwrap_or(Duration::ZERO));
-    (slept.saturating_add(delay) <= budget).then_some(delay)
+    (elapsed.saturating_add(delay) <= budget).then_some(delay)
 }
 
 /// What the user is told while the loop waits for the model service.
@@ -2730,7 +2732,7 @@ fn outage_notice(error: &ProviderError, delay: Duration) -> String {
     let secs = delay.as_secs().max(1);
     let why = truncate_utf8(&error.to_string(), 160).to_owned();
     format!(
-        "The model service did not answer ({why}). Waiting {secs} s, then trying again. /          Model servisi yanıt vermedi ({why}). {secs} sn bekleyip yeniden denenecek."
+        "The model service did not answer ({why}). Waiting {secs} s, then trying again. / Model servisi yanıt vermedi ({why}). {secs} sn bekleyip yeniden denenecek."
     )
 }
 

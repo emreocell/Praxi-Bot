@@ -127,3 +127,71 @@ async fn stop_ends_the_wait_without_another_attempt() {
     assert_eq!(state, RunState::Cancelled);
     assert_eq!(fake.n_requests(), 1, "no attempt after the stop");
 }
+
+#[tokio::test(start_paused = true)]
+async fn the_budget_is_wall_time_so_slow_attempts_count_too() {
+    let env = setup();
+    // Every attempt hangs until the stream idle timeout (2 minutes). Only the sleeps used
+    // to be counted, which let a 10 minute budget stall for the better part of
+    // an hour.
+    let fake = Fake::new((0..40).map(|_| Reply::Hang).collect());
+    let (lp, run, t0) = started(&env, &fake, outage_cfg(600));
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Failed);
+    let n = fake.n_requests();
+    assert!((2..=6).contains(&n), "{n} requests");
+    let took = t0.elapsed();
+    assert!(
+        took >= Duration::from_secs(600) && took <= Duration::from_secs(700),
+        "the step ended after {took:?}"
+    );
+}
+
+struct Named(&'static str, Arc<Fake>);
+
+#[async_trait]
+impl ChatProvider for Named {
+    fn id(&self) -> &str {
+        self.0
+    }
+    async fn stream(
+        &self,
+        req: ChatRequest,
+    ) -> Result<provider_catalog::ChatStream, ProviderError> {
+        self.1.stream(req).await
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_providers_retry_after_is_kept_while_another_one_keeps_failing() {
+    let env = setup();
+    // The primary asks for 400 s; the fallback answers 503 over and over.
+    let primary = Fake::new(vec![
+        Reply::RateLimited(Some(Duration::from_secs(400))),
+        text("primary is back"),
+    ]);
+    let fallback = Fake::new((0..60).map(|_| Reply::Fail("upstream")).collect());
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &primary,
+        &[],
+        profile("fallback = [\"other/m\"]\n"),
+        outage_cfg(600),
+    );
+    lp.set_providers(
+        Providers::single(Arc::new(Named("fake", primary.clone())))
+            .with(Arc::new(Named("other", fallback.clone()))),
+    );
+    let t0 = tokio::time::Instant::now();
+    let run = lp.run_turn(env.chat, "hi").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    // The primary was not asked again before its 400 s were over, however many
+    // rounds the failing fallback made the chain go through.
+    assert_eq!(primary.n_requests(), 2);
+    assert!(
+        t0.elapsed() >= Duration::from_secs(400),
+        "{:?}",
+        t0.elapsed()
+    );
+    assert!(fallback.n_requests() >= 5, "{}", fallback.n_requests());
+}
