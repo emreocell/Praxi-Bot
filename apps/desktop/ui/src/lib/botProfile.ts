@@ -386,6 +386,17 @@ export function resolveAutoExecutorRef(
   return { provider: "", model: "" };
 }
 
+/** Full is inherited only when the bot has no preset or category rules of its own. */
+export function botHasFullAccess(bot: Bot | undefined, globalPreset: string | null | undefined): boolean {
+  if (!bot) return false;
+  const permissions = obj(obj(bot.config).permissions);
+  return permissions.preset === "full" || (
+    permissions.preset == null &&
+    Object.keys(obj(permissions.categories)).length === 0 &&
+    globalPreset === "full"
+  );
+}
+
 /** What the sidebar / chat header need from a stored bot. */
 export function botView(bot: Bot): BotView {
   const d = draftFromBot(bot);

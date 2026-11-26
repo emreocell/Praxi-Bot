@@ -382,8 +382,12 @@ pub(crate) fn profile(extra: &str) -> BotProfile {
     .unwrap()
 }
 
+/// The fixture config. The Full lane is off: the many tests built on it cover the content
+/// gates and the older Full waivers that remain as the fallback. Lane tests turn it on with
+/// [`lane_cfg`].
 pub(crate) fn cfg(policy: Policy) -> LoopConfig {
     LoopConfig {
+        full_access_lane: false,
         legacy_tool_surface: true,
         global_policy: policy,
         model_retry: RetryPolicy {
@@ -395,6 +399,14 @@ pub(crate) fn cfg(policy: Policy) -> LoopConfig {
         // Most tests count provider calls after a failure; the outage wait has its own.
         transient_outage_budget: Duration::ZERO,
         ..LoopConfig::default()
+    }
+}
+
+/// [`cfg`] with the Full lane on (the production default).
+pub(crate) fn lane_cfg(policy: Policy) -> LoopConfig {
+    LoopConfig {
+        full_access_lane: true,
+        ..cfg(policy)
     }
 }
 

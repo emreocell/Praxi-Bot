@@ -1664,10 +1664,10 @@
         "name": "Özel"
       },
       "full": {
-        "exceptions": "Sormadan çalışır (silme dahil); yalnızca Para, e-posta gönderme, zamanlanmış görev etkinleştirme ve yasaklı listedeki yıkıcı komutlarda sorar. Çalışmayı sen başlattıysan, bir sayfa okuduktan sonra bile her genel siteyi gezer, kayıt olur ve formları sormadan doldurur. Yalnızca çalışma özel verini (dosya, posta, hafıza) de tutuyorsa ve yeni bir site ya da form bunlardan bir parça içeriyorsa, kayıtlı bir sır için, sayfa betiği için ve güvenilmeyen içerik okuduktan sonra program çalıştırmak için yine sorar.",
+        "exceptions": "Tam erişim yalnızca para harcamadan önce sorar. Komutlar, dosya değişiklikleri, kurulumlar, gezinme, botun kendi e-postasıyla kayıtlar, formlar, e-posta ve mesajlar; kendi sohbetlerinde, zamanlanmış ve tetiklenmiş çalışmalarda da onay kartı olmadan yapılır. Ödemeler ödeme sayfalarından, ödeme programlarından, ödeme API’lerinden ve ödeme uygulamalarından tanınır; sıradan bir düğmenin arkasındaki ücret tanınamaz. Yıkıcı yasaklı liste komutları, kendi site kuralların ve güvenlik kontrollerinin işaretlediği e-postalar (listeden çıkanlar, günlük sınır) yine durdurulur.",
         "exceptionsTitle": "İstisnalara bak",
-        "hint": "Sormadan çalışır, silme dahil. Birkaç kesin durak her zaman önce sorar.",
-        "name": "Tam"
+        "hint": "Yalnızca para harcamadan önce sorar. Gerisi sormadan çalışır.",
+        "name": "Tam erişim"
       },
       "read-and-draft": {
         "hint": "Okumalar serbest; her değişiklik, gönderim, sayfa açma, tıklama ve komut önce sorar.",
@@ -6997,8 +6997,8 @@
         "save": "Kaydet",
         "security": "SMTP güvenliği",
         "sendMode": {
-          "ask": "Her seferinde bana sor",
-          "askHint": "Her ileti önce sana gösterilir: Kimden, Kime, konu ve metin.",
+          "ask": "Botun onay ayarlarını kullan",
+          "askHint": "Tam erişimdeki botlar günlük e-posta sınırı içinde sormadan gönderir. Diğer botlar her iletiyi önce sana gösterir.",
           "draftOnly": "Yalnızca taslak",
           "draftOnlyHint": "Botlar bu adresten taslak yazabilir ama asla göndermez.",
           "label": "Gönderim"
@@ -7020,7 +7020,7 @@
         "tls": "Güvenli bağlantı kurulamadı. Sunucu adını, portu ve güvenlik ayarını kontrol et.",
         "unreachable": "Posta sunucusuna ulaşılamadı. İnternet bağlantını ve sunucu adlarını kontrol edip yeniden dene."
       },
-      "note": "Bir posta kutusunu bir bota bağla; bot o postaları okuyup arayabilir. Göndermeden önce her zaman sorar.",
+      "note": "Bir posta kutusunu bir bota bağla; bot o postaları okuyup arayabilir. Göndermeden önce sorar; Tam erişimdeki bot ise sormadan gönderir.",
       "onlyBot": "Yalnızca {{name}}",
       "passwordMissing": "Kayıtlı parola yok.",
       "result": {
@@ -7279,16 +7279,16 @@
           "summary": "Botlar bakar, her değişikliği sen onaylarsın."
         },
         "handsOff": {
-          "ask": "Para harcamak, tehlikeli komutlar ve güvenilmeyen bir sayfa okuduktan sonraki her şey.",
-          "name": "Tam",
-          "own": "Dosya silmek ve mesaj göndermek dahil hemen her şey.",
-          "summary": "Botlar işini kendisi halleder. Yalnızca en büyük risklerde durup sorar."
+          "ask": "Yalnızca para harcama ve yasaklı listedeki yıkıcı komutlar.",
+          "name": "Tam erişim",
+          "own": "Gerisi: komutlar, dosyalar, gezinme, kayıtlar, formlar, e-posta ve mesajlar; zamanlanmış ve tetiklenmiş çalışmalar dahil.",
+          "summary": "Botlar işini kendisi halleder. Yalnızca para harcamadan önce sorarlar."
         }
       },
       "offline": "Yardımcıya henüz bağlı değil, bu yüzden seviye gösterilemiyor ya da değiştirilemiyor.",
       "onItsOwn": "Kendi başına",
       "recommended": "Önerilen",
-      "samePresets": "Bu üç seviye, tek bir bot için İzinler bölümünde seçebileceğin hazır ayarlarla aynıdır: Dikkatli “Oku ve taslak hazırla”, Dengeli “Yıkıcı işlemlerde onay”, Tam ise Tam’dır.",
+      "samePresets": "Bu üç seviye, tek bir bot için İzinler bölümünde seçebileceğin hazır ayarlarla aynıdır: Dikkatli “Oku ve taslak hazırla”, Dengeli “Yıkıcı işlemlerde onay”, Tam erişim ise “Tam”dır.",
       "saved": "Kaydedildi. Botun bir sonraki adımından itibaren geçerli.",
       "title": "Botlar kendi başına neler yapabilir",
       "willAsk": "Önce sana soracak"

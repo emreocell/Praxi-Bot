@@ -7,6 +7,7 @@ import {
   AUTONOMY_LEVELS,
   autonomyToPreset,
   BOT_TEMPLATES,
+  botHasFullAccess,
   botView,
   configFromDraft,
   draftFromBot,
@@ -27,6 +28,15 @@ function policyBot(permissions?: Record<string, unknown>): Bot {
     }
   };
 }
+
+test("schedule actions use Full access only when explicit or inherited", () => {
+  assert.equal(botHasFullAccess(policyBot({ preset: "full" }), null), true);
+  assert.equal(botHasFullAccess(policyBot(), "full"), true);
+  assert.equal(botHasFullAccess(policyBot({ preset: "read-and-draft" }), "full"), false);
+  assert.equal(botHasFullAccess(policyBot({ categories: { fs: { level: "deny" } } }), "full"), false);
+  assert.equal(botHasFullAccess(policyBot(), null), false);
+  assert.equal(botHasFullAccess(undefined, "full"), false);
+});
 
 test("changing only the executor preserves preset category denials and initiator overrides", () => {
   const permissions = {

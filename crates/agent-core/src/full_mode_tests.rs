@@ -1469,3 +1469,51 @@ async fn the_owners_paired_telegram_chat_is_the_owner_in_full_but_a_keyless_one_
         assert!(card(other, &deep).await.is_some(), "{source}");
     }
 }
+
+#[test]
+fn full_policy_has_a_money_floor_for_each_initiator() {
+    use PermissionCategory as C;
+    use permission_engine::{ActionRequest, Decision, PermissionResolver};
+
+    let resolver = PermissionResolver::new();
+    for initiator in [
+        InitiatorKind::Human,
+        InitiatorKind::Schedule,
+        InitiatorKind::ExternalSchedule,
+        InitiatorKind::ExternalAgent,
+        InitiatorKind::Routine,
+        InitiatorKind::Channel,
+        InitiatorKind::Subagent,
+    ] {
+        for category in [
+            C::Fs,
+            C::Shell,
+            C::Desktop,
+            C::Browser,
+            C::Accounts,
+            C::Messaging,
+            C::Money,
+            C::System,
+            C::Remote,
+            C::Script,
+            C::Meta,
+        ] {
+            let request = ActionRequest {
+                category,
+                initiator,
+                raw_command: String::new(),
+                cwd: None,
+            };
+            let expected = if category == C::Money {
+                Decision::ask()
+            } else {
+                Decision::Allow
+            };
+            assert_eq!(
+                resolver.resolve(&Policy::full(), None, None, &request),
+                expected,
+                "{initiator:?} / {category:?}",
+            );
+        }
+    }
+}

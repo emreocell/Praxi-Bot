@@ -46,6 +46,23 @@ async fn open(b: &Browser, html: &str) -> Page {
 
 #[tokio::test]
 #[ignore = "needs Chrome/Edge"]
+async fn checkout_detection_uses_visible_payment_fields() {
+    let browser = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let page = open(
+        &browser,
+        r#"<input name="email" type="email"><input id="number" autocomplete="cc-number" hidden>"#,
+    )
+    .await;
+    assert!(!page.has_payment_form().await.unwrap());
+    page.evaluate("document.querySelector('#number').hidden = false")
+        .await
+        .unwrap();
+    assert!(page.has_payment_form().await.unwrap());
+    browser.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
 async fn form_flow_fill_select_click_diff() {
     let b = Browser::launch(LaunchOptions::default()).await.unwrap();
     let p = open(&b, FORM).await;

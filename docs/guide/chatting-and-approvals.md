@@ -278,6 +278,39 @@ data. The bot form has an explicit, off-by-default setting that skips this ask
 for that bot. Deny rules and the floors above still win. A run that has not
 read anything behaves as before.
 
+### Full access: asks only before spending money
+
+A bot on the **Full access** level (or any bot without its own level while the global
+level is Full access) asks the owner for **nothing except spending money**. Shell
+commands, file changes and deletes inside the allowed folders, installs, browsing,
+forms, sign-ups with the bot's own e-mail address, sending e-mail and messages and
+connector writes all run without a card. That holds for runs you typed, for a
+schedule's own run and for runs a webhook, trigger or inbound mail of yours started.
+Every call the level let through is written to the audit log as `approval.auto_allowed`
+with the reason `mode.full.policy`, the tool and who started the run.
+
+What still asks, and why:
+
+* **Money.** A tool that declares payments, a shell command that starts a known payment
+  program (`stripe`, `paypal`, `lncli`, ...) or names a payment API host, a connector
+  action of a payment app (or with a payment verb such as `charge`, `payout`, `checkout`),
+  and a managed-browser page that shows checkout (a checkout or payment URL, a card
+  field or a payment button). The card is once-only and bound to that page.
+* **The never-list** (catastrophic commands), a **deny** in the bot's own rules, the
+  owner's per-site and per-app ask rules, and limits the daemon cannot evaluate.
+* **Durable permission** (a schedule, a bot change, the knowledge root) minted by a run that
+  read untrusted content.
+* Anything that is not served by the lane: a helper bot, an unpaired chat, an external
+  agent, a Balanced or custom level.
+
+Mail the safety checks flag (a recipient who opted out, the daily volume) is not sent in an
+unattended run; the bot is told why and nobody is asked.
+
+What the level cannot know: a charge behind an ordinary button, a payment made by a script
+file, a desktop window or an API Praxi does not recognise. See the threat model.
+The rest of this section describes the older, narrower waivers; they apply only if the
+operator switches the lane off (`full_access_lane = false`).
+
 ### Full level: working on the web after a read (owner-started runs)
 
 The **Full** preset ("Tam") is for people who want the bot to do the work, not to

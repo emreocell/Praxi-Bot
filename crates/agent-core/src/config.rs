@@ -425,6 +425,11 @@ pub struct LoopConfig {
     /// Safe mode (decided once at process start): the model gets no tools and
     /// every tool call is refused as unknown, whatever the bot's profile says.
     pub safe_mode: bool,
+    /// The Full level's single rule: everything runs without a card except money. When `false`
+    /// a Full bot falls back to the older, narrower waivers (an owner-started run browses and
+    /// runs allow-listed shell commands, everything else asks). A rollback switch for the
+    /// operator; on by default.
+    pub full_access_lane: bool,
     /// Where events are journaled.  Empty by default: the loop then creates a
     /// background writer over its own storage on first use.
     pub journal: JournalSlot,
@@ -466,6 +471,7 @@ impl Default for LoopConfig {
             handover_timeout: DEFAULT_HANDOVER_TIMEOUT,
             wait_for_pc_timeout: DEFAULT_WAIT_FOR_PC_TIMEOUT,
             safe_mode: false,
+            full_access_lane: true,
             journal: JournalSlot::default(),
             workspaces_root: None,
         }

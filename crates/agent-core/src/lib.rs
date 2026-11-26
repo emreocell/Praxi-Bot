@@ -38,6 +38,7 @@ mod mail_prompt;
 mod memory;
 mod mention;
 mod mission_start;
+mod money;
 pub mod page_guard;
 mod profile;
 mod router;
@@ -71,6 +72,8 @@ mod control_grant_tests;
 mod delegation_tests;
 #[cfg(test)]
 mod egress_tests;
+#[cfg(test)]
+mod full_lane_tests;
 #[cfg(test)]
 mod full_mode_tests;
 #[cfg(test)]

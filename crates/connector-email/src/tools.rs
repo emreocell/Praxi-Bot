@@ -226,7 +226,7 @@ fn specs() -> Vec<(Kind, ToolSpec)> {
             Kind::Identities,
             spec(
                 IDENTITIES,
-                "List the mail identities (addresses) this bot may use: name, address, kind, whether it is the default and its send mode (`ask` = every send needs the owner's approval, `draft_only` = drafts only). Call it before sending when the user names a sender, then pass the matching `account` to email_send / email_draft and tell the user which identity you used. Example: {}",
+                "List the mail identities (addresses) this bot may use: name, address, kind, whether it is the default and its send mode (`ask` = the bot's approval policy applies, `draft_only` = drafts only). Call it before sending when the user names a sender, then pass the matching `account` to email_send / email_draft and tell the user which identity you used. Example: {}",
                 json!({"type":"object","properties":{}}),
                 Effect::Read,
             ),
@@ -328,7 +328,7 @@ fn specs() -> Vec<(Kind, ToolSpec)> {
             Kind::Send,
             spec(
                 SEND,
-                "Send an e-mail NOW from the account. Irreversible and visible to third parties: requires user approval. \
+                "Send an e-mail NOW from the account. Irreversible and visible to third parties. The daemon checks whether approval is required. \
                  Prefer email_draft unless the user asked to send. \
                  An opt-out line is added to the body by the system: do not write one yourself. \
                  The system warns the owner about opt-out addresses, daily volume and repeat recipients; \
@@ -529,65 +529,67 @@ struct SendPlan {
     key: String,
 }
 
-impl EmailTool {
-    fn plan_send(&self, ctx: &ToolContext, i: &SendInput) -> Result<SendPlan, ToolError> {
-        let c = self.conn.scoped(ctx.bot_id.as_deref());
-        let (account, from) = c
-            .resolve_sender(i.account.as_deref())
-            .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
-        let mut recipients = Vec::new();
-        for a in i.mail.to.iter().chain(&i.mail.cc).chain(&i.mail.bcc) {
-            // The same parse that builds the SMTP envelope, then the guard's canonical form.
-            let email = crate::smtp::envelope_address(a)
-                .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
-            let keys = guard::canonical_address(&email)
-                .ok_or_else(|| ToolError::InvalidInput(format!("invalid address {a:?}")))?;
-            recipients.push(keys.full);
-        }
-        recipients.sort();
-        recipients.dedup();
-        let guard = self.conn.guard();
-        let default_on = guard.opt_out_line_default();
-        let line_on = i.opt_out_line.unwrap_or(default_on);
-        // Asking to drop a line the owner wants on is a warning; the owner's own default-off is not.
-        let dropped = !line_on && default_on;
-        let mut report = guard.check(&MailFacts {
-            bot: ctx.bot_id.as_deref(),
-            account: &account,
-            from: &from,
-            recipients: &recipients,
-            opt_out_line: !dropped,
-        });
-        if !line_on {
-            report.footer = None;
-        }
-        // Everything the owner's card shows or the send uses, the resolved reply included: a
-        // reply whose original reads differently at send time is not the mail that was approved.
-        let key = json!([
-            ctx.bot_id,
-            account,
-            recipients,
-            i.mail.to,
-            i.mail.cc,
-            i.mail.subject,
-            i.mail.body,
-            line_on,
-            i.mail.in_reply_to,
-            i.mail.references,
-            i.reply_to_uid,
-            i.reply_to_message_id,
-            i.reply_folder,
-        ])
-        .to_string();
-        Ok(SendPlan {
-            account,
-            from,
-            recipients,
-            line_on,
-            report,
-            key,
-        })
+fn plan_send(
+    conn: &EmailConnector,
+    ctx: &ToolContext,
+    i: &SendInput,
+    chosen: &crate::AccountConfig,
+) -> Result<SendPlan, ToolError> {
+    let account = chosen.name.clone();
+    let from = chosen.address.clone();
+    let mut recipients = Vec::new();
+    for a in i.mail.to.iter().chain(&i.mail.cc).chain(&i.mail.bcc) {
+        // The same parse that builds the SMTP envelope, then the guard's canonical form.
+        let email =
+            crate::smtp::envelope_address(a).map_err(|e| ToolError::InvalidInput(e.to_string()))?;
+        let keys = guard::canonical_address(&email)
+            .ok_or_else(|| ToolError::InvalidInput(format!("invalid address {a:?}")))?;
+        recipients.push(keys.full);
     }
+    recipients.sort();
+    recipients.dedup();
+    let guard = conn.guard();
+    let default_on = guard.opt_out_line_default();
+    let line_on = i.opt_out_line.unwrap_or(default_on);
+    // Asking to drop a line the owner wants on is a warning; the owner's own default-off is not.
+    let dropped = !line_on && default_on;
+    let mut report = guard.check(&MailFacts {
+        bot: ctx.bot_id.as_deref(),
+        account: &account,
+        from: &from,
+        recipients: &recipients,
+        opt_out_line: !dropped,
+    });
+    if !line_on {
+        report.footer = None;
+    }
+    // Everything the owner's card shows or the send uses, the resolved reply included: a
+    // reply whose original reads differently at send time is not the mail that was approved.
+    let key = json!([
+        ctx.run_id,
+        ctx.bot_id,
+        account,
+        recipients,
+        i.mail.to,
+        i.mail.cc,
+        i.mail.subject,
+        i.mail.body,
+        line_on,
+        i.mail.in_reply_to,
+        i.mail.references,
+        i.reply_to_uid,
+        i.reply_to_message_id,
+        i.reply_folder,
+    ])
+    .to_string();
+    Ok(SendPlan {
+        account,
+        from,
+        recipients,
+        line_on,
+        report,
+        key,
+    })
 }
 
 fn attachment_line(item: &Value) -> (String, u64) {
@@ -802,21 +804,29 @@ impl EmailTool {
         let mut i = parse_send(input)?;
         let reply = self.resolve_reply(ctx, &mut i).await?;
         let c = self.conn.scoped(ctx.bot_id.as_deref());
+        let guard = self.conn.guard();
+        // Check and record serially so parallel runs cannot pass the same remaining mail limit.
+        let _send = guard.send_lock.lock().await;
         let chosen = c
             .resolve(i.account.as_deref())
             .map_err(|e| ToolError::InvalidInput(e.to_string()))?;
         if chosen.identity.send_mode == SendMode::DraftOnly {
             return draft_fallback(&c, &chosen, &i.mail).await;
         }
-        let plan = self.plan_send(ctx, &i)?;
-        let guard = self.conn.guard();
+        let plan = plan_send(&self.conn, ctx, &i, &chosen)?;
         // Consumes the card the owner was shown. No argument of the model reaches this.
-        let card = guard.take_card(&plan.key, &plan.report);
+        let card = if ctx.unattended_mail {
+            // No card was shown: the Full level lets a mail without warnings go with nobody asked.
+            guard::CardCheck::default()
+        } else {
+            guard.take_card(&plan.key, &plan.report)
+        };
         let overridden = card.overrides;
         // A reply fills in its recipients, subject and threading from the original, read from
         // the mailbox. It goes out only as the owner saw it: the original is read again here,
-        // and a message that changed since (or a card that expired) is a different mail.
-        if reply.is_some() && !card.shown {
+        // and a message that changed since (or a card that expired) is a different mail. An
+        // unattended send has no owner to have seen it.
+        if reply.is_some() && !card.shown && !ctx.unattended_mail {
             return Err(ToolError::Execution(
                 "Not sent. This reply is not the one the owner approved (the original message \
                  changed, or the approval expired). Call email_send again so the owner sees the \
@@ -831,6 +841,12 @@ impl EmailTool {
                 .iter()
                 .map(|w| w.text.as_str())
                 .collect();
+            if ctx.unattended_mail {
+                return Err(ToolError::PermissionDenied(format!(
+                    "Mail guard stopped this send and nobody was asked. {} Skip this recipient or change the mail.",
+                    why.join(" ")
+                )));
+            }
             return Err(ToolError::Execution(format!(
                 "Not sent. {} Only the owner can send past these warnings, by approving the \
                      e-mail card that shows them (\"Send anyway\"). You cannot override this: \
@@ -848,7 +864,7 @@ impl EmailTool {
             Some(r) if r.kind == AccountKind::AgentMail => {
                 c.reply(Some(&plan.account), &r.id, &mail, false).await?
             }
-            _ => c.send_receipt(Some(&plan.account), &mail).await?,
+            _ => self.conn.provider_for(&chosen).await?.send(&mail).await?,
         };
         guard.record(SendLogEntry {
             at: guard::now_secs(),
@@ -884,8 +900,9 @@ impl Tool for EmailTool {
         &self.spec
     }
 
-    /// A send is confirmed every time: no grant, preset or "this chat" allowance waives the card,
-    /// because the card is where the owner sees the opt-out and volume warnings.
+    /// A send is confirmed on a card unless the bot is on the Full level and the daemon let the
+    /// call through ([`ToolContext::unattended_mail`]). Only the owner, on a card, can send past
+    /// the opt-out and volume warnings: an unattended send that has any is refused.
     fn always_ask(&self) -> bool {
         matches!(self.kind, Kind::Send)
     }
@@ -906,7 +923,11 @@ impl Tool for EmailTool {
         }
         let mut i = parse_send(input.clone())?;
         self.resolve_reply(ctx, &mut i).await?;
-        let plan = self.plan_send(ctx, &i)?;
+        let chosen = self
+            .conn
+            .scoped(ctx.bot_id.as_deref())
+            .resolve(i.account.as_deref())?;
+        let plan = plan_send(&self.conn, ctx, &i, &chosen)?;
         let token = next_token();
         // The owner is about to be shown exactly these warnings; a later call that matches this
         // card (and nothing else) may go through when the owner approves.
@@ -939,7 +960,11 @@ impl Tool for EmailTool {
         let mut lines = Vec::new();
         if matches!(self.kind, Kind::Send)
             && let Ok(i) = parse_send(input.clone())
-            && let Ok(plan) = self.plan_send(ctx, &i)
+            && let Ok(chosen) = self
+                .conn
+                .scoped(ctx.bot_id.as_deref())
+                .resolve(i.account.as_deref())
+            && let Ok(plan) = plan_send(&self.conn, ctx, &i, &chosen)
         {
             for w in &plan.report.warnings {
                 lines.push(format!("warning: {}", w.text));

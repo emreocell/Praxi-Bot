@@ -134,6 +134,18 @@ impl ControlTarget {
     }
 }
 
+/// Payment guard for an action in the managed browser.
+#[derive(Debug, Clone, Default)]
+pub enum PaymentApproval {
+    /// This call uses the existing approval rules.
+    #[default]
+    Unchecked,
+    /// Withhold input if a checkout or payment surface is detected.
+    Check,
+    /// The owner approved this call on the identified payment document.
+    Approved(u64),
+}
+
 /// Context supplied to every tool call.
 #[derive(Debug, Clone)]
 pub struct ToolContext {
@@ -156,6 +168,11 @@ pub struct ToolContext {
     /// page action. The browser tool refuses to act if the page is on another origin by then
     /// (a navigation or redirect in between), so an allowance never follows the page elsewhere.
     pub expected_origin: Option<String>,
+    /// The Full level admitted this call without a card. A mail send then refuses
+    /// every mail-guard warning: only a card the owner saw can send past one.
+    pub unattended_mail: bool,
+    /// Payment authorization supplied by the daemon, never tool arguments.
+    pub payment: PaymentApproval,
     /// Set by the loop only when a run-scoped control grant covers this call:
     /// the tool must send its input through the backend's guarded path, so the
     /// window that would receive it is checked against this program right
@@ -176,6 +193,8 @@ impl Default for ToolContext {
             content_tainted: false,
             exposure_untrusted: false,
             expected_origin: None,
+            unattended_mail: false,
+            payment: PaymentApproval::Unchecked,
             control_guard: None,
             lane: None,
         }
@@ -289,6 +308,12 @@ pub trait Tool: Send + Sync {
     /// observation per tab when it shortens a long conversation). `None`: not a
     /// browser tool, or the id is unknown.
     async fn landed_tab(&self, _ctx: &ToolContext) -> Option<String> {
+        None
+    }
+
+    /// Identify a managed payment page just before approval. The token binds
+    /// authorization to that document and is never based on model arguments.
+    async fn payment_page(&self, _ctx: &ToolContext, _input: &Value) -> Option<u64> {
         None
     }
 

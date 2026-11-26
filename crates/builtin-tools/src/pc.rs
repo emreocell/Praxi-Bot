@@ -298,6 +298,8 @@ impl ToolWrapper for Renamed {
             content_tainted: ctx.content_tainted,
             exposure_untrusted: ctx.exposure_untrusted,
             expected_origin: None,
+            unattended_mail: false,
+            payment: tool_registry::PaymentApproval::Unchecked,
             control_guard: None,
             lane: ctx.lane.clone(),
         };

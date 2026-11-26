@@ -35,6 +35,7 @@ mod attach_tests;
 pub mod files;
 #[cfg(test)]
 mod files_tests;
+mod payment;
 mod pointer;
 #[cfg(test)]
 mod pointer_tests;
@@ -390,6 +391,11 @@ pub trait BrowserDriver: Send + Sync {
     /// (the CDP target id). `None`: no session, or the driver cannot tell.
     async fn current_tab_id(&self) -> Option<String> {
         None
+        None
+    }
+    /// The current page visibly contains payment inputs or a payment widget.
+    async fn has_payment_form(&self) -> bool {
+        false
     }
     /// Browser document identity used to release a secret capture latch on navigation.
     async fn capture_epoch(&self) -> Option<String> {
@@ -1189,6 +1195,7 @@ async fn close_session(view: Option<&browser_cdp::BrowserViewTarget>, session: S
 tokio::task_local! {
     // Carried across control-gate waits, then checked with the session lock held.
     static EXPECTED_PAGE_ORIGIN: Option<String>;
+    static PAYMENT_APPROVAL: tool_registry::PaymentApproval;
 }
 
 tokio::task_local! {
@@ -1981,6 +1988,16 @@ impl BrowserDriver for CdpDriver {
         }
         .await;
         id.ok()
+    }
+
+    async fn has_payment_form(&self) -> bool {
+        let result: Result<bool, String> = async {
+            with_session!(self, None, false, |sess| {
+                sess.page.has_payment_form().await
+            })
+        }
+        .await;
+        result.unwrap_or(false)
     }
 
     async fn current_url(&self) -> Option<String> {
@@ -3286,6 +3303,7 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                self.check_payment_approval(Some(&i.r#ref)).await?;
                 // `protect` runs the work on its own task: carry the batch guard over.
                 let guard = step_guard();
                 permit
@@ -3325,6 +3343,7 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                self.check_payment_approval(Some(&i.r#ref)).await?;
                 match what {
                     Source::Text(text) => permit
                         .protect(async move { d.fill(&i.r#ref, &text).await })
@@ -3377,6 +3396,7 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                self.check_payment_approval(Some(&i.r#ref)).await?;
                 permit
                     .protect(async move { d.select(&i.r#ref, &i.value).await })
                     .await
@@ -3420,6 +3440,7 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                self.check_payment_approval(None).await?;
                 permit
                     .protect(STEP_GUARD.scope(guard, async move { d.press(&i.key).await }))
                     .await
@@ -3688,6 +3709,7 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                self.check_payment_approval(None).await?;
                 permit
                     .protect(async move { d.eval(&i.js).await })
                     .await
@@ -4095,7 +4117,10 @@ impl BrowserTool {
         let ran = EXPECTED_PAGE_ORIGIN
             .scope(
                 ctx.expected_origin.clone(),
-                selected.run(&ctx.run_id, input, ctx.bot_id.as_deref()),
+                PAYMENT_APPROVAL.scope(
+                    ctx.payment.clone(),
+                    selected.run(&ctx.run_id, input, ctx.bot_id.as_deref()),
+                ),
             )
             .await;
         let mut text = match ran {
@@ -4200,6 +4225,15 @@ impl Tool for BrowserTool {
             .scope(ctx.lane.clone(), async {
                 let shared = self.select_shared(ctx).ok()?;
                 shared.driver.current_tab_id().await
+            })
+            .await
+    }
+
+    async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64> {
+        BROWSER_LANE
+            .scope(ctx.lane.clone(), async {
+                let shared = self.select_shared(ctx).ok()?;
+                self.payment_page_with(&*shared.driver, input).await
             })
             .await
     }
@@ -4595,6 +4629,43 @@ mod tests {
             Some("TAB-2"),
             "the id follows a tab switch"
         );
+    }
+
+    #[tokio::test]
+    async fn checkout_input_is_withheld_until_its_document_is_approved() {
+        use tool_registry::PaymentApproval;
+
+        let (_dir, fake, tools) = build();
+        let click = get(&tools, "browser_click");
+        let args = json!({"ref": "e1"});
+        // Looking at the page is allowed; only a click is withheld.
+        let clicks = || {
+            fake.calls
+                .lock()
+                .iter()
+                .filter(|call| call.starts_with("click"))
+                .count()
+        };
+        let mut ctx = ToolContext {
+            payment: PaymentApproval::Check,
+            ..ToolContext::default()
+        };
+        *fake.url.lock() = Some("https://shop.example/checkout/order-one".into());
+        let token = click.payment_page(&ctx, &args).await.unwrap();
+        assert!(matches!(
+            click.call(&ctx, args.clone()).await,
+            Err(ToolError::PermissionDenied(_))
+        ));
+        assert_eq!(clicks(), 0);
+        ctx.payment = PaymentApproval::Approved(token);
+        click.call(&ctx, args.clone()).await.unwrap();
+        assert_eq!(clicks(), 1);
+        *fake.url.lock() = Some("https://shop.example/checkout/order-two".into());
+        assert!(matches!(
+            click.call(&ctx, args).await,
+            Err(ToolError::PermissionDenied(_))
+        ));
+        assert_eq!(clicks(), 1);
     }
 
     fn text(o: &ToolOutput) -> String {

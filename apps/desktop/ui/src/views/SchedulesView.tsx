@@ -36,7 +36,8 @@ import type {
 import { EmptyState } from "../components/EmptyState";
 import { Switch } from "../components/SettingsUi";
 import formStyles from "../components/Form.module.css";
-import { botView } from "../lib/botProfile";
+import { botHasFullAccess, botView } from "../lib/botProfile";
+import { POLICY_CHANGED_EVENT } from "./settings/SafetyLevelsCard";
 import scheduleTemplateFile from "../data/scheduleTemplates.json";
 import { humanLine } from "../lib/humanError";
 import { dayWord, lastOutcome, localSpecLabel, primaryAction, scheduleKind } from "../lib/automations";
@@ -1149,6 +1150,32 @@ function ScheduleForm({
   const [sentence, setSentence] = useState(initialText ?? "");
   const [sentenceNote, setSentenceNote] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // A bot at Full access deletes its own schedule without the extra confirmation.
+  const [globalPreset, setGlobalPreset] = useState<string | null>(null);
+  useEffect(() => {
+    if (!client) return undefined;
+    let revision = 0;
+    const loadPolicy = () => {
+      const request = ++revision;
+      setGlobalPreset(null);
+      void client.getPolicy().then((policy) => {
+        if (revision === request && !policy.load_error) setGlobalPreset(policy.preset ?? null);
+      }).catch(() => {});
+    };
+    loadPolicy();
+    window.addEventListener(POLICY_CHANGED_EVENT, loadPolicy);
+    return () => {
+      revision += 1;
+      window.removeEventListener(POLICY_CHANGED_EVENT, loadPolicy);
+    };
+  }, [client]);
+  const runDelete = () => {
+    if (!onDelete) return;
+    setBusy(true);
+    void onDelete()
+      .catch((e) => setProblem(errorText(e)))
+      .finally(() => setBusy(false));
+  };
   const applySentence = (text: string) => {
     const read = parseAutomationSentence(text);
     if (!read.task && !read.simple) {
@@ -1855,12 +1882,7 @@ function ScheduleForm({
                     variant="danger"
                     disabled={busy}
                     data-testid="schedule-delete-confirm"
-                    onClick={() => {
-                      setBusy(true);
-                      void onDelete()
-                        .catch((e) => setProblem(errorText(e)))
-                        .finally(() => setBusy(false));
-                    }}
+                    onClick={runDelete}
                   >
                     {t("schedules.confirmDelete")}
                   </Button>
@@ -1874,7 +1896,10 @@ function ScheduleForm({
                   variant="ghost"
                   disabled={busy}
                   data-testid="schedule-delete"
-                  onClick={() => setConfirmDelete(true)}
+                  onClick={() => {
+                    if (botHasFullAccess(bots.find((b) => b.id === editing?.bot_id), globalPreset)) runDelete();
+                    else setConfirmDelete(true);
+                  }}
                 >
                   <Trash2 />
                   {t("schedules.delete")}

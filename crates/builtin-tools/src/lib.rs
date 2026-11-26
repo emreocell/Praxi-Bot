@@ -100,7 +100,8 @@ pub use schedule::{
     SchedulePreview, ScheduleRequest, ScheduleView,
 };
 pub use script::{
-    GateHost, GateRequest, ResolverGate, SCRIPT_TOOL_NAME, ToolGate, cwd_for, raw_command_for,
+    GateAuthorization, GateHost, GateRequest, ResolverGate, SCRIPT_TOOL_NAME, ToolGate, cwd_for,
+    raw_command_for,
 };
 pub use secret_request::{
     Fields as SecretFields, SECRET_REQUEST, SECRET_REQUEST_CARD_KIND, SecretCard, entry_names,

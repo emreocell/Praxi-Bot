@@ -107,13 +107,16 @@ impl TurnHost for Host {
         let Some(spec) = r.spec else {
             return false;
         };
-        let decision = self
-            .sh
-            .decide(&ctx, &r.name, spec.effect, spec.category, &r.input);
+        let category =
+            crate::shared::Shared::money_category(&r.name, spec.effect, spec.category, &r.input);
+        let (decision, auto_reason) =
+            self.sh
+                .decide_with_reason(&ctx, &r.name, spec.effect, category, &r.input, None);
         // An allow is not stored. Recording it would let a later ask, including
         // one that carries unevaluated limits, skip the interactive path.
         match &decision {
-            Decision::Allow => true,
+            Decision::Allow => auto_reason
+                .is_none_or(|reason| self.sh.audit_auto_allow(&ctx, &r.name, reason).is_ok()),
             Decision::Deny => false,
             Decision::Ask { .. } => {
                 let honored_limits = decision.unsupported_limits().cloned();
@@ -127,7 +130,7 @@ impl TurnHost for Host {
                         ToolCallId::new(),
                         &r.name,
                         spec.effect,
-                        spec.category,
+                        category,
                         &r.input,
                         details,
                         None,
@@ -163,6 +166,23 @@ impl Host {
             return false;
         };
         let name = format!("cli.native.{}", sanitize_tool_label(&request.tool));
+        // The Full level: the CLI's own tool runs without a card unless it looks like a payment.
+        // The CLI's text only ever makes this stricter.
+        let command = request
+            .input
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if self.sh.full_lane_run(&ctx)
+            && !crate::money::command_moves_money(command)
+            && !crate::money::command_moves_money(&request.summary)
+            && !crate::money::command_moves_money(&request.input.to_string())
+        {
+            return self
+                .sh
+                .audit_auto_allow(&ctx, &name, crate::approval::FULL_POLICY_REASON)
+                .is_ok();
+        }
         let details = json!({
             "kind": "cli_native_action",
             "engine_label": ctx.profile.models.executor,

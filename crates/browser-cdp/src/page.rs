@@ -497,6 +497,33 @@ impl Page {
         Ok(r.pointer("/result/value").cloned().unwrap_or(Value::Null))
     }
 
+    /// Whether the active document displays a conventional checkout control.
+    /// Run in an isolated world so page scripts cannot replace the DOM methods.
+    pub async fn has_payment_form(&self) -> Result<bool> {
+        let tree = self.cmd("Page.getFrameTree", json!({})).await?;
+        let world = self
+            .cmd(
+                "Page.createIsolatedWorld",
+                json!({"frameId": tree["frameTree"]["frame"]["id"], "worldName": "praxi-payment-check"}),
+            )
+            .await?;
+        let result = self
+            .cmd(
+                "Runtime.evaluate",
+                json!({
+                    "contextId": world["executionContextId"],
+                    "returnByValue": true,
+                    "expression": r#"(() => {
+                        const selector = "input[autocomplete^='cc-' i], input[autocomplete^='transaction-' i], iframe[src*='checkout.stripe.com' i], iframe[src*='js.stripe.com' i]";
+                        return Array.from(document.querySelectorAll(selector))
+                            .some(e => e.getClientRects().length && getComputedStyle(e).visibility === "visible");
+                    })()"#,
+                }),
+            )
+            .await?;
+        Ok(result.pointer("/result/value").and_then(Value::as_bool) == Some(true))
+    }
+
     /// Evaluate JavaScript in the main frame and return the result as JSON.
     pub async fn evaluate(&self, expression: &str) -> Result<Value> {
         // A script can read the typed value straight from the field.

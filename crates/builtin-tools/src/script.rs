@@ -50,6 +50,17 @@ pub struct GateRequest {
     pub control: Option<tool_registry::ControlTarget>,
 }
 
+/// Facts the registry tool must enforce when it executes the authorized call.
+#[derive(Debug, Default)]
+pub struct GateAuthorization {
+    /// Origin that received browser authorization.
+    pub expected_origin: Option<String>,
+    /// This mail may run without consuming an owner's warning override.
+    pub unattended_mail: bool,
+    /// Approval for a managed browser payment document, if required.
+    pub payment: tool_registry::PaymentApproval,
+}
+
 /// Permission check for tool calls issued from scripts.
 ///
 /// The agent loop implements this with its full approval flow (it may suspend
@@ -80,8 +91,10 @@ pub trait ToolGate: Send + Sync {
     /// Authorize a registry tool call whose caller forwards the origin to `ToolContext`.
     /// # Errors
     /// A human-readable denial reason.
-    async fn authorize_page(&self, req: &GateRequest) -> Result<Option<String>, String> {
-        self.authorize(req).await.map(|()| None)
+    async fn authorize_tool(&self, req: &GateRequest) -> Result<GateAuthorization, String> {
+        self.authorize(req)
+            .await
+            .map(|()| GateAuthorization::default())
     }
 
     /// Whether the call would run right now without asking anyone: the run's
@@ -323,14 +336,16 @@ impl ScriptHost for GateHost {
             content: spec.content,
             control: None,
         };
-        let expected_origin = self.gate.authorize_page(&req).await?;
+        let authorization = self.gate.authorize_tool(&req).await?;
         let ctx = ToolContext {
             run_id: self.run_id.clone(),
             max_inline_bytes: self.max_inline_bytes,
             bot_id: self.bot_id.clone(),
             content_tainted: self.gate.content_tainted(&self.run_id),
             exposure_untrusted: self.gate.content_untrusted(&self.run_id),
-            expected_origin,
+            expected_origin: authorization.expected_origin,
+            unattended_mail: authorization.unattended_mail,
+            payment: authorization.payment,
             // A script is never covered by a run-scoped control grant.
             control_guard: None,
             lane: self.lane.clone(),

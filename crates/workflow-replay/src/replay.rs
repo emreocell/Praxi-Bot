@@ -848,8 +848,8 @@ impl Replayer {
         let spec = tool.spec();
         // Gate on the resolved tool's real name (`mcp_srv__x` may alias
         // `mcp_srv.x`), so profile globs and "always" grants match.
-        let expected_origin = gate
-            .authorize_page(&GateRequest {
+        let authorization = gate
+            .authorize_tool(&GateRequest {
                 run_id: self.opts.run_id.clone(),
                 tool: spec.name.clone(),
                 category: spec.category,
@@ -866,7 +866,9 @@ impl Replayer {
             bot_id: self.opts.bot_id.clone(),
             content_tainted: gate.content_tainted(&self.opts.run_id),
             exposure_untrusted: gate.content_untrusted(&self.opts.run_id),
-            expected_origin,
+            expected_origin: authorization.expected_origin,
+            unattended_mail: authorization.unattended_mail,
+            payment: authorization.payment,
             ..ToolContext::default()
         };
         match tool.call(&ctx, input).await {
