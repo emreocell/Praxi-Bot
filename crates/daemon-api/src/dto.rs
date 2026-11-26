@@ -596,7 +596,7 @@ pub struct RunDto {
     /// Start of the current pause in Unix milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub paused_at_ms: Option<i64>,
-    /// Reason the run is currently `paused` (e.g. `waiting_for_pc`).
+    /// Reason the run is currently `paused`: `waiting_for_pc`, `daemon_restart` (a restart interrupted it; Full-level bots resume by themselves) or `restart_resume_limit` (it was resumed automatically as often as allowed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pause_reason: Option<String>,
 }
