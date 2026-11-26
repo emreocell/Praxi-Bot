@@ -115,8 +115,10 @@ pub(crate) struct Exchange {
 }
 
 /// Whether the steps of a run show contact with content the user did not
-/// write.  Only `Meta` tools (which have no external effect) keep a run
-/// clean; `use_tool` hides the real tool, and unknown names cannot be vouched
+/// write.  Only tools that bring no outside text into the run keep it clean
+/// (the caller passes `Meta`, and `System` such as creating a schedule: they
+/// take the owner's own words and return a receipt; anything that reads a page,
+/// mail, file or MCP answer is neither, and taints the run anyway); `use_tool` hides the real tool, and unknown names cannot be vouched
 /// for, so both count as outside content.
 fn steps_touch_outside_content(steps: &[storage::RunStep], is_meta: impl Fn(&str) -> bool) -> bool {
     steps.iter().any(|s| match s.name.as_str() {
@@ -135,6 +137,16 @@ fn steps_touch_outside_content(steps: &[storage::RunStep], is_meta: impl Fn(&str
         STEP_WORKFLOW => true,
         _ => false,
     })
+}
+
+/// Tool categories whose calls take the owner's words and return only a receipt:
+/// agent-internal `Meta` tools and `System` (creating a schedule). Everything that can
+/// read a page, mail, file, screen, shell output or MCP answer stays untrusted.
+fn brings_no_outside_text(category: PermissionCategory) -> bool {
+    matches!(
+        category,
+        PermissionCategory::Meta | PermissionCategory::System
+    )
 }
 
 impl Exchange {
@@ -171,7 +183,7 @@ impl Exchange {
                 steps_touch_outside_content(&steps, |name| {
                     sh.tools
                         .get(name)
-                        .is_some_and(|t| t.spec().category == PermissionCategory::Meta)
+                        .is_some_and(|t| brings_no_outside_text(t.spec().category))
                 })
             })
             || sh
@@ -259,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn only_meta_tools_keep_an_exchange_trusted() {
+    fn only_tools_without_outside_text_keep_an_exchange_trusted() {
         let is_meta = |n: &str| n == "ask_user";
         let calls = |names: &[&str]| {
             step(
@@ -290,5 +302,26 @@ mod tests {
         let mut cli = step(STEP_MODEL, json!({}));
         cli.output = Some(json!({"model":"cli:claude"}));
         assert!(steps_touch_outside_content(&[cli], is_meta));
+    }
+
+    #[test]
+    fn only_meta_and_system_calls_bring_no_outside_text() {
+        use PermissionCategory as C;
+        for c in [C::Meta, C::System] {
+            assert!(brings_no_outside_text(c), "{c:?}");
+        }
+        for c in [
+            C::Fs,
+            C::Shell,
+            C::Desktop,
+            C::Browser,
+            C::Accounts,
+            C::Messaging,
+            C::Money,
+            C::Remote,
+            C::Script,
+        ] {
+            assert!(!brings_no_outside_text(c), "{c:?}");
+        }
     }
 }

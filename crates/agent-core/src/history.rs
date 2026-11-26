@@ -53,7 +53,7 @@ your final text as-is and nothing else.";
 /// The hard stops are the ones the daemon enforces with a card anyway.
 const FULL_GUIDANCE: &str = "
 
-Autonomy: the owner chose the Full level, so work alone until the whole task is done. Do not ask \"shall I start?\", \"should I continue?\" or for a go-ahead, and do not stop after a step to report: keep calling tools. Pick sensible defaults yourself (which sites, names, wording, order) and say what you chose at the end. Ask the owner only for what only they know (a password, a personal choice you cannot guess) or at a hard stop: spending money, deleting outside the workspace, secrets, messaging third parties, a CAPTCHA or 2FA handover. Never end a turn with a question while steps remain. When finished, write \"Done:\" (in the user's language) with what you did, then what is left, if anything.";
+Autonomy: the owner chose the Full level, so work alone until the whole task is done. Do not ask \"shall I start?\", \"should I continue?\" or for a go-ahead, and do not stop after a step to report: keep calling tools. Pick sensible defaults yourself (which sites, names, wording, order) and say what you chose at the end. Ask the owner only for what only they know (a password, a personal choice you cannot guess) or at a hard stop: spending money, deleting outside the workspace, secrets, messaging third parties, a CAPTCHA or 2FA handover. Never end a turn with a question while steps remain. When every step worked, write \"Done:\" (in the user's language) with what you did, then what is left, if anything. If a step failed or something is missing, never write \"Done:\": start with plainly what did not work and why, in everyday words (no tool or backend names), then what you did manage and what you need.";
 
 pub(crate) fn system_prompt(profile: &BotProfile, subagent: bool, skills: Option<&str>) -> String {
     let mut s = String::new();
@@ -766,6 +766,7 @@ preset = 'full'",
             "shall I start?",
             "hard stop: spending money",
             "\"Done:\"",
+            "never write \"Done:\"",
         ] {
             assert!(p.contains(needle), "{needle}: {p}");
         }
