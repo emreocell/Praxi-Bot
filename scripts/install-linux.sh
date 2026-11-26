@@ -66,6 +66,8 @@ NODE_ENV_FILE="${CONF_DIR}/praxi-node.env"
 UNIT_DIR="/etc/systemd/system"
 SLICE_NAME="praxi.slice"
 SVC_USER="praxi"
+UPDATE_UNITS=(praxi-update.socket praxi-update@.service praxi-update-check.timer praxi-update-check.service)
+SERVICE_PATH="${DATA_DIR}/.local/bin:${DATA_DIR}/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
 
 VERSION="latest"
 LOCAL_FILE=""
@@ -307,9 +309,19 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
   exit 0
 fi
 
+# The managed updater, local self-update and this installer share this lock.
+if [[ "${VERIFY_ONLY}" -eq 0 ]]; then
+  command -v flock >/dev/null 2>&1 || die "flock is required; install util-linux and retry"
+  mkdir -p -- "$(dirname "${PREFIX}")"
+  exec {maintenance_lock}>>"${PREFIX}.maintenance.lock"
+  flock -n "${maintenance_lock}" || die "another Praxi maintenance operation is running; wait and retry"
+fi
+
 # ---------------------------------------------------------------- uninstall
 if [[ "${UNINSTALL}" -eq 1 ]]; then
   log "stopping and removing services"
+  systemctl disable --now praxi-update.socket praxi-update-check.timer >/dev/null 2>&1 || true
+  for u in "${UPDATE_UNITS[@]}"; do rm -f "${UNIT_DIR:?}/${u:?}"; done
   for u in praxi.service praxi-node.service praxi-desktop.service praxi-xvfb.service "${SLICE_NAME}"; do
     systemctl disable --now "${u}" >/dev/null 2>&1 || true
     rm -f "${UNIT_DIR:?}/${u:?}"
@@ -684,7 +696,7 @@ restore_backup() {
       cp -a "${WORK}/backup/conf/${c}" "${CONF_DIR}/${c}"
     fi
   done
-  for u in "${SLICE_NAME}" praxi.service praxi-node.service praxi-xvfb.service praxi-desktop.service \
+  for u in "${SLICE_NAME}" praxi.service praxi-node.service praxi-xvfb.service praxi-desktop.service "${UPDATE_UNITS[@]}" \
     praxi.service.d praxi-node.service.d praxi-desktop.service.d praxi-xvfb.service.d; do
     rm -rf "${UNIT_DIR:?}/${u:?}"
     if [[ -e "${WORK}/backup/units/${u}" ]]; then
@@ -705,6 +717,7 @@ on_exit() {
     # Stop anything the failed attempt started or left activating. Stop praxi-xvfb
     # before praxi-desktop/praxi so Upholds= does not restart them during rollback.
     local u was_enabled
+    systemctl disable --now praxi-update.socket praxi-update-check.timer >/dev/null 2>&1 || true
     for u in praxi-node.service praxi-xvfb.service praxi-desktop.service praxi.service "${SLICE_NAME}"; do
       if [[ -f "${UNIT_DIR}/${u}" ]] || systemctl is-active --quiet "${u}" 2>/dev/null; then
         systemctl stop "${u}" >/dev/null 2>&1 || true
@@ -725,6 +738,8 @@ on_exit() {
     done
     restore_backup
     systemctl daemon-reload >/dev/null 2>&1 || true
+    for u in "${UPDATE_TRIGGERS_ENABLED[@]}"; do systemctl enable "${u}" >/dev/null 2>&1 || true; done
+    for u in "${UPDATE_TRIGGERS_ACTIVE[@]}"; do systemctl start "${u}" >/dev/null 2>&1 || true; done
     if [[ "${WAS_ENABLED_XVFB:-0}" -eq 1 && -f "${UNIT_DIR}/praxi-xvfb.service" ]]; then
       systemctl enable praxi-xvfb.service >/dev/null 2>&1 || true
     fi
@@ -934,7 +949,7 @@ for c in "${ENV_FILE}" "${NODE_ENV_FILE}"; do
     cp -a "${c}" "${WORK}/backup/conf/"
   fi
 done
-for u in "${SLICE_NAME}" praxi.service praxi-node.service praxi-xvfb.service praxi-desktop.service \
+for u in "${SLICE_NAME}" praxi.service praxi-node.service praxi-xvfb.service praxi-desktop.service "${UPDATE_UNITS[@]}" \
   praxi.service.d praxi-node.service.d praxi-desktop.service.d praxi-xvfb.service.d; do
   if [[ -e "${UNIT_DIR}/${u}" ]]; then
     cp -a "${UNIT_DIR}/${u}" "${WORK}/backup/units/"
@@ -967,7 +982,16 @@ if systemctl is-active --quiet praxi.service 2>/dev/null; then
   WAS_ACTIVE_PRAXI=1
 fi
 NODE_WAS_ACTIVE="${WAS_ACTIVE_NODE}"
+UPDATE_TRIGGERS_ENABLED=()
+UPDATE_TRIGGERS_ACTIVE=()
+for u in praxi-update.socket praxi-update-check.timer; do
+  if [[ -f "${UNIT_DIR}/${u}" ]]; then
+    if systemctl is-enabled --quiet "${u}"; then UPDATE_TRIGGERS_ENABLED+=("${u}"); fi
+    if systemctl is-active --quiet "${u}"; then UPDATE_TRIGGERS_ACTIVE+=("${u}"); fi
+  fi
+done
 UPGRADE_STOPPED=1
+for u in "${UPDATE_TRIGGERS_ACTIVE[@]}"; do systemctl stop "${u}"; done
 
 if (( WAS_ACTIVE_NODE || WAS_ACTIVE_XVFB || WAS_ACTIVE_DESKTOP || WAS_ACTIVE_PRAXI )); then
   log "stopping active Praxi services for installation"
@@ -1013,7 +1037,7 @@ write_wrapper() { # <command name> <binary name> <env file>
   cat > "/usr/local/bin/${cmd}" <<WRAP
 #!/bin/sh
 # Runs ${PREFIX}/bin/${bin} as the ${SVC_USER} user with ${envf}.
-inner='set -a; . ${envf}; set +a; exec "\$@"'
+inner='export PATH=${SERVICE_PATH} NPM_CONFIG_PREFIX=${DATA_DIR}/.npm-global; set -a; . ${envf}; set +a; exec "\$@"'
 if [ "\$(id -u)" -eq 0 ]; then
   if [ "${cmd}" = praxi ] && [ "\${1:-}" = self-update ]; then
     # Only this explicit maintenance command retains root. Do not source the
@@ -1023,7 +1047,8 @@ if [ "\$(id -u)" -eq 0 ]; then
   if [ "${cmd}" = praxi ] && [ "\${1:-}" = doctor ]; then
     exec systemd-run --quiet --wait --pipe --collect --unit="praxi-doctor-\$\$" \
       --property=User=${SVC_USER} --property=Group=${SVC_USER} \
-      --property=WorkingDirectory=${DATA_DIR} --property=EnvironmentFile=${envf} \
+      --property=WorkingDirectory=${PREFIX} --property=EnvironmentFile=${envf} \
+      --setenv=PATH=${SERVICE_PATH} --setenv=NPM_CONFIG_PREFIX=${DATA_DIR}/.npm-global \
       ${doctor_properties} ${PREFIX}/bin/${bin} "\$@"
   fi
   exec runuser -u ${SVC_USER} -- sh -c "\$inner" sh ${PREFIX}/bin/${bin} "\$@"
@@ -1207,7 +1232,9 @@ Type=simple
 ${SLICE_LINE:+${SLICE_LINE}
 }User=${SVC_USER}
 Group=${SVC_USER}
-WorkingDirectory=${DATA_DIR}
+WorkingDirectory=${PREFIX}
+Environment=PATH=${SERVICE_PATH}
+Environment=NPM_CONFIG_PREFIX=${DATA_DIR}/.npm-global
 EnvironmentFile=${ENV_FILE}
 ExecStart=${PREFIX}/bin/bot ${SERVE_ARGS}
 Restart=on-failure
@@ -1218,6 +1245,64 @@ ${HARDENING}
 [Install]
 WantedBy=multi-user.target
 UNIT
+
+if [[ "${HOST_MODE}" -eq 1 ]]; then
+  cat > "${UNIT_DIR}/praxi-update.socket" <<UNIT
+[Unit]
+Description=Praxi managed update socket
+
+[Socket]
+ListenStream=/run/praxi-update.sock
+SocketGroup=${SVC_USER}
+SocketMode=0660
+Accept=yes
+MaxConnections=4
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target
+UNIT
+  cat > "${UNIT_DIR}/praxi-update@.service" <<UNIT
+[Unit]
+Description=Praxi managed update request
+
+[Service]
+ExecStart=${PREFIX}/bin/bot self-update --managed-port ${PORT}
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+StateDirectory=praxi-updates
+PrivateTmp=true
+ProtectSystem=full
+RuntimeMaxSec=25min
+UNIT
+  cat > "${UNIT_DIR}/praxi-update-check.service" <<UNIT
+[Unit]
+Description=Praxi scheduled update check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${PREFIX}/bin/bot self-update --managed-port ${PORT} --scheduled
+StateDirectory=praxi-updates
+PrivateTmp=true
+ProtectSystem=full
+TimeoutStartSec=25min
+UNIT
+  cat > "${UNIT_DIR}/praxi-update-check.timer" <<'UNIT'
+[Unit]
+Description=Check for Praxi releases daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+fi
 
 # Node-agent: installed but NOT enabled; pair it first (praxi-node join <ticket>).
 cat > "${UNIT_DIR}/praxi-node.service" <<UNIT
@@ -1885,6 +1970,10 @@ write_wrapper praxi-node bot-node "${NODE_ENV_FILE}"
 
 systemctl daemon-reload
 systemctl enable praxi.service >/dev/null
+if [[ "${HOST_MODE}" -eq 1 ]]; then
+  systemctl enable praxi-update.socket >/dev/null
+  systemctl enable praxi-update-check.timer >/dev/null
+fi
 if [[ "${DESKTOP_ACTIVE}" -eq 1 ]]; then
   systemctl enable praxi-xvfb.service >/dev/null
 fi
@@ -1935,6 +2024,10 @@ if [[ "${NO_START}" -eq 0 ]]; then
     die "files installed, but service readiness failed (bounded wait); see journal above"
   fi
   log "daemon ready on loopback (health may report setup_required until provider setup)"
+  if [[ "${HOST_MODE}" -eq 1 ]]; then
+    systemctl start praxi-update.socket
+    systemctl start praxi-update-check.timer
+  fi
 else
   log "files installed and units enabled; startup/readiness skipped (--no-start)"
   if [[ "${WAS_ACTIVE_PRAXI}" -eq 1 || "${WAS_ACTIVE_XVFB}" -eq 1 || "${WAS_ACTIVE_DESKTOP}" -eq 1 || "${WAS_ACTIVE_NODE}" -eq 1 ]]; then

@@ -195,9 +195,12 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
         },
         status: async () => {
           const st = await (isMockMode() || !conn ? api : new ApiClient(conn)).hostStatus();
-          return { version: st.version, hasDisplay: st.has_display };
+          return { build: { ...st, status: "ok" }, hasDisplay: st.has_display };
         },
-        localVersion: async () => (await api.listHosts()).local_version,
+        localVersion: async () => {
+          const local = await api.listHosts();
+          return { localVersion: local.local_version, localApiVersion: local.local_api_version, localRelease: local.local_release_tag };
+        },
         canSendModels: async () => Boolean((await api.copyPlan(id)).host_accepts)
       };
       await runPairChecks(probe, setRows);
@@ -217,7 +220,11 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
       dispatch({ type: "checks" });
       void runChecks(info.id);
     } catch (e) {
-      setPairError(e instanceof ApiError && e.status === 400 ? t("addServer.have.codeBad") : humanLine(e));
+      if (e instanceof ApiError && e.status === 409) {
+        setPairError(t("serverConnectionStatus.pairVersion"));
+      } else {
+        setPairError(e instanceof ApiError && e.status === 400 ? t("addServer.have.codeBad") : humanLine(e));
+      }
     } finally {
       setPairing(false);
     }
@@ -588,12 +595,15 @@ function Content({ onClose, onManual }: { onClose: () => void; onManual: () => v
                   </span>
                   <span className={styles.stageText}>
                     <b>{t(`addServer.pairChecks.${id}.title`)}</b>
-                    <small>{t(`addServer.pairChecks.${id}.${state === "fail" || state === "warn" ? "fix" : state}`)}</small>
+                    <small>{id === "version" && state === "warn"
+                      ? t("serverConnectionStatus.pairCheckVersion")
+                      : t(`addServer.pairChecks.${id}.${state === "fail" || state === "warn" ? "fix" : state}`)}</small>
                   </span>
                 </li>
               ))}
             </ol>
-            {checksDone(rows) ? <Callout tone="success">{t("addServer.pairChecks.ready")}</Callout> : null}
+            {checksDone(rows) && rows.find((row) => row.id === "version")?.state === "pass"
+              ? <Callout tone="success">{t("addServer.pairChecks.ready")}</Callout> : null}
           </div>
           <DialogFooter>
             {back}

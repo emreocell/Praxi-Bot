@@ -295,6 +295,36 @@ async fn copilot_sign_in_is_never_claimed() {
 }
 
 #[tokio::test]
+async fn headless_cli_detection_uses_the_service_home_for_install_and_sign_in() {
+    let temp = fixture_dir();
+    let service_home = temp.path().join("service");
+    let ssh_home = temp.path().join("ssh-login");
+    let credential = ".gemini/antigravity-cli/antigravity-oauth-token";
+    for home in [&service_home, &ssh_home] {
+        std::fs::create_dir_all(home.join(credential).parent().unwrap()).unwrap();
+    }
+    std::fs::write(ssh_home.join(credential), b"fixture").unwrap();
+    let bin = service_home.join(".local/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let detector =
+        Detector::with_env(PathEnv::for_test(bin.clone()).with_home(service_home.clone()));
+
+    let before = detector.detect(true).await;
+    assert!(!before.iter().find(|row| row.id == "agy").unwrap().installed);
+    install_fake(&bin, "agy");
+    let after = detector.detect(true).await;
+    let row = after.iter().find(|row| row.id == "agy").unwrap();
+    assert!(row.installed);
+    assert_eq!(row.auth, AuthState::SignedOut);
+
+    std::fs::write(service_home.join(credential), b"fixture").unwrap();
+    let after = detector.detect(true).await;
+    let row = after.iter().find(|row| row.id == "agy").unwrap();
+    assert_eq!(row.auth, AuthState::Unknown);
+    assert_eq!(row.detail.as_deref(), Some("auth_metadata_only"));
+}
+
+#[tokio::test]
 async fn vibe_sign_in_is_never_claimed() {
     let temp = fixture_dir();
     install_fake(temp.path(), "vibe-acp");
@@ -313,7 +343,7 @@ async fn vibe_sign_in_is_never_claimed() {
     assert!(vibe.installed);
     assert!(vibe.version.is_some());
     assert_eq!(vibe.auth, AuthState::Unknown);
-    assert_eq!(vibe.detail.as_deref(), Some("auth_unverified"));
+    assert_eq!(vibe.detail.as_deref(), Some("auth_metadata_only"));
     let debug = format!("{vibe:?}");
     assert!(!debug.contains("mistral_secret_key"));
     assert!(!debug.contains("SENTINEL_TOKEN"));

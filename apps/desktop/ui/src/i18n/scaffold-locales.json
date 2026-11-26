@@ -1,3 +1,4 @@
 {
-  "scaffold": ["fr", "id", "pt"]
+  "scaffold": ["fr", "id", "pt"],
+  "englishFallbackPrefixes": ["serverConnectionStatus."]
 }

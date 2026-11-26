@@ -121,6 +121,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/host-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["admin_host_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/import/bots": {
         parameters: {
             query?: never;
@@ -5442,6 +5458,8 @@ export interface components {
             account?: string | null;
             /** @description The host can run that command itself (a verified, fixed installer). */
             can_install: boolean;
+            /** @description Known credential file exists. Its contents and validity were not checked. */
+            credential_file_present?: boolean;
             docs_url: string;
             id: string;
             /** @description Command that installs it on the host, when one is known. */
@@ -7998,6 +8016,7 @@ export interface components {
         Health: {
             /** @description HTTP API compatibility version. */
             api_version: string;
+            build_id?: string | null;
             /**
              * @description `true` only when this daemon is the active leader and its automatic
              *     components (scheduler, channels) are running. `false` on standby.
@@ -8011,6 +8030,9 @@ export interface components {
             components_ready?: boolean;
             /** @description Capabilities of this host; probes never launch a browser. */
             host: components["schemas"]["HostInfo"];
+            host_update?: null | components["schemas"]["HostUpdateStatus"];
+            /** @description Exact published release, when known. */
+            release_tag?: string | null;
             /**
              * @description `true` when the daemon was started in safe mode: no tools, no schedules, no
              *     channels, no MCP servers or apps. Fixed for the life of the process.
@@ -8328,6 +8350,15 @@ export interface components {
         HostToolFact: {
             name: string;
             present: boolean;
+        };
+        HostUpdateInput: {
+            tag: string;
+        };
+        /** @enum {string} */
+        HostUpdateState: "idle" | "available" | "running" | "updated" | "failed" | "rolled_back" | "rollback_failed";
+        HostUpdateStatus: {
+            state: components["schemas"]["HostUpdateState"];
+            tag?: string | null;
         };
         /** @description `GET /v1/hosts/{id}/version`: what a paired server runs. */
         HostVersion: {
@@ -12707,6 +12738,43 @@ export interface operations {
                 content?: never;
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    admin_host_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostUpdateInput"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -19806,7 +19874,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostUpdateInput"];
+            };
+        };
         responses: {
             202: {
                 headers: {

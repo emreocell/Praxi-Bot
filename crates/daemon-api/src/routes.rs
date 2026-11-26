@@ -390,6 +390,13 @@ pub(crate) async fn health(State(s): State<AppState>) -> Json<Health> {
         .into(),
         version: env!("CARGO_PKG_VERSION").into(),
         api_version: crate::API_VERSION.into(),
+        release_tag: crate::release_tag().map(str::to_owned),
+        build_id: Some(crate::build_id().into()),
+        host_update: if s.leader().config().mode == crate::host::HostMode::Host && !s.safe_mode() {
+            crate::host::update_status()
+        } else {
+            None
+        },
         host: {
             let mut host = crate::dto::HostInfo::detect();
             let config = s.leader().config();

@@ -5,6 +5,7 @@
  */
 
 import { isProcessingRunState } from "./runState.ts";
+import { reportedRelease, updateState } from "./serverUpdate.ts";
 
 export type LinkState =
   | "idle"
@@ -23,6 +24,8 @@ export interface HostHealthLike {
   status: string;
   version: string;
   api_version: string;
+  release_tag?: string | null;
+  build_id?: string | null;
   /** Background startup of the host's own components; absent on older hosts. */
   startup?: "starting" | "ready" | "degraded";
 }
@@ -34,7 +37,7 @@ export type HostUiState =
   /** Revoked by the host, removed from the list, or never paired. */
   | { kind: "not_paired" }
   /** The two daemons speak different API versions (blocking) or builds. */
-  | { kind: "version_mismatch"; local: string; host: string; blocking: boolean }
+  | { kind: "version_mismatch"; local: string; host: string; blocking: boolean; update: "app" | "host" | "unknown"; unidentified?: true }
   /** Connected and compatible, but the host cannot run a model yet. */
   | { kind: "no_model_key" }
   /** Reachable, but still verifying leadership and starting its components. */
@@ -44,36 +47,51 @@ export type HostUiState =
 
 /** Compare `major.minor` only: patch differences never block. */
 function sameMinor(a: string, b: string): boolean {
-  const key = (v: string) => v.split(".").slice(0, 2).join(".");
+  const key = (v: string) => v.replace(/^v/, "").split(".").slice(0, 2).join(".");
   return key(a) === key(b);
 }
 
 /**
- * Which side is behind when the app and the host run different versions: the one with the lower
- * `major.minor.patch`. `"unknown"` when the versions cannot be compared.
+ * Which side is behind, including prerelease ordering.
  */
 export function olderSide(local: string, host: string): "app" | "host" | "unknown" {
-  const parts = (v: string) => v.split(/[.+-]/).slice(0, 3).map((n) => Number.parseInt(n, 10));
-  const a = parts(local);
-  const b = parts(host);
-  if (a.length < 3 || b.length < 3 || [...a, ...b].some((n) => Number.isNaN(n))) {
-    return "unknown";
-  }
-  for (let i = 0; i < 3; i += 1) {
-    if (a[i] !== b[i]) {
-      return a[i] < b[i] ? "app" : "host";
-    }
-  }
-  return "unknown";
+  const state = updateState({ version: host }, { version: local });
+  return state === "older" ? "host" : state === "newer" ? "app" : "unknown";
 }
 
-export function deriveHostState(input: {
-  link: HostLinkLike | null;
-  health: HostHealthLike | null;
+export interface HostProtocol {
   localVersion: string | null;
   localApiVersion: string | null;
+  localRelease?: string | null;
+}
+
+export function hostMismatch(health: HostHealthLike, protocol: HostProtocol): Extract<HostUiState, { kind: "version_mismatch" }> | null {
+  const { localVersion, localApiVersion, localRelease } = protocol;
+  if (!localVersion) return null;
+  const hostRelease = reportedRelease(health.release_tag, health.build_id);
+  const local = localRelease || localVersion;
+  const host = hostRelease || health.version;
+  const builds = updateState({ version: health.version, releaseTag: hostRelease }, { version: localVersion, releaseTag: localRelease });
+  const incompatible = (localApiVersion !== null && health.api_version !== localApiVersion) || !sameMinor(host, local);
+  const preview = Boolean(localRelease && (localRelease.includes("-") || hostRelease?.includes("-")));
+  const previewSkew = preview && builds !== "current";
+  const sameVersion = builds === "current" || (builds === "unknown" && health.version === localVersion);
+  if (!incompatible && !previewSkew && sameVersion) return null;
+  return {
+    kind: "version_mismatch",
+    local,
+    host,
+    blocking: incompatible || previewSkew,
+    ...(previewSkew && builds === "unknown" ? { unidentified: true } : {}),
+    update: builds === "older" || (previewSkew && builds === "unknown") ? "host" : builds === "newer" ? "app" : "unknown"
+  };
+}
+
+export function deriveHostState(input: HostProtocol & {
+  link: HostLinkLike | null;
+  health: HostHealthLike | null;
 }): HostUiState {
-  const { link, health, localVersion, localApiVersion } = input;
+  const { link, health } = input;
   if (!link || link.state === "unreachable") {
     return { kind: "not_paired" };
   }
@@ -83,26 +101,8 @@ export function deriveHostState(input: {
   if (link.state !== "connected" || !health) {
     return { kind: "connecting" };
   }
-  if (localVersion) {
-    const apiDiffers =
-      localApiVersion !== null && health.api_version !== localApiVersion;
-    if (apiDiffers || !sameMinor(health.version, localVersion)) {
-      return {
-        kind: "version_mismatch",
-        local: localVersion,
-        host: health.version,
-        blocking: true
-      };
-    }
-    if (health.version !== localVersion) {
-      return {
-        kind: "version_mismatch",
-        local: localVersion,
-        host: health.version,
-        blocking: false
-      };
-    }
-  }
+  const mismatch = hostMismatch(health, input);
+  if (mismatch) return mismatch;
   if (health.status === "setup_required") {
     return { kind: "no_model_key" };
   }

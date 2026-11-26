@@ -833,6 +833,10 @@ export class ApiClient {
   hostStatus(): Promise<HostStatus> {
     return this.request("GET", "/host");
   }
+  /** Ask the paired host's systemd updater to install the exact published desktop release. */
+  async startManagedHostUpdate(tag: string): Promise<void> {
+    await this.send("POST", "/admin/host-update", { body: { tag } });
+  }
   /** Private key files found in `~/.ssh` (paths only). */
   async listSshKeys(): Promise<SshKeyHint[]> {
     const r = await this.request<{ keys: SshKeyHint[] }>("GET", "/hosts/setup/ssh-keys");

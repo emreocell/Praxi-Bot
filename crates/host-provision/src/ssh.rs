@@ -264,6 +264,13 @@ pub fn classify_ssh_failure(stderr: &str) -> TransportError {
         || s.contains("host key for")
     {
         TransportError::HostKeyChanged
+    } else if s.contains("unprotected private key file") || s.contains("bad permissions") {
+        TransportError::KeyPermissions
+    } else if s.lines().any(|line| {
+        line.trim_end_matches('.')
+            .ends_with("permission denied (password)")
+    }) {
+        TransportError::PasswordOnly
     } else if s.contains("permission denied") || s.contains("no supported authentication") {
         TransportError::Auth
     } else if s.contains("connection refused")
@@ -467,6 +474,16 @@ mod tests {
         assert_eq!(
             classify_ssh_failure("ubuntu@h: Permission denied (publickey)."),
             TransportError::Auth
+        );
+        assert_eq!(
+            classify_ssh_failure(
+                "WARNING: UNPROTECTED PRIVATE KEY FILE!\nubuntu@h: Permission denied (publickey)."
+            ),
+            TransportError::KeyPermissions
+        );
+        assert_eq!(
+            classify_ssh_failure("ubuntu@h: Permission denied (password)."),
+            TransportError::PasswordOnly
         );
     }
 

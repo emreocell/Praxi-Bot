@@ -27,7 +27,9 @@ const PEER_CHECK_TIMEOUT: Duration = Duration::from_secs(10);
 /// At the ceiling, explicit force reuses the ceiling; equal owners still stop both.
 pub const EPOCH_CEILING: u64 = 1_000_000_000;
 pub const MAX_PEER_EPOCH_ADVANCE: u64 = 4096;
-pub const UPDATE_UNIT: &str = "praxi-update.service";
+/// Managed installer paths. The socket and the status file are owned by systemd/root.
+pub const UPDATE_SOCKET: &str = "/run/praxi-update.sock";
+pub const UPDATE_STATUS: &str = "/var/lib/praxi-updates/status.json";
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1080,31 +1082,98 @@ pub(crate) async fn activate(
         .map(Json)
 }
 
-#[utoipa::path(post, operation_id = "host_update", path = "/v1/host/update", tag = "host", security(("bearer" = [])), responses((status = 202), (status = 409, body = crate::error::ErrorBody)))]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct HostUpdateStatus {
+    pub state: HostUpdateState,
+    pub tag: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HostUpdateState {
+    #[default]
+    Idle,
+    Available,
+    Running,
+    Updated,
+    Failed,
+    RolledBack,
+    RollbackFailed,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HostUpdateInput {
+    pub tag: String,
+}
+
+pub(crate) fn update_status() -> Option<HostUpdateStatus> {
+    if !cfg!(target_os = "linux") || !Path::new(UPDATE_SOCKET).exists() {
+        return None;
+    }
+    let status = std::fs::read(UPDATE_STATUS)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    Some(status.unwrap_or_default())
+}
+
+#[utoipa::path(post, operation_id = "host_update", path = "/v1/host/update", tag = "host", security(("bearer" = [])), request_body = HostUpdateInput, responses((status = 202), (status = 409, body = crate::error::ErrorBody)))]
 pub(crate) async fn update(
     State(s): State<AppState>,
     peer: Option<Extension<crate::PeerIdentity>>,
+    input: Option<Json<HostUpdateInput>>,
 ) -> Result<StatusCode, ApiError> {
     s.leader().audit(
         &actor(peer.as_ref()),
         "host.update",
-        &serde_json::json!({"phase":"requested","unit":UPDATE_UNIT}),
+        &serde_json::json!({"phase":"requested"}),
     )?;
-    if std::env::consts::OS != "linux" || s.leader().config().mode != HostMode::Host {
+    if s.leader().config().mode != HostMode::Host || s.safe_mode() || update_status().is_none() {
         return Err(ApiError::conflict(
-            "updates require Linux host mode and the praxi-update.service unit",
+            "managed updates are unavailable; use the verified Linux host installer with --update",
         ));
     }
-    // Fixed executable and arguments only. The installer must grant exactly this unit.
-    let result = tokio::process::Command::new("/usr/bin/sudo")
-        .args(["-n", "/usr/bin/systemctl", "start", UPDATE_UNIT])
-        .output()
-        .await
-        .map_err(|_| ApiError::conflict("host updater unavailable; install /usr/bin/sudo and the praxi-update.service sudoers rule"))?;
-    if !result.status.success() {
-        return Err(ApiError::conflict(
-            "could not start praxi-update.service; install its narrowly scoped sudoers rule or run the host updater locally",
+    let Some(Json(input)) = input else {
+        return Err(ApiError::bad_request(
+            "update requires the desktop release tag",
         ));
+    };
+    if input.tag.len() > 100
+        || !input.tag.starts_with('v')
+        || !input
+            .tag
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+'))
+    {
+        return Err(ApiError::bad_request("use a published release tag"));
     }
+    request_update(&input.tag).await?;
     Ok(StatusCode::ACCEPTED)
+}
+
+#[cfg(target_os = "linux")]
+async fn request_update(tag: &str) -> Result<(), ApiError> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let accepted = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut socket = tokio::net::UnixStream::connect(UPDATE_SOCKET).await?;
+        socket.write_all(tag.as_bytes()).await?;
+        socket.write_all(b"\n").await?;
+        socket.shutdown().await?;
+        socket.read_u8().await
+    })
+    .await;
+    if matches!(accepted, Ok(Ok(b'1'))) {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "the updater refused the request; check whether an update is already running or use the verified host installer",
+    ))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn request_update(_: &str) -> std::future::Ready<Result<(), ApiError>> {
+    std::future::ready(Err(ApiError::conflict(
+        "managed updates require a Linux host",
+    )))
 }

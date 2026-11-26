@@ -17,6 +17,14 @@ pub struct Health {
     pub version: String,
     /// HTTP API compatibility version.
     pub api_version: String,
+    /// Exact published release, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_id: Option<String>,
+    /// Managed update capability and the result of the most recent attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_update: Option<crate::host::HostUpdateStatus>,
     /// Capabilities of this host; probes never launch a browser.
     pub host: HostInfo,
     /// Seconds since the daemon started.

@@ -138,6 +138,35 @@ on it. `--uninstall` also uninstalls and keeps the data. `--purge` deletes
 `/var/lib/praxi`, `/etc/praxi` and the `praxi` user. `--yes` skips the typed
 confirmation for `--purge`.
 
+On a Linux host installed with the managed updater, the desktop's **Update server**
+button requests the exact published desktop release over the paired connection.
+The host administrator pairing is required. The updater checks both SHA-256 and
+GitHub build provenance, switches the program files, restarts `praxi.service`,
+and waits for the new process to report ready. If readiness fails, it switches
+back to the previous program files and checks that the previous daemon restarts.
+A host installed before the managed updater needs one verified installer upgrade.
+Use the SSH upgrade or the commands the app shows if it cannot start the update.
+
+Scheduled updates are off by default. To change that, create `/etc/praxi/updates.toml`
+as root and set the mode and channel.
+
+```toml
+mode = "notify"         # off, notify, auto
+channel = "stable"      # stable, pre-release
+```
+
+The systemd timer checks daily. `notify` shows available releases on the selected
+server in the desktop app. `auto` also installs them and can restart the daemon
+while bots are working. `stable` waits for a stable release. `pre-release` also
+considers preview releases. Run `sudo systemctl start praxi-update-check.service`
+to apply a mode change immediately. Use `sudo journalctl -u 'praxi-update*.service'`
+to inspect failures. To turn off update requests from paired desktops, disable
+and stop `praxi-update.socket` on the host.
+
+Managed rollback restores program files. Before upgrading a host with important
+data, take a backup as described below so you can also recover from a failed data
+migration.
+
 ## Roll back
 
 Use the path that matches how far the upgrade got.
@@ -207,7 +236,13 @@ again after a restore without `--include-secrets` (`sudo praxi setup` or
 ## Pairing the desktop app
 
 The desktop app talks to the host over an outbound peer channel. The host
-does not open an extra listening port for it. Two ways to pair:
+does not open an extra listening port for it.
+
+**From the server provider's console:** open **Add server** in the desktop app
+and choose **I have a server**. Paste the setup command into the server console.
+It verifies the installer, sets up the service and prints a QR and a `bot-pair:`
+line. Paste the full line into the app within 30 minutes. If it expired, run
+`sudo praxi host invite --role desktop` on the server to get a new one.
 
 **From the owning computer** (the usual path): leave the desktop app or
 `bot serve` running, then `bot host add user@server`. The command installs
@@ -242,6 +277,10 @@ longer install-time notes are in
 Until the host has a model key, chats have nothing to answer with. The
 screen and bot list still work.
 
+The **Praxi desktop** peer represents the computer you paired from. Its offline
+status affects work that targets that computer. Jobs targeting the server can
+keep running there while the desktop is closed.
+
 To measure whether live screen view is using a direct path or a relay (RTT and
 frame rate), open a tunnel with `bot --remote <ENDPOINT> proxy` and follow
 [Measuring the live-view link](../design/live-view-link-measurement.md).
@@ -262,6 +301,16 @@ security-list notes are in
 [Firewall notes](remote-host.md#4-firewall-notes-oracle-cloud).
 
 ## Troubleshooting
+
+Server coding CLIs are installed and checked as the `praxi` service account.
+Use the server settings' sign-in action. If a CLI needs its own interactive
+setup, open a terminal on the server and use the same account and executable paths.
+
+```sh
+sudo -Hu praxi env HOME=/var/lib/praxi NPM_CONFIG_PREFIX=/var/lib/praxi/.npm-global \
+  PATH=/var/lib/praxi/.local/bin:/var/lib/praxi/.npm-global/bin:/usr/local/bin:/usr/bin:/bin \
+  /bin/bash --noprofile --norc
+```
 
 | What you see | What to do |
 | --- | --- |

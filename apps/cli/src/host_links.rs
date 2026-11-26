@@ -246,8 +246,10 @@ impl HostLinks for CliHostLinks {
     }
 
     async fn pair(&self, ticket: &str) -> Result<HostLinkInfo, HostLinkError> {
-        let ticket = PairTicket::parse(ticket)
-            .map_err(|_| HostLinkError::Invalid("that is not a pairing ticket".into()))?;
+        let ticket = PairTicket::parse(ticket).map_err(|e| match e {
+            peer_network::PeerError::VersionMismatch { .. } => HostLinkError::ProtocolMismatch,
+            _ => HostLinkError::Invalid("that is not a pairing ticket".into()),
+        })?;
         if ticket.role != Role::Desktop {
             return Err(HostLinkError::Invalid(
                 "this ticket is for another role; on the host run `bot host invite --role desktop`"
@@ -255,10 +257,10 @@ impl HostLinks for CliHostLinks {
             ));
         }
         let net = self.network().await?;
-        let device = net
-            .pair(&ticket)
-            .await
-            .map_err(|e| HostLinkError::Failed(safe(e)))?;
+        let device = net.pair(&ticket).await.map_err(|e| match e {
+            peer_network::PeerError::VersionMismatch { .. } => HostLinkError::ProtocolMismatch,
+            _ => HostLinkError::Failed(safe(e)),
+        })?;
         if device.role != Role::Host {
             return Err(HostLinkError::Invalid(
                 "paired, but that device is not an always-on host (start it with `bot serve --host`)"

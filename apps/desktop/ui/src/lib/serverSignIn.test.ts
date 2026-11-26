@@ -40,6 +40,16 @@ test("the engine list says installed-and-signed-in, needs sign-in, or unknown, w
   // Installed but not signed in is "needs sign-in", never "install".
   assert.deepEqual(engineStatus({ installed: true, signed_in: false, account: null }), { key: "home.engines.needsSignIn" });
   assert.deepEqual(engineStatus({ installed: true, signed_in: null, account: null }), { key: "home.engines.installedUnknown" });
+  // Sign-in unverified: a known credential file is mentioned (never its contents); "signed out" stays signed out.
+  assert.deepEqual(engineStatus({ installed: true, signed_in: null, account: null, credential_file_present: true }), {
+    key: "serverConnectionStatus.credentialFound"
+  });
+  assert.deepEqual(engineStatus({ installed: true, signed_in: null, account: null, credential_file_present: false }), {
+    key: "home.engines.installedUnknown"
+  });
+  assert.deepEqual(engineStatus({ installed: true, signed_in: false, account: null, credential_file_present: true }), {
+    key: "home.engines.needsSignIn"
+  });
 });
 
 test("the window shows the real host and path of the https page, without its query", () => {

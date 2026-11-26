@@ -1,4 +1,4 @@
-//! Explicit, anonymous release updates. Never restart a service here.
+//! Verified Linux release installation and managed service updates.
 
 #[derive(Debug, clap::Args)]
 pub struct UpdateArgs {
@@ -14,6 +14,11 @@ pub struct UpdateArgs {
     /// Installation prefix; normally inferred from the installed executable.
     #[arg(long)]
     pub prefix: Option<std::path::PathBuf>,
+    /// Port passed by the installer-managed systemd updater units.
+    #[arg(long, hide = true, conflicts_with_all = ["check", "version", "rollback", "prefix"])]
+    pub managed_port: Option<u16>,
+    #[arg(long, hide = true, requires = "managed_port")]
+    pub scheduled: bool,
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(clippy::unnecessary_wraps))]
@@ -66,6 +71,8 @@ mod linux {
         assets: Vec<Asset>,
         #[serde(default)]
         draft: bool,
+        #[serde(default)]
+        prerelease: bool,
     }
 
     fn tag(version: &str) -> Result<String> {
@@ -75,7 +82,7 @@ mod linux {
             || !version.starts_with(|c: char| c.is_ascii_digit())
             || !version
                 .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
             || version.contains("..")
         {
             return Err("invalid release version".into());
@@ -229,6 +236,7 @@ mod linux {
             .env("GH_PROMPT_DISABLED", "1")
             .env("GH_NO_UPDATE_NOTIFIER", "1")
             .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
             .status()
             .await
             .map_err(|e| format!("provenance verification requires gh attestation: {e}"))?;
@@ -260,7 +268,11 @@ mod linux {
         for component in path.ancestors() {
             let meta = std::fs::symlink_metadata(component)?;
             if meta.uid() != 0 || meta.mode() & 0o022 != 0 || meta.file_type().is_symlink() {
-                return Err("untrusted provenance verifier ownership or permissions".into());
+                return Err(format!(
+                    "untrusted ownership or permissions at {}",
+                    component.display()
+                )
+                .into());
             }
         }
         Ok(())
@@ -587,10 +599,23 @@ mod linux {
     #[cfg(target_os = "linux")]
     #[allow(clippy::too_many_lines)] // Keep the verified installation transaction sequential.
     pub(super) async fn run(args: &UpdateArgs) -> Result<()> {
+        if let Some(port) = args.managed_port {
+            return managed::run(port, args.scheduled).await;
+        }
         let prefix = args
             .prefix
             .clone()
             .map_or_else(|| inferred_prefix(&std::env::current_exe()?), Ok)?;
+        let _maintenance = if !args.check
+            && prefix
+                .canonicalize()
+                .as_deref()
+                .is_ok_and(|p| p == Path::new("/opt/praxi"))
+        {
+            Some(maintenance_lock()?)
+        } else {
+            None
+        };
         if !args.check {
             directory(&prefix)?;
             tempfile::Builder::new().prefix(".write-probe-").tempdir_in(&prefix)
@@ -607,18 +632,52 @@ mod linux {
             println!("rolled back to {}; restart required", previous.display());
             return Ok(());
         }
-        let client = reqwest::Client::builder()
+        let client = release_client()?;
+        let release = release(&client, API, args.version.as_deref()).await?;
+        let [archive, ..] = assets(&release)?;
+        let installed = installed_tag(&prefix);
+        println!(
+            "installed {}; available {} ({})",
+            installed
+                .as_deref()
+                .unwrap_or("incomplete (repair required)"),
+            release.tag_name,
+            archive.name
+        );
+        if args.check {
+            installed?;
+            return Ok(());
+        }
+        let _lock = lock(&prefix)?;
+        let target = prepare(&prefix, &client, &release).await?;
+        switch(&prefix, &target)?;
+        println!(
+            "installed {}; restart required (launch {}/current/bin/bot)",
+            release.tag_name,
+            prefix.display()
+        );
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn release_client() -> Result<reqwest::Client> {
+        Ok(reqwest::Client::builder()
             .https_only(true)
             .user_agent(concat!("Praxi-Bot/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(300))
-            .build()?;
-        let release = release(&client, API, args.version.as_deref()).await?;
+            .build()?)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn assets(release: &Release) -> Result<[&Asset; 3]> {
         let name = asset_name(std::env::consts::ARCH)?;
-        let archive_asset = select(&release, &name)?;
-        let checksum_asset = select(&release, &format!("{name}.sha256"))?;
-        let bundle_asset = select(&release, "praxi-linux.sigstore.json")?;
-        for asset in [archive_asset, checksum_asset, bundle_asset] {
+        let assets = [
+            select(release, &name)?,
+            select(release, &format!("{name}.sha256"))?,
+            select(release, "praxi-linux.sigstore.json")?,
+        ];
+        for asset in assets {
             let expected = format!(
                 "https://github.com/emreocell/Praxi-Bot/releases/download/{}/{}",
                 release.tag_name, asset.name
@@ -627,29 +686,26 @@ mod linux {
                 return Err("unexpected release asset origin".into());
             }
         }
-        let installed = installed_tag(&prefix);
-        println!(
-            "installed {}; available {} ({name})",
-            installed
-                .as_deref()
-                .unwrap_or("incomplete (repair required)"),
-            release.tag_name
-        );
-        if args.check {
-            installed?;
-            return Ok(());
-        }
-        directory(&prefix)?;
-        let _lock = lock(&prefix)?;
+        Ok(assets)
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn prepare(
+        prefix: &Path,
+        client: &reqwest::Client,
+        release: &Release,
+    ) -> Result<PathBuf> {
+        let [archive_asset, checksum_asset, bundle_asset] = assets(release)?;
+        let name = &archive_asset.name;
         directory(&prefix.join("versions"))?;
         // Always download and verify again, including same-tag repair. Directory
         // presence (or an interrupted current switch) is not proof of integrity.
         let staging = tempfile::Builder::new()
             .prefix(".update-")
-            .tempdir_in(&prefix)?;
-        let archive = staging.path().join(&name);
+            .tempdir_in(prefix)?;
+        let archive = staging.path().join(name);
         download(
-            &client,
+            client,
             &archive_asset.browser_download_url,
             &archive,
             MAX_ARCHIVE,
@@ -664,10 +720,10 @@ mod linux {
             4096,
         )
         .await?;
-        verify_sha256(&archive, std::str::from_utf8(&checksum)?, &name)?;
+        verify_sha256(&archive, std::str::from_utf8(&checksum)?, name)?;
         let bundle = staging.path().join("provenance.json");
         download(
-            &client,
+            client,
             &bundle_asset.browser_download_url,
             &bundle,
             16 * 1024 * 1024,
@@ -677,16 +733,13 @@ mod linux {
         let unpacked = staging.path().join("unpacked");
         std::fs::create_dir(&unpacked)?;
         unpack(&archive, &unpacked, std::env::consts::ARCH)?;
-        ensure_launchers(&prefix)?;
-        let target = publish_version(&prefix, &unpacked, &release.tag_name)?;
-        switch(&prefix, &target)?;
-        println!(
-            "installed {}; restart required (launch {}/current/bin/bot)",
-            release.tag_name,
-            prefix.display()
-        );
-        Ok(())
+        ensure_launchers(prefix)?;
+        publish_version(prefix, &unpacked, &release.tag_name)
     }
+
+    #[cfg(any(target_os = "linux", all(test, windows)))]
+    #[path = "update_managed.rs"]
+    mod managed;
 
     #[cfg(unix)]
     fn publish_version(prefix: &Path, unpacked: &Path, version: &str) -> Result<PathBuf> {
@@ -768,9 +821,16 @@ mod linux {
     }
 
     fn lock(prefix: &Path) -> Result<std::fs::File> {
-        let path = prefix.join(".update.lock");
-        if std::fs::symlink_metadata(&path)
-            .is_ok_and(|m| !m.is_file() || m.file_type().is_symlink())
+        lock_file(&prefix.join(".update.lock"))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn maintenance_lock() -> Result<std::fs::File> {
+        lock_file(Path::new("/opt/praxi.maintenance.lock"))
+    }
+
+    fn lock_file(path: &Path) -> Result<std::fs::File> {
+        if std::fs::symlink_metadata(path).is_ok_and(|m| !m.is_file() || m.file_type().is_symlink())
         {
             return Err("unsafe update lock".into());
         }

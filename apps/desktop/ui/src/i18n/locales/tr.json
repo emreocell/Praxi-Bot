@@ -4617,7 +4617,7 @@
     "connecting": "{{name}} sunucusuna bağlanılıyor…",
     "noModelKey": "{{name}} sunucusunda henüz model anahtarı yok. Ekranını izleyebilir ve botlarını yönetebilirsin; sunucuya bir anahtar eklenene kadar sohbetlere yanıt gelmez.",
     "notPaired": "{{name}} artık bu bilgisayarı kabul etmiyor. Yeni bir biletle yeniden eşleştir.",
-    "offline": "{{name}} yanıt vermiyor. Botları çalışmaya devam eder; uygulama kendiliğinden yeniden bağlanır.",
+    "offline": "{{name}} çevrimdışı. Sunucuda Praxi servisinin çalıştığını kontrol et. Uygulama bağlantıyı otomatik olarak yeniden deneyecek.",
     "updateApp": "Güncelleme gerekli: bu uygulama ({{local}}), {{name}} ({{host}}) sunucusundan eski. {{name}} ile çalışmak için bu uygulamayı güncelle.",
     "updateHost": "Güncelleme gerekli: {{name}} ({{host}}), bu uygulamadan ({{local}}) eski. {{name}} sunucusunu bu uygulamaya uyacak şekilde güncelle.",
     "useThisComputer": "Bu bilgisayarı kullan",
@@ -6349,6 +6349,22 @@
     "untrusted": "Bu çalışma dışarıdan içerik okudu. Bu isteği oradaki bir şey istemiş olabilir. O içeriğe doğrudan vermeyeceğiniz bir parolayı girmeyin.",
     "username": "Kullanıcı adı",
     "value": "Gizli değer"
+  },
+  "serverConnectionStatus": {
+    "available": "{{name}} için Praxi {{tag}} hazır. Sunucuyu güncellemeden önce uygulamayı bu sürüme getir.",
+    "credentialFound": "Kurulu · giriş dosyası bulundu, oturum doğrulanmadı",
+    "denied": "Bu bilgisayarın {{name}} sunucusunu güncelleyebilmesi için yönetici yetkisi gerekiyor. Sunucuda bilgisayarı onayla veya güncelleme komutlarını orada çalıştır.",
+    "failed": "{{name}} güncellenemedi. Yeniden dene veya sunucudaki güncelleme servisi kayıtlarına bak.",
+    "loginNeeded": "Kurulu · giriş gerekli",
+    "pairCheckVersion": "Sürümler farklı. Hangi cihazın güncellenmesi gerektiğini görmek için sunucuyu seç.",
+    "pairVersion": "Sunucu farklı bir eşleştirme protokolü kullanıyor. İki cihaza da aynı Praxi sürümünü kurup sunucuda yeni bir eşleştirme kodu oluştur.",
+    "protocolMismatch": "{{name}} sunucusu {{host}} sürümünü bildiriyor, ancak bağlantı protokolü uygulamayla uyumsuz. Eşleşen sürümü sunucuda yeniden kur.",
+    "refused": "{{name}} güncellemeyi başlatamadı. Başka bir güncelleme sürüyorsa bekle veya güncelleme komutlarını sunucuda çalıştır.",
+    "rollback_failed": "{{name}} güncellenemedi ve önceki sürüm de sağlık kontrolünü geçemedi. Sunucu konsolunu açıp Praxi servis kayıtlarına bak.",
+    "rolled_back": "{{name}} önceki sürümüne döndü. Tekrar denemeden önce sunucudaki güncelleme servisi kayıtlarına bak.",
+    "running": "{{name}} sunucusuna {{tag}} kuruluyor. Sunucu yeniden başlayınca uygulama otomatik olarak bağlanacak.",
+    "unidentified": "{{name}} sunucusu {{host}} sürüm numarasını bildiriyor, tam sürüm etiketi eksik. Sunucuyu uygulamanın sürümüne ({{local}}) getir.",
+    "versionMismatch": "Güncelleme gerekli"
   },
   "serverSignIn": {
     "apiKey": {

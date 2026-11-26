@@ -65,7 +65,8 @@ mod tests {
         assert!(c.contains("PRAXI_TAG=v0.1.0-beta.2\n"));
         assert!(c.contains("gh attestation verify"));
         assert!(c.contains("--source-ref \"refs/tags/${PRAXI_TAG}\""));
-        assert!(c.contains("--ticket-only"));
+        assert!(c.contains("--headless"));
+        assert!(c.contains("host invite --role desktop --ttl-secs 1800"));
         // the attestation check must come before the installer runs
         assert!(
             c.find("gh attestation verify").unwrap()

@@ -14,6 +14,7 @@ with tempfile.TemporaryDirectory() as temporary:
     subprocess.run(["bash", "-c", "\n".join([
         "set -eu", f"PREFIX='{root}'", "SVC_USER=praxi", "HARDENING=''",
         f"UNIT_DIR='{root}/units'", f"DATA_DIR='{root}/data'", function,
+        "SERVICE_PATH=/usr/local/bin:/usr/bin:/bin",
         f"write_wrapper praxi bot '{root}/must-not-source'",
         f"write_wrapper praxi-node bot-node '{root}/must-not-source'",
     ])], check=True)

@@ -27,6 +27,7 @@ const ENGINE_ENV: &[&str] = &[
     "XDG_CONFIG_HOME",
     "CODEX_HOME",
     "CLAUDE_CONFIG_DIR",
+    "VIBE_HOME",
 ];
 
 #[cfg(windows)]
@@ -132,9 +133,11 @@ impl PathEnv {
         #[cfg(not(windows))]
         let pathext = vec![String::new()];
 
-        let home_dir = std::env::var_os("USERPROFILE")
-            .or_else(|| std::env::var_os("HOME"))
-            .map(PathBuf::from);
+        #[cfg(windows)]
+        let home_dir = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+        #[cfg(not(windows))]
+        let home_dir = std::env::var_os("HOME");
+        let home_dir = home_dir.map(PathBuf::from);
 
         let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
         let xdg_data_home = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from);
@@ -213,6 +216,11 @@ impl PathEnv {
 
     #[must_use]
     pub fn with_home(mut self, path: PathBuf) -> Self {
+        self.env_vars
+            .insert("HOME".into(), path.to_string_lossy().into_owned());
+        #[cfg(windows)]
+        self.env_vars
+            .insert("USERPROFILE".into(), path.to_string_lossy().into_owned());
         self.home_dir = Some(path);
         self
     }
@@ -941,6 +949,7 @@ pub(crate) fn apply_sanitized_env(cmd: &mut tokio::process::Command, env: &PathE
         "XDG_CONFIG_HOME",
         "CODEX_HOME",
         "CLAUDE_CONFIG_DIR",
+        "VIBE_HOME",
     ] {
         if let Some(value) = env.env_vars.get(key)
             && !is_secret_env(key, value)
@@ -1310,9 +1319,7 @@ impl Detector {
             self.probe_unverified_auth("kiro"),
             self.probe_kimi(),
             self.probe_qoder(),
-            // Mistral Vibe: the key can be in the environment, `~/.vibe/.env`, the OS keyring
-            // or a browser sign-in, and there is no status command.
-            self.probe_unverified_auth("vibe"),
+            self.probe_vibe(),
             self.probe_goose(),
         );
 
@@ -1716,10 +1723,27 @@ impl Detector {
         cli
     }
 
-    /// Antigravity CLI: version only. It has no auth-status command, and its login
-    /// files are never read, so sign-in stays unknown.
+    /// Antigravity has no auth-status command. Inspect its dedicated token path.
     async fn probe_agy(&self) -> DetectedCli {
-        self.probe_unverified_auth("agy").await
+        let file = self
+            .env
+            .home_dir
+            .as_ref()
+            .map(|home| home.join(".gemini/antigravity-cli/antigravity-oauth-token"));
+        self.probe_credential_path("agy", file, true).await
+    }
+
+    /// Vibe's shared dotenv can exist without a Mistral key, and Vibe also has a keyring.
+    async fn probe_vibe(&self) -> DetectedCli {
+        let vibe_home = self
+            .env
+            .env_vars
+            .get("VIBE_HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .or_else(|| self.env.home_dir.as_ref().map(|home| home.join(".vibe")));
+        self.probe_credential_path("vibe", vibe_home.map(|home| home.join(".env")), false)
+            .await
     }
 
     /// Version probe only: the CLI has no sign-in evidence Praxi can read.
@@ -1788,27 +1812,34 @@ impl Detector {
     /// Version probe plus an exists-only check of a credential file under the home folder
     /// (never read).
     async fn probe_oauth_file(&self, id: &str, file: &[&str]) -> DetectedCli {
+        let path = self
+            .env
+            .home_dir
+            .as_ref()
+            .map(|h| file.iter().fold(h.clone(), |path, part| path.join(part)));
+        self.probe_credential_path(id, path, false).await
+    }
+
+    async fn probe_credential_path(
+        &self,
+        id: &str,
+        path: Option<PathBuf>,
+        missing_is_signed_out: bool,
+    ) -> DetectedCli {
         let (mut cli, resolved) = self.probe_engine_version(id).await;
         if !cli.installed || resolved.is_none() || cli.detail.is_some() {
             return cli;
         }
 
-        let exists = self
-            .env
-            .home_dir
-            .as_ref()
-            .map(|h| file.iter().fold(h.clone(), |path, part| path.join(part)))
-            .is_some_and(|p| std::fs::metadata(&p).is_ok_and(|m| m.is_file()));
-
-        cli.auth = AuthState::Unknown;
-        cli.detail = Some(
-            if exists {
-                "auth_metadata_only"
-            } else {
-                "auth_unverified"
+        match path.map(std::fs::metadata) {
+            Some(Ok(meta)) if meta.is_file() => cli.detail = Some("auth_metadata_only".into()),
+            Some(Err(error))
+                if missing_is_signed_out && error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                cli.auth = AuthState::SignedOut;
             }
-            .to_owned(),
-        );
+            _ => cli.detail = Some("auth_unverified".into()),
+        }
 
         cli
     }

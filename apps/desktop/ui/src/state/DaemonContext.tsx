@@ -35,6 +35,8 @@ import {
 import {
   deriveHostState,
   giveUpConnecting,
+  hostMismatch,
+  type HostProtocol,
   type HostStateMemory,
   type HostUiState,
   settleHostState
@@ -275,8 +277,8 @@ type DaemonData = Pick<
  * daemon and (while selected) a paired host each run their own copy, so the local
  * safety machinery never depends on which computer the views are showing.
  */
-function useDaemonData(conn: Connection | null, computerId: string): DaemonData {
-  const [health, setHealth] = useState<Health | null>(null);
+function useDaemonData(conn: Connection | null, computerId: string, protocol?: HostProtocol): DaemonData {
+  const [sample, setSample] = useState<{ client: ApiClient; health: Health; available: boolean } | null>(null);
   const [eventsConnected, setEventsConnected] = useState(false);
   const [rawBots, setBots] = useState<Bot[]>([]);
   const botOrder = useBotOrder(computerId);
@@ -289,7 +291,11 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
   const [events, dispatch] = useReducer(reducer, EMPTY_EVENTS);
 
   const [session, setSession] = useState<{ conn: Connection; client: ApiClient } | null>(null);
-  const client = session && session.conn === conn ? session.client : null;
+  const transport = session && session.conn === conn ? session.client : null;
+  const last = sample && sample.client === transport ? sample : null;
+  const health = last?.available ? last.health : null;
+  const compatible = !protocol || Boolean(protocol.localVersion && last && !hostMismatch(last.health, protocol)?.blocking);
+  const client = compatible ? transport : null;
   useEffect(() => {
     if (!conn) {
       setSession(null);
@@ -464,7 +470,33 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
     };
   }, [client, refreshBots, refreshChats, refreshRuns]);
 
-  // health indicator + reconciliation with the daemon's own pending lists
+  // Probe compatibility before opening the host event stream or asking for its lists.
+  useEffect(() => {
+    if (!transport) return undefined;
+    let stopped = false;
+    let pending = false;
+    const tick = async () => {
+      if (pending) return;
+      pending = true;
+      try {
+        let health = await transport.health();
+        if (protocol && !health.build_id && !health.release_tag) {
+          const status = await transport.hostStatus().catch(() => null);
+          if (status) health = { ...health, build_id: status.build_id, release_tag: status.release_tag };
+        }
+        if (!stopped) setSample({ client: transport, health, available: true });
+      } catch {
+        if (!stopped) setSample((current) => current?.client === transport ? { ...current, available: false } : null);
+      } finally {
+        pending = false;
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 3000);
+    return () => { stopped = true; window.clearInterval(id); };
+  }, [transport, protocol]);
+
+  // Reconcile pending lists independently of the health response.
   useEffect(() => {
     if (!client) {
       return undefined;
@@ -473,15 +505,13 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
     const tick = async () => {
       const startedAt = Date.now();
       try {
-        const [h, approvals, runList] = await Promise.all([
-          client.health(),
+        const [approvals, runList] = await Promise.all([
           client.listApprovals(),
           client.listRuns()
         ]);
         if (stopped) {
           return;
         }
-        setHealth(h);
         setRuns(runList);
         dispatch({
           type: "reconcile",
@@ -493,11 +523,7 @@ function useDaemonData(conn: Connection | null, computerId: string): DaemonData 
           pending: approvals,
           runs: runList
         });
-      } catch {
-        if (!stopped) {
-          setHealth(null);
-        }
-      }
+      } catch { /* The next reconciliation tick retries. */ }
     };
     void tick();
     const id = window.setInterval(() => void tick(), 3000);
@@ -1006,7 +1032,11 @@ export function DaemonProvider({
 export function HostSession({ children }: { children: ReactNode }) {
   const local = useDaemon();
   const { hostConn, hostList, hostError, activeComputerId } = local;
-  const data = useDaemonData(hostConn, activeComputerId);
+  const localVersion = hostList?.local_version ?? null;
+  const localApiVersion = hostList?.local_api_version ?? null;
+  const localRelease = hostList?.local_release_tag ?? null;
+  const protocol = useMemo(() => ({ localVersion, localApiVersion, localRelease }), [localVersion, localApiVersion, localRelease]);
+  const data = useDaemonData(hostConn, activeComputerId, protocol);
   const link =
     hostList?.hosts.find((h) => h.id === activeComputerId) ?? null;
   const rawHostState = useMemo<HostUiState>(() => {
@@ -1021,10 +1051,9 @@ export function HostSession({ children }: { children: ReactNode }) {
     return deriveHostState({
       link: l,
       health: data.health,
-      localVersion: hostList?.local_version ?? null,
-      localApiVersion: hostList?.local_api_version ?? null
+      ...protocol
     });
-  }, [activeComputerId, data.health, hostConn, hostError, hostList, link]);
+  }, [activeComputerId, data.health, hostConn, hostError, hostList, link, protocol]);
   // One stable state per connection: no flicker between connecting / connected / offline.
   const memory = useRef<HostStateMemory | null>(null);
   const [, setTick] = useState(0);

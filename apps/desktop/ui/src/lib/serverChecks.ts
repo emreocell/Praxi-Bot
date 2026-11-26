@@ -1,3 +1,5 @@
+import { hostMismatch, type HostHealthLike, type HostProtocol } from "./hostState.ts";
+
 /**
  * The live checks shown after a server was paired with its one-command code:
  * can this app reach it, does it run the same version, is there a screen to
@@ -16,17 +18,11 @@ export interface ServerProbe {
   /** Open the guarded channel; rejects when the server does not answer. */
   connect(): Promise<void>;
   /** Version and screen of the server as it reports them. */
-  status(): Promise<{ version: string; hasDisplay: boolean }>;
+  status(): Promise<{ build: HostHealthLike; hasDisplay: boolean }>;
   /** This app's own version. */
-  localVersion(): Promise<string | null>;
+  localVersion(): Promise<HostProtocol>;
   /** True when this app may send model keys to the server. */
   canSendModels(): Promise<boolean>;
-}
-
-/** "v0.1.0-beta.2" and "0.1.0" are the same release line: compare the numbers only. */
-export function sameRelease(a: string | null, b: string | null): boolean {
-  const norm = (v: string | null) => (v ?? "").trim().replace(/^v/i, "").split(/[-+]/)[0];
-  return norm(a) !== "" && norm(a) === norm(b);
 }
 
 const initial = (): PairCheckRow[] => PAIR_CHECKS.map((id) => ({ id, state: "pending" }));
@@ -46,7 +42,7 @@ export async function runPairChecks(
     onChange(rows);
   };
   set("reach", "running");
-  let status: { version: string; hasDisplay: boolean };
+  let status: Awaited<ReturnType<ServerProbe["status"]>>;
   try {
     await probe.connect();
     status = await probe.status();
@@ -56,13 +52,8 @@ export async function runPairChecks(
   }
   set("reach", "pass");
   set("version", "running");
-  let local: string | null = null;
-  try {
-    local = await probe.localVersion();
-  } catch {
-    local = null;
-  }
-  set("version", sameRelease(local, status.version) ? "pass" : "warn");
+  const local = await probe.localVersion().catch(() => null);
+  set("version", local?.localVersion && !hostMismatch(status.build, local) ? "pass" : "warn");
   set("screen", status.hasDisplay ? "pass" : "warn");
   set("models", "running");
   let models = false;

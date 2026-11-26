@@ -130,6 +130,37 @@ değişmişse komut herhangi bir değişiklikten önce durur (`host key mismatch
 `--uninstall` ayrıca kaldırır ve veriyi korur. `--purge` ise `/var/lib/praxi`, `/etc/praxi` ve
 `praxi` kullanıcısını siler. `--yes`, `--purge` için yazdırılan onayı atlar.
 
+Yönetilen güncelleyiciyle kurulmuş bir Linux sunucusunda **Sunucuyu güncelle**
+düğmesi, masaüstü uygulamasının yayınlanan sürümünü eşleştirilmiş bağlantı üzerinden
+ister. Bu işlem için masaüstünün sunucu yönetici yetkisi gerekir. Güncelleyici
+SHA‑256 özetini ve GitHub derleme kaynağını doğrular, program dosyalarını değiştirir,
+`praxi.service` birimini yeniden başlatır ve yeni sürecin hazır olmasını bekler.
+Sağlık kontrolü başarısız olursa önceki program dosyalarını geri koyar ve önceki
+sürümün yeniden açıldığını kontrol eder. Daha eski kurulumlarda doğrulanmış kurulum
+programıyla bir kez yükseltme yap. Uygulama güncellemeyi başlatamazsa SSH ile
+yükseltme yolunu veya uygulamanın gösterdiği komutları kullan.
+
+Zamanlanmış güncellemeler varsayılan olarak kapalıdır. Ayarı değiştirmek için
+`/etc/praxi/updates.toml` dosyasını root olarak oluştur ve modu ve kanalı seç.
+
+```toml
+mode = "notify"         # off, notify, auto
+channel = "stable"      # stable, pre-release
+```
+
+systemd zamanlayıcısı her gün kontrol eder. `notify`, masaüstünde seçili sunucu
+için yeni sürümü gösterir. `auto` güncellemeyi de kurar ve botlar çalışırken servisi
+yeniden başlatabilir. `stable` kararlı sürümü bekler. `pre-release` ön sürümleri de
+kontrol eder. Ayar değişikliğini hemen uygulamak için
+`sudo systemctl start praxi-update-check.service` çalıştır. Hata kayıtları için
+`sudo journalctl -u 'praxi-update*.service'` komutunu kullan. Masaüstünden gelen
+güncelleme isteklerini kapatmak için sunucuda `praxi-update.socket` birimini durdur
+ve devre dışı bırak.
+
+Otomatik geri alma program dosyalarını geri yükler. Önemli veriler bulunan bir
+sunucuyu yükseltmeden önce aşağıdaki yedekleme adımlarını uygula. Böylece başarısız
+bir veri geçişinden de dönebilirsin.
+
 ## Geri alma
 
 Yükseltmenin ne kadar ilerlediğine uyan yolu kullan.
@@ -193,6 +224,16 @@ tutarken ya da servis portunda yanıt verirken çalışmayı reddeder, bu yüzde
 
 ## Masaüstü uygulamasını eşleştirme
 
+**Sunucu sağlayıcısının konsolundan:** masaüstünde **Sunucu ekle** ekranını aç
+ve **Sunucum var** seçeneğini seç. Kurulum komutunu sunucu konsoluna yapıştır.
+Komut kurulum programını doğrular, servisi kurar ve QR ile bir `bot-pair:` satırı
+gösterir. Satırın tamamını 30 dakika içinde uygulamaya yapıştır. Süre dolduysa
+sunucuda `sudo praxi host invite --role desktop` ile yeni bir kod al.
+
+**Praxi desktop** eşleştirmeyi yaptığın bilgisayarı temsil eder. Çevrimdışı olması
+o bilgisayarı hedefleyen işleri etkiler. Sunucuyu hedefleyen işler, masaüstü
+kapalıyken sunucuda çalışmaya devam edebilir.
+
 Masaüstü uygulaması sunucuyla dışa doğru açılan bir eş kanalı üzerinden konuşur. Sunucu bunun için
 fazladan bir dinleme portu açmaz. İki eşleştirme yolu var:
 
@@ -245,6 +286,16 @@ eşleştirilmiş uygulamayla ulaş. Oracle güvenlik listesi notları
 [Güvenlik duvarı notları](remote-host.md) bölümünde.
 
 ## Sorun giderme
+
+Sunucudaki kodlama CLI’ları `praxi` servis hesabıyla kurulur ve denetlenir.
+Sunucu ayarlarındaki giriş seçeneğini kullan. CLI kendi terminalinde kurulum
+istiyorsa sunucuda bir terminal açıp aynı hesap ve yolları kullan.
+
+```sh
+sudo -Hu praxi env HOME=/var/lib/praxi NPM_CONFIG_PREFIX=/var/lib/praxi/.npm-global \
+  PATH=/var/lib/praxi/.local/bin:/var/lib/praxi/.npm-global/bin:/usr/local/bin:/usr/bin:/bin \
+  /bin/bash --noprofile --norc
+```
 
 | Ne görüyorsun | Ne yapmalı |
 | --- | --- |

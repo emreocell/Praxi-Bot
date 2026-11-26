@@ -27,7 +27,7 @@ export function wantedComputer(home: Home, workLocalNow: boolean, localId: strin
 }
 
 /** What the status chip says about the bots' computer. */
-export type HomeStatus = "local" | "online" | "starting" | "degraded" | "connecting" | "offline" | "temporary";
+export type HomeStatus = "local" | "online" | "starting" | "degraded" | "connecting" | "offline" | "temporary" | "version_mismatch";
 
 export function homeStatus(home: Home, workLocalNow: boolean, host: HostUiState | null): HomeStatus {
   if (home.kind === "local") {
@@ -45,7 +45,7 @@ export function homeStatus(home: Home, workLocalNow: boolean, host: HostUiState 
     case "degraded":
       return "degraded";
     case "version_mismatch":
-      return host.blocking ? "offline" : "online";
+      return host.blocking ? "version_mismatch" : "online";
     case "offline":
     case "not_paired":
       return "offline";

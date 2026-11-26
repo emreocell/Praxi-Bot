@@ -82,6 +82,23 @@ test("a patch-only difference warns but does not block", () => {
   assert.equal(hostAcceptsWork(s), true);
 });
 
+test("published preview builds use the exact release, including legacy build IDs", () => {
+  const derive = (remote: Partial<HostHealthLike>) => deriveHostState({
+    link: link("connected"), health: health(remote), ...base, localRelease: "v0.1.0-alpha.10"
+  });
+  assert.deepEqual(derive({ build_id: "v0.1.0-alpha.5" }), {
+    kind: "version_mismatch", local: "v0.1.0-alpha.10", host: "v0.1.0-alpha.5", blocking: true, update: "host"
+  });
+  assert.equal(derive({ release_tag: "v0.1.0-alpha.10" }).kind, "connected");
+  assert.equal(hostAcceptsWork(derive({ release_tag: "v0.1.0-alpha.11" })), false);
+  assert.equal(olderSide("v0.1.0-alpha.10", "v0.1.0-alpha.11"), "app");
+  assert.equal(hostAcceptsWork(derive({ release_tag: "v0.1.0-alpha.10", api_version: "2" })), false);
+  const unidentified = derive({});
+  assert.equal(hostAcceptsWork(unidentified), false);
+  assert.equal(unidentified.kind === "version_mismatch" && unidentified.unidentified, true);
+  assert.equal(homeStatus({ kind: "host", hostId: "h1", name: "Oracle" }, false, unidentified), "version_mismatch");
+});
+
 test("setup_required on a compatible host is the no-model-key state", () => {
   const s = deriveHostState({
     link: link("connected"),
