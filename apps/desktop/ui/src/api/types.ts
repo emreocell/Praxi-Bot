@@ -520,6 +520,14 @@ export type ComponentId = S["ComponentId"];
 export type ComposioDisconnect = S["ComposioDisconnectDto"];
 export type ComposioTest = S["ComposioTestDto"];
 
+// ---- Calendar accounts (`/v1/calendar/*`) ----------------------------------
+
+export type CalendarAccount = S["CalendarAccountDto"];
+export type CalendarAccountInput = S["CalendarAccountInput"];
+export type CalendarTestInput = S["CalendarTestInput"];
+export type CalendarTestReport = S["CalendarTestReport"];
+export type CalendarFound = S["CalendarFoundDto"];
+
 // ---- E-mail accounts (`/v1/email/*`) ---------------------------------------
 
 export type EmailAccount = S["EmailAccountDto"];

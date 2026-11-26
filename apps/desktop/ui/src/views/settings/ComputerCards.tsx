@@ -15,6 +15,7 @@ import { useLiveView } from "../../state/LiveViewContext";
 import styles from "../SettingsModal.module.css";
 import { PermissionsSection } from "../SettingsSections";
 import { ComputerAccessCard } from "../../components/ComputerAccess";
+import { CalendarCard } from "./CalendarCard";
 import { WebSearchCard } from "./WebSearchCard";
 import { WorkspaceStorageCard } from "./WorkspaceStorageCard";
 import { AuditLogCard } from "./AuditLogCard";
@@ -237,6 +238,19 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
       node: (
         <SettingsCard title={t("settingsModal.webSearch.title")} description={t("settingsModal.webSearch.description")}>
           <WebSearchCard />
+        </SettingsCard>
+      )
+    },
+    {
+      id: "calendar",
+      section: "computer",
+      kind: "block",
+      title: t("settingsModal.calendar.title"),
+      description: t("settingsModal.calendar.description"),
+      keywords: "calendar caldav event meeting invite google icloud fastmail nextcloud takvim etkinlik toplantı davet kalender termin",
+      node: (
+        <SettingsCard title={t("settingsModal.calendar.title")} description={t("settingsModal.calendar.description")}>
+          <CalendarCard />
         </SettingsCard>
       )
     },

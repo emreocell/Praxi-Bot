@@ -51,6 +51,9 @@ import type {
   UsageSummary,
   GlobalEnvelope,
   ViewHeartbeat,
+  CalendarAccount,
+  CalendarAccountInput,
+  CalendarTestInput,
   WebSearchConfig,
   WebSearchConfigInput,
   WebSearchTestInput,
@@ -2799,6 +2802,11 @@ export class MockApiClient extends ApiClient {
       case "PUT /web":
       case "POST /web":
         return ok(this.web(method, seg, opts.body));
+      case "GET /calendar":
+      case "POST /calendar":
+      case "PUT /calendar":
+      case "DELETE /calendar":
+        return ok(this.calendar(method, seg, opts.body));
       default:
         throw new ApiError(404, "not_found", `mock: ${method} ${path}`);
     }
@@ -3287,6 +3295,65 @@ export class MockApiClient extends ApiClient {
       stt_key_set: b.clear_stt_key ? false : b.stt_key ? true : this.voice.stt_key_set
     };
     return { ...this.voice };
+  }
+
+  private calendarAccounts: CalendarAccount[] = [];
+
+  private calendar(method: string, seg: string[], body: unknown): unknown {
+    const [, sub, name] = seg;
+    if (sub === "test" && method === "POST") {
+      const input = (body ?? {}) as CalendarTestInput;
+      if (input.password === "wrong") {
+        return { ok: false, calendars: [], scheduling: false, error: "The server refused the login. Check the user name and the app password." };
+      }
+      return {
+        ok: true,
+        scheduling: true,
+        calendars: [
+          { name: "Personal", url: "https://dav.example.com/calendars/me/personal/" },
+          { name: "Work", url: "https://dav.example.com/calendars/me/work/" }
+        ],
+        error: null
+      };
+    }
+    if (sub !== "accounts") {
+      throw new ApiError(404, "not_found", "mock calendar");
+    }
+    if (!name && method === "GET") {
+      return structuredClone(this.calendarAccounts);
+    }
+    if (!name && method === "POST") {
+      const input = (body ?? {}) as CalendarAccountInput;
+      if (this.calendarAccounts.some((a) => a.name === input.name)) {
+        throw new ApiError(409, "conflict", `a calendar named ${input.name} already exists`);
+      }
+      const made: CalendarAccount = {
+        name: input.name ?? "",
+        url: input.url,
+        username: input.username,
+        email: input.email?.trim() || null,
+        password_set: true
+      };
+      this.calendarAccounts.push(made);
+      return structuredClone(made);
+    }
+    const at = this.calendarAccounts.findIndex((a) => a.name === name);
+    if (at < 0) {
+      throw new ApiError(404, "not_found", `calendar ${name ?? ""}`);
+    }
+    if (method === "DELETE") {
+      this.calendarAccounts.splice(at, 1);
+      return undefined;
+    }
+    const input = (body ?? {}) as CalendarAccountInput;
+    const next: CalendarAccount = {
+      ...this.calendarAccounts[at],
+      url: input.url,
+      username: input.username,
+      email: input.email?.trim() || null
+    };
+    this.calendarAccounts[at] = next;
+    return structuredClone(next);
   }
 
   private web(method: string, seg: string[], body: unknown): unknown {

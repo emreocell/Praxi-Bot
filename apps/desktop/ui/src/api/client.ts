@@ -192,6 +192,10 @@ import type {
   VoiceConfig,
   VoiceConfigInput,
   LocalVoiceStatus,
+  CalendarAccount,
+  CalendarAccountInput,
+  CalendarTestInput,
+  CalendarTestReport,
   WebSearchConfig,
   WebSearchConfigInput,
   WebSearchTestInput,
@@ -1952,6 +1956,29 @@ export class ApiClient {
   /** Dictation: the recording goes to the service the owner configured. */
   transcribe(input: TranscribeInput): Promise<TranscribeOutput> {
     return this.request("POST", "/voice/transcribe", { body: input });
+  }
+
+  listCalendarAccounts(): Promise<CalendarAccount[]> {
+    return this.request("GET", "/calendar/accounts");
+  }
+
+  /** The `password` is write-only: the daemon stores it and never returns it. */
+  createCalendarAccount(input: CalendarAccountInput): Promise<CalendarAccount> {
+    return this.request("POST", "/calendar/accounts", { body: input });
+  }
+
+  /** Without `password` the stored one is kept. */
+  updateCalendarAccount(name: string, input: CalendarAccountInput): Promise<CalendarAccount> {
+    return this.request("PUT", `/calendar/accounts/${encodeURIComponent(name)}`, { body: input });
+  }
+
+  deleteCalendarAccount(name: string): Promise<void> {
+    return this.request("DELETE", `/calendar/accounts/${encodeURIComponent(name)}`);
+  }
+
+  /** Try a saved account (`name`) or an unsaved login; lists its calendars. */
+  testCalendar(input: CalendarTestInput): Promise<CalendarTestReport> {
+    return this.request("POST", "/calendar/test", { body: input });
   }
 
   getWebSearch(): Promise<WebSearchConfig> {

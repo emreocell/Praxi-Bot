@@ -1,45 +1,59 @@
 # Calendar (CalDAV)
 
-Bots can read and add events in a CalDAV calendar (Nextcloud, Radicale,
-Fastmail, iCloud, Synology ...). Every call goes through the permission engine
+Bots can read, add, change and delete events in a CalDAV calendar (Nextcloud,
+Radicale, Fastmail, iCloud, Synology ...), find free time across calendars, make
+repeating events and invite people. Every call goes through the permission engine
 like any other tool.
 
 ## Set it up
 
-1. Store the calendar password in the secret store (never in a config file):
+Open **Settings > Mail & web > Calendar**:
 
-   ```
-   bot secrets set calendar/home/password
-   ```
+1. Pick your service (iCloud, Fastmail, Nextcloud, Google or Other). The address is filled in for you.
+2. Enter your user name and an **app password** (not your normal password). Each
+   preset explains where to create one.
+3. Press **Test connection**. It lists the calendars it finds and tells you whether
+   the service sends invitations itself. Pick the calendar your bots should use.
+4. Press **Add calendar**.
 
-2. Create `<data dir>/calendar.toml`:
+The password goes to the secret store; it is never written to a file and never shown
+again. The tools work from the next call, with no restart. Remove a calendar with the
+bin icon next to it, which also deletes its stored password.
 
-   ```toml
-   [[calendar]]
-   name = "home"
-   url = "https://dav.example.com/calendars/me/personal/"   # the calendar collection
-   username = "me"
-   password = "calendar/home/password"                      # reference, not the password
-   ```
+Google only accepts app passwords for calendars on some accounts. If the test fails
+for a Google account, that is the likely reason.
 
-3. Restart `bot serve`. The `calendar_*` tools appear for bots that are allowed
-   to use them.
+You can still configure calendars by hand with `<data dir>/calendar.toml` (`name`,
+`url`, `username`, and `password` as a secret-store reference such as
+`calendar/home/password`); the Settings page edits the same file.
 
 ## Tools
 
 | Tool | Effect | Notes |
 | --- | --- | --- |
-| `calendar_list_events` | read | Events overlapping a range; recurring events are expanded by the server. Titles and notes are untrusted text. |
-| `calendar_create_event` | write | Adds one event. No attendees are written, so nobody is invited or notified. |
+| `calendar_list_events` | read | Events overlapping a range; repeating events are listed once per occurrence. Titles and notes are untrusted text. |
+| `calendar_free_busy` | read | Free slots across all (or the named) calendars, optionally inside working hours. Reports a calendar it could not read instead of hiding it. |
+| `calendar_create_event` | write | Adds an event, optionally repeating (`recurrence`, an RRULE) and with `attendees`. |
+| `calendar_update_event` | write | Renames or moves an event, changes its place, notes, repeat rule or attendees. Only the fields you pass change. |
 | `calendar_delete_event` | destructive | Deletes one event by `uid`; always asks. |
 
 Dates are `YYYY-MM-DD` (whole day) or RFC 3339 with an offset.
+
+### Invitations
+
+Adding attendees, changing an event that has attendees, or removing one always asks
+you first, whatever your permission level. If the calendar server supports CalDAV
+scheduling it sends the invitations itself. Otherwise the bot sends an e-mail with an
+`.ics` attachment through your e-mail account (set one up under Settings > Mail &
+web > E-mail). An event without attendees notifies nobody.
 
 ## Safety
 
 - The URL must be `https` (plain `http` only for a loopback host: `localhost`, `::1` or `127.*`, e.g. a test server).
 - Redirects are never followed, so the password cannot be sent to another host.
-- A server-supplied link is used for deleting only if it stays inside the
+- A server-supplied link is used for changing or deleting only if it stays inside the
   configured calendar.
 - Calendar text returned to the model is marked as untrusted data; a run that
   read it is tainted like one that read a web page or an e-mail.
+- Adding, testing and removing calendars is an owner action: a paired desktop cannot
+  change the credentials of a host.

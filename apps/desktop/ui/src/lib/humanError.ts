@@ -21,6 +21,7 @@ export const DAEMON_ERROR_CODES = [
   "admin_rate_limit",
   "approval_once_only",
   "attachment_too_large",
+  "bad_calendar_config",
   "bad_composio_request",
   "bad_email_config",
   "bad_engine",

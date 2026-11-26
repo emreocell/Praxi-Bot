@@ -1176,6 +1176,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/calendar/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The saved calendar accounts, non-secret fields only (`password_set` says
+         *     whether a password is stored; it is never returned).
+         */
+        get: operations["list_calendar_accounts"];
+        put?: never;
+        /**
+         * Add a calendar account. The `password` goes to the secret store (never to
+         *     `calendar.toml`, never returned). Takes effect for the next tool call, no
+         *     restart needed.
+         */
+        post: operations["create_calendar_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/calendar/accounts/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change an account. Without `password` the stored one is kept. */
+        put: operations["update_calendar_account"];
+        post?: never;
+        /** Remove an account and its stored password. */
+        delete: operations["delete_calendar_account"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/calendar/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Try a login and list the calendars behind it: a saved account (`name`) or an
+         *     unsaved login (`url`, `username`, `password`). A server that cannot be
+         *     reached or refuses the login answers `200` with `ok: false` and a plain
+         *     message. At most two connection tests run at once (`429`).
+         */
+        post: operations["test_calendar"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/channels": {
         parameters: {
             query?: never;
@@ -5915,6 +5980,68 @@ export interface components {
         };
         /** @enum {string} */
         Button: "left" | "middle" | "right";
+        /** @description One calendar account (non-secret fields only). */
+        CalendarAccountDto: {
+            /** @description Address invitations are sent from; `null` uses the login when it is an address. */
+            email?: string | null;
+            /** @description Short name bots use to pick the calendar (`personal`). */
+            name: string;
+            /** @description Whether a password is stored (never returned). */
+            password_set: boolean;
+            /** @description Address of the calendar (a `CalDAV` collection). */
+            url: string;
+            /** @description Login name. */
+            username: string;
+        };
+        /** @description Body of `POST /v1/calendar/accounts` and `PUT /v1/calendar/accounts/{name}`. */
+        CalendarAccountInput: {
+            /** @description Address invitations are sent from. Empty clears it. */
+            email?: string | null;
+            /** @description Short name (letters, digits, `-` and `_`). Ignored by `PUT`: the path names it. */
+            name?: string;
+            /** @description (App) password, **write-only**. Required to create; with `PUT` omitted keeps the stored one. */
+            password?: string | null;
+            /**
+             * @description Address of the calendar. A server address that holds several calendars
+             *     is accepted when it holds exactly one.
+             */
+            url: string;
+            /** @description Login name. */
+            username: string;
+        };
+        /** @description A calendar a test found. */
+        CalendarFoundDto: {
+            /** @description Name the owner gave it. */
+            name: string;
+            /** @description Its address: what an account's `url` should be. */
+            url: string;
+        };
+        /**
+         * @description Body of `POST /v1/calendar/test`: either a saved account (`name`) or a login
+         *     that is not saved yet (`url`, `username`, `password`). Never a mix: a saved
+         *     account is always tried at its own address.
+         */
+        CalendarTestInput: {
+            /** @description A saved account to test. */
+            name?: string | null;
+            /** @description (App) password, **write-only**, used once. */
+            password?: string | null;
+            /** @description Address to try. */
+            url?: string | null;
+            /** @description Login name. */
+            username?: string | null;
+        };
+        /** @description Result of `POST /v1/calendar/test`. */
+        CalendarTestReport: {
+            /** @description The calendars found. */
+            calendars: components["schemas"]["CalendarFoundDto"][];
+            /** @description What went wrong, in plain words (`null` on success). */
+            error?: string | null;
+            /** @description `true` when the server accepted the login and was reachable. */
+            ok: boolean;
+            /** @description Whether the server sends invitations itself (`CalDAV` scheduling). */
+            scheduling: boolean;
+        };
         Capabilities: {
             codecs: components["schemas"]["Codec"][];
             input: boolean;
@@ -15654,6 +15781,253 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_calendar_accounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarAccountDto"][];
+                };
+            };
+            /** @description calendar management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_calendar_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarAccountInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarAccountDto"];
+                };
+            };
+            /** @description bad password */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the name is taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config or the server refused the login */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description calendar management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_calendar_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description account name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarAccountInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarAccountDto"];
+                };
+            };
+            /** @description bad password */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description no such account */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid config or the server refused the login */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description calendar management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_calendar_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description account name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description no such account */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description calendar management is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_calendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarTestInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarTestReport"];
+                };
+            };
+            /** @description bad password */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description nothing to test */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description too many tests running */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description calendar management is not available */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -126,9 +126,10 @@
     "headings": [
       "Kurulum",
       "Araçlar",
+      "Davetler",
       "Güvenlik"
     ],
-    "summary": "Botlar bir CalDAV takviminde (Nextcloud, Radicale, Fastmail, iCloud, Synology ...) etkinlik okuyabilir ve"
+    "summary": "Botlar bir CalDAV takviminde (Nextcloud, Radicale, Fastmail, iCloud, Synology ...) etkinlik okuyabilir,"
   },
   {
     "doc": "tr/chatting-and-approvals.md",

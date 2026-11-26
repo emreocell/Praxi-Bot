@@ -100,6 +100,7 @@ export const CARD_META: Record<string, CardMeta> = {
   "bot-workspaces": { page: "connections", group: "computers", advanced: true },
   "web-search": { page: "connections", group: "mailWeb" },
   email: { page: "connections", group: "mailWeb" },
+  calendar: { page: "connections", group: "mailWeb" },
   "email-channel": { page: "connections", group: "mailWeb", advanced: true },
   "mail-guard": { page: "connections", group: "mailWeb", advanced: true },
   vault: { page: "connections", group: "vault" },

@@ -3068,6 +3068,10 @@
         "hint": "Hänge eine kleinere Datei an (höchstens 15 MB, Bilder 5 MB).",
         "title": "Diese Datei ist zu groß"
       },
+      "bad_calendar_config": {
+        "hint": "Prüfe Adresse, Benutzername und App-Passwort und versuche es erneut.",
+        "title": "Die Kalendereinstellungen sind nicht gültig"
+      },
       "bad_composio_request": {
         "hint": "Prüfe die App und die eingegebenen Werte und versuche es erneut.",
         "title": "Composio hat die Anfrage nicht verstanden"
@@ -6272,6 +6276,63 @@
         "title": "Zugangsschlüssel",
         "unknown": "Wir können nicht erkennen, für welchen Anbieter dieser Schlüssel gilt. Wähle unten einen aus."
       }
+    },
+    "calendar": {
+      "add": "Add calendar",
+      "addTitle": "Connect a calendar",
+      "description": "Let your bots read and manage your calendar.",
+      "emailHint": "Invitations come from this address. Leave it empty if your user name is already your email address.",
+      "emailLabel": "Your email address (optional)",
+      "empty": "No calendar is connected yet.",
+      "loadError": "Could not load your calendars ({{message}}).",
+      "nameHint": "Letters, numbers, - and _. Bots use this name to pick the calendar.",
+      "nameLabel": "Name for your bots",
+      "note": "Your bots can look at your calendar, find free time, add and move events and invite people. The password is kept in the secure store and is never shown again.",
+      "passwordHint": "Use an app password, not your normal password. It is stored securely and cannot be read back.",
+      "passwordLabel": "App password",
+      "pickHint": "Choose the calendar your bots should use:",
+      "presets": {
+        "fastmail": {
+          "hint": "Use your Fastmail address and an app password with calendar access (Settings, Privacy & Security, Integrations).",
+          "label": "Fastmail"
+        },
+        "google": {
+          "hint": "Use your full Gmail address and an app password (Google Account, Security, App passwords; needs 2-step verification). Google sometimes refuses app passwords for calendars. If the test fails, that is the likely reason.",
+          "label": "Google Calendar"
+        },
+        "icloud": {
+          "hint": "Use your Apple ID and an app-specific password (account.apple.com, Sign-In and Security).",
+          "label": "iCloud (Apple)"
+        },
+        "nextcloud": {
+          "hint": "Enter your server's address and your user name. Create an app password in Settings, Security, Devices & sessions.",
+          "label": "Nextcloud"
+        },
+        "other": {
+          "hint": "Paste the CalDAV address your calendar service gives you.",
+          "label": "Other (CalDAV)"
+        }
+      },
+      "remove": "Remove {{name}}",
+      "savedTestOk": "{{name}} works. Found {{count}} calendars.",
+      "savedTestOk_one": "{{name}} works. Found {{count}} calendar.",
+      "schedulingOff": "This service does not send invitations itself, so your bot will send them by email instead (an email account is needed for that).",
+      "schedulingOn": "This service sends invitations itself.",
+      "serverLabel": "Your Nextcloud server",
+      "serviceLabel": "Calendar service",
+      "test": "Test connection",
+      "testFailed": "The test did not work: {{error}}",
+      "testOk": "Connected. Found {{count}} calendars.",
+      "testOk_one": "Connected. Found {{count}} calendar.",
+      "testing": "Testing...",
+      "title": "Calendar",
+      "toast": {
+        "added": "{{name}} was added.",
+        "removed": "{{name}} was removed."
+      },
+      "urlHint": "Filled in for you. Test the connection to pick the right calendar from the list.",
+      "urlLabel": "Calendar address",
+      "usernameLabel": "User name"
     },
     "computer": {
       "target": {

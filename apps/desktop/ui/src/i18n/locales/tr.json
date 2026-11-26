@@ -3068,6 +3068,10 @@
         "hint": "Daha küçük bir dosya ekle (en fazla 15 MB, görseller 5 MB).",
         "title": "Bu dosya çok büyük"
       },
+      "bad_calendar_config": {
+        "hint": "Adresi, kullanıcı adını ve uygulama parolasını kontrol edip yeniden dene.",
+        "title": "Takvim ayarları geçerli değil"
+      },
       "bad_composio_request": {
         "hint": "Uygulamayı ve girdiğin değerleri kontrol edip yeniden dene.",
         "title": "Composio isteği anlamadı"
@@ -6273,6 +6277,63 @@
         "unknown": "Bu anahtarın hangi sağlayıcıya ait olduğunu anlayamadık. Aşağıdan birini seç."
       }
     },
+    "calendar": {
+      "add": "Takvimi ekle",
+      "addTitle": "Takvim bağla",
+      "description": "Botların takvimini okuyup yönetebilsin.",
+      "emailHint": "Davetler bu adresten gider. Kullanıcı adın zaten e-posta adresinse boş bırak.",
+      "emailLabel": "E-posta adresin (isteğe bağlı)",
+      "empty": "Henüz bağlı bir takvim yok.",
+      "loadError": "Takvimler yüklenemedi ({{message}}).",
+      "nameHint": "Harf, rakam, - ve _ kullanabilirsin. Botlar takvimi bu adla seçer.",
+      "nameLabel": "Botlar için ad",
+      "note": "Botların takvimine bakabilir, boş zaman bulabilir, etkinlik ekleyip taşıyabilir ve insanları davet edebilir. Parola güvenli depoda saklanır ve bir daha gösterilmez.",
+      "passwordHint": "Normal parolanı değil, bir uygulama parolası kullan. Güvenli şekilde saklanır ve geri okunamaz.",
+      "passwordLabel": "Uygulama parolası",
+      "pickHint": "Botların hangi takvimi kullansın, seç:",
+      "presets": {
+        "fastmail": {
+          "hint": "Fastmail adresini ve takvim erişimi olan bir uygulama parolası kullan (Ayarlar, Gizlilik ve Güvenlik, Entegrasyonlar).",
+          "label": "Fastmail"
+        },
+        "google": {
+          "hint": "Tam Gmail adresini ve bir uygulama parolası kullan (Google Hesabı, Güvenlik, Uygulama parolaları; 2 adımlı doğrulama gerekir). Google bazen takvimler için uygulama parolalarını reddeder. Deneme başarısız olursa muhtemel neden budur.",
+          "label": "Google Takvim"
+        },
+        "icloud": {
+          "hint": "Apple Kimliğini ve uygulamaya özel bir parola kullan (account.apple.com, Oturum Açma ve Güvenlik).",
+          "label": "iCloud (Apple)"
+        },
+        "nextcloud": {
+          "hint": "Sunucunun adresini ve kullanıcı adını yaz. Uygulama parolasını Ayarlar, Güvenlik, Cihazlar ve oturumlar bölümünden oluştur.",
+          "label": "Nextcloud"
+        },
+        "other": {
+          "hint": "Takvim hizmetinin verdiği CalDAV adresini yapıştır.",
+          "label": "Diğer (CalDAV)"
+        }
+      },
+      "remove": "{{name}} takvimini kaldır",
+      "savedTestOk": "{{name}} çalışıyor. {{count}} takvim bulundu.",
+      "savedTestOk_one": "{{name}} çalışıyor. {{count}} takvim bulundu.",
+      "schedulingOff": "Bu hizmet davetleri kendisi göndermez; botun davetleri e-postayla gönderir (bunun için bir e-posta hesabı gerekir).",
+      "schedulingOn": "Bu hizmet davetleri kendisi gönderir.",
+      "serverLabel": "Nextcloud sunucun",
+      "serviceLabel": "Takvim hizmeti",
+      "test": "Bağlantıyı dene",
+      "testFailed": "Deneme başarısız oldu: {{error}}",
+      "testOk": "Bağlandı. {{count}} takvim bulundu.",
+      "testOk_one": "Bağlandı. {{count}} takvim bulundu.",
+      "testing": "Deneniyor...",
+      "title": "Takvim",
+      "toast": {
+        "added": "{{name}} eklendi.",
+        "removed": "{{name}} kaldırıldı."
+      },
+      "urlHint": "Senin için dolduruldu. Listeden doğru takvimi seçmek için bağlantıyı dene.",
+      "urlLabel": "Takvim adresi",
+      "usernameLabel": "Kullanıcı adı"
+    },
     "computer": {
       "target": {
         "description": "Botlarının çalıştığı bilgisayar.",
@@ -6721,7 +6782,7 @@
         "name": "Görünüm"
       },
       "connections": {
-        "description": "Botlarının çalıştığı bilgisayarlar ve bağlandıkları hizmetler: e-posta, web araması ve şifreler.",
+        "description": "Botlarının çalıştığı bilgisayarlar ve bağlandıkları hizmetler: e-posta, takvim, web araması ve şifreler.",
         "name": "Bağlantılar"
       },
       "general": {

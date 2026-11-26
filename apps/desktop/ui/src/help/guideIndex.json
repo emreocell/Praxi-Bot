@@ -128,9 +128,10 @@
     "headings": [
       "Set it up",
       "Tools",
+      "Invitations",
       "Safety"
     ],
-    "summary": "Bots can read and add events in a CalDAV calendar (Nextcloud, Radicale,"
+    "summary": "Bots can read, add, change and delete events in a CalDAV calendar (Nextcloud,"
   },
   {
     "doc": "chatting-and-approvals.md",
