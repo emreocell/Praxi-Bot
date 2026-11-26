@@ -243,7 +243,7 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
       t("settings.notifications.title"),
       t("settings.notifications.description"),
       <NotificationSettings settings={settings} onChange={update} />,
-      { kind: "block", keywords: "notifications bildirim notify alert uyari quiet hours digest sessiz saat ozet benachrichtigung ruhezeit" }
+      { kind: "block", keywords: "notifications bildirim notify alert uyari quiet hours digest sessiz saat saatler ozet private gizli gizlilik privacy benachrichtigung ruhezeit datenschutz" }
     ),
     card(
       "onboarding",

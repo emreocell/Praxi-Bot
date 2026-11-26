@@ -220,7 +220,7 @@ export function SiteRulesCard() {
                 {" · "}
                 {formatDateTime(s.approved_at_ms, i18n.language)}
               </span>
-              {confirming?.key === s.key && confirming.capability === s.capability && confirming.kind === s.kind ? (
+              {confirming !== null && confirming.key === s.key && confirming.capability === s.capability && confirming.kind === s.kind ? (
                 <span className={styles.confirm} role="group" aria-label={t("settingsModal.siteRules.confirm", { target: siteRuleTarget(s.kind, s.key, true), what: what(s.capability) })}>
                   <span>{t("settingsModal.siteRules.confirm", { target: siteRuleTarget(s.kind, s.key, true), what: what(s.capability) })}</span>
                   <Button disabled={busy} onClick={() => void allowSuggestion(s)}>

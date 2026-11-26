@@ -564,7 +564,7 @@ export function appearanceCards(b: SettingsBridge, t: TFunction): CardDef[] {
       ),
       {
         keywords:
-          "accessibility text size font dyslexia motion transparency focus contrast density erisilebilirlik yazi boyutu disleksi hareket seffaflik odak yogunluk barrierefreiheit schriftgroesse legasthenie bewegung transparenz fokus dichte"
+          "accessibility text size font dyslexia motion transparency focus contrast density erisilebilirlik yazi boyutu yazi tipi disleksi hareket seffaflik odak yogunluk barrierefreiheit schriftgroesse legasthenie bewegung transparenz fokus dichte"
       }
     ),
     card(

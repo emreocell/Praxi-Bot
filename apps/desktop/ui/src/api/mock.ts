@@ -1878,6 +1878,10 @@ export class MockApiClient extends ApiClient {
         if (seg[1] && seg[2] === "grants") {
           return ok(structuredClone(this.botGrants.get(seg[1]) ?? []));
         }
+        // Site rules and recent site approvals: none in the demo (the list used to fall through to the bot list).
+        if (seg[1] && seg[2] === "site-rules") {
+          return ok([]);
+        }
         if (seg[1] && seg[2] === "workspace") {
           return ok(this.mockGetBotWorkspace(seg[1], opts.query));
         }

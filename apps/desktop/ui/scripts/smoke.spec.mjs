@@ -179,7 +179,7 @@ export async function flows(ctx) {
         }
         await page.keyboard.press('Escape');
         await page.getByRole('button', { name: 'Settings', exact: true }).click();
-        await page.getByTestId('settings-nav-where').click();
+        await page.getByTestId('settings-nav-connections').click();
         const storage = page.getByTestId('workspace-storage-card');
         await storage.waitFor(T);
         await storage.locator('[data-testid="workspace-open-root-folder"]').scrollIntoViewIfNeeded();

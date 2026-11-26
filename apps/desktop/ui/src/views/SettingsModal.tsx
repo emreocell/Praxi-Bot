@@ -1,10 +1,9 @@
 import {
   BrainCircuit,
   Check,
-  Globe,
   LoaderCircle,
-  Monitor,
   Palette,
+  Plug,
   RotateCcw,
   Search,
   Settings2,
@@ -31,22 +30,25 @@ import {
   SettingsDisclosure
 } from "../components/SettingsUi";
 import { humanLine } from "../lib/humanError";
-import { matchesQuery } from "../lib/searchText";
 import { peekPendingTarget } from "../lib/settingsLink";
 import {
   CARD_META,
   canReset,
   type DetailMode,
+  groupCards,
+  groupOfCard,
   highlightParts,
-  loadDetailMode,
+  initialDetailMode,
   metaOfCard,
   parsePage,
   queryWords,
   RECOMMENDED_SAFETY_PRESET,
   resetPatch,
-  saveDetailMode,
   SETTINGS_PAGE_GROUPS,
-  type SettingsPageId
+  type SettingsGroupId,
+  type SettingsPageId,
+  settingsSearchMatch,
+  settingsSearchRank
 } from "../lib/settingsPages";
 import { useDaemon } from "../state/DaemonContext";
 import { DEFAULT_SETTINGS } from "../store/settingsStore";
@@ -64,8 +66,7 @@ const PAGE_ICONS: Record<SettingsPageId, typeof Settings2> = {
   general: Settings2,
   appearance: Palette,
   models: BrainCircuit,
-  where: Monitor,
-  apps: Globe,
+  connections: Plug,
   safety: ShieldCheck,
   system: SlidersHorizontal
 };
@@ -77,6 +78,7 @@ const FLASH_MS = 220;
 interface PlacedCard {
   card: CardDef;
   page: SettingsPageId;
+  group: SettingsGroupId;
   advanced: boolean;
   risk?: string;
   learn?: ReturnType<typeof metaOfCard>["learn"];
@@ -173,8 +175,8 @@ function prefersReducedMotion(): boolean {
 type SaveState = "idle" | "saving" | "saved";
 
 /**
- * Settings modal: 7 plainly named grouped pages, fast search across every setting with
- * keyboard navigation, one consistent per-page "More options" disclosure, real deep links
+ * Settings modal: 6 plainly named pages in titled groups, forgiving search across every setting
+ * with keyboard navigation, one per-page "Advanced settings" disclosure (closed on open), real deep links
  * (scroll + flash + focus), saved status and per-page "Reset to recommended".
  */
 export function SettingsModal({
@@ -196,7 +198,8 @@ export function SettingsModal({
   const { client } = useDaemon();
   const [page, setPage] = useState<SettingsPageId>(() => parsePage(initialSection));
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState<DetailMode>(() => loadDetailMode());
+  // "Advanced settings" starts closed on every open (initialDetailMode); not remembered across opens.
+  const [mode, setMode] = useState<DetailMode>("simple");
   const [save, setSave] = useState<SaveState>("idle");
   const [confirmReset, setConfirmReset] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
@@ -212,7 +215,6 @@ export function SettingsModal({
 
   const changeMode = useCallback((m: DetailMode) => {
     setMode(m);
-    saveDetailMode(m);
   }, []);
 
   useEffect(() => {
@@ -224,9 +226,7 @@ export function SettingsModal({
     setQuery("");
     setSave("idle");
     setResetDone(false);
-    if (cardMeta?.advanced) {
-      changeMode("advanced");
-    }
+    changeMode(initialDetailMode(cardMeta?.advanced === true));
     if (cardId) {
       setPendingReveal({ card: cardId, field: target?.field, seq: ++revealSeq.current });
     } else {
@@ -309,6 +309,7 @@ export function SettingsModal({
           return {
             card,
             page: m.page,
+            group: groupOfCard(m),
             advanced: m.advanced === true,
             risk: m.risk,
             learn: m.learn,
@@ -323,19 +324,27 @@ export function SettingsModal({
   const searching = query.trim() !== "";
   const matches = useCallback(
     (p: PlacedCard) =>
-      matchesQuery(
+      settingsSearchMatch(
         query,
         p.card.title,
         p.card.description,
         p.card.keywords,
-        t(`settingsModal.pages.${p.page}.name`)
+        t(`settingsModal.pages.${p.page}.name`),
+        t(`settingsModal.groups.${p.group}`)
       ),
     [query, t]
   );
 
   const searchHits = useMemo(
-    () => (searching ? placed.filter(matches) : []),
-    [searching, placed, matches]
+    () =>
+      searching
+        ? placed
+            .filter(matches)
+            .map((p, i) => ({ p, i, rank: settingsSearchRank(query, p.card.title, p.card.description) }))
+            .sort((a, b) => a.rank - b.rank || a.i - b.i)
+            .map((x) => x.p)
+        : [],
+    [searching, placed, matches, query]
   );
   const pagesWithHits = useMemo(
     () => new Set(searchHits.map((p) => p.page)),
@@ -488,6 +497,22 @@ export function SettingsModal({
   };
 
   const pageName = (id: SettingsPageId) => t(`settingsModal.pages.${id}.name`);
+  const groupName = (id: SettingsGroupId) => t(`settingsModal.groups.${id}`);
+  // A page reads as a few titled groups; the cards of a group keep the usual row / block framing.
+  const renderGroups = (cards: PlacedCard[], scope: "basic" | "advanced") =>
+    groupCards(page, cards, (p) => ({ page: p.page, group: p.group })).map((g) => (
+      <section
+        key={`${scope}-${g.group}`}
+        className={styles.group}
+        aria-labelledby={`settings-group-${scope}-${g.group}`}
+        data-testid={`settings-group-${g.group}`}
+      >
+        <h3 id={`settings-group-${scope}-${g.group}`} className={styles.groupTitle}>
+          {groupName(g.group)}
+        </h3>
+        {renderCards(g.cards, extras, flashCard)}
+      </section>
+    ));
   const resettable = !searching && canReset(page);
 
   return (
@@ -540,6 +565,7 @@ export function SettingsModal({
                       key={s}
                       type="button"
                       data-testid={`settings-nav-${s}`}
+                      title={t(`settingsModal.pages.${s}.description`)}
                       disabled={dim}
                       aria-current={!searching && s === page ? "page" : undefined}
                       className={[styles.navItem, !searching && s === page ? styles.navActive : ""].filter(Boolean).join(" ")}
@@ -635,6 +661,8 @@ export function SettingsModal({
                         <span className={styles.resultMeta}>
                           <span className={styles.pageTag}>
                             <Marked text={pageName(p.page)} query={query} />
+                            <span aria-hidden="true"> › </span>
+                            <Marked text={groupName(p.group)} query={query} />
                           </span>
                           {p.advanced ? (
                             <span className={styles.advTag}>{t("settingsModal.mode.moreOptions")}</span>
@@ -648,7 +676,7 @@ export function SettingsModal({
               )
             ) : (
               <div className={styles.section}>
-                {renderCards(basicOnPage, extras, flashCard)}
+                {renderGroups(basicOnPage, "basic")}
                 {advancedOnPage.length > 0 ? (
                   <SettingsDisclosure
                     open={moreOpen}
@@ -658,7 +686,7 @@ export function SettingsModal({
                     testId="settings-show-advanced"
                     onToggle={() => changeMode(moreOpen ? "simple" : "advanced")}
                   >
-                    {renderCards(advancedOnPage, extras, flashCard)}
+                    {renderGroups(advancedOnPage, "advanced")}
                   </SettingsDisclosure>
                 ) : null}
               </div>

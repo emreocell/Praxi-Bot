@@ -6275,6 +6275,24 @@
         "title": "Mostrar la hora de los mensajes"
       }
     },
+    "groups": {
+      "about": "Versión y solución de problemas",
+      "access": "A qué pueden acceder los bots",
+      "computers": "Ordenadores",
+      "history": "Actividad",
+      "level": "Con cuánta libertad trabajan los bots",
+      "look": "Aspecto",
+      "mailWeb": "Correo y web",
+      "memory": "Memoria y conocimiento",
+      "models": "Modelos de IA y claves",
+      "notifications": "Notificaciones",
+      "readability": "Legibilidad",
+      "startup": "Inicio y atajos",
+      "usage": "Uso y almacenamiento",
+      "vault": "Contraseñas y claves",
+      "voice": "Voz",
+      "you": "Tú e idioma"
+    },
     "learn": {
       "guide": "Más información en la guía",
       "open": "¿Qué es esto?",
@@ -6343,8 +6361,8 @@
       "verifyDomainsPlaceholder": "correo.ejemplo.com"
     },
     "mode": {
-      "moreHint": "Opciones adicionales",
-      "moreOptions": "Más opciones"
+      "moreHint": "Rara vez necesarios. Se cierran de nuevo la próxima vez que abras los ajustes.",
+      "moreOptions": "Ajustes avanzados"
     },
     "navGroups": {
       "app": "App y datos",
@@ -6357,9 +6375,9 @@
         "description": "Colores, fondo y legibilidad.",
         "name": "Apariencia"
       },
-      "apps": {
-        "description": "Búsqueda web y buzones que tus bots pueden usar.",
-        "name": "Correo y web"
+      "connections": {
+        "description": "Dónde trabajan tus bots y a qué se conectan: ordenadores, correo, búsqueda web y contraseñas.",
+        "name": "Conexiones"
       },
       "general": {
         "description": "Tu nombre, idioma, avisos y voz.",
@@ -6367,7 +6385,7 @@
       },
       "models": {
         "description": "Con qué IA piensan tus bots y qué recuerdan.",
-        "name": "Modelos"
+        "name": "IA y memoria"
       },
       "safety": {
         "description": "Qué pueden hacer los bots por sí solos, carpetas de confianza y registro.",
@@ -6376,10 +6394,6 @@
       "system": {
         "description": "Uso, almacenamiento, actualizaciones y estado del sistema.",
         "name": "Sistema"
-      },
-      "where": {
-        "description": "En qué ordenador trabajan tus bots.",
-        "name": "Equipos"
       }
     },
     "reset": {

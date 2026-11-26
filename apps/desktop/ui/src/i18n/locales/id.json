@@ -6222,10 +6222,6 @@
         "description": "Colours, backdrop, and readability.",
         "name": "Appearance"
       },
-      "apps": {
-        "description": "Web search and mailboxes your bots can use.",
-        "name": "Mail & web"
-      },
       "general": {
         "description": "Your name, language, alerts, and voice.",
         "name": "General"
@@ -6241,10 +6237,6 @@
       "system": {
         "description": "Usage, storage space, updates, and health checks.",
         "name": "System"
-      },
-      "where": {
-        "description": "Which computer your bots work on.",
-        "name": "Computers"
       }
     },
     "reset": {

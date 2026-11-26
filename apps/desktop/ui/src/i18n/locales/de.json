@@ -6275,6 +6275,24 @@
         "title": "Nachrichtenzeiten anzeigen"
       }
     },
+    "groups": {
+      "about": "Version und Fehlerbehebung",
+      "access": "Worauf Bots zugreifen dürfen",
+      "computers": "Computer",
+      "history": "Aktivität",
+      "level": "Wie frei Bots arbeiten",
+      "look": "Aussehen",
+      "mailWeb": "Mail und Web",
+      "memory": "Gedächtnis und Wissen",
+      "models": "KI-Modelle und Schlüssel",
+      "notifications": "Benachrichtigungen",
+      "readability": "Lesbarkeit",
+      "startup": "Start und Tastenkürzel",
+      "usage": "Nutzung und Speicher",
+      "vault": "Passwörter und Schlüssel",
+      "voice": "Stimme",
+      "you": "Du und Sprache"
+    },
     "learn": {
       "guide": "Mehr im Handbuch lesen",
       "open": "Was ist das?",
@@ -6343,8 +6361,8 @@
       "verifyDomainsPlaceholder": "mail.beispiel.de"
     },
     "mode": {
-      "moreHint": "Zusätzliche Feineinstellungen",
-      "moreOptions": "Weitere Optionen"
+      "moreHint": "Selten nötig. Beim nächsten Öffnen der Einstellungen wieder zu.",
+      "moreOptions": "Erweiterte Einstellungen"
     },
     "navGroups": {
       "app": "App & Daten",
@@ -6357,9 +6375,9 @@
         "description": "Farben, Hintergrund und Lesbarkeit.",
         "name": "Darstellung"
       },
-      "apps": {
-        "description": "Websuche und Postfächer für deine Bots.",
-        "name": "Mail & Web"
+      "connections": {
+        "description": "Wo deine Bots arbeiten und womit sie verbunden sind: Computer, Mail, Websuche und Passwörter.",
+        "name": "Verbindungen"
       },
       "general": {
         "description": "Dein Name, Sprache, Hinweise und Stimme.",
@@ -6367,7 +6385,7 @@
       },
       "models": {
         "description": "Mit welcher KI deine Bots denken und was sie sich merken.",
-        "name": "KI-Modelle"
+        "name": "KI und Gedächtnis"
       },
       "safety": {
         "description": "Was Bots selbst dürfen, vertrauenswürdige Ordner und Aktivitätsprotokoll.",
@@ -6376,10 +6394,6 @@
       "system": {
         "description": "Verbrauch, Speicherplatz, Updates und Systemprüfung.",
         "name": "System"
-      },
-      "where": {
-        "description": "Auf welchem Computer deine Bots arbeiten.",
-        "name": "Computer"
       }
     },
     "reset": {

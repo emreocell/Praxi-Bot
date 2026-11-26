@@ -6275,6 +6275,24 @@
         "title": "Show message times"
       }
     },
+    "groups": {
+      "about": "Version and troubleshooting",
+      "access": "What bots may reach",
+      "computers": "Computers",
+      "history": "Activity",
+      "level": "How freely bots work",
+      "look": "Look",
+      "mailWeb": "Mail and web",
+      "memory": "Memory and knowledge",
+      "models": "AI models and keys",
+      "notifications": "Notifications",
+      "readability": "Readability",
+      "startup": "Start-up and shortcuts",
+      "usage": "Usage and storage",
+      "vault": "Passwords and keys",
+      "voice": "Voice",
+      "you": "You and language"
+    },
     "learn": {
       "guide": "Read more in the guide",
       "open": "What is this?",
@@ -6343,8 +6361,8 @@
       "verifyDomainsPlaceholder": "mail.example.com"
     },
     "mode": {
-      "moreHint": "Extra controls for fine-tuning",
-      "moreOptions": "More options"
+      "moreHint": "Rarely needed. Closed again the next time you open Settings.",
+      "moreOptions": "Advanced settings"
     },
     "navGroups": {
       "app": "App & data",
@@ -6357,9 +6375,9 @@
         "description": "Colours, backdrop, and readability.",
         "name": "Appearance"
       },
-      "apps": {
-        "description": "Web search and mailboxes your bots can use.",
-        "name": "Mail & web"
+      "connections": {
+        "description": "Where your bots work and what they connect to: computers, mail, web search and passwords.",
+        "name": "Connections"
       },
       "general": {
         "description": "Your name, language, alerts, and voice.",
@@ -6367,7 +6385,7 @@
       },
       "models": {
         "description": "Which AI your bots think with, and what they remember.",
-        "name": "AI models"
+        "name": "AI and memory"
       },
       "safety": {
         "description": "What bots can do alone, trusted folders, and activity log.",
@@ -6376,10 +6394,6 @@
       "system": {
         "description": "Usage, storage space, updates, and health checks.",
         "name": "System"
-      },
-      "where": {
-        "description": "Which computer your bots work on.",
-        "name": "Computers"
       }
     },
     "reset": {

@@ -75,7 +75,7 @@ export function otherCards(t: TFunction): CardDef[] {
       kind: "block",
       title: t("usage.title"),
       description: t("usage.subtitle"),
-      keywords: "usage tokens cost spend limit bill kullanim maliyet limit butce verbrauch kosten token",
+      keywords: "usage tokens cost spend limit bill quota kullanim maliyet limit butce kota verbrauch kosten token kontingent",
       node: (
         <SettingsCard title={t("usage.title")} description={t("usage.subtitle")}>
           <UsageView embedded />

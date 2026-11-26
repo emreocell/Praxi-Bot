@@ -1,7 +1,7 @@
 /**
  * How to add a settings card:
  * 1. Build a CardDef `{ id, section, title, description, keywords, kind, node }` in `views/settings/*Cards.tsx`.
- * 2. Register `{ page, advanced?, risk?, learn? }` in `CARD_META` below (missing entries fall back via `SECTION_PAGE`).
+ * 2. Register `{ page, group, advanced?, risk?, learn? }` in `CARD_META` below (missing entries fall back via `SECTION_PAGE`).
  * 3. Add any new i18n keys to `en.json`, `tr.json`, `de.json`, and `es.json` and run `pnpm --dir apps/desktop/ui sort:i18n`.
  * 4. Add the new card id to `FROZEN_CARD_IDS` in `lib/settingsPages.test.ts` so nothing silently vanishes.
  */
@@ -10,25 +10,41 @@ import { foldText } from "./searchText.ts";
 import type { SettingsSectionId } from "../views/settings/types.ts";
 
 /**
- * The settings, as a non-programmer sees them: at most 7 plainly named pages.
- * Cards keep their old technical `section` for fallback; `CARD_META` places each card here.
+ * The settings, as a non-programmer sees them: six plainly named pages, each split into a few
+ * titled groups (`SETTINGS_GROUPS`).  Cards keep their old technical `section` for fallback;
+ * `CARD_META` places each card on a page and in a group.
  */
 export const SETTINGS_PAGES = [
   "general",
   "appearance",
   "models",
-  "where",
-  "apps",
+  "connections",
   "safety",
   "system"
 ] as const;
 export type SettingsPageId = (typeof SETTINGS_PAGES)[number];
+
+/**
+ * The titled groups of each page, in order.  Rarely used cards of a group sit under the page's one
+ * collapsed "Advanced settings" disclosure, under the same group title.
+ */
+export const SETTINGS_GROUPS = {
+  general: ["you", "notifications", "voice", "startup"],
+  appearance: ["look", "readability"],
+  models: ["models", "memory"],
+  connections: ["computers", "mailWeb", "vault"],
+  safety: ["level", "access", "history"],
+  system: ["usage", "about"]
+} as const satisfies Record<SettingsPageId, readonly string[]>;
+export type SettingsGroupId = (typeof SETTINGS_GROUPS)[SettingsPageId][number];
 
 /** Words that get a short plain-language "What is this?" popover (and a docs link). */
 export type LearnTerm = "apiKey" | "permissions" | "folders" | "memory" | "provider" | "safeMode";
 
 export interface CardMeta {
   page: SettingsPageId;
+  /** The titled group on the page (one of `SETTINGS_GROUPS[page]`). */
+  group?: SettingsGroupId;
   /** Hidden behind "More options" until expanded (or when searching / targeted by a deep link). */
   advanced?: boolean;
   /** i18n key suffix of a one-line "what happens if you change this" warning. */
@@ -38,93 +54,93 @@ export interface CardMeta {
 
 /** Where every settings card lives. A card missing here falls back via its legacy `section`. */
 export const CARD_META: Record<string, CardMeta> = {
-  // General (You): 6 basic, 8 under "More options"
-  account: { page: "general" },
-  language: { page: "general" },
-  send: { page: "general" },
-  notifications: { page: "general" },
-  "speak-replies": { page: "general" },
-  dictation: { page: "general" },
-  voice: { page: "general", advanced: true },
-  "voice-input": { page: "general", advanced: true },
-  times: { page: "general", advanced: true },
-  autostart: { page: "general", advanced: true },
-  keepInTray: { page: "general", advanced: true },
-  quickAsk: { page: "general", advanced: true },
-  hotkey: { page: "general", advanced: true },
-  onboarding: { page: "general", advanced: true },
+  // General: you, notifications, voice, start-up (rarely used ones under Advanced)
+  account: { page: "general", group: "you" },
+  language: { page: "general", group: "you" },
+  send: { page: "general", group: "you" },
+  times: { page: "general", group: "you", advanced: true },
+  notifications: { page: "general", group: "notifications" },
+  "speak-replies": { page: "general", group: "voice" },
+  dictation: { page: "general", group: "voice" },
+  voice: { page: "general", group: "voice", advanced: true },
+  "voice-input": { page: "general", group: "voice", advanced: true },
+  autostart: { page: "general", group: "startup", advanced: true },
+  keepInTray: { page: "general", group: "startup", advanced: true },
+  quickAsk: { page: "general", group: "startup", advanced: true },
+  hotkey: { page: "general", group: "startup", advanced: true },
+  onboarding: { page: "general", group: "startup", advanced: true },
 
-  // Appearance (You): 6 basic (corners promoted: owners look for it next to the theme), 6 under "More options"
-  theme: { page: "appearance" },
-  accent: { page: "appearance" },
-  backdrop: { page: "appearance" },
-  wallpaper: { page: "appearance" },
-  corners: { page: "appearance" },
-  accessibility: { page: "appearance" },
-  style: { page: "appearance", advanced: true },
-  clearChat: { page: "appearance", advanced: true },
-  photorealAvatars: { page: "appearance", advanced: true },
-  bubbles: { page: "appearance", advanced: true },
-  background: { page: "appearance", advanced: true },
-  frame: { page: "appearance", advanced: true },
+  // Appearance: the look, and readability (corners is basic: owners look for it next to the theme, #889)
+  theme: { page: "appearance", group: "look" },
+  accent: { page: "appearance", group: "look" },
+  backdrop: { page: "appearance", group: "look" },
+  wallpaper: { page: "appearance", group: "look" },
+  accessibility: { page: "appearance", group: "readability" },
+  style: { page: "appearance", group: "look", advanced: true },
+  clearChat: { page: "appearance", group: "look", advanced: true },
+  photorealAvatars: { page: "appearance", group: "look", advanced: true },
+  corners: { page: "appearance", group: "look" },
+  bubbles: { page: "appearance", group: "look", advanced: true },
+  background: { page: "appearance", group: "look", advanced: true },
+  frame: { page: "appearance", group: "look", advanced: true },
 
-  // AI models (Your bots): 5 basic, 3 under "More options"
-  defaultModel: { page: "models", learn: "provider" },
-  keys: { page: "models", learn: "apiKey" },
-  detectedAccounts: { page: "models" },
-  memory: { page: "models", learn: "memory", risk: "memory" },
-  knowledge: { page: "models", learn: "memory" },
-  localModels: { page: "models", advanced: true },
-  helpers: { page: "models", advanced: true },
-  providers: { page: "models", advanced: true, risk: "providers", learn: "provider" },
+  // AI: which models the bots think with, and what they remember
+  defaultModel: { page: "models", group: "models", learn: "provider" },
+  keys: { page: "models", group: "models", learn: "apiKey" },
+  detectedAccounts: { page: "models", group: "models" },
+  localModels: { page: "models", group: "models", advanced: true },
+  helpers: { page: "models", group: "models", advanced: true },
+  providers: { page: "models", group: "models", advanced: true, risk: "providers", learn: "provider" },
+  memory: { page: "models", group: "memory", learn: "memory", risk: "memory" },
+  knowledge: { page: "models", group: "memory", learn: "memory" },
 
-  // Computers (Your bots): 3 basic
-  target: { page: "where" },
-  "my-computer": { page: "where" },
-  "bot-workspaces": { page: "where" },
+  // Connections: where the bots work, and what they connect to (mail, web, passwords)
+  target: { page: "connections", group: "computers" },
+  "my-computer": { page: "connections", group: "computers" },
+  "bot-workspaces": { page: "connections", group: "computers" },
+  "web-search": { page: "connections", group: "mailWeb" },
+  email: { page: "connections", group: "mailWeb", risk: "email" },
+  "email-channel": { page: "connections", group: "mailWeb", advanced: true },
+  "mail-guard": { page: "connections", group: "mailWeb", advanced: true },
+  vault: { page: "connections", group: "vault" },
 
-  // Mail & web (Your bots): 2 basic
-  "web-search": { page: "apps" },
-  email: { page: "apps", risk: "email" },
-  vault: { page: "apps" },
+  // Safety: how freely bots work, what they may reach, what they did
+  "safety-levels": { page: "safety", group: "level", learn: "permissions" },
+  permissions: { page: "safety", group: "level", advanced: true, risk: "permissions", learn: "permissions" },
+  "safe-mode": { page: "safety", group: "level", advanced: true, learn: "safeMode" },
+  "trusted-folders": { page: "safety", group: "access", risk: "folders", learn: "folders" },
+  "allowed-grants": { page: "safety", group: "access", learn: "permissions" },
+  "page-reader": { page: "safety", group: "access" },
+  "site-rules": { page: "safety", group: "access", advanced: true, learn: "permissions" },
+  "audit-log": { page: "safety", group: "history" },
 
-  // Safety (Your bots): 4 basic, 2 under "More options"
-  "safety-levels": { page: "safety", learn: "permissions" },
-  "page-reader": { page: "safety" },
-  "trusted-folders": { page: "safety", risk: "folders", learn: "folders" },
-  "allowed-grants": { page: "safety", learn: "permissions" },
-  "site-rules": { page: "safety", advanced: true, learn: "permissions" },
-  "audit-log": { page: "safety" },
-  permissions: { page: "safety", advanced: true, risk: "permissions", learn: "permissions" },
-  "safe-mode": { page: "safety", advanced: true, learn: "safeMode" },
-
-  // System (App & data): 3 basic, 2 under "More options"
-  usage: { page: "system" },
-  data: { page: "system" },
-  version: { page: "system" },
-  diagnostics: { page: "system", advanced: true },
-  logs: { page: "system", advanced: true }
+  // System: usage and storage, version and troubleshooting
+  usage: { page: "system", group: "usage" },
+  data: { page: "system", group: "usage" },
+  version: { page: "system", group: "about" },
+  diagnostics: { page: "system", group: "about", advanced: true },
+  logs: { page: "system", group: "about", advanced: true }
 };
 
 const SECTION_PAGE: Record<SettingsSectionId, SettingsPageId> = {
   general: "general",
   appearance: "appearance",
   ai: "models",
-  computer: "where",
-  mail: "apps",
+  computer: "connections",
+  mail: "connections",
   usage: "system",
   diagnostics: "system",
   updates: "system"
 };
 
-/** Legacy section ids and retired page ids resolve to one of the 7 current pages. */
+/** Legacy section ids and retired page ids (Computers and Mail & web are now Connections) resolve to a current page. */
 export const PAGE_ALIASES: Record<string, SettingsPageId> = {
   ...SECTION_PAGE,
   notifications: "general",
   voice: "general",
   models: "models",
-  where: "where",
-  apps: "apps",
+  where: "connections",
+  apps: "connections",
   safety: "safety",
   data: "system",
   help: "system",
@@ -154,33 +170,34 @@ export const SETTINGS_PAGE_GROUPS: ReadonlyArray<{
   pages: readonly SettingsPageId[];
 }> = [
   { id: "you", pages: ["general", "appearance"] },
-  { id: "bots", pages: ["models", "where", "apps", "safety"] },
+  { id: "bots", pages: ["models", "connections", "safety"] },
   { id: "app", pages: ["system"] }
 ];
 
 // ---------------------------------------------------------------- simple / more options
 
 export type DetailMode = "simple" | "advanced";
-export const DETAIL_MODE_KEY = "praxi.settings.detailMode";
 
-export function parseDetailMode(raw: unknown): DetailMode {
-  return raw === "advanced" ? "advanced" : "simple";
+/**
+ * "Advanced settings" starts closed every time Settings opens, so the pages stay short; it opens
+ * by itself only for a deep link or a search result that points at an advanced card.
+ */
+export function initialDetailMode(targetIsAdvanced: boolean): DetailMode {
+  return targetIsAdvanced ? "advanced" : "simple";
 }
 
-export function loadDetailMode(storage?: Pick<Storage, "getItem">): DetailMode {
-  try {
-    return parseDetailMode((storage ?? window.localStorage).getItem(DETAIL_MODE_KEY));
-  } catch {
-    return "simple";
-  }
+/** The group a card is drawn under: its own, else the page's first group. */
+export function groupOfCard(meta: CardMeta): SettingsGroupId {
+  const groups: readonly SettingsGroupId[] = SETTINGS_GROUPS[meta.page];
+  return meta.group && groups.includes(meta.group) ? meta.group : (groups[0] as SettingsGroupId);
 }
 
-export function saveDetailMode(mode: DetailMode, storage?: Pick<Storage, "setItem">): void {
-  try {
-    (storage ?? window.localStorage).setItem(DETAIL_MODE_KEY, mode);
-  } catch {
-    // Private mode / blocked storage: the choice just is not remembered.
-  }
+/** Cards in page order, split into their titled groups (empty groups are left out). */
+export function groupCards<T>(page: SettingsPageId, cards: readonly T[], meta: (card: T) => CardMeta): Array<{ group: SettingsGroupId; cards: T[] }> {
+  const groups: readonly SettingsGroupId[] = SETTINGS_GROUPS[page];
+  return groups
+    .map((group) => ({ group, cards: cards.filter((c) => groupOfCard(meta(c)) === group) }))
+    .filter((g) => g.cards.length > 0);
 }
 
 /** A card shows when it is not advanced, or "More options" is open, or the user is searching for it. */
@@ -279,6 +296,33 @@ export function levelOfPreset(preset: string | null | undefined): SafetyLevel["i
 }
 
 // ---------------------------------------------------------------- search highlighting
+
+/**
+ * Settings search: every word of the query must appear in the card's words (title, description,
+ * keywords, page and group names).  Turkish and German add endings to words ("anahtarı",
+ * "başlangıçta"), so a long query word also matches when the text has its stem (the word without
+ * its last one or two letters, at least five letters left, so short words are never cut).
+ */
+export function settingsSearchMatch(query: string, ...texts: Array<string | null | undefined>): boolean {
+  const words = queryWords(query);
+  if (words.length === 0) return true;
+  const hay = foldText(texts.filter(Boolean).join(" "));
+  return words.every((w) => {
+    if (hay.includes(w)) return true;
+    for (let cut = 1; cut <= 2; cut++) {
+      const stem = w.slice(0, w.length - cut);
+      if (stem.length >= 5 && hay.includes(stem)) return true;
+    }
+    return false;
+  });
+}
+
+/** Lower is better: query words missing from the card's title weigh most, then those missing from its description. */
+export function settingsSearchRank(query: string, title: string, description: string): number {
+  const words = queryWords(query);
+  const missing = (text: string) => words.filter((w) => !settingsSearchMatch(w, text)).length;
+  return missing(title) * 10 + missing(description);
+}
 
 /** The folded words of a search query. */
 export function queryWords(query: string): string[] {

@@ -8,21 +8,23 @@ import { VOICE_KEY_TARGET } from "./settingsLink.ts";
 import {
   CARD_META,
   canReset,
-  DETAIL_MODE_KEY,
   highlightParts,
   isCardShown,
   levelOfPreset,
-  loadDetailMode,
   metaOfCard,
   PAGE_ALIASES,
-  parseDetailMode,
   parsePage,
   RECOMMENDED_SAFETY_PRESET,
   resetPatch,
   SAFETY_LEVELS,
-  saveDetailMode,
   SETTINGS_PAGE_GROUPS,
+  SETTINGS_GROUPS,
   SETTINGS_PAGES,
+  settingsSearchMatch,
+  settingsSearchRank,
+  groupCards,
+  groupOfCard,
+  initialDetailMode,
   pageOfSection
 } from "./settingsPages.ts";
 
@@ -116,8 +118,8 @@ test("old section ids, retired page ids, and SettingsTargets all resolve to a re
     assert.ok(id in PAGE_ALIASES || (SETTINGS_PAGES as readonly string[]).includes(id), id);
   }
   assert.equal(parsePage("ai"), "models");
-  assert.equal(parsePage("computer"), "where");
-  assert.equal(parsePage("mail"), "apps");
+  assert.equal(parsePage("computer"), "connections");
+  assert.equal(parsePage("mail"), "connections");
   assert.equal(parsePage("notifications"), "general");
   assert.equal(parsePage("voice"), "general");
   assert.equal(parsePage("data"), "system");
@@ -161,27 +163,55 @@ test("Basic hides advanced cards and search reveals them", () => {
   assert.equal(isCardShown({ page: "models" }, "simple", false), true);
 });
 
-test("More options state is remembered, and a broken store falls back to closed", () => {
-  const mem = new Map<string, string>();
-  const store = {
-    getItem: (k: string) => mem.get(k) ?? null,
-    setItem: (k: string, v: string) => void mem.set(k, v)
-  };
-  assert.equal(loadDetailMode(store), "simple");
-  saveDetailMode("advanced", store);
-  assert.equal(mem.get(DETAIL_MODE_KEY), "advanced");
-  assert.equal(loadDetailMode(store), "advanced");
-  assert.equal(parseDetailMode("weird"), "simple");
-  const broken = {
-    getItem: () => {
-      throw new Error("blocked");
-    },
-    setItem: () => {
-      throw new Error("blocked");
-    }
-  };
-  assert.equal(loadDetailMode(broken), "simple");
-  assert.doesNotThrow(() => saveDetailMode("advanced", broken));
+test("Advanced settings starts closed on every open; only a deep link to an advanced card opens it", () => {
+  assert.equal(initialDetailMode(false), "simple");
+  assert.equal(initialDetailMode(true), "advanced");
+});
+
+test("six pages, each split into titled groups; every card sits in a group of its own page", () => {
+  assert.deepEqual([...SETTINGS_PAGES], ["general", "appearance", "models", "connections", "safety", "system"]);
+  for (const page of SETTINGS_PAGES) assert.ok(SETTINGS_GROUPS[page].length >= 2, page);
+  for (const [id, meta] of Object.entries(CARD_META)) {
+    assert.ok(meta.group, `${id} has a group`);
+    assert.ok((SETTINGS_GROUPS[meta.page] as readonly string[]).includes(meta.group as string), `${id}: ${meta.group} on ${meta.page}`);
+  }
+  // Computers and Mail & web are one page now; their old ids and sections still land there.
+  for (const old of ["where", "apps", "computer", "mail"]) assert.equal(parsePage(old), "connections", old);
+  // Every page keeps a short basic view: rarely used cards are under Advanced.
+  for (const page of SETTINGS_PAGES) {
+    const basic = Object.values(CARD_META).filter((m) => m.page === page && !m.advanced).length;
+    assert.ok(basic >= 1 && basic <= 8, `${page}: ${basic} basic cards`);
+  }
+});
+
+test("cards are drawn group by group in the page's order; a card without a group joins the first", () => {
+  const cards = [
+    { id: "a", meta: { page: "general", group: "voice" } },
+    { id: "b", meta: { page: "general", group: "you" } },
+    { id: "c", meta: { page: "general" } },
+    { id: "d", meta: { page: "general", group: "voice" } }
+  ] as const;
+  const out = groupCards("general", cards, (c) => c.meta);
+  assert.deepEqual(out.map((g) => [g.group, g.cards.map((c) => c.id)]), [["you", ["b", "c"]], ["voice", ["a", "d"]]]);
+  assert.equal(groupOfCard({ page: "system", group: "voice" }), "usage");
+});
+
+test("search forgives Turkish and German word endings, accents and case, but still needs every word", () => {
+  assert.ok(settingsSearchMatch("api anahtarı", "API keys", "API anahtarları ve hesaplar"));
+  assert.ok(settingsSearchMatch("başlangıçta", "Windows başlangıcında aç", "baslangic otomatik"));
+  assert.ok(settingsSearchMatch("Bildirimleri", "Bildirimler"));
+  assert.ok(settingsSearchMatch("SCHLÜSSELN", "Schlüssel"));
+  assert.ok(!settingsSearchMatch("api xyzzy", "API keys"));
+  // Short words are never cut: "dil" (language) must not match every "di…" word.
+  assert.ok(!settingsSearchMatch("dile", "dikte"));
+  assert.ok(!settingsSearchMatch("ollama", "kollar"));
+  assert.ok(settingsSearchMatch("", "anything"));
+  // The card named after the words comes first.
+  const keys = settingsSearchRank("api anahtarı", "Erişim anahtarları", "Anahtarlar sistem anahtarlığında saklanır");
+  const dictation = settingsSearchRank("api anahtarı", "Sesli dikte", "OpenAI uyumlu bir servis, API anahtarı");
+  assert.ok(keys < dictation, `${keys} < ${dictation}`);
+  assert.equal(settingsSearchRank("tema", "Tema", "Renkler"), 1);
+  assert.equal(settingsSearchRank("tema", "Tema", "Tema rengi"), 0);
 });
 
 test("the three safety levels map to daemon presets, balanced is the recommended default", () => {

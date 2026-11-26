@@ -6336,10 +6336,6 @@
         "description": "Couleurs, arrière-plan et lisibilité.",
         "name": "Apparence"
       },
-      "apps": {
-        "description": "Recherche web et boîtes aux lettres que vos bots peuvent utiliser.",
-        "name": "E-mail et web"
-      },
       "general": {
         "description": "Votre nom, la langue, les alertes et la voix.",
         "name": "Général"
@@ -6355,10 +6351,6 @@
       "system": {
         "description": "Utilisation, espace de stockage, mises à jour et bilans de santé.",
         "name": "Système"
-      },
-      "where": {
-        "description": "Sur quel ordinateur travaillent vos bots.",
-        "name": "Ordinateurs"
       }
     },
     "reset": {
