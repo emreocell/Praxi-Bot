@@ -5463,6 +5463,330 @@
         ]
       }
     },
+    "/v1/calendar/accounts": {
+      "get": {
+        "tags": [
+          "calendar"
+        ],
+        "summary": "The saved calendar accounts, non-secret fields only (`password_set` says\nwhether a password is stored; it is never returned).",
+        "operationId": "list_calendar_accounts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CalendarAccountDto"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "calendar management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "calendar"
+        ],
+        "summary": "Add a calendar account. The `password` goes to the secret store (never to\n`calendar.toml`, never returned). Takes effect for the next tool call, no\nrestart needed.",
+        "operationId": "create_calendar_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarAccountInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarAccountDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "the name is taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid config or the server refused the login",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "calendar management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/calendar/accounts/{name}": {
+      "put": {
+        "tags": [
+          "calendar"
+        ],
+        "summary": "Change an account. Without `password` the stored one is kept.",
+        "operationId": "update_calendar_account",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "account name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarAccountInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarAccountDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid config or the server refused the login",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "calendar management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "calendar"
+        ],
+        "summary": "Remove an account and its stored password.",
+        "operationId": "delete_calendar_account",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "account name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "removed"
+          },
+          "404": {
+            "description": "no such account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "calendar management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/calendar/test": {
+      "post": {
+        "tags": [
+          "calendar"
+        ],
+        "summary": "Try a login and list the calendars behind it: a saved account (`name`) or an\nunsaved login (`url`, `username`, `password`). A server that cannot be\nreached or refuses the login answers `200` with `ok: false` and a plain\nmessage. At most two connection tests run at once (`429`).",
+        "operationId": "test_calendar",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarTestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarTestReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "nothing to test",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "too many tests running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "calendar management is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/channels": {
       "get": {
         "tags": [
@@ -21001,6 +21325,162 @@
           "middle",
           "right"
         ]
+      },
+      "CalendarAccountDto": {
+        "type": "object",
+        "description": "One calendar account (non-secret fields only).",
+        "required": [
+          "name",
+          "url",
+          "username",
+          "password_set"
+        ],
+        "properties": {
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Address invitations are sent from; `null` uses the login when it is an address."
+          },
+          "name": {
+            "type": "string",
+            "description": "Short name bots use to pick the calendar (`personal`)."
+          },
+          "password_set": {
+            "type": "boolean",
+            "description": "Whether a password is stored (never returned)."
+          },
+          "url": {
+            "type": "string",
+            "description": "Address of the calendar (a `CalDAV` collection)."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login name."
+          }
+        }
+      },
+      "CalendarAccountInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/calendar/accounts` and `PUT /v1/calendar/accounts/{name}`.",
+        "required": [
+          "url",
+          "username"
+        ],
+        "properties": {
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Address invitations are sent from. Empty clears it."
+          },
+          "name": {
+            "type": "string",
+            "description": "Short name (letters, digits, `-` and `_`). Ignored by `PUT`: the path names it."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "(App) password, **write-only**. Required to create; with `PUT` omitted keeps the stored one."
+          },
+          "url": {
+            "type": "string",
+            "description": "Address of the calendar. A server address that holds several calendars\nis accepted when it holds exactly one."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login name."
+          }
+        }
+      },
+      "CalendarFoundDto": {
+        "type": "object",
+        "description": "A calendar a test found.",
+        "required": [
+          "name",
+          "url"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name the owner gave it."
+          },
+          "url": {
+            "type": "string",
+            "description": "Its address: what an account's `url` should be."
+          }
+        }
+      },
+      "CalendarTestInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/calendar/test`: either a saved account (`name`) or a login\nthat is not saved yet (`url`, `username`, `password`). Never a mix: a saved\naccount is always tried at its own address.",
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A saved account to test."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "(App) password, **write-only**, used once."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Address to try."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Login name."
+          }
+        }
+      },
+      "CalendarTestReport": {
+        "type": "object",
+        "description": "Result of `POST /v1/calendar/test`.",
+        "required": [
+          "ok",
+          "calendars",
+          "scheduling"
+        ],
+        "properties": {
+          "calendars": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalendarFoundDto"
+            },
+            "description": "The calendars found."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What went wrong, in plain words (`null` on success)."
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "`true` when the server accepted the login and was reachable."
+          },
+          "scheduling": {
+            "type": "boolean",
+            "description": "Whether the server sends invitations itself (`CalDAV` scheduling)."
+          }
+        }
       },
       "Capabilities": {
         "type": "object",
@@ -37313,6 +37793,9 @@
     },
     {
       "name": "voice"
+    },
+    {
+      "name": "calendar"
     },
     {
       "name": "web"

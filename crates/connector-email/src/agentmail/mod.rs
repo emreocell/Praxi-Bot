@@ -288,6 +288,9 @@ impl AgentMailProvider {
 
     /// Validate what will be sent before any request is made.
     fn check_outgoing(&self, mail: &OutgoingMail, need_recipient: bool) -> Result<(), EmailError> {
+        if mail.calendar.is_some() {
+            return Err(EmailError::unsupported("calendar invitations"));
+        }
         let from = self.address().unwrap_or("bot@example.com");
         let any = !(mail.to.is_empty() && mail.cc.is_empty() && mail.bcc.is_empty());
         // What is validated is what is sent (and shown for approval): only plain

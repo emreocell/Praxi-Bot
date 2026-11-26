@@ -325,6 +325,11 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/v1/email/guard/opt-out/{}"),
     ("GET", "/v1/email/guard/send-log"),
     ("GET", "/v1/email/guard/send-log.csv"),
+    // calendar logins: stored passwords, and a test dials a server the caller names
+    ("POST", "/v1/calendar/accounts"),
+    ("PUT", "/v1/calendar/accounts/{}"),
+    ("DELETE", "/v1/calendar/accounts/{}"),
+    ("POST", "/v1/calendar/test"),
     ("PUT", "/v1/web/search"),
     ("PUT", "/v1/voice"),
     // downloads hundreds of MB onto the owner's disk

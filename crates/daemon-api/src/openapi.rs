@@ -9,6 +9,8 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
 use crate::bot_limits_routes;
+use crate::calendar;
+use crate::calendar_routes;
 use crate::changes;
 use crate::cli_login;
 use crate::components;
@@ -440,6 +442,11 @@ impl Modify for Security {
         connection_test::test_web,
         connection_test::test_voice,
         connection_test::test_email,
+        calendar_routes::list_calendar_accounts,
+        calendar_routes::create_calendar_account,
+        calendar_routes::update_calendar_account,
+        calendar_routes::delete_calendar_account,
+        calendar_routes::test_calendar,
         web_routes::get_web_search,
         web_routes::test_web_search,
         web_routes::update_web_search,
@@ -872,6 +879,11 @@ impl Modify for Security {
         embeddings_routes::DecisionHelperInput,
         spend_routes::SpendLimitDto,
         spend_routes::SpendLimitInput,
+        calendar::CalendarAccountDto,
+        calendar::CalendarAccountInput,
+        calendar::CalendarTestInput,
+        calendar::CalendarFoundDto,
+        calendar::CalendarTestReport,
         web::WebSearchConfigDto,
         web::WebSearchConfigInput,
         web::WebSearchTestInput,
@@ -924,6 +936,7 @@ impl Modify for Security {
         (name = "usage"),
         (name = "view"),
         (name = "voice"),
+        (name = "calendar"),
         (name = "web"),
         (name = "workspaces"),
         (name = "connection-test"),

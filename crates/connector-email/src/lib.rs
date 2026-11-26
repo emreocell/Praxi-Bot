@@ -55,7 +55,7 @@ pub use provider::{
     AttachmentData, Capabilities, CreateInbox, Found, InboxInfo, MailboxProvider, NewMessages,
     Receipt, SearchRequest,
 };
-pub use smtp::OutgoingMail;
+pub use smtp::{CalendarPart, OutgoingMail};
 pub use tools::TOOL_NAMES;
 pub use wait::{
     LinkBasis, MailHandle, PageOrigin, PageOriginSlot, TrackingResolver, WaitEnd, WaitFilter,

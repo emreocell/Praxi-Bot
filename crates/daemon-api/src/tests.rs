@@ -27,6 +27,7 @@ mod audit;
 mod bot_patch;
 mod bot_tools;
 mod browser_profiles;
+mod calendar;
 mod chat_history;
 mod cli_engines;
 mod composio;

@@ -80,6 +80,8 @@ pub(crate) mod workspace_routes;
 pub use peer::{PeerIdentity, PeerRole, peer_router};
 mod bot_limits_routes;
 mod browser_profiles;
+pub mod calendar;
+mod calendar_routes;
 mod data_routes;
 mod embeddings_routes;
 mod incoming_webhook;
@@ -132,6 +134,7 @@ pub use auth::{
     OWNER_KEY_FILE_NAME, TOKEN_FILE_NAME, TokenInfo, load_or_create_owner_key,
     load_or_create_token, read_owner_key, read_token, token_path,
 };
+pub use calendar::{CalendarControl, CalendarControlError};
 pub use components::{ComponentControl, ComponentError};
 pub use composio::{ComposioControl, ComposioControlError};
 pub use control::{ControlConfig, ControlHub};
@@ -301,6 +304,8 @@ struct Inner {
     email_channel: OnceLock<Arc<dyn EmailChannelControl>>,
     /// Bounds concurrent "test connection" calls (see `email_routes`).
     email_tests: Arc<tokio::sync::Semaphore>,
+    /// Calendar account management (see [`AppState::set_calendar`]).
+    calendar: OnceLock<Arc<dyn CalendarControl>>,
     /// Web search settings management (see [`AppState::set_web`]).
     web: OnceLock<Arc<dyn WebControl>>,
     /// Dictation (speech-to-text) management (see [`AppState::set_voice`]).
@@ -510,6 +515,7 @@ impl AppState {
             email: OnceLock::new(),
             email_channel: OnceLock::new(),
             email_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
+            calendar: OnceLock::new(),
             web: OnceLock::new(),
             voice: OnceLock::new(),
             skills: OnceLock::new(),
@@ -649,6 +655,12 @@ impl AppState {
         self.0.email_channel.get().cloned()
     }
 
+    /// Enable `/v1/calendar/*` with the embedder calendar manager (call once,
+    /// before serving; a second call is ignored).
+    pub fn set_calendar(&self, calendar: Arc<dyn CalendarControl>) {
+        let _ = self.0.calendar.set(calendar);
+    }
+
     /// Enable `/v1/web/search*` with the embedder web-search manager (call once,
     /// before [`serve`]; a second call is ignored).
     pub fn set_web(&self, web: Arc<dyn WebControl>) {
@@ -748,6 +760,10 @@ impl AppState {
 
     pub(crate) fn voice(&self) -> Option<Arc<dyn VoiceControl>> {
         self.0.voice.get().cloned()
+    }
+
+    pub(crate) fn calendar(&self) -> Option<Arc<dyn CalendarControl>> {
+        self.0.calendar.get().cloned()
     }
 
     pub(crate) fn web(&self) -> Option<Arc<dyn WebControl>> {
@@ -1247,6 +1263,7 @@ pub fn router(state: AppState) -> Router {
 
 #[allow(clippy::too_many_lines)] // The route table of the whole API.
 fn api_routes() -> Router<AppState> {
+    use calendar_routes as cal;
     use composio_routes as c;
     use email_routes as e;
     use fill_routes as f;
@@ -1888,6 +1905,15 @@ fn api_routes() -> Router<AppState> {
             get(w::get_web_search).put(w::update_web_search),
         )
         .route("/v1/web/search/test", post(w::test_web_search))
+        .route(
+            "/v1/calendar/accounts",
+            get(cal::list_calendar_accounts).post(cal::create_calendar_account),
+        )
+        .route(
+            "/v1/calendar/accounts/{name}",
+            axum::routing::put(cal::update_calendar_account).delete(cal::delete_calendar_account),
+        )
+        .route("/v1/calendar/test", post(cal::test_calendar))
         .route(
             "/v1/connection-test/provider",
             post(connection_test::test_provider),

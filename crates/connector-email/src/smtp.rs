@@ -39,6 +39,19 @@ pub struct OutgoingMail {
     /// `References` chain of a reply: the original's chain plus its own id.
     #[serde(skip)]
     pub references: Vec<String>,
+    /// A calendar invitation to attach. Set by the calendar connector, never
+    /// read from a tool's input.
+    #[serde(skip)]
+    pub calendar: Option<CalendarPart>,
+}
+
+/// An iCalendar message (an invitation or a cancellation) sent with a mail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CalendarPart {
+    /// The iTIP method: `REQUEST`, `CANCEL`.
+    pub method: String,
+    /// The `.ics` document.
+    pub ics: String,
 }
 
 /// Models sometimes write a line break as the two characters backslash and `n` instead of a
@@ -242,6 +255,17 @@ fn compose_message(
         .from(from.clone())
         .subject(mail.subject.clone())
         .text_body(mail.body.clone());
+    if let Some(cal) = &mail.calendar {
+        if !cal.method.chars().all(|c| c.is_ascii_uppercase()) {
+            return Err(EmailError::Input("bad calendar method".into()));
+        }
+        // Mail programs recognise an invitation by the `method` parameter.
+        builder = builder.attachment(
+            format!("text/calendar; method={}; charset=UTF-8", cal.method),
+            "invite.ics",
+            cal.ics.clone().into_bytes(),
+        );
+    }
     if !to.is_empty() {
         builder = builder.to(to);
     }
@@ -349,6 +373,25 @@ mod tests {
         let raw = String::from_utf8(m.formatted()).unwrap();
         assert!(raw.contains("Subject: Hello"));
         assert!(raw.contains("bob@example.com"));
+    }
+
+    #[test]
+    fn a_calendar_part_is_attached_as_text_calendar_with_its_method() {
+        let mut m = mail();
+        m.calendar = Some(CalendarPart {
+            method: "REQUEST".into(),
+            ics: "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR\r\n".into(),
+        });
+        let raw = String::from_utf8(compose("me@example.com", &m).unwrap().formatted()).unwrap();
+        assert!(raw.contains("text/calendar"), "{raw}");
+        assert!(raw.contains("method=REQUEST"), "{raw}");
+        assert!(raw.contains("invite.ics"), "{raw}");
+        // A method that could carry a header break is refused.
+        m.calendar = Some(CalendarPart {
+            method: "REQUEST\r\nBcc: x@example.com".into(),
+            ics: String::new(),
+        });
+        assert!(compose("me@example.com", &m).is_err());
     }
 
     #[test]

@@ -279,7 +279,7 @@ fn host_mode_desktop_denial(method: &Method, check_path: &str) -> Option<&'stati
     if (under("/v1/mcp") || under("/v1/skills") || is_bot_skills_path(check_path)) && mutating {
         return Some("tool servers and skills are managed on the host itself");
     }
-    if (under("/v1/email") || under("/v1/web/search")) && mutating {
+    if (under("/v1/email") || under("/v1/web/search") || under("/v1/calendar")) && mutating {
         return Some("account credentials are managed on the host itself");
     }
     // The dictation key and endpoint: audio could be redirected to another service.
@@ -1034,6 +1034,8 @@ mod tests {
             (Method::GET, "/v1/audit"),
             (Method::GET, "/v1/chats/search"),
             (Method::PUT, "/v1/web/search"),
+            (Method::POST, "/v1/calendar/accounts"),
+            (Method::POST, "/v1/calendar/test"),
             (Method::PUT, "/v1/voice"),
             (Method::PUT, "/v1/spend-limit"),
             (Method::POST, "/v1/bots/abc/incoming-webhooks"),
