@@ -365,6 +365,9 @@ impl Shared {
         // Taint is kept on the top-level run so subagents spawned after a
         // tainted replay inherit it and no per-child entry has to be cleaned up.
         let root = self.root_run_id(ctx);
+        // A file the run writes after it read untrusted content may later be run by a
+        // waived shell command: remember it before anything else decides.
+        ctx.taint.lock().note_write(name, effect, category, input);
         // A browser call that names a profile other than the throw-away one may be signed in to
         // the owner's accounts: what the run reads from then on is private and cannot be compared.
         // The same for an address on this computer or its network (file:, localhost, LAN): a
@@ -1266,20 +1269,28 @@ impl Shared {
     ///
     /// * an owner-started run ([`Self::full_owner_started`]: the desktop, the admin desktop or
     ///   the owner's paired Telegram chat), not a subagent, not a helper, not a mail, webhook,
-    ///   schedule or external-agent run;
+    ///   schedule or external-agent run, on the bot's own host;
     /// * the bot's level is Full, the policy already allowed the call, and the input is plain
     ///   (`command`, `shell`, `cwd`, `timeout` only) with no hidden character and nothing the
     ///   redactor would change;
-    /// * the command has no exfil shape ([`crate::full_autonomy::command_exfil_shape`]: a
-    ///   network client, a URL, inline code, an encoder, a secret location, a key, a card
-    ///   number) and is shorter than [`SHELL_COMMAND_LIMIT`];
+    /// * the WHOLE command line is on the strict allow-list of [`crate::shell_allow`]: it
+    ///   parses without any expansion, and every simple command in it is a read-only or
+    ///   local-build program from a fixed table whose flags and paths are checked (paths stay
+    ///   inside the bot's workspace). Anything else, including every network client, every
+    ///   interpreter wrapper, persistence and system change, asks. Fails closed on any doubt;
+    /// * an interpreter running a script, a build or test tool, `make` or `git` (they start code
+    ///   that lives in the project) is waived only while the run has NOT written or changed
+    ///   anything that could hold code AFTER it read untrusted content
+    ///   ([`taint::ContentTaint::code_written_after_untrusted`], recorded for file tools when
+    ///   they are decided and for redirects of waived commands): a script a page could have
+    ///   shaped never becomes a waived run;
     /// * the run holds no private data of the owner, OR only private data whose text could be
     ///   hashed and the command copies none of its words (private data that cannot be
     ///   compared, or too much of it, asks);
     /// * the run has not used up [`SHELL_WAIVER_BUDGET`] such commands.
     ///
-    /// Residual risk (documented): a script the model wrote earlier in the run is not read
-    /// here; it can do what a plain command could not.
+    /// Residual (documented): a command the owner approved on a card runs as approved; the
+    /// files it writes are not tracked.
     fn full_shell_waives(&self, ctx: &RunCtx, input: &Value) -> bool {
         if ctx.parent_run_id.is_some()
             || ctx.delegation().is_some()
@@ -1302,18 +1313,29 @@ impl Shared {
         {
             return false;
         }
+        if obj
+            .get("shell")
+            .is_some_and(|s| !matches!(s.as_str(), Some("powershell" | "cmd" | "bash" | "sh")))
+        {
+            return false;
+        }
         let Some(command) = obj.get("command").and_then(Value::as_str) else {
             return false;
         };
         let cwd = obj.get("cwd").and_then(Value::as_str).unwrap_or_default();
         if command.chars().count() >= SHELL_COMMAND_LIMIT
-            || crate::full_autonomy::command_exfil_shape(command)
-            || crate::full_autonomy::command_exfil_shape(cwd)
+            || crate::full_autonomy::text_carries_data(command)
             || taint::input_forbids_egress(input)
             || taint::input_needs_a_card_to_show(input)
         {
             return false;
         }
+        let Some(workspace) = self.bot_workspace_dir(ctx.bot_id) else {
+            return false;
+        };
+        let Some(plan) = crate::shell_allow::plan(command, cwd, &workspace) else {
+            return false;
+        };
         if let Some(r) = &self.cfg.redactor {
             let mut shown = input.clone();
             if crate::shared::redact_value(r, &mut shown) {
@@ -1322,6 +1344,11 @@ impl Shared {
         }
         let owner_words = self.owner_words(ctx);
         let mut taint = ctx.taint.lock();
+        // What the command writes is remembered even when this call still asks.
+        taint.note_redirect_writes(&plan.writes);
+        if plan.runs_project_code && taint.code_written_after_untrusted {
+            return false;
+        }
         if taint.private_source && (taint.seen.unhashed || taint.seen.copied(command, &owner_words))
         {
             return false;

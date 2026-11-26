@@ -342,6 +342,10 @@ async fn run(
             None,
             false,
         ));
+        // The workspace must be outside the data directory.
+        let ws = tempfile::tempdir().unwrap();
+        lp.set_workspaces_root(Some(ws.path().join("workspaces")));
+        std::mem::forget(ws);
     }
     if case.prior != Prior::None {
         let crate::Delivery::NewTurn(first) = lp

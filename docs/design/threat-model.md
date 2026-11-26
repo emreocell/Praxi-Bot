@@ -24,7 +24,7 @@ or the content claims. Exposure never clears inside a run.
 | Gate | Stops | Code |
 |------|-------|------|
 | Egress gate (untrusted + private read, then a call that can send) | URL query, path, subdomain, fragment exfil; mail; markdown image loads; web search with secrets | `permission-engine/src/egress.rs`, `agent-core/src/taint.rs`, `approval.rs` |
-| Executor gate (untrusted read, then a program start) | shell commands injected through pages, mail, MCP results, filenames | `egress.rs::executes_must_ask` |
+| Executor gate (untrusted read, then a program start) | shell commands injected through pages, mail, MCP results, filenames. An owner-started Full run is waived only for a command line that parses fully and is on a strict allow-list (fail closed), and never for a script the run wrote after an untrusted read | `egress.rs::executes_must_ask`, `agent-core/src/shell_allow.rs`, `approval.rs::full_shell_waives` |
 | Forbidden characters | tag characters, bidi overrides/isolates, invisible operators, private-use, U+FFFC in outgoing text are refused before any card | `approval.rs::refuse_unshowable_egress`, `taint.rs` |
 | Card hygiene | hostile tool descriptions, control characters and secrets never appear on the card the owner reads | `approval.rs`, `mcp-tool-pinning-adr.md` |
 | Floors | money floor, never-list, protected daemon paths, always-ask tools | `resolver.rs`, `never_list.rs` |

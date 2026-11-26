@@ -383,8 +383,62 @@ A shell, a script, a desktop launch and desktop input (`desktop_type`,
 `desktop_key`, `desktop_set_value`, `desktop_drag`) start a program or drive the
 keyboard on your behalf. After a run has put untrusted content in front of the
 model, each of them asks, once, with the full command or input on the card. A
-standing grant, the read shortcut, a Full preset and `allow_egress_after_reads`
-do not cover that ask. Shell, script and launch always ask, on every platform.
+standing grant, the read shortcut and `allow_egress_after_reads`
+do not cover that ask. Script, desktop launch and desktop input always ask, on every
+platform. The ONE exception is the Full level's shell rule below: a plain
+`shell_run` of an owner-started run, judged from the whole command line against a
+strict allow-list.
+
+### What is still asked in the Full level
+
+The **Full** level ("Tam") is for an owner who wants the bot to do the work without a
+card per step. It never switches a hard stop off. In a run the **owner** started it
+removes only these asks, and only while every condition in the row holds:
+
+* **Who is the owner.** The desktop app, the admin desktop, and your **own paired
+  Telegram chat**: only a paired user, in a private 1:1 chat with the bot, whose message
+  also carries the daemon's owner key counts. A Telegram group, an unpaired user, a bot,
+  a Discord message, a webhook, a mail, a schedule, a subagent, a helper bot and an
+  external agent never do.
+* **Shell after a page read.** A `shell_run` on the bot's own host computer runs without
+  a card only when ALL hold: the **whole command line** parses without any expansion and
+  every simple command in it is on a fixed allow-list of read-only tools (`ls`, `dir`,
+  `cat`, `type`, `head`, `tail`, `wc`, `find` without `-exec` or `-delete`, `grep`, `rg`,
+  `sort`, `uniq`, `echo`, `date`, `whoami`, `hostname`, `uname`, `git status`, `diff`,
+  `log`, `show`, `branch --list`, `rev-parse`, version queries) or local build and test
+  tools (`cargo build`, `check`, `test`, `clippy`, `fmt`, `doc`, `run`, `npm`, `pnpm` or
+  `yarn` `test` and `run`, `make`, `python`, `node` or `bash` with a script,
+  `python -m pytest`); the flags of every program are checked; every path stays inside
+  the bot's workspace (no `..`, no absolute path, no drive, no UNC, symlinks and
+  junctions resolved); `>` and `>>` only write inside the workspace; no private word of
+  the run is copied; at most 60 such commands per run. **Anything the parser does not
+  understand asks.** There is no list of forbidden words: a network client, `start`,
+  `Resolve-DnsName`, `schtasks`, `reg add`, `taskkill`, `curl` hidden as `cu""rl`,
+  `c${x}url` or a hex escape piped into `sh`, `cmd /c`, PowerShell and its aliases, `$`,
+  `%`, backticks, `^`, non-ASCII look-alikes and 8.3 names are simply not on the
+  allow-list.
+* **Scripts and project files the bot wrote.** An interpreter running a script, a build
+  or test tool, `make` and `git` (they run code that lives in the project) are waived only
+  while the run has **not written or changed a file that could hold code after it read
+  untrusted content** (file tools are recorded when they are decided, redirects of waived
+  commands too; a plain `.md`, `.txt`, `.csv` or image does not count). A script written
+  after a page read, or edited after it, always asks; one written before any untrusted
+  read runs.
+* **Web reads and the managed browser.** After a page read with no private data in the
+  run, everything passes; with private data AND a page read, only sites the owner named
+  pass, and any other call only when no private word, no data shape and the send budget
+  allow it.
+
+| Still asks in Full, always | Why |
+|---|---|
+| Money, the never-list (`rm -rf`, sign-in stores), mail and message sends, secrets typed with `browser_fill`, Composio actions, bot and schedule creation | floors and always-ask tools are decided before the Full rule |
+| A shell command off the allow-list, a wrapper (`cmd /c`, `powershell`, `sh`), quoting or expansion, a path outside the workspace, 400 characters or more | the page may have chosen the command; fail closed |
+| A script, build or test after the run wrote code-like files after an untrusted read | the file may carry what the command line no longer shows |
+| A private word of the run in a command or a new address, data-shaped text (keys, hashes, card numbers), private data that cannot be compared, over the send budget | the egress gate and the per-run budget stay |
+| `browser_eval`, a named browser profile, a local or private-network address, a signed-in profile | not covered by Full |
+| The user's own computer (`pc_*`) | only owner-started desktop runs, never Telegram |
+| Anything in a run that is not owner-started, a subagent or a helper bot | they never inherit the owner's Full autonomy |
+| A command the owner approved on a card | runs as shown; files it writes are not tracked (residual) |
 
 **Host-status command exception (always-on host only):** On an always-on host
 running on its own computer (`host` or `browser`, never the user's PC), a narrow

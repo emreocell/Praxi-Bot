@@ -40,6 +40,7 @@ mod router;
 mod schedule_precheck;
 mod scoped_grant;
 mod shared;
+mod shell_allow;
 mod site_profiles;
 pub mod spend;
 mod subagent;

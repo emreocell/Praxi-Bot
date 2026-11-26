@@ -119,9 +119,78 @@ pub(crate) struct ContentTaint {
     pub(crate) private_source: bool,
     /// Salted hashes of the words of the private results of this run (see `full_autonomy`).
     pub(crate) seen: crate::full_autonomy::SeenText,
+    /// The run wrote or changed something that could hold code (a script, a manifest, a build
+    /// file, anything but a plain document) AFTER it read untrusted content. A program the bot
+    /// starts later may then run what a page chose, so the Full level's shell waiver stops
+    /// covering interpreters and build tools. Only ever set.
+    pub(crate) code_written_after_untrusted: bool,
 }
 
 impl ContentTaint {
+    /// A tool call that may write files, recorded when it is DECIDED (before it runs, whether or
+    /// not it is later allowed): after untrusted content was read, a write of anything but a
+    /// plain document marks the run (see [`Self::code_written_after_untrusted`]). A browser,
+    /// a mail or a memory tool cannot write the bot's files; a file tool without a recognisable
+    /// path, a script, a desktop or system tool is assumed to.
+    pub(crate) fn note_write(
+        &mut self,
+        name: &str,
+        effect: tool_registry::Effect,
+        category: protocol::PermissionCategory,
+        input: &Value,
+    ) {
+        use protocol::PermissionCategory as C;
+        if self.code_written_after_untrusted
+            || !self.exposure.untrusted
+            || effect == tool_registry::Effect::Read
+            || matches!(name, "shell_run" | "fs_delete" | "notes_write")
+            || name.starts_with("pc_")
+            || name.starts_with("browser_")
+            || !matches!(
+                category,
+                C::Fs | C::Shell | C::Desktop | C::Script | C::System | C::Remote
+            )
+        {
+            return;
+        }
+        let paths: Vec<&str> = ["path", "to", "output_path", "output_dir", "dest", "file"]
+            .iter()
+            .filter_map(|k| input.get(*k).and_then(Value::as_str))
+            .collect();
+        let inert = category == C::Fs
+            && !paths.is_empty()
+            && paths.iter().all(|p| crate::shell_allow::inert_path(p));
+        if !inert {
+            self.code_written_after_untrusted = true;
+        }
+    }
+
+    /// [`Self::note_write`] for a call read back from a stored model step (a run rebuilt after a
+    /// restart): the tool's class is not at hand, so it is judged by name.
+    fn note_write_from_history(&mut self, name: &str, arguments: &str) {
+        use protocol::PermissionCategory as C;
+        let category = match name {
+            "fs_write" | "fs_edit" | "fs_move" | "checkpoint_restore" | "docx_write"
+            | "xlsx_write" | "csv_transform" | "doc_convert" | "doc_preview" => C::Fs,
+            "script_run" => C::Script,
+            n if n.starts_with("desktop_") => C::Desktop,
+            _ => return,
+        };
+        let input = serde_json::from_str(arguments).unwrap_or(Value::Null);
+        self.note_write(name, tool_registry::Effect::Write, category, &input);
+    }
+
+    /// A redirect target of a command the Full level ran (see `Shared::full_shell_waives`).
+    pub(crate) fn note_redirect_writes(&mut self, writes: &[std::path::PathBuf]) {
+        if self.exposure.untrusted
+            && writes
+                .iter()
+                .any(|p| !crate::shell_allow::inert_path(&p.to_string_lossy()))
+        {
+            self.code_written_after_untrusted = true;
+        }
+    }
+
     /// Record that a tool result of this class entered the context.
     ///
     /// A class that neither ingests untrusted content nor reads private data
@@ -191,6 +260,7 @@ impl ContentTaint {
     pub(crate) fn inherit(&mut self, other: &Self) {
         self.exposure.inherit(other.exposure);
         self.private_source |= other.private_source;
+        self.code_written_after_untrusted |= other.code_written_after_untrusted;
         self.seen.merge(&other.seen);
         self.trust_folders
             .extend(other.trust_folders.iter().cloned());
@@ -336,6 +406,21 @@ pub(crate) fn observe_history_step(
         }
         "model" => {
             let Some(out) = output else { return };
+            // The calls the model made in this step were decided before their results came in:
+            // judge them against what the run had read by then.
+            for call in out
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                taint.note_write_from_history(
+                    call.get("name").and_then(Value::as_str).unwrap_or_default(),
+                    call.get("arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                );
+            }
             apply_fact_list(taint, out.get("executed"));
             apply_fact_list(taint, out.get("metadata"));
         }
@@ -1688,6 +1773,38 @@ mod hashed_history_tests {
     use serde_json::json;
 
     use super::*;
+
+    fn write_step(path: &str) -> Value {
+        json!({"tool_calls": [{
+            "id": "c1",
+            "name": "fs_write",
+            "arguments": json!({"path": path, "content": "x"}).to_string()
+        }]})
+    }
+
+    fn page_step() -> Value {
+        json!({"results": [{"fact": {
+            "ran": true, "ingests_untrusted": true, "reads_private": false, "label": "page https://x.example/"
+        }}]})
+    }
+
+    #[test]
+    fn a_rebuilt_run_remembers_code_written_after_an_untrusted_read() {
+        // written before any page read: clean
+        let mut taint = ContentTaint::default();
+        observe_history_step(&mut taint, "model", &json!({}), Some(&write_step("x.sh")));
+        observe_history_step(&mut taint, "tools", &json!({}), Some(&page_step()));
+        assert!(!taint.code_written_after_untrusted);
+        // a note after the read is inert, a script after the read marks the run
+        observe_history_step(&mut taint, "model", &json!({}), Some(&write_step("a.md")));
+        assert!(!taint.code_written_after_untrusted);
+        observe_history_step(&mut taint, "model", &json!({}), Some(&write_step("x.sh")));
+        assert!(taint.code_written_after_untrusted);
+        // and a parent that absorbs the child keeps the mark
+        let mut parent = ContentTaint::default();
+        parent.inherit(&taint);
+        assert!(parent.code_written_after_untrusted);
+    }
 
     #[test]
     fn recalled_memory_of_a_resumed_run_is_hashed_not_unhashed() {

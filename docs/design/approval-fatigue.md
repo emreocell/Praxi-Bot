@@ -30,7 +30,7 @@ In order:
 | 5 | Never-list floor (`rm -rf`, CLI sign-in stores, ...) | `never_list.rs` | Yes, by design |
 | 6 | Always-ask tools (`Tool::always_ask`, `always_ask_for`: secret fills, Composio actions, knowledge brain, bot/schedule creation) | tools | Yes, every call; no preset or grant waives it |
 | 7 | **Egress gate** after untrusted (or untrusted+private) content: browse to another site, fetch, page text, send | `egress.rs`, `taint.rs` | Yes, each call, unless a "this chat" gate grant for the class and origin exists |
-| 8 | **Executor gate**: any call that starts a program (`shell_run`, `script_run`, `desktop_launch`, desktop typing) after untrusted content | `egress.rs::executes_must_ask` | Yes, each call; only a chat-scoped gate grant (shell class) or a typed URL helps; not the egress waiver, not Full |
+| 8 | **Executor gate**: any call that starts a program (`shell_run`, `script_run`, `desktop_launch`, desktop typing) after untrusted content | `egress.rs::executes_must_ask` | Yes, each call; only a chat-scoped gate grant (shell class) or a typed URL helps; not the egress waiver. The one Full-level exception is a `shell_run` of an owner-started run whose WHOLE command line is on the strict allow-list in `shell_allow.rs` (read-only tools and local build tools, paths inside the workspace; a script or project file written after an untrusted read is never waived), see `docs/guide/security.md` |
 | 9 | User's-PC read, once per run and family | `approval.rs` (`pc_read_pending`) | No (once per run) |
 | 10 | Policy-level ask in Balanced mode outside its lane (deletes, sends, accounts, the user's PC) | `modes.rs` | Yes, by design |
 

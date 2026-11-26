@@ -249,7 +249,7 @@ description: [docs/guide/security.md](../guide/security.md).
   memory are *data*, never instructions. Each tool declares a `ContentClass`
   (`ingests_untrusted`, `reads_private`, `egress`, `executes`); the registry rejects an undeclared
   one. Once a run has read untrusted or private content, egress and program starts ask every time
-  (`executes` calls ask once per call and the egress waiver does not cover them). The facts are
+  (`executes` calls ask once per call and the egress waiver does not cover them; the only exception is the owner's Full level for `shell_run`, which needs the whole command line to pass the allow-list in `shell_allow.rs` and ignores scripts the run wrote after an untrusted read). The facts are
   recorded by the daemon when a call happens (`ExecFact`), not parsed from tool output.
 - **Redaction.** `secret-store`'s `Redactor` runs on user text before storage, on tool output and
   on the way out to models, channels and the UI. Secrets are passed around as `SecretRef`, and a
