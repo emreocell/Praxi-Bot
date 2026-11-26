@@ -344,7 +344,7 @@ impl LeaderControl {
         if updates.len() >= MAX_UPDATE_REQUESTS {
             return Err(ApiError::new(
                 StatusCode::TOO_MANY_REQUESTS,
-                "update_rate_limit",
+                "too_many_requests",
                 "too many update requests; wait a few minutes",
             ));
         }

@@ -4,7 +4,7 @@ mod guard;
 mod proxy;
 #[cfg(feature = "server")]
 mod server;
-pub use proxy::{ApiProxy, ProxyState};
+pub use proxy::{ApiProxy, Compatibility, ProxyState, RemoteHealth, works_while_incompatible};
 #[cfg(feature = "server")]
 pub use server::ApiProtocol;
 

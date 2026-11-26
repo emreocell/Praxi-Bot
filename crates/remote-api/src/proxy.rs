@@ -16,15 +16,66 @@ use hyper::client::conn::http1;
 use hyper_util::rt::TokioIo;
 use iroh::{PublicKey, endpoint::Connection};
 use peer_network::{ALPN_API, PeerNetwork};
-use std::{fmt::Write as _, io, time::Duration};
+use std::{fmt::Write as _, io, sync::Arc, time::Duration};
 use tokio::{net::TcpListener, sync::watch};
 
 /// Connection status of the remote API tunnel.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProxyState {
     Connected,
+    /// The server answered but is not a release this computer may work with: only its status and
+    /// the update request pass (see [`works_while_incompatible`]). The reason is plain text.
+    Incompatible(String),
     Reconnecting,
     Unreachable(String),
+}
+
+/// What a server reports on `GET /v1/health`, as far as release compatibility needs it. A field the
+/// server does not report (an older build) is empty.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RemoteHealth {
+    pub version: String,
+    pub api_version: String,
+    pub release_tag: Option<String>,
+    pub build_id: Option<String>,
+}
+
+impl RemoteHealth {
+    pub(crate) fn from_json(body: &serde_json::Value) -> Self {
+        let text = |key: &str| {
+            body[key]
+                .as_str()
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+        };
+        Self {
+            version: text("version").unwrap_or_default(),
+            api_version: text("api_version").unwrap_or_default(),
+            release_tag: text("release_tag"),
+            build_id: text("build_id"),
+        }
+    }
+}
+
+/// Decides, from what the server reports, whether ordinary traffic may flow to it. `Err` carries
+/// the reason in plain words.
+pub type Compatibility = Arc<dyn Fn(&RemoteHealth) -> Result<(), String> + Send + Sync>;
+
+/// The routes that still work while the server runs another release: its identity and status, and
+/// the request to update it. Everything else (work, bots, secrets) waits until the releases match.
+#[must_use]
+pub fn works_while_incompatible(method: &str, path: &str) -> bool {
+    matches!(
+        (method, path),
+        ("GET", "/v1/health" | "/v1/host") | ("POST", "/v1/host/update" | "/v1/admin/host-update")
+    )
+}
+
+/// The dialed connection and, when the server is not compatible, why.
+#[derive(Clone)]
+struct Link {
+    conn: Connection,
+    refusal: Option<Arc<str>>,
 }
 
 /// A guarded loopback endpoint. Dropping it cancels serving and reconnecting.
@@ -53,7 +104,7 @@ impl Drop for CloseConnection {
 #[derive(Clone)]
 struct Proxy {
     token: String,
-    conn: watch::Receiver<Option<Connection>>,
+    conn: watch::Receiver<Option<Link>>,
     budget: Budget,
     tuning: Tuning,
     cancel: tokio_util::sync::CancellationToken,
@@ -66,13 +117,28 @@ impl ApiProxy {
     /// Returns an error if randomness or the loopback bind fails, or the peer
     /// is not paired locally. Dial failures are reported through `state`.
     pub async fn start(net: PeerNetwork, peer: PublicKey) -> io::Result<Self> {
-        Self::start_with(net, peer, Tuning::default()).await
+        Self::start_with(net, peer, Tuning::default(), None).await
+    }
+
+    /// Like [`ApiProxy::start`], but `compatible` judges the server's `/v1/health` after every
+    /// connect. When it refuses, the state becomes [`ProxyState::Incompatible`] and the proxy
+    /// answers 409 `host_incompatible` to every route except [`works_while_incompatible`].
+    ///
+    /// # Errors
+    /// As [`ApiProxy::start`].
+    pub async fn start_checked(
+        net: PeerNetwork,
+        peer: PublicKey,
+        compatible: Compatibility,
+    ) -> io::Result<Self> {
+        Self::start_with(net, peer, Tuning::default(), Some(compatible)).await
     }
 
     pub(crate) async fn start_with(
         net: PeerNetwork,
         peer: PublicKey,
         tuning: Tuning,
+        compatible: Option<Compatibility>,
     ) -> io::Result<Self> {
         if net.device(&peer).is_none() {
             return Err(io::Error::new(
@@ -103,9 +169,17 @@ impl ApiProxy {
                         // alone may complete before a revoked key is rejected.
                         let _close = CloseConnection(conn.clone());
                         match tokio::time::timeout(CONNECT_TIMEOUT, probe(&conn)).await {
-                            Ok(Ok(())) => {
-                                connections.send_replace(Some(conn.clone()));
-                                status.send_replace(ProxyState::Connected);
+                            Ok(Ok(health)) => {
+                                let refusal =
+                                    compatible.as_ref().and_then(|check| check(&health).err());
+                                connections.send_replace(Some(Link {
+                                    conn: conn.clone(),
+                                    refusal: refusal.as_deref().map(Arc::from),
+                                }));
+                                status.send_replace(match refusal {
+                                    Some(reason) => ProxyState::Incompatible(reason),
+                                    None => ProxyState::Connected,
+                                });
                                 delay = Duration::from_millis(100);
                                 let reason = conn.closed().await;
                                 connections.send_replace(None);
@@ -166,7 +240,7 @@ impl ApiProxy {
     }
 }
 
-async fn probe(conn: &Connection) -> io::Result<()> {
+async fn probe(conn: &Connection) -> io::Result<RemoteHealth> {
     let (send, recv) = conn.open_bi().await.map_err(io::Error::other)?;
     let (mut sender, connection) = http1::handshake(TokioIo::new(tokio::io::join(recv, send)))
         .await
@@ -183,12 +257,15 @@ async fn probe(conn: &Connection) -> io::Result<()> {
     }
     drop(sender);
     let _ = tokio::time::timeout(CONNECT_TIMEOUT, driver).await;
-    Ok(())
+    result
 }
+
+/// More than a health report is ever this large.
+const MAX_HEALTH_BODY: usize = 64 * 1024;
 
 async fn probe_health(
     sender: &mut hyper::client::conn::http1::SendRequest<Body>,
-) -> io::Result<()> {
+) -> io::Result<RemoteHealth> {
     let req = Request::builder()
         .uri("/v1/health")
         .header(header::HOST, "iroh.local")
@@ -198,12 +275,15 @@ async fn probe_health(
     if response.status() != StatusCode::OK {
         return Err(io::Error::other("remote API health probe rejected"));
     }
-    response
-        .into_body()
+    let body = http_body_util::Limited::new(response.into_body(), MAX_HEALTH_BODY)
         .collect()
         .await
-        .map_err(io::Error::other)?;
-    Ok(())
+        .map_err(io::Error::other)?
+        .to_bytes();
+    // A body that is not JSON still proves the server answers; it names no release.
+    Ok(serde_json::from_slice(&body)
+        .map(|json| RemoteHealth::from_json(&json))
+        .unwrap_or_default())
 }
 
 fn error(status: StatusCode, message: &str) -> Response {
@@ -216,6 +296,7 @@ fn serde_error(status: StatusCode, message: &str) -> serde_json::Value {
         StatusCode::FORBIDDEN => "forbidden",
         StatusCode::PAYLOAD_TOO_LARGE => "payload_too_large",
         StatusCode::TOO_MANY_REQUESTS => "too_many_streams",
+        StatusCode::CONFLICT => "host_incompatible",
         _ => "unavailable",
     };
     serde_json::json!({"error": {"code": code, "message": message}})
@@ -372,7 +453,8 @@ async fn forward(State(proxy): State<Proxy>, mut req: Request) -> Response {
         req.headers_mut()
             .insert(header::HOST, HeaderValue::from_static("iroh.local"));
         let class = budget::request_class(req.method(), req.uri(), req.headers());
-        tunnel(&proxy, req.map(request_body), class).await
+        let exempt = works_while_incompatible(req.method().as_str(), req.uri().path());
+        tunnel(&proxy, req.map(request_body), class, exempt).await
     };
     cors(&mut response, origin, false);
     response
@@ -407,6 +489,8 @@ fn strip_hop_headers(headers: &mut HeaderMap) {
 enum Refusal {
     /// A budget pool was full: fail fast rather than queue.
     Overloaded(Class),
+    /// The server runs a release this computer may not work with.
+    Incompatible(Arc<str>),
     Io(io::Error),
 }
 
@@ -428,18 +512,24 @@ fn refusal(refusal: Refusal) -> Response {
         Refusal::Overloaded(Class::Ordinary) => {
             error(StatusCode::BAD_GATEWAY, "no stream capacity available")
         }
+        Refusal::Incompatible(reason) => error(StatusCode::CONFLICT, &reason),
         Refusal::Io(e) => error(StatusCode::BAD_GATEWAY, &e.to_string()),
     }
 }
 
-async fn tunnel(proxy: &Proxy, req: Request, class: Class) -> Response {
-    match exchange(proxy, req, class).await {
+async fn tunnel(proxy: &Proxy, req: Request, class: Class, exempt: bool) -> Response {
+    match exchange(proxy, req, class, exempt).await {
         Ok(response) => response,
         Err(e) => refusal(e),
     }
 }
 
-async fn exchange(proxy: &Proxy, req: Request, class: Class) -> Result<Response, Refusal> {
+async fn exchange(
+    proxy: &Proxy,
+    req: Request,
+    class: Class,
+    exempt: bool,
+) -> Result<Response, Refusal> {
     // `Overloaded` names the pool that was full; an exhausted total is reported
     // as ordinary whatever was asked for.
     let mut held = proxy
@@ -447,15 +537,19 @@ async fn exchange(proxy: &Proxy, req: Request, class: Class) -> Result<Response,
         .acquire(class)
         .map_err(|o| Refusal::Overloaded(o.0))?;
     let mut connection_rx = proxy.conn.clone();
-    let conn = tokio::time::timeout(
+    let link = tokio::time::timeout(
         CONNECT_TIMEOUT,
-        connection_rx.wait_for(|c| c.as_ref().is_some_and(|c| c.close_reason().is_none())),
+        connection_rx.wait_for(|l| l.as_ref().is_some_and(|l| l.conn.close_reason().is_none())),
     )
     .await
     .map_err(io::Error::other)?
     .map_err(io::Error::other)?
     .clone()
     .ok_or_else(|| io::Error::other("remote daemon unreachable"))?;
+    if let Some(reason) = link.refusal.filter(|_| !exempt) {
+        return Err(Refusal::Incompatible(reason));
+    }
+    let conn = link.conn;
     // The deadline covers dial, request upload and response *headers* only. It
     // ends before the body is returned, so a legitimately endless body survives.
     let (response, driver) = tokio::time::timeout(proxy.tuning.response_timeout, async {

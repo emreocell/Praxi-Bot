@@ -100,15 +100,13 @@ fn preflight_with(data: &Path, snapshot: &Path, available: u64) -> Result<()> {
         .map(|path| fs::metadata(data.join(path)).map(|meta| meta.len()))
         .sum::<std::io::Result<u64>>()?;
     // The previous snapshot is replaced, so its space counts as free.
-    let reusable: u64 = fs::read_dir(snapshot)
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter_map(|entry| entry.metadata().ok())
-                .map(|meta| meta.len())
-                .sum()
-        })
-        .unwrap_or(0);
+    let reusable: u64 = fs::read_dir(snapshot).map_or(0, |entries| {
+        entries
+            .flatten()
+            .filter_map(|entry| entry.metadata().ok())
+            .map(|meta| meta.len())
+            .sum()
+    });
     if available.saturating_add(reusable) < needed.saturating_add(FREE_MARGIN) {
         return Err(format!(
             "not enough free disk space for a safety copy of the data ({} MiB); nothing was changed",

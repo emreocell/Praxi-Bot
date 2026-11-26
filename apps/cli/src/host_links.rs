@@ -49,6 +49,8 @@ pub struct CliHostLinks {
     pc: Option<PcTarget>,
     /// Keep-alive links so a host can reach this computer without the app selecting it.
     beats: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    /// Which servers this computer may work with, judged from their `/v1/health`.
+    compatible: remote_api::Compatibility,
 }
 
 /// A short, single-line, path-free message for the UI.
@@ -77,7 +79,45 @@ impl CliHostLinks {
             open: Mutex::new(HashMap::new()),
             pc: None,
             beats: Mutex::new(HashMap::new()),
+            compatible: crate::host_compat::compatibility(),
         }
+    }
+
+    /// Tests: judge servers by another rule than this build's release.
+    #[cfg(test)]
+    fn with_compatibility(mut self, compatible: remote_api::Compatibility) -> Self {
+        self.compatible = compatible;
+        self
+    }
+
+    /// Whether ordinary traffic may flow to server `id`, from its link's first verdict (the link
+    /// is opened when there is none yet). `Ok(false)`: it runs a release this computer may not
+    /// work with.
+    async fn may_work_with(&self, id: &str) -> Result<bool, HostLinkError> {
+        let existing = self
+            .open
+            .lock()
+            .get(id)
+            .map(|link| link.proxy.state.clone());
+        let mut state = if let Some(state) = existing {
+            state
+        } else {
+            self.connect(id).await?;
+            self.open
+                .lock()
+                .get(id)
+                .map(|link| link.proxy.state.clone())
+                .ok_or(HostLinkError::NotFound)?
+        };
+        let seen = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            state.wait_for(|s| matches!(s, ProxyState::Connected | ProxyState::Incompatible(_))),
+        )
+        .await
+        .map_err(|_| HostLinkError::Failed("the host did not answer".into()))?
+        .map_err(|_| HostLinkError::Failed("the host link closed".into()))?
+        .clone();
+        Ok(matches!(seen, ProxyState::Connected))
     }
 
     #[must_use]
@@ -157,6 +197,10 @@ impl CliHostLinks {
     ) -> Result<serde_json::Value, PcError> {
         let device = self.host_device(id).ok_or_else(not_paired)?;
         let key = device.public_key().map_err(|_| not_paired())?;
+        // Work only goes to a server that runs this release.
+        if !self.may_work_with(id).await.map_err(|_| offline())? {
+            return Err(incompatible());
+        }
         let net = self.network().await.map_err(|_| offline())?;
         let client = net.rpc_client(&key).map_err(|_| not_paired())?;
         client
@@ -191,7 +235,8 @@ impl CliHostLinks {
         let (state, detail) = match open.get_mut(&device.id) {
             None => (HostLinkState::Idle, None),
             Some(link) => match link.proxy.state.borrow().clone() {
-                ProxyState::Connected => {
+                // The channel is up: the app reads the release and says what is wrong.
+                ProxyState::Connected | ProxyState::Incompatible(_) => {
                     link.seen_up = true;
                     (HostLinkState::Connected, None)
                 }
@@ -294,7 +339,7 @@ impl HostLinks for CliHostLinks {
             });
         }
         let net = self.network().await?;
-        let proxy = ApiProxy::start(net, key)
+        let proxy = ApiProxy::start_checked(net, key, Arc::clone(&self.compatible))
             .await
             .map_err(|e| HostLinkError::Failed(safe(e)))?;
         let connection = HostLinkConnection {
@@ -408,6 +453,13 @@ impl HostLinks for CliHostLinks {
         if !(status_read || path.starts_with("/v1/admin/") || path.starts_with("/v1/bots")) {
             return Err(HostLinkError::Invalid("path not allowed".into()));
         }
+        // Secrets, bots and work only go to a server that runs this release (the proxy enforces
+        // the same for every other caller); its status and the update request always pass.
+        if !remote_api::works_while_incompatible(&method.to_ascii_uppercase(), path)
+            && !self.may_work_with(id).await?
+        {
+            return Err(HostLinkError::Incompatible);
+        }
         let conn = self.connect(id).await?;
         let method = reqwest::Method::from_bytes(method.as_bytes())
             .map_err(|_| HostLinkError::Invalid("bad method".into()))?;
@@ -459,6 +511,12 @@ impl HostLinks for CliHostLinks {
 fn not_paired() -> PcError {
     PcError::Message(
         "The server this bot uses as its computer is not paired with this computer any more, so its browser cannot be used. Tell the user to pair the server again or to change the bot's computer. Do not use another browser instead.".into(),
+    )
+}
+
+fn incompatible() -> PcError {
+    PcError::Message(
+        "The server this bot uses as its computer runs a different Praxi release than this computer, so its browser cannot be used. Tell the user to update the server (or this app) so that both run the same release. Do not use another browser instead.".into(),
     )
 }
 
@@ -582,6 +640,102 @@ mod tests {
         .unwrap();
     }
 
+    fn host_api(data: &std::path::Path) -> Arc<dyn peer_network::ProtocolHandler> {
+        let storage = Arc::new(storage::Storage::open(data).unwrap());
+        let agent = agent_core::AgentLoop::new(
+            storage.clone(),
+            tool_registry::ToolRegistry::new(),
+            agent_core::Providers::single(Arc::new(daemon_api::fake::FakeProvider)),
+            agent_core::LoopConfig::default(),
+        );
+        let state = daemon_api::AppState::new(
+            agent,
+            storage,
+            daemon_api::DaemonConfig::new("host-only-token"),
+        )
+        .unwrap();
+        Arc::new(remote_api::ApiProtocol::new(state))
+    }
+
+    /// A server that runs another release gets neither bot RPC nor copied bots and secrets from
+    /// this computer, and the link still shows as connected so the app can say what to update.
+    #[tokio::test]
+    async fn a_server_of_another_release_gets_neither_rpc_nor_copies() {
+        use builtin_tools::pc::RPC_BROWSER;
+        use peer_network::{PeerConfig, RelayConfig};
+        let host_dir = tempfile::tempdir().unwrap();
+        let mut hc = PeerConfig::new(host_dir.path().join("peer"));
+        hc.local_role = Role::Host;
+        hc.relay = RelayConfig::Disabled;
+        hc.bind_addr = Some("127.0.0.1:0".parse().unwrap());
+        hc.extra_protocols
+            .push((peer_network::ALPN_API.to_vec(), host_api(host_dir.path())));
+        let host = PeerNetwork::start(hc, None).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut dc = PeerConfig::new(dir.path().join("peer"));
+        dc.local_role = Role::Desktop;
+        dc.relay = RelayConfig::Disabled;
+        dc.bind_addr = Some("127.0.0.1:0".parse().unwrap());
+        let net = PeerNetwork::start(dc, None).await.unwrap();
+        let refusing: remote_api::Compatibility =
+            Arc::new(|_| Err("the server runs another Praxi release".into()));
+        let links = CliHostLinks::new(dir.path().to_path_buf(), Some(net.clone()))
+            .with_compatibility(refusing);
+        let invite = host.create_invite(Role::Desktop).await;
+        let id = links.pair(&invite.ticket).await.unwrap().id;
+        let timeout = std::time::Duration::from_secs(10);
+
+        // Bot RPC (a bot using the server as its computer).
+        let error = links
+            .call_host(&id, RPC_BROWSER, serde_json::json!({}), timeout)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, PcError::Message(text) if text.contains("different Praxi release")),
+            "{error:?}"
+        );
+        // Copying bots and secrets (`host_copy`), reading bots, administration.
+        for (method, path) in [
+            ("GET", "/v1/bots"),
+            ("post", "/v1/bots"),
+            ("POST", "/v1/admin/import/bots"),
+            ("PUT", "/v1/admin/providers/openai"),
+        ] {
+            let outcome = links
+                .call(&id, method, path, Some(serde_json::json!({})))
+                .await;
+            assert!(
+                matches!(outcome, Err(HostLinkError::Incompatible)),
+                "{method} {path}"
+            );
+        }
+        // Status and the update request still reach the server: that is how it gets fixed.
+        for (method, path) in [("GET", "/v1/host"), ("POST", "/v1/admin/host-update")] {
+            let outcome = links
+                .call(
+                    &id,
+                    method,
+                    path,
+                    Some(serde_json::json!({"tag": "v0.1.0"})),
+                )
+                .await;
+            assert!(outcome.is_ok(), "{method} {path}: {outcome:?}");
+        }
+        // The link is up, so the app can read the release and explain.
+        let listed = links.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].state, HostLinkState::Connected);
+
+        // The same link under a policy that accepts the server works as before.
+        let accepting = CliHostLinks::new(dir.path().to_path_buf(), Some(net.clone()))
+            .with_compatibility(Arc::new(|_| Ok(())));
+        let bots = accepting.call(&id, "GET", "/v1/bots", None).await.unwrap();
+        assert_eq!(bots.status, 200);
+        drop((links, accepting));
+        net.shutdown().await;
+        host.shutdown().await;
+    }
+
     /// A bot of this computer reaches a paired server's browser through the REAL
     /// link and the REAL host handler: the paired administrator desktop is served,
     /// a desktop the owner did not make administrator is refused with words, and
@@ -607,6 +761,9 @@ mod tests {
         hc.local_role = Role::Host;
         hc.relay = RelayConfig::Disabled;
         hc.bind_addr = Some("127.0.0.1:0".parse().unwrap());
+        // A real host also answers `/v1/health`: this computer reads the release from it first.
+        hc.extra_protocols
+            .push((peer_network::ALPN_API.to_vec(), host_api(host_dir.path())));
         let host = PeerNetwork::start(hc, Some(handler)).await.unwrap();
         let desktop = |admin: bool| {
             let host = host.clone();

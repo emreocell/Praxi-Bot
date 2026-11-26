@@ -1467,8 +1467,7 @@ async fn update_requests_are_audited_with_their_tag_and_outcome() {
         let audit = t.state.storage().list_audit(t.state.user_id()).unwrap();
         let last = audit
             .iter()
-            .filter(|row| row.action == "host.update")
-            .next_back()
+            .rfind(|row| row.action == "host.update")
             .unwrap();
         assert_eq!(last.detail["detail"]["phase"], "rejected");
         assert_eq!(last.detail["detail"]["outcome"], "unavailable");

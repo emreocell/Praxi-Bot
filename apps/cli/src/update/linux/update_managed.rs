@@ -95,10 +95,10 @@ struct Peer {
 /// Only the managed daemon's main process may request an update: same process as systemd's
 /// `MainPID`, same non-root user, and in the `praxi.service` control group. A shared service UID
 /// alone would also let subprocesses such as shell tools (or a lookalike process) in.
-fn peer_is_daemon(peer: &Peer, daemon_pid: u32, daemon_uid: u32, peer_cgroups: &str) -> bool {
+fn peer_is_daemon(peer: &Peer, daemon_pid: u32, daemon_user: u32, peer_cgroups: &str) -> bool {
     peer.pid == daemon_pid
-        && daemon_uid != 0
-        && peer.uid == daemon_uid
+        && daemon_user != 0
+        && peer.uid == daemon_user
         && in_service_cgroup(peer_cgroups)
 }
 
@@ -551,13 +551,13 @@ mod systemd {
             uid: peer.uid.as_raw(),
         };
         let daemon_pid = main_pid(&System).await?;
-        let daemon_uid = status_uid(&std::fs::read_to_string(format!(
+        let daemon_user = status_uid(&std::fs::read_to_string(format!(
             "/proc/{daemon_pid}/status"
         ))?)
         .ok_or("cannot tell which user runs the daemon")?;
         let cgroups =
             std::fs::read_to_string(format!("/proc/{}/cgroup", peer.pid)).unwrap_or_default();
-        if !peer_is_daemon(&peer, daemon_pid, daemon_uid, &cgroups) {
+        if !peer_is_daemon(&peer, daemon_pid, daemon_user, &cgroups) {
             return Err("update requests must come from the managed daemon process".into());
         }
         // A peer that connects and says nothing must not hold one of the few socket slots.
@@ -815,11 +815,11 @@ mod systemd {
         }
 
         impl Systemctl for FakeSystemctl {
-            async fn run(&self, args: &[&str]) -> Result<bool> {
+            fn run(&self, args: &[&str]) -> impl std::future::Future<Output = Result<bool>> {
                 self.calls.borrow_mut().push(args.join(" "));
                 let unit = args.last().copied().unwrap_or_default();
-                match args[0] {
-                    "is-active" => Ok(self.active.borrow().contains(&unit)),
+                let outcome = match args[0] {
+                    "is-active" => self.active.borrow().contains(&unit),
                     "stop" => {
                         if !(self.stubborn && unit == UNIT) {
                             self.active.borrow_mut().retain(|active| *active != unit);
@@ -828,14 +828,15 @@ mod systemd {
                                 self.active.borrow_mut().retain(|active| *active != UNIT);
                             }
                         }
-                        Ok(true)
+                        true
                     }
-                    _ => Ok(true),
-                }
+                    _ => true,
+                };
+                std::future::ready(Ok(outcome))
             }
 
-            async fn show(&self, _: &[&str]) -> Result<String> {
-                Ok(String::new())
+            fn show(&self, _: &[&str]) -> impl std::future::Future<Output = Result<String>> {
+                std::future::ready(Ok(String::new()))
             }
         }
 
@@ -857,7 +858,7 @@ mod systemd {
             let sys = FakeSystemctl::new(&[UNIT]);
             let mut running = Vec::new();
             stop_stack(&sys, &mut running).await.unwrap();
-            assert!(running.is_empty());
+            assert_eq!(running, Vec::<&str>::new());
             assert!(
                 !sys.calls
                     .borrow()
@@ -1092,8 +1093,8 @@ mod tests {
         fn preflight(&mut self) -> Result<()> {
             self.step("preflight")
         }
-        async fn stop(&mut self) -> Result<()> {
-            self.scripted("stop", &self.stops)
+        fn stop(&mut self) -> impl std::future::Future<Output = Result<()>> {
+            std::future::ready(self.scripted("stop", &self.stops))
         }
         fn snapshot(&mut self) -> Result<()> {
             self.step("snapshot")
@@ -1101,8 +1102,8 @@ mod tests {
         fn switch(&mut self) -> Result<()> {
             self.step("switch")
         }
-        async fn start(&mut self) -> Result<()> {
-            self.scripted("start", &self.starts)
+        fn start(&mut self) -> impl std::future::Future<Output = Result<()>> {
+            std::future::ready(self.scripted("start", &self.starts))
         }
         fn restore_programs(&mut self) -> Result<()> {
             self.step("restore_programs")

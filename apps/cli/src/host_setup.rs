@@ -707,6 +707,9 @@ fn describe(e: HostLinkError) -> String {
         HostLinkError::ProtocolMismatch => {
             "install the same Praxi release on both devices, then make a new pairing invite".into()
         }
+        HostLinkError::Incompatible => {
+            "the server runs a different Praxi release; update it first".into()
+        }
         HostLinkError::Invalid(m) | HostLinkError::Failed(m) => m,
     }
 }

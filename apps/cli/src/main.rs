@@ -21,6 +21,7 @@ mod email_cmd;
 mod email_host;
 mod homeassistant_host;
 mod host;
+mod host_compat;
 mod host_links;
 mod host_provision;
 mod host_runtime;
@@ -695,6 +696,7 @@ fn secret_backend_label(kind: secret_store::BackendKind) -> &'static str {
 fn proxy_state_label(state: &remote_api::ProxyState) -> String {
     match state {
         remote_api::ProxyState::Connected => "connected".to_owned(),
+        remote_api::ProxyState::Incompatible(reason) => format!("connected, but {reason}"),
         remote_api::ProxyState::Reconnecting => "still connecting".to_owned(),
         remote_api::ProxyState::Unreachable(reason) => format!("unreachable: {reason}"),
     }

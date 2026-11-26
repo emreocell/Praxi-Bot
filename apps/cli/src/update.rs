@@ -1,6 +1,7 @@
 //! Verified Linux release installation and managed service updates.
 
 #[derive(Debug, clap::Args)]
+#[allow(clippy::struct_excessive_bools)] // independent command-line flags
 pub struct UpdateArgs {
     /// Show the available release without downloading or installing it.
     #[arg(long, conflicts_with = "rollback")]
