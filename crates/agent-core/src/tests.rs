@@ -98,6 +98,8 @@ pub(crate) fn calls(cs: &[(&str, &str, Value)]) -> Reply {
 pub(crate) struct Fake {
     replies: Mutex<VecDeque<Reply>>,
     requests: Mutex<Vec<ChatRequest>>,
+    /// What `supports_vision` answers.
+    vision: bool,
 }
 
 impl Fake {
@@ -105,6 +107,15 @@ impl Fake {
         Arc::new(Self {
             replies: Mutex::new(replies.into()),
             requests: Mutex::new(Vec::new()),
+            vision: true,
+        })
+    }
+    /// A model that does not take images (its provider says so).
+    pub(crate) fn without_vision(replies: Vec<Reply>) -> Arc<Self> {
+        Arc::new(Self {
+            replies: Mutex::new(replies.into()),
+            requests: Mutex::new(Vec::new()),
+            vision: false,
         })
     }
     pub(crate) fn request(&self, i: usize) -> ChatRequest {
@@ -119,6 +130,9 @@ impl Fake {
 impl ChatProvider for Fake {
     fn id(&self) -> &'static str {
         "fake"
+    }
+    fn supports_vision(&self, _model: &str) -> bool {
+        self.vision
     }
     async fn stream(
         &self,
@@ -175,6 +189,10 @@ pub(crate) struct TestTool {
     pub(crate) seen_expected: Arc<parking_lot::Mutex<Vec<Option<String>>>>,
     /// After a call the page is on this origin (a navigation the action caused).
     pub(crate) moves_to: Option<String>,
+    /// The picture this tool saved, reported out of band the way the browser tools do.
+    pub(crate) notes_screenshot: Option<PathBuf>,
+    /// Fail with `output` as the error text instead of returning it.
+    pub(crate) fails: bool,
 }
 
 pub(crate) fn tool(name: &str, effect: Effect, output: &str) -> TestTool {
@@ -214,6 +232,8 @@ pub(crate) fn with_class(
         page_origin: Arc::new(parking_lot::Mutex::new(None)),
         seen_expected: Arc::new(parking_lot::Mutex::new(Vec::new())),
         moves_to: None,
+        notes_screenshot: None,
+        fails: false,
     }
 }
 
@@ -235,6 +255,9 @@ impl Tool for TestTool {
     }
     async fn call(&self, ctx: &ToolContext, _: Value) -> Result<ToolOutput, ToolError> {
         self.count.fetch_add(1, Ordering::SeqCst);
+        if let Some(path) = &self.notes_screenshot {
+            builtin_tools::browser::note_screenshot(&ctx.run_id, path);
+        }
         self.seen_expected.lock().push(ctx.expected_origin.clone());
         if self.count.load(Ordering::SeqCst) == 2
             && let Some(to) = &self.moves_to
@@ -260,6 +283,9 @@ impl Tool for TestTool {
                 }),
                 exposure: self.exposure.clone(),
             });
+        }
+        if self.fails {
+            return Err(ToolError::Execution(self.output.clone()));
         }
         let mut out = ToolOutput::text(self.output.clone());
         out.exposure = self.exposure.clone();

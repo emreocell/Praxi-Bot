@@ -1627,6 +1627,7 @@ impl DesktopTool {
                         "jpg"
                     };
                     let path = save_file(&sh.data_dir.join("screenshots"), ext, &img.data)?;
+                    crate::browser::note_screenshot(run_id, std::path::Path::new(&path));
                     let _ = writeln!(text, "screenshot: {path} ({}x{})", img.width, img.height);
                     let note = screenshot_coordinate_line(
                         ox, oy, capture_w, capture_h, img.width, img.height,

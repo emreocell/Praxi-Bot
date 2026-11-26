@@ -38,7 +38,7 @@ fn entry<'a>(m: &'a mut HashMap<String, Sideband>, run_id: &str) -> &'a mut Side
 }
 
 /// Record the picture a call of `run_id` saved (the newest wins).
-pub(super) fn note_screenshot(run_id: &str, path: &Path) {
+pub fn note_screenshot(run_id: &str, path: &Path) {
     entry(&mut map(), run_id).screenshot = Some(path.to_path_buf());
 }
 

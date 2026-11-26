@@ -42,7 +42,7 @@ mod sideband;
 pub use act::{can_egress as act_can_egress, summary as act_summary};
 pub use profiles::{BrowserProfiles, ProfileStatus};
 pub use recover::{RECOVERY_CLOSE, RECOVERY_OPEN, split_recovery};
-pub use sideband::{Sideband, take as take_sideband};
+pub use sideband::{Sideband, note_screenshot, take as take_sideband};
 
 pub use browser_cdp::FieldTarget;
 

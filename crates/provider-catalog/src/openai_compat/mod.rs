@@ -222,6 +222,10 @@ impl ChatProvider for OpenAiCompatProvider {
         &self.entry.id
     }
 
+    fn supports_vision(&self, model: &str) -> bool {
+        self.entry.caps_for(model).vision
+    }
+
     async fn stream(&self, req: ChatRequest) -> Result<ChatStream, ProviderError> {
         self.open(req, true).await
     }

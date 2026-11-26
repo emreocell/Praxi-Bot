@@ -1,17 +1,21 @@
 //! Screenshots for pointing at reach a vision model as a picture.
 //!
 //! `browser_screenshot`, `browser_pointer` and a browser step that failed save a JPEG under
-//! `<data>/screenshots/` and name it in their text (`screenshot: <path> (WxH)`). A model that
+//! `<data>/screenshots/` and say so in their text (`screenshot: <path> (WxH)`). A model that
 //! cannot see that file cannot pick a point on it, so for the model call that follows such a
 //! tool step the latest picture is attached to the request as an image: one picture, the newest,
 //! only for that call (it is never written into the run's history, so it costs nothing on the
 //! calls after it and cannot pile up).
 //!
-//! The picture is the page: text drawn in it is data like any page text, and the note that
-//! introduces it says so. Nothing outside the screenshots folder is ever read, whatever a tool
-//! result says: the path in the text is checked against the folder, the file type and a size cap.
-//! A model without vision refuses the request; [`strip`] removes the picture and the call is
-//! made again without it, so a text-only model works as before.
+//! Which picture is NOT read off that text: a page can print `screenshot: <path>` as well. The
+//! tool reports the file out of band (`builtin_tools::browser::note_screenshot`, per run), the
+//! loop stores it in the result record, and only that path is used. The picture is the page:
+//! text drawn in it is data like any page text, and the note that introduces it says so. It is
+//! shown only to a model that takes images (asked of its provider, never to a `cli:` model), never
+//! when the run reads pages through the quarantined reader, and nothing outside the screenshots
+//! folder is ever read: the path is checked against the folder, the file type and a size cap, and
+//! the read itself is bounded. A model that refuses the picture anyway is asked again without it,
+//! with a fresh request: the shared messages are not changed.
 
 use std::path::{Path, PathBuf};
 
@@ -20,24 +24,7 @@ use provider_catalog::{Message, MessageRole};
 use serde_json::json;
 use storage::RunStep;
 
-use crate::shared::{CallRec, ResultRec};
-
-/// Tools whose text names a screenshot worth showing: the browser's own, and the desktop's
-/// window state with `screenshot: true`.
-const SHOT_TOOLS: &[&str] = &[
-    "browser_screenshot",
-    "browser_pointer",
-    "browser_click",
-    "browser_fill",
-    "browser_select",
-    "browser_press",
-    "browser_scroll",
-    "browser_hover",
-    "browser_select_text",
-    "browser_dismiss_consent",
-    "browser_act",
-    "desktop_get_state",
-];
+use crate::shared::ResultRec;
 
 /// Largest picture sent, in bytes (a JPEG of a 1280-wide viewport is a fraction of this).
 const MAX_BYTES: u64 = 1_500_000;
@@ -45,32 +32,22 @@ const MAX_BYTES: u64 = 1_500_000;
 /// First words of the note that introduces the picture. [`strip`] finds the message by it.
 pub(crate) const NOTE_OPEN: &str = "[screenshot of the page after your last step.";
 
-/// The newest screenshot named by the latest tool step, if that step made one.
+/// The newest screenshot the latest tool step reported (out of band), if that step made one.
 pub(crate) fn latest(steps: &[RunStep], data_dir: &Path) -> Option<PathBuf> {
     let step = steps
         .iter()
         .rev()
         .find(|s| s.name == crate::shared::STEP_TOOLS)?;
-    let calls: Vec<CallRec> =
-        serde_json::from_value(step.input["calls"].clone()).unwrap_or_default();
     let results: Vec<ResultRec> = step
         .output
         .as_ref()
         .and_then(|o| serde_json::from_value(o["results"].clone()).ok())
         .unwrap_or_default();
-    let named = results
+    let reported = results
         .iter()
-        .filter(|r| {
-            calls
-                .iter()
-                .find(|c| c.id == r.id)
-                .is_some_and(|c| SHOT_TOOLS.contains(&c.name.as_str()))
-        })
-        .flat_map(|r| r.text.lines())
-        .filter_map(|l| l.strip_prefix("screenshot: "))
-        .map(|l| l.split(" (").next().unwrap_or(l).trim())
+        .filter_map(|r| r.shot.as_deref())
         .next_back()?;
-    inside_screenshots(data_dir, Path::new(named))
+    inside_screenshots(data_dir, Path::new(reported))
 }
 
 /// `path` when it is a small picture inside `<data>/screenshots/` (links and `..` resolved).
@@ -83,14 +60,27 @@ fn inside_screenshots(data_dir: &Path, path: &Path) -> Option<PathBuf> {
         .then_some(file)
 }
 
+/// The bytes of `file`, at most [`MAX_BYTES`] of them (the file may have grown since it was
+/// checked; a bigger one is not read).
+fn read_bounded(file: &Path) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    std::fs::File::open(file)
+        .ok()?
+        .take(MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (u64::try_from(bytes.len()).ok()? <= MAX_BYTES).then_some(bytes)
+}
+
 /// The message that shows `file` to the model.
 pub(crate) fn message(file: &Path) -> Option<Message> {
-    let bytes = std::fs::read(file).ok()?;
-    let mime = if file.extension().and_then(|e| e.to_str()) == Some("png") {
-        "image/png"
-    } else {
-        "image/jpeg"
-    };
+    let bytes = read_bounded(file)?;
+    let png = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("png"));
+    let mime = if png { "image/png" } else { "image/jpeg" };
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
     Some(Message {
         role: MessageRole::User,
@@ -104,13 +94,22 @@ pub(crate) fn message(file: &Path) -> Option<Message> {
     })
 }
 
+/// `messages` with the picture message at `at` (before the closing note, if any).
+pub(crate) fn with_picture(messages: &[Message], at: usize, shot: Message) -> Vec<Message> {
+    let mut with = messages.to_vec();
+    with.insert(at.min(with.len()), shot);
+    with
+}
+
 /// Remove the picture message, if the request has one. `true` when something was removed.
+#[cfg(test)]
 pub(crate) fn strip(messages: &mut Vec<Message>) -> bool {
     let before = messages.len();
     messages.retain(|m| !is_shot(m));
     messages.len() != before
 }
 
+#[cfg(test)]
 fn is_shot(m: &Message) -> bool {
     m.role == MessageRole::User
         && m.content.as_array().is_some_and(|parts| {
@@ -119,6 +118,17 @@ fn is_shot(m: &Message) -> bool {
                 .and_then(|p| p["text"].as_str())
                 .is_some_and(|t| t.starts_with(NOTE_OPEN))
         })
+}
+
+/// Whether the model refused the request for lack of vision, or the provider turned the
+/// picture down (a plain `400` from a compatible endpoint that does not name a capability).
+pub(crate) fn refused_picture(e: &provider_catalog::ProviderError) -> bool {
+    use provider_catalog::ProviderError;
+    match e {
+        ProviderError::Unsupported { capability } => is_vision_refusal(capability),
+        ProviderError::Upstream { status, .. } => *status == 400,
+        _ => false,
+    }
 }
 
 /// Whether the model refused the request for lack of vision.
@@ -166,6 +176,23 @@ mod tests {
         // No screenshots folder at all.
         let empty = tempfile::tempdir().unwrap();
         assert!(inside_screenshots(empty.path(), &ok).is_none());
+    }
+
+    #[test]
+    fn the_extension_is_read_in_any_case_and_a_file_that_grew_is_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let shots = dir.path().join("screenshots");
+        std::fs::create_dir_all(&shots).unwrap();
+        let upper = shots.join("A.PNG");
+        std::fs::write(&upper, b"\x89PNGdata").unwrap();
+        assert!(inside_screenshots(dir.path(), &upper).is_some());
+        let m = message(&upper).unwrap();
+        let url = m.content[1]["image_url"]["url"].as_str().unwrap();
+        assert!(url.starts_with("data:image/png;base64,"), "{url}");
+        // Checked small, grown since: the read itself is bounded.
+        let grown = shots.join("g.jpg");
+        std::fs::write(&grown, vec![0u8; usize::try_from(MAX_BYTES).unwrap() + 10]).unwrap();
+        assert!(message(&grown).is_none());
     }
 
     #[test]

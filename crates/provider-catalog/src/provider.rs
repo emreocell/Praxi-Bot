@@ -228,6 +228,14 @@ pub trait ChatProvider: Send + Sync {
     /// Return the provider's catalog identifier (e.g. `"openrouter"`).
     fn id(&self) -> &str;
 
+    /// Whether `model` takes images. Unknown means no: a caller that would send a picture
+    /// (a screenshot of a page) asks first, so a model that cannot see it, or a provider that
+    /// handles pictures in its own way, never receives one by accident.
+    fn supports_vision(&self, model: &str) -> bool {
+        let _ = model;
+        false
+    }
+
     /// Send a chat request and return a streaming response.
     async fn stream(&self, req: ChatRequest) -> Result<ChatStream, ProviderError>;
 

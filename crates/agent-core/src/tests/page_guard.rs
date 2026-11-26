@@ -431,3 +431,135 @@ async fn many_page_reads_after_a_mail_read_still_go_through_the_reader() {
     let last = tool_messages(&fake.request(21)).pop().unwrap();
     assert!(last.contains("(reader)"), "{last}");
 }
+
+/// A failed browser step: the tool's own words, then the page's state between the daemon's markers
+/// (see `builtin_tools::browser::split_recovery`), then the daemon's advice.
+fn failed_step_text() -> String {
+    format!(
+        "unknown ref e9\n{open}\npage now: https://shop.example/\n{PAGE}\nscreenshot: /nowhere/shot.jpg (10x10)\n{close}\n\
+         [Praxi notice] recover in place, do not reload.",
+        open = builtin_tools::browser::RECOVERY_OPEN,
+        close = builtin_tools::browser::RECOVERY_CLOSE,
+    )
+}
+
+fn failing_page_tool() -> Arc<TestTool> {
+    let mut t = with_class(
+        "browser_click",
+        Effect::Read,
+        PermissionCategory::Fs,
+        ContentClass::declared(true, false, false),
+        &failed_step_text(),
+    );
+    t.fails = true;
+    Arc::new(t)
+}
+
+/// Review finding 5: with the reader on (`always`), a failed step's page state never reaches the
+/// main model raw, and the daemon's advice after it stays outside the data block.
+#[tokio::test]
+async fn a_failed_steps_page_state_goes_through_the_reader_in_always_mode() {
+    let env = setup();
+    set_reader(&env, "always");
+    let click = failing_page_tool();
+    let fake = Fake::new(vec![
+        calls(&[("c1", "browser_click", json!({"ref": "e9"}))]),
+        reader_reply(),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&click)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(fake.n_requests(), 3, "the reader read the page state");
+    let main = all_text(&fake, 2);
+    assert!(main.contains("(reader)"), "{main}");
+    assert!(
+        main.contains("unknown ref e9"),
+        "the tool's own words stay: {main}"
+    );
+    assert!(
+        main.contains("recover in place"),
+        "the advice stays: {main}"
+    );
+    assert!(
+        !main.contains("evil.example")
+            && !main.contains("SECRET-LEAK")
+            && !main.contains("Cheap shoes"),
+        "no raw page: {main}"
+    );
+    assert!(
+        !main.contains("/nowhere/shot.jpg"),
+        "no picture line either: {main}"
+    );
+}
+
+/// ... and in `auto`, once the run holds the owner's private data.
+#[tokio::test]
+async fn a_failed_steps_page_state_goes_through_the_reader_for_a_private_run() {
+    let env = setup();
+    set_reader(&env, "auto");
+    let private = private_tool();
+    let click = failing_page_tool();
+    let fake = Fake::new(vec![
+        calls(&[("p", "fs_read", json!({"path": "budget.txt"}))]),
+        calls(&[("c1", "browser_click", json!({"ref": "e9"}))]),
+        reader_reply(),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&private), t(&click)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let main = all_text(&fake, 3);
+    assert!(main.contains("(reader)"), "{main}");
+    assert!(
+        !main.contains("evil.example") && !main.contains("Cheap shoes"),
+        "no raw page: {main}"
+    );
+}
+
+/// Without the reader (no private data in `auto`) the page state is still data-framed, and the
+/// advice is outside the frame.
+#[tokio::test]
+async fn without_the_reader_a_failed_steps_page_state_is_data_framed() {
+    let env = setup();
+    set_reader(&env, "auto");
+    let click = failing_page_tool();
+    let fake = Fake::new(vec![
+        calls(&[("c1", "browser_click", json!({"ref": "e9"}))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&click)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(fake.n_requests(), 2);
+    let result = tool_messages(&fake.request(1)).remove(0);
+    let blocks = result.matches("[UNTRUSTED DATA from browser_click").count();
+    assert_eq!(blocks, 2, "the tool's words and the page state: {result}");
+    let advice_at = result.find("recover in place").unwrap();
+    let last_end = result.rfind("<<END DATA").unwrap();
+    assert!(
+        advice_at > last_end,
+        "the advice is outside every block: {result}"
+    );
+}
