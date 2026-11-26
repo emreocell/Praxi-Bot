@@ -127,10 +127,14 @@ impl BotPreset {
             // tools are `Read` and run without a prompt until the run has read
             // private or untrusted content, when the egress gate asks before a
             // later send (see `tool_allow` docs).
+            // Files and commands are what a general assistant is used for first, so
+            // they are in the list; whether they run or ask is the permission preset
+            // (read-only denies them, the default asks, Full runs them) and the bot's
+            // file-access mode (a folder-only bot never gets `shell_run`).
             Self::General => v.extend([
-                "fs_read",
-                "fs_list",
-                "fs_search",
+                "fs_*",
+                "checkpoint_*",
+                "shell_run",
                 "web_*",
                 "mcp:*",
                 "schedule_*",
@@ -283,6 +287,28 @@ mod tests {
             assert_eq!(allow.contains(&"mcp:*"), p == BotPreset::General, "{p:?}");
             assert!(!allow.iter().any(|g| g.starts_with("email")), "{p:?}");
         }
+    }
+
+    #[test]
+    fn a_general_bot_can_write_files_and_run_commands_but_email_stays_off() {
+        let config = bot_config(
+            BotPreset::General,
+            PermissionPreset::ApproveDestructive,
+            "Test",
+            "fake/model",
+            Lang::En,
+        );
+        let profile: agent_core::BotProfile = serde_json::from_value(config).unwrap();
+        for tool in [
+            "fs_write",
+            "fs_edit",
+            "fs_read",
+            "shell_run",
+            "checkpoint_restore",
+        ] {
+            assert!(profile.tool_visible(tool), "{tool} must be offered");
+        }
+        assert!(!profile.tool_visible("email_send"));
     }
 
     #[test]

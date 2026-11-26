@@ -16,6 +16,13 @@ const CORE: &[&str] = &[
     "todo_write",
     "fs_list",
     "fs_read",
+    // Writing a file and running a command are the two most common jobs. They sit in the
+    // direct set (shown only when the bot may use them) so a light model never has to
+    // find them through `tool_search` first: a search for "write file" does not reliably
+    // rank them, and a bot that cannot find its own tool tells the owner it has none.
+    "fs_write",
+    "fs_edit",
+    "shell_run",
     "web_search",
     "web_extract",
     "desktop_list_apps",

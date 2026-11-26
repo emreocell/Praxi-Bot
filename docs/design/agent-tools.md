@@ -96,3 +96,26 @@ activates them with `tool_describe`.
   `inj-json-query-`, `inj-pdf-extract-then-exfil`): after an untrusted page and a
   private read, the pure tools do not clear the taint and the document readers
   cannot be followed by an unapproved send.
+
+## Files and commands without a coding CLI (critic round, 2026-11-26)
+
+An independent critic found that a General-preset bot with only a model key could not
+create a file or run a command ("I do not have a file writing tool"). The tools existed;
+three things hid them:
+
+* `bot setup` wrote the General preset's `[tools] allow` with only `fs_read`, `fs_list`,
+  `fs_search`, so `fs_write`, `fs_edit`, `shell_run` and `checkpoint_*` were invisible to
+  that bot (a bot made in the app has no allow list and sees everything). The preset now
+  lists `fs_*`, `checkpoint_*` and `shell_run`; the permission preset still decides ask,
+  allow or deny, and a "Folder only" bot still never gets `shell_run`.
+* `fs_write`, `fs_edit` and `shell_run` were only reachable through
+  `tool_search` + `tool_describe`; a light model searched for "write file", did not get them
+  and gave up. They are now in the direct set (shown only when the bot may use them).
+* The tool-access prompt said "files (read, write, search)" whenever any `fs_*` tool was
+  allowed. It now names read-only files as such and adds one fixed "Not available to you"
+  line for file changes and for commands when they are not permitted, so a bot never promises
+  a tool it does not have.
+
+The "Engine" (coding CLI) setting is unrelated to this: Praxi's own file and command tools
+are the default. Shell commands still cannot be confined to a folder (see the Windows sandbox
+note), so the only workspace confinement is the file-access mode, unchanged.

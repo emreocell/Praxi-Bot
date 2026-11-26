@@ -3270,6 +3270,71 @@ async fn an_over_budget_catalog_loads_typed_tools_in_a_stable_run_local_order() 
     assert_eq!(fake.request(3).tools, initial);
 }
 
+fn offered_names(req: &ChatRequest) -> Vec<String> {
+    req.tools
+        .iter()
+        .filter_map(|t| t["function"]["name"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// A plain-API-key bot must be able to write a file and run a command on its very first
+/// model call, without finding the tool through `tool_search` (a light model does not).
+#[tokio::test]
+async fn file_write_edit_and_shell_are_offered_directly_and_the_prompt_does_not_deny_them() {
+    let env = setup();
+    let read = Arc::new(tool("fs_read", Effect::Read, "ok"));
+    let write = Arc::new(tool("fs_write", Effect::Write, "ok"));
+    let edit = Arc::new(tool("fs_edit", Effect::Write, "ok"));
+    let shell = Arc::new(tool("shell_run", Effect::Write, "ok"));
+    let fake = Fake::new(vec![text("done")]);
+    let mut config = cfg(Policy::full());
+    config.legacy_tool_surface = false;
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[&read, &write, &edit, &shell],
+        profile(""),
+        config,
+    );
+    let run = lp.run_turn(env.chat, "create notes.md").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let offered = offered_names(&fake.request(0));
+    for name in ["fs_write", "fs_edit", "shell_run", "fs_read"] {
+        assert!(
+            offered.iter().any(|n| n == name),
+            "{name} missing: {offered:?}"
+        );
+    }
+    let system = system_text(&fake.request(0));
+    assert!(
+        !system.contains("Not available to you in this run"),
+        "{system}"
+    );
+}
+
+/// A bot that may only read files is told so: no promised-but-missing tool.
+#[tokio::test]
+async fn a_read_only_bot_is_told_it_cannot_write_or_run_commands() {
+    let env = setup();
+    let read = Arc::new(tool("fs_read", Effect::Read, "ok"));
+    let fake = Fake::new(vec![text("done")]);
+    let mut config = cfg(Policy::full());
+    config.legacy_tool_surface = false;
+    let lp = make_loop(&env.storage, env.bot, &fake, &[&read], profile(""), config);
+    let run = lp.run_turn(env.chat, "create notes.md").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let system = system_text(&fake.request(0));
+    assert!(system.contains("files (read and search only)"), "{system}");
+    assert!(system.contains("Not available to you in this run: creating or changing files"));
+    assert!(system.contains("Not available to you in this run: running programs"));
+    assert!(
+        !offered_names(&fake.request(0))
+            .iter()
+            .any(|n| n == "fs_write")
+    );
+}
+
 #[tokio::test]
 async fn discovery_prompt_composes_with_skills_and_is_byte_stable_across_turns_and_hints() {
     let env = setup();

@@ -44,6 +44,15 @@ const FAMILIES: &[(&[&str], &str)] = &[
     ),
 ];
 
+/// The files family when this bot may read but not change files.
+const READ_ONLY_FILES_LABEL: &str = "files (read and search only)";
+/// Said when no file-changing tool is permitted (fixed text, cache-stable).
+const NO_FILE_WRITE_LINE: &str = "
+Not available to you in this run: creating or changing files. If asked to, answer in one plain sentence that this bot cannot create or change files yet and that the owner can switch it on in the bot's settings (the app offers a button). Do not search for a tool for it, do not ask a Yes/No question about it, and never claim a file was written.";
+/// Said when `shell_run` is not permitted (fixed text, cache-stable).
+const NO_SHELL_LINE: &str = "
+Not available to you in this run: running programs or commands. If asked to, answer in one plain sentence that this bot cannot run commands yet and that the owner can switch it on in the bot's settings (the app offers a button). Do not search for a tool for it and never pretend a command ran.";
+
 /// Index of the `fs_` family in [`FAMILIES`].
 const FS_FAMILY: usize = 2;
 /// The one added line about file reach (fixed text, cache-stable).
@@ -283,7 +292,11 @@ pub(crate) fn block_for<'a>(
 ) -> Option<String> {
     let mut servers = BTreeSet::new();
     let mut families = vec![false; FAMILIES.len()];
+    let mut can_write_files = false;
+    let mut can_run_commands = false;
     for name in names {
+        can_write_files |= matches!(name, "fs_write" | "fs_edit" | "fs_move" | "fs_delete");
+        can_run_commands |= name == "shell_run";
         if let Some(rest) = name.strip_prefix("mcp:") {
             if let Some((server, _)) = rest.split_once('/')
                 && let Some(id) = clean_server_id(server)
@@ -301,8 +314,15 @@ pub(crate) fn block_for<'a>(
     let labels: Vec<&str> = FAMILIES
         .iter()
         .zip(&families)
-        .filter(|(_, on)| **on)
-        .map(|((_, label), _)| *label)
+        .enumerate()
+        .filter(|(_, (_, on))| **on)
+        .map(|(i, ((_, label), _))| {
+            if i == FS_FAMILY && !can_write_files {
+                READ_ONLY_FILES_LABEL
+            } else {
+                *label
+            }
+        })
         .collect();
     if labels.is_empty() && servers.is_empty() {
         return None;
@@ -322,6 +342,13 @@ pub(crate) fn block_for<'a>(
     }
     if families[FS_FAMILY] {
         out.push_str(FILES_LINE);
+    }
+    // Say what is NOT there, so the bot never promises it and never goes hunting for it.
+    if !can_write_files {
+        out.push_str(NO_FILE_WRITE_LINE);
+    }
+    if !can_run_commands {
+        out.push_str(NO_SHELL_LINE);
     }
     if families[PC_FAMILY] {
         out.push_str(PC_LINE);
@@ -370,6 +397,10 @@ mod tests {
     fn lists_only_permitted_families() {
         let b = block(["browser_open", "fs_read", "web_search"]).unwrap();
         assert!(b.contains("browser") && b.contains("files") && b.contains("web search"));
+        // Read-only files are never advertised as writable, and the gap is stated.
+        assert!(b.contains("files (read and search only)"));
+        assert!(b.contains("Not available to you in this run: creating or changing files"));
+        assert!(b.contains("Not available to you in this run: running programs"));
         assert!(
             !b.contains("e-mail")
                 && !b.contains("computer / desktop")
@@ -377,6 +408,13 @@ mod tests {
         );
         assert!(b.contains("Never say you cannot before you tried find_tool"));
         assert!(b.contains("absolute paths"));
+    }
+
+    #[test]
+    fn a_bot_with_write_and_shell_tools_is_not_told_they_are_missing() {
+        let b = block(["fs_read", "fs_write", "shell_run"]).unwrap();
+        assert!(b.contains("files (read, write, search)") && b.contains("shell commands"));
+        assert!(!b.contains("Not available to you"), "{b}");
     }
 
     #[test]
@@ -539,6 +577,8 @@ mod tests {
         let b = block(many.iter().map(String::as_str)).unwrap();
         assert!(b.contains("srv07") && !b.contains("srv08"));
         let long = format!("mcp:{}/t", "a".repeat(200));
-        assert!(block([long.as_str()]).unwrap().len() < 600);
+        // The id is capped; what grows the block is only the fixed "not available" notes.
+        let fixed = NO_FILE_WRITE_LINE.len() + NO_SHELL_LINE.len();
+        assert!(block([long.as_str()]).unwrap().len() < 600 + fixed);
     }
 }
