@@ -46,6 +46,11 @@ pub struct Guards {
     pub repeat_warn: u32,
     /// Identical consecutive tool calls at which the turn is stopped.
     pub repeat_stop: u32,
+    /// Repetitions of a 2-3 call cycle with unchanged results at which a
+    /// recovery hint is added to the tool result (`0` turns cycle detection off).
+    pub cycle_warn: u32,
+    /// Repetitions of such a cycle at which the turn is stopped.
+    pub cycle_stop: u32,
     /// Token budget (prompt + completion, summed over the turn's model calls).
     pub max_tokens_per_turn: u64,
     /// Tool output above this many bytes is spilled to a file.
@@ -78,6 +83,8 @@ impl Default for Guards {
             model_timeout: Duration::from_secs(300),
             repeat_warn: 3,
             repeat_stop: 5,
+            cycle_warn: 3,
+            cycle_stop: 5,
             max_tokens_per_turn: 2_000_000,
             spill_threshold_bytes: 16 * 1024,
             spill_preview_bytes: 2 * 1024,

@@ -33,6 +33,7 @@ mod grounding;
 mod history;
 mod knowledge;
 mod ledger;
+mod loops;
 mod mail_prompt;
 mod memory;
 mod mention;

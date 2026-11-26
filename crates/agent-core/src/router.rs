@@ -727,6 +727,7 @@ impl TurnExecutor {
             name: d["name"].as_str().unwrap_or_default().to_owned(),
             arguments: d["input"].to_string(),
             repeat: 1,
+            cycle: 0,
         };
         Some(RoutePlan::Step(StepSpec {
             name: STEP_TOOLS.to_owned(),

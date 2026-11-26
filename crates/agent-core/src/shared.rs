@@ -2884,6 +2884,10 @@ pub(crate) struct CallRec {
     pub name: String,
     pub arguments: String,
     pub repeat: u32,
+    /// Repetitions of a 2-3 call cycle this call continues (`<= 1`: none).
+    /// Absent on rows written before cycle detection existed.
+    #[serde(default)]
+    pub cycle: u32,
 }
 
 /// One result inside a persisted tool step's output.

@@ -10,6 +10,7 @@ mod composio_approvals;
 mod external_agent;
 mod fill_secret;
 mod grounding;
+mod loop_cycles;
 mod offline;
 mod page_guard;
 mod planning_pause;

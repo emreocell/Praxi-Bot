@@ -184,6 +184,32 @@ fn call_key(name: &str, args: &str) -> (String, Value) {
     (name.to_owned(), v)
 }
 
+/// Every tool call of the run, oldest first, with a fingerprint of its result
+/// (none for a call that has not finished) for cycle detection.
+fn cycle_entries(history: &[RunStep]) -> Vec<crate::loops::Entry> {
+    let mut out = Vec::new();
+    for step in history.iter().filter(|s| s.name == STEP_TOOLS) {
+        let calls: Vec<CallRec> =
+            serde_json::from_value(step.input["calls"].clone()).unwrap_or_default();
+        let results: Vec<ResultRec> = step
+            .output
+            .as_ref()
+            .and_then(|o| serde_json::from_value(o["results"].clone()).ok())
+            .unwrap_or_default();
+        for call in calls {
+            let text = results
+                .iter()
+                .find(|r| r.id == call.id)
+                .map(|r| r.text.as_str());
+            out.push(crate::loops::Entry::new(
+                call_key(&call.name, &call.arguments),
+                text,
+            ));
+        }
+    }
+    out
+}
+
 /// True when the turn's last model step ended with no text after tool calls
 /// and no nudge was sent yet (one nudge per turn).
 fn silent_end(history: &[RunStep]) -> bool {
@@ -747,6 +773,7 @@ impl TurnExecutor {
             .iter()
             .map(|c| call_key(&c.name, &c.arguments))
             .collect();
+        let mut cycle_seq = cycle_entries(history);
         let read = |c: &provider_catalog::ToolCall| {
             self.is_read(
                 ctx,
@@ -780,12 +807,24 @@ impl TurnExecutor {
                     c.name
                 ));
             }
+            cycle_seq.push(crate::loops::Entry::new(key.clone(), None));
+            let cycle = crate::loops::trailing_cycle(&cycle_seq);
+            if g.cycle_stop > 0
+                && let Some((repeats, names)) = &cycle
+                && *repeats >= g.cycle_stop
+            {
+                return Err(format!(
+                    "loop detected: the calls {} were repeated {repeats} times in a row and                      their results did not change",
+                    names.join(" -> ")
+                ));
+            }
             seq.push(key);
             calls.push(CallRec {
                 id: c.id.clone(),
                 name: c.name.clone(),
                 arguments: c.arguments.clone(),
                 repeat,
+                cycle: cycle.map_or(0, |(repeats, _)| repeats),
             });
         }
         let mut input = json!({ "calls": calls });
@@ -2078,6 +2117,7 @@ impl TurnExecutor {
         .await;
 
         let g = &self.sh.cfg.guards;
+        let mut cycle_tools: Option<Vec<String>> = None;
         let mut results = Vec::with_capacity(calls.len());
         for ((call, call_uuid), (text, mut is_error, duration_ms, own_spill, fact)) in
             calls.iter().zip(uuids).zip(outcomes)
@@ -2153,11 +2193,26 @@ impl TurnExecutor {
                 // unknown and what to do next.
                 let _ = write!(text, "\n{}", crate::ledger::TIMEOUT_HINT);
             }
+            if g.cycle_warn > 0
+                && call.cycle >= g.cycle_warn
+                && knowledge_request.is_none()
+                && !is_error
+            {
+                let names = cycle_tools
+                    .get_or_insert_with(|| {
+                        crate::loops::trailing_cycle(&cycle_entries(&history))
+                            .map(|(_, names)| names)
+                            .unwrap_or_default()
+                    })
+                    .clone();
+                let _ = write!(text, "{}", crate::loops::hint(call.cycle, &names));
+            }
             if call.repeat >= g.repeat_warn && knowledge_request.is_none() {
                 let _ = write!(
                     text,
-                    "\n[warning: this exact call has now been made {} times in a row; \
+                    "{} has now been made {} times in a row; \
                      change your approach or stop]",
+                    crate::loops::REPEAT_WARN_MARK,
                     call.repeat
                 );
             }
