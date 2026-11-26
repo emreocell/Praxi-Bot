@@ -906,11 +906,11 @@ pub async fn connect(handle: &DaemonHandle) -> Result<Connection, String> {
 pub async fn connect_existing(handle: &DaemonHandle) -> Result<Connection, String> {
     let _one_at_a_time = handle.connecting.lock().await;
     let url = base_url()?;
-    if !healthy(&url).await {
+    if !probe_health(&url).await.is_ready() {
         return Err("the service is unavailable; open the main window to reconnect".to_owned());
     }
     check_listener(handle, &url, false).await?;
-    connection(handle, url, &data_dir()?)
+    connection(handle, &url, &data_dir()?)
 }
 
 /// Stop a daemon this app started and connect again.  The `connecting` lock is
@@ -947,7 +947,7 @@ pub async fn restart(
         && handle.started_by_app()
     {
         let url = base_url()?;
-        if healthy(&url).await {
+        if probe_health(&url).await.is_ready() {
             support_logs::tracing::info!(target: "praxi_support", reason = "restart_skipped");
             // Another restart (or the start-up) brought the service up moments ago and it
             // answers: killing it again would only cause a second gap.
@@ -1512,7 +1512,7 @@ mod tests {
         // This test process plays the squatter: it answers a healthy probe.
         let port = ok_daemon().await;
         let url = format!("http://127.0.0.1:{port}");
-        assert!(healthy(&url).await);
+        assert!(probe_health(&url).await.is_ready());
 
         // The app spawned a child (any process that is not the listener).
         let handle = DaemonHandle::default();
