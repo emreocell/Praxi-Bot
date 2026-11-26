@@ -11,15 +11,15 @@ Regenerate with `python scripts/license_report.py` and verify in CI with
 
 ## Summary
 
-- Rust external crates: **923**
+- Rust external crates: **933**
 - Desktop UI production npm packages: **24**
 
 | Licence expression | Packages |
 | --- | ---: |
 | `MIT OR Apache-2.0` | 442 |
-| `MIT` | 217 |
-| `Apache-2.0 OR MIT` | 97 |
-| `MIT/Apache-2.0` | 42 |
+| `MIT` | 223 |
+| `Apache-2.0 OR MIT` | 98 |
+| `MIT/Apache-2.0` | 43 |
 | `Zlib OR Apache-2.0 OR MIT` | 23 |
 | `Unicode-3.0` | 18 |
 | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | 14 |
@@ -29,10 +29,10 @@ Regenerate with `python scripts/license_report.py` and verify in CI with
 | `ISC` | 6 |
 | `MPL-2.0` | 6 |
 | `MIT OR Apache-2.0 OR Zlib` | 5 |
+| `Apache-2.0/MIT` | 4 |
 | `Unlicense/MIT` | 4 |
 | `(MIT OR Apache-2.0) AND Unicode-3.0` | 3 |
 | `Apache-2.0 OR ISC OR MIT` | 3 |
-| `Apache-2.0/MIT` | 3 |
 | `OFL-1.1` | 3 |
 | `Unlicense` | 3 |
 | `Zlib` | 3 |
@@ -53,6 +53,7 @@ Regenerate with `python scripts/license_report.py` and verify in CI with
 | `Apache-2.0 OR BSL-1.0` | 1 |
 | `Apache-2.0 OR GPL-2.0-only` | 1 |
 | `BSD-2-Clause` | 1 |
+| `BSD-2-Clause OR Apache-2.0` | 1 |
 | `BSD-3-Clause AND MIT` | 1 |
 | `BSD-3-Clause/MIT` | 1 |
 | `CC0-1.0` | 1 |
@@ -199,6 +200,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `cfb` | `0.7.3` | `MIT` | [https://github.com/mdsteele/rust-cfb](https://github.com/mdsteele/rust-cfb) |
 | `cfg-expr` | `0.15.8` | `MIT OR Apache-2.0` | [https://github.com/EmbarkStudios/cfg-expr](https://github.com/EmbarkStudios/cfg-expr) |
 | `cfg-if` | `1.0.5` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/cfg-if](https://github.com/rust-lang/cfg-if) |
+| `cfg_aliases` | `0.1.1` | `MIT` | [https://github.com/katharostech/cfg_aliases](https://github.com/katharostech/cfg_aliases) |
 | `cfg_aliases` | `0.2.2` | `MIT` | [https://github.com/katharostech/cfg_aliases](https://github.com/katharostech/cfg_aliases) |
 | `chacha20` | `0.10.2` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/stream-ciphers](https://github.com/RustCrypto/stream-ciphers) |
 | `chacha20` | `0.9.1` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/stream-ciphers](https://github.com/RustCrypto/stream-ciphers) |
@@ -283,6 +285,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `dlopen2` | `0.8.2` | `MIT` | [https://github.com/OpenByteDev/dlopen2](https://github.com/OpenByteDev/dlopen2) |
 | `dlopen2_derive` | `0.4.3` | `MIT` | [https://github.com/OpenByteDev/dlopen2](https://github.com/OpenByteDev/dlopen2) |
 | `dom_query` | `0.27.0` | `MIT` | [https://github.com/niklak/dom_query](https://github.com/niklak/dom_query) |
+| `downcast-rs` | `1.2.1` | `MIT/Apache-2.0` | [https://github.com/marcianx/downcast-rs](https://github.com/marcianx/downcast-rs) |
 | `dpi` | `0.1.2` | `Apache-2.0 AND MIT` | [https://github.com/rust-windowing/winit](https://github.com/rust-windowing/winit) |
 | `dtoa` | `1.0.11` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/dtoa](https://github.com/dtolnay/dtoa) |
 | `dtoa-short` | `0.3.5` | `MPL-2.0` | [https://github.com/upsuper/dtoa-short](https://github.com/upsuper/dtoa-short) |
@@ -320,6 +323,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `fdeflate` | `0.3.7` | `MIT OR Apache-2.0` | [https://github.com/image-rs/fdeflate](https://github.com/image-rs/fdeflate) |
 | `fiat-crypto` | `0.3.0` | `MIT OR Apache-2.0 OR BSD-1-Clause` | [https://github.com/mit-plv/fiat-crypto](https://github.com/mit-plv/fiat-crypto) |
 | `field-offset` | `0.3.6` | `MIT OR Apache-2.0` | [https://github.com/Diggsey/rust-field-offset](https://github.com/Diggsey/rust-field-offset) |
+| `filedescriptor` | `0.8.3` | `MIT` | [https://github.com/wezterm/wezterm](https://github.com/wezterm/wezterm) |
 | `filetime` | `0.2.29` | `MIT/Apache-2.0` | [https://github.com/alexcrichton/filetime](https://github.com/alexcrichton/filetime) |
 | `find-msvc-tools` | `0.1.15` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/cc-rs](https://github.com/rust-lang/cc-rs) |
 | `fixedbitset` | `0.5.7` | `MIT OR Apache-2.0` | [https://github.com/petgraph/fixedbitset](https://github.com/petgraph/fixedbitset) |
@@ -511,6 +515,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `netlink-sys` | `0.9.0` | `MIT` | [https://github.com/rust-netlink/netlink-sys](https://github.com/rust-netlink/netlink-sys) |
 | `netwatch` | `0.19.3` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/net-tools](https://github.com/n0-computer/net-tools) |
 | `new_debug_unreachable` | `1.0.6` | `MIT` | [https://github.com/mbrubeck/rust-debug-unreachable](https://github.com/mbrubeck/rust-debug-unreachable) |
+| `nix` | `0.28.0` | `MIT` | [https://github.com/nix-rust/nix](https://github.com/nix-rust/nix) |
 | `nix` | `0.29.0` | `MIT` | [https://github.com/nix-rust/nix](https://github.com/nix-rust/nix) |
 | `nix` | `0.31.3` | `MIT` | [https://github.com/nix-rust/nix](https://github.com/nix-rust/nix) |
 | `nom` | `7.1.3` | `MIT` | [https://github.com/Geal/nom](https://github.com/Geal/nom) |
@@ -604,6 +609,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `polyval` | `0.6.2` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/universal-hashes](https://github.com/RustCrypto/universal-hashes) |
 | `portable-atomic` | `1.15.0` | `Apache-2.0 OR MIT` | [https://github.com/taiki-e/portable-atomic](https://github.com/taiki-e/portable-atomic) |
 | `portable-atomic-util` | `0.2.8` | `Apache-2.0 OR MIT` | [https://github.com/taiki-e/portable-atomic-util](https://github.com/taiki-e/portable-atomic-util) |
+| `portable-pty` | `0.9.0` | `MIT` | [https://github.com/wezterm/wezterm](https://github.com/wezterm/wezterm) |
 | `portmapper` | `0.19.3` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/net-tools](https://github.com/n0-computer/net-tools) |
 | `postcard` | `1.1.3` | `MIT OR Apache-2.0` | [https://github.com/jamesmunns/postcard](https://github.com/jamesmunns/postcard) |
 | `postcard-derive` | `0.2.2` | `MIT OR Apache-2.0` | [https://github.com/jamesmunns/postcard](https://github.com/jamesmunns/postcard) |
@@ -729,6 +735,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `serde_yaml` | `0.9.34+deprecated` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/serde-yaml](https://github.com/dtolnay/serde-yaml) |
 | `serde_yaml_ng` | `0.10.0` | `MIT` | [https://github.com/acatton/serde-yaml-ng](https://github.com/acatton/serde-yaml-ng) |
 | `serdect` | `0.4.3` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/formats](https://github.com/RustCrypto/formats) |
+| `serial2` | `0.2.39` | `BSD-2-Clause OR Apache-2.0` | [https://github.com/de-vri-es/serial2-rs](https://github.com/de-vri-es/serial2-rs) |
 | `serialize-to-javascript` | `0.1.2` | `MIT OR Apache-2.0` | [https://github.com/chippers/serialize-to-javascript](https://github.com/chippers/serialize-to-javascript) |
 | `serialize-to-javascript-impl` | `0.1.2` | `MIT OR Apache-2.0` | [https://github.com/chippers/serialize-to-javascript](https://github.com/chippers/serialize-to-javascript) |
 | `servo_arc` | `0.4.3` | `MIT OR Apache-2.0` | [https://github.com/servo/stylo](https://github.com/servo/stylo) |
@@ -737,6 +744,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `sha2` | `0.10.9` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
 | `sha2` | `0.11.1` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
 | `sharded-slab` | `0.1.7` | `MIT` | [https://github.com/hawkw/sharded-slab](https://github.com/hawkw/sharded-slab) |
+| `shared_library` | `0.1.9` | `Apache-2.0/MIT` | [https://github.com/tomaka/shared_library/](https://github.com/tomaka/shared_library/) |
 | `shell-words` | `1.1.1` | `MIT/Apache-2.0` | [https://github.com/tmiasko/shell-words](https://github.com/tmiasko/shell-words) |
 | `shlex` | `2.0.1` | `MIT OR Apache-2.0` | [https://github.com/comex/rust-shlex](https://github.com/comex/rust-shlex) |
 | `signal-hook-registry` | `1.4.8` | `MIT OR Apache-2.0` | [https://github.com/vorner/signal-hook](https://github.com/vorner/signal-hook) |
@@ -880,6 +888,8 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `version_check` | `0.9.5` | `MIT/Apache-2.0` | [https://github.com/SergioBenitez/version_check](https://github.com/SergioBenitez/version_check) |
 | `vswhom` | `0.1.0` | `MIT` | [https://github.com/nabijaczleweli/vswhom.rs](https://github.com/nabijaczleweli/vswhom.rs) |
 | `vswhom-sys` | `0.1.3` | `MIT` | [https://github.com/nabijaczleweli/vswhom-sys.rs](https://github.com/nabijaczleweli/vswhom-sys.rs) |
+| `vt100` | `0.18.1` | `MIT` | [https://github.com/doy/vt100-rust](https://github.com/doy/vt100-rust) |
+| `vte` | `0.15.0` | `Apache-2.0 OR MIT` | [https://github.com/alacritty/vte](https://github.com/alacritty/vte) |
 | `walkdir` | `2.5.0` | `Unlicense/MIT` | [https://github.com/BurntSushi/walkdir](https://github.com/BurntSushi/walkdir) |
 | `want` | `0.3.2` | `MIT` | [https://github.com/seanmonstar/want](https://github.com/seanmonstar/want) |
 | `wasi` | `0.11.1+wasi-snapshot-preview1` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [https://github.com/bytecodealliance/wasi](https://github.com/bytecodealliance/wasi) |
@@ -974,6 +984,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `winnow` | `0.5.40` | `MIT` | [https://github.com/winnow-rs/winnow](https://github.com/winnow-rs/winnow) |
 | `winnow` | `0.7.15` | `MIT` | [https://github.com/winnow-rs/winnow](https://github.com/winnow-rs/winnow) |
 | `winnow` | `1.0.5` | `MIT` | [https://github.com/winnow-rs/winnow](https://github.com/winnow-rs/winnow) |
+| `winreg` | `0.10.1` | `MIT` | [https://github.com/gentoo90/winreg-rs](https://github.com/gentoo90/winreg-rs) |
 | `winreg` | `0.56.0` | `MIT` | [https://github.com/gentoo90/winreg-rs](https://github.com/gentoo90/winreg-rs) |
 | `winx` | `0.36.4` | `Apache-2.0 WITH LLVM-exception` | [https://github.com/sunfishcode/winx](https://github.com/sunfishcode/winx) |
 | `wiremock` | `0.6.5` | `MIT/Apache-2.0` | [https://github.com/LukeMathWalker/wiremock-rs](https://github.com/LukeMathWalker/wiremock-rs) |
