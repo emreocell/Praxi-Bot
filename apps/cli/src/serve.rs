@@ -2170,7 +2170,7 @@ host = "smtp.example.com"
             .map(|spec| spec.name)
             .collect();
         executors.sort();
-        assert_eq!(executors, ["script_run", "shell_run"]);
+        assert_eq!(executors, ["script_run", "shell_interactive", "shell_run"]);
     }
 
     #[test]

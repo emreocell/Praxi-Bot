@@ -47,6 +47,7 @@ members = [
     "crates/openapi-tools",
     "crates/composio",
     "crates/process-guard",
+    "crates/pty-session",
     "crates/embedding-hub",
     "apps/cli",
     "apps/desktop",

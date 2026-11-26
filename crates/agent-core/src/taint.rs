@@ -521,7 +521,7 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
         "process_list" => "window desktop".to_owned(),
         // A shell or script result is command output, not a file: the card must not say
         // the run "read file shell_run".
-        "shell_run" | "script_run" => "command output".to_owned(),
+        "shell_run" | "shell_interactive" | "script_run" => "command output".to_owned(),
         other => format!("tool {other}"),
     }
 }
@@ -574,7 +574,7 @@ pub(crate) fn egress_payload(name: &str, input: &Value) -> (String, String, &'st
             };
             (host, "body")
         }
-        "shell_run" => ("the shell".to_owned(), "body"),
+        "shell_run" | "shell_interactive" => ("the shell".to_owned(), "body"),
         "script_run" => ("a script".to_owned(), "body"),
         "browser_fill"
         | "browser_press"

@@ -871,7 +871,7 @@ impl Shared {
             // A page action is bound to the origin the browser reported when it was resolved
             // (checked again by the tool when it runs); unknown stays once-only.
             n if crate::shared::is_page_action(n) => page_origin.map(|o| ("page", o.to_owned())),
-            "shell_run" | "script_run" => Some(("shell", String::new())),
+            "shell_run" | "shell_interactive" | "script_run" => Some(("shell", String::new())),
             "desktop_type" | "desktop_key" | "desktop_set_value" | "desktop_drag" => {
                 Some(("desktop_input", String::new()))
             }

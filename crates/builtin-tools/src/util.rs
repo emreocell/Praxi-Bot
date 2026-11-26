@@ -68,7 +68,7 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // when the egress waiver is on; the command is the content.
         // The desktop input tools drive the keyboard and pointer: Win+R, a
         // terminal or a save dialog turns them into a launcher, so they count.
-        "shell_run" | "script_run" | "desktop_launch" | "desktop_type" | "desktop_set_value"
+        "shell_run" | "shell_interactive" | "script_run" | "desktop_launch" | "desktop_type" | "desktop_set_value"
         | "desktop_key" | "desktop_drag" => ContentClass::all().executes(),
         "browser_open"
         | "browser_back"

@@ -178,6 +178,20 @@ pub fn raw_command_for(tool: &str, input: &Value) -> String {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
+        // `start` names the program; `write` types text into one that is already running, so the
+        // never-list sees what is typed too (a bare shell cannot be started, see `pty_shell`).
+        "shell_interactive" => {
+            let field = match input.get("action").and_then(Value::as_str) {
+                Some("start") => "command",
+                Some("write") => "input",
+                _ => return String::new(),
+            };
+            input
+                .get(field)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        }
         "desktop_launch" => {
             let exe = input
                 .get("executable")
@@ -197,7 +211,7 @@ pub fn raw_command_for(tool: &str, input: &Value) -> String {
 /// The working directory a `shell_run` call names (absolute only), for path resolution in the
 /// permission layer.
 pub fn cwd_for(tool: &str, input: &Value) -> Option<String> {
-    (tool == "shell_run")
+    matches!(tool, "shell_run" | "shell_interactive")
         .then(|| input.get("cwd").and_then(Value::as_str))
         .flatten()
         .filter(|c| !c.is_empty())
@@ -708,6 +722,16 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("needs approval"), "{err}");
+        // Typing a catastrophic command into an interactive session is judged the same way.
+        let typed = raw_command_for(
+            "shell_interactive",
+            &json!({"action":"write","session":"pty-1","input":"rm -rf /","enter":true}),
+        );
+        let err = gate
+            .authorize(&req("shell_interactive", PermissionCategory::Shell, &typed))
+            .await
+            .unwrap_err();
+        assert!(err.contains("needs approval"), "{err}");
     }
 
     #[test]
@@ -721,5 +745,20 @@ mod tests {
             "a.exe 1 2"
         );
         assert_eq!(raw_command_for("fs_read", &json!({"path":"p"})), "");
+        // The interactive shell: the program on `start`, the typed text on `write`, nothing else.
+        let interactive = |input: Value| raw_command_for("shell_interactive", &input);
+        assert_eq!(
+            interactive(json!({"action":"start","command":"vibe --setup","input":"x"})),
+            "vibe --setup"
+        );
+        assert_eq!(
+            interactive(json!({"action":"write","session":"s","input":"rm -rf /"})),
+            "rm -rf /"
+        );
+        assert_eq!(interactive(json!({"action":"read","session":"s"})), "");
+        assert_eq!(
+            interactive(json!({"action":"write","session":"s","key":"enter"})),
+            ""
+        );
     }
 }

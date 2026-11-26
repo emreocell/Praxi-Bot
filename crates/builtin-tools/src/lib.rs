@@ -35,6 +35,7 @@ pub mod meta;
 pub mod notes;
 pub mod pc;
 pub mod provenance;
+pub mod pty_shell;
 pub mod pure_tools;
 pub mod schedule;
 pub mod script;
@@ -344,6 +345,7 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         cfg.provenance.clone(),
         cfg.fs_access.clone(),
     ));
+    all.push(pty_shell::tool(cfg.fs_access.clone()));
     all.push(script::tool_with_control(
         registry.clone(),
         cfg.gate,
@@ -426,6 +428,7 @@ mod tests {
         // program or drives input must be added here and in `classify`.
         let executors = [
             "shell_run",
+            "shell_interactive",
             "script_run",
             "desktop_launch",
             "desktop_type",
@@ -633,6 +636,7 @@ mod tests {
             ("checkpoint_list", R, Fs),
             ("checkpoint_restore", W, Fs),
             ("shell_run", D, Sh),
+            ("shell_interactive", D, Sh),
             ("script_run", W, Sc),
             ("ask_user", R, Me),
             ("todo_write", W, Me),
@@ -1233,7 +1237,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 43 + 7 + 2 + 2 + 1 + 1);
+        assert_eq!(added, 44 + 7 + 2 + 2 + 1 + 1);
 
         // Verification of email tools and their effects
         let send_tool = reg
