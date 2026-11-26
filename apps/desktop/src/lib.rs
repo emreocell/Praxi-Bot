@@ -9,6 +9,7 @@ mod deep_link;
 mod lifecycle_windows;
 pub mod listener;
 mod microphone;
+pub mod oauth_relay;
 pub mod popout;
 pub mod prereq;
 pub mod quick_ask;
@@ -71,6 +72,44 @@ async fn open_composio_link(window: Window, href: String, dashboard: bool) -> Re
         .await
         .map_err(|_| "system browser opener failed".to_owned())?
 }
+
+/// Open the page a sign-in sends the owner to (an app's consent page, a Google
+/// console page) in the operating system browser. https only.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn open_sign_in_link(window: Window, href: String) -> Result<(), String> {
+    require_window(&window, MAIN_ONLY)?;
+    tauri::async_runtime::spawn_blocking(move || browser::open_sign_in(&href))
+        .await
+        .map_err(|_| "system browser opener failed".to_owned())?
+}
+
+/// Start catching an OAuth redirect on this computer (a daemon on another
+/// computer is finishing the sign-in). Returns the port to give the daemon.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn oauth_relay_listen(window: Window) -> Result<oauth_relay::Listening, String> {
+    require_window(&window, MAIN_ONLY)?;
+    oauth_relay::listen().await
+}
+
+/// Wait for the redirect that carries `state`; returns its address.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+async fn oauth_relay_wait(window: Window, id: u64, state: String) -> Result<String, String> {
+    require_window(&window, MAIN_ONLY)?;
+    oauth_relay::wait(id, &state).await
+}
+
+/// Stop waiting for a redirect.
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn oauth_relay_cancel(window: Window, id: u64) -> Result<(), String> {
+    require_window(&window, MAIN_ONLY)?;
+    oauth_relay::cancel(id);
+    Ok(())
+}
+
 const MENU_ID_TOGGLE_WHEEL: &str = "dev.toggle_wheel";
 const MENU_ID_STOP_ALL: &str = "dev.stop_all";
 
@@ -1384,6 +1423,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             deep_link_take,
             open_composio_link,
+            open_sign_in_link,
+            oauth_relay_listen,
+            oauth_relay_wait,
+            oauth_relay_cancel,
             get_control_state,
             is_human_driving,
             begin_action,
@@ -1686,6 +1729,10 @@ mod acl_tests {
     const GATED: &[(&str, &str)] = &[
         ("deep_link_take", "MAIN_ONLY"),
         ("open_composio_link", "MAIN_ONLY"),
+        ("open_sign_in_link", "MAIN_ONLY"),
+        ("oauth_relay_listen", "MAIN_ONLY"),
+        ("oauth_relay_wait", "MAIN_ONLY"),
+        ("oauth_relay_cancel", "MAIN_ONLY"),
         ("begin_action", "MAIN_ONLY"),
         ("start_bot_run", "MAIN_ONLY"),
         ("pause_bot_run", "MAIN_AND_WIDGET_AND_CHAT"),

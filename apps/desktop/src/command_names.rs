@@ -12,6 +12,10 @@
 pub const COMMAND_NAMES: &[&str] = &[
     "deep_link_take",
     "open_composio_link",
+    "open_sign_in_link",
+    "oauth_relay_listen",
+    "oauth_relay_wait",
+    "oauth_relay_cancel",
     "get_control_state",
     "is_human_driving",
     "begin_action",

@@ -7,6 +7,10 @@
   "permissions": [
     "allow-deep-link-take",
     "allow-open-composio-link",
+    "allow-open-sign-in-link",
+    "allow-oauth-relay-listen",
+    "allow-oauth-relay-wait",
+    "allow-oauth-relay-cancel",
     "allow-get-control-state",
     "allow-begin-action",
     "allow-start-bot-run",
