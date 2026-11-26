@@ -60,7 +60,18 @@ async fn open_form(r: &Rig, text: &str) -> (String, String) {
 
 /// [`open_form`] that also returns the id of the bot that asked.
 async fn open_form_as(r: &Rig, text: &str) -> (String, String, String) {
+    open_form_prepared(r, text, |_| {}).await
+}
+
+/// [`open_form_as`] that runs `before(bot)` once the bot exists and before it asks
+/// (for example to grant it an entry it may then ask to replace).
+async fn open_form_prepared(
+    r: &Rig,
+    text: &str,
+    before: impl FnOnce(&str),
+) -> (String, String, String) {
     let (bot, chat) = make_chat(&r.t).await;
+    before(&bot);
     let run = send_msg(&r.t, &chat, text, "queue").await["run_id"]
         .as_str()
         .unwrap()
@@ -77,6 +88,19 @@ async fn open_form_as(r: &Rig, text: &str) -> (String, String, String) {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     panic!("no secret request was opened");
+}
+
+/// Whether the owner's form for this run says it REPLACES an existing entry.
+fn requested_replaces(r: &Rig, run: &str) -> bool {
+    let id: uuid::Uuid = run.parse().unwrap();
+    let log = storage::read_event_log(r.t.state.storage().data_dir(), protocol::RunId(id))
+        .unwrap_or_default();
+    log.iter()
+        .find_map(|env| match &env.event {
+            protocol::Event::SecretRequested(q) => Some(q.replaces_existing),
+            _ => None,
+        })
+        .expect("a secret request event")
 }
 
 /// The owner lets `bot` use `name` (a Vault grant).
@@ -326,17 +350,25 @@ async fn a_failed_login_replace_keeps_the_old_username_and_password() {
     r.secrets
         .upsert("login/example/password", Some("old-pass-123"), None, None)
         .unwrap();
-    let (run, call_id, bot) = open_form_as(
+    // The entries are this bot's (the owner allowed it before it asked): only then
+    // does the owner get a "replace" form.
+    let (run, call_id, bot) = open_form_prepared(
         &r,
         r#"call:secret_request {"name":"login/example","purpose":"Sign in","fields":"login","replace":true}"#,
+        |bot| {
+            grant(&r, "login/example/username", &[bot]);
+            grant(&r, "login/example/password", &[bot]);
+        },
     )
     .await;
+    assert!(
+        requested_replaces(&r, &run),
+        "the owning bot's replace request is shown as a replace"
+    );
     wait_state(&r.t, &run, "waiting_approval").await;
     let path = format!("/v1/secret-requests/{call_id}");
     let body = json!({"username": USER_CANARY, "password": CANARY});
-    // The entries are this bot's (the owner allowed it): only then may it replace them.
-    grant(&r, "login/example/username", &[&bot]);
-    grant(&r, "login/example/password", &[&bot]);
+    let _ = &bot;
 
     // The next two writes are this call's: the second one fails.
     store.fail_at.store(store.sets.load(SeqCst) + 1, SeqCst);
@@ -399,6 +431,12 @@ async fn a_form_cannot_take_over_an_owner_made_entry_granted_to_other_bots() {
         r#"call:secret_request {"name":"login/example","purpose":"Session expired, re-enter the password","fields":"login","replace":true}"#,
     )
     .await;
+    // Scope check at the root: bot B never gets a "replace" form for an entry it
+    // may not use, even though it passed replace:true.
+    assert!(
+        !requested_replaces(&r, &run),
+        "the owner was asked to replace an entry of other bots"
+    );
     let path = format!("/v1/secret-requests/{call_id}");
     let denied = call(
         &r.t,

@@ -69,11 +69,14 @@ impl Storage {
         )?)
     }
 
-    /// Insert a webhook. `secret` is stored and not returned.
+    /// Insert a webhook. The signing secret lives in the secret store; the
+    /// column stays empty (it only holds the plaintext of rows made before the
+    /// secret moved, until [`Self::clear_legacy_webhook_secret`] blanks it).
     ///
     /// # Errors
     /// SQLite errors.
-    pub fn insert_incoming_webhook(&self, hook: &IncomingWebhook, secret: &str) -> Result<()> {
+    pub fn insert_incoming_webhook(&self, hook: &IncomingWebhook) -> Result<()> {
+        let secret = "";
         self.conn().execute(
             "INSERT INTO incoming_webhooks (id, user_id, bot_id, name, instruction, secret, enabled, created_at_ms, updated_at_ms, last_fired_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
@@ -88,6 +91,25 @@ impl Storage {
                 hook.updated_at_ms,
                 hook.last_fired_at_ms,
             ],
+        )?;
+        Ok(())
+    }
+
+    /// Insert a webhook the way builds before the secret store did (plaintext
+    /// in the column). Only the migration tests use it.
+    ///
+    /// # Errors
+    /// SQLite errors.
+    #[doc(hidden)]
+    pub fn insert_legacy_incoming_webhook(
+        &self,
+        hook: &IncomingWebhook,
+        secret: &str,
+    ) -> Result<()> {
+        self.insert_incoming_webhook(hook)?;
+        self.conn().execute(
+            "UPDATE incoming_webhooks SET secret = ?1 WHERE id = ?2",
+            params![secret, hook.id.to_string()],
         )?;
         Ok(())
     }
@@ -128,7 +150,43 @@ impl Storage {
             .optional()?)
     }
 
-    /// The signing secret of one webhook. Callers must not log or return it.
+    /// Plaintext signing secrets still in the database (rows made before the
+    /// secret store held them). Empty once every row is migrated.
+    ///
+    /// # Errors
+    /// SQLite errors.
+    pub fn legacy_webhook_secrets(&self) -> Result<Vec<(Uuid, String)>> {
+        let conn = self.conn();
+        let mut st = conn.prepare("SELECT id, secret FROM incoming_webhooks WHERE secret <> ''")?;
+        let rows = st.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let id = Uuid::parse_str(&id).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+            Ok((id, row.get::<_, String>(1)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Blank the plaintext column of one webhook (its secret now lives in the
+    /// secret store).
+    ///
+    /// # Errors
+    /// SQLite errors.
+    pub fn clear_legacy_webhook_secret(&self, id: Uuid) -> Result<()> {
+        self.conn().execute(
+            "UPDATE incoming_webhooks SET secret = '' WHERE id = ?1",
+            params![id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// One webhook by id, with the legacy plaintext column (empty once the
+    /// secret is in the secret store). Callers must not log or return it.
     ///
     /// # Errors
     /// SQLite errors.

@@ -263,8 +263,17 @@ pub(crate) async fn create_webhook(
         updated_at_ms: now,
         last_fired_at_ms: None,
     };
+    // The signing secret lives in the secret store, never in bot.db. Without a
+    // store there is nowhere safe to keep it, so no webhook is made.
+    let store = store_of(&s)?;
     let secret = new_secret()?;
-    s.storage().insert_incoming_webhook(&hook, &secret)?;
+    store
+        .set(&secret_name(hook.id), &secret)
+        .map_err(|_| ApiError::unavailable("could not store the webhook secret"))?;
+    if let Err(err) = s.storage().insert_incoming_webhook(&hook) {
+        let _ = store.delete(&secret_name(hook.id));
+        return Err(err.into());
+    }
     audit(
         &s,
         "owner",
@@ -283,6 +292,153 @@ pub(crate) async fn create_webhook(
             secret,
         }),
     ))
+}
+
+/// Answer of rotate: the new secret, shown this once.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct IncomingWebhookRotated {
+    /// The webhook, unchanged.
+    pub webhook: IncomingWebhookDto,
+    /// New HMAC secret. Copy it now; later reads do not return it. The old one
+    /// stops working at once.
+    pub secret: String,
+}
+
+/// Replace the signing secret. The old secret is refused from this moment, so
+/// the sender has to be updated; the new secret is returned once.
+#[utoipa::path(post, path = "/v1/bots/{bot}/incoming-webhooks/{hook}/rotate-secret", tag = "webhooks",
+    security(("bearer" = [])),
+    params(("bot" = Uuid, Path, description = "Bot id"),
+           ("hook" = Uuid, Path, description = "Webhook id")),
+    responses((status = 200, body = IncomingWebhookRotated),
+              (status = 404, body = ErrorBody),
+              (status = 503, body = ErrorBody, description = "the secret store is not available")))]
+pub(crate) async fn rotate_webhook_secret(
+    State(s): State<AppState>,
+    AxumPath((bot, hook)): AxumPath<(String, String)>,
+) -> Result<Json<IncomingWebhookRotated>, ApiError> {
+    let bot = owned_bot(&s, &bot)?;
+    let id = crate::routes::id(&hook)?;
+    let mut row = s
+        .storage()
+        .get_incoming_webhook(s.user_id(), id)?
+        .filter(|h| h.bot_id == bot)
+        .ok_or_else(|| ApiError::not_found("webhook"))?;
+    let store = store_of(&s)?;
+    let secret = new_secret()?;
+    store
+        .set(&secret_name(row.id), &secret)
+        .map_err(|_| ApiError::unavailable("could not store the webhook secret"))?;
+    // A row that still had its plaintext in bot.db must not keep a second,
+    // working copy of the old secret.
+    s.storage().clear_legacy_webhook_secret(row.id)?;
+    row.updated_at_ms = storage::now_ms();
+    let _ = s.storage().update_incoming_webhook(&row)?;
+    audit(
+        &s,
+        "owner",
+        "incoming_webhook.secret_rotated",
+        None,
+        &serde_json::json!({"webhook_id": row.id, "bot_id": row.bot_id.0}),
+    )?;
+    Ok(Json(IncomingWebhookRotated {
+        webhook: dto(&row),
+        secret,
+    }))
+}
+
+/// The webhook row and its signing secret for a call. A row without any secret
+/// (for example after a state import) can never verify: the caller checks it
+/// against the dummy secret like an unknown id.
+fn lookup(
+    s: &AppState,
+    id: Option<Uuid>,
+) -> Result<(Option<IncomingWebhook>, Option<String>), ApiError> {
+    let found = match id {
+        Some(id) => s
+            .storage()
+            .incoming_webhook_secret(id)?
+            .filter(|(row, _)| row.user_id == s.user_id()),
+        None => None,
+    };
+    let Some((row, legacy)) = found else {
+        return Ok((None, None));
+    };
+    let secret = signing_secret(s, row.id, &legacy)?;
+    Ok((Some(row), secret))
+}
+
+fn secret_name(id: Uuid) -> String {
+    format!("{}{id}", secret_store::WEBHOOK_PREFIX)
+}
+
+fn store_of(s: &AppState) -> Result<std::sync::Arc<dyn secret_store::SecretStore>, ApiError> {
+    s.secret_store().ok_or_else(|| {
+        ApiError::unavailable(
+            "the secret store is not available, so webhook secrets cannot be kept",
+        )
+    })
+}
+
+/// Move every plaintext signing secret from bot.db into the secret store, then
+/// blank the column. Safe to repeat and safe to be interrupted: the store is
+/// written and read back before the column is cleared, so a crash leaves the
+/// secret in at least one place. Returns how many rows moved.
+pub(crate) fn migrate_legacy_secrets(
+    storage: &storage::Storage,
+    store: &dyn secret_store::SecretStore,
+) -> usize {
+    let Ok(rows) = storage.legacy_webhook_secrets() else {
+        return 0;
+    };
+    let mut moved = 0;
+    for (id, plain) in rows {
+        if migrate_one(storage, store, id, &plain) {
+            moved += 1;
+        }
+    }
+    moved
+}
+
+fn migrate_one(
+    storage: &storage::Storage,
+    store: &dyn secret_store::SecretStore,
+    id: Uuid,
+    plain: &str,
+) -> bool {
+    let name = secret_name(id);
+    match store.get(&name) {
+        // Already there (an interrupted earlier run, or a rotation): the store wins.
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            if store.set(&name, plain).is_err() {
+                return false;
+            }
+            let back = store.get(&name);
+            if !matches!(&back, Ok(Some(v)) if v.expose() == plain) {
+                return false;
+            }
+        }
+        Err(_) => return false,
+    }
+    storage.clear_legacy_webhook_secret(id).is_ok()
+}
+
+/// The signing secret for a call: the secret store first, then (only until the
+/// row is migrated) the legacy column. `Ok(None)` means there is none.
+fn signing_secret(s: &AppState, id: Uuid, legacy: &str) -> Result<Option<String>, ApiError> {
+    if let Some(store) = s.secret_store() {
+        match store.get(&secret_name(id)) {
+            Ok(Some(v)) => return Ok(Some(v.expose().to_owned())),
+            Ok(None) => {}
+            Err(_) => return Err(ApiError::unavailable("the secret store is not available")),
+        }
+        if !legacy.is_empty() {
+            // Late migration: a webhook that predates the secret store.
+            let _ = migrate_one(s.storage(), store.as_ref(), id, legacy);
+        }
+    }
+    Ok((!legacy.is_empty()).then(|| legacy.to_owned()))
 }
 
 /// Rename a webhook, change its instruction, or turn it on or off.
@@ -363,6 +519,9 @@ pub(crate) async fn delete_webhook(
     if !s.storage().delete_incoming_webhook(s.user_id(), row.id)? {
         return Err(ApiError::not_found("webhook"));
     }
+    if let Some(store) = s.secret_store() {
+        let _ = store.delete(&secret_name(row.id));
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -435,17 +594,9 @@ pub(crate) async fn receive_webhook(
         guard.lock().note_failure(bucket, now);
         return Err(ApiError::bad_request("the body must be UTF-8 text"));
     };
-    let found = match parsed {
-        Some(id) => s
-            .storage()
-            .incoming_webhook_secret(id)?
-            .filter(|(row, _)| row.user_id == s.user_id()),
-        None => None,
-    };
-    let (row, secret) = match found {
-        Some((row, secret)) => (Some(row), secret),
-        None => (None, DUMMY_SECRET.to_owned()),
-    };
+    let (row, secret) = lookup(&s, parsed)?;
+    let have_secret = secret.is_some();
+    let secret = secret.unwrap_or_else(|| DUMMY_SECRET.to_owned());
     let ts = match timestamp_of(&headers) {
         Ok(ts) => ts,
         Err(err) => {
@@ -458,8 +609,9 @@ pub(crate) async fn receive_webhook(
         return Err(fail(row.as_ref().map(|r| r.id), "stale_timestamp"));
     }
     let signed = format!("{ts}.{text}");
-    let verified =
-        scheduler::verify_webhook_signature(&secret, signed.as_bytes(), signature).is_ok();
+    let verified = scheduler::verify_webhook_signature(&secret, signed.as_bytes(), signature)
+        .is_ok()
+        && have_secret;
     let Some(row) = row.filter(|_| verified) else {
         return Err(fail(parsed, "bad_signature"));
     };

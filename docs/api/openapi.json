@@ -2383,6 +2383,74 @@
         ]
       }
     },
+    "/v1/bots/{bot}/incoming-webhooks/{hook}/rotate-secret": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Replace the signing secret. The old secret is refused from this moment, so\nthe sender has to be updated; the new secret is returned once.",
+        "operationId": "rotate_webhook_secret",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "description": "Bot id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "hook",
+            "in": "path",
+            "description": "Webhook id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomingWebhookRotated"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "the secret store is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/bots/{bot}/incoming-webhooks/{hook}/test": {
       "post": {
         "tags": [
@@ -26991,6 +27059,24 @@
           }
         },
         "additionalProperties": false
+      },
+      "IncomingWebhookRotated": {
+        "type": "object",
+        "description": "Answer of rotate: the new secret, shown this once.",
+        "required": [
+          "webhook",
+          "secret"
+        ],
+        "properties": {
+          "secret": {
+            "type": "string",
+            "description": "New HMAC secret. Copy it now; later reads do not return it. The old one\nstops working at once."
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/IncomingWebhookDto",
+            "description": "The webhook, unchanged."
+          }
+        }
       },
       "InputBatch": {
         "type": "object",

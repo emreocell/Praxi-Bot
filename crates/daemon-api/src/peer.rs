@@ -1030,6 +1030,10 @@ mod tests {
             (Method::PUT, "/v1/voice"),
             (Method::PUT, "/v1/spend-limit"),
             (Method::POST, "/v1/bots/abc/incoming-webhooks"),
+            (
+                Method::POST,
+                "/v1/bots/abc/incoming-webhooks/x/rotate-secret",
+            ),
             (Method::GET, "/v1/channels/telegram"),
             // a path that only starts like a listed one
             (Method::POST, "/v1/hostage"),

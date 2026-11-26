@@ -150,8 +150,16 @@ pub const RESERVED_PREFIX: &str = "composio/";
 #[must_use]
 pub fn is_reserved_name(name: &str) -> bool {
     let n = name.trim_start_matches('/').to_ascii_lowercase();
-    n.starts_with(RESERVED_PREFIX) || n == "composio"
+    n.starts_with(RESERVED_PREFIX)
+        || n == "composio"
+        || n.starts_with(WEBHOOK_PREFIX)
+        || n == "webhook"
 }
+
+/// Store prefix of the HMAC secrets of incoming webhooks (`webhook/<id>`). Like
+/// the Composio key, only the owning route talks to the store with the literal
+/// name; no configuration, bot, peer or state export can reference or read it.
+pub const WEBHOOK_PREFIX: &str = "webhook/";
 
 /// Store prefix of the owner-only fill secrets (see [`crate::FillSecrets`]).
 pub const FILL_PREFIX: &str = "fill/";
@@ -324,6 +332,11 @@ mod reserved_tests {
         assert!(SecretRef::new("mcp/github-token").is_ok());
         assert!(serde_json::from_str::<SecretRef>("\"mcp/x\"").is_ok());
         assert!(!is_reserved_name("composiox/a"));
+        for n in ["webhook/0190", "Webhook/X", "/webhook/x", "webhook"] {
+            assert!(is_reserved_name(n), "{n}");
+            assert!(SecretRef::new(n).is_err(), "{n}");
+        }
+        assert!(!is_reserved_name("webhooks/a"));
     }
 }
 

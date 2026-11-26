@@ -223,6 +223,7 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PATCH", "/v1/bots/{}/incoming-webhooks/{}"),
     ("DELETE", "/v1/bots/{}/incoming-webhooks/{}"),
     ("POST", "/v1/bots/{}/incoming-webhooks/{}/test"),
+    ("POST", "/v1/bots/{}/incoming-webhooks/{}/rotate-secret"),
     ("POST", "/v1/schedules"),
     ("PUT", "/v1/schedules/{}"),
     ("DELETE", "/v1/schedules/{}"),

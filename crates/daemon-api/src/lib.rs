@@ -674,7 +674,12 @@ impl AppState {
     /// Enable `POST /v1/secrets/{name}` (write-only) over `store` (call once;
     /// a second call is ignored).
     pub fn set_secret_store(&self, store: Arc<dyn secret_store::SecretStore>) {
-        let _ = self.0.secrets.set(store);
+        let for_migration = Arc::clone(&store);
+        if self.0.secrets.set(store).is_ok() {
+            // Webhook secrets made before the store held them leave bot.db now.
+            let _ =
+                incoming_webhook::migrate_legacy_secrets(self.storage(), for_migration.as_ref());
+        }
     }
 
     /// Add desktop / browser facts and repairs to `/v1/doctor` (call once;
@@ -1542,6 +1547,10 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/bots/{id}/incoming-webhooks/{hook}/test",
             post(incoming_webhook::test_webhook),
+        )
+        .route(
+            "/v1/bots/{id}/incoming-webhooks/{hook}/rotate-secret",
+            post(incoming_webhook::rotate_webhook_secret),
         )
         .route(
             "/v1/incoming-webhooks/{hook}",
