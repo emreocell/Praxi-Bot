@@ -4785,8 +4785,9 @@
     "needsYou": {
       "answerFor": "{{key}} için yanıtın",
       "intro": "Yanıtlayabildiklerini tek seferde yanıtla. Dokunmadıkların beklemeye devam eder.",
+      "liveOnly": "Bu adım için sitede senin olman gerekiyor. Kod buraya yazılmaz, saklanmaz ve bota gösterilmez: adımı kendin tamamla, sonra “Bunu atla” kutusunu işaretle.",
       "missing": "Bir yanıt yaz ya da “Bunu atla” kutusunu işaretle.",
-      "placeholder": "Kodu yaz ya da botun ne yapması gerektiğini söyle…",
+      "placeholder": "Botun ne yapması gerektiğini yaz… Parola ya da kod yazma.",
       "send": "Yanıtları gönder",
       "sending": "Gönderiliyor…",
       "skip": "Bunu atla",

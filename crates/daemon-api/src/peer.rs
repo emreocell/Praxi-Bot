@@ -362,6 +362,10 @@ pub fn peer_router(state: AppState) -> Router {
     crate::api_routes()
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
+            crate::mission_routes::mission_gate,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
             crate::live_view::audit_ingress,
         ))
         .layer(axum::middleware::from_fn_with_state(state.clone(), guard))
@@ -439,6 +443,9 @@ fn host_local_denial(method: &Method, check_path: &str) -> Option<&'static str> 
     }
     if under(check_path, "/v1/favicons") {
         return Some("site icons are fetched for the local owner only");
+    }
+    if under(check_path, "/v1/missions") {
+        return Some("missions (goals, ledgers, answers) are the owner's on this host");
     }
     if check_path == "/v1/data-usage" || check_path.starts_with("/v1/data-usage/") {
         return Some("data folder sizes and Clear cache are a host-local owner action");
@@ -1168,6 +1175,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn peers_never_touch_missions() {
+        for path in [
+            "/v1/missions",
+            "/v1/missions/abc",
+            "/v1/missions/abc/answers",
+            "/v1/missions/abc/cancel",
+        ] {
+            for method in [Method::GET, Method::HEAD, Method::POST] {
+                assert!(
+                    host_local_denial(&method, path).is_some(),
+                    "{method} {path}"
+                );
+            }
+        }
+        assert!(host_local_denial(&Method::GET, "/v1/missions-x").is_none());
     }
 
     #[test]

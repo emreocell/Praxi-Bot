@@ -3715,7 +3715,8 @@ export interface paths {
         put?: never;
         /**
          * Answer the blocked items of a mission in one go (owner only). Answered items go back to the
-         *     bot with the answer; skipped ones are left out; a blocked mission runs again.
+         *     bot with the answer; skipped ones are left out; a blocked mission runs again. A one-time code
+         *     (2FA) is never an answer: it would be stored in the ledger and shown to the bot.
          */
         post: operations["answer_mission"];
         delete?: never;
@@ -9772,6 +9773,11 @@ export interface components {
             kind: string;
             /** @description Last failure. */
             last_error?: string | null;
+            /**
+             * @description The step needs the owner live (a 2FA / verification code): a code is never taken as an
+             *     answer, never stored and never shown to the bot. Skip the item or finish it yourself.
+             */
+            needs_live_owner: boolean;
             /** @description What the owner answered for a blocked item. */
             owner_answer?: string | null;
             /** @description What was achieved (evidence), when done. */
@@ -21307,6 +21313,14 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

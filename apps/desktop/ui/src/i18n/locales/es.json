@@ -4785,8 +4785,9 @@
     "needsYou": {
       "answerFor": "Tu respuesta para {{key}}",
       "intro": "Responde de una vez lo que puedas. Lo que dejes sin tocar sigue en espera.",
+      "liveOnly": "Este paso te necesita en el sitio. Un código nunca se escribe aquí, ni se guarda ni se muestra al bot: termina el paso tú mismo y marca después «Omitir este».",
       "missing": "Escribe una respuesta o marca «Omitir este».",
-      "placeholder": "El código, o lo que debe hacer el bot…",
+      "placeholder": "Lo que debe hacer el bot… Nunca una contraseña ni un código.",
       "send": "Enviar respuestas",
       "sending": "Enviando…",
       "skip": "Omitir este",

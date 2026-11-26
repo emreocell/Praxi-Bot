@@ -13963,7 +13963,7 @@
         "tags": [
           "missions"
         ],
-        "summary": "Answer the blocked items of a mission in one go (owner only). Answered items go back to the\nbot with the answer; skipped ones are left out; a blocked mission runs again.",
+        "summary": "Answer the blocked items of a mission in one go (owner only). Answered items go back to the\nbot with the answer; skipped ones are left out; a blocked mission runs again. A one-time code\n(2FA) is never an answer: it would be stored in the ledger and shown to the bot.",
         "operationId": "answer_mission",
         "parameters": [
           {
@@ -14009,6 +14009,16 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "",
             "content": {
               "application/json": {
@@ -31149,6 +31159,7 @@
           "title",
           "status",
           "attempts",
+          "needs_live_owner",
           "updated_at_ms"
         ],
         "properties": {
@@ -31179,6 +31190,10 @@
               "null"
             ],
             "description": "Last failure."
+          },
+          "needs_live_owner": {
+            "type": "boolean",
+            "description": "The step needs the owner live (a 2FA / verification code): a code is never taken as an\nanswer, never stored and never shown to the bot. Skip the item or finish it yourself."
           },
           "owner_answer": {
             "type": [

@@ -1227,6 +1227,10 @@ pub fn router(state: AppState) -> Router {
     api_routes()
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
+            mission_routes::mission_gate,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
             owner::owner_gate,
         ))
         .layer(axum::middleware::from_fn_with_state(

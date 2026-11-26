@@ -1017,12 +1017,22 @@ pub(crate) async fn delete_bot(
 /// List chats.
 #[utoipa::path(get, path = "/v1/chats", tag = "chats", security(("bearer" = [])),
     responses((status = 200, body = Vec<ChatDto>)))]
-pub(crate) async fn list_chats(State(s): State<AppState>) -> Result<Json<Vec<ChatDto>>, ApiError> {
+pub(crate) async fn list_chats(
+    State(s): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<Vec<ChatDto>>, ApiError> {
     let flags = s.storage().list_chat_flags(s.user_id())?;
+    // The chat of a mission is the owner's: other callers do not see it listed.
+    let hidden = if s.owner_ok(&headers) {
+        std::collections::HashSet::new()
+    } else {
+        s.mission_chat_ids()
+    };
     Ok(Json(
         s.storage()
             .list_chats(s.user_id())?
             .into_iter()
+            .filter(|c| !hidden.contains(&c.id))
             .map(|c| {
                 let f = flags.get(&c.id).copied().unwrap_or_default();
                 chat_dto(c, f)
@@ -1332,17 +1342,29 @@ pub struct ApprovalsQuery {
     responses((status = 200, body = Vec<ApprovalDto>)))]
 pub(crate) async fn list_approvals(
     State(s): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(q): Query<ApprovalsQuery>,
 ) -> Result<Json<Vec<ApprovalDto>>, ApiError> {
+    // The sessions of a mission are the owner's: another caller sees none of their cards.
+    let owner = s.owner_ok(&headers);
+    let hidden = if owner {
+        std::collections::HashSet::new()
+    } else {
+        s.mission_chat_ids()
+    };
     let out = if let Some(run) = q.run_id {
-        run_approvals(&s, &s.run_of_user(RunId(run))?)?
+        let run = s.run_of_user(RunId(run))?;
+        if !owner && s.is_mission_run(&run) {
+            return Err(ApiError::not_found(format!("run {}", run.id.0)));
+        }
+        run_approvals(&s, &run)?
     } else {
         let mut v = Vec::new();
         for run in s
             .storage()
             .list_runs_by_state(RunState::WaitingApproval.as_str())?
         {
-            if run.user_id == s.user_id() {
+            if run.user_id == s.user_id() && (owner || !AppState::run_in_missions(&run, &hidden)) {
                 v.extend(
                     run_approvals(&s, &run)?
                         .into_iter()
@@ -1422,14 +1444,25 @@ pub(crate) async fn answer_question(
 /// List runs, newest last.
 #[utoipa::path(get, path = "/v1/runs", tag = "runs", security(("bearer" = [])),
     responses((status = 200, body = Vec<RunDto>)))]
-pub(crate) async fn list_runs(State(s): State<AppState>) -> Result<Json<Vec<RunDto>>, ApiError> {
+pub(crate) async fn list_runs(
+    State(s): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<Vec<RunDto>>, ApiError> {
     // `can_remember` may open the per-bot router cache (a sqlite file), so a
     // read-only listing does not ask: it reports `false`; `GET /v1/runs/{id}`
-    // has the real answer.
+    // has the real answer. The sessions of a mission are the owner's: they are not listed
+    // for other callers.
+    let owner = s.owner_ok(&headers);
+    let hidden = if owner {
+        std::collections::HashSet::new()
+    } else {
+        s.mission_chat_ids()
+    };
     Ok(Json(
         s.storage()
             .list_runs(s.user_id())?
             .into_iter()
+            .filter(|r| owner || !AppState::run_in_missions(r, &hidden))
             .map(|r| run_dto_with(r, false))
             .collect(),
     ))

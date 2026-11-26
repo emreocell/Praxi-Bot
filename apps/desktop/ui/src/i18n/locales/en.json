@@ -4785,8 +4785,9 @@
     "needsYou": {
       "answerFor": "Your answer for {{key}}",
       "intro": "Answer what you can in one go. Items you leave alone stay parked.",
+      "liveOnly": "This step needs you on the site. A code is never typed here, stored or shown to the bot: finish it yourself, then tick “Skip this one”.",
       "missing": "Write an answer or tick “Skip this one”.",
-      "placeholder": "The code, or what the bot should do…",
+      "placeholder": "What the bot should do… Never a password or a code.",
       "send": "Send answers",
       "sending": "Sending…",
       "skip": "Skip this one",

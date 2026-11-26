@@ -26,6 +26,9 @@ use crate::{AppState, error::ApiError};
 /// How long a session waits for the mission chat to be free (the owner may be typing in it).
 const CHAT_BUSY_PATIENCE: Duration = Duration::from_secs(10 * 60);
 
+/// How often a session that waits for the mission chat looks again.
+const CHAT_BUSY_POLL: Duration = Duration::from_secs(2);
+
 /// Starts mission sessions through the agent loop.
 pub struct AgentSessionRunner {
     agent: AgentLoop,
@@ -77,21 +80,44 @@ impl SessionRunner for AgentSessionRunner {
         let Some(chat) = parse(&req.chat_id, ChatId) else {
             return failed("the mission's chat id is invalid".into());
         };
+        let cancelled = || SessionResult {
+            end: SessionEnd::Cancelled,
+            model_steps: 0,
+            cost_usd: 0.0,
+        };
         let started = Instant::now();
         let run = loop {
+            // The owner paused or stopped the mission, or the daemon is going down: no run
+            // is started for a session nobody wants any more.
+            if req.cancel.is_cancelled() {
+                return cancelled();
+            }
             match self
                 .agent
                 .run_mission_session(chat, &req.mission_id, &req.brief)
             {
                 Ok(run) => break run,
                 Err(LoopError::Busy(_)) if started.elapsed() < CHAT_BUSY_PATIENCE => {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    tokio::select! {
+                        () = req.cancel.cancelled() => return cancelled(),
+                        () = tokio::time::sleep(CHAT_BUSY_POLL) => {}
+                    }
                 }
                 Err(e) => return failed(e.to_string()),
             }
         };
         on_started(&run.to_string());
-        let ended = self.agent.wait(run).await;
+        // `wait` hands out the run's task once, so it is polled to the end: a stop only
+        // cancels the run and the same wait then sees it finish.
+        let waiter = self.agent.wait(run);
+        tokio::pin!(waiter);
+        let ended = tokio::select! {
+            ended = &mut waiter => ended,
+            () = req.cancel.cancelled() => {
+                let _ = self.agent.cancel(run);
+                waiter.await
+            }
+        };
         let stats = self.agent.session_stats(run);
         let end = match ended {
             Ok(RunState::Succeeded) if stats.guard_stopped => SessionEnd::GuardStop,
@@ -220,8 +246,10 @@ impl AppState {
         });
     }
 
-    /// Stop the supervisor; a session in flight is left to the agent loop's own shutdown and
-    /// continues from the ledger after the next start.
+    /// Stop the supervisor: the session runs in flight are cancelled and every driver is
+    /// joined before this returns (see [`Supervisor::spawn`]), so a supervisor started after a
+    /// leader change never runs next to a leftover one. The missions stay `running` and
+    /// continue from their ledger at the next start.
     pub(crate) async fn stop_missions(&self) {
         let runtime = self.0.missions.lock().take();
         if let Some(r) = runtime {

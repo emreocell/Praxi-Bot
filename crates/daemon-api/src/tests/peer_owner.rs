@@ -590,3 +590,67 @@ async fn an_admin_read_of_a_sensitive_collection_leaves_an_audit_row() {
     assert!(!paths.contains(&"/v1/policy"));
     r.net.shutdown().await;
 }
+
+/// A mission belongs to the owner: a paired phone or an unconfirmed desktop can neither read
+/// it nor write into its chat or touch its sessions; the administrator desktop (the owner of
+/// the host) can.
+#[tokio::test]
+async fn a_paired_device_cannot_read_or_steer_a_mission_but_the_admin_desktop_can() {
+    let r = rig().await;
+    r.t.state.enable_missions().unwrap();
+    let bot = {
+        let created = super::call(
+            &r.t,
+            Method::POST,
+            "/v1/bots",
+            Some(json!({"profile_toml": super::PROFILE, "name": "Ada"})),
+        )
+        .await;
+        created.json()["id"].as_str().unwrap().to_owned()
+    };
+    let (mission, chat, run) = super::missions::seed_mission(&r.t, &bot);
+    let (chat, run) = (chat.0.to_string(), run.0.to_string());
+    let probes = [
+        (Method::GET, format!("/v1/missions/{mission}"), None),
+        (Method::GET, format!("/v1/chats/{chat}/messages"), None),
+        (
+            Method::POST,
+            format!("/v1/chats/{chat}/messages"),
+            Some(json!({"text": "do something else", "mode": "steer"})),
+        ),
+        (Method::DELETE, format!("/v1/chats/{chat}"), None),
+        (Method::POST, format!("/v1/runs/{run}/resume"), None),
+        (Method::POST, format!("/v1/runs/{run}/cancel"), None),
+    ];
+    for who in [
+        (r.legacy_key.as_str(), PeerRole::Desktop),
+        (r.admin_key.as_str(), PeerRole::Phone),
+    ] {
+        for (m, path, body) in &probes {
+            // A peer may try the owner key header too: the guard strips it.
+            let resp = peer_request(
+                &r.t,
+                who,
+                m.clone(),
+                path,
+                &[("x-praxi-owner-key", OWNER)],
+                body.clone(),
+            )
+            .await;
+            assert!(
+                refused(&resp),
+                "{:?} {m} {path} reached a mission: {} {}",
+                who.1,
+                resp.status,
+                code(&resp)
+            );
+        }
+    }
+    let admin = (r.admin_key.as_str(), PeerRole::Desktop);
+    for (m, path, body) in &probes[..2] {
+        r.t.state.leader().reset_admin_budget();
+        let resp = peer_request(&r.t, admin, m.clone(), path, &[], body.clone()).await;
+        assert_eq!(resp.status, StatusCode::OK, "{m} {path}: {:?}", resp.json());
+    }
+    r.net.shutdown().await;
+}

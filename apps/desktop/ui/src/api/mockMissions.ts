@@ -33,6 +33,7 @@ function item(key: string, status: MissionItem["status"], at: number, extra: Par
     result: null,
     last_error: null,
     blocked_reason: null,
+    needs_live_owner: false,
     owner_answer: null,
     updated_at_ms: at,
     ...extra
@@ -65,7 +66,12 @@ export class MockMissions {
       const at = now - (15 - i) * MIN;
       if (i < 7) return item(key, "done", at, { result: "Profile created, confirmation mail received." });
       if (i === 7) return item(key, "blocked", at, { blocked_reason: "A CAPTCHA appeared on the sign-up form." });
-      if (i === 8) return item(key, "blocked", at, { blocked_reason: "The site wants the 6-digit code it sent to your phone." });
+      if (i === 8) {
+        return item(key, "blocked", at, {
+          blocked_reason: "The site wants the 6-digit code it sent to your phone.",
+          needs_live_owner: true
+        });
+      }
       return item(key, i === 9 ? "doing" : "todo", at);
     });
     this.items.set("mission-running", running);
@@ -219,6 +225,9 @@ export class MockMissions {
       if (a.skip) {
         it.status = "skipped";
         skipped += 1;
+      } else if (it.needs_live_owner) {
+        // As the daemon: a code is never taken as an answer.
+        throw new ApiError(400, "bad_request", `item ${a.key} needs you live: a code is never taken as an answer`);
       } else if (a.answer?.trim()) {
         it.status = "todo";
         it.owner_answer = a.answer.trim();

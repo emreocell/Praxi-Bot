@@ -4785,8 +4785,9 @@
     "needsYou": {
       "answerFor": "Deine Antwort für {{key}}",
       "intro": "Beantworte, was du kannst, in einem Rutsch. Was du auslässt, bleibt liegen.",
+      "liveOnly": "Dieser Schritt braucht dich auf der Seite. Ein Code wird hier nie eingetippt, gespeichert oder dem Bot gezeigt: Erledige den Schritt selbst und setze dann den Haken bei „Diesen überspringen“.",
       "missing": "Schreibe eine Antwort oder setze den Haken bei „Diesen überspringen“.",
-      "placeholder": "Der Code oder was der Bot tun soll…",
+      "placeholder": "Was der Bot tun soll… Nie ein Passwort oder ein Code.",
       "send": "Antworten senden",
       "sending": "Wird gesendet…",
       "skip": "Diesen überspringen",

@@ -380,18 +380,23 @@ function NeedsYou({
                 {it.title && it.title !== it.key ? <span> · {it.title}</span> : null}
               </p>
               {it.blocked_reason ? <p className={styles.itemReason}>{it.blocked_reason}</p> : null}
-              <textarea
-                className={styles.textarea}
-                rows={2}
-                maxLength={2000}
-                value={draft?.text ?? ""}
-                disabled={draft?.skip === true}
-                placeholder={t("missions.needsYou.placeholder")}
-                aria-label={t("missions.needsYou.answerFor", { key: it.key })}
-                aria-invalid={missing}
-                aria-describedby={missing ? `${id}-${it.key}-missing` : undefined}
-                onChange={(e) => touch(it.key, { text: e.target.value })}
-              />
+              {it.needs_live_owner ? (
+                // A code is never taken as an answer: nothing to type here, only to skip.
+                <p className={styles.hint}>{t("missions.needsYou.liveOnly")}</p>
+              ) : (
+                <textarea
+                  className={styles.textarea}
+                  rows={2}
+                  maxLength={2000}
+                  value={draft?.text ?? ""}
+                  disabled={draft?.skip === true}
+                  placeholder={t("missions.needsYou.placeholder")}
+                  aria-label={t("missions.needsYou.answerFor", { key: it.key })}
+                  aria-invalid={missing}
+                  aria-describedby={missing ? `${id}-${it.key}-missing` : undefined}
+                  onChange={(e) => touch(it.key, { text: e.target.value })}
+                />
+              )}
               <label className={styles.skip}>
                 <input
                   type="checkbox"

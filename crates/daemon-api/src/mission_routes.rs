@@ -6,13 +6,17 @@
 //! blocked items in one request. Everything that starts or steers unattended work is
 //! owner-only (see `owner.rs`).
 
+use std::collections::HashSet;
+
 use axum::http::HeaderMap;
 use axum::{
     Json,
-    extract::{Path as AxumPath, Query, State},
+    extract::{Path as AxumPath, Query, Request, State},
+    middleware::Next,
+    response::{IntoResponse, Response},
 };
 use missions::{Budgets, ItemStatus, Mission, MissionError, MissionState, NewMission};
-use protocol::{BotId, ChatId};
+use protocol::{BotId, ChatId, RunId};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use storage::{Chat, Message, now_ms};
@@ -149,6 +153,9 @@ pub struct MissionItemDto {
     pub last_error: Option<String>,
     /// What the owner has to do or answer (blocked items).
     pub blocked_reason: Option<String>,
+    /// The step needs the owner live (a 2FA / verification code): a code is never taken as an
+    /// answer, never stored and never shown to the bot. Skip the item or finish it yourself.
+    pub needs_live_owner: bool,
     /// What the owner answered for a blocked item.
     pub owner_answer: Option<String>,
     /// Last change (ms since epoch).
@@ -281,7 +288,9 @@ fn store_err(e: MissionError) -> ApiError {
     match e {
         MissionError::NotFound(w) => ApiError::not_found(w),
         MissionError::Invalid(m) => ApiError::bad_request(m),
-        MissionError::IllegalTransition { .. } => ApiError::conflict(e.to_string()),
+        MissionError::IllegalTransition { .. } | MissionError::Busy(_) => {
+            ApiError::conflict(e.to_string())
+        }
         other => ApiError::internal(other),
     }
 }
@@ -319,6 +328,7 @@ fn item_dto(i: &missions::Item) -> MissionItemDto {
         result: i.result.clone(),
         last_error: i.last_error.clone(),
         blocked_reason: i.blocked_reason.clone(),
+        needs_live_owner: i.live_only,
         owner_answer: i.owner_answer.clone(),
         updated_at_ms: i.updated_at_ms,
     }
@@ -463,8 +473,9 @@ pub(crate) async fn create_mission(
         created_at_ms: now_ms(),
     };
     s.storage().insert_chat(&chat)?;
+    let goal_message = Uuid::now_v7();
     s.storage().insert_message(&Message {
-        id: Uuid::now_v7(),
+        id: goal_message,
         user_id: s.user_id(),
         chat_id: chat.id,
         run_id: None,
@@ -475,6 +486,10 @@ pub(crate) async fn create_mission(
         exposure_private: false,
         exposure_sources: Vec::new(),
     })?;
+    // The goal is the one text of a mission that is the owner's own words (the route is
+    // owner-only): named sites and typed URLs in it count for the approval code. The briefs the
+    // supervisor writes later are tagged `mission_brief` and never do.
+    s.storage().set_message_source(goal_message, "owner")?;
     let m = store
         .create(
             &NewMission {
@@ -566,12 +581,13 @@ pub(crate) async fn cancel_mission(
 }
 
 /// Answer the blocked items of a mission in one go (owner only). Answered items go back to the
-/// bot with the answer; skipped ones are left out; a blocked mission runs again.
+/// bot with the answer; skipped ones are left out; a blocked mission runs again. A one-time code
+/// (2FA) is never an answer: it would be stored in the ledger and shown to the bot.
 #[utoipa::path(post, path = "/v1/missions/{id}/answers", tag = "missions", security(("bearer" = [])),
     params(("id" = Uuid, Path, description = "Mission id")),
     request_body = MissionAnswersInput,
     responses((status = 200, body = MissionAnswersDto), (status = 400, body = ErrorBody),
-              (status = 404, body = ErrorBody)))]
+              (status = 404, body = ErrorBody), (status = 409, body = ErrorBody)))]
 pub(crate) async fn answer_mission(
     State(s): State<AppState>,
     headers: HeaderMap,
@@ -580,52 +596,79 @@ pub(crate) async fn answer_mission(
 ) -> Result<Json<MissionAnswersDto>, ApiError> {
     s.require_owner(&headers)?;
     let m = mission_of_user(&s, id)?;
+    // An ended mission is history: its ledger no longer changes.
+    if m.state.is_terminal() {
+        return Err(ApiError::conflict(format!(
+            "this mission is {}: its ledger no longer changes",
+            m.state
+        )));
+    }
     let sup = s.mission_supervisor()?;
     let store = s.mission_store()?;
     if input.answers.is_empty() || input.answers.len() > missions::model::MAX_ITEMS {
         return Err(ApiError::bad_request("send at least one answer"));
     }
     // Validate everything first so a bad request changes nothing.
-    let blocked: std::collections::HashSet<String> = store
+    let blocked: std::collections::HashMap<String, missions::Item> = store
         .items(&m.id, Some(ItemStatus::Blocked))
         .map_err(store_err)?
         .into_iter()
-        .map(|i| i.key)
+        .map(|i| (i.key.clone(), i))
         .collect();
     for a in &input.answers {
-        if !blocked.contains(&a.key) {
+        let Some(item) = blocked.get(&a.key) else {
             return Err(ApiError::bad_request(format!(
                 "item {:?} is not blocked",
                 a.key
             )));
-        }
+        };
         if !a.skip && a.answer.trim().is_empty() {
             return Err(ApiError::bad_request(format!(
                 "item {:?}: write an answer or choose to skip it",
                 a.key
             )));
         }
-    }
-    let now = now_ms();
-    let mut skipped = 0;
-    let mut to_answer: Vec<(String, String)> = Vec::new();
-    for a in &input.answers {
-        if a.skip {
-            let upd = missions::ItemUpdate {
-                status: Some(ItemStatus::Skipped),
-                ..missions::ItemUpdate::default()
-            };
-            store
-                .update_item(&m.id, &a.key, &upd, true, now)
-                .map_err(store_err)?;
-            skipped += 1;
-        } else {
-            to_answer.push((a.key.clone(), a.answer.clone()));
+        if !a.skip && item.live_only {
+            return Err(ApiError::bad_request(format!(
+                "item {:?} needs you live (a code): Praxi never stores one or shows it to the bot. Finish that step yourself on the site, then skip the item",
+                a.key
+            )));
         }
     }
-    let released = sup.answer_blocked(&m.id, &to_answer).map_err(store_err)?;
+    // An answer or a skip may start a blocked mission again, and a mission only runs unattended
+    // on a bot that is still at the Full level.
+    let resumes = m.state == MissionState::Blocked;
+    if resumes && !s.agent().bot_is_full(BotId(uuid_of(&m.bot_id))) {
+        return Err(ApiError::bad_request(
+            "the bot is no longer on the Full level; set it back before answering",
+        ));
+    }
+    let now = now_ms();
+    let (skips, answers): (Vec<_>, Vec<_>) = input.answers.iter().partition(|a| a.skip);
+    // The store checks all answers (a code is refused) and changes nothing when it refuses one,
+    // so the answers go first and a refusal leaves the skips undone too.
+    let to_answer: Vec<(String, String)> = answers
+        .iter()
+        .map(|a| (a.key.clone(), a.answer.clone()))
+        .collect();
+    let released = if to_answer.is_empty() {
+        0
+    } else {
+        sup.answer_blocked(&m.id, &to_answer).map_err(store_err)?
+    };
+    let mut skipped = 0;
+    for a in &skips {
+        let upd = missions::ItemUpdate {
+            status: Some(ItemStatus::Skipped),
+            ..missions::ItemUpdate::default()
+        };
+        store
+            .update_item(&m.id, &a.key, &upd, true, now)
+            .map_err(store_err)?;
+        skipped += 1;
+    }
     // Skipping the last blocked item may finish a blocked mission: let the supervisor look.
-    if skipped > 0 && released == 0 && m.state == MissionState::Blocked {
+    if skipped > 0 && released == 0 && resumes {
         sup.resume(&m.id).map_err(store_err)?;
     }
     audit(
@@ -635,4 +678,78 @@ pub(crate) async fn answer_mission(
         &json!({"released": released, "skipped": skipped}),
     );
     Ok(Json(MissionAnswersDto { released, skipped }))
+}
+
+impl AppState {
+    /// `chat` is the chat of one of the user's missions.
+    pub(crate) fn is_mission_chat(&self, chat: ChatId) -> bool {
+        let Some(store) = self.0.mission_store.get() else {
+            return false;
+        };
+        // A ledger that cannot be read fails closed: nobody but the owner gets the chat.
+        store
+            .mission_for_chat(&chat.to_string())
+            .map_or(true, |m| m.is_some())
+    }
+
+    /// The run is a mission session, or runs in a mission's chat (a subagent of a session).
+    pub(crate) fn is_mission_run(&self, run: &storage::Run) -> bool {
+        missions::mission_of_kind(&run.kind).is_some()
+            || run.chat_id.is_some_and(|c| self.is_mission_chat(c))
+    }
+
+    /// [`Self::is_mission_run`] against a chat set read once (for lists).
+    pub(crate) fn run_in_missions(run: &storage::Run, mission_chats: &HashSet<ChatId>) -> bool {
+        missions::mission_of_kind(&run.kind).is_some()
+            || run.chat_id.is_some_and(|c| mission_chats.contains(&c))
+    }
+
+    /// The chats of the user's missions, for lists that must not show them to a non-owner.
+    pub(crate) fn mission_chat_ids(&self) -> HashSet<ChatId> {
+        let Some(store) = self.0.mission_store.get() else {
+            return HashSet::new();
+        };
+        store
+            .list(&self.user_id().to_string())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|m| Uuid::parse_str(&m.chat_id).ok().map(ChatId))
+            .collect()
+    }
+
+    /// Whether a request for `path` reads, steers or ends a mission: any route under
+    /// `/v1/chats/{id}` or `/v1/runs/{id}` whose chat is a mission's chat or whose run is one
+    /// of its sessions. The path is decoded first, like the owner-route table does.
+    fn path_targets_mission(&self, path: &str) -> bool {
+        let decoded = percent_encoding::percent_decode_str(path).decode_utf8_lossy();
+        let mut segs = decoded.split('/').filter(|p| !p.is_empty());
+        if segs.next() != Some("v1") {
+            return false;
+        }
+        match (segs.next(), segs.next().map(Uuid::parse_str)) {
+            (Some("chats"), Some(Ok(chat))) => self.is_mission_chat(ChatId(chat)),
+            (Some("runs"), Some(Ok(run))) => match self.storage().get_run(RunId(run)) {
+                Ok(Some(r)) => self.is_mission_run(&r),
+                Ok(None) => false,
+                Err(_) => true,
+            },
+            _ => false,
+        }
+    }
+}
+
+/// A mission is the owner's: its chat (the goal, the briefs, the digest) and the runs of its
+/// sessions can be read, steered, resumed, cancelled or deleted only with the owner key (the
+/// local app, or the host's administrator desktop, which the peer guard shows the key). A holder
+/// of only the API token, a paired phone or another desktop is refused whichever route it uses.
+pub(crate) async fn mission_gate(State(s): State<AppState>, req: Request, next: Next) -> Response {
+    if !s.owner_ok(req.headers()) && s.path_targets_mission(req.uri().path()) {
+        return ApiError::new(
+            axum::http::StatusCode::FORBIDDEN,
+            crate::owner::OWNER_REQUIRED,
+            "this chat or run belongs to a mission, which is the owner's: use the app, or run it on the host with its owner key",
+        )
+        .into_response();
+    }
+    next.run(req).await
 }

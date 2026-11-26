@@ -15,14 +15,21 @@ address, and move on to the next site."*
    work through the whole task, to ask all its questions together before it
    starts, and to decide small choices itself and tell you in the final report.
    If a reply still ends with a request for permission to carry on ("I did
-   one, shall I do the next?", "want me to also research other companies?"),
-   the daemon answers "yes, continue" itself on the **Full** level. A turn that
-   ends while its plan still has open steps is continued at every level. This
-   is bounded: a limit on automatic continuations per turn, the step and token
-   budgets and a time window. Asking about money is never answered
-   automatically, and a real question (which e-mail address?) still ends the
-   turn. The permission engine is unchanged: every tool call is still decided
-   by it, so a bot below Full still asks before it acts.
+   one, shall I do the next?"), the daemon answers "yes, continue" itself on the
+   **Full** level, but only for your own turn (typed in the app, from the admin
+   desktop or from your paired Telegram chat) and only when the bot has not read
+   a web page or a mail in that turn: a page can plant that very question. A
+   turn that ends while its plan still has open steps is continued the same way
+   at every level. This is bounded: a limit on automatic continuations per turn,
+   the step and token budgets and a time window. A turn that a safety limit
+   closed is never re-opened. Anything about money (amounts, payment, banking,
+   fees, prices, orders, crypto), anything about deleting, a generic consent
+   question ("shall I go ahead?") and an offer of more work ("want me to also
+   research other companies?") is never answered automatically: the reply is
+   read as a whole, in English, Turkish, German and Spanish, and a real question
+   (which e-mail address?) still ends the turn. The permission engine is
+   unchanged: every tool call is still decided by it, so a bot below Full still
+   asks before it acts.
 2. **Missions** make long work durable. A mission is a list of items (sites,
    leads, documents) that lives in the daemon's database, not in the chat. The
    bot works through it in **sessions** (ordinary runs). Each session starts
@@ -51,6 +58,12 @@ answer for each (or skip it) and send them all with one button. When nothing
 else is left to do, the mission waits for you and the report lists what is
 blocked.
 
+**A code is never an answer.** A 2FA or verification code is single-use, so it
+is never stored in the list and never shown to the bot. An item that waits for a
+code only offers "Skip this one": enter the code on the site yourself, then skip
+the item. The same holds for passwords: add a credential in the app, never write
+it in an answer.
+
 ## When a mission stops
 
 * **Done:** the goal you set is met. The daemon checks it from the list; the
@@ -76,10 +89,19 @@ panel. What does **not** exist yet: waking a mission by a timer, an incoming
 mail or a webhook (the bot cannot "check the verification mail in 10 minutes"
 without holding a run), a separate permission scope per mission, mail pacing and
 opt-out handling for outreach, sub-missions for helper bots and push reports to
-Telegram. A mission session is the owner's own run: it asks for what the Full
-level asks for (money, secrets, messages to other people), so an unattended
-mission can sit on an approval card; it then blocks after ten minutes with a
-note.
+Telegram. A mission session is **not** your own typing, because its first
+message is built from a list that earlier sessions filled with text from web
+pages and mails. It runs as its own kind (`mission`): that text never counts as
+your words (the sites you named, the URLs you typed), it never reaches your own
+computer (`pc_*` tools) or other bots, and it gets the Full level's web,
+own-inbox and shell waivers with nothing of yours but the goal: only the goal
+you wrote when you started the mission is your text. It still asks for what the Full
+level asks for (money, secrets, messages to other people): an approval nobody
+answers pauses the session, and the mission then waits for you with a note
+instead of running past the card. Everything about a mission (the goal, the
+list, your answers, its chat and its sessions) can be read or changed only with
+the owner key: the app, or the administrator desktop of a host. A paired phone, a
+script holding the API token or another desktop gets a refusal.
 
 The laptop sleeping pauses a mission (the daemon stops with it). For work that
 should run all night, use an [always-on host](remote-host.md).
