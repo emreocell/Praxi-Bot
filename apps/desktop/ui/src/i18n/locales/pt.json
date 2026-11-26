@@ -3979,15 +3979,7 @@
     "today": "today {{time}}"
   },
   "hostMode": {
-    "have": {
-      "bots": "Bots are ready on this server.",
-      "model": "A model is connected."
-    },
     "managedOnServer": "Depois que este computador for confirmado como administrador em {{name}}, você também gerencia daqui chaves, permissões, ferramentas e e-mail. O emparelhamento de dispositivos e as atualizações de {{name}} continuam em {{name}}.",
-    "missing": {
-      "bots": "No bots on this server yet.",
-      "model": "No model connected on this server yet."
-    },
     "model": {
       "action": "Connect a model on {{name}}",
       "afterwards": "This app picks it up on its own a few seconds later.",
@@ -4443,7 +4435,6 @@
     "daemonOfflineDescription": "Praxi-Bot's background service is not answering. Wait a few seconds and try again. If it keeps failing, check that a firewall is not blocking Praxi-Bot, or restart the app.",
     "daemonOfflineTitle": "Local background service is not running",
     "daemonRetry": "Retry connection",
-    "refreshBots": "Refresh",
     "runSetupWizard": "Run setup wizard",
     "selectBotDescription": "Choose a bot from the sidebar to view its profile, or open settings to customize the theme, accent color, and background.",
     "selectBotTitle": "Select a bot",

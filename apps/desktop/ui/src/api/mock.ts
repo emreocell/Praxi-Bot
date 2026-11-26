@@ -92,6 +92,11 @@ import type {
 import { isMockMode, MOCK_BASE_URL } from "./mockMode.ts";
 export { isMockMode, MOCK_BASE_URL };
 
+/** Review state `?screen=nobots` (mock mode only): this computer has no bot yet. */
+function mockNoBots(): boolean {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("screen") === "nobots";
+}
+
 const NOW = 1_750_000_000_000;
 
 const ATLAS = "11111111-1111-4111-8111-111111111111";
@@ -1960,7 +1965,8 @@ export class MockApiClient extends ApiClient {
           };
           return ok(botCopy);
         }
-        return ok(mockHostScenario() === "empty" ? [] : structuredClone(this.bots));
+        // `?screen=nobots`: this computer has no bot yet (the home screen's first steps).
+        return ok(mockHostScenario() === "empty" || mockNoBots() ? [] : structuredClone(this.bots));
       case "DELETE /bots":
         if (seg[1] && seg[2] === "browser-profile" && !seg[3]) {
           const found = this.bots.find((b) => b.id === seg[1]);

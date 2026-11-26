@@ -86,6 +86,16 @@
   color: var(--color-text-muted);
 }
 
+/* Open steps after the next one: just their name, quieter, so the next step stands out. */
+.step:not(.done):not(.next) .stepTitle {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-regular);
+}
+
+.next .mark {
+  color: var(--color-accent-text);
+}
+
 .body {
   font-size: var(--font-size-xs);
   line-height: var(--line-height-normal);

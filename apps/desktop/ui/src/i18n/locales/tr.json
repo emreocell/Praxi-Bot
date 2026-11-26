@@ -4115,15 +4115,7 @@
     "today": "bugün {{time}}"
   },
   "hostMode": {
-    "have": {
-      "bots": "Botlar bu sunucuda hazır.",
-      "model": "Bir model bağlı."
-    },
     "managedOnServer": "Bu bilgisayar {{name}} üzerinde yönetici olarak onaylandıktan sonra anahtarları, izinleri, araçları ve e-postayı buradan da yönetirsin. Cihaz eşleştirme ve {{name}} güncellemesi {{name}} üzerinde kalır.",
-    "missing": {
-      "bots": "Bu sunucuda henüz bot yok.",
-      "model": "Bu sunucuda henüz bağlı bir model yok."
-    },
     "model": {
       "action": "{{name}} sunucusuna model bağla",
       "afterwards": "Bu uygulama birkaç saniye sonra bunu kendiliğinden fark eder.",
@@ -4132,6 +4124,7 @@
       "onServer": "Şimdilik anahtarlar bu uygulamadan değil, sunucunun kendisinde eklenir. {{name}} üzerinde bir terminal aç ve şunu çalıştır:",
       "title": "Bu sunucuya model bağla"
     },
+    "moreTitle": "Buradan neleri yönetebilirim?",
     "newBotNeedsModel": "{{name}} sunucusunda henüz model yok, bu yüzden orada bot oluşturulamaz. Önce sunucuya bir model bağla.",
     "refusal": {
       "adminRequired": "{{name}} bu bilgisayarı henüz yönetici olarak onaylamadı. {{name}} üzerinde bir kez `bot host admin --all-desktops` çalıştır, sonra tekrar dene.",
@@ -4153,6 +4146,20 @@
       "notPaired": "Bu bilgisayarı artık kabul etmiyor. Yeniden eşleştir.",
       "offline": "Yanıt vermiyor. Kendiliğinden yeniden dener."
     },
+    "stateHint": {
+      "connecting": "Bu birkaç saniye sürer.",
+      "mismatch": "Güncellemeden sonra uygulama kendiliğinden yeniden bağlanır.",
+      "notPaired": "Üstteki bilgisayar menüsünü aç ve sunucuyu yeniden ekle.",
+      "offline": "Sunucunun açık ve internete bağlı olduğundan emin ol. Bu sırada bu bilgisayarda çalışabilirsin."
+    },
+    "steps": {
+      "bot": "Burada ilk botunu oluştur",
+      "botHint": "Buradaki bir bot, bu bilgisayar kapalıyken de çalışır.",
+      "model": "{{name}} üzerinde bir yapay zekâ bağla",
+      "modelAction": "Yapay zekâ bağla",
+      "modelHint": "Bu sunucudaki botların onunla düşünür."
+    },
+    "stepsLabel": "{{name}} kurulumu",
     "viewScreen": "Ekranı izle"
   },
   "hostRecovery": {
@@ -4594,13 +4601,12 @@
     "daemonOfflineDescription": "Praxi-Bot'un arka plan servisi yanıt vermiyor. Birkaç saniye bekleyip yeniden dene. Sorun sürerse bir güvenlik duvarının Praxi-Bot'u engellemediğini kontrol et veya uygulamayı yeniden başlat.",
     "daemonOfflineTitle": "Yerel arka plan servisi çalışmıyor",
     "daemonRetry": "Bağlantıyı yeniden dene",
-    "refreshBots": "Yenile",
     "runSetupWizard": "Kurulum sihirbazını çalıştır",
-    "selectBotDescription": "Profilini görüntülemek için kenar çubuğundan bir bot seç veya temayı, vurgu rengini ve arka planı özelleştirmek için ayarları aç.",
-    "selectBotTitle": "Bir bot seç",
+    "selectBotDescription": "Soldan bir bot seç ya da yeni bir bot oluştur.",
+    "selectBotTitle": "Konuşmak için bir bot seç",
     "selectedBotLabel": "Etkin bot profili",
-    "welcomeDescription": "Bir botun kişiliği, modelleri ve izin ön ayarı vardır. Sohbete başlamak için kurulum sihirbazını çalıştır veya elle bir bot oluştur.",
-    "welcomeTitle": "İlk botunu oluştur"
+    "welcomeDescription": "Üç kısa adımda ilk botun çalışmaya hazır.",
+    "welcomeTitle": "İlk botunu hazırlayalım"
   },
   "memory": {
     "add": "Hafızaya ekle",
@@ -6772,6 +6778,22 @@
         "saved": "Web araması ayarları kaydedildi"
       },
       "toggleBackend": "{{name}} sağlayıcısını aç/kapat"
+    }
+  },
+  "setup": {
+    "home": {
+      "bot": "İlk botunu oluştur",
+      "botHint": "Bir şablon seç ya da boş başla. Her şeyi sonra değiştirebilirsin.",
+      "chat": "Ona ilk mesajını gönder",
+      "missingBots": "Botların zaten var mı? Listeyi yenile",
+      "model": "Bir yapay zekâ bağla",
+      "modelAction": "Yapay zekâ bağla",
+      "modelHint": "Botlarının adına düşünür. Ücretsiz seçenek yaklaşık iki dakika sürer."
+    },
+    "state": {
+      "done": "tamam",
+      "later": "sonra",
+      "next": "Sıradaki"
     }
   },
   "shell": {

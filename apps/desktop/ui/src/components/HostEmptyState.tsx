@@ -1,4 +1,4 @@
-import { Check, Circle, Copy, MonitorPlay, Plus, ServerCog, Terminal } from "lucide-react";
+import { Check, Copy, MonitorPlay, Plus, ServerCog, Terminal } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
@@ -10,6 +10,7 @@ import { LOCAL_COMPUTER, useDaemon } from "../state/DaemonContext";
 import { useLiveView } from "../state/LiveViewContext";
 import { Modal } from "./Modal";
 import { RunOnServer } from "./RunOnServer";
+import { SetupChecklist } from "./SetupChecklist";
 import styles from "./HostEmptyState.module.css";
 
 /**
@@ -60,15 +61,6 @@ function HostModelDialog({ open, onClose }: { open: boolean; onClose: () => void
   );
 }
 
-function StatusRow({ ok, label }: { ok: boolean; label: string }) {
-  return (
-    <li className={styles.row} data-ok={ok ? "true" : "false"}>
-      {ok ? <Check aria-hidden="true" /> : <Circle aria-hidden="true" />}
-      <span>{label}</span>
-    </li>
-  );
-}
-
 /**
  * The calm center of the chat area while a paired host is selected and has no bots (or
  * no model). Replaces the local first-run wizard, which only fits this computer.
@@ -107,41 +99,50 @@ export function HostEmptyState({ onNewBot, onConnectModel }: { onNewBot: () => v
           {t(`hostMode.state.${stateKey}`)}
         </p>
         {reachable ? (
-          <ul className={styles.rows}>
-            <StatusRow ok={!noModel} label={t(noModel ? "hostMode.missing.model" : "hostMode.have.model")} />
-            <StatusRow
-              ok={bots.length > 0}
-              label={t(bots.length > 0 ? "hostMode.have.bots" : "hostMode.missing.bots")}
-            />
-          </ul>
-        ) : null}
+          <SetupChecklist
+            label={t("hostMode.stepsLabel", { name })}
+            testId="host-setup-steps"
+            steps={[
+              {
+                id: "model",
+                title: t("hostMode.steps.model", { name }),
+                hint: t("hostMode.steps.modelHint"),
+                done: !noModel,
+                action: {
+                  label: t("hostMode.steps.modelAction"),
+                  testId: "host-connect-model",
+                  onClick: () => (onConnectModel ? onConnectModel() : setModelOpen(true))
+                }
+              },
+              {
+                id: "bot",
+                title: t("hostMode.steps.bot"),
+                hint: t("hostMode.steps.botHint"),
+                done: bots.length > 0,
+                action: { label: t("sidebar.newBot"), icon: <Plus aria-hidden="true" />, testId: "host-new-bot", onClick: onNewBot }
+              }
+            ]}
+          />
+        ) : (
+          <p className={styles.note}>{t(`hostMode.stateHint.${stateKey}`)}</p>
+        )}
         <div className={styles.actions}>
-          {reachable && noModel ? (
-            <Button variant="primary" onClick={() => (onConnectModel ? onConnectModel() : setModelOpen(true))} data-testid="host-connect-model">
-              {t("hostMode.model.action", { name })}
-            </Button>
-          ) : null}
-          {reachable ? (
-            <Button
-              variant={noModel ? "secondary" : "primary"}
-              onClick={onNewBot}
-              data-testid="host-new-bot"
-            >
-              <Plus aria-hidden="true" />
-              {t("sidebar.newBot")}
-            </Button>
-          ) : null}
           {reachable && targets.length > 0 ? (
-            <Button variant="secondary" onClick={() => openViewer()} data-testid="host-view-screen">
+            <Button variant="ghost" onClick={() => openViewer()} data-testid="host-view-screen">
               <MonitorPlay aria-hidden="true" />
               {t("hostMode.viewScreen")}
             </Button>
           ) : null}
-          <Button variant="ghost" onClick={() => setWorkLocalNow(true)}>
+          <Button variant={reachable ? "ghost" : "secondary"} onClick={() => setWorkLocalNow(true)}>
             {t("home.banner.workHere")}
           </Button>
         </div>
-        {reachable ? <p className={styles.note}>{t("hostMode.managedOnServer", { name })}</p> : null}
+        {reachable ? (
+          <details className={styles.more}>
+            <summary>{t("hostMode.moreTitle", { name })}</summary>
+            <p className={styles.note}>{t("hostMode.managedOnServer", { name })}</p>
+          </details>
+        ) : null}
       </div>
       <HostModelDialog open={modelOpen} onClose={() => setModelOpen(false)} />
     </div>

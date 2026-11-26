@@ -29,6 +29,9 @@ export function GettingStartedView({
     return null;
   }
   const percent = Math.round((progress.done / progress.total) * 100);
+  // When every required step is done, an optional one left open is the next step.
+  const nextId = progress.next ?? steps.find((st) => !st.done)?.id ?? null;
+  const isNext = (step: Step) => !step.done && step.id === nextId;
   const progressText = t("gettingStarted.progress", { done: progress.done, total: progress.total });
   return (
     <section className={styles.root} aria-labelledby={`getting-started-title-${variant}`} data-testid={`getting-started-${variant}`}>
@@ -61,7 +64,7 @@ export function GettingStartedView({
         {steps.map((step) => (
           <li
             key={step.id}
-            className={`${styles.step} ${step.done ? styles.done : ""}`}
+            className={`${styles.step} ${step.done ? styles.done : ""} ${isNext(step) ? styles.next : ""}`}
             data-testid={`getting-started-step-${step.id}`}
             data-done={step.done}
           >
@@ -71,11 +74,13 @@ export function GettingStartedView({
                 {step.title}
                 <span className={styles.srOnly}>{` - ${t(step.done ? "gettingStarted.stateDone" : "gettingStarted.stateOpen")}`}</span>
               </span>
-              {step.done ? null : <span className={styles.body}>{step.body}</span>}
-              {step.done ? null : (
+              {/* One obvious next step: only the first open step explains itself and has a button. */}
+              {isNext(step) ? <span className={styles.body}>{step.body}</span> : null}
+              {isNext(step) ? (
                 <div className={styles.actions}>
                   <Button
-                    variant={step.id === progress.next ? "primary" : "secondary"}
+                    // On the empty chat, "New chat" is the page's main button; in Help this is.
+                    variant={variant === "help" ? "primary" : "secondary"}
                     size="sm"
                     data-testid={`getting-started-action-${step.id}`}
                     onClick={() => onAction(step.target)}
@@ -83,7 +88,7 @@ export function GettingStartedView({
                     {step.action}
                   </Button>
                 </div>
-              )}
+              ) : null}
             </div>
           </li>
         ))}

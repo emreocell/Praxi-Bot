@@ -4065,15 +4065,7 @@
     "today": "aujourd'hui {{time}}"
   },
   "hostMode": {
-    "have": {
-      "bots": "Des bots sont prêts sur ce serveur.",
-      "model": "Un modèle est connecté."
-    },
     "managedOnServer": "Une fois cet ordinateur confirmé comme administrateur sur {{name}}, vous gérez aussi d'ici les clés, les autorisations, les outils et le courrier. L'appairage des appareils et la mise à jour de {{name}} restent sur {{name}}.",
-    "missing": {
-      "bots": "Aucun bot sur ce serveur pour l'instant.",
-      "model": "Aucun modèle connecté sur ce serveur pour l'instant."
-    },
     "model": {
       "action": "Connecter un modèle sur {{name}}",
       "afterwards": "Cette application le détecte d'elle-même quelques secondes plus tard.",
@@ -4529,7 +4521,6 @@
     "daemonOfflineDescription": "Le service en arrière-plan de Praxi-Bot ne répond pas. Attendez quelques secondes et réessayez. Si cela échoue encore, vérifiez qu'un pare-feu ne bloque pas Praxi-Bot, ou redémarrez l'application.",
     "daemonOfflineTitle": "Le service local en arrière-plan n'est pas en cours d'exécution",
     "daemonRetry": "Réessayer la connexion",
-    "refreshBots": "Actualiser",
     "runSetupWizard": "Lancer l'assistant de configuration",
     "selectBotDescription": "Choisissez un bot dans la barre latérale pour voir son profil, ou ouvrez les réglages pour personnaliser le thème, la couleur d'accent et l'arrière-plan.",
     "selectBotTitle": "Sélectionnez un bot",

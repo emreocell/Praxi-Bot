@@ -4115,15 +4115,7 @@
     "today": "heute {{time}}"
   },
   "hostMode": {
-    "have": {
-      "bots": "Auf diesem Server sind Bots bereit.",
-      "model": "Ein Modell ist verbunden."
-    },
     "managedOnServer": "Sobald dieser Computer auf {{name}} als Administrator bestätigt ist, verwaltest du Schlüssel, Berechtigungen, Werkzeuge und E-Mail auch von hier. Gerätekopplung und Updates von {{name}} bleiben auf {{name}} selbst.",
-    "missing": {
-      "bots": "Auf diesem Server gibt es noch keine Bots.",
-      "model": "Auf diesem Server ist noch kein Modell verbunden."
-    },
     "model": {
       "action": "Ein Modell auf {{name}} verbinden",
       "afterwards": "Diese App erkennt es einige Sekunden später von selbst.",
@@ -4132,6 +4124,7 @@
       "onServer": "Vorerst werden Schlüssel auf dem Server selbst hinzugefügt, nicht über diese App. Öffne ein Terminal auf {{name}} und führe aus:",
       "title": "Ein Modell auf diesem Server verbinden"
     },
+    "moreTitle": "What can I manage from here?",
     "newBotNeedsModel": "{{name}} hat noch kein Modell, daher kann dort kein Bot erstellt werden. Verbinde zuerst ein Modell auf dem Server.",
     "refusal": {
       "adminRequired": "{{name}} hat diesen Computer noch nicht als Administrator bestätigt. Führe einmalig `bot host admin --all-desktops` auf {{name}} aus und versuche es dann erneut.",
@@ -4153,6 +4146,20 @@
       "notPaired": "Akzeptiert diesen Computer nicht mehr. Koppele erneut.",
       "offline": "Antwortet nicht. Versucht es von selbst erneut."
     },
+    "stateHint": {
+      "connecting": "This takes a few seconds.",
+      "mismatch": "After the update the app reconnects by itself.",
+      "notPaired": "Open the computer menu at the top and add the server again.",
+      "offline": "Make sure the server is on and online. Meanwhile you can work on this computer."
+    },
+    "steps": {
+      "bot": "Create your first bot here",
+      "botHint": "A bot here keeps working while this computer is off.",
+      "model": "Connect an AI on {{name}}",
+      "modelAction": "Connect an AI",
+      "modelHint": "Your bots on this server think with it."
+    },
+    "stepsLabel": "Set up {{name}}",
     "viewScreen": "Bildschirm ansehen"
   },
   "hostRecovery": {
@@ -4594,7 +4601,6 @@
     "daemonOfflineDescription": "Der Hintergrunddienst von Praxi-Bot antwortet nicht. Warte ein paar Sekunden und versuche es erneut. Hilft das nicht, prüfe, ob eine Firewall Praxi-Bot blockiert, oder starte die App neu.",
     "daemonOfflineTitle": "Lokaler Hintergrunddienst läuft nicht",
     "daemonRetry": "Verbindung erneut versuchen",
-    "refreshBots": "Aktualisieren",
     "runSetupWizard": "Einrichtungsassistent starten",
     "selectBotDescription": "Wähle einen Bot in der Seitenleiste, um sein Profil zu sehen, oder öffne die Einstellungen, um Design, Akzentfarbe und Hintergrund anzupassen.",
     "selectBotTitle": "Bot auswählen",
@@ -6772,6 +6778,22 @@
         "saved": "Websuche-Einstellungen gespeichert"
       },
       "toggleBackend": "{{name}} umschalten"
+    }
+  },
+  "setup": {
+    "home": {
+      "bot": "Create your first bot",
+      "botHint": "Pick a template or start blank. You can change everything later.",
+      "chat": "Send it your first message",
+      "missingBots": "Already have bots? Refresh the list",
+      "model": "Connect an AI",
+      "modelAction": "Connect an AI",
+      "modelHint": "It does the thinking for your bots. The free option takes about two minutes."
+    },
+    "state": {
+      "done": "done",
+      "later": "later",
+      "next": "Next"
     }
   },
   "shell": {

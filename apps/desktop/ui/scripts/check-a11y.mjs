@@ -29,6 +29,9 @@ if (!chromePath) { process.stdout.write('check:a11y needs Chrome (set CHROME_BIN
 const SETTINGS = ['general', 'appearance', 'models', 'connections', 'safety', 'system'];
 const screens = [
   { name: 'home', query: 'screen=home' },
+  { name: 'home-no-bots', query: 'screen=nobots', expect: '[data-testid=home-first-steps]' },
+  { name: 'host-empty', query: 'screen=home&host=empty', expect: '[data-testid=host-setup-steps]' },
+  { name: 'host-offline', query: 'screen=home&host=offline', expect: '[data-testid=host-empty-state]' },
   { name: 'my-bots', query: 'screen=myBots', expect: '[data-testid=my-bots]' },
   { name: 'chat', query: 'screen=bot' },
   { name: 'chat-right-panel', query: 'screen=bot&panel=1' },

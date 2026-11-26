@@ -12,6 +12,7 @@
   flex-direction: column;
   align-items: center;
   gap: var(--space-3);
+  width: 100%;
   max-width: calc(var(--space-16) * 7);
   text-align: center;
 }
@@ -64,34 +65,6 @@
   background-color: var(--color-danger);
 }
 
-.rows {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  text-align: left;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--color-text);
-  font-size: var(--font-size-md);
-}
-
-.row svg {
-  width: var(--size-icon-sm);
-  height: var(--size-icon-sm);
-  color: var(--color-text-muted);
-}
-
-.row[data-ok="true"] svg {
-  color: var(--color-success);
-}
-
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -104,6 +77,21 @@
   margin: 0;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+
+.more {
+  width: 100%;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  text-align: left;
+}
+
+.more summary {
+  cursor: pointer;
+}
+
+.more .note {
+  margin-top: var(--space-2);
 }
 
 .dialog {

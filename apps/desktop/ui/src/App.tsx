@@ -141,6 +141,7 @@ import { ComputerPicker } from "./components/ComputerPicker";
 import { ServerTerminalProvider } from "./state/ServerTerminalContext";
 import { ComputerRequestModal } from "./components/ComputerAccess";
 import { HostEmptyState } from "./components/HostEmptyState";
+import { HomeFirstSteps } from "./components/HomeFirstSteps";
 import { HostStateBanner } from "./components/HostStateBanner";
 import { SafeModeBanner } from "./components/SafeModeBanner";
 import { WorkspaceWarningBanner } from "./components/WorkspaceWarningBanner";
@@ -473,7 +474,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         if (screen === "myBots") setRoute({ kind: "myBots" });
         if (screen === "needs") setRoute({ kind: "needs" });
         if (screen === "notifications" || screen === "notifications-empty") setRoute({ kind: "notifications" });
-        if (screen === "home" || screen === "offline") setRoute({ kind: "home" });
+        if (screen === "home" || screen === "offline" || screen === "nobots") setRoute({ kind: "home" });
       }
       setSettings(merged);
       setSettingsLoaded(true);
@@ -1521,11 +1522,8 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
                     <Button variant={serviceProblem === "starting" ? "secondary" : "primary"} onClick={() => void restartDaemon(undefined, "owner-offline-screen")}>
                       {t("errors.restartService")}
                     </Button>
-                    <Button variant="secondary" onClick={retry}>
+                    <Button variant={serviceProblem === "starting" ? "primary" : "ghost"} onClick={retry}>
                       {t("main.daemonRetry")}
-                    </Button>
-                    <Button variant="secondary" onClick={() => handleOpenOnboarding(false)}>
-                      {t("main.runSetupWizard")}
                     </Button>
                   </div>
                 </div>
@@ -1556,37 +1554,22 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
                         ? t("main.welcomeDescription")
                         : t("main.selectBotDescription")}
                     </p>
-                    <div className={styles.optionRow}>
-                      {bots.length === 0 ? (
-                        <>
-                          <Button
-                            variant="primary"
-                            onClick={() => handleOpenOnboarding(false)}
-                          >
-                            {t("main.runSetupWizard")}
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            onClick={() => setNewBotOpen(true)}
-                          >
-                            <Plus />{t("sidebar.newBot")}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            onClick={() => void refreshBots()}
-                          >
-                            {t("main.refreshBots")}
-                          </Button>
-                        </>
-                      ) : (
+                    {bots.length === 0 ? (
+                      <HomeFirstSteps
+                        onConnectModel={() => handleOpenOnboarding(false)}
+                        onNewBot={() => setNewBotOpen(true)}
+                        onRefresh={() => void refreshBots()}
+                      />
+                    ) : (
+                      <div className={styles.optionRow}>
                         <Button
                           variant="primary"
                           onClick={() => setNewBotOpen(true)}
                         >
                           <Plus />{t("sidebar.newBot")}
                         </Button>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
               )}
             </Card>
