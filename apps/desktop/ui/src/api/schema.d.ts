@@ -10590,7 +10590,7 @@ export interface components {
              * @description The run that spawned this one when it is a subagent run.
              */
             parent_run_id?: string | null;
-            /** @description Reason the run is currently `paused`: `waiting_for_pc`, `daemon_restart` (a restart interrupted it; Full-level bots resume by themselves) or `restart_resume_limit` (it was resumed automatically as often as allowed). */
+            /** @description Reason the run is currently `paused`: `waiting_for_pc`, `daemon_restart` (a restart interrupted it; Full-level bots resume by themselves, a run that was waiting for a person is never marked this way) or `restart_resume_limit` (it was resumed automatically as often as allowed). */
             pause_reason?: string | null;
             /**
              * Format: int64

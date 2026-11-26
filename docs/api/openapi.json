@@ -33271,7 +33271,7 @@
               "string",
               "null"
             ],
-            "description": "Reason the run is currently `paused`: `waiting_for_pc`, `daemon_restart` (a restart interrupted it; Full-level bots resume by themselves) or `restart_resume_limit` (it was resumed automatically as often as allowed)."
+            "description": "Reason the run is currently `paused`: `waiting_for_pc`, `daemon_restart` (a restart interrupted it; Full-level bots resume by themselves, a run that was waiting for a person is never marked this way) or `restart_resume_limit` (it was resumed automatically as often as allowed)."
           },
           "paused_at_ms": {
             "type": [
