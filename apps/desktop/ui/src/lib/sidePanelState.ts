@@ -113,6 +113,28 @@ export function deriveSidePanelState(input: SidePanelInput): SidePanelState {
   };
 }
 
+/**
+ * The full-screen live view ("Büyüt") takes the whole app window: the bot panel steps aside when the
+ * view opens and comes back, if it was open, when the view closes. While the view is open the owner
+ * can still bring the panel in from the view's own menu; closing the view then restores the state it
+ * had before the view opened, not the one it had a moment ago.
+ */
+export function screenPanelStep(input: {
+  wasScreenOpen: boolean;
+  screenOpen: boolean;
+  panelOpen: boolean;
+  /** The panel's state before the view opened (`null` while the view is closed). */
+  stash: boolean | null;
+}): { panelOpen: boolean; stash: boolean | null } {
+  if (input.screenOpen && !input.wasScreenOpen) {
+    return { panelOpen: false, stash: input.panelOpen };
+  }
+  if (!input.screenOpen && input.wasScreenOpen) {
+    return { panelOpen: input.stash ?? input.panelOpen, stash: null };
+  }
+  return { panelOpen: input.panelOpen, stash: input.stash };
+}
+
 /** What can ask the side panel to go away. */
 export type PanelDismissTrigger =
   | "close-button"

@@ -10,6 +10,8 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
+    "core:window:allow-is-fullscreen",
+    "core:window:allow-set-fullscreen",
     "allow-popout-connect",
     "allow-popout-owner-key",
     "allow-popout-set-always-on-top",

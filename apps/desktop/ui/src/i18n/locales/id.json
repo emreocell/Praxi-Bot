@@ -4293,8 +4293,6 @@
         "release": "Leave the screen to use the buttons",
         "takeover": "Take control"
       },
-      "screenFill": "Fill without bars",
-      "screenFillHint": "Crops the screen's edges a little so the picture fills the view. Turn off to see the whole screen with bars.",
       "shortcuts": "Keyboard shortcuts",
       "takeoverHint": "Take control of this screen yourself (Ctrl+Shift+D). The bots pause until you hand it back.",
       "view": "View"

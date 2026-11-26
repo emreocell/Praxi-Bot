@@ -4400,17 +4400,28 @@
     "toolbar": {
       "fitOff": "Pencereyi doldur",
       "fitOn": "Normal boyuta dön",
+      "fullscreen": "Tam ekran",
+      "fullscreenExit": "Tam ekrandan çık",
       "keys": {
         "exit": "Ekran görünümünden çık",
         "fit": "Pencereyi doldur / normal boyut",
+        "fullscreen": "Tam ekranı aç / kapat",
         "release": "Düğmeleri kullanmak için ekrandan çık",
-        "takeover": "Kontrolü devral"
+        "takeover": "Kontrolü devral",
+        "zoomActual": "Gerçek boyut (1:1)",
+        "zoomFit": "Tüm ekranı sığdır",
+        "zoomIn": "Yakınlaştır",
+        "zoomOut": "Uzaklaştır"
       },
-      "screenFill": "Boşluksuz doldur",
-      "screenFillHint": "Ekranın kenarlarını biraz keserek görüntüyü alana doldurur. Kapatırsan ekranın tamamı, kenarlarda boşlukla görünür.",
+      "scaleActual": "Gerçek boyut (1:1)",
+      "scaleActualHint": "Uzak ekranın her pikseli bir ekran pikseli olur. Ekran pencereden büyükse kalanını kaydırarak görürsün.",
+      "scaleFit": "Tüm ekranı sığdır",
+      "scaleFitHint": "Uzak ekranın tamamını, kesmeden gösterir. Kenarlarda boşluk yalnızca şekiller uyuşmadığında kalır.",
       "shortcuts": "Klavye kısayolları",
       "takeoverHint": "Bu ekranın kontrolünü kendin al (Ctrl+Shift+D). Sen geri verene kadar botlar durur.",
-      "view": "Görünüm"
+      "view": "Görünüm",
+      "zoomIn": "Yakınlaştır",
+      "zoomOut": "Uzaklaştır"
     },
     "viewOnly": "Salt izleme",
     "watchAction": "Devral"

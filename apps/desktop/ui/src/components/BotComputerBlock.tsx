@@ -15,7 +15,6 @@ import { computerPresence, mainBotLabel } from "../lib/computerStage";
 import { useComputerView } from "../state/useComputerView";
 import { streamHealth } from "../lib/liveViewAdaptive";
 import { cardAspect } from "../lib/liveViewSizing";
-import { useScreenFit } from "../state/useScreenFit";
 import { useContextMenu, useMenuTranslate } from "./ContextMenu";
 import { StreamQuality } from "./StreamQuality";
 import { useDragPopOut } from "./useDragPopOut";
@@ -95,7 +94,6 @@ export function BotComputerBlock({
   onPopOut?: (side: ComputerSide, opts?: { nearCursor?: boolean; targetId?: string }) => void;
 }) {
   const { t } = useTranslation();
-  const { screenFit } = useScreenFit();
   const menuT = useMenuTranslate();
   const cardMenu = useContextMenu();
   const serverTerminal = useServerTerminal();
@@ -267,7 +265,7 @@ export function BotComputerBlock({
         >
           {view.kind === "live" && view.frameUrl ? (
             <>
-              <img className={styles.frame} data-fit={screenFit} data-testid="bot-computer-frame" src={view.frameUrl} alt={t("computerCard.frameAlt", { name })} title={t("liveView.privacyNotice")} draggable={false} />
+              <img className={styles.frame} data-testid="bot-computer-frame" src={view.frameUrl} alt={t("computerCard.frameAlt", { name })} title={t("liveView.privacyNotice")} draggable={false} />
               <LiveClock since={view.liveSinceMs} />
               <StallNotice lastActivityAtMs={live.state.lastActivityAtMs} />
               <div className={styles.quality}>
@@ -289,7 +287,7 @@ export function BotComputerBlock({
           ) : (
             <>
               {view.previewUrl ? (
-                <img className={styles.frame} data-fit={screenFit} src={view.previewUrl} alt="" draggable={false} />
+                <img className={styles.frame} src={view.previewUrl} alt="" draggable={false} />
               ) : (
                 <div className={styles.stage} data-testid="bot-computer-stage" data-presence={presence} aria-hidden="true">
                   {server ? <Server className={styles.device} /> : <Monitor className={styles.device} />}

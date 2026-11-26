@@ -9,6 +9,7 @@ import { noScreenCode } from "../lib/computerLabel";
 import {
   type ComputerView, deriveView, IDLE_PAUSE_MS, measureFps, SCREEN_START_TIMEOUT_MS, type UnavailableReason
 } from "../lib/computerView";
+import { resolutionLabel } from "../lib/liveViewScale";
 import { summarizeTarget } from "../lib/liveViewState";
 import { LOCAL_COMPUTER, useDaemon } from "./DaemonContext";
 import { useLiveView, useLocalLiveView } from "./LiveViewContext";
@@ -221,7 +222,8 @@ export function useComputerView(opts: {
         : derived.unavailable,
     frameUrl: live ? frameUrl : null,
     previewUrl,
-    resolution: live && frame ? `${frame.width}×${frame.height}` : null,
+    // The remote display's own size: it must not change with the stream size or the view size (#895).
+    resolution: live && frame ? resolutionLabel(frame) : null,
     fps: live ? fps : null,
     liveSinceMs,
     start,

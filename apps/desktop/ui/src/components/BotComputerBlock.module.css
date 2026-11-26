@@ -268,11 +268,6 @@
   background-color: var(--color-media-scrim);
 }
 
-/* "Doldur" (the owner's default): no bars around the picture, edges cropped around the centre. */
-.frame[data-fit="cover"] {
-  object-fit: cover;
-}
-
 .over {
   position: absolute;
   right: calc(var(--u) * 1.5);

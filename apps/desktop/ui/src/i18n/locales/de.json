@@ -4400,17 +4400,28 @@
     "toolbar": {
       "fitOff": "Fenster ausfüllen",
       "fitOn": "Zurück zur normalen Größe",
+      "fullscreen": "Full screen",
+      "fullscreenExit": "Leave full screen",
       "keys": {
         "exit": "Bildschirmansicht verlassen",
         "fit": "Fenster ausfüllen / normale Größe",
+        "fullscreen": "Full screen on / off",
         "release": "Bildschirm verlassen, um die Schaltflächen zu nutzen",
-        "takeover": "Steuerung übernehmen"
+        "takeover": "Steuerung übernehmen",
+        "zoomActual": "Actual size (1:1)",
+        "zoomFit": "Fit the whole screen",
+        "zoomIn": "Zoom in",
+        "zoomOut": "Zoom out"
       },
-      "screenFill": "Ohne Ränder füllen",
-      "screenFillHint": "Beschneidet die Bildschirmränder leicht, damit das Bild die Fläche füllt. Aus: der ganze Bildschirm mit Rändern.",
+      "scaleActual": "Actual size (1:1)",
+      "scaleActualHint": "One remote pixel per screen pixel. If the screen is larger than the window, scroll to see the rest.",
+      "scaleFit": "Fit the whole screen",
+      "scaleFitHint": "Shows the whole remote screen, never cropped. Bars appear only where the shapes differ.",
       "shortcuts": "Tastenkürzel",
       "takeoverHint": "Übernimm diesen Bildschirm selbst (Strg+Umschalt+D). Die Bots pausieren, bis du ihn zurückgibst.",
-      "view": "Ansicht"
+      "view": "Ansicht",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out"
     },
     "viewOnly": "Nur ansehen",
     "watchAction": "Kontrolle übernehmen"

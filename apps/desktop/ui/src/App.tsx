@@ -54,6 +54,7 @@ import {
   deriveSidePanelState,
   hasUnanswerableNeed,
   PANEL_DOCK_MIN_WIDTH,
+  screenPanelStep,
   type SidePanelMode
 } from "./lib/sidePanelState";
 import { useMcp } from "./state/useMcp";
@@ -1023,13 +1024,23 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
     .sort()
     .join(",");
   const [dismissedNeedKey, setDismissedNeedKey] = useState("");
-  // On a narrow window the panel and the full-screen view cannot sit side by side: the picture would be
-  // squeezed to a sliver beside it. Opening the view closes the panel once; the view's own menu brings it back.
+  // The full-screen view takes the whole window: the panel steps aside when it opens and returns, if it
+  // was open, when it closes (`screenPanelStep`). Esc in the view closes it, and with it this hiding.
   const wasScreenOpen = useRef(false);
+  const panelStash = useRef<boolean | null>(null);
+  const panelOpenRef = useRef(panelOpen);
+  panelOpenRef.current = panelOpen;
   useEffect(() => {
-    if (screenOpen && !wasScreenOpen.current && viewportWidth < PANEL_DOCK_MIN_WIDTH) setPanelOpen(false);
+    const step = screenPanelStep({
+      wasScreenOpen: wasScreenOpen.current,
+      screenOpen,
+      panelOpen: panelOpenRef.current,
+      stash: panelStash.current
+    });
     wasScreenOpen.current = screenOpen;
-  }, [screenOpen, viewportWidth]);
+    panelStash.current = step.stash;
+    if (step.panelOpen !== panelOpenRef.current) setPanelOpen(step.panelOpen);
+  }, [screenOpen]);
   const unanswerableNeed = hasUnanswerableNeed({
     routeKind: route.kind,
     selectedBotId: selectedBot?.id,

@@ -1,6 +1,13 @@
 /** Pure helpers of the live view's toolbar: keyboard shortcuts, the remembered chat strip and the spoken status. */
 
-export type ViewerShortcut = "fit" | "takeover";
+export type ViewerShortcut =
+  | "fit"
+  | "takeover"
+  | "fullscreen"
+  | "zoomFit"
+  | "zoomActual"
+  | "zoomIn"
+  | "zoomOut";
 
 export interface ShortcutEvent {
   key: string;
@@ -17,6 +24,11 @@ export interface ShortcutEvent {
 export const VIEWER_SHORTCUTS = [
   { id: "exit", keys: "Esc" },
   { id: "fit", keys: "F" },
+  { id: "fullscreen", keys: "F11" },
+  { id: "zoomFit", keys: "0" },
+  { id: "zoomActual", keys: "1" },
+  { id: "zoomIn", keys: "+" },
+  { id: "zoomOut", keys: "-" },
   { id: "takeover", keys: "Ctrl+Shift+D" },
   { id: "release", keys: "Shift+Esc" }
 ] as const;
@@ -35,6 +47,9 @@ export function viewerShortcut(
   }
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   const ctrl = event.ctrlKey || event.metaKey;
+  if (key === "F11" && !ctrl && !event.altKey && !event.shiftKey) {
+    return "fullscreen";
+  }
   if (ctrl && event.shiftKey && !event.altKey && key === "d") {
     return "takeover";
   }
@@ -44,6 +59,13 @@ export function viewerShortcut(
   if (key === "f" && !event.shiftKey) {
     return "fit";
   }
+  if (event.shiftKey && key !== "+") {
+    return null;
+  }
+  if (key === "0") return "zoomFit";
+  if (key === "1") return "zoomActual";
+  if (key === "+" || key === "=") return "zoomIn";
+  if (key === "-" || key === "_") return "zoomOut";
   return null;
 }
 

@@ -1,26 +1,26 @@
-import { Check, Crop, Maximize2, Minimize2, PanelRight, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { Check, Maximize2, Minimize2, PanelRight, RefreshCw, SlidersHorizontal, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import { Popover } from "../components/Popover";
 import { StreamQuality } from "../components/StreamQuality";
 import type { QualityMode } from "../lib/liveViewAdaptive";
-import type { ScreenFit } from "../lib/liveViewInput";
+import { isActualSize, isFit, type ViewScale } from "../lib/liveViewScale";
 import { type FitMode, VIEWER_SHORTCUTS } from "../lib/liveViewToolbar";
 import styles from "./LiveViewMenu.module.css";
 
 /**
  * "View": everything about how the screen is shown, behind one button so the top bar keeps only
- * Back, the screen picker, this button and Stop.  Picture quality, fill the window, refresh the list
- * of screens, the bot info panel and the keyboard shortcuts.
+ * Back, the screen picker, this button and Stop.  Picture quality, fill the window, the screen's size
+ * (fit / 1:1 / zoom), refresh the list of screens, the bot info panel and the keyboard shortcuts.
  */
 export function LiveViewMenu({
   quality,
   onQuality,
   fit,
   onToggleFit,
-  screenFit,
-  onToggleScreenFit,
+  scale,
+  onScale,
   onRefresh,
   refreshing,
   infoPanel
@@ -29,9 +29,9 @@ export function LiveViewMenu({
   onQuality: (mode: QualityMode) => void;
   fit: FitMode;
   onToggleFit: () => void;
-  /** `cover`: the screen fills the box and its edges are cropped; `contain`: the whole screen with bars. */
-  screenFit: ScreenFit;
-  onToggleScreenFit: () => void;
+  /** How the remote screen is sized: the whole screen in the free area (`fit`) or a zoom (1 = 1:1). */
+  scale: ViewScale;
+  onScale: (action: "fit" | "actual" | "in" | "out") => void;
   onRefresh: () => void;
   refreshing: boolean;
   /** The bot panel beside the viewer; absent when the viewer has none. */
@@ -79,14 +79,52 @@ export function LiveViewMenu({
             <button
               type="button"
               className={styles.row}
-              aria-pressed={screenFit === "cover"}
-              title={t("liveView.toolbar.screenFillHint")}
-              data-testid="live-viewer-screen-fit"
-              onClick={onToggleScreenFit}
+              aria-pressed={isFit(scale)}
+              aria-keyshortcuts="0"
+              title={t("liveView.toolbar.scaleFitHint")}
+              data-testid="live-viewer-scale-fit"
+              onClick={() => onScale("fit")}
             >
-              <Crop aria-hidden="true" />
-              <span className={styles.rowText}>{t("liveView.toolbar.screenFill")}</span>
-              {screenFit === "cover" ? <Check className={styles.on} aria-hidden="true" /> : null}
+              <Minimize2 aria-hidden="true" />
+              <span className={styles.rowText}>{t("liveView.toolbar.scaleFit")}</span>
+              {isFit(scale) ? <Check className={styles.on} aria-hidden="true" /> : null}
+              <kbd className={styles.key}>0</kbd>
+            </button>
+            <button
+              type="button"
+              className={styles.row}
+              aria-pressed={isActualSize(scale)}
+              aria-keyshortcuts="1"
+              title={t("liveView.toolbar.scaleActualHint")}
+              data-testid="live-viewer-scale-actual"
+              onClick={() => onScale("actual")}
+            >
+              <Maximize2 aria-hidden="true" />
+              <span className={styles.rowText}>{t("liveView.toolbar.scaleActual")}</span>
+              {isActualSize(scale) ? <Check className={styles.on} aria-hidden="true" /> : null}
+              <kbd className={styles.key}>1</kbd>
+            </button>
+            <button
+              type="button"
+              className={styles.row}
+              aria-keyshortcuts="+"
+              data-testid="live-viewer-zoom-in"
+              onClick={() => onScale("in")}
+            >
+              <ZoomIn aria-hidden="true" />
+              <span className={styles.rowText}>{t("liveView.toolbar.zoomIn")}</span>
+              <kbd className={styles.key}>+</kbd>
+            </button>
+            <button
+              type="button"
+              className={styles.row}
+              aria-keyshortcuts="-"
+              data-testid="live-viewer-zoom-out"
+              onClick={() => onScale("out")}
+            >
+              <ZoomOut aria-hidden="true" />
+              <span className={styles.rowText}>{t("liveView.toolbar.zoomOut")}</span>
+              <kbd className={styles.key}>-</kbd>
             </button>
             <button type="button" className={styles.row} disabled={refreshing} data-testid="live-viewer-refresh" onClick={onRefresh}>
               <RefreshCw aria-hidden="true" />

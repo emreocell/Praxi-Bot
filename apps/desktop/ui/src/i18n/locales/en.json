@@ -4400,17 +4400,28 @@
     "toolbar": {
       "fitOff": "Fill the window",
       "fitOn": "Back to normal size",
+      "fullscreen": "Full screen",
+      "fullscreenExit": "Leave full screen",
       "keys": {
         "exit": "Leave the screen view",
         "fit": "Fill the window / normal size",
+        "fullscreen": "Full screen on / off",
         "release": "Leave the screen to use the buttons",
-        "takeover": "Take control"
+        "takeover": "Take control",
+        "zoomActual": "Actual size (1:1)",
+        "zoomFit": "Fit the whole screen",
+        "zoomIn": "Zoom in",
+        "zoomOut": "Zoom out"
       },
-      "screenFill": "Fill without bars",
-      "screenFillHint": "Crops the screen's edges a little so the picture fills the view. Turn off to see the whole screen with bars.",
+      "scaleActual": "Actual size (1:1)",
+      "scaleActualHint": "One remote pixel per screen pixel. If the screen is larger than the window, scroll to see the rest.",
+      "scaleFit": "Fit the whole screen",
+      "scaleFitHint": "Shows the whole remote screen, never cropped. Bars appear only where the shapes differ.",
       "shortcuts": "Keyboard shortcuts",
       "takeoverHint": "Take control of this screen yourself (Ctrl+Shift+D). The bots pause until you hand it back.",
-      "view": "View"
+      "view": "View",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out"
     },
     "viewOnly": "View only",
     "watchAction": "Take control"

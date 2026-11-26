@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  screenPanelStep,
   deriveSidePanelState,
   hasUnanswerableNeed,
   panelDismissedBy,
@@ -155,4 +156,32 @@ test("a 760 px window docks the panel: it pushes the chat instead of covering th
   const s = deriveSidePanelState({ ...BASE, ownerOpen: true, viewportWidth: 760, railWidth: 68 });
   assert.equal(s.mode, "docked");
   assert.equal(s.flowWidth, s.width);
+});
+
+test("opening the full-screen view hides the open panel and closing it brings the panel back", () => {
+  const opened = screenPanelStep({ wasScreenOpen: false, screenOpen: true, panelOpen: true, stash: null });
+  assert.deepEqual(opened, { panelOpen: false, stash: true });
+  const steady = screenPanelStep({ wasScreenOpen: true, screenOpen: true, panelOpen: false, stash: true });
+  assert.deepEqual(steady, { panelOpen: false, stash: true });
+  const closed = screenPanelStep({ wasScreenOpen: true, screenOpen: false, panelOpen: false, stash: true });
+  assert.deepEqual(closed, { panelOpen: true, stash: null });
+});
+
+test("a panel that was closed stays closed after the full-screen view", () => {
+  const opened = screenPanelStep({ wasScreenOpen: false, screenOpen: true, panelOpen: false, stash: null });
+  assert.deepEqual(opened, { panelOpen: false, stash: false });
+  const closed = screenPanelStep({ wasScreenOpen: true, screenOpen: false, panelOpen: false, stash: false });
+  assert.deepEqual(closed, { panelOpen: false, stash: null });
+});
+
+test("a panel the owner opened inside the view is put back to its earlier state on exit", () => {
+  const inView = screenPanelStep({ wasScreenOpen: true, screenOpen: true, panelOpen: true, stash: false });
+  assert.equal(inView.panelOpen, true);
+  const closed = screenPanelStep({ wasScreenOpen: true, screenOpen: false, panelOpen: true, stash: false });
+  assert.equal(closed.panelOpen, false);
+});
+
+test("without a view change nothing moves", () => {
+  const same = screenPanelStep({ wasScreenOpen: false, screenOpen: false, panelOpen: true, stash: null });
+  assert.deepEqual(same, { panelOpen: true, stash: null });
 });

@@ -147,7 +147,7 @@
 
 .stageArea[data-fit="fill"] .stageFrame {
   border-radius: var(--space-0);
-  border-width: var(--space-0);
+  outline-width: var(--space-0);
 }
 
 .stateBadge {
@@ -261,35 +261,50 @@
   gap: var(--space-3);
 }
 
-/* The stage is framed like a screen: it takes the frame's own aspect ratio (inline) and
-   never grows past the free room; without a frame it fills the area as a calm card. */
+/* The free room for the picture. It is measured (ResizeObserver) and the frame below gets the exact
+   size that fits it whole, so the remote screen is never cropped; zoomed in, this area scrolls. */
+.stageViewport {
+  position: relative;
+  flex: 1 1 0;
+  display: flex;
+  width: 100%;
+  min-width: var(--space-0);
+  min-height: var(--space-0);
+  overflow: hidden;
+}
+
+.stageViewport[data-scroll="true"] {
+  overflow: auto;
+}
+
+/* The stage is framed like a screen. With a picture its size is set inline (same aspect ratio as the
+   frame); without one it fills the area as a calm card. `margin: auto` centres it and still lets a
+   zoomed picture scroll from its top-left corner. The frame's line is an outline, so it never takes
+   room from the picture. */
 .stageFrame {
   position: relative;
-  max-width: 100%;
-  max-height: 100%;
-  min-height: var(--space-0);
-  flex: 1 1 auto;
+  flex: none;
+  margin: auto;
   width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: calc(var(--radius-card) * 1.25);
-  border: var(--size-border) solid color-mix(in srgb, var(--color-text) 10%, transparent);
+  outline: var(--size-border) solid color-mix(in srgb, var(--color-text) 10%, transparent);
+  outline-offset: calc(var(--size-border) * -1);
   background-color: var(--color-surface);
   box-shadow: 0 var(--space-6) var(--space-12) calc(var(--space-6) * -1) var(--color-shadow);
   overflow: hidden;
-  transition: border-color var(--motion-duration-fast) var(--motion-easing-standard);
+  transition: outline-color var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .stageFrame[data-has-frame="true"] {
-  flex: 0 1 auto;
-  width: auto;
-  height: 100%;
   background-color: var(--color-background);
 }
 
 .stageFrame[data-active="true"] {
-  border-color: var(--color-accent);
+  outline-color: var(--color-accent);
 }
 
 .stageSurface {
@@ -307,6 +322,7 @@
   cursor: crosshair;
 }
 
+/* The frame already has the picture's exact shape, so nothing is cropped or stretched. */
 .stageImg {
   width: 100%;
   height: 100%;
@@ -316,18 +332,6 @@
   image-rendering: auto;
   display: block;
   user-select: none;
-}
-
-/* "Doldur" (cover): the picture takes the whole frame and its edges are cropped around the
-   centre: no bars. Pointer mapping follows the same rule (lib/liveViewInput, fit "cover"). */
-.stageArea[data-screen-fit="cover"] .stageFrame[data-has-frame="true"] {
-  flex: 1 1 auto;
-  width: 100%;
-  height: 100%;
-}
-
-.stageArea[data-screen-fit="cover"] .stageImg {
-  object-fit: cover;
 }
 
 .imeCapture {

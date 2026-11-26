@@ -119,6 +119,8 @@ export function computeContainedImageRect(
   return computeImageRect(containerWidth, containerHeight, imageWidth, imageHeight, "contain");
 }
 
+const EDGE_EPS = 1e-9;
+
 export interface ClientBox {
   left: number;
   top: number;
@@ -157,10 +159,11 @@ export function mapClientPointToNormalized(
   const rawX = (clientX - elementRect.left - inner.x) / inner.width;
   const rawY = (clientY - elementRect.top - inner.y) / inner.height;
   if (!opts.clamp) {
-    if (rawX < 0 || rawX > 1 || rawY < 0 || rawY > 1) {
+    // A hair of float error on the picture's own edge must not drop the corner pixel.
+    if (rawX < -EDGE_EPS || rawX > 1 + EDGE_EPS || rawY < -EDGE_EPS || rawY > 1 + EDGE_EPS) {
       return null;
     }
-    return { x: rawX, y: rawY };
+    return { x: Math.min(1, Math.max(0, rawX)), y: Math.min(1, Math.max(0, rawY)) };
   }
   return {
     x: Math.min(1, Math.max(0, rawX)),

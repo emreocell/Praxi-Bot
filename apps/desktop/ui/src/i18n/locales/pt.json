@@ -4320,8 +4320,6 @@
         "release": "Leave the screen to use the buttons",
         "takeover": "Take control"
       },
-      "screenFill": "Preencher sem bordas",
-      "screenFillHint": "Corta um pouco as bordas da tela para a imagem preencher a área. Desligado: a tela inteira, com faixas.",
       "shortcuts": "Keyboard shortcuts",
       "takeoverHint": "Take control of this screen yourself (Ctrl+Shift+D). The bots pause until you hand it back.",
       "view": "Exibição"

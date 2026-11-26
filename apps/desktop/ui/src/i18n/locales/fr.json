@@ -4406,8 +4406,6 @@
         "release": "Quitter l'écran pour utiliser les boutons",
         "takeover": "Prendre le contrôle"
       },
-      "screenFill": "Remplir sans bandes",
-      "screenFillHint": "Rogne légèrement les bords de l'écran pour que l'image remplisse la zone. Désactivé : tout l'écran avec des bandes.",
       "shortcuts": "Raccourcis clavier",
       "takeoverHint": "Prenez vous-même le contrôle de cet écran (Ctrl+Maj+D). Les bots se mettent en pause jusqu'à ce que vous le rendiez.",
       "view": "Affichage"

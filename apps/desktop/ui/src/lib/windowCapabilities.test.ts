@@ -32,7 +32,8 @@ const actions: [string, (window: Window) => Promise<void>][] = [
   ["is-maximized", async (window) => { await window.isMaximized(); }],
   ["minimize", (window) => window.minimize()],
   ["toggle-maximize", (window) => window.toggleMaximize()],
-  ["close", (window) => window.close()]
+  ["close", (window) => window.close()],
+  ["set-fullscreen", (window) => window.setFullscreen(true)]
 ];
 
 for (const [action, perform] of actions) {
