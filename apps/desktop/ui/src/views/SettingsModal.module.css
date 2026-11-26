@@ -458,11 +458,13 @@
   font-weight: var(--font-weight-medium);
 }
 
+/* The matched letters: a tint and full-contrast ink, no ring (an outer ring spilled over the next
+   letter, which then lost its contrast on a wallpaper-free dark theme). */
 .mark {
   background-color: var(--color-accent-subtle);
-  color: inherit;
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
   border-radius: var(--radius-sm);
-  box-shadow: 0 0 0 var(--size-border) var(--color-accent);
 }
 
 ::highlight(settings-search) {
