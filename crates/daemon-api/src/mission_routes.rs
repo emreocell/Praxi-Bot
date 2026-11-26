@@ -49,6 +49,7 @@ pub struct MissionProgressDto {
 /// The limits the supervisor enforces before every session.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
+#[allow(clippy::struct_field_names)] // `max_*` is the wire name of every limit
 pub struct MissionBudgetsDto {
     /// Most sessions (agent runs) over the mission's life.
     pub max_sessions: u32,

@@ -91,9 +91,9 @@ impl SessionRunner for AgentSessionRunner {
             }
         };
         on_started(&run.to_string());
-        let state = self.agent.wait(run).await;
+        let ended = self.agent.wait(run).await;
         let stats = self.agent.session_stats(run);
-        let end = match state {
+        let end = match ended {
             Ok(RunState::Succeeded) if stats.guard_stopped => SessionEnd::GuardStop,
             Ok(RunState::Succeeded) => SessionEnd::Finished,
             Ok(RunState::Cancelled) => SessionEnd::Cancelled,

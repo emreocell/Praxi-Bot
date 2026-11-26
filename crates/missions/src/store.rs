@@ -1354,7 +1354,7 @@ mod tests {
         s.set_lease(&m.id, Some("run-x")).unwrap();
         s.set_session_run(1, "run-x").unwrap();
         assert_eq!(s.recover_interrupted(3).unwrap(), vec!["run-x".to_owned()]);
-        assert!(s.recover_interrupted(4).unwrap().is_empty());
+        assert_eq!(s.recover_interrupted(4).unwrap().len(), 0);
         assert_eq!(s.get(&m.id).unwrap().unwrap().lease_run_id, None);
     }
 

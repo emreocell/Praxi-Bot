@@ -238,7 +238,7 @@ impl ReactiveModel {
 
 #[async_trait]
 impl ChatProvider for ReactiveModel {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "fake"
     }
 

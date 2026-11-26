@@ -12,7 +12,8 @@ script:
           items:
             - { content: a, status: completed }
             - { content: b, status: in_progress }
-  - text: planned
+  # An answer without "Done:" while a plan step is open would be continued by the runtime.
+  - text: "Done: planned"
 expect:
   state: succeeded
   model_calls: 2

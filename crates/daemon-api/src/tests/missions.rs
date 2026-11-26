@@ -72,6 +72,7 @@ async fn missions_answer_503_until_enabled_and_changes_are_owner_only() {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)] // one ordered walk through the routes
 async fn a_mission_needs_a_full_level_bot_a_goal_and_can_be_paused_and_stopped() {
     let t = setup();
     t.state.enable_missions().unwrap();
