@@ -586,15 +586,28 @@ pub(crate) async fn update_bot(
             e.to_string(),
         )
     })?;
-    if after.engine.mode == cli_provider::EngineMode::NativeTools
-        && !after.models.executor.starts_with("cli:")
-    {
-        return Err(ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "bad_engine",
-            "this bot runs a CLI with its own tools; switch it back to Praxi-governed before choosing a non-CLI model",
-        )
-        .into());
+    let leaves_native = after.engine.mode == cli_provider::EngineMode::NativeTools
+        && !after.models.executor.starts_with("cli:");
+    if leaves_native {
+        // Choosing an API model for a bot whose CLI ran its own tools is an owner's choice,
+        // not an error: the bot goes back to Praxi-governed (the narrower setting, so no
+        // consent is needed) and the audit trail records it, as the engine endpoint does.
+        s.storage()
+            .append_audit(
+                s.user_id(),
+                None,
+                "user",
+                "engine.updated",
+                &serde_json::json!({
+                    "bot_id": bot.id.to_string(),
+                    "from": {"mode": after.engine.mode.as_str()},
+                    "to": {"mode": cli_provider::EngineMode::PraxiGoverned.as_str()},
+                    "reason": "executor_is_not_a_cli",
+                }),
+            )
+            .map_err(ApiError::internal)?;
+        config["engine"] = serde_json::to_value(agent_core::EngineSettings::default())
+            .map_err(ApiError::internal)?;
     }
     if config.get("knowledge").is_some()
         && bot.config.pointer("/knowledge/embedding") != config.pointer("/knowledge/embedding")
@@ -622,6 +635,9 @@ pub(crate) async fn update_bot(
         }
         Ok((name, config))
     })?;
+    if leaves_native && matches!(outcome, storage::BotPatch::Applied { .. }) {
+        s.agent().kill_native_runs(bot.id);
+    }
     profile_write_response(&s, outcome)
 }
 

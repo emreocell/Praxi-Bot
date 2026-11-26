@@ -25,8 +25,13 @@ interface EngineConsentApi {
   askEngine: (executor: string, config?: unknown) => Promise<EngineAnswer>;
   /** Apply the answer to a saved bot (after `askEngine`). */
   applyEngine: (botId: string, answer: EngineAnswer) => Promise<void>;
-  /** The consent step for a bot whose model cannot run yet (the "Fix" button of a failed turn). */
-  fixBotEngine: (bot: Bot) => Promise<boolean>;
+  /**
+   * The consent step for a bot whose model cannot run yet (the "Fix" button of a failed turn, and the
+   * check before a message is sent). `false`: the owner said no, or the engine cannot start.
+   * `quiet`: an engine list that cannot be read is not an error (the message goes out; a failed
+   * turn still offers the fix).
+   */
+  fixBotEngine: (bot: Bot, quiet?: boolean) => Promise<boolean>;
 }
 
 /** Without a provider (static renders, tests) nothing is asked and nothing is applied. */
@@ -119,13 +124,22 @@ export function EngineConsentProvider({ children }: { children: ReactNode }) {
   );
 
   const fixBotEngine = useCallback(
-    async (bot: Bot): Promise<boolean> => {
+    async (bot: Bot, quiet = false): Promise<boolean> => {
       const c = clientRef.current;
       if (!c) {
-        return false;
+        return quiet;
+      }
+      let status: EngineStatus;
+      try {
+        status = botEngineStatus(bot.config, await c.cliEngines());
+      } catch (e) {
+        if (!quiet) {
+          toast.show(humanLine(e), "danger");
+        }
+        return quiet;
       }
       try {
-        const answer = await ask(botEngineStatus(bot.config, await c.cliEngines()));
+        const answer = await ask(status);
         if (answer === null) {
           return false;
         }

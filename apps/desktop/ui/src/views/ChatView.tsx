@@ -17,6 +17,7 @@ import {
   Zap
 } from "lucide-react";
 import { BotLimitCard } from "../components/BotLimitCard";
+import { engineOf, executorCli } from "../lib/botEngine";
 import { parseLimitReached } from "../lib/botLimits";
 import {
   type CSSProperties,
@@ -975,6 +976,13 @@ export function ChatView({
     // A chat opened from a link never follows earlier `/new` results; a `/new` sent here does.
     if (followNewSince.current === null && parseSlashInput(body)?.name === "new") {
       followNewSince.current = Date.now();
+    }
+    // A bot whose CLI model works with its own tools (picked in Settings, imported, or created by
+    // another route) gets the one consent step now, never a failed first message.
+    if (bot && !body.startsWith("/") && executorCli(bot.config) && engineOf(bot.config).mode !== "native_tools") {
+      if (!(await fixBotEngine(bot, true))) {
+        return;
+      }
     }
     attachments.locked = true;
     const attachmentSignal = attachments.signal;

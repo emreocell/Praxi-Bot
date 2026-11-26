@@ -3397,9 +3397,25 @@
         "title": "AgentMail şu anda kullanılamıyor"
       }
     },
+    "engineBadFolder": {
+      "hint": "Başka bir klasör seç. Ev klasörün, ayar klasörleri ve Praxi'nin kendi verileri kullanılamaz.",
+      "title": "Bu klasör kullanılamaz"
+    },
+    "engineLevel": {
+      "hint": "Motor için listelenen düzeylerden birini seçip yeniden kaydet.",
+      "title": "Bu motor o düzeyi sunmuyor"
+    },
+    "engineNeedsCli": {
+      "hint": "Bir kodlama CLI'sinden gelen modeli seç, sonra kendi araçlarına izin ver.",
+      "title": "Önce bir kodlama CLI modeli seç"
+    },
     "engineNeedsNative": {
       "hint": "Kendi araçlarıyla çalışıyor. Bu bot için buna izin vermek için Düzelt'e bas.",
       "title": "Bu model için önce onayın gerekiyor"
+    },
+    "engineNoFolder": {
+      "hint": "Botun motor ayarlarından bir klasör seç ve yeniden dene.",
+      "title": "Praxi bu bot için bir klasör oluşturamadı"
     },
     "events_disconnected": {
       "hint": "Praxi yeniden bağlanıyor. Hiçbir şey kaybolmadı.",

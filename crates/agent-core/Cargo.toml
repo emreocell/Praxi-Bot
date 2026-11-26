@@ -60,3 +60,7 @@ openapi-tools = { path = "../openapi-tools", version = "0.1.0" }
 [[bin]]
 name = "agent-cli-fixture"
 path = "../cli-provider/tests/fixtures/runtime_cli.rs"
+
+[[bin]]
+name = "native-cli-fixture"
+path = "../cli-provider/tests/fixtures/native_cli.rs"

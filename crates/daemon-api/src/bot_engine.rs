@@ -201,16 +201,27 @@ pub(crate) async fn put_engine(
 ) -> Result<Json<BotDto>, ApiError> {
     crate::cli_engines::local_owner(&actor)?;
     let mut bot = s.bot_of_user(BotId(crate::routes::id(&bid)?))?;
+    let profile: agent_core::BotProfile =
+        serde_json::from_value(bot.config.clone()).map_err(ApiError::internal)?;
     if input.mode == EngineMode::NativeTools.as_str()
         && input
             .workspace
             .as_deref()
             .is_none_or(|w| w.trim().is_empty())
     {
-        input.workspace = default_workspace(&bot);
+        // A bot that already has a folder keeps it when its engine or level changes.
+        let kept = profile
+            .engine
+            .workspace
+            .clone()
+            .filter(|w| std::path::Path::new(w).is_dir());
+        input.workspace = Some(match kept {
+            Some(kept) => kept,
+            None => default_workspace(&bot).ok_or_else(|| {
+                refuse("could not create a work folder for this bot; choose a folder in the bot's engine settings")
+            })?,
+        });
     }
-    let profile: agent_core::BotProfile =
-        serde_json::from_value(bot.config.clone()).map_err(ApiError::internal)?;
     let data_dir = s.storage().data_dir().to_path_buf();
     let next = next_settings(
         &profile.engine,
@@ -285,6 +296,65 @@ mod tests {
             workspace: Some(ws.display().to_string()),
             consent_native_tools: native,
             consent_full_access: full,
+        }
+    }
+
+    /// What the picker's consent dialog starts on, and sends: Ask when the engine offers it,
+    /// else its first offered level (`OpenCode`, and Kimi on Linux, cannot be held at Ask).
+    fn dialog_default(driver: Driver) -> ApprovalLevel {
+        let offered: Vec<ApprovalLevel> = ApprovalLevel::ALL
+            .into_iter()
+            .filter(|l| level_plan(driver, *l).offered)
+            .collect();
+        if offered.contains(&ApprovalLevel::Ask) {
+            ApprovalLevel::Ask
+        } else {
+            offered[0]
+        }
+    }
+
+    #[test]
+    fn every_engine_accepts_what_the_picker_dialog_sends_for_a_fresh_bot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        let work = tmp.path().join("work");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        for driver in Driver::ALL {
+            let level = dialog_default(driver);
+            let executor = format!("cli:{}/default", driver.id());
+            let chosen = next_settings(
+                &EngineSettings::default(),
+                &executor,
+                &input(
+                    "native_tools",
+                    Some(level.as_str()),
+                    &work,
+                    true,
+                    level == ApprovalLevel::Full,
+                ),
+                &data,
+                9,
+            )
+            .unwrap_or_else(|e| panic!("{}: {e:?}", driver.id()));
+            assert_eq!(chosen.mode, EngineMode::NativeTools, "{}", driver.id());
+            assert_eq!(chosen.approval_level, level, "{}", driver.id());
+            assert_eq!(
+                chosen.consent.native_tools_at_ms,
+                Some(9),
+                "{}",
+                driver.id()
+            );
+            // Picking another engine later keeps the level without asking again.
+            let again = next_settings(
+                &chosen,
+                &executor,
+                &input("native_tools", Some(level.as_str()), &work, false, false),
+                &data,
+                10,
+            )
+            .unwrap_or_else(|e| panic!("{} again: {e:?}", driver.id()));
+            assert_eq!(again.consent, chosen.consent, "{}", driver.id());
         }
     }
 

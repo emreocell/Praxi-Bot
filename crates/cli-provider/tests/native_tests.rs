@@ -152,6 +152,61 @@ async fn acp_agent_permissions_follow_the_level_and_fs_is_refused() {
     assert!(log(&dir, "permission_answer").contains("\"optionId\":\"yes\""));
 }
 
+/// The level the desktop's one consent step starts on: Ask when the engine offers it, else its first
+/// offered level (`OpenCode`, and Kimi on Linux and macOS, cannot be held at Ask).
+fn level_picker_starts_on(driver: Driver) -> ApprovalLevel {
+    let offered: Vec<_> = ApprovalLevel::ALL
+        .into_iter()
+        .filter(|l| cli_provider::level_plan(driver, *l).offered)
+        .collect();
+    if offered.contains(&ApprovalLevel::Ask) {
+        ApprovalLevel::Ask
+    } else {
+        offered[0]
+    }
+}
+
+#[tokio::test]
+async fn every_engine_runs_its_first_message_with_the_settings_the_picker_gives_it() {
+    for driver in Driver::ALL {
+        let level = level_picker_starts_on(driver);
+        let (dir, workspace, env) = setup();
+        let env = match driver {
+            // `vibe-acp` is its own entry point and takes no arguments.
+            Driver::Vibe => env.with_env_var("FAKE_DRIVER", "vibe"),
+            _ => env,
+        };
+        let host = Arc::new(Host {
+            allow: true,
+            permissions: Mutex::new(Vec::new()),
+            text: Mutex::new(String::new()),
+        });
+        let nt = NativeTurn {
+            turn: turn(),
+            driver,
+            level,
+            workspace: workspace.path().to_owned(),
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            run_native_turn("fixture", &env, nt, host.clone(), CancellationToken::new()),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{}: first message timed out", driver.id()));
+        result.unwrap_or_else(|e| panic!("{}: first message failed: {e:?}", driver.id()));
+        assert!(
+            !host.text.lock().is_empty(),
+            "{}: the fake CLI's answer reached the chat",
+            driver.id()
+        );
+        assert!(
+            same_dir(&log(&dir, "cwd"), workspace.path()),
+            "{}",
+            driver.id()
+        );
+    }
+}
+
 #[tokio::test]
 async fn refuses_below_enforceable_levels_and_workspace_executables() {
     use cli_provider::runtime::CliError;

@@ -215,6 +215,14 @@ const REASONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/executor is busy|is busy; (try|retry)|previous input still draining|already in progress/i, "hostBusy"]
 ];
 
+/** The concrete reasons behind a `bad_engine` refusal of `PUT /v1/bots/{id}/engine` (the code alone says too little). */
+const ENGINE_REASONS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/could not create a work folder|a workspace folder is required/i, "engineNoFolder"],
+  [/workspace/i, "engineBadFolder"],
+  [/has no ".*" level|consent is required for full/i, "engineLevel"],
+  [/choose a coding cli model/i, "engineNeedsCli"]
+];
+
 /** Raw-text patterns, for tool results and plain errors that carry no code. First match wins. */
 const PATTERNS: ReadonlyArray<readonly [RegExp, string, ((m: RegExpExecArray) => Record<string, string>)?]> = [
   // A coding CLI that cannot answer yet (the daemon's stable markers, see `cli_exec_error_for`).
@@ -330,6 +338,12 @@ export function humanError(err: unknown): HumanError {
       if (re.test(raw)) {
         return pack(key, key, details);
       }
+    }
+  }
+  if (code === "bad_engine") {
+    const reason = ENGINE_REASONS.find(([re]) => re.test(raw));
+    if (reason) {
+      return pack(reason[1], "bad_engine", details);
     }
   }
   if (code === "network") {

@@ -1,5 +1,5 @@
 import type { CliEngineDto } from "../api/types.ts";
-import { type ApprovalLevel, type EngineState, engineOf, executorCli } from "./botEngine.ts";
+import { APPROVAL_LEVELS, type ApprovalLevel, type EngineState, engineOf, executorCli } from "./botEngine.ts";
 import { cliStatus } from "./cliCards.ts";
 
 /** Why a CLI model cannot be used for a bot right now (the picker row is disabled with this reason). */
@@ -46,14 +46,29 @@ export function engineStatus(
   if (reason) {
     return { kind: "blocked", cliId, name, reason };
   }
-  if (engine.detected.runnable || current.mode === "native_tools") {
+  const native = current.mode === "native_tools";
+  if (engine.detected.runnable && !native) {
     return { kind: "ready" };
   }
   const levels = (engine.native?.levels ?? []).filter((l) => l.offered).map((l) => l.level as ApprovalLevel);
+  // A bot that already works with its own tools keeps its level when the new engine offers it.
+  if (native && levels.includes(current.approvalLevel)) {
+    return { kind: "ready" };
+  }
   if (levels.length === 0) {
     return { kind: "blocked", cliId, name, reason: "unsupported" };
   }
-  return { kind: "consent", cliId, name, levels, defaultLevel: levels.includes("ask") ? "ask" : (levels[0] as ApprovalLevel) };
+  return { kind: "consent", cliId, name, levels, defaultLevel: defaultLevel(levels, native ? current.approvalLevel : "ask") };
+}
+
+/**
+ * The level the consent step starts on: `wanted` when offered, else the widest offered level that
+ * is not wider than it (a change of engine never silently widens), else the narrowest offered one.
+ */
+function defaultLevel(levels: readonly ApprovalLevel[], wanted: ApprovalLevel): ApprovalLevel {
+  const rank = (l: ApprovalLevel) => APPROVAL_LEVELS.indexOf(l);
+  const within = levels.filter((l) => rank(l) <= rank(wanted));
+  return within.length > 0 ? within.reduce((a, b) => (rank(b) > rank(a) ? b : a)) : levels.reduce((a, b) => (rank(b) < rank(a) ? b : a));
 }
 
 /** Same as `engineStatus` for a bot config (its stored executor and engine table). */

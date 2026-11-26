@@ -237,8 +237,13 @@ fn main() {
     if args.first().is_some_and(|a| a == "app-server") {
         codex(&args);
     } else if args.iter().any(|a| a == "acp" || a == "--acp")
-        // `vibe-acp` is its own entry point and takes no arguments.
+        // `vibe-acp` is its own entry point and takes no arguments: told by the executable's name
+        // (the agent loop launches it with a sealed environment) or by `FAKE_DRIVER`.
         || std::env::var("FAKE_DRIVER").as_deref() == Ok("vibe")
+        || std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_stem().map(|s| s == "vibe-acp"))
+            .unwrap_or(false)
     {
         acp(&args);
     } else {

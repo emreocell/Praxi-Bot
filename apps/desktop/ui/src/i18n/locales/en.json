@@ -3397,9 +3397,25 @@
         "title": "AgentMail is not available right now"
       }
     },
+    "engineBadFolder": {
+      "hint": "Pick another folder. Your home folder, settings folders and Praxi's own data are not allowed.",
+      "title": "This folder cannot be used"
+    },
+    "engineLevel": {
+      "hint": "Pick one of the levels listed for it and save again.",
+      "title": "This engine does not offer that level"
+    },
+    "engineNeedsCli": {
+      "hint": "Choose a model that comes from a coding CLI, then turn on its own tools.",
+      "title": "Pick a coding CLI model first"
+    },
     "engineNeedsNative": {
       "hint": "It works with its own tools. Press Fix to allow that for this bot.",
       "title": "This model needs your OK first"
+    },
+    "engineNoFolder": {
+      "hint": "Choose a folder in the bot's engine settings, then try again.",
+      "title": "Praxi could not make a folder for this bot"
     },
     "events_disconnected": {
       "hint": "Praxi is reconnecting. Nothing is lost.",

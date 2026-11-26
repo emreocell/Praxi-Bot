@@ -3933,6 +3933,81 @@ mode = \"native_tools\"
     assert_eq!(killed.json()["config"]["engine"]["mode"], "praxi_governed");
 }
 
+/// A native-tools bot of the claude CLI with `workspace` as its folder; returns the bot path.
+async fn native_cli_bot(t: &T, workspace: &std::path::Path) -> (String, Value) {
+    let created = call(
+        t,
+        Method::POST,
+        "/v1/bots",
+        Some(json!({"profile_toml": PROFILE.replace("fake/echo", "cli:claude/sonnet")})),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::CREATED);
+    let path = format!("/v1/bots/{}", created.json()["id"].as_str().unwrap());
+    let ok = call(
+        t,
+        Method::PUT,
+        &format!("{path}/engine"),
+        Some(json!({
+            "mode": "native_tools", "workspace": workspace.display().to_string(),
+            "consent_native_tools": true
+        })),
+    )
+    .await;
+    assert_eq!(ok.status, StatusCode::OK, "{:?}", ok.json());
+    (path, ok.json())
+}
+
+#[tokio::test]
+async fn choosing_an_api_model_for_a_native_cli_bot_returns_it_to_praxi_governed() {
+    let t = setup();
+    let workspace = tempfile::tempdir().unwrap();
+    let (path, native) = native_cli_bot(&t, workspace.path()).await;
+    assert_eq!(native["config"]["engine"]["mode"], "native_tools");
+    // The owner picks an API model in the model picker: that is a save, not a `bad_engine` error.
+    let api = call(
+        &t,
+        Method::PUT,
+        &path,
+        Some(json!({"profile_toml": PROFILE, "expected_version": native["version"]})),
+    )
+    .await;
+    assert_eq!(api.status, StatusCode::OK, "{:?}", api.json());
+    assert_eq!(api.json()["config"]["models"]["executor"], "fake/echo");
+    assert_eq!(api.json()["config"]["engine"]["mode"], "praxi_governed");
+    assert!(api.json()["config"]["engine"]["consent"]["native_tools_at_ms"].is_null());
+    let audit = t.state.storage().list_audit(t.state.user_id()).unwrap();
+    assert!(
+        audit
+            .iter()
+            .any(|a| a.action == "engine.updated" && a.detail["reason"] == "executor_is_not_a_cli")
+    );
+}
+
+#[tokio::test]
+async fn changing_a_native_bots_level_keeps_its_own_folder() {
+    let t = setup();
+    let workspace = tempfile::tempdir().unwrap();
+    let (path, _) = native_cli_bot(&t, workspace.path()).await;
+    // The picker's consent step sends no folder; the bot keeps the one it has.
+    let again = call(
+        &t,
+        Method::PUT,
+        &format!("{path}/engine"),
+        Some(json!({"mode": "native_tools", "approval_level": "accept_edits", "consent_native_tools": true})),
+    )
+    .await;
+    assert_eq!(again.status, StatusCode::OK, "{:?}", again.json());
+    assert_eq!(
+        again.json()["config"]["engine"]["approval_level"],
+        "accept_edits"
+    );
+    assert_eq!(
+        again.json()["config"]["engine"]["workspace"],
+        workspace.path().display().to_string()
+    );
+}
+
 // ------------------------------------------------------ POST /v1/runs/stop
 
 /// A run row in `state` for the test user (no task drives it).
