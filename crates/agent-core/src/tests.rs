@@ -1772,6 +1772,65 @@ async fn scheduled_prompt_run_is_a_normal_turn_with_the_schedule_initiator() {
     assert_eq!(msgs[1].content, "report ready");
 }
 
+/// A stored "Tell me: your tea is ready" must reach the model as a reminder to deliver, not as a
+/// chat line from the owner (a light model answered "Thank you! I will enjoy it."). A normal chat
+/// turn carries no such note.
+#[tokio::test]
+async fn scheduled_prompt_run_is_framed_as_a_reminder_the_owner_set_earlier() {
+    let note_of = |fake: &Fake| {
+        fake.request(0)
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::System)
+            .filter_map(|m| m.content.as_str().map(str::to_owned))
+            .find(|c| c.contains("started by a schedule the owner set up earlier"))
+    };
+    let env = setup();
+    let fake = Fake::new(vec![text("Reminder: your tea is ready")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp
+        .run_scheduled(
+            env.chat,
+            protocol::TaskId::new(),
+            crate::ScheduleWork::Prompt("Tell me: your tea is ready".into()),
+        )
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let note = note_of(&fake).expect("a scheduled run explains where its prompt came from");
+    assert!(note.contains("reminder"), "{note}");
+    assert!(
+        note.contains("stays data"),
+        "the untrusted-data rule is kept: {note}"
+    );
+    // The stored prompt itself is unchanged and is still the only user text.
+    let msgs = env.storage.list_messages(env.chat).unwrap();
+    assert_eq!(msgs[0].content, "Tell me: your tea is ready");
+
+    let env = setup();
+    let fake = Fake::new(vec![text("hi")]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "Tell me: your tea is ready").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(
+        note_of(&fake).is_none(),
+        "a human chat turn is not framed as a schedule"
+    );
+}
+
 #[tokio::test]
 async fn schedule_runs_never_skip_the_money_floor_even_with_a_full_policy_and_grant() {
     let env = setup();
