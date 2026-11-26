@@ -1452,6 +1452,31 @@ async fn cancel_and_timeout_kill_the_whole_process_tree() {
     r.net.shutdown().await;
 }
 
+/// The desktop that started a sign-in loses host administration while the sign-in waits (up to
+/// ten minutes): it stops by itself, without any further request, and its process tree dies.
+#[tokio::test]
+async fn a_sign_in_stops_when_its_desktop_loses_host_administration() {
+    let _turn = LOGIN_TURN.lock().await;
+    let r = rig().await;
+    let (_dir, home, _bin) = install_fake_clis(&r, "", true).await;
+    let job = start_job(&r, "claude").await;
+    wait_login_state(&r, "claude", &job, &["needs_code"]).await;
+    let (leader, child) = (
+        read_pid(&home, "login-pid"),
+        read_pid(&home, "grandchild-pid"),
+    );
+    assert!(pid_alive(leader) && pid_alive(child));
+    let key = peer_network::key_from_string(&r.admin_key).unwrap();
+    r.net.set_device_admin(&key, false).unwrap();
+    expect_dead(leader).await;
+    expect_dead(child).await;
+    // With its right back the desktop can read the job's own record of why it stopped.
+    r.net.set_device_admin(&key, true).unwrap();
+    let ended = wait_login_state(&r, "claude", &job, &["failed"]).await;
+    assert_eq!(ended["error"], "admin_revoked", "{ended}");
+    r.net.shutdown().await;
+}
+
 #[tokio::test]
 async fn a_cli_that_never_shows_a_page_fails_and_its_tree_dies() {
     let _turn = LOGIN_TURN.lock().await;

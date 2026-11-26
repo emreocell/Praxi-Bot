@@ -105,6 +105,20 @@
   overflow-wrap: anywhere;
 }
 
+.address {
+  display: block;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.address b {
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+}
+
 .problem {
   margin: var(--space-0);
   color: var(--color-danger);

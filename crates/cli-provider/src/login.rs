@@ -27,8 +27,10 @@
 //! Only the output rules in [`LoginSpec`] decide what leaves this module: a link on one of the
 //! vendor's own hosts, a one-time code, and the account name the CLI prints once it is done.
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::ChildStdin;
@@ -72,6 +74,54 @@ pub struct Step {
     pub send: &'static str,
 }
 
+/// Which host a sign-in page may be on. Never "this domain and everything under it": shared
+/// hosting names (`amazonaws.com`, `google.com`, `awsapps.com`) hand out subdomains and open
+/// redirects to anybody.
+#[derive(Debug, Clone, Copy)]
+pub enum Host {
+    /// This host and no other.
+    Exact(&'static str),
+    /// `<labels>.<region>.amazonaws.com`, where the region is a real AWS region name
+    /// (`device.sso.us-east-1.amazonaws.com`): `Aws("device.sso")`.
+    Aws(&'static str),
+}
+
+/// One page a CLI may ask the person to open: an exact host and the start of its path.
+#[derive(Debug, Clone, Copy)]
+pub struct Page {
+    pub host: Host,
+    /// The path is this, or lies under it (`/` allows any path).
+    pub path: &'static str,
+}
+
+impl Page {
+    const fn at(host: &'static str, path: &'static str) -> Self {
+        Self {
+            host: Host::Exact(host),
+            path,
+        }
+    }
+}
+
+/// Where a CLI keeps a credential file, so it can be found in the service user's home.
+#[derive(Debug, Clone, Copy)]
+pub enum Root {
+    /// The home folder.
+    Home,
+    /// `$XDG_DATA_HOME`, and `~/.local/share` when it is not set.
+    DataHome,
+    /// `%LOCALAPPDATA%`, and `~/AppData/Local` when it is not set.
+    LocalAppData,
+}
+
+/// A credential FILE a sign-in writes (never a folder: a folder also fills with settings and
+/// caches). Only its existence, size and modification time are looked at, never its content.
+#[derive(Debug, Clone, Copy)]
+pub struct CredentialFile {
+    pub root: Root,
+    pub path: &'static [&'static str],
+}
+
 /// One entry of the fixed registry. No field is ever derived from a request.
 #[derive(Debug)]
 pub struct LoginSpec {
@@ -79,8 +129,9 @@ pub struct LoginSpec {
     /// Argv after the executable.
     pub args: &'static [&'static str],
     pub kind: FlowKind,
-    /// Hosts the shown page may be on (exact or subdomain).
-    pub hosts: &'static [&'static str],
+    /// The only pages that may be shown (exact hosts, expected paths). The first one the CLI
+    /// prints is the one shown.
+    pub pages: &'static [Page],
     pub transport: Transport,
     /// A device flow with one fixed page: only this page is shown, without its query.
     pub device_page: Option<&'static str>,
@@ -88,10 +139,10 @@ pub struct LoginSpec {
     pub env: &'static [(&'static str, &'static str)],
     /// Menu answers typed before the link appears.
     pub script: &'static [Step],
-    /// A credential file or folder the sign-in writes, as path parts under the home folder.
-    /// Only its existence and modification time are looked at, never its content. For a CLI
-    /// that has no status command and does not exit when it is done.
-    pub credential: Option<&'static [&'static str]>,
+    /// The credential files the sign-in writes. For a CLI that has no status command and does
+    /// not exit when it is done: one of them appearing or changing after the page was shown is
+    /// the evidence.
+    pub credentials: &'static [CredentialFile],
     /// Text the CLI prints when it succeeded (case-insensitive). With no status command, an
     /// exit code 0 plus one of these is the evidence.
     pub success_markers: &'static [&'static str],
@@ -102,12 +153,12 @@ impl LoginSpec {
         engine: "",
         args: &[],
         kind: FlowKind::Browser,
-        hosts: &[],
+        pages: &[],
         transport: Transport::Pty,
         device_page: None,
         env: &[],
         script: &[],
-        credential: None,
+        credentials: &[],
         success_markers: &[],
     };
 }
@@ -117,11 +168,13 @@ pub const LOGIN_SPECS: &[LoginSpec] = &[
         engine: "claude",
         args: &["auth", "login"],
         kind: FlowKind::PasteCode,
-        hosts: &[
-            "claude.com",
-            "claude.ai",
-            "console.anthropic.com",
-            "platform.claude.com",
+        pages: &[
+            Page::at("claude.com", "/cai/oauth/"),
+            Page::at("claude.com", "/oauth/"),
+            Page::at("claude.ai", "/oauth/"),
+            Page::at("claude.ai", "/cai/oauth/"),
+            Page::at("platform.claude.com", "/oauth/"),
+            Page::at("console.anthropic.com", "/oauth/"),
         ],
         transport: Transport::Pipe,
         ..LoginSpec::BASE
@@ -130,7 +183,7 @@ pub const LOGIN_SPECS: &[LoginSpec] = &[
         engine: "codex",
         args: &["login", "--device-auth"],
         kind: FlowKind::DeviceCode,
-        hosts: &["auth.openai.com"],
+        pages: &[Page::at("auth.openai.com", "/codex/device")],
         transport: Transport::Pipe,
         device_page: Some("https://auth.openai.com/codex/device"),
         ..LoginSpec::BASE
@@ -141,19 +194,32 @@ pub const LOGIN_SPECS: &[LoginSpec] = &[
         engine: "cursor",
         args: &["login"],
         kind: FlowKind::Browser,
-        hosts: &["cursor.com", "cursor.sh"],
+        pages: &[Page::at("cursor.com", "/loginDeepControl")],
         env: &[("NO_OPEN_BROWSER", "1")],
         ..LoginSpec::BASE
     },
     // Antigravity has no login command: its first interactive run signs in (Google OAuth) and
     // asks for the code the page shows. It keeps running afterwards, so the sign-in is
-    // confirmed by the token file it writes under `~/.gemini/antigravity-cli/`.
+    // confirmed by the token file it writes under `~/.gemini/antigravity-cli/`. Only Google's
+    // OAuth page is shown: `google.com` as a whole has open redirects and user sites. The folder
+    // also holds settings, caches and conversations, so only token files count; the names are
+    // read from the CLI binary's strings, not from a sign-in (a wrong name fails closed:
+    // "not confirmed").
     LoginSpec {
         engine: "agy",
         args: &[],
         kind: FlowKind::PasteCode,
-        hosts: &["accounts.google.com", "google.com", "antigravity.google"],
-        credential: Some(&[".gemini", "antigravity-cli"]),
+        pages: &[Page::at("accounts.google.com", "/o/oauth2/")],
+        credentials: &[
+            CredentialFile {
+                root: Root::Home,
+                path: &[".gemini", "antigravity-cli", "authstore.enc"],
+            },
+            CredentialFile {
+                root: Root::Home,
+                path: &[".gemini", "antigravity-cli", "auth.json"],
+            },
+        ],
         ..LoginSpec::BASE
     },
     // `opencode auth login opencode` (the integration is named, so there is no provider menu)
@@ -164,13 +230,23 @@ pub const LOGIN_SPECS: &[LoginSpec] = &[
         engine: "opencode",
         args: &["auth", "login", "opencode"],
         kind: FlowKind::Browser,
-        hosts: &["opencode.ai"],
+        pages: &[Page::at("opencode.ai", "/auth")],
         script: &[Step {
             wait_for: "select login method",
             send: "\r",
         }],
-        // OpenCode keeps its credentials in `auth.json` under the data folder.
-        credential: Some(&[".local", "share", "opencode", "auth.json"]),
+        // OpenCode keeps its credentials in `auth.json` under its data folder: `$XDG_DATA_HOME`
+        // or `~/.local/share`, and `%LOCALAPPDATA%` on Windows.
+        credentials: &[
+            CredentialFile {
+                root: Root::DataHome,
+                path: &["opencode", "auth.json"],
+            },
+            CredentialFile {
+                root: Root::LocalAppData,
+                path: &["opencode", "auth.json"],
+            },
+        ],
         success_markers: &["login successful", "logged in", "credentials saved"],
         ..LoginSpec::BASE
     },
@@ -180,7 +256,15 @@ pub const LOGIN_SPECS: &[LoginSpec] = &[
         engine: "kiro",
         args: &["login", "--license", "free", "--use-device-flow"],
         kind: FlowKind::DeviceCode,
-        hosts: &["amazonaws.com", "awsapps.com", "amazon.com", "kiro.dev"],
+        // The device page lives on `device.sso.<region>.amazonaws.com`; Builder ID's own start
+        // page is `view.awsapps.com`. Every other `awsapps.com` name is somebody's own tenant.
+        pages: &[
+            Page {
+                host: Host::Aws("device.sso"),
+                path: "/",
+            },
+            Page::at("view.awsapps.com", "/start"),
+        ],
         success_markers: &["logged in", "login successful", "device authorized"],
         ..LoginSpec::BASE
     },
@@ -190,7 +274,12 @@ pub const LOGIN_SPECS: &[LoginSpec] = &[
         engine: "qoder",
         args: &["login"],
         kind: FlowKind::Browser,
-        hosts: &["qoder.com", "qoder.cn", "qoder.sh", "qoder.ai"],
+        pages: &[
+            Page::at("qoder.com", "/device"),
+            Page::at("qoder.cn", "/device"),
+            Page::at("qoder.sh", "/device"),
+            Page::at("qoder.ai", "/device"),
+        ],
         success_markers: &["login successful", "already logged in"],
         ..LoginSpec::BASE
     },
@@ -200,7 +289,12 @@ pub const LOGIN_SPECS: &[LoginSpec] = &[
         engine: "kimi",
         args: &["login"],
         kind: FlowKind::DeviceCode,
-        hosts: &["kimi.com", "kimi.ai"],
+        pages: &[
+            Page::at("www.kimi.com", "/code/"),
+            Page::at("kimi.com", "/code/"),
+            Page::at("www.kimi.ai", "/code/"),
+            Page::at("kimi.ai", "/code/"),
+        ],
         success_markers: &["logged in to"],
         ..LoginSpec::BASE
     },
@@ -226,17 +320,52 @@ fn strip_ansi(text: &str) -> String {
     re.replace_all(text, "").into_owned()
 }
 
-/// An https page on one of `hosts`, with no login, port or fragment. A device page with one
-/// fixed address is shown as that address without its query (the code is shown separately);
-/// every other page keeps its query, which carries the sign-in state.
+/// `us-east-1`, `eu-central-2`, `ap-southeast-3`, `us-gov-west-1`: lower-case words joined by
+/// `-`, ending in a one or two digit number.
+fn is_aws_region(name: &str) -> bool {
+    let words: Vec<&str> = name.split('-').collect();
+    let [first, middle @ .., last] = words.as_slice() else {
+        return false;
+    };
+    let word = |w: &&str| (2..=10).contains(&w.len()) && w.bytes().all(|b| b.is_ascii_lowercase());
+    !middle.is_empty()
+        && word(first)
+        && middle.iter().all(word)
+        && (1..=2).contains(&last.len())
+        && last.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn host_matches(rule: Host, host: &str) -> bool {
+    match rule {
+        Host::Exact(exact) => host == exact,
+        Host::Aws(labels) => host
+            .strip_suffix(".amazonaws.com")
+            .and_then(|rest| rest.strip_prefix(labels))
+            .and_then(|rest| rest.strip_prefix('.'))
+            .is_some_and(is_aws_region),
+    }
+}
+
+/// `path` is `prefix` or lies under it, on a `/` boundary.
+fn path_matches(prefix: &str, path: &str) -> bool {
+    prefix == "/"
+        || path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|rest| prefix.ends_with('/') || rest.starts_with('/'))
+}
+
+/// An https page the spec lists (exact host, expected path), with no login, port or fragment. A
+/// device page with one fixed address is shown as that address without its query (the code is
+/// shown separately); every other page keeps its query, which carries the sign-in state.
 fn trusted_page(value: &str, spec: &LoginSpec) -> Option<String> {
     let value = value.trim_end_matches([')', ',', '.', ';', '"', '\'', '>']);
     let url = url::Url::parse(value).ok()?;
     let host = url.host_str()?.to_ascii_lowercase();
     let trusted = spec
-        .hosts
+        .pages
         .iter()
-        .any(|h| host == *h || host.ends_with(&format!(".{h}")));
+        .any(|p| host_matches(p.host, &host) && path_matches(p.path, url.path()));
     let plain = url.scheme() == "https"
         && trusted
         && url.username().is_empty()
@@ -304,12 +433,13 @@ pub fn parse_prompt(spec: &LoginSpec, output: &str) -> Option<Prompt> {
     let mut code = None;
     for line in lines {
         let line = line.trim_end_matches('\r').trim();
-        if let Some(found) = line
-            .split_whitespace()
-            .filter(|w| w.starts_with("https://"))
-            .find_map(|w| trusted_page(w, spec))
-        {
-            url = Some(found);
+        // The FIRST page the CLI prints is the one shown: whatever it prints later (an error
+        // message that quotes a link, a changelog) never replaces it.
+        if url.is_none() {
+            url = line
+                .split_whitespace()
+                .filter(|w| w.starts_with("https://"))
+                .find_map(|w| trusted_page(w, spec));
         }
         if matches!(spec.kind, FlowKind::DeviceCode | FlowKind::Browser)
             && let Some(c) = device_code(line)
@@ -354,11 +484,45 @@ pub fn parse_account(output: &str) -> Option<String> {
         .then(|| name.to_owned())
 }
 
-/// Did the CLI print one of the spec's success lines?
+/// Is `word` one that turns the phrase after it into its opposite ("not logged in")?
+fn is_negation(word: &str) -> bool {
+    matches!(
+        word,
+        "not" | "no" | "never" | "cannot" | "unable" | "fail" | "failed" | "without"
+    ) || word.ends_with("n't")
+}
+
+/// Does `marker` occur in `line` as a statement ("Logged in to X"), not as a denial ("You are
+/// not logged in")? It must start a word, and none of the words before it in its sentence may
+/// be a negation.
+fn marker_in_line(line: &str, marker: &str) -> bool {
+    line.match_indices(marker).any(|(at, _)| {
+        let before = &line[..at];
+        if before
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric)
+        {
+            return false;
+        }
+        let clause = before
+            .rsplit(['.', '!', '?', ';'])
+            .next()
+            .unwrap_or_default();
+        !clause
+            .split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == '\u{2019}'))
+            .any(|w| is_negation(&w.replace('\u{2019}', "'")))
+    })
+}
+
+/// Did the CLI print one of the spec's success lines? A negated phrase ("not logged in", "you
+/// are no longer logged in") is not one.
 #[must_use]
 pub fn printed_success(spec: &LoginSpec, output: &str) -> bool {
     let lower = strip_ansi(output).to_ascii_lowercase();
-    spec.success_markers.iter().any(|m| lower.contains(m))
+    lower
+        .lines()
+        .any(|line| spec.success_markers.iter().any(|m| marker_in_line(line, m)))
 }
 
 /// What Anthropic's page shows after sign-in: a code, sometimes with `#state`.
@@ -378,7 +542,9 @@ pub struct LoginRun {
     inner: Inner,
     /// How many of the spec's menu steps were answered.
     script_done: usize,
-    started: std::time::SystemTime,
+    /// The spec's credential files as they were when the run started, and again when its page
+    /// was shown ([`Self::watch_credentials`]): only a change after that counts as a sign-in.
+    baseline: Stamps,
 }
 
 enum Inner {
@@ -591,6 +757,8 @@ fn start_pipe(
     env: &PathEnv,
     resolved: &crate::detect::ResolvedCommand,
 ) -> Result<LoginRun, StartError> {
+    // Before the CLI runs: a file it writes later is then a change against this.
+    let baseline = credential_stamps(spec, env);
     let mut cmd = tokio::process::Command::new(&resolved.program);
     cmd.args(&resolved.args)
         .args(spec.args)
@@ -624,7 +792,7 @@ fn start_pipe(
             closed_streams: 0,
         }),
         script_done: spec.script.len(),
-        started: std::time::SystemTime::now(),
+        baseline,
     })
 }
 
@@ -669,6 +837,7 @@ fn start_pty(
     env: &PathEnv,
     resolved: &crate::detect::ResolvedCommand,
 ) -> Result<LoginRun, StartError> {
+    let baseline = credential_stamps(spec, env);
     let mut args: Vec<std::ffi::OsString> = resolved.args.iter().map(Into::into).collect();
     args.extend(spec.args.iter().map(Into::into));
     let session = PtySession::spawn(&SpawnSpec {
@@ -684,7 +853,7 @@ fn start_pty(
     Ok(LoginRun {
         inner: Inner::Pty(session),
         script_done: 0,
-        started: std::time::SystemTime::now(),
+        baseline,
     })
 }
 
@@ -706,6 +875,61 @@ fn spawn_reader(
         }
         let _ = tx.send(Event::Closed).await;
     });
+}
+
+/// Size and modification time of each credential file that exists.
+type Stamps = HashMap<PathBuf, (SystemTime, u64)>;
+
+/// Where the spec's credential files can be for the service user (every candidate: the CLI may
+/// follow an XDG or `%LOCALAPPDATA%` setting this process does not see).
+fn credential_paths(spec: &LoginSpec, env: &PathEnv) -> Vec<PathBuf> {
+    let home = home_of(env);
+    let under_home = |parts: &[&str]| {
+        home.as_ref()
+            .map(|h| parts.iter().fold(h.clone(), |p, part| p.join(part)))
+    };
+    let mut out = Vec::new();
+    for file in spec.credentials {
+        let roots: Vec<Option<PathBuf>> = match file.root {
+            Root::Home => vec![home.clone()],
+            Root::DataHome => vec![
+                env.xdg_data_home.clone().filter(|p| p.is_absolute()),
+                under_home(&[".local", "share"]),
+            ],
+            Root::LocalAppData => vec![
+                env.local_app_data.clone().filter(|p| p.is_absolute()),
+                under_home(&["AppData", "Local"]),
+            ],
+        };
+        for root in roots.into_iter().flatten() {
+            let path = file.path.iter().fold(root, |p, part| p.join(part));
+            if !out.contains(&path) {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+/// A credential file's state, or `None` unless it is a regular, non-empty file. `symlink_metadata`
+/// does not follow a link, so a link to some other, fresher file is not a credential.
+fn stamp(path: &Path) -> Option<(SystemTime, u64)> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    (meta.file_type().is_file() && meta.len() > 0).then_some((meta.modified().ok()?, meta.len()))
+}
+
+fn credential_stamps(spec: &LoginSpec, env: &PathEnv) -> Stamps {
+    credential_paths(spec, env)
+        .into_iter()
+        .filter_map(|path| Some((stamp(&path)?, path)))
+        .map(|(st, path)| (path, st))
+        .collect()
+}
+
+fn credential_changed(spec: &LoginSpec, env: &PathEnv, baseline: &Stamps) -> bool {
+    credential_stamps(spec, env)
+        .iter()
+        .any(|(path, now)| baseline.get(path) != Some(now))
 }
 
 impl PipeRun {
@@ -835,29 +1059,18 @@ impl LoginRun {
         }
     }
 
-    /// Has the credential file or folder of `spec` been written since this run started?
-    /// Existence and modification time only; the content is never opened.
+    /// Take the credential files' state as the baseline: call it when the sign-in page is shown,
+    /// so that whatever the CLI wrote while starting up (a refreshed token, a migration) is not
+    /// taken for the sign-in.
+    pub fn watch_credentials(&mut self, spec: &LoginSpec, env: &PathEnv) {
+        self.baseline = credential_stamps(spec, env);
+    }
+
+    /// Has one of the spec's credential files appeared or changed since the baseline? Existence,
+    /// size and modification time only; the content is never opened, and a symlink never counts.
     #[must_use]
     pub fn credential_written(&self, spec: &LoginSpec, env: &PathEnv) -> bool {
-        let Some(parts) = spec.credential else {
-            return false;
-        };
-        let Some(home) = home_of(env) else {
-            return false;
-        };
-        let path = parts.iter().fold(home, |p, part| p.join(part));
-        let newer = |meta: &std::fs::Metadata| {
-            meta.modified()
-                .is_ok_and(|m| m >= self.started - Duration::from_secs(2))
-        };
-        match std::fs::metadata(&path) {
-            Ok(meta) if meta.is_file() => newer(&meta),
-            Ok(meta) if meta.is_dir() => std::fs::read_dir(&path).is_ok_and(|dir| {
-                dir.flatten()
-                    .any(|e| e.metadata().is_ok_and(|m| m.is_file() && newer(&m)))
-            }),
-            _ => false,
-        }
+        credential_changed(spec, env, &self.baseline)
     }
 
     /// Kill the whole process tree and reap it.
@@ -894,7 +1107,7 @@ mod tests {
                     "{arg}"
                 );
             }
-            assert_ne!(spec.hosts.len(), 0);
+            assert_ne!(spec.pages.len(), 0);
         }
         // One entry per engine.
         let mut ids: Vec<_> = LOGIN_SPECS.iter().map(|s| s.engine).collect();
@@ -1033,11 +1246,8 @@ mod per_cli_tests {
             page("agy", "https://accounts.evil.example/o/oauth2\n"),
             None
         );
-        // The token folder the sign-in writes is what confirms it.
-        assert_eq!(
-            login_spec("agy").unwrap().credential,
-            Some(&[".gemini", "antigravity-cli"][..])
-        );
+        // The token file the sign-in writes is what confirms it (never the folder around it).
+        assert!(!login_spec("agy").unwrap().credentials.is_empty());
     }
 
     #[test]
@@ -1116,7 +1326,7 @@ mod per_cli_tests {
         );
         assert_eq!(code.as_deref(), Some("WXYZ-5678"));
         // A code without a dash, after the label, is read too.
-        let plain = "Opening browser for Kimi device login: https://www.kimi.ai/x\nIf the browser did not open, paste the URL above and enter code: ABCD2345\n";
+        let plain = "Opening browser for Kimi device login: https://www.kimi.ai/code/authorize_device\nIf the browser did not open, paste the URL above and enter code: ABCD2345\n";
         assert_eq!(page("kimi", plain).unwrap().1.as_deref(), Some("ABCD2345"));
         assert!(printed_success(
             login_spec("kimi").unwrap(),
@@ -1168,5 +1378,304 @@ mod per_cli_tests {
     fn a_pasted_code_may_carry_a_slash_like_googles() {
         assert_eq!(valid_code("4/0AbCdEf_gh-123"), Some("4/0AbCdEf_gh-123"));
         assert_eq!(valid_code("4/0AbC dEf_gh-123"), None);
+    }
+}
+
+/// The sign-in page and the success line are read from a program's output: only what the vendor's
+/// own pages look like may pass, whoever wrote the text.
+#[cfg(test)]
+mod hardening_tests {
+    use super::*;
+
+    fn shown(engine: &str, output: &str) -> Option<String> {
+        parse_prompt(login_spec(engine).expect(engine), output).map(|Prompt::Page { url, .. }| url)
+    }
+
+    #[test]
+    fn a_shared_hosting_name_is_not_a_sign_in_host() {
+        let code = "Code: ABCD-1234\n";
+        // Kiro: any bucket, API, tenant or look-alike under the AWS names is somebody's page.
+        for bad in [
+            "https://evil.s3.amazonaws.com/device",
+            "https://attacker.execute-api.us-east-1.amazonaws.com/device",
+            "https://ec2-1-2-3-4.compute-1.amazonaws.com/",
+            "https://amazonaws.com/",
+            "https://device.sso.evil.amazonaws.com/",
+            "https://x.device.sso.us-east-1.amazonaws.com/",
+            "https://device.sso.us-east-1.amazonaws.com.evil.example/",
+            "https://device.sso.us-east-1.amazonaws.com:8443/",
+            "https://evil.awsapps.com/start",
+            "https://view.awsapps.com/other",
+            "https://www.amazon.com/",
+            "http://device.sso.us-east-1.amazonaws.com/",
+        ] {
+            assert_eq!(shown("kiro", &format!("{code}{bad}\n")), None, "{bad}");
+        }
+        for good in [
+            "https://device.sso.us-east-1.amazonaws.com/?user_code=ABCD-1234",
+            "https://device.sso.eu-central-1.amazonaws.com/",
+            "https://view.awsapps.com/start",
+        ] {
+            assert_eq!(
+                shown("kiro", &format!("{code}{good}\n")).as_deref(),
+                Some(good),
+                "{good}"
+            );
+        }
+        // Antigravity: Google's OAuth page only, not `google.com` (user sites, open redirects).
+        for bad in [
+            "https://sites.google.com/view/phish",
+            "https://www.google.com/url?q=https://evil.example",
+            "https://google.com/",
+            "https://accounts.google.com/ServiceLogin?continue=https://evil.example",
+            "https://evil.accounts.google.com/o/oauth2/v2/auth",
+            "https://accounts.google.com.evil.example/o/oauth2/v2/auth",
+            "https://accounts.google.com/o/oauth2evil",
+            "https://antigravity.google/docs",
+        ] {
+            assert_eq!(shown("agy", &format!("{bad}\n")), None, "{bad}");
+        }
+        assert!(
+            shown(
+                "agy",
+                "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=s\n"
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn every_engine_checks_the_exact_host_and_the_path() {
+        for (engine, bad) in [
+            ("claude", "https://evil.claude.com/oauth/authorize"),
+            ("claude", "https://claude.com/other/page"),
+            ("claude", "https://claude.com/oauth-evil"),
+            ("claude", "https://claude.com.evil.example/oauth/authorize"),
+            ("cursor", "https://evil.cursor.com/loginDeepControl"),
+            ("cursor", "https://cursor.com/pricing"),
+            ("cursor", "https://cursor.com/loginDeepControlX"),
+            ("cursor", "https://cursor.sh/loginDeepControl"),
+            ("opencode", "https://evil.opencode.ai/auth"),
+            ("opencode", "https://opencode.ai/docs"),
+            ("opencode", "https://opencode.ai/authx"),
+            ("qoder", "https://evil.qoder.com/device/x"),
+            ("qoder", "https://qoder.com/blog"),
+            ("kimi", "https://evil.kimi.com/code/x"),
+            ("kimi", "https://www.kimi.com/pricing"),
+        ] {
+            assert_eq!(
+                shown(engine, &format!("see {bad}\n")),
+                None,
+                "{engine} {bad}"
+            );
+        }
+        for (engine, good) in [
+            ("claude", "https://claude.com/cai/oauth/authorize?code=true"),
+            ("claude", "https://platform.claude.com/oauth/authorize?x=1"),
+            ("cursor", "https://cursor.com/loginDeepControl?challenge=c"),
+            ("opencode", "https://opencode.ai/auth/device"),
+            ("qoder", "https://qoder.com/device/selectAccounts?n=1"),
+        ] {
+            assert_eq!(
+                shown(engine, &format!("see {good}\n")).as_deref(),
+                Some(good),
+                "{engine}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_first_valid_page_wins() {
+        let spec = login_spec("claude").unwrap();
+        let first = "https://claude.com/cai/oauth/authorize?state=one";
+        let later = "https://claude.ai/oauth/authorize?state=two";
+        let out = format!("visit {first}\nerror, try again: {later}\n");
+        let Some(Prompt::Page { url, .. }) = parse_prompt(spec, &out) else {
+            panic!("no page")
+        };
+        assert_eq!(url, first);
+        // A page that is not valid never counts, in either position.
+        let out =
+            format!("see https://evil.example/x\nvisit {first}\nsee https://evil.example/y\n");
+        let Some(Prompt::Page { url, .. }) = parse_prompt(spec, &out) else {
+            panic!("no page")
+        };
+        assert_eq!(url, first);
+    }
+
+    #[test]
+    fn aws_regions_are_region_names() {
+        for ok in [
+            "us-east-1",
+            "eu-central-2",
+            "ap-southeast-3",
+            "us-gov-west-1",
+            "il-central-1",
+        ] {
+            assert!(is_aws_region(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "evil",
+            "us-east",
+            "us-east-x",
+            "US-EAST-1",
+            "us--1",
+            "-east-1",
+            "a-b-1",
+            "us-east-123",
+            "us.east.1",
+            "us-east-1.evil",
+        ] {
+            assert!(!is_aws_region(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_denial_is_not_a_success_line() {
+        for (engine, text) in [
+            ("kimi", "Logged in to Kimi Code.\n"),
+            ("kiro", "Logged in\n"),
+            ("qoder", "Login successful! Welcome, ada.\n"),
+            ("qoder", "Already logged in as ada.\n"),
+            ("opencode", "Login successful\n"),
+            ("opencode", "Hello, no problem. Logged in\n"),
+            ("kiro", "\x1b[32mLogged in\x1b[0m\n"),
+        ] {
+            assert!(
+                printed_success(login_spec(engine).unwrap(), text),
+                "{engine} {text:?}"
+            );
+        }
+        for (engine, text) in [
+            ("kiro", "You are not logged in\n"),
+            ("kiro", "Not logged in. Run `kiro-cli login`.\n"),
+            ("kiro", "Error: you aren't logged in\n"),
+            ("kiro", "You are no longer logged in\n"),
+            ("kiro", "You are never logged in\n"),
+            ("kiro", "Could not tell: user isn\u{2019}t logged in\n"),
+            ("kimi", "Error: not logged in to Kimi\n"),
+            ("kimi", "NOT LOGGED IN TO KIMI\n"),
+            ("opencode", "Status: not logged in\n"),
+            ("opencode", "Failed: logged in state could not be read\n"),
+            ("qoder", "You are not already logged in\n"),
+            ("kiro", "unlogged in\n"),
+        ] {
+            assert!(
+                !printed_success(login_spec(engine).unwrap(), text),
+                "{engine} {text:?}"
+            );
+        }
+    }
+
+    fn env_in(home: &Path) -> PathEnv {
+        let mut env = PathEnv::from_ambient();
+        env.home_dir = Some(home.to_path_buf());
+        env.env_vars.clear();
+        env.xdg_data_home = None;
+        env.local_app_data = None;
+        env
+    }
+
+    fn write(path: &Path, content: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn only_a_credential_file_that_changed_after_the_baseline_counts() {
+        let home = tempfile::tempdir().unwrap();
+        let env = env_in(home.path());
+        let spec = login_spec("opencode").unwrap();
+        let auth = home.path().join(".local/share/opencode/auth.json");
+        // An old file that was there before the run is not a sign-in...
+        write(&auth, "{\"old\":1}");
+        let baseline = credential_stamps(spec, &env);
+        assert!(!credential_changed(spec, &env, &baseline), "at t=0");
+        // ...an empty one is not either...
+        write(&auth, "");
+        assert!(!credential_changed(spec, &env, &baseline), "empty");
+        // ...a rewritten one is.
+        write(&auth, "{\"opencode\":{\"type\":\"oauth\"}}");
+        assert!(credential_changed(spec, &env, &baseline), "rewritten");
+        // A new baseline (the page was shown) starts again.
+        let baseline = credential_stamps(spec, &env);
+        assert!(!credential_changed(spec, &env, &baseline));
+        // A file that did not exist before appears.
+        let fresh = tempfile::tempdir().unwrap();
+        let env2 = env_in(fresh.path());
+        let baseline = credential_stamps(spec, &env2);
+        assert!(!credential_changed(spec, &env2, &baseline));
+        write(&fresh.path().join(".local/share/opencode/auth.json"), "x");
+        assert!(credential_changed(spec, &env2, &baseline));
+    }
+
+    #[test]
+    fn the_xdg_and_app_data_folders_are_looked_in_too() {
+        let home = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let spec = login_spec("opencode").unwrap();
+        let mut env = env_in(home.path());
+        env.xdg_data_home = Some(other.path().join("xdg"));
+        env.local_app_data = Some(other.path().join("local"));
+        let baseline = credential_stamps(spec, &env);
+        write(&other.path().join("xdg/opencode/auth.json"), "x");
+        assert!(credential_changed(spec, &env, &baseline), "XDG_DATA_HOME");
+        let baseline = credential_stamps(spec, &env);
+        write(&other.path().join("local/opencode/auth.json"), "x");
+        assert!(credential_changed(spec, &env, &baseline), "LOCALAPPDATA");
+        // A relative setting is not trusted.
+        let mut env = env_in(home.path());
+        env.xdg_data_home = Some(PathBuf::from("relative"));
+        assert!(credential_paths(spec, &env).iter().all(|p| p.is_absolute()));
+    }
+
+    #[test]
+    fn a_folder_full_of_settings_is_not_a_credential() {
+        let home = tempfile::tempdir().unwrap();
+        let env = env_in(home.path());
+        let spec = login_spec("agy").unwrap();
+        let baseline = credential_stamps(spec, &env);
+        let dir = home.path().join(".gemini/antigravity-cli");
+        for name in [
+            "settings.json",
+            "cache/projects.json",
+            "needs-auth-cache.json",
+            "conversations/c1",
+        ] {
+            write(&dir.join(name), "{}");
+        }
+        assert!(!credential_changed(spec, &env, &baseline));
+        write(&dir.join("authstore.enc"), "token");
+        assert!(credential_changed(spec, &env, &baseline));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_credential_file_never_counts() {
+        let home = tempfile::tempdir().unwrap();
+        let env = env_in(home.path());
+        let spec = login_spec("opencode").unwrap();
+        let baseline = credential_stamps(spec, &env);
+        // A link to a fresh, non-empty file elsewhere.
+        let target = home.path().join("elsewhere.json");
+        write(&target, "fresh");
+        let auth = home.path().join(".local/share/opencode/auth.json");
+        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&target, &auth).unwrap();
+        assert!(!credential_changed(spec, &env, &baseline), "link to a file");
+        std::fs::remove_file(&auth).unwrap();
+        std::os::unix::fs::symlink(home.path(), &auth).unwrap();
+        assert!(
+            !credential_changed(spec, &env, &baseline),
+            "link to a folder"
+        );
+        std::fs::remove_file(&auth).unwrap();
+        std::os::unix::fs::symlink(home.path().join("missing"), &auth).unwrap();
+        assert!(!credential_changed(spec, &env, &baseline), "dangling link");
+        // A folder where the file belongs is nothing either.
+        std::fs::remove_file(&auth).unwrap();
+        std::fs::create_dir_all(&auth).unwrap();
+        assert!(!credential_changed(spec, &env, &baseline), "folder");
     }
 }

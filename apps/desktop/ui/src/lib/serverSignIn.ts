@@ -66,3 +66,21 @@ export function engineStatus(
   }
   return { key: engine.signed_in === false ? "home.engines.needsSignIn" : "home.engines.installedUnknown" };
 }
+
+/**
+ * What the person is about to open: the host and path of the sign-in page, as the browser will
+ * read them (the query is left out: it carries sign-in state). `null` unless it is an https page.
+ * The server only hands over a page on the vendor's own host, and the window shows the host so
+ * the person can see that too; a page that is anything else is not offered at all.
+ */
+export function pageAddress(url: string | null | undefined): { host: string; shown: string } | null {
+  if (!url) {
+    return null;
+  }
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && u.host ? { host: u.host, shown: `${u.host}${u.pathname}` } : null;
+  } catch {
+    return null;
+  }
+}

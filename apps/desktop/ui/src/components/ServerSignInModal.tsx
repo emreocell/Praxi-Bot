@@ -5,7 +5,7 @@ import { Button } from "ui";
 import type { AdminCliEngine, AdminCliLogin } from "../api/types";
 import { humanError } from "../lib/humanError";
 import { openExternal } from "../lib/externalLink";
-import { signInPhase, apiKeyProvider, needsManualFallback, waitingFor, type SignInPhase } from "../lib/serverSignIn";
+import { signInPhase, apiKeyProvider, needsManualFallback, pageAddress, waitingFor, type SignInPhase } from "../lib/serverSignIn";
 import { useDaemon } from "../state/DaemonContext";
 import { Modal } from "./Modal";
 import { RunOnServer } from "./RunOnServer";
@@ -162,6 +162,9 @@ function Content({
   };
 
   const url = job?.url ?? null;
+  // The page the person is about to open, as the browser reads it. Nothing that is not https is
+  // offered, whatever the server sent.
+  const address = pageAddress(url);
   // The CLI showed no sign-in page (its prompt was not the expected one): offer the plain command.
   const startFailed = needsManualFallback(job);
   return (
@@ -191,15 +194,21 @@ function Content({
           <li>
             <b>{t("serverSignIn.step1")}</b>
             <div className={styles.row}>
-              <Button variant="primary" size="sm" data-testid="signin-open" onClick={() => url && openExternal(url)}>
+              <Button variant="primary" size="sm" data-testid="signin-open" disabled={!address} onClick={() => url && address && openExternal(url)}>
                 <ExternalLink aria-hidden="true" />
                 {t("serverSignIn.openPage")}
               </Button>
-              <Button variant="ghost" size="sm" data-testid="signin-copy" onClick={() => url && copy(url)}>
+              <Button variant="ghost" size="sm" data-testid="signin-copy" disabled={!address} onClick={() => url && address && copy(url)}>
                 {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
                 {copied ? t("errors.copied") : t("serverSignIn.copyLink")}
               </Button>
             </div>
+            {address ? (
+              <code className={styles.address} data-testid="signin-address" data-host={address.host} title={url ?? undefined}>
+                <b>{address.host}</b>
+                {address.shown.slice(address.host.length)}
+              </code>
+            ) : null}
             {job?.code ? (
               <div className={styles.codeBox}>
                 <span className={styles.codeLabel}>{t("serverSignIn.codeLabel")}</span>

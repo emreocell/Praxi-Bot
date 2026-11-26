@@ -194,7 +194,9 @@ fn main() {
             if typed.trim() == "4/0AGYCODE-1234" {
                 let dir = home().join(".gemini").join("antigravity-cli");
                 std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(dir.join("token"), "fixture only").unwrap();
+                // Settings and caches fill the folder from the first run: only a token file counts.
+                std::fs::write(dir.join("settings.json"), "{}").unwrap();
+                std::fs::write(dir.join("authstore.enc"), "fixture only").unwrap();
                 flush("\nSigned in. Starting the agent...\n");
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(1));

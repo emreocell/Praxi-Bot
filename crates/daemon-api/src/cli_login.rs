@@ -40,7 +40,7 @@ use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
 use crate::{
-    ApiError, AppState, PeerIdentity,
+    ApiError, AppState, PeerIdentity, PeerRole,
     host_admin::{Gate, audit, require_admin},
     routes::ApiJson,
 };
@@ -65,6 +65,23 @@ fn lifetime() -> Duration {
 
 /// How long the CLI may take after the code was handed to it.
 const AFTER_CODE: Duration = Duration::from_secs(60);
+/// How often the credential files are looked at.
+const WATCH_EVERY: Duration = Duration::from_secs(1);
+/// How often the owner desktop's admin right is read again while a sign-in runs.
+const ADMIN_RECHECK: Duration = Duration::from_secs(2);
+
+/// Completes once the desktop that started the sign-in is no longer a host administrator
+/// (the pairing store is read on every look, as for a terminal session).
+async fn revoked(still_admin: &impl Fn() -> bool) {
+    let mut every =
+        tokio::time::interval_at(tokio::time::Instant::now() + ADMIN_RECHECK, ADMIN_RECHECK);
+    loop {
+        every.tick().await;
+        if !still_admin() {
+            return;
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 struct Job {
@@ -290,11 +307,18 @@ async fn run_job(
     s: AppState,
     spec: &'static LoginSpec,
     id: u64,
+    owner: String,
     cancel: CancellationToken,
     mut code_rx: tokio::sync::mpsc::Receiver<zeroize::Zeroizing<String>>,
 ) {
     let engine = spec.engine;
     let shutdown = s.shutdown_token();
+    let still_admin = || {
+        s.is_host_admin(Some(&PeerIdentity {
+            key: owner.clone(),
+            role: PeerRole::Desktop,
+        }))
+    };
     let deadline = tokio::time::Instant::now() + lifetime();
     let detector = s.detector();
     let pins = read_pins(&s.data_dir()).remove(engine);
@@ -322,6 +346,7 @@ async fn run_job(
         p = run.next_prompt(spec, STARTUP) => p,
         () = cancel.cancelled() => { run.terminate().await; finish(&s, engine, id, "cancelled", None); return; }
         () = shutdown.cancelled() => { run.terminate().await; finish(&s, engine, id, "cancelled", None); return; }
+        () = revoked(&still_admin) => { run.terminate().await; finish(&s, engine, id, "failed", Some("admin_revoked")); return; }
     };
     let Some(Prompt::Page { url, code }) = prompt else {
         let reason = classify(&run.private_output());
@@ -340,6 +365,8 @@ async fn run_job(
         return;
     };
     let paste = spec.kind == FlowKind::PasteCode;
+    // Whatever the CLI wrote while it started up is not the sign-in: only a change from here on.
+    run.watch_credentials(spec, detector.environment());
     update(&s, engine, id, |j| {
         j.state = if paste { "needs_code" } else { "needs_browser" };
         j.url = Some(url);
@@ -348,13 +375,25 @@ async fn run_job(
     // 2. A pasted code (paste flow), then the exit (or the credential file of a CLI that keeps
     //    running) and the confirmation.
     let mut sent_at: Option<tokio::time::Instant> = None;
-    let mut watch = tokio::time::interval(Duration::from_secs(1));
+    // The first look comes after a full period, never at once.
+    let first = tokio::time::Instant::now() + WATCH_EVERY;
+    let mut watch = tokio::time::interval_at(first, WATCH_EVERY);
+    let mut recheck = tokio::time::interval_at(first, ADMIN_RECHECK);
     let ended = loop {
         let limit = sent_at.map_or(deadline, |t| (t + AFTER_CODE).min(deadline));
         tokio::select! {
             biased;
             () = cancel.cancelled() => { run.terminate().await; finish(&s, engine, id, "cancelled", None); return; }
             () = shutdown.cancelled() => { run.terminate().await; finish(&s, engine, id, "cancelled", None); return; }
+            // The owner's admin right can be withdrawn while the sign-in waits: stop at once, and
+            // do not hand a pasted code to the process after that.
+            _ = recheck.tick() => {
+                if !still_admin() {
+                    run.terminate().await;
+                    finish(&s, engine, id, "failed", Some("admin_revoked"));
+                    return;
+                }
+            }
             () = tokio::time::sleep_until(limit) => {
                 run.terminate().await;
                 if sent_at.is_some() && tokio::time::Instant::now() < deadline {
@@ -365,6 +404,11 @@ async fn run_job(
                 return;
             }
             Some(pasted) = code_rx.recv(), if paste && sent_at.is_none() => {
+                if !still_admin() {
+                    run.terminate().await;
+                    finish(&s, engine, id, "failed", Some("admin_revoked"));
+                    return;
+                }
                 // Straight to the process' stdin; the value is dropped right after.
                 if run.send_line(pasted.as_str()).await.is_err() {
                     run.terminate().await;
@@ -375,7 +419,7 @@ async fn run_job(
                 sent_at = Some(tokio::time::Instant::now());
                 update(&s, engine, id, |j| j.state = "verifying");
             }
-            _ = watch.tick(), if spec.credential.is_some() && (sent_at.is_some() || !paste) => {
+            _ = watch.tick(), if !spec.credentials.is_empty() && (sent_at.is_some() || !paste) => {
                 if run.credential_written(spec, detector.environment()) {
                     // The CLI keeps running after it signed in: give it a moment to finish
                     // writing, then stop it.
@@ -632,7 +676,7 @@ pub(crate) async fn start_login(
         error: None,
         cancel: cancel.clone(),
         token,
-        owner: device,
+        owner: device.clone(),
         code_tx: Some(tx),
         account: None,
     };
@@ -643,7 +687,7 @@ pub(crate) async fn start_login(
     let task = s.clone();
     tokio::spawn(async move {
         let _permit = permit;
-        run_job(task.clone(), spec, job_id, cancel, rx).await;
+        run_job(task.clone(), spec, job_id, device, cancel, rx).await;
         let outcome = task
             .0
             .cli_logins
@@ -772,4 +816,43 @@ pub(crate) async fn cancel_login(
         .ok()
         .map(|j| j.clone());
     Ok(Json(dto(&s, engine, job).await))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A CLI without a status command is confirmed by a success line after a clean exit; a
+    /// denial that contains the same words ("not logged in") is not one.
+    #[test]
+    fn a_negated_success_phrase_does_not_confirm_a_sign_in() {
+        let kiro = login::login_spec("kiro").unwrap();
+        let ended = Ended::Exit(true);
+        for denial in [
+            "You are not logged in\n",
+            "Error: not logged in. Run `kiro-cli login` again\n",
+            "Session expired, you are no longer logged in\n",
+        ] {
+            assert_eq!(
+                confirm(kiro, ended, false, None, denial),
+                Confirmed::No,
+                "{denial:?}"
+            );
+        }
+        assert_eq!(
+            confirm(kiro, ended, false, None, "Logged in successfully\n"),
+            Confirmed::Yes
+        );
+        // The CLI's own status still decides first.
+        assert_eq!(
+            confirm(
+                kiro,
+                ended,
+                false,
+                Some(cli_provider::AuthState::SignedOut),
+                "Logged in\n"
+            ),
+            Confirmed::No
+        );
+    }
 }
