@@ -7,12 +7,15 @@ import type { ForgottenItem, MemoryItem, MemoryKind, MemoryPreview } from "../..
 import { ConfirmDialog } from "../../components/DialogParts";
 import form from "../../components/Form.module.css";
 import { EmptyState } from "../../components/EmptyState";
-import { BotMemorySettings } from "../../components/BotMemorySettings";
+import { BotMemoryAdvancedFields, BotMemoryError, BotMemoryModeChoice, useBotMemorySettings } from "../../components/BotMemorySettings";
+import { MoreInfo } from "../../components/ChoiceList";
+import { pendingMemoryView } from "../../lib/pendingMemory";
 import { humanLine } from "../../lib/humanError";
 import { formatDay } from "../../lib/dateFormat";
 import { MemoryRecallQuality } from "./MemoryRecallQuality";
 import { useDaemon } from "../../state/DaemonContext";
 import styles from "./KnowledgeCard.module.css";
+import mine from "./MemoryCard.module.css";
 
 const KINDS: readonly MemoryKind[] = ["profile", "bot", "episodic", "procedural", "lesson"];
 const message = (error: unknown) => humanLine(error);
@@ -47,6 +50,7 @@ export function MemoryCard() {
   const [preview, setPreview] = useState<MemoryPreview | null>(null);
 
   const epoch = useRef(0);
+  const memorySettings = useBotMemorySettings(activeBot);
 
   const reload = useCallback(async () => {
     if (!client || !activeBot) return;
@@ -163,58 +167,68 @@ export function MemoryCard() {
       testId="memory-card"
     >
       <div className={styles.root}>
-      <label className={form.field}>
-        {t("memory.bot")}
-        <select
-          className={form.select}
-          value={activeBot}
-          disabled={busy}
-          onChange={(e) => {
-            setBot(e.target.value);
-            setPreview(null);
-          }}
-        >
-          {bots.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {bots.length > 1 ? (
+        <label className={form.field}>
+          {t("memory.bot")}
+          <select
+            className={form.select}
+            value={activeBot}
+            disabled={busy}
+            onChange={(e) => {
+              setBot(e.target.value);
+              setPreview(null);
+            }}
+          >
+            {bots.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       {!activeBot ? (
         <p className={form.hint}>{t("memory.noBot")}</p>
       ) : (
         <>
-          <BotMemorySettings botId={activeBot} />
-          <MemoryRecallQuality />
           {pending.length > 0 ? (
-            <section className={styles.review} aria-label={t("memory.pendingTitle")} data-testid="memory-pending">
-              <h4>{t("memory.pendingTitle")}</h4>
-              <p className={form.hint}>{t("memory.pendingHint")}</p>
-              <ul className={styles.list}>
-                {pending.map((item) => (
-                  <li key={item.id} className={styles.source} data-testid="memory-pending-item">
-                    <strong>{item.content}</strong>
-                    <span className={form.hint}>
-                      {t(`memory.kinds.${item.kind}`)} · {botName(item.bot_id)} ·{" "}
-                      {t(`memory.trust.${item.trust}`)}
-                    </span>
-                    {item.source_quote ? (
-                      <code className={styles.locator}>“{item.source_quote}”</code>
-                    ) : null}
-                    <div className={styles.actions}>
-                      <Button size="sm" disabled={busy} onClick={() => void review(item, true)}>
-                        {t("memory.approve")}
-                      </Button>
-                      <Button size="sm" variant="secondary" disabled={busy} onClick={() => void review(item, false)}>
-                        {t("memory.discard")}
-                      </Button>
-                    </div>
-                  </li>
-                ))}
+            <section className={mine.pending} aria-labelledby="memory-pending-title" data-testid="memory-pending">
+              <div>
+                <h4 id="memory-pending-title" className={mine.pendingTitle}>
+                  {t("memory.pendingTitle", { count: pending.length })}
+                </h4>
+                <p className={form.hint}>{t("memory.pendingHint")}</p>
+              </div>
+              <ul className={mine.pendingList}>
+                {pending.map((item) => {
+                  const view = pendingMemoryView(item);
+                  const scope =
+                    view.scope.kind === "shared"
+                      ? t("memory.forAllBots")
+                      : t("memory.scopeThisBot", { bot: botName(view.scope.botId) });
+                  return (
+                    <li key={item.id} className={mine.pendingItem} data-testid="memory-pending-item">
+                      <p className={mine.pendingText}>{item.content}</p>
+                      <p className={mine.pendingMeta}>
+                        {t(`memory.origin.${view.origin}`)} · {scope}
+                      </p>
+                      {view.quote ? <p className={mine.pendingQuote}>“{view.quote}”</p> : null}
+                      <div className={styles.actions}>
+                        <Button size="sm" variant="primary" disabled={busy} onClick={() => void review(item, true)}>
+                          {t("memory.approve")}
+                        </Button>
+                        <Button size="sm" variant="secondary" disabled={busy} onClick={() => void review(item, false)}>
+                          {t("memory.discard")}
+                        </Button>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           ) : null}
+          <BotMemoryModeChoice botId={activeBot} state={memorySettings} />
+          <BotMemoryError state={memorySettings} />
           <div className={form.row}>
             <label className={`${form.field} ${form.grow}`}>
               {t("memory.search")}
@@ -240,24 +254,6 @@ export function MemoryCard() {
                   </option>
                 ))}
               </select>
-            </label>
-          </div>
-          <div className={styles.actions}>
-            <label className={form.hint}>
-              <input
-                type="checkbox"
-                checked={botOnly}
-                onChange={(e) => setBotOnly(e.target.checked)}
-              />{" "}
-              {t("memory.botOnly")}
-            </label>
-            <label className={form.hint}>
-              <input
-                type="checkbox"
-                checked={includeDeleted}
-                onChange={(e) => setIncludeDeleted(e.target.checked)}
-              />{" "}
-              {t("memory.includeForgotten")}
             </label>
           </div>
           {error ? (
@@ -286,15 +282,14 @@ export function MemoryCard() {
                 <strong>{item.content}</strong>
                 <span className={form.hint}>
                   {t(`memory.kinds.${item.kind}`)} · {botName(item.bot_id)} ·{" "}
-                  {t(`memory.trust.${item.trust}`)} ·{" "}
                   {formatDay(item.created_ms, i18n.language)}
                   {item.deleted ? ` · ${t("memory.forgottenBadge")}` : ""}
                   {item.valid_until_ms
                     ? ` · ${t("memory.expires", { date: formatDay(item.valid_until_ms, i18n.language) })}`
                     : ""}
                 </span>
-                {item.source_quote ? (
-                  <code className={styles.locator}>“{item.source_quote}”</code>
+                {pendingMemoryView(item).quote ? (
+                  <p className={mine.pendingQuote}>“{item.source_quote}”</p>
                 ) : null}
                 <div className={styles.actions}>
                   {!item.deleted ? (
@@ -322,7 +317,7 @@ export function MemoryCard() {
                   ) : null}
                   <Button
                     size="sm"
-                    variant="secondary"
+                    variant="ghost"
                     disabled={busy}
                     data-testid="memory-erase"
                     onClick={() => setErasing(item)}
@@ -365,38 +360,6 @@ export function MemoryCard() {
               </div>
             </section>
           ) : null}
-          <details className={styles.group} data-testid="memory-forgotten">
-            <summary>{t("memory.forgottenSectionTitle")}</summary>
-            <div className={styles.form}>
-              <p className={form.hint}>{t("memory.forgottenHint")}</p>
-              {forgotten.length === 0 ? (
-                <p className={form.hint}>{t("memory.forgottenEmpty")}</p>
-              ) : (
-                <ul className={styles.list}>
-                  {forgotten.map((entry) => (
-                    <li key={entry.id} className={styles.source} data-testid="memory-forgotten-item">
-                      <strong>{entry.label ?? t("memory.forgottenErased")}</strong>
-                      <span className={form.hint}>
-                        {t(`memory.kinds.${entry.kind}`)} · {botName(entry.bot_id)} ·{" "}
-                        {formatDay(entry.created_ms, i18n.language)}
-                        {entry.erased && entry.label ? ` · ${t("memory.forgottenErased")}` : ""}
-                      </span>
-                      <div className={styles.actions}>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={busy}
-                          onClick={() => void allowAgain(entry)}
-                        >
-                          {t("memory.forgottenRemove")}
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </details>
           <details className={styles.group}>
             <summary>{t("memory.addTitle")}</summary>
             <div className={styles.form}>
@@ -442,9 +405,59 @@ export function MemoryCard() {
               </Button>
             </div>
           </details>
-          <details className={styles.group}>
-            <summary>{t("memory.previewTitle")}</summary>
-            <div className={styles.form}>
+          <MoreInfo label={t("choice.advanced")} testId="memory-advanced">
+            <div className={styles.actions}>
+              <label className={form.hint}>
+                <input
+                  type="checkbox"
+                  checked={botOnly}
+                  onChange={(e) => setBotOnly(e.target.checked)}
+                />{" "}
+                {t("memory.botOnly")}
+              </label>
+              <label className={form.hint}>
+                <input
+                  type="checkbox"
+                  checked={includeDeleted}
+                  onChange={(e) => setIncludeDeleted(e.target.checked)}
+                />{" "}
+                {t("memory.includeForgotten")}
+              </label>
+            </div>
+            <BotMemoryAdvancedFields state={memorySettings} />
+            <MemoryRecallQuality />
+            <section className={styles.form} data-testid="memory-forgotten">
+              <h4 className={mine.subTitle}>{t("memory.forgottenSectionTitle")}</h4>
+              <p className={form.hint}>{t("memory.forgottenHint")}</p>
+              {forgotten.length === 0 ? (
+                <p className={form.hint}>{t("memory.forgottenEmpty")}</p>
+              ) : (
+                <ul className={styles.list}>
+                  {forgotten.map((entry) => (
+                    <li key={entry.id} className={styles.source} data-testid="memory-forgotten-item">
+                      <strong>{entry.label ?? t("memory.forgottenErased")}</strong>
+                      <span className={form.hint}>
+                        {t(`memory.kinds.${entry.kind}`)} · {botName(entry.bot_id)} ·{" "}
+                        {formatDay(entry.created_ms, i18n.language)}
+                        {entry.erased && entry.label ? ` · ${t("memory.forgottenErased")}` : ""}
+                      </span>
+                      <div className={styles.actions}>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={() => void allowAgain(entry)}
+                        >
+                          {t("memory.forgottenRemove")}
+                        </Button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            <section className={styles.form}>
+              <h4 className={mine.subTitle}>{t("memory.previewTitle")}</h4>
               <p className={form.hint}>{t("memory.previewHint")}</p>
               <label className={form.field}>
                 {t("memory.previewQuery")}
@@ -478,8 +491,8 @@ export function MemoryCard() {
                   )}
                 </>
               ) : null}
-            </div>
-          </details>
+            </section>
+          </MoreInfo>
         </>
       )}
       <ConfirmDialog

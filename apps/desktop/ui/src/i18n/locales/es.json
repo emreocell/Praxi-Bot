@@ -2575,6 +2575,11 @@
     "unarchive": "Desarchivar",
     "unpin": "Desfijar"
   },
+  "choice": {
+    "advanced": "Advanced",
+    "howItWorks": "How it works",
+    "recommended": "Recommended"
+  },
   "common": {
     "back": "Volver",
     "cancel": "Cancelar",
@@ -4604,6 +4609,7 @@
     "eraseTitle": "¿Quieres borrar este recuerdo permanentemente?",
     "erasedNotice": "Recuerdo borrado permanentemente.",
     "expires": "vence el {{date}}",
+    "forAllBots": "For all your bots",
     "forget": "Olvidar",
     "forgottenBadge": "Olvidado",
     "forgottenEmpty": "Aún no hay recuerdos olvidados.",
@@ -4624,8 +4630,13 @@
       "profile": "Perfil de usuario"
     },
     "noBot": "Crea un bot para ver o añadir recuerdos.",
+    "origin": {
+      "chat": "From your chat",
+      "outside": "From a web page, file or tool"
+    },
     "pendingHint": "El bot encontró estos datos en páginas web, archivos o herramientas, o le pediste que te consultara siempre. Solo los usará si los apruebas.",
-    "pendingTitle": "Pendientes de aprobación",
+    "pendingTitle": "{{count}} memories are waiting for your OK",
+    "pendingTitle_one": "{{count}} memory is waiting for your OK",
     "previewEmpty": "El bot no recuperaría ningún recuerdo para este mensaje.",
     "previewHint": "Escribe un mensaje de ejemplo para ver el bloque exacto de recuerdos que se añade al inicio del turno.",
     "previewPlaceholder": "P. ej., ¿cuándo redactamos las notas de la versión?",
@@ -4641,10 +4652,6 @@
     "search": "Buscar recuerdos",
     "searchPlaceholder": "Filtrar por texto o cita…",
     "title": "Memoria personal",
-    "trust": {
-      "untrusted": "Datos sin verificar",
-      "user": "Verificado por el usuario"
-    },
     "undo": "Deshacer",
     "undoneNotice": "Se deshizo el último cambio.",
     "updatedNotice": "Recuerdo actualizado."
@@ -6543,7 +6550,6 @@
     "resultsCount_one": "{{count}} ajuste encontrado",
     "resultsCount_other": "{{count}} ajustes encontrados",
     "risk": {
-      "email": "Un buzón conectado permite que los bots lean tu correo. Aun así, te preguntan antes de enviar nada.",
       "folders": "Los bots pueden leer y modificar archivos en las carpetas de confianza sin preguntar. Añade solo carpetas que no te importe compartir.",
       "memory": "«Olvidar» elimina lo que recordaba un bot. No siempre se puede deshacer.",
       "permissions": "Permitir más aquí deja que los bots actúen sin preguntarte. Piensa primero qué podría salir mal.",
@@ -6555,6 +6561,7 @@
         "empty": "Aún no hay permisos permanentes de sitios o acciones. Elige \"Permitir siempre\" en una tarjeta de aprobación para añadir uno aquí.",
         "title": "Sitios y acciones permitidos"
       },
+      "compare": "What each level does alone, and what it asks",
       "custom": "Tienes reglas personalizadas (consulta Avanzado). Elige un nivel para reemplazarlas.",
       "description": "Elige cuánta libertad tienen tus bots. Puedes cambiarlo cuando quieras.",
       "lead": "Elige un nivel. Todos los bots lo siguen, salvo que le hayas dado reglas propias a alguno.",
@@ -6693,6 +6700,7 @@
       "upToDate": "Tienes la última versión."
     },
     "webSearch": {
+      "advanced": "Search providers and keys",
       "backends": {
         "bing": "Bing (HTML)",
         "brave": "Brave Search API",

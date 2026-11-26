@@ -3,7 +3,6 @@ import {
   ArrowUp,
   CircleAlert,
   CircleCheck,
-  Info,
   KeyRound,
   PlugZap,
   Trash2,
@@ -18,7 +17,7 @@ import type {
   WebSearchTestReport
 } from "../../api/types";
 import formStyles from "../../components/Form.module.css";
-import { ConnectionTestButton } from "../../components/ConnectionTest";
+import { MoreInfo } from "../../components/ChoiceList";
 import { SettingGroup, Switch } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
 import { applyWebSearchUpdate } from "../../lib/webSearchDraft";
@@ -234,11 +233,6 @@ export function WebSearchCard() {
 
   return (
     <div className={styles.root} data-testid="web-search-card">
-      <p className={styles.note}>
-        <Info aria-hidden="true" />
-        <span>{t("settingsModal.webSearch.note")}</span>
-      </p>
-
       {loadError ? (
         <p className={formStyles.error} role="alert">
           {t("settingsModal.webSearch.loadError", { message: loadError })}
@@ -256,6 +250,70 @@ export function WebSearchCard() {
 
       {config ? (
         <>
+          <Card padding="md" elevated className={styles.card}>
+            <h4 className={styles.subheading}>{t("settingsModal.webSearch.testTitle")}</h4>
+            <div className={styles.keyRow}>
+              <input
+                type="text"
+                className={[formStyles.input, styles.keyInput].join(" ")}
+                value={testQuery}
+                placeholder="rust programming"
+                aria-label={t("settingsModal.webSearch.testQueryLabel")}
+                onChange={(e) => setTestQuery(e.target.value)}
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={testing || saving}
+                data-testid="web-search-test-btn"
+                onClick={() => void runTest()}
+              >
+                <PlugZap />
+                {testing
+                  ? t("settingsModal.webSearch.testing")
+                  : t("settingsModal.webSearch.test")}
+              </Button>
+            </div>
+
+            {report ? (
+              <div className={styles.result} data-testid="web-search-test-result">
+                <div
+                  className={[
+                    styles.pill,
+                    report.ok ? styles.pillOk : styles.pillBad
+                  ].join(" ")}
+                >
+                  {report.ok ? (
+                    <CircleCheck aria-hidden="true" />
+                  ) : (
+                    <CircleAlert aria-hidden="true" />
+                  )}
+                  <span>
+                    {report.ok && report.backend
+                      ? t("settingsModal.webSearch.testOk", {
+                          backend: t(backendLabelKey(report.backend)),
+                          count: report.result_count,
+                          ms: report.elapsed_ms
+                        })
+                      : t("settingsModal.webSearch.testFailed", {
+                          ms: report.elapsed_ms,
+                          error: report.error ?? ""
+                        })}
+                  </span>
+                </div>
+                {(report.fallback_errors ?? []).length > 0 ? (
+                  <p className={formStyles.hint}>
+                    {t("settingsModal.webSearch.fallbackNotes", {
+                      details: (report.fallback_errors ?? []).join("; ")
+                    })}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </Card>
+
+          <MoreInfo label={t("settingsModal.webSearch.advanced")} testId="web-search-advanced">
+            <p>{t("settingsModal.webSearch.note")}</p>
           <div className={styles.section}>
             <h4 className={styles.subheading}>{t("settingsModal.webSearch.orderTitle")}</h4>
             <p className={styles.subhint}>{t("settingsModal.webSearch.orderHint")}</p>
@@ -425,74 +483,7 @@ export function WebSearchCard() {
             </div>
             </form>
           </Card>
-
-          <Card padding="md" elevated className={styles.card}>
-            <h4 className={styles.subheading}>{t("settingsModal.webSearch.testTitle")}</h4>
-            <div className={styles.keyRow}>
-              <input
-                type="text"
-                className={[formStyles.input, styles.keyInput].join(" ")}
-                value={testQuery}
-                placeholder="rust programming"
-                aria-label={t("settingsModal.webSearch.testQueryLabel")}
-                onChange={(e) => setTestQuery(e.target.value)}
-              />
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={testing || saving}
-                data-testid="web-search-test-btn"
-                onClick={() => void runTest()}
-              >
-                <PlugZap />
-                {testing
-                  ? t("settingsModal.webSearch.testing")
-                  : t("settingsModal.webSearch.test")}
-              </Button>
-            </div>
-
-            <ConnectionTestButton
-              testId="web-connection-test"
-              disabled={saving || !client}
-              run={() => (client ? client.testConnection("web") : Promise.reject(new Error("daemon not connected")))}
-            />
-
-            {report ? (
-              <div className={styles.result} data-testid="web-search-test-result">
-                <div
-                  className={[
-                    styles.pill,
-                    report.ok ? styles.pillOk : styles.pillBad
-                  ].join(" ")}
-                >
-                  {report.ok ? (
-                    <CircleCheck aria-hidden="true" />
-                  ) : (
-                    <CircleAlert aria-hidden="true" />
-                  )}
-                  <span>
-                    {report.ok && report.backend
-                      ? t("settingsModal.webSearch.testOk", {
-                          backend: t(backendLabelKey(report.backend)),
-                          count: report.result_count,
-                          ms: report.elapsed_ms
-                        })
-                      : t("settingsModal.webSearch.testFailed", {
-                          ms: report.elapsed_ms,
-                          error: report.error ?? ""
-                        })}
-                  </span>
-                </div>
-                {(report.fallback_errors ?? []).length > 0 ? (
-                  <p className={formStyles.hint}>
-                    {t("settingsModal.webSearch.fallbackNotes", {
-                      details: (report.fallback_errors ?? []).join("; ")
-                    })}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </Card>
+          </MoreInfo>
         </>
       ) : null}
     </div>

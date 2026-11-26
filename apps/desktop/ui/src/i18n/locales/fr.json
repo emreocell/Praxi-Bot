@@ -4582,7 +4582,7 @@
     },
     "noBot": "Créez un bot pour consulter ou ajouter des souvenirs.",
     "pendingHint": "Ces éléments proviennent de pages web, de fichiers ou d'outils, ou vous avez demandé à tout approuver. Le bot ne les utilise pas tant que vous ne les avez pas approuvés.",
-    "pendingTitle": "Votre accord est requis",
+    "pendingTitle": "{{count}} memories are waiting for your OK",
     "previewEmpty": "Aucun souvenir ne serait rappelé pour ce message.",
     "previewHint": "Saisissez un exemple de message pour voir le bloc exact de souvenirs rappelés qui sera ajouté en tête du tour.",
     "previewPlaceholder": "p. ex. Quand rédigeons-nous les notes de version ?",
@@ -4598,10 +4598,6 @@
     "search": "Rechercher dans les souvenirs",
     "searchPlaceholder": "Filtrer par texte ou citation…",
     "title": "Mémoire personnelle",
-    "trust": {
-      "untrusted": "Données non fiables",
-      "user": "Vérifié par l'utilisateur"
-    },
     "undo": "Annuler",
     "undoneNotice": "Dernier changement annulé.",
     "updatedNotice": "Souvenir mis à jour."
@@ -6364,7 +6360,6 @@
     "resultsCount_one": "{{count}} réglage trouvé",
     "resultsCount_other": "{{count}} réglages trouvés",
     "risk": {
-      "email": "Une boîte aux lettres connectée permet aux bots de lire votre courrier. Ils demandent toujours avant d'envoyer quoi que ce soit.",
       "folders": "Les bots peuvent lire et modifier les fichiers des dossiers approuvés sans demander. N'ajoutez que des dossiers que vous acceptez de partager.",
       "memory": "« Oublier » supprime ce qu'un bot a retenu. Cela ne peut pas toujours être annulé.",
       "permissions": "En autorisant plus ici, vous permettez aux bots d'agir sans vous demander. Réfléchissez d'abord à ce qui pourrait mal tourner.",

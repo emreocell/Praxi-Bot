@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PageReader } from "../../api/types";
+import { ChoiceList, MoreInfo } from "../../components/ChoiceList";
+import choice from "../../components/ChoiceList.module.css";
 import form from "../../components/Form.module.css";
 import { humanLine } from "../../lib/humanError";
 import { useDaemon } from "../../state/DaemonContext";
@@ -60,7 +62,7 @@ export function PageReaderCard() {
     return <p className={form.hint}>{t("pageReader.noBot")}</p>;
   }
   return (
-    <div data-testid="page-reader">
+    <div data-testid="page-reader" className={choice.stack}>
       {bots.length > 1 ? (
         <label className={form.field}>
           {t("pageReader.bot")}
@@ -79,23 +81,24 @@ export function PageReaderCard() {
         </label>
       ) : null}
       {setting ? (
-        <fieldset className={form.field} disabled={busy}>
-          <legend>{t("pageReader.legend")}</legend>
-          {MODES.map((mode) => (
-            <label key={mode} className={form.hint}>
-              <input
-                type="radio"
-                name={`page-reader-${activeBot}`}
-                checked={setting.mode === mode}
-                data-testid={`page-reader-${mode}`}
-                onChange={() => void choose(mode)}
-              />{" "}
-              <strong>{t(`pageReader.mode.${mode}`)}</strong> — {t(`pageReader.modeHint.${mode}`)}
-            </label>
-          ))}
-        </fieldset>
+        <ChoiceList<Mode>
+          name={`page-reader-${activeBot}`}
+          label={t("pageReader.legend")}
+          value={setting.mode as Mode}
+          disabled={busy}
+          testIdPrefix="page-reader"
+          options={MODES.map((mode) => ({
+            value: mode,
+            label: t(`pageReader.mode.${mode}`),
+            hint: t(`pageReader.modeHint.${mode}`),
+            recommended: mode === "auto"
+          }))}
+          onChange={(mode) => void choose(mode)}
+        />
       ) : null}
-      <p className={form.hint}>{t("pageReader.note")}</p>
+      <MoreInfo testId="page-reader-more">
+        <p>{t("pageReader.note")}</p>
+      </MoreInfo>
       {error ? (
         <p role="alert" className={form.error}>
           {error}

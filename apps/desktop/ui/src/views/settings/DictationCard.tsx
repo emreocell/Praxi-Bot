@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { VoiceConfig, VoiceConfigInput } from "../../api/types";
 import { ConnectionTestButton } from "../../components/ConnectionTest";
+import { MoreInfo } from "../../components/ChoiceList";
+import choice from "../../components/ChoiceList.module.css";
 import formStyles from "../../components/Form.module.css";
 import { SettingRow } from "../../components/SettingsUi";
 import { useToast } from "../../components/Toast";
@@ -102,9 +104,7 @@ export function DictationCard() {
   const key = provider === "local_voice" ? "" : (drafts[provider] ?? "");
   return (
     <SettingRow stacked title={t("voice.stt.title")} description={t("voice.stt.description")}>
-      <p role="note" data-testid="voice-where">
-        <strong>{t("voice.stt.whereTitle")}</strong> {privacy}
-      </p>
+      <div className={choice.stack}>
       <select
         className={formStyles.input}
         aria-label={t("voice.stt.provider")}
@@ -125,7 +125,7 @@ export function DictationCard() {
               {gemini ? t("voice.stt.reuseGemini") : t("voice.stt.reuseKey")}
             </label>
           ) : null}
-          <p role="status" data-testid="voice-key-status">{status}</p>
+          <p role="status" className={formStyles.hint} data-testid="voice-key-status">{status}</p>
           {needsOwnKey ? (
             <input
               ref={keyInput}
@@ -139,8 +139,7 @@ export function DictationCard() {
               onChange={(e) => setDrafts((d) => ({ ...d, [provider]: e.target.value }))}
             />
           ) : null}
-          <details data-testid="voice-advanced">
-            <summary>{t("voice.stt.advanced")}</summary>
+          <MoreInfo label={t("voice.stt.advanced")} testId="voice-advanced">
             {gemini ? (
               <input
                 className={formStyles.input}
@@ -167,9 +166,13 @@ export function DictationCard() {
                 />
               </>
             )}
-          </details>
+          </MoreInfo>
         </>
       )}
+      <MoreInfo label={t("voice.stt.whereTitle")} testId="voice-where">
+        <p>{privacy}</p>
+      </MoreInfo>
+      <div className={choice.actions}>
       <Button size="sm" disabled={busy} onClick={() => void save(provider === "local_voice" ? {} : { ...sttKeyInput(provider, drafts), use_provider_key: useProviderKey })}>
         {t("voice.stt.save")}
       </Button>
@@ -190,6 +193,8 @@ export function DictationCard() {
           {t("voice.stt.clearKey")}
         </Button>
       ) : null}
+      </div>
+      </div>
     </SettingRow>
   );
 }

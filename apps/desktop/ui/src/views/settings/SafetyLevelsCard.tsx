@@ -2,6 +2,7 @@ import { Check, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PolicyDto } from "../../api/types";
+import { MoreInfo } from "../../components/ChoiceList";
 import formStyles from "../../components/Form.module.css";
 import { humanLine } from "../../lib/humanError";
 import { levelOfPreset, SAFETY_LEVELS } from "../../lib/settingsPages";
@@ -48,8 +49,6 @@ export function SafetyLevelsCard() {
   const current = levelOfPreset(policy?.preset);
   return (
     <div className={styles.root} data-testid="safety-levels">
-      <p className={styles.lead}>{t("settingsModal.safety.lead")}</p>
-      <p className={formStyles.hint}>{t("settingsModal.safety.samePresets")}</p>
       <div className={styles.grid} role="radiogroup" aria-label={t("settingsModal.safety.title")}>
         {SAFETY_LEVELS.map((l) => {
           const active = current === l.id;
@@ -75,14 +74,29 @@ export function SafetyLevelsCard() {
                 {active ? <Check className={styles.check} aria-hidden="true" /> : null}
               </span>
               <span className={styles.summary}>{t(`settingsModal.safety.levels.${l.id}.summary`)}</span>
-              <span className={styles.group}>{t("settingsModal.safety.onItsOwn")}</span>
-              <span className={styles.example}>{t(`settingsModal.safety.levels.${l.id}.own`)}</span>
-              <span className={styles.group}>{t("settingsModal.safety.willAsk")}</span>
-              <span className={styles.example}>{t(`settingsModal.safety.levels.${l.id}.ask`)}</span>
             </button>
           );
         })}
       </div>
+      <MoreInfo label={t("settingsModal.safety.compare")} testId="safety-levels-more">
+        <p>{t("settingsModal.safety.lead")}</p>
+        <dl className={styles.compare}>
+          {SAFETY_LEVELS.map((l) => (
+            <div key={l.id}>
+              <dt className={styles.name}>{t(`settingsModal.safety.levels.${l.id}.name`)}</dt>
+              <dd>
+                <span className={styles.group}>{t("settingsModal.safety.onItsOwn")}</span>{" "}
+                {t(`settingsModal.safety.levels.${l.id}.own`)}
+              </dd>
+              <dd>
+                <span className={styles.group}>{t("settingsModal.safety.willAsk")}</span>{" "}
+                {t(`settingsModal.safety.levels.${l.id}.ask`)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <p>{t("settingsModal.safety.samePresets")}</p>
+      </MoreInfo>
       {policy && current === null ? (
         <p className={formStyles.hint}>{t("settingsModal.safety.custom")}</p>
       ) : null}

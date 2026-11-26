@@ -1,0 +1,159 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: var(--space-0);
+  margin: var(--space-0);
+  padding: var(--space-0);
+  border: none;
+}
+
+.legend {
+  position: absolute;
+  width: var(--size-border);
+  height: var(--size-border);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface);
+  cursor: pointer;
+}
+
+.option:hover {
+  background-color: var(--color-surface-elevated);
+}
+
+.option:focus-within {
+  box-shadow: var(--shadow-focus);
+}
+
+.checked,
+.checked:hover {
+  border-color: var(--color-accent);
+  background-color: var(--color-surface-elevated);
+}
+
+.list:disabled .option {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.radio {
+  flex: none;
+  margin: var(--space-half) var(--space-0) var(--space-0);
+  accent-color: var(--color-accent);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-half);
+  min-width: var(--space-0);
+}
+
+.title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}
+
+.hint {
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-muted);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-0) var(--space-2);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface-active);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+}
+
+.badge > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.more {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.moreSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  list-style: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.moreSummary::-webkit-details-marker {
+  display: none;
+}
+
+.moreSummary:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-focus);
+}
+
+.moreChev {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.more[open] .moreChev {
+  transform: rotate(0.25turn);
+}
+
+.moreBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-left: var(--space-5);
+  line-height: var(--line-height-normal);
+}
+
+.moreBody p {
+  margin: var(--space-0);
+}
+
+/* A vertical stack of a card's parts (choice, details, error) with even spacing. */
+.stack {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  min-width: var(--space-0);
+}
+
+/* A row of a card's buttons. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}

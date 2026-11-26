@@ -2575,6 +2575,11 @@
     "unarchive": "Arşivden çıkar",
     "unpin": "Sabitlemeyi kaldır"
   },
+  "choice": {
+    "advanced": "Gelişmiş",
+    "howItWorks": "Nasıl çalışır?",
+    "recommended": "Önerilen"
+  },
   "common": {
     "back": "Geri",
     "cancel": "İptal",
@@ -2591,7 +2596,7 @@
     "alwaysReadNote": "Kapalıyken oturum başına bir kez sorulur. Praxi'nin kendi pencereleri asla gösterilmez.",
     "askNote": "Bir şeyi değiştiren her işlem önce sana sorar.",
     "deny": "Reddet",
-    "description": "Eşleştirdiğin sunucular, yalnızca sen izin verirsen bu bilgisayarın ekranına bakıp işlem yapmak isteyebilir.",
+    "description": "İzin verdiğinde botların bu bilgisayarın ekranını görüp kullanabilir.",
     "details": "Tam olarak",
     "enableAction": "Ekran ve girişe izin ver",
     "enableHint": "{{name}} bu bilgisayarın ekranını görebilsin ve kullanabilsin. Tıklama ve yazma işlemleri için yine onayın istenir.",
@@ -3832,8 +3837,8 @@
   },
   "folderTrust": {
     "action": "Bu klasöre güveniyorum — {{folder}} klasörünü dış içerik sayma",
-    "description": "Güvendiğin klasörler kendi içeriğin olarak değerlendirilir. Botun indirdiği dosyalar dış içerik sayılmaya devam eder. Mevcut görevler okudukları içeriği korur.",
-    "empty": "Henüz güvenilen klasör yok. Bir klasörü okuduktan sonra onay kartından güvenebilirsin.",
+    "description": "Botlarının sormadan okuyup değiştirebileceği klasörler.",
+    "empty": "Henüz yok. Bir bot bir klasörü okuduğunda onay kartından ona güvenebilirsin.",
     "ownerRequired": "Klasör güvenini değiştirmek için bu bilgisayardaki masaüstü uygulamasını aç.",
     "remove": "{{folder}} klasörüne güveni kaldır",
     "saved": "Güveniliyor: {{folder}}",
@@ -4180,7 +4185,7 @@
     "conversation": "Konuşma",
     "counts": "{{documents}} belge · {{chunks}} parça",
     "defaultBrainName": "Ortak beyin",
-    "description": "Bu botun arayabileceği kaynakları seç. Her kaynak için uzaktaki sağlayıcıya açıkça izin verene kadar içerik bu sunucuda kalır.",
+    "description": "Bu botun bilgi arayabileceği dosya ve sayfalar. Sen izin vermedikçe bu bilgisayarda kalır.",
     "dimensions": "Vektör boyutu",
     "dimensionsInvalid": "1 ile 4096 arasında bir tam sayı girin.",
     "disable": "Devre dışı bırak",
@@ -4207,7 +4212,7 @@
     "fileSkipped": "Okunamıyor, korunuyor veya metin çıkarma sınırını aşıyor. Diğer dosyalar dizinlenmeye devam eder.",
     "grantRemote": "Belge vektörlerine izin ver",
     "html": "Kaydedilen içerik HTML biçiminde",
-    "importHint": "İçe aktarılan kaynaklar devre dışı başlar. Embedding sağlayıcısını yeniden seçip kaydet; ardından kaynaklara ve arama sorgularına ayrı ayrı izin ver.",
+    "importHint": "İçe aktarılan kaynaklar kapalı başlar. Arama modelini yeniden seçip kaydet, sonra her kaynağa izin ver.",
     "indexed": "{{count}} belge işlendi.",
     "indexed_one": "{{count}} belge işlendi.",
     "kind": "Kaynak türü",
@@ -4591,9 +4596,9 @@
     "botOnly": "Yalnızca bu bota özel kayıtlar",
     "content": "Hatırlanacak bilgi",
     "contentPlaceholder": "Kısa bir bilgi veya tercih yaz…",
-    "description": "Her botun geçmiş sohbetlerden ne hatırladığını gör, herhangi bir kaydı düzenle veya unut, değişiklikleri geri al ve bir sonraki tura ne gireceğini önizle.",
-    "discard": "At",
-    "discardedNotice": "Atıldı.",
+    "description": "Botlarının senin hakkında hatırladıkları. Kontrol et, düzelt ya da unut.",
+    "discard": "Unut",
+    "discardedNotice": "Unutuldu.",
     "edit": "Düzenle",
     "editLabel": "Hafıza metni",
     "empty": "Botun burada adın gibi işe yarar bilgileri hatırlar. Bir sohbette ona bir şey söyle ya da aşağıdan kendin ekle.",
@@ -4604,11 +4609,12 @@
     "eraseTitle": "Bu hafıza kaydı kalıcı olarak silinsin mi?",
     "erasedNotice": "Hafıza kaydı kalıcı olarak silindi.",
     "expires": "{{date}} tarihinde sona erer",
+    "forAllBots": "Tüm botların için",
     "forget": "Unut",
     "forgottenBadge": "Unutuldu",
     "forgottenEmpty": "Henüz unutulmuş bir şey yok.",
     "forgottenErased": "Kalıcı olarak silindi",
-    "forgottenHint": "Unuttuğun şeyler sohbetlerden yeniden öğrenilmez. Botun yeniden öğrenebilmesi için bir kaydı listeden kaldır.",
+    "forgottenHint": "Botun bunları yeniden öğrenmez. İzin vermek için listeden kaldır.",
     "forgottenNotice": "Hafıza kaydı unutuldu.",
     "forgottenRemove": "Yeniden öğrenmeye izin ver",
     "forgottenRemovedNotice": "Bu artık yeniden öğrenilebilir.",
@@ -4624,14 +4630,19 @@
       "profile": "Kullanıcı profili"
     },
     "noBot": "Hafıza kayıtlarını görmek veya eklemek için bir bot oluştur.",
-    "pendingHint": "Bunlar web sayfalarından, dosyalardan veya araçlardan alındı ya da her şeyi onaylamak istedin. Sen onaylayana kadar bot bunları kullanmaz.",
-    "pendingTitle": "Onayın gerekiyor",
+    "origin": {
+      "chat": "Sohbetinden",
+      "outside": "Bir web sayfası, dosya ya da araçtan"
+    },
+    "pendingHint": "Botun bunları ancak sen onaylarsan kullanır.",
+    "pendingTitle": "Onayını bekleyen {{count}} anı var",
+    "pendingTitle_one": "Onayını bekleyen {{count}} anı var",
     "previewEmpty": "Bu mesaj için hiçbir hafıza kaydı çağrılmaz.",
-    "previewHint": "Tura eklenecek hatırlanan kayıtlar veri bloğunu görmek için örnek bir mesaj gir.",
+    "previewHint": "Botun hangi anıları kullanacağını görmek için örnek bir mesaj yaz.",
     "previewPlaceholder": "ör. Sürüm notlarını ne zaman hazırlıyoruz?",
-    "previewQuery": "Örnek kullanıcı mesajı",
-    "previewRun": "Geri çağırmayı önizle",
-    "previewTitle": "Botun göreceği blok (geri çağırma önizlemesi)",
+    "previewQuery": "Örnek mesaj",
+    "previewRun": "Göster",
+    "previewTitle": "Bot neyi hatırlardı?",
     "previewTokens": "{{count}} kayıt çağrıldı · ~{{used}} / {{budget}} token",
     "previewTokens_one": "{{count}} kayıt çağrıldı · ~{{used}} / {{budget}} token",
     "saveEdit": "Kaydet",
@@ -4640,38 +4651,34 @@
     "scopeThisBot": "Yalnızca {{bot}}",
     "search": "Hafızada ara",
     "searchPlaceholder": "Metin veya alıntıya göre filtrele…",
-    "title": "Kişisel hafıza",
-    "trust": {
-      "untrusted": "Güvenilmeyen veri",
-      "user": "Kullanıcı onaylı"
-    },
+    "title": "Hafıza",
     "undo": "Geri al",
     "undoneNotice": "Son değişiklik geri alındı.",
     "updatedNotice": "Hafıza kaydı güncellendi."
   },
   "memoryRecall": {
-    "consent": "Anılarımın arama verisine çevrilmek üzere {{provider}} sağlayıcısına gönderilmesini kabul ediyorum",
+    "consent": "Anlamına göre aranabilmeleri için anılarımı {{provider}} sağlayıcısına gönder",
     "disable": "Temel moda dön",
     "enable": "Akıllı moda geç",
     "explain": {
-      "basic": "Bir anı, mesajınla aynı kelimeleri içeriyorsa bulunur. Hiçbir şey bu bilgisayardan çıkmaz.",
-      "smart": "Seçtiğin gömme modeli sayesinde bir anı, farklı kelimeler kullanılsa bile anlamına göre bulunur."
+      "basic": "Mesajınla aynı kelimeleri içeren anıları bulur. Hiçbir şey bu bilgisayardan çıkmaz.",
+      "smart": "Farklı kelimeler kullansan da anıları anlamından bulur."
     },
     "failed": "Akıllı mod açılamadı, bu yüzden Temel mod kullanılıyor. Hiçbir şey kaybolmadı. Modeli kontrol edip tekrar dene.",
-    "noSource": "Akıllı mod, bir botun bilgi kaynakları için kurduğun gömme modelini kullanır. Etkinleştirmek için önce orada bir tane kur.",
-    "progress": "{{total}} anıdan {{done}} tanesi yeniden dizinleniyor",
+    "noSource": "Akıllı arama için bir arama modeli gerekir. Önce bir botun Bilgi ve dosyalar bölümünde kur.",
+    "progress": "{{total}} anıdan {{done}} tanesi güncelleniyor",
     "source": "Kullanılacak model",
     "state": {
-      "basic": "Temel (kelime eşleşmesi)",
-      "smart": "Akıllı (anlam)"
+      "basic": "Temel (aynı kelimeler)",
+      "smart": "Akıllı (anlamına göre)"
     },
-    "title": "Anılar nasıl bulunur",
+    "title": "Anıları bulma",
     "waiting": "model başlıyor; bu sırada kelimeler kullanılıyor"
   },
   "memorySettings": {
     "advanced": "Gelişmiş",
     "budget": "Bir yanıta okunan bellek: yaklaşık {{words}} kelime",
-    "budgetHint": "Daha fazla bellek bota daha çok arka plan bilgisi verir ama her yanıtı biraz yavaşlatır ve pahalılaştırır. Varsayılan yaklaşık 600 kelimedir.",
+    "budgetHint": "Fazlası daha iyi arka plan verir ama yanıtlar yavaşlar ve pahalılaşır. Varsayılan: yaklaşık 600 kelime.",
     "budgetLabel": "Yanıt başına bellek boyutu",
     "mode": {
       "ask": "Kaydetmeden önce sor",
@@ -4679,14 +4686,14 @@
       "on": "Açık"
     },
     "modeHint": {
-      "ask": "Her yeni anı, sen onaylayana kadar \"Onayın gerekiyor\" listesinde bekler.",
-      "off": "Hiçbir şey öğrenmez, hatırlamaz ve bellek araçları yoktur. Mevcut anılar saklanır ama kullanılmaz.",
-      "on": "Söylediklerinden öğrenir. Web sayfalarından, dosyalardan veya araçlardan aldığı her şey önce senin onayını bekler."
+      "ask": "Yeni bir şey kaydetmeden önce sana sorar.",
+      "off": "Yeni bir şey hatırlamaz, kayıtlı olanları kullanmaz.",
+      "on": "Sohbetlerinden öğrenir; dışarıdan gelen bilgiler için önce sorar."
     },
     "sectionHint": "Bu botun sohbetlerinden öğrenip öğrenmeyeceğini ve öğrendiklerini kullanıp kullanmayacağını seç.",
     "sectionTitle": "Bellek",
     "share": "Öğrendiklerimi diğer botlarımla paylaş",
-    "shareHint": "Açık: seninle ve geçmiş olaylarla ilgili bilgiler tüm botlarının kullanımına açılır. Kapalı: bu bot öğrendiği her şeyi kendine saklar.",
+    "shareHint": "Açık: bu botun senin hakkında öğrendiklerini tüm botların bilir. Kapalı: kendine saklar.",
     "title": "Bellek"
   },
   "messageInfo": {
@@ -5146,20 +5153,20 @@
   },
   "pageReader": {
     "bot": "Bot",
-    "description": "Botun web sayfalarını, e-postaları ve yabancıların yazdığı diğer metinleri nasıl okuduğu.",
+    "description": "Botun web sayfası ve e-posta gibi başkalarının yazdığı metinleri nasıl okuduğu.",
     "legend": "Sayfa okuyucu",
     "mode": {
       "always": "Her zaman",
-      "auto": "Otomatik (önerilir)",
+      "auto": "Otomatik",
       "off": "Kapalı"
     },
     "modeHint": {
-      "always": "Özel veri olmasa bile ayrı bir yardımcı model her sayfayı önce okur. Daha yavaştır ve kotanı biraz daha fazla kullanır.",
-      "auto": "Bot özel dosyaların, e-postaların veya hafızanla çalışırken ayrı bir yardımcı model her sayfayı önce okur ve yalnızca bilgileri aktarır. Aksi halde bot sayfaları kendisi okur.",
-      "off": "Bot sayfaları kendisi okur. Sayfa metni her zaman dışarıdan gelen veri olarak işaretlenir ve bir insanın göremediği her şey önceden ayıklanır."
+      "always": "Her sayfayı önce bir yardımcı kontrol eder. Biraz daha yavaştır.",
+      "auto": "Özel verilerin kullanılırken sayfaları önce bir yardımcı kontrol eder.",
+      "off": "Bot sayfaları kendisi okur."
     },
     "noBot": "Önce bir bot oluştur.",
-    "note": "Yardımcı, botun ucuz yardımcı modelidir (sınıflandırıcısı) ve botun kendisinden farklı bir sağlayıcıda çalışabilir: sayfa metni oraya gönderilir. Aracı yoktur ve özel verilerini hiç görmez. Bir sayfa onu yine de kandırmaya çalışabilir; bu yüzden gönderme ve silme onayları geçerli kalır. Yardımcı model yoksa sayfalar denetlenmeden aktarılmaz, tutulur.",
+    "note": "Yardımcı, bu botun daha ucuz ikinci yapay zekâ modelidir ve başka bir sağlayıcıda çalışabilir; sayfa metni oraya gider. Hiçbir aracı yoktur ve özel verilerini görmez. Gönderme ve silme onayları yine geçerlidir. Yardımcı yoksa sayfalar denetlenmeden aktarılmaz, bekletilir.",
     "title": "Web sayfalarını güvenle okuma"
   },
   "pairHost": {
@@ -5841,7 +5848,7 @@
     },
     "digest": {
       "enabled": "Günlük özet gönder",
-      "enabledHint": "Günde bir kısa bildirim: botların neler yaptı ve maliyeti ne oldu. Sessiz saatler geçerlidir: o saatlerde yalnızca bildirim geçmişine düşer.",
+      "enabledHint": "Botlarının gün içinde ne yaptığını ve maliyetini anlatan günde bir kısa bildirim.",
       "time": "Şu saatte gönder",
       "title": "Günlük özet"
     },
@@ -6000,7 +6007,7 @@
         "copied": "Komut kopyalandı",
         "copyCommand": "Komutu kopyala",
         "copyDetails": "Ayrıntıları kopyala",
-        "description": "Burada bulunan araçlar, giriş yaptıysan kendiliğinden açılır. Birini kapatırsan kapalı kalır.",
+        "description": "Bu bilgisayarda oturum açtığın yapay zekâ uygulamaları kendiliğinden açılır. Birini kapatırsan kapalı kalır.",
         "detailsCopied": "Ayrıntılar kopyalandı",
         "detailsToggle": "Ayrıntılar",
         "detectError": "Kurulu kodlama araçları denetlenemedi.",
@@ -6068,7 +6075,7 @@
     },
     "computer": {
       "target": {
-        "description": "Şimdilik yalnızca bağlı bilgisayar destekleniyor. Bilgisayar ve tarayıcı erişimini aşağıdaki İzinler bölümünden yönet.",
+        "description": "Botlarının çalıştığı bilgisayar.",
         "title": "Bot nerede çalışır"
       },
       "targets": {
@@ -6325,7 +6332,7 @@
         "tls": "Güvenli bağlantı kurulamadı. Sunucu adını, portu ve güvenlik ayarını kontrol et.",
         "unreachable": "Posta sunucusuna ulaşılamadı. İnternet bağlantını ve sunucu adlarını kontrol edip yeniden dene."
       },
-      "note": "Botlar e-posta araçlarını varsayılan olarak almaz. Bir posta kutusunu bir bota bağladığında o bot araçları kendiliğinden alır; aşağıda posta kutusu başına ya da botun ayarlarında kapatabilirsin. Postayı okuma ve arama sormadan çalışır; gönderme her zaman önce sorar.",
+      "note": "Bir posta kutusunu bir bota bağla; bot o postaları okuyup arayabilir. Göndermeden önce her zaman sorar.",
       "onlyBot": "Yalnızca {{name}}",
       "passwordMissing": "Kayıtlı parola yok",
       "result": {
@@ -6543,18 +6550,18 @@
     "resultsCount_one": "{{count}} ayar bulundu",
     "resultsCount_other": "{{count}} ayar bulundu",
     "risk": {
-      "email": "Bağlı bir posta kutusu botların e-postalarını okumasını sağlar. Bir şey göndermeden önce yine de sana sorarlar.",
-      "folders": "Botlar güvenilen klasörlerdeki dosyaları sormadan okuyup değiştirebilir. Yalnızca paylaşmaktan rahatsız olmayacağın klasörleri ekle.",
+      "folders": "Yalnızca botlarınla paylaşmaktan çekinmeyeceğin klasörleri ekle.",
       "memory": "“Unut”, botun hatırladığını siler. Her zaman geri alınamaz.",
       "permissions": "Burada daha fazla izin verirsen botlar sana sormadan işlem yapabilir. Önce nelerin ters gidebileceğini düşün.",
       "providers": "Bunu yalnızca sana kesin bilgi verildiyse değiştir. Yanlış bir giriş botlarının yanıt vermesini durdurabilir."
     },
     "safety": {
       "allowedGrants": {
-        "description": "Botların her seferinde sormadan kullanabildiği siteler ve araçlar. Tekrar sorulması için izni kaldırabilirsiniz.",
+        "description": "Botların her seferinde sormadan kullanabildiği siteler ve araçlar. Yeniden sorulsun istersen kaldır.",
         "empty": "Henüz kalıcı site veya işlem izni yok. Buraya eklemek için onay kartında \"Her zaman izin ver\"i seçin.",
         "title": "İzin verilen siteler ve işlemler"
       },
+      "compare": "Her seviye neyi kendi yapar, neyi sorar?",
       "custom": "Özel kuralların var (Gelişmiş’e bak). Onların yerine geçmesi için bir seviye seç.",
       "description": "Botlarına ne kadar serbestlik vereceğini seç. İstediğin zaman değiştirebilirsin.",
       "lead": "Bir seviye seç. Kendi kuralını vermediğin her bot buna uyar.",
@@ -6693,6 +6700,7 @@
       "upToDate": "En son sürümü kullanıyorsunuz."
     },
     "webSearch": {
+      "advanced": "Arama sağlayıcıları ve anahtarlar",
       "backends": {
         "bing": "Bing (HTML)",
         "brave": "Brave Search API",
@@ -6705,7 +6713,7 @@
       "clearKey": "Anahtarı sil",
       "configError": "web.toml yüklenemedi ({{message}}). Varsayılanlar gösteriliyor — aşağıda değişiklikleri kaydetmek dosyayı yenileyecektir.",
       "credentialsTitle": "Kendi sunucun ve API sağlayıcıları",
-      "description": "Arama sağlayıcı öncelik sırası, API anahtarları ve canlı bağlantı testi.",
+      "description": "Botlarının internette arama yapmasını sağlar. Ücretsiz arama kurulum gerektirmez.",
       "fallbackNotes": "Başarılı olmadan önceki denemelerde alınan hatalar: {{details}}",
       "keyEmptyPlaceholder": "API anahtarı gir…",
       "keyStoredPlaceholder": "Anahtar kayıtlı (değiştirmek için yeni anahtar gir)",
@@ -6713,7 +6721,7 @@
       "loadError": "Web araması ayarları yüklenemedi: {{message}}",
       "moveDown": "{{name}} sağlayıcısını aşağı taşı",
       "moveUp": "{{name}} sağlayıcısını yukarı taşı",
-      "note": "Web araması, sonuç alana kadar etkin sağlayıcıları öncelik sırasıyla dener. Değişiklikler yeniden başlatma gerekmeden bir sonraki turda geçerli olur.",
+      "note": "Arama, biri sonuç verene kadar aşağıdaki sağlayıcıları sırayla dener. Değişiklikler hemen geçerli olur.",
       "orderHint": "Tercih ettiğin sağlayıcıları yukarı taşı. Anahtarsız yedekler hesap gerektirmez ancak zaman zaman hız sınırına takılabilir.",
       "orderTitle": "Sağlayıcı sırası ve yedekler",
       "save": "Değişiklikleri kaydet",
@@ -6727,13 +6735,13 @@
       },
       "tavilyHint": "Tavily Search için isteğe bağlı API anahtarı (gizli bilgi deposunda yalnızca yazılabilir olarak saklanır).",
       "tavilyKeyLabel": "Tavily Search API anahtarı",
-      "test": "Test et",
+      "test": "Ara",
       "testFailed": "Arama testi başarısız ({{ms}} ms): {{error}}",
       "testOk": "{{backend}} yanıt verdi ({{ms}} ms içinde {{count}} sonuç)",
       "testOk_one": "{{backend}} yanıt verdi ({{ms}} ms içinde {{count}} sonuç)",
       "testQueryLabel": "Test arama sorgusu",
-      "testTitle": "Bağlantı testi",
-      "testing": "Test ediliyor…",
+      "testTitle": "Aramayı dene",
+      "testing": "Aranıyor…",
       "title": "Web araması",
       "toast": {
         "keyCleared": "API anahtarı gizli bilgi deposundan kaldırıldı",
@@ -7259,7 +7267,7 @@
     "limit": {
       "clear": "Limiti kaldır",
       "forecast": "Ay sonu tahmini",
-      "hint": "Bir çağrı aylık harcamayı limitin üzerine çıkarabilecekse Praxi modeli çağırmadan durur. Arka plan ve zamanlanmış çalışmalar da durur ve başarısız çalışma olarak görünür.",
+      "hint": "Bir çağrı limiti aşacaksa Praxi modeli çağırmadan durur. Zamanlanmış çalışmalar da durur.",
       "invalid": "1 ile 1.000.000 $ arasında bir tutar gir.",
       "label": "Aylık limit (USD)",
       "limitLabel": "Limit",
@@ -7456,7 +7464,7 @@
     },
     "searchPlaceholder": "Site, giriş veya notlarda ara…",
     "selectHint": "Ayrıntıları görmek, sırrı görüntülemek veya hangi botların kullanabileceğini seçmek için bir öğe seçin.",
-    "subtitle": "Bot bazlı erişim denetimleriyle yerel olarak saklanan girişler, parolalar ve bot kimlikleri.",
+    "subtitle": "Botlarının kullanabileceği girişler ve parolalar; bu bilgisayarda saklanır.",
     "tabs": {
       "all": "Tümü",
       "label": "Kasa filtresi",
@@ -7586,7 +7594,7 @@
     "stt": {
       "advanced": "Gelişmiş (model ve adres)",
       "clearKey": "Anahtarı sil",
-      "description": "Kayıtların nerede yazıya çevrileceği: OpenAI uyumlu bir servis (bulut sağlayıcı ya da yerel whisper sunucusu).",
+      "description": "Yazmak yerine konuş. Sesini yazıya çeviren servisi seç.",
       "geminiKey": "Gemini API anahtarı",
       "geminiModel": "Gemini modeli",
       "geminiPrivacy": "Gemini Live ile konuşman, yalnızca sesle yazarken ya da sesli görüşmedeyken, arka plan servisi üzerinden Google'a gider. Anahtar gizli bilgi deposunda kalır. Yalnızca yazıya dökülen metin kullanılır; modelin kendi yanıtı yok sayılır.",
@@ -7604,13 +7612,13 @@
       "save": "Kaydet",
       "saved": "Sesle yazma ayarları kaydedildi",
       "statusNoGeminiKey": "Henüz Gemini anahtarı yok. Botlar ve modeller'den ekleyin ya da aşağıya bir anahtar yapıştırın.",
-      "statusNoKey": "Henüz anahtar yok. Aşağıya yapıştırın (yerel bir sunucu anahtar istemeyebilir).",
+      "statusNoKey": "Henüz anahtar yok. Aşağıya yapıştır (yerel bir sunucu anahtar istemeyebilir).",
       "statusOwnKey": "Hazır: ses için kaydedilmiş ayrı bir anahtar kullanılıyor.",
-      "statusReusing": "Hazır: bu hizmet için zaten eklediğiniz anahtar kullanılıyor. Anahtar gizli depoda kalır.",
+      "statusReusing": "Hazır: bu hizmet için zaten eklediğin anahtar kullanılıyor. Anahtar gizli depoda kalır.",
       "statusReusingGemini": "Hazır: zaten eklediğiniz Gemini anahtarı kullanılıyor. Anahtar gizli depoda kalır.",
       "title": "Sesli dikte",
       "url": "Servis adresi",
-      "whereTitle": "Sesiniz nereye gider:"
+      "whereTitle": "Sesim nereye gider?"
     },
     "tableOmitted": "(tablo atlandı)",
     "title": "Sesli yanıtlar",
@@ -7762,7 +7770,7 @@
   "workspace": {
     "botRowDesc": "Klasör: {{folder}} · {{used}} ({{files}} dosya)",
     "breadcrumbs": "Çalışma alanı yolu",
-    "cardDescription": "Kalıcı bot klasörlerini, isteğe bağlı bot disk sınırlarını, uyarı eşiklerini ve güvenli temizliği yönet.",
+    "cardDescription": "Botlarının dosyalarını sakladığı yer ve kullandığı alan.",
     "cardTitle": "Bot Çalışma Klasörleri ve Disk",
     "cleanedSummary": "{{size}} yer açıldı",
     "cleanupDesc": "Yalnızca downloads/ ve logs/ içindeki eski dosyalar veya yeniden üretilebilir önbellek temizlenir.",

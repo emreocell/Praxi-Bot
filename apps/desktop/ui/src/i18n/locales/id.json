@@ -4469,7 +4469,7 @@
     },
     "noBot": "Create a bot to view or add memories.",
     "pendingHint": "These were picked up from web pages, files or tools, or you asked to approve everything. The bot does not use them until you approve.",
-    "pendingTitle": "Needs your OK",
+    "pendingTitle": "{{count}} memories are waiting for your OK",
     "previewEmpty": "No memories would be recalled for this message.",
     "previewHint": "Enter a sample message to see the exact recalled-memory data block that will be prepended to the turn.",
     "previewPlaceholder": "e.g. When do we draft release notes?",
@@ -4485,10 +4485,6 @@
     "search": "Search memories",
     "searchPlaceholder": "Filter by text or quote…",
     "title": "Personal memory",
-    "trust": {
-      "untrusted": "Untrusted data",
-      "user": "User-verified"
-    },
     "undo": "Undo",
     "undoneNotice": "Last change undone.",
     "updatedNotice": "Memory updated."
@@ -6250,7 +6246,6 @@
     "resultsCount_one": "{{count}} setting found",
     "resultsCount_other": "{{count}} settings found",
     "risk": {
-      "email": "A connected mailbox lets bots read your mail. They still ask before they send anything.",
       "folders": "Bots can read and change files in trusted folders without asking. Only add folders you are happy to share.",
       "memory": "“Forget” removes what a bot remembered. It cannot always be undone.",
       "permissions": "Allowing more here lets bots act without asking you. Think about what could go wrong first.",

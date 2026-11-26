@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
+import { MoreInfo } from "../components/ChoiceList";
 import { SettingsCard } from "../components/SettingsUi";
 import formStyles from "../components/Form.module.css";
 import { type QuietHours } from "../lib/quietHours";
@@ -190,10 +191,12 @@ export function NotificationSettings({
           </label>
         ) : null}
       </div>
-      <div className={styles.group}>
-        <h3 className={styles.subHeading}>{t("settings.route.title")}</h3>
-        {row("showAgentRoute")}
-      </div>
+      <MoreInfo label={t("choice.advanced")} testId="notifications-advanced">
+        <div className={styles.group}>
+          <h3 className={styles.subHeading}>{t("settings.route.title")}</h3>
+          {row("showAgentRoute")}
+        </div>
+      </MoreInfo>
     </SettingsCard>
   );
 }

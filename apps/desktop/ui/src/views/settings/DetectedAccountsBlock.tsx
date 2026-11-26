@@ -1,4 +1,5 @@
-import { ChevronDown, Info, RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw } from "lucide-react";
+import { MoreInfo } from "../../components/ChoiceList";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CliEngineDto, CliInstallApproval, ProvidersDto } from "../../api/types";
@@ -318,10 +319,10 @@ export function DetectedAccountsBlock({ local = false }: { local?: boolean } = {
         {approvalRemaining === 0 && !installing ? <button type="button" className={styles.textBtn} onClick={() => setApproval(null)}>{t("settingsModal.ai.detected.dismissExpired")}</button> : null}
       </div> : null}
       {installing ? <p role="status" className={styles.hint}>{t("settingsModal.ai.detected.installRunning")}</p> : null}
-      <p className={styles.hint}>
-        <Info size={12} aria-hidden="true" /> {t("settingsModal.ai.detected.description")}{" "}
-        {t("settingsModal.ai.detected.termsNotice")}
-      </p>
+      <MoreInfo testId="detected-more">
+        <p>{t("settingsModal.ai.detected.description")}</p>
+        <p>{t("settingsModal.ai.detected.termsNotice")}</p>
+      </MoreInfo>
       {problem ? (
         <p className={styles.error} role="alert">
           {problem.message}{" "}

@@ -6,6 +6,7 @@ import type { SpendLimit } from "../api/types";
 import { humanLine } from "../lib/humanError";
 import { paceOf, parseLimitInput, usedFraction, type Pace } from "../lib/spendLimit";
 import { useDaemon } from "../state/DaemonContext";
+import { MoreInfo } from "./ChoiceList";
 import formStyles from "./Form.module.css";
 import styles from "./SpendLimitCard.module.css";
 
@@ -155,13 +156,13 @@ export function SpendLimitCard({ refreshKey }: { refreshKey: number }) {
           {error}
         </p>
       ) : null}
-      <div className={styles.notes}>
-        <p className={formStyles.hint}>{t("usage.limit.hint")}</p>
-        <p className={formStyles.hint}>{t("usage.limit.notCounted")}</p>
+      <MoreInfo testId="spend-limit-more">
+        <p>{t("usage.limit.hint")}</p>
+        <p>{t("usage.limit.notCounted")}</p>
         {state && state.unpriced_calls > 0 ? (
-          <p className={formStyles.hint}>{t("usage.limit.unpriced", { count: state.unpriced_calls })}</p>
+          <p>{t("usage.limit.unpriced", { count: state.unpriced_calls })}</p>
         ) : null}
-      </div>
+      </MoreInfo>
     </Card>
   );
 }

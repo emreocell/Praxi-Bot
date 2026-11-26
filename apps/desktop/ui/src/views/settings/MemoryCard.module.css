@@ -1,0 +1,64 @@
+.pending {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--size-border) solid var(--color-accent);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated);
+}
+
+.pendingTitle,
+.subTitle {
+  margin: var(--space-0);
+  color: var(--color-text);
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-semibold);
+}
+
+.subTitle {
+  font-size: var(--font-size-sm);
+}
+
+.pendingList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-0);
+  padding: var(--space-0);
+  list-style: none;
+}
+
+.pendingItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+}
+
+.pendingText {
+  margin: var(--space-0);
+  color: var(--color-text);
+  font-size: var(--font-size-ui);
+  line-height: var(--line-height-normal);
+  overflow-wrap: anywhere;
+}
+
+.pendingMeta,
+.pendingQuote {
+  margin: var(--space-0);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.pendingQuote {
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.pendingItem > div {
+  margin-top: var(--space-1);
+}

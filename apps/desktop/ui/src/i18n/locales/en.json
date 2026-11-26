@@ -2575,6 +2575,11 @@
     "unarchive": "Unarchive",
     "unpin": "Unpin"
   },
+  "choice": {
+    "advanced": "Advanced",
+    "howItWorks": "How it works",
+    "recommended": "Recommended"
+  },
   "common": {
     "back": "Back",
     "cancel": "Cancel",
@@ -2591,7 +2596,7 @@
     "alwaysReadNote": "Otherwise you are asked once per session. Praxi's own windows are never shown.",
     "askNote": "Every action that changes something asks you first.",
     "deny": "Deny",
-    "description": "Servers you paired can ask this computer to look at the screen and act on it, only when you allow it.",
+    "description": "Let your bots see and use this computer's screen, only when you allow it.",
     "details": "Exactly",
     "enableAction": "Enable screen and input",
     "enableHint": "Allow {{name}} to see and control this PC’s screen. Input still asks for your approval.",
@@ -3832,8 +3837,8 @@
   },
   "folderTrust": {
     "action": "I trust this folder — don't treat {{folder}} as outside content",
-    "description": "Folders you trust are treated as your own content. Files fetched by a bot still count as outside content. Current tasks keep the content they already read.",
-    "empty": "No trusted folders yet. Trust a folder from an approval card after reading it.",
+    "description": "Folders your bots may read and change without asking.",
+    "empty": "None yet. When a bot reads a folder, you can trust it from the approval card.",
     "ownerRequired": "Open the desktop app on this computer to change folder trust.",
     "remove": "Remove trust for {{folder}}",
     "saved": "Trusted: {{folder}}",
@@ -4180,7 +4185,7 @@
     "conversation": "Conversation",
     "counts": "{{documents}} documents · {{chunks}} chunks",
     "defaultBrainName": "Shared brain",
-    "description": "Choose what this bot can search. Sources stay on this host until you explicitly enable remote embeddings for each source.",
+    "description": "Files and pages this bot can look things up in. They stay on this computer unless you allow otherwise.",
     "dimensions": "Vector dimensions",
     "dimensionsInvalid": "Enter a whole number between 1 and 4096.",
     "disable": "Disable",
@@ -4207,7 +4212,7 @@
     "fileSkipped": "Unreadable, protected or beyond an extraction limit. Other files continue indexing.",
     "grantRemote": "Allow document embeddings",
     "html": "The saved content is HTML",
-    "importHint": "Imported sources start disabled. Select and save the embedding provider again, then authorize sources and retrieval queries separately.",
+    "importHint": "Imported sources start switched off. Choose the search model again and save, then allow each source.",
     "indexed": "Processed {{count}} documents.",
     "indexed_one": "Processed {{count}} document.",
     "kind": "Source type",
@@ -4591,9 +4596,9 @@
     "botOnly": "Only memories specific to this bot",
     "content": "What to remember",
     "contentPlaceholder": "Write a concise fact or preference…",
-    "description": "See what each bot remembers from past conversations, edit or forget any item, undo changes, and preview what enters the next turn.",
-    "discard": "Discard",
-    "discardedNotice": "Discarded.",
+    "description": "What your bots remember about you. Check it, fix it or forget it.",
+    "discard": "Forget",
+    "discardedNotice": "Forgotten.",
     "edit": "Edit",
     "editLabel": "Memory text",
     "empty": "Your bot remembers useful facts here, like your name. Tell it something in a chat, or add one yourself below.",
@@ -4604,11 +4609,12 @@
     "eraseTitle": "Erase this memory permanently?",
     "erasedNotice": "Memory erased permanently.",
     "expires": "expires {{date}}",
+    "forAllBots": "For all your bots",
     "forget": "Forget",
     "forgottenBadge": "Forgotten",
     "forgottenEmpty": "Nothing forgotten yet.",
     "forgottenErased": "Erased permanently",
-    "forgottenHint": "Things you forgot are not learned again from conversations. Remove an entry to let your bot learn it again.",
+    "forgottenHint": "Your bot will not learn these again. Remove one to allow it.",
     "forgottenNotice": "Memory forgotten.",
     "forgottenRemove": "Allow learning again",
     "forgottenRemovedNotice": "This can be learned again now.",
@@ -4624,14 +4630,19 @@
       "profile": "User profile"
     },
     "noBot": "Create a bot to view or add memories.",
-    "pendingHint": "These were picked up from web pages, files or tools, or you asked to approve everything. The bot does not use them until you approve.",
-    "pendingTitle": "Needs your OK",
+    "origin": {
+      "chat": "From your chat",
+      "outside": "From a web page, file or tool"
+    },
+    "pendingHint": "Your bot uses these only after you approve them.",
+    "pendingTitle": "{{count}} memories are waiting for your OK",
+    "pendingTitle_one": "{{count}} memory is waiting for your OK",
     "previewEmpty": "No memories would be recalled for this message.",
-    "previewHint": "Enter a sample message to see the exact recalled-memory data block that will be prepended to the turn.",
+    "previewHint": "Type a sample message to see which memories the bot would use.",
     "previewPlaceholder": "e.g. When do we draft release notes?",
-    "previewQuery": "Sample user message",
-    "previewRun": "Preview recall",
-    "previewTitle": "What the bot will see (recall preview)",
+    "previewQuery": "Sample message",
+    "previewRun": "Show",
+    "previewTitle": "What the bot would recall",
     "previewTokens": "{{count}} memories recalled · ~{{used}} / {{budget}} tokens",
     "previewTokens_one": "{{count}} memory recalled · ~{{used}} / {{budget}} tokens",
     "saveEdit": "Save memory",
@@ -4640,38 +4651,34 @@
     "scopeThisBot": "Only {{bot}}",
     "search": "Search memories",
     "searchPlaceholder": "Filter by text or quote…",
-    "title": "Personal memory",
-    "trust": {
-      "untrusted": "Untrusted data",
-      "user": "User-verified"
-    },
+    "title": "Memory",
     "undo": "Undo",
     "undoneNotice": "Last change undone.",
     "updatedNotice": "Memory updated."
   },
   "memoryRecall": {
-    "consent": "I agree that my memories are sent to {{provider}} to be turned into search data",
+    "consent": "Send my memories to {{provider}} so they can be searched by meaning",
     "disable": "Switch back to Basic",
     "enable": "Switch to Smart",
     "explain": {
-      "basic": "A memory is found when it shares words with your message. Nothing leaves this computer.",
-      "smart": "A memory is found by what it means, even with different words, using the embedding model you chose."
+      "basic": "Finds memories that share words with your message. Nothing leaves this computer.",
+      "smart": "Finds memories by what they mean, even with different words."
     },
     "failed": "Smart mode could not be switched on, so Basic is used. Nothing was lost. Check the model and try again.",
-    "noSource": "Smart mode reuses an embedding model you set up for a bot's knowledge. Set one up there first to enable it.",
-    "progress": "re-indexing {{done}} of {{total}} memories",
+    "noSource": "Smart search needs a search model. Set one up under a bot's Knowledge first.",
+    "progress": "updating {{done}} of {{total}} memories",
     "source": "Model to use",
     "state": {
-      "basic": "Basic (word match)",
-      "smart": "Smart (meaning)"
+      "basic": "Basic (same words)",
+      "smart": "Smart (by meaning)"
     },
-    "title": "How memories are found",
+    "title": "Finding memories",
     "waiting": "the model is starting; words are used meanwhile"
   },
   "memorySettings": {
     "advanced": "Advanced",
     "budget": "Memory read into one answer: about {{words}} words",
-    "budgetHint": "More memory gives the bot more background but makes every answer a little slower and costlier. The default is about 600 words.",
+    "budgetHint": "More gives better background but slower, costlier answers. Default: about 600 words.",
     "budgetLabel": "Memory size per answer",
     "mode": {
       "ask": "Ask before saving",
@@ -4679,14 +4686,14 @@
       "on": "On"
     },
     "modeHint": {
-      "ask": "Every new memory waits in \"Needs your OK\" until you approve it.",
-      "off": "Learns nothing, remembers nothing and has no memory tools. Existing memories stay stored but are not used.",
-      "on": "Learns from what you say. Anything it picks up from web pages, files or tools waits for your OK first."
+      "ask": "Asks you before saving anything new.",
+      "off": "Remembers nothing new and uses nothing saved.",
+      "on": "Learns from your chats; asks first about anything from outside."
     },
     "sectionHint": "Choose whether this bot learns from your chats and uses what it learned.",
     "sectionTitle": "Memory",
     "share": "Share what I learn with my other bots",
-    "shareHint": "On: facts about you and past events are available to all your bots. Off: this bot keeps everything it learns to itself.",
+    "shareHint": "On: all your bots know what this bot learns about you. Off: it keeps it to itself.",
     "title": "Memory"
   },
   "messageInfo": {
@@ -5146,20 +5153,20 @@
   },
   "pageReader": {
     "bot": "Bot",
-    "description": "How a bot reads web pages, mail and other text written by strangers.",
+    "description": "How your bot reads text written by others, like web pages and mail.",
     "legend": "Page reader",
     "mode": {
       "always": "Always",
-      "auto": "Automatic (recommended)",
+      "auto": "Automatic",
       "off": "Off"
     },
     "modeHint": {
-      "always": "A separate helper model reads every page first, even when no private data is involved. Slower, and it uses a little more of your quota.",
-      "auto": "While the bot works with your private files, mail or memory, a separate helper model reads each page first and passes on only the facts. Otherwise the bot reads pages itself.",
-      "off": "The bot reads pages itself. Page text always arrives marked as data from outside, with anything a person cannot see already removed."
+      "always": "A helper checks every page first. A little slower.",
+      "auto": "A helper checks pages first while your private data is in use.",
+      "off": "Your bot reads pages itself."
     },
     "noBot": "Create a bot first.",
-    "note": "The helper is this bot's cheap helper model (its classifier), which may run with a different provider than the bot itself: the page text is sent there. It has no tools and never sees your private data. A page can still try to fool it, so the approvals for sending and deleting stay in force. If no helper model is available, pages are held back instead of being passed on unchecked.",
+    "note": "The helper is a second, cheaper AI model of this bot and may run with another provider, so the page text is sent there. It has no tools and never sees your private data. Approvals for sending and deleting still apply. If no helper is available, pages are held back instead of being passed on unchecked.",
     "title": "Reading web pages safely"
   },
   "pairHost": {
@@ -5841,7 +5848,7 @@
     },
     "digest": {
       "enabled": "Send a daily summary",
-      "enabledHint": "One short notification a day with what your bots did and what it cost. Quiet hours apply: during them it only goes to the notification history.",
+      "enabledHint": "One short note a day on what your bots did and what it cost.",
       "time": "Send it at",
       "title": "Daily summary"
     },
@@ -6000,7 +6007,7 @@
         "copied": "Command copied",
         "copyCommand": "Copy command",
         "copyDetails": "Copy details",
-        "description": "Tools found here are switched on automatically when you are signed in. Switch one off and it stays off.",
+        "description": "AI apps you are signed in to on this computer are switched on automatically. Switch one off and it stays off.",
         "detailsCopied": "Details copied",
         "detailsToggle": "Details",
         "detectError": "Could not check installed coding tools.",
@@ -6068,7 +6075,7 @@
     },
     "computer": {
       "target": {
-        "description": "Only the connected computer is currently supported. Manage computer and browser access in Permissions below.",
+        "description": "The computer your bots work on.",
         "title": "Where the bot runs"
       },
       "targets": {
@@ -6325,7 +6332,7 @@
         "tls": "The secure connection failed. Check the server name, the port and the security setting.",
         "unreachable": "The mail server could not be reached. Check your internet connection and the server names, then try again."
       },
-      "note": "Bots do not get the e-mail tools by default. When you connect a mailbox to a bot, that bot gets them automatically; you can turn them off per mailbox below or in the bot's settings. Reading and searching mail runs without asking; sending always asks first.",
+      "note": "Connect a mailbox to a bot and it can read and search that mail. It always asks before sending.",
       "onlyBot": "Only {{name}}",
       "passwordMissing": "No password stored",
       "result": {
@@ -6543,18 +6550,18 @@
     "resultsCount_one": "{{count}} setting found",
     "resultsCount_other": "{{count}} settings found",
     "risk": {
-      "email": "A connected mailbox lets bots read your mail. They still ask before they send anything.",
-      "folders": "Bots can read and change files in trusted folders without asking. Only add folders you are happy to share.",
+      "folders": "Only add folders you are happy to share with your bots.",
       "memory": "“Forget” removes what a bot remembered. It cannot always be undone.",
       "permissions": "Allowing more here lets bots act without asking you. Think about what could go wrong first.",
       "providers": "Only change this if someone gave you exact details. A wrong entry can stop your bots from answering."
     },
     "safety": {
       "allowedGrants": {
-        "description": "Sites and tools a bot can use without asking each time. Revoke any entry to ask again.",
+        "description": "Sites and tools a bot may use without asking each time. Remove one to be asked again.",
         "empty": "No standing site or action permissions yet. Choose \"Always allow\" on an approval card to add one here.",
         "title": "Allowed sites and actions"
       },
+      "compare": "What each level does alone, and what it asks",
       "custom": "You have custom rules (see Advanced). Pick a level to replace them.",
       "description": "Pick how much freedom your bots have. You can change it any time.",
       "lead": "Choose one level. Every bot follows it unless you gave that bot its own rules.",
@@ -6693,6 +6700,7 @@
       "upToDate": "You have the latest version."
     },
     "webSearch": {
+      "advanced": "Search providers and keys",
       "backends": {
         "bing": "Bing (HTML)",
         "brave": "Brave Search API",
@@ -6705,7 +6713,7 @@
       "clearKey": "Clear key",
       "configError": "web.toml could not be loaded ({{message}}). Showing defaults — saving changes below will replace it.",
       "credentialsTitle": "Self-hosted & API backends",
-      "description": "Search backend priority order, API keys, and live connectivity probe.",
+      "description": "Lets your bots search the internet. Free search works without any setup.",
       "fallbackNotes": "Earlier fallback errors before success: {{details}}",
       "keyEmptyPlaceholder": "Enter API key…",
       "keyStoredPlaceholder": "Key stored (enter a new key to replace)",
@@ -6713,7 +6721,7 @@
       "loadError": "Could not load web search settings: {{message}}",
       "moveDown": "Move {{name}} down",
       "moveUp": "Move {{name}} up",
-      "note": "Web search tries active backends in priority order until one returns results. Changes apply immediately on the next bot turn without restarting.",
+      "note": "Search tries the providers below in order until one answers. Changes apply right away.",
       "orderHint": "Move preferred backends up. Keyless fallbacks work without an API key but may occasionally hit upstream rate limits.",
       "orderTitle": "Backend order & fallbacks",
       "save": "Save changes",
@@ -6727,13 +6735,13 @@
       },
       "tavilyHint": "Optional API key for Tavily Search (stored write-only in the secret store).",
       "tavilyKeyLabel": "Tavily Search API key",
-      "test": "Test",
+      "test": "Search",
       "testFailed": "Search probe failed ({{ms}} ms): {{error}}",
       "testOk": "{{backend}} answered ({{count}} results in {{ms}} ms)",
       "testOk_one": "{{backend}} answered ({{count}} result in {{ms}} ms)",
       "testQueryLabel": "Test search query",
-      "testTitle": "Connectivity test",
-      "testing": "Testing…",
+      "testTitle": "Try a search",
+      "testing": "Searching…",
       "title": "Web search",
       "toast": {
         "keyCleared": "API key removed from secret store",
@@ -7259,7 +7267,7 @@
     "limit": {
       "clear": "Remove limit",
       "forecast": "Forecast for month end",
-      "hint": "When a call could take the month past the limit, Praxi stops before calling the model. Background and scheduled runs stop too and show up as failed runs.",
+      "hint": "If a call would go over the limit, Praxi stops before calling the model. Scheduled runs stop too.",
       "invalid": "Enter an amount from $1 to $1,000,000.",
       "label": "Limit in USD per month",
       "limitLabel": "Limit",
@@ -7456,7 +7464,7 @@
     },
     "searchPlaceholder": "Search sites, logins, notes…",
     "selectHint": "Select an item to view details, reveal its secret, or choose which bots may use it.",
-    "subtitle": "Logins, passwords and bot identities stored locally with per-bot access controls.",
+    "subtitle": "Logins and passwords your bots may use, kept on this computer.",
     "tabs": {
       "all": "All",
       "label": "Vault filter",
@@ -7586,7 +7594,7 @@
     "stt": {
       "advanced": "Advanced (model and address)",
       "clearKey": "Remove key",
-      "description": "Where your recordings are transcribed: an OpenAI-compatible service (a cloud provider or a local whisper server).",
+      "description": "Speak instead of typing. Choose the service that turns your voice into text.",
       "geminiKey": "Gemini API key",
       "geminiModel": "Gemini model",
       "geminiPrivacy": "With Gemini Live your speech goes to Google, through the background service, only while you dictate or are in a voice call. The key stays in the secret store. Only the transcript is used; the model's own answer is ignored.",
@@ -7610,7 +7618,7 @@
       "statusReusingGemini": "Ready: using the Gemini key you already added. It stays in the secret store.",
       "title": "Voice dictation",
       "url": "Service address",
-      "whereTitle": "Where your voice goes:"
+      "whereTitle": "Where does my voice go?"
     },
     "tableOmitted": "(table omitted)",
     "title": "Spoken replies",
@@ -7762,7 +7770,7 @@
   "workspace": {
     "botRowDesc": "Folder: {{folder}} · {{used}} ({{files}} files)",
     "breadcrumbs": "Workspace breadcrumbs",
-    "cardDescription": "Inspect persistent bot folders, optional per-bot disk limits, warning thresholds, and safe cleanup.",
+    "cardDescription": "Where your bots keep their files, and how much space they use.",
     "cardTitle": "Bot Workspaces & Disk",
     "cleanedSummary": "Freed {{size}}",
     "cleanupDesc": "Only old files in downloads/ and logs/, or regenerable cache folders, are ever removed.",

@@ -2575,6 +2575,11 @@
     "unarchive": "Aus Archiv holen",
     "unpin": "Lösen"
   },
+  "choice": {
+    "advanced": "Advanced",
+    "howItWorks": "How it works",
+    "recommended": "Recommended"
+  },
   "common": {
     "back": "Zurück",
     "cancel": "Abbrechen",
@@ -4604,6 +4609,7 @@
     "eraseTitle": "Diesen Gedächtniseintrag endgültig löschen?",
     "erasedNotice": "Gedächtniseintrag endgültig gelöscht.",
     "expires": "läuft am {{date}} ab",
+    "forAllBots": "For all your bots",
     "forget": "Vergessen",
     "forgottenBadge": "Vergessen",
     "forgottenEmpty": "Noch nichts vergessen.",
@@ -4624,8 +4630,13 @@
       "profile": "Benutzerprofil"
     },
     "noBot": "Erstelle einen Bot, um Erinnerungen anzusehen oder hinzuzufügen.",
+    "origin": {
+      "chat": "From your chat",
+      "outside": "From a web page, file or tool"
+    },
     "pendingHint": "Diese stammen aus Webseiten, Dateien oder Werkzeugen, oder du wolltest alles freigeben. Der Bot nutzt sie erst, wenn du zustimmst.",
-    "pendingTitle": "Braucht dein OK",
+    "pendingTitle": "{{count}} memories are waiting for your OK",
+    "pendingTitle_one": "{{count}} memory is waiting for your OK",
     "previewEmpty": "Für diese Nachricht würden keine Erinnerungen abgerufen.",
     "previewHint": "Gib eine Beispielnachricht ein, um den genauen Datenblock mit abgerufenen Erinnerungen zu sehen, der dem Durchgang vorangestellt wird.",
     "previewPlaceholder": "z. B. Wann erstellen wir die Versionshinweise?",
@@ -4641,10 +4652,6 @@
     "search": "Erinnerungen durchsuchen",
     "searchPlaceholder": "Nach Text oder Zitat filtern …",
     "title": "Persönliches Gedächtnis",
-    "trust": {
-      "untrusted": "Nicht vertrauenswürdige Daten",
-      "user": "Vom Benutzer bestätigt"
-    },
     "undo": "Rückgängig",
     "undoneNotice": "Letzte Änderung rückgängig gemacht.",
     "updatedNotice": "Erinnerung aktualisiert."
@@ -6543,7 +6550,6 @@
     "resultsCount_one": "{{count}} Einstellung gefunden",
     "resultsCount_other": "{{count}} Einstellungen gefunden",
     "risk": {
-      "email": "Ein verbundenes Postfach lässt Bots deine Mails lesen. Vor dem Senden fragen sie dich trotzdem.",
       "folders": "Bots können Dateien in vertrauten Ordnern ohne Nachfrage lesen und ändern. Füge nur Ordner hinzu, die du gern teilst.",
       "memory": "„Vergessen“ entfernt, was sich ein Bot gemerkt hat. Das lässt sich nicht immer rückgängig machen.",
       "permissions": "Mehr Erlaubnis hier heißt: Bots handeln, ohne dich zu fragen. Überlege zuerst, was schiefgehen könnte.",
@@ -6555,6 +6561,7 @@
         "empty": "Noch keine dauerhaften Website- oder Aktionsfreigaben. Wählen Sie in einer Bestätigungskarte „Immer erlauben“, um eine hinzuzufügen.",
         "title": "Erlaubte Websites und Aktionen"
       },
+      "compare": "What each level does alone, and what it asks",
       "custom": "Du hast eigene Regeln (siehe Erweitert). Wähle eine Stufe, um sie zu ersetzen.",
       "description": "Wähle, wie viel Freiheit deine Bots haben. Du kannst es jederzeit ändern.",
       "lead": "Wähle eine Stufe. Jeder Bot folgt ihr, außer du hast ihm eigene Regeln gegeben.",
@@ -6693,6 +6700,7 @@
       "upToDate": "Sie haben die neueste Version."
     },
     "webSearch": {
+      "advanced": "Search providers and keys",
       "backends": {
         "bing": "Bing (HTML)",
         "brave": "Brave Search API",

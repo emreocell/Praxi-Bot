@@ -15,5 +15,4 @@
 .pace[data-pace="reached"] { color: var(--color-danger); }
 .form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
 .amount { flex: 1; min-width: calc(var(--size-control-lg) * 2); }
-.notes { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-3); }
 @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }

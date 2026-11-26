@@ -7,6 +7,7 @@ import { useDaemon } from "../../state/DaemonContext";
 import { useProviders } from "../../state/useProviders";
 import { advanceKnowledgeEmbeddings } from "../../lib/knowledgeEmbedding";
 import { MAX_EMBEDDING_DIMENSIONS, parsePositiveInt } from "../../lib/embeddingInputs";
+import { MoreInfo } from "../../components/ChoiceList";
 import form from "../../components/Form.module.css";
 import styles from "./KnowledgeCard.module.css";
 import { humanLine } from "../../lib/humanError";
@@ -114,7 +115,6 @@ export function KnowledgeCard() {
 
   return <SettingsCard title={t("knowledge.title")} description={t("knowledge.description")}>
     <div className={styles.root}>
-    <p className={form.hint}>{t("knowledge.importHint")}</p>
     <label className={form.field}>{t("knowledge.bot")}
       <select className={form.select} value={activeBot} disabled={busy} onChange={(e) => setBot(e.target.value)}>
         {bots.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -211,6 +211,7 @@ export function KnowledgeCard() {
       </details>
       {settings ? <EmbeddingSettings key={activeBot + JSON.stringify(settings)} settings={settings} providerIds={providers?.configured.filter((p) => p.enabled && (p.custom || providers.catalog.some((entry) => entry.id === p.id && ["gemini", "openai_compatible"].includes(entry.kind)))).map((p) => p.id) ?? []} busy={busy} save={(value) => act(() => client!.updateKnowledgeSettings(activeBot, value))} queryApproval={() => requestApproval({ kind: "queries" })} revokeQuery={() => act(() => client!.revokeKnowledgeEmbeddingGrant(activeBot, { kind: "queries" }))} resetCooldown={() => act(() => client!.resetKnowledgeEmbeddingCooldown(activeBot))} /> : null}
     </>}
+    <MoreInfo testId="knowledge-more"><p>{t("knowledge.importHint")}</p></MoreInfo>
     </div>
   </SettingsCard>;
 }

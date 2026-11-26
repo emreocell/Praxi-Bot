@@ -807,6 +807,24 @@ export class MockApiClient extends ApiClient {
       deleted: false,
       pending: false,
       undo_journal_id: 2
+    },
+    {
+      // Picked up from a page the bot read: waits in "Needs your OK" (the quote repeats the text).
+      id: "44444444-4444-4444-8444-444444444443",
+      bot_id: null,
+      kind: "profile",
+      content: "User's email address is alex@example.com",
+      source_quote: "alex@example.com",
+      source_chat_id: "33333333-3333-4333-8333-333333333333",
+      source_message_id: null,
+      trust: "untrusted",
+      importance: 0.5,
+      created_ms: NOW - 3_600_000,
+      last_used_ms: NOW,
+      valid_until_ms: null,
+      deleted: false,
+      pending: true,
+      undo_journal_id: null
     }
   ];
   private readonly memoryUndoSnapshots = new Map<string, MemoryItem>();
@@ -1712,6 +1730,9 @@ export class MockApiClient extends ApiClient {
         rendered_block: rendered,
         hits: visible.map((m, i) => ({ memory: structuredClone(m), score: 1 / (60 + i + 1) }))
       });
+    }
+    if (seg[0] === "memory" && seg[1] === "forgotten" && method === "GET") {
+      return ok([]);
     }
     if (seg[0] === "memory" && seg[1] === "pending" && method === "GET") {
       return ok(structuredClone(this.memories.filter((m) => m.pending && !m.deleted)));
