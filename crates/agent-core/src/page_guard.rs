@@ -607,17 +607,15 @@ pub(crate) async fn frame_tool_result(
             match read {
                 Read::Done(read) => wrap_data_block(&format!("{tool} (reader)"), &read),
                 Read::NoModel => {
-                    // Never fall back to the raw page: a run that should be quarantined is not
-                    // handed the page just because no reader model could be found.
+                    // Never fall back to the page, not even its structure: with no reader model
+                    // at all nothing has vetted any of it, so a run that should be quarantined
+                    // gets nothing of the page until the owner fixes the reader (a reader that
+                    // was configured and FAILED is a different case, below).
                     tracing::warn!(
                         tool,
-                        "page reader: no usable model is configured, structure only"
+                        "page reader: no usable model is configured, page withheld"
                     );
-                    degraded(
-                        tool,
-                        &text,
-                        "no separate reader model is available for this bot",
-                    )
+                    withheld("no separate reader model is available for this bot")
                 }
                 Read::Failed(why) => {
                     tracing::warn!(tool, %why, "page reader failed twice, structure only");
@@ -866,16 +864,24 @@ pub(crate) fn structural_view(raw: &str) -> Option<String> {
 /// [`structural_view`]) in the data block, and a daemon notice that this is no reason to stop.
 /// Without any structure the page is withheld, with the same notice.
 fn degraded(tool: &str, raw: &str, why: &str) -> String {
-    let next = "This is NOT a reason to stop or to ask the owner: carry on in the interactive browser (browser_open on the address if it is not open, then browser_snapshot, browser_scroll, browser_click / browser_pointer) and work the page there.";
     match structural_view(raw) {
         Some(view) => format!(
-            "[Praxi notice] The safe page reader could not summarise this page ({why}), so you get its structure only (title, controls, addresses), not its text. {next}\n{}",
+            "[Praxi notice] The safe page reader could not summarise this page ({why}), so you get its structure only (title, controls, addresses), not its text. {CARRY_ON}\n{}",
             wrap_data_block(&format!("{tool} (structure only)"), &view)
         ),
         None => format!(
-            "[page withheld: the safe page reader could not run ({why}), and the page has no controls or addresses to list. {next} Or the owner can set browser.reader to off in Settings > Safety.]"
+            "[page withheld: the safe page reader could not run ({why}), and the page has no controls or addresses to list. {CARRY_ON} Or the owner can set browser.reader to off in Settings > Safety.]"
         ),
     }
+}
+
+const CARRY_ON: &str = "This is NOT a reason to stop or to ask the owner: carry on in the interactive browser (browser_open on the address if it is not open, then browser_snapshot, browser_scroll, browser_click / browser_pointer) and work the page there.";
+
+/// What the run gets when no reader model exists for it: nothing of the page.
+fn withheld(why: &str) -> String {
+    format!(
+        "[page withheld: the safe page reader could not run ({why}). The owner can give the bot a model (a classifier or executor that is not a CLI model) or set browser.reader to off in Settings > Safety. Until then pages are not shown to this run; tools that do not read a page work as usual.]"
+    )
 }
 
 #[cfg(test)]
@@ -1113,11 +1119,19 @@ mod tests {
         assert!(!v.contains("address book"), "{v}");
         assert!(v.contains("- [e5] link \"Home\""), "{v}");
         // A page of thousands of controls cannot make the view big.
-        let many: String = (0..5000)
-            .map(|i| format!("[e{i}] button \"Item {i}\"\n"))
-            .collect();
+        let many = (0..5000).fold(String::new(), |mut acc, i| {
+            let _ = writeln!(acc, "[e{i}] button \"Item {i}\"");
+            acc
+        });
         let big = structural_view(&format!("# Shop (https://s.example/)\n{many}")).unwrap();
         assert!(big.len() <= READER_OUTPUT_MAX_BYTES + 60, "{}", big.len());
+    }
+
+    #[test]
+    fn no_reader_model_withholds_the_page_and_its_structure() {
+        let w = withheld("no separate reader model is available for this bot");
+        assert!(w.starts_with("[page withheld"), "{w}");
+        assert!(!w.contains("structure only"), "{w}");
     }
 
     #[test]

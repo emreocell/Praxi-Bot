@@ -1817,9 +1817,9 @@ impl TurnExecutor {
                 .unwrap_or_default(),
         );
         // The pictures the calls of this step reported out of band, by call.
-        let shots: std::sync::Mutex<std::collections::HashMap<String, String>> =
+        let pictures: std::sync::Mutex<std::collections::HashMap<String, String>> =
             std::sync::Mutex::default();
-        let shots_ref = &shots;
+        let pictures_ref = &pictures;
         // Reads batched by `pending_tools` run concurrently; everything else is a single call.
         let ctx_ref: &RunCtx = &ctx;
         let outcomes = futures::future::join_all(slots.into_iter().map(|slot| async move {
@@ -1955,7 +1955,7 @@ impl TurnExecutor {
                     // A picture of a page the main model may not read raw is not shown either.
                     if let Some(path) = reported.screenshot
                         && !crate::page_guard::quarantined(reader_mode, ctx_ref)
-                        && let Ok(mut m) = shots_ref.lock()
+                        && let Ok(mut m) = pictures_ref.lock()
                     {
                         m.insert(call_id.to_string(), path.display().to_string());
                     }
@@ -2071,7 +2071,7 @@ impl TurnExecutor {
                 } else {
                     None
                 },
-                shot: shots
+                shot: pictures
                     .lock()
                     .ok()
                     .and_then(|mut m| m.remove(&call_uuid.to_string())),
