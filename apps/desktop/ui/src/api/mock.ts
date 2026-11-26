@@ -2508,7 +2508,8 @@ export class MockApiClient extends ApiClient {
         return ok(undefined);
       }
       case "GET /profile-share":
-        return ok([]);
+        // The built-in gallery (names and descriptions of crates/daemon-api/templates/*.json), for design review.
+        return ok(seg[1] === "templates" ? MOCK_PROFILE_TEMPLATES : []);
       case "POST /profile-share":
         // Preview, import and export need the daemon's validator; the demo has none.
         throw new ApiError(422, "bad_profile", "profile sharing needs a running daemon");
@@ -3548,6 +3549,125 @@ export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["even
   }
   return out;
 }
+
+/** The daemon's bot template gallery, trimmed to what the New-bot dialog shows (mock mode only). */
+const MOCK_PROFILE_TEMPLATES = [
+  {
+    "format": "praxi-bot-profile",
+    "format_version": 1,
+    "meta": {
+      "id": "researcher",
+      "names": {
+        "en": "Researcher",
+        "tr": "Araştırmacı",
+        "de": "Rechercheur"
+      },
+      "descriptions": {
+        "en": "Reads the web, compares sources and writes a short cited summary.",
+        "tr": "Web'i okur, kaynakları karşılaştırır ve kaynaklı kısa bir özet yazar.",
+        "de": "Liest im Web, vergleicht Quellen und schreibt eine kurze Zusammenfassung mit Belegen."
+      }
+    },
+    "bot": {
+      "name": "Researcher"
+    },
+    "permissions": {
+      "preset": "approve-destructive"
+    }
+  },
+  {
+    "format": "praxi-bot-profile",
+    "format_version": 1,
+    "meta": {
+      "id": "inbox-triage",
+      "names": {
+        "en": "Inbox triage",
+        "tr": "Gelen kutusu ayıklama",
+        "de": "Posteingangs-Sortierer"
+      },
+      "descriptions": {
+        "en": "Reads your mail, sorts it by urgency and drafts replies. It never sends on its own.",
+        "tr": "E-postalarınızı okur, aciliyete göre ayırır ve yanıt taslakları hazırlar. Kendi başına göndermez.",
+        "de": "Liest Ihre Mails, sortiert sie nach Dringlichkeit und entwirft Antworten. Sendet nie von allein."
+      }
+    },
+    "bot": {
+      "name": "Inbox triage"
+    },
+    "permissions": {
+      "preset": "read-and-draft"
+    }
+  },
+  {
+    "format": "praxi-bot-profile",
+    "format_version": 1,
+    "meta": {
+      "id": "daily-briefing",
+      "names": {
+        "en": "Daily briefing",
+        "tr": "Günlük özet",
+        "de": "Tagesbriefing"
+      },
+      "descriptions": {
+        "en": "Collects news and your open tasks into a short morning briefing.",
+        "tr": "Haberleri ve açık işlerinizi kısa bir sabah özetinde toplar.",
+        "de": "Fasst Nachrichten und Ihre offenen Aufgaben zu einem kurzen Morgenbriefing zusammen."
+      }
+    },
+    "bot": {
+      "name": "Daily briefing"
+    },
+    "permissions": {
+      "preset": "approve-destructive"
+    }
+  },
+  {
+    "format": "praxi-bot-profile",
+    "format_version": 1,
+    "meta": {
+      "id": "coder",
+      "names": {
+        "en": "Coder",
+        "tr": "Yazılımcı",
+        "de": "Programmierer"
+      },
+      "descriptions": {
+        "en": "Reads and edits code in your project and runs tests. Every change asks first.",
+        "tr": "Projenizdeki kodu okur, düzenler ve testleri çalıştırır. Her değişiklik önce sorar.",
+        "de": "Liest und bearbeitet Code in Ihrem Projekt und führt Tests aus. Jede Änderung fragt zuerst."
+      }
+    },
+    "bot": {
+      "name": "Coder"
+    },
+    "permissions": {
+      "preset": "approve-destructive"
+    }
+  },
+  {
+    "format": "praxi-bot-profile",
+    "format_version": 1,
+    "meta": {
+      "id": "family-helper",
+      "names": {
+        "en": "Family helper",
+        "tr": "Aile yardımcısı",
+        "de": "Familienhelfer"
+      },
+      "descriptions": {
+        "en": "Plain-language help for the household: recipes, plans, reminders and homework explanations.",
+        "tr": "Ev halkı için sade dille yardım: tarifler, planlar, hatırlatmalar ve ödev açıklamaları.",
+        "de": "Hilfe in einfacher Sprache für den Haushalt: Rezepte, Pläne, Erinnerungen und Hausaufgaben-Erklärungen."
+      }
+    },
+    "bot": {
+      "name": "Family helper"
+    },
+    "permissions": {
+      "preset": "read-only"
+    }
+  }
+];
 
 /** Sample for design review: a 16 GB laptop with an 8 GB GPU, Ollama installed but not running. */
 const MOCK_LOCAL_MODELS: LocalModelsDto = {

@@ -45,6 +45,8 @@ const screens = [
   { name: 'first-run-bot', query: 'screen=onboarding&frstep=bot' },
   // Views opened by a few clicks/keys (act: click a selector, type into one, or press a key).
   { name: 'settings-search', expect: '[data-autofocus]', query: 'screen=settings&section=general', act: [{ type: ['[data-autofocus]', 'theme'] }] },
+  { name: 'new-bot-identity', expect: '[data-testid=new-bot-name]', query: 'screen=newbot', act: [{ click: '[data-testid=new-bot-start-blank]' }] },
+  { name: 'new-bot-access', expect: '[data-testid=new-bot-summary]', query: 'screen=newbot', act: [{ click: '[data-testid=new-bot-start-blank]' }, { type: ['[data-testid=new-bot-name]', 'Nova'] }, { click: '[data-testid=new-bot-next]' }] },
   { name: 'settings-search-empty', query: 'screen=settings&section=general', act: [{ type: ['[data-autofocus]', 'zzzqqq'] }] },
   { name: 'vault-grants', expect: '[data-testid=vault-grants-panel]', scope: '[data-testid=vault-grants-panel]', query: 'screen=vault', act: [{ click: '[data-testid=vault-grants-open]' }] },
   { name: 'vault-grants-revoke', expect: '[data-testid=confirm-dialog]', scope: '[data-testid=confirm-dialog]', query: 'screen=vault', act: [{ click: '[data-testid=vault-grants-open]' }, { click: '[data-testid^=vault-grant-revoke-]' }] },

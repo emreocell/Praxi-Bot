@@ -1,9 +1,12 @@
+/* One height for all three steps, so the dialog does not jump while moving between them. */
 .modalForm {
   display: flex;
   flex-direction: column;
   flex: 1;
   width: 100%;
-  max-height: 100%;
+  height: calc(var(--size-modal-height) * 0.86);
+  /* The backdrop keeps a 24 px margin around the dialog: on a small window the body scrolls, the footer stays. */
+  max-height: calc(100dvh - var(--space-6) * 2);
   min-height: var(--space-0);
 }
 
@@ -11,21 +14,13 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: var(--space-5);
   min-height: var(--space-0);
-  padding: var(--space-2) var(--space-6) var(--space-6);
+  padding: var(--space-4) var(--space-6) var(--space-6);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-}
-
-.templates {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--space-2);
-  width: 100%;
 }
 
 .tplChip {
@@ -71,12 +66,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-3);
   width: 100%;
-  min-height: var(--size-control-md);
-  padding: var(--space-2) var(--space-1);
-  border: none;
-  border-top: var(--size-border) solid var(--color-border);
-  border-radius: var(--radius-sm);
+  min-height: var(--size-control-lg);
+  padding: var(--space-2) var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  text-align: left;
   background: transparent;
   color: var(--color-text-muted);
   font-family: inherit;
@@ -138,52 +134,300 @@
   .body { padding-inline: var(--space-5); gap: var(--space-4); }
 }
 
-.gallery {
+/* ---- Steps: 1 how to start, 2 name and look, 3 what it can do ---- */
+.stepperWrap {
+  padding: var(--space-0) var(--space-6);
+}
+
+.stepper {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
+  margin: var(--space-0);
+  padding: var(--space-0) var(--space-0) var(--space-3);
+  border-bottom: var(--size-border) solid var(--color-border);
+  list-style: none;
 }
 
-.galleryCards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-8) * 2), 1fr));
-  gap: var(--space-2);
-  width: 100%;
-}
-
-.galleryCard {
+.stepItem {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-half);
-  padding: var(--space-2) var(--space-3);
-  border: var(--size-border) solid var(--color-border);
-  border-radius: var(--radius-md);
-  background-color: transparent;
-  color: var(--color-text-secondary);
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: var(--space-0);
+}
+
+/* A hairline between the steps. */
+.stepItem:first-child {
+  flex: 0 1 auto;
+}
+
+.stepItem + .stepItem::before {
+  content: "";
+  flex: 1 1 var(--space-4);
+  min-width: var(--space-4);
+  height: var(--size-border);
+  background-color: var(--color-border-strong);
+}
+
+.stepButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: var(--space-0);
+  min-height: var(--size-control-sm);
+  padding: var(--space-0) var(--space-2) var(--space-0) var(--space-0);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-text-muted);
   font-family: inherit;
-  text-align: left;
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-medium);
+}
+
+button.stepButton {
   cursor: pointer;
 }
 
-.galleryCard:hover {
-  border-color: var(--color-border-hover);
-  background-color: var(--color-surface-elevated);
+button.stepButton:hover {
+  background-color: var(--state-hover);
+  color: var(--color-text);
 }
 
-.galleryCard:focus-visible {
+button.stepButton:focus-visible {
   outline: none;
   box-shadow: var(--shadow-focus);
 }
 
-.galleryName {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+.stepDot {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.stepDot > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.stepLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stepItem[data-state="current"] .stepButton {
   color: var(--color-text);
 }
 
-.galleryDesc {
-  font-size: var(--font-size-xs);
+.stepItem[data-state="current"] .stepDot {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+.stepItem[data-state="done"] .stepDot {
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+/* ---- Step 1: readable cards with real widths (text never wraps word by word) ---- */
+.startGrid,
+.readyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-16) * 3.5), 1fr));
+  gap: var(--space-3);
+}
+
+/* The two ways to start share the full row. */
+.startGrid {
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-16) * 3.5), 1fr));
+}
+
+.ready {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.readyHead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.sectionTitle {
+  margin: var(--space-0);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.sectionHint {
+  margin: var(--space-0);
   color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+.card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: var(--space-0);
+  padding: var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.card:hover {
+  border-color: var(--color-border-hover);
+  background-color: var(--state-hover);
+}
+
+.card:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.cardPrimary {
+  border-color: var(--color-accent);
+}
+
+.cardIcon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--size-control-md);
+  height: var(--size-control-md);
+  border-radius: var(--radius-md);
+  background-color: var(--color-accent-subtle);
+  color: var(--color-accent-text);
+}
+
+.cardIcon > svg {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+
+.cardText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: var(--space-0);
+}
+
+.cardName {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  overflow-wrap: break-word;
+}
+
+.cardDesc {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  overflow-wrap: break-word;
+}
+
+.cardTag {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  padding: var(--space-0) var(--space-2);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface-active);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-2xs);
+  line-height: var(--line-height-ui);
+}
+
+.cardTag > svg {
+  width: var(--space-3);
+  height: var(--space-3);
+}
+
+.cardChevron {
+  flex: none;
+  align-self: center;
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  color: var(--color-text-muted);
+}
+
+/* ---- Step 2: quick looks above the character picker ---- */
+.looks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.looksLabel {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+/* ---- Step 3: who is being made, then the AI and the autonomy level ---- */
+.who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+.whoName {
+  flex: 1;
+  min-width: var(--space-0);
+  overflow: hidden;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.advancedText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-half);
+  min-width: var(--space-0);
+}
+
+.advancedName {
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+.advancedHint {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+}
+
+/* stylelint-disable-next-line unit-disallowed-list -- small window: the other step names give way to their numbers */
+@media (width <= 40em) {
+  .stepperWrap { padding-inline: var(--space-5); }
+  .stepItem:not([data-state="current"]) .stepLabel { display: none; }
 }

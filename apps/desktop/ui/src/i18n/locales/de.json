@@ -4788,6 +4788,7 @@
   },
   "newBot": {
     "advanced": "Erweiterte Einstellungen",
+    "advancedHint": "Anweisungen, Bild, Modelle, Rechte im Detail, Apps",
     "autonomy": "Wie viel er allein darf",
     "autonomyCustom": "Verwendet die Berechtigungsvorlage {{preset}}.",
     "autonomyHints": {
@@ -4800,13 +4801,22 @@
       "auto": "Frei",
       "balanced": "Ausgewogen"
     },
+    "blankHint": "Von vorn: Name, Aussehen und was er darf, bestimmst du.",
+    "blankTitle": "Leerer Bot",
     "brain": "KI",
     "brainAuto": "Automatisch",
     "brainHint": "Das kannst du später im Chat ändern",
+    "changeLook": "Name oder Aussehen ändern",
     "create": "Erstellen",
     "creating": "Wird erstellt…",
+    "importHint": "Eine Bot-Profildatei, die jemand mit dir geteilt hat. Du prüfst sie, bevor etwas angelegt wird.",
+    "importTitle": "Geteilten Bot importieren",
     "nameNeeded": "Gib deinem Bot einen Namen, um ihn zu erstellen.",
     "namePlaceholder": "Bot-Name",
+    "next": "Weiter",
+    "quickLooks": "Schnelle Looks:",
+    "readyHint": "Mit Anweisungen und vorsichtigen Rechten. Du prüfst alles, bevor der Bot angelegt wird.",
+    "readyTitle": "Fertige Bots",
     "shapeGroup": "Figurenform",
     "shapes": {
       "boulder": "Bohne",
@@ -4826,7 +4836,17 @@
       "star": "Stern",
       "tri": "Dreieck"
     },
-    "subtitle": "Wähle Aussehen, Name und wie selbstständig der Bot arbeitet.",
+    "stepHints": {
+      "access": "Wähle seine KI und wie frei er arbeiten darf, dann erstelle ihn.",
+      "identity": "Gib ihm einen Namen und ein Aussehen. Beides lässt sich später ändern.",
+      "start": "Fang von vorn an, mit einem fertigen Bot oder mit einer geteilten Datei."
+    },
+    "steps": {
+      "access": "Was er darf",
+      "identity": "Name und Aussehen",
+      "start": "Start"
+    },
+    "stepsLabel": "Schritte",
     "templates": {
       "assistant": "Assistent",
       "blank": "Leer",

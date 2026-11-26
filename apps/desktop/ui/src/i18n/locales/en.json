@@ -4788,6 +4788,7 @@
   },
   "newBot": {
     "advanced": "Advanced settings",
+    "advancedHint": "Instructions, picture, models, permissions in detail, apps",
     "autonomy": "How much it may do alone",
     "autonomyCustom": "Using the {{preset}} permission preset.",
     "autonomyHints": {
@@ -4800,13 +4801,22 @@
       "auto": "Free",
       "balanced": "Balanced"
     },
+    "blankHint": "Start from scratch: you choose the name, the look and what it may do.",
+    "blankTitle": "Blank bot",
     "brain": "AI",
     "brainAuto": "Auto",
     "brainHint": "You can change this later in chat",
+    "changeLook": "Change name or look",
     "create": "Create",
     "creating": "Creating…",
+    "importHint": "A bot profile file someone shared with you. You review it before anything is created.",
+    "importTitle": "Import a shared bot",
     "nameNeeded": "Give your bot a name to create it.",
     "namePlaceholder": "Bot name",
+    "next": "Next",
+    "quickLooks": "Quick looks:",
+    "readyHint": "They come with their instructions and careful permissions. You review everything before the bot is created.",
+    "readyTitle": "Ready-made bots",
     "shapeGroup": "Character shape",
     "shapes": {
       "boulder": "Bean",
@@ -4826,7 +4836,17 @@
       "star": "Star",
       "tri": "Triangle"
     },
-    "subtitle": "Choose a look, a name and how far it may go on its own.",
+    "stepHints": {
+      "access": "Choose its AI and how freely it may work, then create it.",
+      "identity": "Give it a name and a look. You can change both later.",
+      "start": "Start from scratch, from a ready-made bot or from a shared file."
+    },
+    "steps": {
+      "access": "What it can do",
+      "identity": "Name and look",
+      "start": "Start"
+    },
+    "stepsLabel": "Steps",
     "templates": {
       "assistant": "Assistant",
       "blank": "Blank",

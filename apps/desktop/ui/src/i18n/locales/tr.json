@@ -4788,6 +4788,7 @@
   },
   "newBot": {
     "advanced": "Gelişmiş ayarlar",
+    "advancedHint": "Talimatlar, resim, modeller, ayrıntılı izinler, uygulamalar",
     "autonomy": "Kendi başına ne kadar yapabilir",
     "autonomyCustom": "{{preset}} izin profili kullanılıyor.",
     "autonomyHints": {
@@ -4800,13 +4801,22 @@
       "auto": "Serbest",
       "balanced": "Dengeli"
     },
+    "blankHint": "Sıfırdan başla: adını, görünümünü ve neler yapabileceğini sen seçersin.",
+    "blankTitle": "Boş bot",
     "brain": "Yapay zekâ",
     "brainAuto": "Otomatik",
     "brainHint": "Sonradan sohbetten değiştirebilirsin",
+    "changeLook": "Adı ya da görünümü değiştir",
     "create": "Oluştur",
     "creating": "Oluşturuluyor…",
+    "importHint": "Biri seninle bir bot profili dosyası paylaştıysa. Bir şey oluşturulmadan önce gözden geçirirsin.",
+    "importTitle": "Paylaşılan bir botu içe aktar",
     "nameNeeded": "Oluşturmak için botuna bir ad ver.",
     "namePlaceholder": "Bot adı",
+    "next": "İleri",
+    "quickLooks": "Hazır görünümler:",
+    "readyHint": "Talimatları ve dikkatli izinleriyle gelir. Bot oluşturulmadan önce her şeyi gözden geçirirsin.",
+    "readyTitle": "Hazır botlar",
     "shapeGroup": "Karakter şekli",
     "shapes": {
       "boulder": "Fasulye",
@@ -4826,7 +4836,17 @@
       "star": "Yıldız",
       "tri": "Üçgen"
     },
-    "subtitle": "Görünümünü, adını ve ne kadar özgür çalışacağını seç.",
+    "stepHints": {
+      "access": "Yapay zekasını ve ne kadar serbest çalışacağını seç, sonra oluştur.",
+      "identity": "Bir ad ve görünüm ver. İkisini de sonra değiştirebilirsin.",
+      "start": "Sıfırdan, hazır bir botla ya da paylaşılan bir dosyadan başla."
+    },
+    "steps": {
+      "access": "Neler yapabilir",
+      "identity": "Ad ve görünüm",
+      "start": "Başlangıç"
+    },
+    "stepsLabel": "Adımlar",
     "templates": {
       "assistant": "Asistan",
       "blank": "Boş",

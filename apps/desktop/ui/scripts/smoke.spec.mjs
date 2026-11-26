@@ -316,7 +316,10 @@ export async function flows(ctx) {
   });
   await run(s, 'create a second bot from the New-bot modal', async (page) => {
     await page.getByRole('button', { name: /new bot/i }).first().click();
+    // Three steps: how to start (blank), name and look, what it can do (then Create).
+    await page.getByTestId('new-bot-start-blank').click();
     await page.getByTestId('new-bot-name').fill('Nova');
+    await page.getByTestId('new-bot-next').click();
     await page.getByTestId('autonomy-ask').click();
     await page.getByTestId('new-bot-submit').click();
     await page.getByTestId('bot-empty-state').waitFor(T);
@@ -324,7 +327,10 @@ export async function flows(ctx) {
   // Created here, early: the New-bot modal's Create stays disabled in the later part of a full run (Auto brain unresolved).
   await run(s, 'a Full-level bot is created', async (page) => {
     await page.getByRole('button', { name: /new bot/i }).first().click();
+    // Three steps: how to start (blank), name and look, what it can do (then Create).
+    await page.getByTestId('new-bot-start-blank').click();
     await page.getByTestId('new-bot-name').fill('Fulla');
+    await page.getByTestId('new-bot-next').click();
     await page.getByTestId('autonomy-auto').click();
     await page.getByTestId('new-bot-submit').click();
     await page.getByTestId('bot-empty-state').waitFor(T);
