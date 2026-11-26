@@ -847,3 +847,112 @@ async fn a_generated_password_typed_through_browser_fill_is_in_no_sink() {
         "files leaked the password"
     );
 }
+
+/// `account_register` makes the password; `browser_fill {secret}` then really types
+/// it into a page that ECHOES what it was given. The scan covers the model's
+/// requests, the events, every stored row, the files under the data directory and
+/// the logs. Positive controls: the page received the password, the log capture
+/// sees a planted line, and the echo text proves the result path was exercised.
+#[tokio::test]
+async fn an_account_password_typed_through_browser_fill_reaches_no_sink() {
+    let log = Arc::new(Mutex::new(String::new()));
+    let _guard = tracing::subscriber::set_default(crate::account_register_tests::LogCapture(
+        Arc::clone(&log),
+    ));
+    tracing::info!(control = PLANTED, "log capture control line");
+    let r = rig(Policy::full(), true, vec![]);
+    r.lp.sh.tools.register(builtin_tools::account_register_tool(
+        Arc::clone(&r.secrets),
+        builtin_tools::AccountRegisterConfig::default(),
+    ));
+    let bot = r.env.bot.to_string();
+    let short: String = bot
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .take(8)
+        .collect();
+    let name = format!("login/example.com-{short}");
+    r.page
+        .targets
+        .lock()
+        .insert("e6".into(), target("https://example.com"));
+    r.fake.replies.lock().extend([
+        calls(&[(
+            "c1",
+            "account_register",
+            json!({"site": "https://example.com", "login_id": "me@example.org"}),
+        )]),
+        calls(&[(
+            "c2",
+            "browser_fill",
+            json!({"ref": "e6", "secret": name.clone()}),
+        )]),
+        text("signed up"),
+    ]);
+    let mut rx = r.lp.subscribe();
+    let run =
+        r.lp.run_turn(r.env.chat, "sign me up on example.com")
+            .unwrap();
+    let mut events = Vec::new();
+    let mut approvals = 0;
+    // The sign-up asks, then the typing asks: the owner approves each once.
+    for _ in 0..2 {
+        let ev = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+        let Event::ApprovalNeeded(a) = &ev else {
+            unreachable!()
+        };
+        approvals += 1;
+        events.push(format!("{ev:?}"));
+        r.lp.approve(a.call_id, ApprovalScope::Once, r.env.user)
+            .unwrap();
+    }
+    let state = r.lp.wait(run).await.unwrap();
+    while let Ok(e) = rx.try_recv() {
+        events.push(format!("{e:?}"));
+    }
+    assert_eq!(state, RunState::Succeeded);
+    assert_eq!(approvals, 2, "the sign-up and the typing each asked");
+
+    let typed = r.page.typed_secrets.lock().clone();
+    assert_eq!(typed.len(), 1, "the password was typed once");
+    let pw = typed[0].clone();
+    assert!(pw.len() >= 20);
+    assert_eq!(
+        r.secrets
+            .resolve_value_for(&name, Some(&bot))
+            .unwrap()
+            .expose(),
+        pw,
+        "what the page got is the stored password"
+    );
+    assert!(!r.secrets.accounts(Some(&bot)).unwrap()[0].unused);
+
+    let mut model_saw = String::new();
+    for i in 0..r.fake.n_requests() {
+        let _ = write!(model_saw, "{:?}", r.fake.request(i));
+    }
+    let haystack = [
+        events.join("\n"),
+        sinks_text(&r),
+        model_saw,
+        log.lock().clone(),
+        format!("{:?}", r.secrets.list().unwrap()),
+    ]
+    .join("\n");
+    assert!(haystack.contains(PLANTED), "the log scan is not vacuous");
+    assert!(haystack.contains("example.com"), "the scan saw the run");
+    assert!(!haystack.contains(&pw), "the typed password leaked");
+    let data = r.env.dir.path();
+    // The vault entry itself is the one place the value lives (the in-memory store
+    // is not on disk); no file of the daemon may hold it.
+    assert!(
+        files_containing(data, &pw).is_empty(),
+        "{:?}",
+        files_containing(data, &pw)
+    );
+    assert!(r.page.typed_text.lock().is_empty());
+    assert!(
+        !files_containing(data, "example.com").is_empty(),
+        "the file scan sees the run"
+    );
+}

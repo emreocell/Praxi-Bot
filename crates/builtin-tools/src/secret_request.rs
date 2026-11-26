@@ -192,12 +192,18 @@ impl Tool for SecretRequest {
                 "`{name}` already exists. Use it (see secrets_list), pick another name, or pass `replace`:true to ask the owner for a new value"
             )));
         }
+        // The scope check at the root: the owner is only ever asked to REPLACE an
+        // entry this bot may use. For a name this bot may not use (another bot's
+        // account, an owner-made entry) the request is an ordinary new-value
+        // form, exactly like a free name, so bot B can never put "replace bot A's
+        // account" in front of the owner. The submit route and the write refuse it
+        // again under the lock.
         let card = json!({
             "kind": SECRET_REQUEST_CARD_KIND,
             "name": name,
             "purpose": purpose,
             "fields": fields.as_str(),
-            "replace": replace,
+            "replace": replace && taken,
         });
         // Not a result the model can use: the loop replaces it with the owner's
         // answer. Called anywhere else (a script, a bridge) it asks nobody.
@@ -335,7 +341,8 @@ mod tests {
             ] {
                 for replace in [true, false] {
                     let c = card(t.call(&ctx(bot), ask(name, replace)).await);
-                    assert_eq!((c.name.as_str(), c.replace), (name, replace));
+                    // Never a "replace" card for an entry this bot may not use.
+                    assert_eq!((c.name.as_str(), c.replace), (name, false), "{bot:?}");
                 }
             }
         }
@@ -346,7 +353,8 @@ mod tests {
                 .await
                 .unwrap_err();
             assert!(err.to_string().contains("replace"), "{err}");
-            assert!(t.call(&ctx(Some("bot-a")), ask(name, true)).await.is_ok());
+            let c = card(t.call(&ctx(Some("bot-a")), ask(name, true)).await);
+            assert!(c.replace, "the owning bot may ask to replace its own entry");
         }
     }
 }
