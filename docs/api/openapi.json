@@ -27522,7 +27522,8 @@
           "tag": {
             "type": "string"
           }
-        }
+        },
+        "additionalProperties": false
       },
       "HostUpdateState": {
         "type": "string",
