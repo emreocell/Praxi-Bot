@@ -19,10 +19,8 @@ script:
   - tool_calls: [{ id: k1, tool: fs_read, args: { path: "notes.txt" } }]
   - text: "Denied."
   - text: "The helper could not read the file."
-reactions:
-  - { on: approval_needed, tool: ask_bot, do: approve }
 expect:
   state: succeeded
   tool_runs: { fs_read: 0 }
   permissions:
-    - { tool: ask_bot, decision: approved }
+    - { tool: ask_bot, decision: allowed }

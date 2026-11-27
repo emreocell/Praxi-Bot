@@ -652,6 +652,7 @@ async fn approval_buttons_map_to_daemon_decisions() {
 
     let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
         .with_api_base_url(server.uri())
+        .with_unbounded_drain_time()
         .with_paired_users([PAIRED_USER_ID]);
     let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
 
@@ -875,6 +876,7 @@ async fn edit_throttling_caps_edits_to_at_most_one_per_second() {
     let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
         .with_api_base_url(server.uri())
         .with_edit_interval(Duration::from_secs(1))
+        .with_unbounded_drain_time()
         .with_paired_users([PAIRED_USER_ID]);
     let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
 
@@ -938,19 +940,43 @@ async fn edit_throttling_caps_edits_to_at_most_one_per_second() {
     );
 
     // Also verify ThrottledEditor across an elapsed interval window.
+    // The caller hands the editor the time, so the window is stepped through exactly and
+    // never depends on how long the HTTP calls take on this machine.
     let mut editor = ThrottledEditor::new(TEST_CHAT_ID, Duration::from_millis(30));
-    editor.push(channel.bot_api(), "A").await.unwrap();
-    editor.push(channel.bot_api(), "AB").await.unwrap();
-    editor.push(channel.bot_api(), "ABC").await.unwrap();
+    let t0 = std::time::Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    editor.push_at(channel.bot_api(), "A", at(0)).await.unwrap();
+    editor
+        .push_at(channel.bot_api(), "AB", at(10))
+        .await
+        .unwrap();
+    editor
+        .push_at(channel.bot_api(), "ABC", at(20))
+        .await
+        .unwrap();
     // Still inside 30ms window: only 1 edit so far (from the earlier run).
     let edits_before = edited_messages(&server.received_requests().await.unwrap()).len();
     assert_eq!(edits_before, 1);
 
-    tokio::time::sleep(Duration::from_millis(40)).await;
-    editor.push(channel.bot_api(), "ABCD").await.unwrap();
+    editor
+        .push_at(channel.bot_api(), "ABCD", at(40))
+        .await
+        .unwrap();
     let edits_after = edited_messages(&server.received_requests().await.unwrap());
     assert_eq!(edits_after.len(), 2);
     assert_eq!(edits_after[1]["text"], "ABCD");
+}
+
+/// Wait until `ready` holds, checking again every few milliseconds. The 30 s limit only
+/// turns a hang into a failure; it never paces the test, so a slow machine just takes longer.
+async fn wait_for(what: &str, mut ready: impl AsyncFnMut() -> bool) {
+    let waited = tokio::time::timeout(Duration::from_secs(30), async {
+        while !ready().await {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+    assert!(waited.is_ok(), "timed out waiting for {what}");
 }
 
 /// Drain run events until every followed run has finished (or 10 s pass). Use it
@@ -2080,6 +2106,7 @@ async fn message_queued_behind_a_run_is_followed_once_it_starts() {
     let daemon = one_bot_daemon();
     let cfg = TelegramConfig::with_in_memory_token(TEST_BOT_TOKEN)
         .with_api_base_url(server.uri())
+        .with_unbounded_drain_time()
         .with_paired_users([PAIRED_USER_ID]);
     let channel = TelegramChannel::new(cfg, daemon.clone()).unwrap();
 
@@ -2261,11 +2288,15 @@ async fn active_runs_do_not_shorten_the_get_updates_long_poll() {
         .with_poll_backoff(Duration::from_millis(10))
         .with_paired_users([PAIRED_USER_ID]);
     let running = TelegramChannel::start(cfg, daemon).unwrap();
-    tokio::time::sleep(Duration::from_millis(900)).await;
+    let target = tg_endpoint("getUpdates");
+    wait_for("a second getUpdates", async || {
+        let reqs = server.received_requests().await.unwrap();
+        reqs.iter().filter(|r| r.url.path() == target).count() >= 2
+    })
+    .await;
     running.shutdown().await;
 
     let reqs = server.received_requests().await.unwrap();
-    let target = tg_endpoint("getUpdates");
     let timeouts: Vec<i64> = reqs
         .iter()
         .filter(|r| r.url.path() == target)
@@ -2402,11 +2433,19 @@ async fn run_loop_keeps_draining_queued_turns_while_get_updates_blocks() {
         .with_poll_backoff(Duration::from_millis(10))
         .with_paired_users([PAIRED_USER_ID]);
     let running = TelegramChannel::start(cfg, daemon.clone()).unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // The second message must be the one the daemon queues: arm that once the first is
+    // in, which is well before the second update's delayed long poll answers.
+    wait_for("the first message", async || {
+        !daemon.sent_messages.lock().is_empty()
+    })
+    .await;
     *daemon.queue_next_message.lock() = true;
 
     // A finishes before the daemon created the queued run: the first lookups find nothing.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    wait_for("the queued second message", async || {
+        daemon.sent_messages.lock().len() >= 2
+    })
+    .await;
     tx_a.send(run_finished(run_a)).unwrap();
     tokio::time::sleep(Duration::from_millis(400)).await;
     let run_b = RunId::new();
@@ -2424,18 +2463,27 @@ async fn run_loop_keeps_draining_queued_turns_while_get_updates_blocks() {
         ],
     );
     daemon.started_later.lock().push_back(run_b);
-    tokio::time::sleep(Duration::from_millis(2500)).await;
+    let shown = async || {
+        let reqs = server.received_requests().await.unwrap();
+        sent_texts(&reqs)
+            .into_iter()
+            .chain(
+                edited_messages(&reqs)
+                    .iter()
+                    .filter_map(|m| m["text"].as_str().map(str::to_owned)),
+            )
+            .collect::<Vec<String>>()
+    };
+    wait_for("the late queued answer", async || {
+        shown()
+            .await
+            .iter()
+            .any(|t| t.contains("late queued answer"))
+    })
+    .await;
     running.shutdown().await;
 
-    let reqs = server.received_requests().await.unwrap();
-    let all: Vec<String> = sent_texts(&reqs)
-        .into_iter()
-        .chain(
-            edited_messages(&reqs)
-                .iter()
-                .filter_map(|m| m["text"].as_str().map(str::to_owned)),
-        )
-        .collect();
+    let all = shown().await;
     assert!(
         all.iter().any(|t| t.contains("late queued answer")),
         "queued turn must be found by the drain loop without a new update: {all:?}"

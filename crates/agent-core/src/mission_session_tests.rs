@@ -964,6 +964,62 @@ async fn the_owner_is_asked_once_and_later_questions_become_blocked_items() {
     );
 }
 
+/// A question after the one batch is parked by the runtime, not left to the model to answer: the
+/// item being worked on is blocked with the question as the reason and the session carries on.
+#[tokio::test]
+async fn a_later_question_blocks_the_item_it_stops_and_the_session_carries_on() {
+    let w = world(&["a.example", "b.example"]);
+    assert!(w.store.take_question_slot(&w.mission).unwrap());
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c0",
+            "mission_item",
+            json!({"key": "a.example", "status": "doing"}),
+        )]),
+        calls(&[(
+            "c1",
+            "ask_user",
+            json!({"question": "Which e-mail should I use?"}),
+        )]),
+        calls(&[(
+            "c2",
+            "mission_item",
+            json!({"key": "b.example", "status": "done", "result": "account created"}),
+        )]),
+        text("Done: one site registered, one needs the owner."),
+    ]);
+    let lp = lp(&w, &fake);
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let blocked = w
+        .store
+        .items(&w.mission, Some(ItemStatus::Blocked))
+        .unwrap();
+    assert_eq!(blocked.len(), 1);
+    assert_eq!(blocked[0].key, "a.example");
+    assert!(
+        blocked[0]
+            .blocked_reason
+            .as_deref()
+            .unwrap()
+            .contains("Which e-mail should I use?")
+    );
+    assert_eq!(w.store.progress(&w.mission).unwrap().done, 1);
+    let tools = crate::tests::tool_messages(&without_ledger(fake.request(2)));
+    assert!(
+        tools
+            .iter()
+            .any(|t| t.contains("parked as blocked") && t.contains("Take the next open item")),
+        "{tools:?}"
+    );
+    assert!(
+        !tools.iter().any(|t| t.contains("decide yourself")),
+        "{tools:?}"
+    );
+}
+
 #[tokio::test]
 async fn mission_tools_refuse_to_work_for_a_run_that_is_not_a_session() {
     let w = world(&["a.example"]);

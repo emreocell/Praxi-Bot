@@ -386,6 +386,33 @@ export function resolveAutoExecutorRef(
   return { provider: "", model: "" };
 }
 
+/** A stored rule that allows every call: its level, and each per-source level, is `allow`. */
+function ruleAllowsAll(rule: unknown): boolean {
+  const r = obj(rule);
+  const allows = (level: unknown) => obj(level).level === "allow";
+  return allows(r.level) && Object.values(obj(r.by_initiator)).every(allows);
+}
+
+/**
+ * Full access: an explicit `full` preset, or no preset and no category rules while the global
+ * level is Full. An `ask` (or a deny) the owner wrote for a category or a source is theirs: the
+ * daemon keeps asking there, so the bot is not "Full access" for the screens that skip a
+ * confirmation on its behalf.
+ */
+export function botHasFullAccess(bot: Bot | undefined, globalPreset: string | null | undefined): boolean {
+  if (!bot) return false;
+  const permissions = obj(obj(bot.config).permissions);
+  const categories = obj(permissions.categories);
+  if (permissions.preset === "full") {
+    return Object.values(categories).every(ruleAllowsAll);
+  }
+  return (
+    permissions.preset == null &&
+    Object.keys(categories).length === 0 &&
+    globalPreset === "full"
+  );
+}
+
 /** What the sidebar / chat header need from a stored bot. */
 export function botView(bot: Bot): BotView {
   const d = draftFromBot(bot);

@@ -12,24 +12,44 @@ fn patterns() -> &'static [Regex] {
             r"\bsk-[A-Za-z0-9_\-]{16,}",
             r"\bgh[pousr]_[A-Za-z0-9]{20,}",
             r"\bgithub_pat_[A-Za-z0-9_]{20,}",
+            r"\bglpat-[A-Za-z0-9_\-]{20,}",
+            r"\bnpm_[A-Za-z0-9]{36}\b",
+            r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}",
+            r"\bya29\.[A-Za-z0-9_\-]{20,}",
+            // AWS: long-term and temporary access key ids, and the key/value
+            // lines of `~/.aws/credentials` (`aws_secret_access_key = ...`, whose
+            // name has no word boundary around "secret").
             r"\bAKIA[0-9A-Z]{16}\b",
+            r"\bASIA[0-9A-Z]{16}\b",
+            r"(?i)\baws_(?:secret_access_key|session_token)\s*[=:]\s*\S{16,}",
+            // Azure storage and service-bus connection strings.
+            r"(?i)\b(?:account|shared ?access)key\s*=\s*[A-Za-z0-9+/]{30,}={0,2}",
             r"\bxox[abprs]-[A-Za-z0-9\-]{10,}",
             r"\bAIza[0-9A-Za-z_\-]{30,}",
+            // A user name and password inside a URL (`postgres://user:pw@host/db`).
+            r"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s:/@]+:[^\s/@]{3,}@",
+            // age secret keys.
+            r"\bAGE-SECRET-KEY-1[0-9A-Z]{50,}",
             // JWT.
             r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}",
-            // PEM private keys.
-            r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+            // PEM private keys (PGP ones end in "KEY BLOCK-----").
+            r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----",
             // Authorization headers.
             r"(?i)\bbearer\s+[A-Za-z0-9._\-]{16,}",
             // "password: hunter2", "api_key = abc", "secret=..."
             r"(?i)\b(pass(word|wd)?|passcode|pwd|secret|api[_\- ]?key|token|pin)\b\s*(is|=|:)\s*\S{3,}",
-            // Card-like digit groups.
-            r"\b(?:\d[ \-]?){13,19}\b",
         ]
         .iter()
         .map(|p| Regex::new(p).expect("static regex"))
         .collect()
     })
+}
+
+/// Card-like digit groups. Weak on its own (order numbers, timestamps and
+/// barcodes look the same), so [`credential_hits`] does not count them.
+fn card_pattern() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"\b(?:\d[ \-]?){13,19}\b").expect("static regex"))
 }
 
 /// Long opaque tokens (hex / base64-ish, 32+).  Unlike the patterns above, a
@@ -107,7 +127,19 @@ fn opaque_spans(text: &str) -> Vec<(usize, usize)> {
 /// True if `text` looks like it contains a credential.
 #[must_use]
 pub fn contains_secret(text: &str) -> bool {
-    patterns().iter().any(|re| re.is_match(text)) || !opaque_spans(text).is_empty()
+    patterns().iter().any(|re| re.is_match(text))
+        || card_pattern().is_match(text)
+        || !opaque_spans(text).is_empty()
+}
+
+/// How many credential-shaped spans `text` holds, counting only the strong
+/// patterns (provider keys, tokens, `password: ...` lines, URL credentials,
+/// private-key headers). Card-like digit groups and long opaque runs are left
+/// out: they are common in ordinary spreadsheets and URLs. A document with many
+/// hits is a credentials dump, not prose that mentions a password.
+#[must_use]
+pub fn credential_hits(text: &str) -> usize {
+    patterns().iter().map(|re| re.find_iter(text).count()).sum()
 }
 
 /// Replace every secret-looking span with `[REDACTED]`.
@@ -117,6 +149,7 @@ pub fn redact(text: &str) -> String {
     for re in patterns() {
         out = re.replace_all(&out, "[REDACTED]").into_owned();
     }
+    out = card_pattern().replace_all(&out, "[REDACTED]").into_owned();
     // Opaque tokens last, on the text the other patterns already cleaned;
     // spans are replaced back to front so earlier offsets stay valid.
     let mut last_start = usize::MAX;
@@ -146,6 +179,40 @@ mod tests {
         ] {
             assert!(contains_secret(s), "{s}");
         }
+    }
+
+    #[test]
+    fn detects_more_cloud_and_connection_credentials() {
+        for s in [
+            "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "AWS_SESSION_TOKEN: IQoJb3JpZ2luX2VjEXAMPLEEXAMPLEEXAMPLE",
+            "temporary id ASIAIOSFODNN7EXAMPLE",
+            "DefaultEndpointsProtocol=https;AccountName=x;AccountKey=Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3A=",
+            "DATABASE_URL=postgres://app:hunter22@db.example.com/prod",
+            "glpat-abcdefghijklmnopqrstu",
+            "sk_live_abcdefghijklmnop1234",
+            "npm_abcdefghijklmnopqrstuvwxyz0123456789",
+            "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+            "AGE-SECRET-KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+        ] {
+            assert!(contains_secret(s), "{s}");
+            assert!(redact(s).contains("[REDACTED]"), "{s}");
+        }
+        for s in [
+            "see https://example.com/docs/page",
+            "mail me at a@example.com",
+        ] {
+            assert!(!contains_secret(s), "{s}");
+        }
+    }
+
+    #[test]
+    fn credential_hits_ignore_card_like_digits_and_long_slugs() {
+        let csv = "1700000000000,a\n1700000000001,b\n".repeat(30);
+        assert_eq!(credential_hits(&csv), 0);
+        assert!(contains_secret(&csv), "still redacted line by line");
+        let dump = "password: hunter22\nAKIAABCDEFGHIJKLMNOP\nsk-abcdefghijklmnop1234\n";
+        assert_eq!(credential_hits(dump), 3);
     }
 
     #[test]

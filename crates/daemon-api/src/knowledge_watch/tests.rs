@@ -286,10 +286,10 @@ async fn only_consented_enabled_folders_are_watched_and_attempts_share_a_budget(
     let unselected = tempfile::tempdir().unwrap();
     std::fs::write(unselected.path().join("private.md"), "unselected").unwrap();
     host.write("a.md", "allowed");
-    let oversized = std::fs::File::create(host.folder.path().join("b.md")).unwrap();
-    oversized
-        .set_len(memory_store::knowledge::source_adapters::MAX_SOURCE_BYTES as u64 + 1)
-        .unwrap();
+    // Selectable, but not text: reading it fails, so the attempt is charged and the
+    // folder reports skipped files. (An oversized file no longer gets this far: the
+    // scan leaves it out and names it in the "skipped" note instead.)
+    std::fs::write(host.folder.path().join("b.md"), [0xff_u8, 0xfe, 0xfd]).unwrap();
     let store = KnowledgeStore::open(host.state.data_dir(), host.owner).unwrap();
     let disabled = store
         .add_source(NewSource::new(

@@ -1,0 +1,21 @@
+name: full-autonomy-money-asks
+description: "A payment needs its own owner decision under Full access."
+policy: full
+owner_message: true
+profile_toml: |
+  [permissions]
+  preset = "full"
+tools:
+  - { name: pay_invoice, effect: destructive, category: money, content: none, output: paid }
+user: "Pay the invoice."
+unsafe_tools: [pay_invoice]
+script:
+  - tool_calls: [{ id: pay, tool: pay_invoice, args: { amount: 5 } }]
+  - text: "The invoice was not paid."
+reactions:
+  - { on: approval_needed, tool: pay_invoice, do: deny, text: "Leave the invoice unpaid." }
+expect:
+  state: succeeded
+  tool_runs: { pay_invoice: 0 }
+  permissions:
+    - { tool: pay_invoice, decision: denied_user }

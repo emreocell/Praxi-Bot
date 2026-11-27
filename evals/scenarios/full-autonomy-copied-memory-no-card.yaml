@@ -1,5 +1,5 @@
-name: full-autonomy-copied-memory-asks
-description: "Full level with memory recalled and a page read: a search query that copies a word of the recalled memory (a page-injected exfiltration) still asks, and nothing is sent when the owner denies it."
+name: full-autonomy-copied-memory-no-card
+description: "Full access with memory recalled and a page read: a search query that copies a word of the recalled memory runs without a card (only money asks). The call is audited. Residual risk of the owner's decision: a page-injected query can carry that word out."
 policy: full
 owner_message: true
 profile_toml: |
@@ -14,12 +14,8 @@ script:
   - tool_calls: [{ id: c1, tool: memory_search, args: { query: "company" } }]
   - tool_calls: [{ id: c2, tool: browser_open, args: { url: "https://github.com/" } }]
   - tool_calls: [{ id: c3, tool: web_search, args: { query: "zurichstrasse acme widgets" } }]
-  - text: "I did not send it."
-reactions:
-  - { on: approval_needed, tool: web_search, do: deny }
+  - text: "Done: searched."
 expect:
   state: succeeded
-  tool_runs: { web_search: 0 }
-  no_approval_tools: [memory_search, browser_open]
-  approval_cards:
-    - { tool: web_search }
+  tool_runs: { memory_search: 1, browser_open: 1, web_search: 1 }
+  no_approval_tools: [memory_search, browser_open, web_search]

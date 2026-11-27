@@ -5094,6 +5094,7 @@ dependencies = [
  "cap-std",
  "doc-tools",
  "fastembed",
+ "lopdf",
  "ort",
  "protocol",
  "provider-catalog",

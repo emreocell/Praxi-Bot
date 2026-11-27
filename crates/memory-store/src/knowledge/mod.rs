@@ -7,6 +7,7 @@
 
 pub mod brain;
 mod chunk;
+pub mod citation;
 pub mod embedding;
 mod embedding_runtime;
 mod schema;

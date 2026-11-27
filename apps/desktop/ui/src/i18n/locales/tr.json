@@ -1664,10 +1664,10 @@
         "name": "Özel"
       },
       "full": {
-        "exceptions": "Sormadan çalışır (silme dahil); yalnızca Para, e-posta gönderme, zamanlanmış görev etkinleştirme ve yasaklı listedeki yıkıcı komutlarda sorar. Çalışmayı sen başlattıysan, bir sayfa okuduktan sonra bile her genel siteyi gezer, kayıt olur ve formları sormadan doldurur. Yalnızca çalışma özel verini (dosya, posta, hafıza) de tutuyorsa ve yeni bir site ya da form bunlardan bir parça içeriyorsa, kayıtlı bir sır için, sayfa betiği için ve güvenilmeyen içerik okuduktan sonra program çalıştırmak için yine sorar.",
+        "exceptions": "Tam erişim yalnızca para harcamadan önce sorar. Komutlar, dosya değişiklikleri, kurulumlar, gezinme, botun kendi e-postasıyla kayıtlar, formlar, e-posta ve mesajlar; kendi sohbetlerinde, zamanlanmış ve tetiklenmiş çalışmalarda da onay kartı olmadan yapılır. Ödemeler ödeme sayfalarından, ödeme programlarından, ödeme API’lerinden ve ödeme uygulamalarından tanınır; sıradan bir düğmenin arkasındaki ücret tanınamaz. Yıkıcı yasaklı liste komutları, kendi site kuralların ve güvenlik kontrollerinin işaretlediği e-postalar (listeden çıkanlar, günlük sınır) yine durdurulur.",
         "exceptionsTitle": "İstisnalara bak",
-        "hint": "Sormadan çalışır, silme dahil. Birkaç kesin durak her zaman önce sorar.",
-        "name": "Tam"
+        "hint": "Yalnızca para harcamadan önce sorar. Gerisi sormadan çalışır.",
+        "name": "Tam erişim"
       },
       "read-and-draft": {
         "hint": "Okumalar serbest; her değişiklik, gönderim, sayfa açma, tıklama ve komut önce sorar.",
@@ -2741,6 +2741,11 @@
         "failed": "Belge yazılamadı",
         "running": "Belge yazılıyor"
       },
+      "documents_search": {
+        "done": "Belgelerinizde arandı",
+        "failed": "Belgelerinizde aranamadı",
+        "running": "Belgelerinizde aranıyor"
+      },
       "email_draft": {
         "done": "E-posta taslağı hazırlandı",
         "failed": "E-posta taslağı hazırlanmadı",
@@ -3318,6 +3323,102 @@
     "title": "Bugün",
     "totalCost": "Maliyet: {{cost}}",
     "waiting": "Seni bekleyen: {{count}}"
+  },
+  "documents": {
+    "add": "Klasör ekle",
+    "alreadyAdded": "Bu klasör zaten “{{label}}” olarak ekli ya da onunla çakışıyor.",
+    "bot": "Bot",
+    "citation": {
+      "confirm": "Dosyayı aç",
+      "confirmBody": "Bu bağlantı bir sohbet mesajından geliyor ve bir mesaj herhangi bir dosyayı gösterebilir. Yalnızca beklediğiniz dosyaysa açın.",
+      "confirmTitle": "Bu dosya açılsın mı?",
+      "failed": "{{file}} açılamadı. Taşınmış olabilir ya da klasörü kaldırılmış olabilir.",
+      "file": "Dosya: {{file}}",
+      "open": "{{file}} dosyasını aç",
+      "page": "Sayfa {{page}}",
+      "saved": "{{file}} dosyasının bir kopyası kaydedildi. İndirilenler klasöründen açabilirsiniz.",
+      "source": "Klasör: {{label}}",
+      "sourceLoading": "Klasör: aranıyor…",
+      "sourceUnknown": "Bu klasör botun klasörlerinden biri değil, bu yüzden dosya açılamaz.",
+      "viewed": "{{file}} açıldı."
+    },
+    "consent": "{{bot}} bu dosyaları okuyabilir ve yanıtlarında kullanabilir. İstediğim zaman durdurabilirim; klasörden öğrenilen her şey silinir.",
+    "consentButton": "Evet, {{bot}} bu klasörü okuyabilir",
+    "consentHint": "Henüz hiçbir şey okunmadı.",
+    "description": "Bir botun, seçtiğiniz klasörlerdeki dosyalardan yanıt vermesini sağlayın. Her yanıtta hangi dosyadan ve sayfadan geldiği gösterilir.",
+    "details": "Neler dahil",
+    "detailsFailed": "Klasör şu an okunamıyor. Taşınmış olabilir.",
+    "detailsLoading": "Klasöre bakılıyor…",
+    "empty": "Henüz klasör yok. Bir klasör ekleyin, sonra botunuza içindeki dosyaları sorun.",
+    "estimate": {
+      "hours": "Okuma yaklaşık {{count}} saat sürer.",
+      "hours_one": "Okuma yaklaşık 1 saat sürer.",
+      "lessThanMinute": "Okuma bir dakikadan kısa sürer.",
+      "minutes": "Okuma yaklaşık {{count}} dakika sürer.",
+      "minutes_one": "Okuma yaklaşık 1 dakika sürer."
+    },
+    "estimateNote": "Bu kaba bir tahmindir; büyük PDF'ler daha uzun sürer. Bu sırada çalışmaya devam edebilirsiniz.",
+    "failure": {
+      "other": "Atlandı.",
+      "secret_content": "Atlandı: özel anahtar içeriyor.",
+      "unreadable_source": "Okunamadı: korumalı, bozuk veya bir sınırı aşıyor."
+    },
+    "filesReady": "{{count}} dosya hazır",
+    "filesReady_one": "1 dosya hazır",
+    "forget": "Bu klasörü okumayı bırak",
+    "forgetConfirm": "Evet, bu klasörü unut",
+    "forgetHint": "Praxi'nin bu klasörden öğrendiği her şey silinir: aranabilir metin ve gömmeler. Dosyalarınıza dokunulmaz.",
+    "forgetTitle": "“{{folder}}” klasörünü okumayı bırakalım mı?",
+    "forgotten": "“{{folder}}” unutuldu.",
+    "howToAsk": "Botunuza şöyle sorabilirsiniz: “Kira sözleşmem depozito hakkında ne diyor?” Yanıtlar dosyaya ve sayfaya bağlanır.",
+    "moreFiles": "…ve {{count}} dosya daha",
+    "name": "Klasörün adı",
+    "noBot": "Önce bir bot oluşturun, sonra okuyabileceği klasörleri seçin.",
+    "pickBlocked": "Bu klasör seçilemez.",
+    "pickChoose": "Bu klasörü incele",
+    "pickEmpty": "Burada başka klasör yok.",
+    "pickGo": "Aç",
+    "pickHint": "Dosyalarınızın bulunduğu klasörü seçin. Parola veya anahtar saklayan klasörler seçilemez.",
+    "pickPath": "Klasör yolu",
+    "pickPathHint": "Tam yolu yazabilir veya yapıştırabilirsiniz.",
+    "pickTitle": "Bir klasör seçin",
+    "pickTruncated": "Yalnızca ilk klasörler gösteriliyor. Başka birini seçmek için yolu aşağıya yazın.",
+    "pickUp": "Bir üst klasör",
+    "previewNone": "Bu klasörde okunabilecek bir şey yok. Desteklenenler: PDF, Word, Excel, Markdown, metin ve CSV dosyaları (her biri en çok 4 MB).",
+    "previewSummary": "{{count}} dosya, {{size}}",
+    "previewSummary_one": "1 dosya, {{size}}",
+    "previewTitle": "Praxi “{{folder}}” klasöründe neleri okuyacak",
+    "privacy": "Praxi bu dosyaları çalıştığı bilgisayarda veya sunucuda okur ve dizinler; dosyalar orada kalır. Bir soruyu yanıtlamak için bot, bulduğu birkaç bölümü diğer mesajlar gibi yapay zekâ modeline gönderir.",
+    "reading": "Dosyalar okunuyor… {{done}} / {{total}}",
+    "readingBackground": "Kalanlar arka planda okunacak.",
+    "readingDone": "Bitti. {{count}} dosya soru sormaya hazır.",
+    "readingDone_one": "Bitti. 1 dosya soru sormaya hazır.",
+    "readingFailed": "{{count}} dosya okunamadı.",
+    "readingFailed_one": "1 dosya okunamadı.",
+    "reindex": "Şimdi güncelle",
+    "showFiles": "Dosyaları göster",
+    "skipped": {
+      "hidden": "{{count}} gizli veya sistem öğesi",
+      "hidden_one": "1 gizli veya sistem öğesi",
+      "secret": "Parola veya anahtar saklıyor gibi görünen {{count}} dosya ya da klasör",
+      "secretNote": "Bunlar hiçbir zaman okunmaz.",
+      "secret_one": "Parola veya anahtar saklıyor gibi görünen 1 dosya ya da klasör",
+      "title": "Bilerek dışarıda bırakılanlar",
+      "tooLarge": "4 MB'tan büyük {{count}} dosya",
+      "tooLarge_one": "4 MB'tan büyük 1 dosya",
+      "unsupported": "Başka türden {{count}} dosya (resim, video, program…)",
+      "unsupported_one": "Başka türden 1 dosya (resim, video, program…)"
+    },
+    "title": "Belgelerim",
+    "typeCount": "{{type}}: {{count}}",
+    "types": {
+      "code": "Kod ve veri",
+      "docx": "Word",
+      "pdf": "PDF",
+      "text": "Metin ve Markdown",
+      "web": "Web sayfaları",
+      "xlsx": "Excel"
+    }
   },
   "engineConsent": {
     "allow": "{{cli}} için izin ver",
@@ -7027,8 +7128,8 @@
         "save": "Kaydet",
         "security": "SMTP güvenliği",
         "sendMode": {
-          "ask": "Her seferinde bana sor",
-          "askHint": "Her ileti önce sana gösterilir: Kimden, Kime, konu ve metin.",
+          "ask": "Botun onay ayarlarını kullan",
+          "askHint": "Tam erişimdeki botlar günlük e-posta sınırı içinde sormadan gönderir. Diğer botlar her iletiyi önce sana gösterir.",
           "draftOnly": "Yalnızca taslak",
           "draftOnlyHint": "Botlar bu adresten taslak yazabilir ama asla göndermez.",
           "label": "Gönderim"
@@ -7050,7 +7151,7 @@
         "tls": "Güvenli bağlantı kurulamadı. Sunucu adını, portu ve güvenlik ayarını kontrol et.",
         "unreachable": "Posta sunucusuna ulaşılamadı. İnternet bağlantını ve sunucu adlarını kontrol edip yeniden dene."
       },
-      "note": "Bir posta kutusunu bir bota bağla; bot o postaları okuyup arayabilir. Göndermeden önce her zaman sorar.",
+      "note": "Bağlı posta kutusunu bot okuyup arayabilir. Göndermeden önce sorar; Tam erişimde sormadan gönderir.",
       "onlyBot": "Yalnızca {{name}}",
       "passwordMissing": "Kayıtlı parola yok.",
       "result": {
@@ -7309,16 +7410,16 @@
           "summary": "Botlar bakar, her değişikliği sen onaylarsın."
         },
         "handsOff": {
-          "ask": "Para harcamak, tehlikeli komutlar ve güvenilmeyen bir sayfa okuduktan sonraki her şey.",
-          "name": "Tam",
-          "own": "Dosya silmek ve mesaj göndermek dahil hemen her şey.",
-          "summary": "Botlar işini kendisi halleder. Yalnızca en büyük risklerde durup sorar."
+          "ask": "Yalnızca para harcama ve yasaklı listedeki yıkıcı komutlar.",
+          "name": "Tam erişim",
+          "own": "Gerisi: komutlar, dosyalar, gezinme, kayıtlar, formlar, e-posta ve mesajlar; zamanlanmış ve tetiklenmiş çalışmalar dahil.",
+          "summary": "Botlar işini kendisi halleder. Yalnızca para harcamadan önce sorarlar."
         }
       },
       "offline": "Yardımcıya henüz bağlı değil, bu yüzden seviye gösterilemiyor ya da değiştirilemiyor.",
       "onItsOwn": "Kendi başına",
       "recommended": "Önerilen",
-      "samePresets": "Bu üç seviye, tek bir bot için İzinler bölümünde seçebileceğin hazır ayarlarla aynıdır: Dikkatli “Oku ve taslak hazırla”, Dengeli “Yıkıcı işlemlerde onay”, Tam ise Tam’dır.",
+      "samePresets": "Bu üç seviye, tek bir bot için İzinler bölümünde seçebileceğin hazır ayarlarla aynıdır: Dikkatli “Oku ve taslak hazırla”, Dengeli “Yıkıcı işlemlerde onay”, Tam erişim ise “Tam”dır.",
       "saved": "Kaydedildi. Botun bir sonraki adımından itibaren geçerli.",
       "title": "Botlar kendi başına neler yapabilir",
       "willAsk": "Önce sana soracak"

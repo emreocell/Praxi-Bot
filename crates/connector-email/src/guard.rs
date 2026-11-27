@@ -280,6 +280,7 @@ impl State {
 
 /// The guard. Cheap to share behind an `Arc`.
 pub struct MailGuard {
+    pub(crate) send_lock: tokio::sync::Mutex<()>,
     dir: Option<PathBuf>,
     state: Mutex<State>,
     log_memory: usize,
@@ -562,6 +563,7 @@ impl MailGuard {
     #[must_use]
     pub fn in_memory() -> Self {
         Self {
+            send_lock: tokio::sync::Mutex::new(()),
             dir: None,
             state: Mutex::new(State::default()),
             log_memory: DEFAULT_LOG_MEMORY,
@@ -623,6 +625,7 @@ impl MailGuard {
             }
         }
         Self {
+            send_lock: tokio::sync::Mutex::new(()),
             dir: Some(dir),
             state: Mutex::new(st),
             log_memory: log_memory.max(1),

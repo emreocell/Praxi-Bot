@@ -228,3 +228,28 @@ test("an image without alt text is labelled with its address; an unsafe image ke
   const [b] = parseMarkdown("![logo](javascript:alert(1))");
   assert.deepEqual(b, { t: "p", children: [{ t: "text", text: "logo" }] });
 });
+
+test("a citation link becomes a doc node, with the label kept as inline text", () => {
+  const id = "0190f3c2-7d9a-7a11-8c01-4f2f3a6b9c10";
+  const blocks = parseMarkdown(`See [lease.pdf, p. 3](praxi-doc://${id}/housing/lease.pdf?lines=12-19&page=3) for the deposit.`);
+  const paragraph = blocks[0];
+  assert.equal(paragraph.t, "p");
+  if (paragraph.t !== "p") return;
+  const doc = paragraph.children.find((n) => n.t === "doc");
+  assert.ok(doc && doc.t === "doc");
+  assert.equal(doc.href, `praxi-doc://${id}/housing/lease.pdf?lines=12-19&page=3`);
+  assert.deepEqual(doc.children, [{ t: "text", text: "lease.pdf, p. 3" }]);
+});
+
+test("a malformed citation or a praxi-doc image stays plain text, never a link", () => {
+  for (const source of [
+    "[x](praxi-doc://not-a-uuid/a.pdf)",
+    "[x](praxi-doc://0190f3c2-7d9a-7a11-8c01-4f2f3a6b9c10/../a.pdf)",
+    "![x](praxi-doc://0190f3c2-7d9a-7a11-8c01-4f2f3a6b9c10/a.pdf)"
+  ]) {
+    const [paragraph] = parseMarkdown(source);
+    assert.equal(paragraph.t, "p");
+    if (paragraph.t !== "p") return;
+    assert.ok(paragraph.children.every((n) => n.t !== "doc" && n.t !== "link"), source);
+  }
+});

@@ -38,6 +38,7 @@ mod mail_prompt;
 mod memory;
 mod mention;
 mod mission_start;
+mod money;
 pub mod page_guard;
 mod profile;
 mod router;
@@ -71,6 +72,8 @@ mod control_grant_tests;
 mod delegation_tests;
 #[cfg(test)]
 mod egress_tests;
+#[cfg(test)]
+mod full_lane_tests;
 #[cfg(test)]
 mod full_mode_tests;
 #[cfg(test)]
@@ -111,8 +114,9 @@ pub use config::{
     DEFAULT_APPROVAL_TIMEOUT, DEFAULT_DIRECT_TOOL_LIMIT, DEFAULT_HANDOVER_TIMEOUT,
     DEFAULT_MAX_AUTO_RESUMES, DEFAULT_MAX_HANDOVERS_PER_RUN, DEFAULT_MAX_SECRET_REQUESTS_PER_RUN,
     DEFAULT_SCHEDULE_APPROVAL_TIMEOUT, DEFAULT_SECRET_REQUEST_TIMEOUT,
-    DEFAULT_TRANSIENT_OUTAGE_BUDGET, DEFAULT_WAIT_FOR_PC_TIMEOUT, Guards, JournalSlot, LoopConfig,
-    MemoryConfig, ModelPrice, RedactorRefreshFn, SharedRedactor, secret_variants,
+    DEFAULT_TRANSIENT_OUTAGE_BUDGET, DEFAULT_WAIT_FOR_PC_TIMEOUT, FullLaneSwitch, Guards,
+    JournalSlot, LoopConfig, MemoryConfig, ModelPrice, RedactorRefreshFn, SharedRedactor,
+    full_access_lane_switch, secret_variants,
 };
 pub use control::{ControlGate, ControlRequest};
 pub use knowledge::{

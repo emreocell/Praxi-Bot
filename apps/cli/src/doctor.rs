@@ -86,6 +86,7 @@ pub fn run_checks(env: &DoctorEnv<'_>) -> Vec<Check> {
         ),
         check_mcp(env.data_dir),
         check_secret_request(env.data_dir),
+        check_full_access_lane(env.data_dir),
         check_web(env),
         core::check_schedule_tools(env.data_dir),
         core::check_process_guard(env.data_dir),
@@ -831,6 +832,14 @@ fn check_secret_request(dir: &Path) -> Check {
             "off (default): the bot is not offered the secret_request tool",
         )
     }
+}
+
+/// The Full access lane's switch as `bot serve` would read it now (`host.toml`, `BOT_FULL_ACCESS_LANE`).
+fn check_full_access_lane(dir: &Path) -> Check {
+    core::check_full_access_lane(&agent_core::full_access_lane_switch(
+        std::fs::read_to_string(dir.join("host.toml")),
+        std::env::var("BOT_FULL_ACCESS_LANE").ok().as_deref(),
+    ))
 }
 
 /// Budget for the `--online` web search probe: must exceed the sequential

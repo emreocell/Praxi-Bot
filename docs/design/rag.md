@@ -484,6 +484,117 @@ runtime state: it is excluded and an existing destination ledger must not be
 rolled back by import. Shared Markdown files transfer as data and are only
 indexed by bots that explicitly attach the brain.
 
+## Ask my documents (folders with consent and citations)
+
+The settings page **My documents** is the plain-language front door to the folder
+sources above. It adds no new storage: a chosen folder is an ordinary `Folder`
+source, so every rule in this document (no-follow capabilities, size and entry
+limits, redaction, untrusted data, taint, per-source embedding consent, hard
+deletion) applies unchanged.
+
+**Consent per folder.** The owner browses the folders of the machine the daemon
+runs on (this computer, or the server for a bot that lives there; the daemon is
+the same code either way). `GET /v1/knowledge/folders` lists sub-folder *names
+only*: no file is listed or read, dot-folders and symlinks are not shown, and
+credential/browser-profile folders and the daemon's data directory (or a folder
+around it) are listed as not selectable, and the daemon does not list *inside* a
+credential, browser-profile or daemon-state folder at all (the request is refused
+with the same `400` as a folder that cannot be opened). `POST /v1/bots/{bot}/knowledge/folder-preview`
+then walks the chosen folder through the same `SelectedSource` the indexer uses
+and returns, before anything is read or stored: the files that would be indexed
+(first 200 named, totals for all), their size and kind, a deliberately rough time
+estimate, and what is left out. Only then does the owner confirm, which is the
+existing `create_source` call. Both routes and the file route below are
+owner-only (`OWNER_ROUTES`); a bearer token alone, a bot or a paired peer
+without the owner key cannot reach them. The peer guard also refuses all three
+(`host_local_denial`) for every method and every paired role, `Host` included,
+so a paired device never browses, previews or reads the host's files; the host's
+administrator desktop is the one documented exception, as for every owner setting.
+
+**What is read.** PDF, DOCX, XLSX, CSV/TSV, HTML, Markdown, plain text and code,
+at most 4 MiB per file and 1 MiB of extracted text. A spreadsheet becomes one
+`## sheet` section per sheet with ` | `-separated rows; it is refused, never
+truncated, when it does not fit (`doc_tools::spreadsheet_text`). Scanned PDFs have
+no text layer and index nothing.
+
+**What is left out, visibly.** A name that looks like it holds secrets is never
+read, whatever its type: dot-env files, key and certificate stores (`.pem`,
+`.key`, `.p12`, `.kdbx`, ...), `id_rsa`-style names, token/credential exports and
+any name with a whole word such as *password*, *secret*, *credentials*, *api key*
+(English and Turkish *şifre/parola*; whole words only, so *secretary-minutes.docx*
+is read). Credential directories are skipped the same way. These, files over the
+size limit and (by count) hidden, linked and unsupported entries are reported in
+the preview and in every indexing page (`indexing.skipped`). Content is checked as
+well, in layers: (1) the file *name* and folder, above; (2) *key material* is
+refused whole, because line-by-line redaction only sees a key's header line and
+would index its body: a PEM, OpenSSH or PGP `PRIVATE KEY` header anywhere in a
+line, a PuTTY `.ppk` header, an age secret key, an `openssh-key-v1` blob, and a
+run of four or more base64 lines that starts like a DER sequence (`MII...`, a
+PKCS#1/PKCS#8 body whose header was cut off; this also refuses certificates, the
+cheaper mistake); (3) a file with 20 or more credential-shaped values (provider
+tokens, AWS key ids and `aws_secret_access_key =` lines, `password: ...` lines,
+credentials inside URLs) is a credentials dump and is refused whole; card-like
+digit runs and long opaque strings do not count towards the 20, because
+spreadsheets are full of them; (4) whatever remains is redacted line by line, with
+line numbers kept. Refusals (2) and (3) are reported as failure code
+`secret_content`. All of this is a heuristic on top of the owner's choice of
+folder, not a guarantee that no secret is indexed: an encrypted or oddly wrapped
+key, or a lone secret in prose that matches no pattern, can still get through.
+
+**Citations.** Every hit from a file source carries `path` (absolute, on the
+machine that holds the index), `page` (PDFs: the `Page N` heading the chunk sits
+under) and `citation`, a markdown link
+`[lease.pdf, p. 3](praxi-doc://<source id>/<path inside the folder>?lines=12-19&page=3)`
+built by trusted code (`knowledge::citation`) from catalog fields only; the
+label cannot break out of the link and the path is percent-encoded. Line numbers
+are the indexed text's lines: the original lines for Markdown, text and code,
+extracted-text lines for PDF, Word and Excel (stated in the model-facing tool
+description, as before). The chat turns a well-formed `praxi-doc://` link in an
+assistant message into a button (`lib/documentCitation.ts`; malformed targets,
+`..` segments and images stay plain text). Clicking calls
+`GET /v1/bots/{bot}/knowledge/sources/{source}/file?locator=...`, which serves a
+file only if it is currently *indexed* from an *enabled* file/folder source of
+that bot. The locator must be a plain relative path (no drive, UNC or `\\?\`
+form, no `\\` or `:`, no `.`/`..`/empty segments, no control characters, no
+trailing dot or space), must equal an indexed document's path exactly (letter
+case included), and is then opened through the same no-follow capability under
+the source's root and checked to resolve to exactly that path. The bytes are sent
+as an `attachment` (`application/octet-stream`) with `nosniff`, a `sandbox` CSP,
+`X-Frame-Options: DENY` and `no-store`; the only inline response is a `.pdf` whose
+bytes start like a PDF, for the viewer, unless a download is asked for. A PDF opens
+in a window on its page when the shell allows it; anything else is saved as a copy.
+In the chat a click first asks, naming the folder (by its label) and the file, because any
+message or document can contain a `praxi-doc://` link; a link into a folder the
+bot does not have cannot be confirmed. The page and line numbers of a link are
+clamped and the saved copy's name is reduced to a clean single segment. Opening
+is a plain read of a file the owner already chose; it grants nothing.
+
+**`documents_search`.** The same backend (so the same embedding, quota, consent,
+egress and taint behaviour) as `knowledge_search`, restricted by the host to file
+and folder sources through the `serde(skip)` field `SearchRequest::files_only`
+(not a model argument; sending it is an error, and `source_ids` is ignored). It
+is visible only to a bot with an enabled file or folder source, and returns
+nothing rather than everything when there is none. Output is `untrusted_data`,
+`reads_private` and `ingests_untrusted`, exactly like `knowledge_search`; the
+egress gate asks before anything that can send data off the machine once a run
+has read it. Hits from other source kinds (notes, saved pages, conversations)
+stay in `knowledge_search`.
+
+**Background indexing, pause and resume** are the folder watcher described above:
+a new folder is indexed page by page (the UI continues the pages while the page
+is open; the watcher finishes the rest), changed files are re-read by content
+hash, deleted files are pruned once a scan completes, and the owner can pause
+and resume a folder's updates.
+
+**Forgetting.** Removing a folder deletes its source row and, by cascade, its
+documents, chunks, FTS rows, vectors and unused cache entries, and revokes its
+document-embedding grant. The files on disk are not touched.
+
+**Not covered here.** Scanned (image-only) PDFs need OCR and are not indexed.
+Automatic retrieval before a question stays off until native taint enforcement
+lands (see above). Opening a file on a *server* from the desktop saves a copy
+through the paired link; it does not open the server's own viewer.
+
 ## Evaluation, token accounting and delivery
 
 The fixture corpus, queries and expected source IDs live under `evals/retrieval`.

@@ -705,6 +705,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bots/{bot}/knowledge/folder-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Show what choosing this folder would index. Reads no document. Owner only. */
+        post: operations["preview_folder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bots/{bot}/knowledge/settings": {
         parameters: {
             query?: never;
@@ -763,6 +780,30 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["embed_source"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bots/{bot}/knowledge/sources/{source}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open the file behind a citation: its bytes, for a document that is indexed
+         *     from an enabled file or folder source of this bot. Owner only.
+         * @description The file is always sent as an attachment (`application/octet-stream`), so a
+         *     browser that navigates here saves it instead of rendering it. The one
+         *     exception is the PDF viewer path: a `.pdf` whose bytes start like a PDF and
+         *     that was not asked for as a download is sent inline as `application/pdf`.
+         */
+        get: operations["get_source_file"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3298,6 +3339,26 @@ export interface paths {
         put?: never;
         /** Accept a signed call and start a run. No bearer token: the signature is the credential. */
         post: operations["receive_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the sub-folders of a folder on the machine the daemon runs on. Owner only.
+         *     Credential, browser-profile and daemon-state folders are refused (400).
+         */
+        get: operations["browse_folders"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8881,12 +8942,56 @@ export interface components {
             code: string;
             locator: string;
         };
+        /** @description A sub-folder in the folder picker. */
+        KnowledgeFolderEntry: {
+            name: string;
+            path: string;
+            /** @description False for credential/browser-profile folders and the daemon's own data. */
+            selectable: boolean;
+        };
+        /** @description One folder and its sub-folders (names only; no file is listed or read). */
+        KnowledgeFolderListing: {
+            entries: components["schemas"]["KnowledgeFolderEntry"][];
+            parent?: string | null;
+            path: string;
+            /** @description Drive roots on Windows; empty elsewhere. */
+            roots: string[];
+            /** @description Whether this very folder may be chosen. */
+            selectable: boolean;
+            /** @description More than 500 sub-folders: only the first ones are listed. */
+            truncated: boolean;
+        };
+        /** @description What indexing a folder would read, before anything is read or stored. */
+        KnowledgeFolderPreview: {
+            /** @description Files per kind: `pdf`, `docx`, `xlsx`, `text`, `web`, `code`. */
+            by_type: {
+                [key: string]: number;
+            };
+            /**
+             * Format: int64
+             * @description Rough time to index on a typical computer, in seconds.
+             */
+            estimated_seconds: number;
+            file_count: number;
+            /** @description The first 200 files; `file_count` is the full count. */
+            files: components["schemas"]["KnowledgePreviewFile"][];
+            skipped: components["schemas"]["KnowledgeSkipped"];
+            /** Format: int64 */
+            total_bytes: number;
+        };
+        /** @description Folder to preview. */
+        KnowledgeFolderPreviewInput: {
+            /** @description Absolute path on the machine the daemon runs on. */
+            path: string;
+        };
         /** @description A bounded indexing page. Replay starts from hashes already committed. */
         KnowledgeIndexStatus: {
             failures: components["schemas"]["KnowledgeFileFailure"][];
             next_cursor?: string | null;
             processed: number;
             removed: number;
+            /** @description What the folder scan left out (secret-looking files, oversized files, ...). */
+            skipped: components["schemas"]["KnowledgeSkipped"];
             unchanged: number;
         };
         /** @description A host-installed local model. Native file locations are never API inputs. */
@@ -8899,6 +9004,12 @@ export interface components {
         KnowledgeMutation: {
             indexing: components["schemas"]["KnowledgeIndexStatus"];
             source: components["schemas"]["KnowledgeSourceDto"];
+        };
+        /** @description A file that would be indexed. */
+        KnowledgePreviewFile: {
+            /** Format: int64 */
+            bytes: number;
+            locator: string;
         };
         KnowledgeReindex: {
             /** @description Last relative file from the previous page; omitted starts a new scan. */
@@ -8920,6 +9031,21 @@ export interface components {
         KnowledgeSettingsInput: {
             auto_retrieve: boolean;
             embedding?: null | components["schemas"]["KnowledgeEmbeddingInput"];
+        };
+        /** @description What a scan left out. Hidden and unsupported entries are only counted. */
+        KnowledgeSkipped: {
+            hidden: number;
+            listed: components["schemas"]["KnowledgeSkippedFile"][];
+            secret: number;
+            too_large: number;
+            unsupported: number;
+        };
+        /** @description A file or folder that is left out, with the reason. */
+        KnowledgeSkippedFile: {
+            /** @description Path inside the folder; folders end in `/`. */
+            locator: string;
+            /** @description `secret` (looks like it holds secrets) or `too_large`. */
+            reason: string;
         };
         /** @enum {string} */
         KnowledgeSourceAction: "enable" | "disable" | "revoke_remote" | "rename" | "rebind";
@@ -14258,6 +14384,39 @@ export interface operations {
             };
         };
     };
+    preview_folder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bot: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeFolderPreviewInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeFolderPreview"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_settings: {
         parameters: {
             query?: never;
@@ -14470,6 +14629,58 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeEmbeddingProgress"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_source_file: {
+        parameters: {
+            query: {
+                /** @description Path of the file inside the source */
+                locator: string;
+                /** @description Force a download even for a PDF */
+                download?: boolean;
+            };
+            header?: never;
+            path: {
+                bot: string;
+                source: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File bytes with attachment, nosniff, sandbox, frame-deny and no-store headers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             409: {
@@ -20723,6 +20934,36 @@ export interface operations {
             };
             /** @description too many calls or too many failed calls this minute */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    browse_folders: {
+        parameters: {
+            query?: {
+                /** @description Absolute folder path; default is the home folder */
+                path?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeFolderListing"];
+                };
+            };
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1,0 +1,25 @@
+.citation {
+  display: inline;
+  padding: var(--space-0);
+  border: var(--space-0);
+  background: none;
+  color: var(--color-accent-text);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: var(--space-1);
+  cursor: pointer;
+}
+
+.citation:hover {
+  color: var(--color-accent-hover);
+}
+
+.citation:focus-visible {
+  outline: var(--size-border) solid var(--color-accent);
+  outline-offset: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.plain {
+  color: var(--color-text-muted);
+}

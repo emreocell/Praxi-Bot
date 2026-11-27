@@ -35,6 +35,7 @@ mod attach_tests;
 pub mod files;
 #[cfg(test)]
 mod files_tests;
+mod payment;
 mod pointer;
 #[cfg(test)]
 mod pointer_tests;
@@ -369,6 +370,16 @@ pub trait BrowserDriver: Send + Sync {
     ) -> Result<(Vec<u8>, &'static str), String>;
     /// Evaluate JavaScript in the page.
     async fn eval(&self, js: &str) -> Result<Value, String>;
+    /// Refuse (`true`) or allow again (`false`) requests from the page to payment APIs
+    /// ([`tool_registry::payment::blocked_url_patterns`]). A driver that cannot block succeeds
+    /// when asked to allow and fails when asked to refuse: the caller then withholds the script.
+    async fn set_payment_block(&self, on: bool) -> Result<(), String> {
+        if on {
+            Err("this browser cannot block requests".into())
+        } else {
+            Ok(())
+        }
+    }
     /// Role and accessible name of the element behind `r` right now, as the browser
     /// reports them; `None` when the ref is unknown or the driver cannot tell. A
     /// `browser_act` batch compares this before every step, so a changed page stops the
@@ -390,6 +401,10 @@ pub trait BrowserDriver: Send + Sync {
     /// (the CDP target id). `None`: no session, or the driver cannot tell.
     async fn current_tab_id(&self) -> Option<String> {
         None
+    }
+    /// The current page visibly contains payment inputs or a payment widget.
+    async fn has_payment_form(&self) -> bool {
+        false
     }
     /// Browser document identity used to release a secret capture latch on navigation.
     async fn capture_epoch(&self) -> Option<String> {
@@ -1189,6 +1204,7 @@ async fn close_session(view: Option<&browser_cdp::BrowserViewTarget>, session: S
 tokio::task_local! {
     // Carried across control-gate waits, then checked with the session lock held.
     static EXPECTED_PAGE_ORIGIN: Option<String>;
+    static PAYMENT_APPROVAL: tool_registry::PaymentApproval;
 }
 
 tokio::task_local! {
@@ -1981,6 +1997,26 @@ impl BrowserDriver for CdpDriver {
         }
         .await;
         id.ok()
+    }
+
+    async fn set_payment_block(&self, on: bool) -> Result<(), String> {
+        let patterns = tool_registry::payment::blocked_url_patterns();
+        // Lifting a block never starts a browser; putting one on may (a script is about to run).
+        with_session!(self, None, on, |sess| {
+            sess.page
+                .set_url_block(on.then_some(patterns.as_slice()))
+                .await
+        })
+    }
+
+    async fn has_payment_form(&self) -> bool {
+        let result: Result<bool, String> = async {
+            with_session!(self, None, false, |sess| {
+                sess.page.has_payment_form().await
+            })
+        }
+        .await;
+        result.unwrap_or(false)
     }
 
     async fn current_url(&self) -> Option<String> {
@@ -3286,6 +3322,7 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                self.check_payment_approval(Some(&i.r#ref)).await?;
                 // `protect` runs the work on its own task: carry the batch guard over.
                 let guard = step_guard();
                 permit
@@ -3325,6 +3362,7 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                self.check_payment_approval(Some(&i.r#ref)).await?;
                 match what {
                     Source::Text(text) => permit
                         .protect(async move { d.fill(&i.r#ref, &text).await })
@@ -3377,6 +3415,7 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                self.check_payment_approval(Some(&i.r#ref)).await?;
                 permit
                     .protect(async move { d.select(&i.r#ref, &i.value).await })
                     .await
@@ -3420,6 +3459,7 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                self.check_payment_approval(None).await?;
                 permit
                     .protect(STEP_GUARD.scope(guard, async move { d.press(&i.key).await }))
                     .await
@@ -3688,6 +3728,8 @@ impl BrowserTool {
                         "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
                     ));
                 }
+                self.check_payment_approval(None).await?;
+                self.arm_payment_block().await?;
                 permit
                     .protect(async move { d.eval(&i.js).await })
                     .await
@@ -4095,7 +4137,10 @@ impl BrowserTool {
         let ran = EXPECTED_PAGE_ORIGIN
             .scope(
                 ctx.expected_origin.clone(),
-                selected.run(&ctx.run_id, input, ctx.bot_id.as_deref()),
+                PAYMENT_APPROVAL.scope(
+                    ctx.payment.clone(),
+                    selected.run(&ctx.run_id, input, ctx.bot_id.as_deref()),
+                ),
             )
             .await;
         let mut text = match ran {
@@ -4204,6 +4249,15 @@ impl Tool for BrowserTool {
             .await
     }
 
+    async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64> {
+        BROWSER_LANE
+            .scope(ctx.lane.clone(), async {
+                let shared = self.select_shared(ctx).ok()?;
+                self.payment_page_with(&*shared.driver, input).await
+            })
+            .await
+    }
+
     async fn landed_origin(&self, ctx: &ToolContext) -> Option<String> {
         BROWSER_LANE
             .scope(ctx.lane.clone(), async {
@@ -4294,6 +4348,8 @@ pub(crate) mod fake {
         pub download_dir: PMutex<Option<PathBuf>>,
         /// What `downloads` reports (`None`: this backend keeps none).
         pub report: PMutex<Option<browser_cdp::DownloadReport>>,
+        /// Why `set_payment_block(true)` fails, when a test wants it to.
+        pub block_error: PMutex<Option<String>>,
     }
 
     impl FakeBrowser {
@@ -4547,6 +4603,13 @@ pub(crate) mod fake {
             self.calls.lock().push(format!("eval:{js}"));
             Ok(json!({"title": "Example"}))
         }
+        async fn set_payment_block(&self, on: bool) -> Result<(), String> {
+            self.calls.lock().push(format!("block:{on}"));
+            match self.block_error.lock().clone() {
+                Some(e) if on => Err(e),
+                _ => Ok(()),
+            }
+        }
     }
 }
 
@@ -4595,6 +4658,185 @@ mod tests {
             Some("TAB-2"),
             "the id follows a tab switch"
         );
+    }
+
+    #[tokio::test]
+    async fn checkout_input_is_withheld_until_its_document_is_approved() {
+        use tool_registry::PaymentApproval;
+
+        let (_dir, fake, tools) = build();
+        let click = get(&tools, "browser_click");
+        let args = json!({"ref": "e1"});
+        // Looking at the page is allowed; only a click is withheld.
+        let clicks = || {
+            fake.calls
+                .lock()
+                .iter()
+                .filter(|call| call.starts_with("click"))
+                .count()
+        };
+        let mut ctx = ToolContext {
+            payment: PaymentApproval::Check,
+            ..ToolContext::default()
+        };
+        *fake.url.lock() = Some("https://shop.example/checkout/order-one".into());
+        let token = click.payment_page(&ctx, &args).await.unwrap();
+        assert!(matches!(
+            click.call(&ctx, args.clone()).await,
+            Err(ToolError::PermissionDenied(_))
+        ));
+        assert_eq!(clicks(), 0);
+        ctx.payment = PaymentApproval::Approved(token);
+        click.call(&ctx, args.clone()).await.unwrap();
+        assert_eq!(clicks(), 1);
+        *fake.url.lock() = Some("https://shop.example/checkout/order-two".into());
+        assert!(matches!(
+            click.call(&ctx, args).await,
+            Err(ToolError::PermissionDenied(_))
+        ));
+        assert_eq!(clicks(), 1);
+    }
+
+    /// Second review, finding 1: a script of the model's own that names a payment API is a
+    /// payment on any page, and one that does not still runs behind a network block of payment
+    /// APIs (a host it spells out at run time, a timer it leaves behind) unless the owner
+    /// approved a payment on that page. A script that cannot be put behind the block is withheld.
+    #[tokio::test]
+    async fn a_script_runs_behind_the_payment_block_unless_a_payment_was_approved() {
+        use tool_registry::PaymentApproval;
+
+        let (_dir, fake, tools) = build();
+        let eval = get(&tools, "browser_eval");
+        *fake.url.lock() = Some("https://shop.example/product/1".into());
+        let order = |fake: &FakeBrowser| -> Vec<String> {
+            fake.calls
+                .lock()
+                .iter()
+                .filter(|c| c.starts_with("block:") || c.starts_with("eval:"))
+                .cloned()
+                .collect()
+        };
+        let ctx = |payment| ToolContext {
+            payment,
+            ..ToolContext::default()
+        };
+        let paying = json!({"js": "fetch('https://api.stripe.com/v1/charges', {method:'POST'})"});
+        let plain = json!({"js": "document.title"});
+
+        // Off a checkout page only the script's text says it is a payment.
+        assert!(
+            eval.payment_page(&ctx(PaymentApproval::Check), &plain)
+                .await
+                .is_none()
+        );
+        let token = eval
+            .payment_page(&ctx(PaymentApproval::Check), &paying)
+            .await
+            .expect("a script naming a payment API is a payment");
+
+        // Unapproved: the block is on before the script runs.
+        eval.call(&ctx(PaymentApproval::Check), plain.clone())
+            .await
+            .unwrap();
+        assert_eq!(order(&fake), ["block:true", "eval:document.title"]);
+        fake.calls.lock().clear();
+
+        // Approved for this page: the block is lifted, the script runs.
+        eval.call(&ctx(PaymentApproval::Approved(token)), paying.clone())
+            .await
+            .unwrap();
+        let ran = order(&fake);
+        assert_eq!(
+            ran.last().unwrap(),
+            &format!("eval:{}", paying["js"].as_str().unwrap())
+        );
+        assert!(
+            ran.contains(&"block:false".to_owned()) && !ran.contains(&"block:true".to_owned()),
+            "{ran:?}"
+        );
+        fake.calls.lock().clear();
+
+        // An approval for another document does not lift it.
+        *fake.url.lock() = Some("https://shop.example/product/2".into());
+        assert!(matches!(
+            eval.call(&ctx(PaymentApproval::Approved(token)), paying.clone())
+                .await,
+            Err(ToolError::PermissionDenied(_))
+        ));
+        assert!(order(&fake).iter().all(|c| !c.starts_with("eval:")));
+        fake.calls.lock().clear();
+
+        // No payment mode on the call (a bot below the Full level): not touched on.
+        eval.call(&ctx(PaymentApproval::Unchecked), plain.clone())
+            .await
+            .unwrap();
+        assert_eq!(order(&fake), ["block:false", "eval:document.title"]);
+        fake.calls.lock().clear();
+
+        // A browser that cannot put the block on: the script is withheld, not run unguarded.
+        *fake.block_error.lock() = Some("no network control".into());
+        let denied = eval.call(&ctx(PaymentApproval::Check), plain).await;
+        assert!(
+            matches!(denied, Err(ToolError::PermissionDenied(_))),
+            "{denied:?}"
+        );
+        assert!(order(&fake).iter().all(|c| !c.starts_with("eval:")));
+    }
+
+    /// A payment page the browser gives no document identity for is asked about, but no
+    /// approval binds it: two identity-less pages are not the same document.
+    #[tokio::test]
+    async fn an_identity_less_payment_page_is_never_approved() {
+        use tool_registry::PaymentApproval;
+
+        let (_dir, fake, tools) = build();
+        let eval = get(&tools, "browser_eval");
+        let paying = json!({"js": "fetch('https://api.stripe.com/v1/charges', {method:'POST'})"});
+        let ctx = |payment| ToolContext {
+            payment,
+            ..ToolContext::default()
+        };
+        let evals = |fake: &FakeBrowser| {
+            fake.calls
+                .lock()
+                .iter()
+                .filter(|c| c.starts_with("eval:"))
+                .count()
+        };
+
+        *fake.url.lock() = None;
+        // Still a payment (so the gate asks), reported with a token no document has.
+        let token = eval
+            .payment_page(&ctx(PaymentApproval::Check), &paying)
+            .await
+            .expect("an identity-less payment page is still a payment");
+        assert_eq!(token, super::payment::UNBOUND);
+        // The approval cannot be redeemed, on this page or another one without identity.
+        for _ in 0..2 {
+            assert!(matches!(
+                eval.call(&ctx(PaymentApproval::Approved(token)), paying.clone())
+                    .await,
+                Err(ToolError::PermissionDenied(_))
+            ));
+        }
+        assert_eq!(evals(&fake), 0);
+
+        // Once a page has an identity, the unbound approval still does not match it.
+        *fake.url.lock() = Some("https://shop.example/checkout".into());
+        assert!(matches!(
+            eval.call(&ctx(PaymentApproval::Approved(token)), paying.clone())
+                .await,
+            Err(ToolError::PermissionDenied(_))
+        ));
+        let real = eval
+            .payment_page(&ctx(PaymentApproval::Check), &paying)
+            .await
+            .unwrap();
+        assert_ne!(real, super::payment::UNBOUND);
+        eval.call(&ctx(PaymentApproval::Approved(real)), paying)
+            .await
+            .unwrap();
+        assert_eq!(evals(&fake), 1);
     }
 
     fn text(o: &ToolOutput) -> String {

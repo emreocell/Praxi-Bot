@@ -48,12 +48,11 @@ impl AccountKind {
     }
 }
 
-/// What an identity may do with the send button. Sending always asks the owner
-/// first; this can only make it stricter.
+/// Whether bots can send from this identity or are limited to drafts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SendMode {
-    /// Every send is shown to the owner for approval (default).
+    /// The bot's approval policy applies to sends (default).
     #[default]
     Ask,
     /// Bots may only save drafts from this address; nothing is sent.
@@ -80,7 +79,7 @@ pub struct IdentitySettings {
     /// Bots whose default sender this account is (when they pass no `account`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub default_for: Vec<String>,
-    /// Draft only, or ask the owner each time.
+    /// Draft only, or send under the bot's approval policy.
     #[serde(default, skip_serializing_if = "SendMode::is_default")]
     pub send_mode: SendMode,
 }

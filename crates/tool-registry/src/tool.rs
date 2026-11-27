@@ -134,6 +134,18 @@ impl ControlTarget {
     }
 }
 
+/// Payment guard for an action in the managed browser.
+#[derive(Debug, Clone, Default)]
+pub enum PaymentApproval {
+    /// This call uses the existing approval rules.
+    #[default]
+    Unchecked,
+    /// Withhold input if a checkout or payment surface is detected.
+    Check,
+    /// The owner approved this call on the identified payment document.
+    Approved(u64),
+}
+
 /// Context supplied to every tool call.
 #[derive(Debug, Clone)]
 pub struct ToolContext {
@@ -156,6 +168,11 @@ pub struct ToolContext {
     /// page action. The browser tool refuses to act if the page is on another origin by then
     /// (a navigation or redirect in between), so an allowance never follows the page elsewhere.
     pub expected_origin: Option<String>,
+    /// The Full level admitted this call without a card. A mail send then refuses
+    /// every mail-guard warning: only a card the owner saw can send past one.
+    pub unattended_mail: bool,
+    /// Payment authorization supplied by the daemon, never tool arguments.
+    pub payment: PaymentApproval,
     /// Set by the loop only when a run-scoped control grant covers this call:
     /// the tool must send its input through the backend's guarded path, so the
     /// window that would receive it is checked against this program right
@@ -176,6 +193,8 @@ impl Default for ToolContext {
             content_tainted: false,
             exposure_untrusted: false,
             expected_origin: None,
+            unattended_mail: false,
+            payment: PaymentApproval::Unchecked,
             control_guard: None,
             lane: None,
         }
@@ -292,6 +311,12 @@ pub trait Tool: Send + Sync {
         None
     }
 
+    /// Identify a managed payment page just before approval. The token binds
+    /// authorization to that document and is never based on model arguments.
+    async fn payment_page(&self, _ctx: &ToolContext, _input: &Value) -> Option<u64> {
+        None
+    }
+
     /// Host the call actually contacts when the input does not name one.
     ///
     /// `OpenAPI` tools use this so the card footer shows the API host, not the
@@ -358,6 +383,10 @@ pub trait ToolWrapper: Send + Sync {
     /// Forward [`Tool::standing_grant`] to the wrapped tool.
     async fn standing_grant(&self, ctx: &ToolContext, input: &Value) -> Option<StandingGrant>;
 
+    /// Forward [`Tool::payment_page`] to the wrapped tool: a wrapper that drops it makes the
+    /// wrapped browser tool look like it never reaches a checkout.
+    async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64>;
+
     /// Forward [`Tool::approval_details`] to the wrapped tool.
     ///
     /// # Errors
@@ -412,6 +441,10 @@ impl<W: ToolWrapper> Tool for W {
 
     async fn standing_grant(&self, ctx: &ToolContext, input: &Value) -> Option<StandingGrant> {
         ToolWrapper::standing_grant(self, ctx, input).await
+    }
+
+    async fn payment_page(&self, ctx: &ToolContext, input: &Value) -> Option<u64> {
+        ToolWrapper::payment_page(self, ctx, input).await
     }
 }
 
@@ -993,6 +1026,13 @@ impl Tool for W {
                 input: &serde_json::Value,
             ) -> Option<crate::StandingGrant> {
                 self.0.standing_grant(ctx, input).await
+            }
+            async fn payment_page(
+                &self,
+                ctx: &crate::ToolContext,
+                input: &serde_json::Value,
+            ) -> Option<u64> {
+                self.0.payment_page(ctx, input).await
             }
             async fn approval_details(
                 &self,

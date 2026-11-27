@@ -156,6 +156,29 @@ pub fn extract_bytes(
     Ok(reply)
 }
 
+/// Complete plain text of an already-authorized `.xlsx` snapshot for indexing: one
+/// `## sheet` section per sheet, rows as ` | `-separated lines. Like
+/// [`extract_bytes`] it refuses a workbook that does not fit in `max_bytes`
+/// (or has an oversized sheet) rather than returning a shortened snapshot.
+///
+/// # Errors
+/// Oversized or malformed workbook, or one that does not fit the text limit.
+pub fn spreadsheet_text(
+    cfg: &DocToolsConfig,
+    bytes: &[u8],
+    max_bytes: usize,
+) -> Result<String, ToolError> {
+    if bytes.len() as u64 > cfg.max_input_bytes {
+        return Err(ToolError::InvalidInput(
+            "document exceeds input limit".into(),
+        ));
+    }
+    check_zip_limits(bytes)?;
+    std::panic::catch_unwind(|| xlsx::complete_text(bytes.to_vec(), max_bytes)).map_err(|_| {
+        ToolError::Execution("document parser failed; source was not indexed".into())
+    })?
+}
+
 /// Which Office format a zip file is (`docx`, `xlsx` or `pptx`), judged by its entries
 /// rather than any file name; `None` for other archives.
 #[must_use]

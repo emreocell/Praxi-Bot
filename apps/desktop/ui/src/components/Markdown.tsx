@@ -7,6 +7,7 @@ import {
   parseMarkdown
 } from "../lib/markdown";
 import { CodeBlock } from "./CodeBlock";
+import { DocCitationLink } from "./DocCitationLink";
 import styles from "./Markdown.module.css";
 
 function renderInline(nodes: Inline[]): ReactNode {
@@ -28,6 +29,12 @@ function renderInline(nodes: Inline[]): ReactNode {
         return <em key={i}>{renderInline(n.children)}</em>;
       case "del":
         return <del key={i}>{renderInline(n.children)}</del>;
+      case "doc":
+        return (
+          <DocCitationLink key={i} href={n.href}>
+            {renderInline(n.children)}
+          </DocCitationLink>
+        );
       case "link":
         return (
           <a

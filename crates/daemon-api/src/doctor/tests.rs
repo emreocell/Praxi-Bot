@@ -943,3 +943,32 @@ fn report_lists_checks_and_config_names_only() {
         "{md}"
     );
 }
+
+/// A kill switch that could not be read shows up as a warning with the reason and the fix, not
+/// as "on" and not silently (second review, finding 3).
+#[test]
+fn the_full_access_lane_check_names_a_switch_that_could_not_be_read() {
+    let on = check_full_access_lane(&agent_core::FullLaneSwitch {
+        enabled: true,
+        problem: None,
+    });
+    assert_eq!(on.status, Status::Ok);
+    let chosen = check_full_access_lane(&agent_core::FullLaneSwitch {
+        enabled: false,
+        problem: None,
+    });
+    assert_eq!(chosen.status, Status::Ok);
+    assert!(chosen.detail.contains("switched off by the operator"));
+    let broken = check_full_access_lane(&agent_core::FullLaneSwitch {
+        enabled: false,
+        problem: Some("host.toml is not valid: expected `]`".into()),
+    });
+    assert_eq!(broken.status, Status::Warn);
+    assert!(broken.detail.contains("OFF") && broken.detail.contains("not valid"));
+    assert!(
+        broken
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("host.toml"))
+    );
+}

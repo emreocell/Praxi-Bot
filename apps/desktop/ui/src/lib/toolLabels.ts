@@ -175,6 +175,7 @@ const TABLE: Record<string, Entry> = {
   calculate: { id: "calculate", icon: "tool" },
   wait: { id: "wait", icon: "calendar", chips: secondsChip },
   knowledge_search: { id: "knowledge_search", icon: "search", chips: queryChip },
+  documents_search: { id: "documents_search", icon: "search", chips: queryChip },
   workflow_run: { id: "workflow", icon: "workflow" },
   todo_write: { id: "todo", icon: "list" },
   todo_list: { id: "todo", icon: "list" },

@@ -1,5 +1,5 @@
 name: delegate-caller-deny-target-full
-description: "Bot A may not read files; its helper bot B may. After the owner allows the hand-off, B tries to read anyway. B cannot do more than A: the read never runs and nothing offers to override the deny."
+description: "Bot A may not read files; its helper bot B may. Full access hands the task over without a card; B tries to read anyway. B cannot do more than A: the read never runs and nothing offers to override the deny."
 policy: full
 profile_toml: |
   [permissions]
@@ -19,13 +19,11 @@ script:
   - tool_calls: [{ id: k1, tool: fs_read, args: { path: "notes.txt" } }]
   - text: "I was not allowed to read it."
   - text: "The helper could not read the file."
-reactions:
-  - { on: approval_needed, tool: ask_bot, do: approve }
 expect:
   state: succeeded
   tool_runs: { fs_read: 0 }
   permissions:
-    - { tool: ask_bot, decision: approved }
+    - { tool: ask_bot, decision: allowed }
   requests:
     - { request: 0, tools_offered: [ask_bot, fs_read] }
     - { request: 1, tools_offered: [fs_read], tools_not_offered: [ask_bot, spawn_subagent] }

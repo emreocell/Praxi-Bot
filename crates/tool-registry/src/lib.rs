@@ -5,6 +5,7 @@
 
 pub mod browser_mcp;
 pub mod error;
+pub mod payment;
 pub mod registry;
 pub mod spec;
 pub mod tool;
@@ -16,7 +17,7 @@ pub use registry::ToolRegistry;
 // for convenience.
 pub use spec::{ContentClass, Effect, ObservationScope, PermissionCategory, Platform, ToolSpec};
 pub use tool::{
-    ContentPart, ControlIdentity, ControlKind, ControlTarget, OutputExposure, SpillRef,
-    StandingGrant, Tool, ToolContext, ToolOutput, ToolWrapper,
+    ContentPart, ControlIdentity, ControlKind, ControlTarget, OutputExposure, PaymentApproval,
+    SpillRef, StandingGrant, Tool, ToolContext, ToolOutput, ToolWrapper,
 };
 pub use url_guard::{UrlGuard, url_blocked, with_url_guard};

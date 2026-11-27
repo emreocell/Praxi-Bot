@@ -100,7 +100,8 @@ pub use schedule::{
     SchedulePreview, ScheduleRequest, ScheduleView,
 };
 pub use script::{
-    GateHost, GateRequest, ResolverGate, SCRIPT_TOOL_NAME, ToolGate, cwd_for, raw_command_for,
+    GateAuthorization, GateHost, GateRequest, ResolverGate, SCRIPT_TOOL_NAME, ToolGate, cwd_for,
+    raw_command_for,
 };
 pub use secret_request::{
     Fields as SecretFields, SECRET_REQUEST, SECRET_REQUEST_CARD_KIND, SecretCard, entry_names,
@@ -395,7 +396,8 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         cfg.data_dir.clone(),
     ));
     if let Some(backend) = cfg.knowledge {
-        all.push(knowledge::tool(backend));
+        all.push(knowledge::tool(Arc::clone(&backend)));
+        all.push(knowledge::documents_tool(backend));
     }
     if let Some(email) = &cfg.email {
         all.extend(connector_email::tools(email));

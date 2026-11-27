@@ -26,13 +26,13 @@ use tool_registry::ToolSpec;
 /// Upper bound of one native-tools turn (Stop and the kill switch end it sooner).
 const NATIVE_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-struct Host {
-    sh: Arc<Shared>,
-    run: Run,
-    approved: parking_lot::Mutex<Vec<CliApproval>>,
+pub(crate) struct Host {
+    pub(crate) sh: Arc<Shared>,
+    pub(crate) run: Run,
+    pub(crate) approved: parking_lot::Mutex<Vec<CliApproval>>,
     /// Facts for tool calls this CLI turn ran. The runtime does not persist a
     /// tools step for them; they ride on the model step instead.
-    executed: parking_lot::Mutex<Vec<crate::taint::ExecFact>>,
+    pub(crate) executed: parking_lot::Mutex<Vec<crate::taint::ExecFact>>,
 }
 #[async_trait]
 impl TurnHost for Host {
@@ -107,13 +107,16 @@ impl TurnHost for Host {
         let Some(spec) = r.spec else {
             return false;
         };
-        let decision = self
-            .sh
-            .decide(&ctx, &r.name, spec.effect, spec.category, &r.input);
+        let category =
+            crate::shared::Shared::money_category(&r.name, spec.effect, spec.category, &r.input);
+        let (decision, auto_reason) =
+            self.sh
+                .decide_with_reason(&ctx, &r.name, spec.effect, category, &r.input, None);
         // An allow is not stored. Recording it would let a later ask, including
         // one that carries unevaluated limits, skip the interactive path.
         match &decision {
-            Decision::Allow => true,
+            Decision::Allow => auto_reason
+                .is_none_or(|reason| self.sh.audit_auto_allow(&ctx, &r.name, reason).is_ok()),
             Decision::Deny => false,
             Decision::Ask { .. } => {
                 let honored_limits = decision.unsupported_limits().cloned();
@@ -127,7 +130,7 @@ impl TurnHost for Host {
                         ToolCallId::new(),
                         &r.name,
                         spec.effect,
-                        spec.category,
+                        category,
                         &r.input,
                         details,
                         None,
@@ -158,11 +161,50 @@ impl Host {
     /// A permission request for the CLI's own tool becomes a normal approval card.
     /// The CLI's text is untrusted: it is shown, never executed or trusted, and
     /// the answer is a single allow or deny for exactly this request.
-    async fn native_permission(&self, request: NativePermission) -> bool {
+    pub(crate) async fn native_permission(&self, request: NativePermission) -> bool {
         let Ok(ctx) = self.sh.ctx(&self.run) else {
             return false;
         };
         let name = format!("cli.native.{}", sanitize_tool_label(&request.tool));
+        // The CLI's own tool is a program on this computer: it is judged like a shell call, from
+        // every string the CLI sent (any field, any depth, and the summary), so a command in a
+        // field called `cmd` or a nested argument list reads as the command it is. The same
+        // pipeline as every other call decides: a locked policy, the bot's deny, the never-list,
+        // the money floor, the owner's explicit asks and a tainted replay all come before the
+        // Full level's waiver. Only that waiver skips the card; every other outcome keeps it.
+        let mut texts = vec![request.summary.clone()];
+        let read_all = string_leaves(&request.input, 0, &mut texts);
+        let judged = json!({ "command": texts.join("\n") });
+        let category = Shared::money_category(
+            &name,
+            tool_registry::Effect::Write,
+            protocol::PermissionCategory::Shell,
+            &judged,
+        );
+        let (decision, reason) = self.sh.decide_with_reason(
+            &ctx,
+            &name,
+            tool_registry::Effect::Write,
+            category,
+            &judged,
+            None,
+        );
+        match decision {
+            Decision::Deny => return false,
+            // A policy-level allow carries the Full label whoever started the run; the waiver is
+            // for the runs the lane serves, so a stranger's or a helper's run keeps its card.
+            Decision::Allow
+                if read_all
+                    && reason == Some(crate::approval::FULL_POLICY_REASON)
+                    && self.sh.full_lane_run(&ctx) =>
+            {
+                return self
+                    .sh
+                    .audit_auto_allow(&ctx, &name, crate::approval::FULL_POLICY_REASON)
+                    .is_ok();
+            }
+            Decision::Allow | Decision::Ask { .. } => {}
+        }
         let details = json!({
             "kind": "cli_native_action",
             "engine_label": ctx.profile.models.executor,
@@ -185,6 +227,50 @@ impl Host {
             )
             .await
             .is_ok()
+    }
+}
+
+/// How deep a CLI's own JSON is read for strings.
+const LEAF_DEPTH: usize = 12;
+
+/// Collect the text inside `value` the way a shell or a payment check would read it: every
+/// string value at any depth, a list of strings also as one command line (an argument vector
+/// `["rm", "-rf", "/"]`), and a string that is itself JSON as the JSON it holds. `false` when
+/// the JSON nests deeper than [`LEAF_DEPTH`]: the rest was not read, so the caller must not
+/// treat the text as judged.
+fn string_leaves(value: &Value, depth: usize, out: &mut Vec<String>) -> bool {
+    match value {
+        Value::String(text) => {
+            out.push(text.clone());
+            let inner = text.trim_start();
+            if (inner.starts_with('{') || inner.starts_with('['))
+                && let Ok(nested) = serde_json::from_str::<Value>(inner)
+            {
+                return depth < LEAF_DEPTH && string_leaves(&nested, depth + 1, out);
+            }
+            true
+        }
+        Value::Array(_) | Value::Object(_) if depth >= LEAF_DEPTH => false,
+        Value::Array(items) => {
+            if items.len() > 1 && items.iter().all(Value::is_string) {
+                let argv: Vec<&str> = items.iter().filter_map(Value::as_str).collect();
+                out.push(argv.join(" "));
+            }
+            // Every item is read, even after one that could not be read to the end.
+            let mut complete = true;
+            for item in items {
+                complete &= string_leaves(item, depth + 1, out);
+            }
+            complete
+        }
+        Value::Object(map) => {
+            let mut complete = true;
+            for item in map.values() {
+                complete &= string_leaves(item, depth + 1, out);
+            }
+            complete
+        }
+        _ => true,
     }
 }
 

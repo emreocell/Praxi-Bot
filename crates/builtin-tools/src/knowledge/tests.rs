@@ -215,3 +215,123 @@ fn dynamic_egress_classification_is_scoped_to_the_authenticated_bot() {
     assert_eq!(tool.egress_for(None), Some(false));
     assert_eq!(tool.egress_for(Some("untrusted-not-a-bot-id")), Some(false));
 }
+
+fn add_folder_file(store: &KnowledgeStore, folder: &str, relative: &str, content: &str) {
+    let source = store
+        .add_source(NewSource::new(SourceKind::Folder, "Documents", folder))
+        .unwrap();
+    store
+        .index_document(
+            source.id,
+            source.revision,
+            &DocumentInput {
+                locator: format!("{relative}#extracted-text"),
+                title: format!("{folder}/{relative}"),
+                format: DocumentFormat::Markdown,
+                content: content.into(),
+                mtime_ms: Some(1),
+            },
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn documents_search_covers_only_chosen_files_and_cites_path_and_page() {
+    let (_dir, storage, a, _, store) = fixture();
+    let backend = Arc::new(LocalKnowledgeBackend::new(storage));
+    let documents = documents_tool(backend.clone());
+    let everything = tool(backend);
+    // A note matches a lot better, but it is not one of the owner's files.
+    add(
+        &store,
+        "# Lease\nThe lease deposit deposit deposit amount is in the note.",
+    );
+    assert!(everything.visible_to(Some(&a.to_string())));
+    assert!(
+        !documents.visible_to(Some(&a.to_string())),
+        "no chosen folder yet: the tool stays hidden"
+    );
+    let empty = documents
+        .call(&context(a), json!({"query":"lease deposit amount"}))
+        .await
+        .unwrap();
+    assert!(!text(&empty).contains("note"), "{}", text(&empty));
+
+    add_folder_file(
+        &store,
+        "/home/ada/Documents",
+        "housing/lease.pdf",
+        "# /home/ada/Documents/housing/lease.pdf (2 pages)\n\n## Page 2\n\nThe lease deposit amount is 1800 euro.\n",
+    );
+    assert!(documents.visible_to(Some(&a.to_string())));
+    let out = documents
+        .call(&context(a), json!({"query":"lease deposit amount"}))
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_str(text(&out)).unwrap();
+    let hits = body["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1, "{body}");
+    // Built the way the citation builds it, so the separators are the platform's own.
+    let expected = std::path::Path::new("/home/ada/Documents")
+        .join("housing/lease.pdf")
+        .display()
+        .to_string();
+    assert_eq!(hits[0]["path"], expected.as_str());
+    assert_eq!(hits[0]["page"], 2);
+    assert!(
+        hits[0]["citation"]
+            .as_str()
+            .unwrap()
+            .starts_with("[lease.pdf, p. 2](praxi-doc://")
+    );
+    assert_eq!(body["content_trust"], "untrusted_data");
+    // The general tool still sees both.
+    let both = everything
+        .call(&context(a), json!({"query":"lease deposit amount"}))
+        .await
+        .unwrap();
+    let both: Value = serde_json::from_str(text(&both)).unwrap();
+    assert_eq!(both["hits"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn documents_search_cannot_be_widened_by_its_arguments_and_keeps_taint() {
+    let (_dir, storage, a, _, store) = fixture();
+    let note = add(&store, "# Lease\nThe lease deposit amount is in the note.");
+    add_folder_file(
+        &store,
+        "/d",
+        "a.md",
+        "# A\nThe lease deposit amount is 900.\n",
+    );
+    let tool = documents_tool(Arc::new(LocalKnowledgeBackend::new(storage)));
+    // A model-supplied source list cannot reach the note, and the host-only
+    // flag is not an accepted argument.
+    let out = tool
+        .call(
+            &context(a),
+            json!({"query":"lease deposit amount","source_ids":[note]}),
+        )
+        .await
+        .unwrap();
+    assert!(!text(&out).contains("in the note"), "{}", text(&out));
+    assert!(text(&out).contains("900"));
+    assert!(
+        tool.call(
+            &context(a),
+            json!({"query":"lease deposit amount","files_only":false})
+        )
+        .await
+        .is_err()
+    );
+    let exposure = out.exposure.as_ref().unwrap();
+    assert!(exposure.ingests_untrusted && exposure.reads_private);
+    let class = tool.spec().content;
+    assert!(class.is_declared() && class.ingests_untrusted && class.reads_private && !class.egress);
+    assert_eq!(tool.spec().name, "documents_search");
+    assert!(
+        tool.spec().input_schema["properties"]
+            .get("source_ids")
+            .is_none()
+    );
+}

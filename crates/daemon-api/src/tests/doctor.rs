@@ -106,6 +106,7 @@ async fn doctor_lists_typed_checks_without_side_effects() {
         "desktop_automation",
         "capabilities",
         "schedule_tools",
+        "full_access_lane",
         "disk_space",
         "clock",
     ] {
@@ -113,6 +114,7 @@ async fn doctor_lists_typed_checks_without_side_effects() {
     }
     let get = |id: &str| checks.iter().find(|c| c["id"] == id).unwrap();
     assert_eq!(get("data_dir")["status"], "ok");
+    assert_eq!(get("full_access_lane")["status"], "ok");
     assert_eq!(
         get("unicode_path")["status"],
         "ok",
@@ -760,4 +762,41 @@ async fn report_is_markdown_and_carries_no_planted_secret_or_home_path() {
         "{home} leaked:\n{text}"
     );
     assert!(text.contains("`~"), "{text}");
+}
+
+/// A Full access lane switch the daemon could not read at start is visible in the app's
+/// diagnostics, with the reason and the fix (second review, finding 3).
+#[tokio::test]
+async fn doctor_shows_a_full_access_lane_that_is_off_because_host_toml_was_unreadable() {
+    let t = super::setup_with_daemon(
+        |_| {},
+        agent_core::LoopConfig::default(),
+        |cfg| {
+            cfg.full_access_lane = agent_core::FullLaneSwitch {
+                enabled: false,
+                problem: Some("host.toml is not valid: expected `]`".into()),
+            };
+        },
+    );
+    let r = call(&t, Method::GET, "/v1/doctor", None).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let v = r.json();
+    let check = v["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "full_access_lane")
+        .expect("the lane has a row");
+    assert_eq!(check["status"], "warn", "{check}");
+    assert!(check["detail"].as_str().unwrap().contains("OFF"), "{check}");
+    assert!(
+        check["detail"].as_str().unwrap().contains("not valid"),
+        "{check}"
+    );
+    assert!(
+        check["hint"].as_str().unwrap().contains("host.toml"),
+        "{check}"
+    );
+    // A warning, not a failure: the daemon works, with more cards than the owner chose.
+    assert_ne!(check["status"], "fail");
 }

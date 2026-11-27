@@ -141,6 +141,8 @@ pub struct TelegramConfig {
     pub poll_backoff: Duration,
     /// Minimum interval between `editMessageText` calls for streaming answers (default 1 s).
     pub edit_interval: Duration,
+    /// Wall-clock budget of one drain pass over the active runs.
+    pub(crate) drain_budget: Duration,
     /// Optional path to persist paired user IDs and chat→bot mappings on disk.
     pub state_path: Option<PathBuf>,
     /// Optional default bot ID to use when a chat has not explicitly run `/use <bot>`.
@@ -188,6 +190,7 @@ impl TelegramConfig {
             poll_timeout_secs: DEFAULT_POLL_TIMEOUT_SECS,
             poll_backoff: DEFAULT_POLL_BACKOFF,
             edit_interval: DEFAULT_EDIT_INTERVAL,
+            drain_budget: MAX_DRAIN_TIME,
             state_path: None,
             default_bot_id: None,
             paired_users: Vec::new(),
@@ -241,6 +244,15 @@ impl TelegramConfig {
     #[must_use]
     pub fn with_edit_interval(mut self, interval: Duration) -> Self {
         self.edit_interval = interval;
+        self
+    }
+
+    /// Lift the wall-clock budget of a drain pass, so a test sees a run's events
+    /// delivered by the event quotas alone, not by how fast the machine is.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_unbounded_drain_time(mut self) -> Self {
+        self.drain_budget = Duration::from_secs(3600);
         self
     }
 
@@ -2099,7 +2111,7 @@ impl TelegramChannel {
         let mut first_error = None;
         let mut events = 0;
         let mut spawned = Vec::new();
-        let deadline = Instant::now() + MAX_DRAIN_TIME;
+        let deadline = Instant::now() + self.inner.config.drain_budget;
         let mut visited = 0;
         for run in &mut lease.runs {
             if events >= MAX_DRAIN_EVENTS || Instant::now() >= deadline {

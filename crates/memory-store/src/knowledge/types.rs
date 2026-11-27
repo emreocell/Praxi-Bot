@@ -230,6 +230,30 @@ pub struct SearchRequest {
     pub budget_tokens: usize,
     /// Independent hard UTF-8 output byte budget.
     pub max_bytes: usize,
+    /// Search only selected files and folders (not notes, conversations, saved
+    /// pages or mail). Set by the host for `documents_search`; never read from
+    /// a tool call.
+    #[serde(skip)]
+    pub files_only: bool,
+}
+
+impl SearchHit {
+    /// Fill `path`, `page` and `citation` from the catalog fields of the source
+    /// this chunk belongs to. Other source kinds keep them empty.
+    pub fn attach_citation(&mut self, source_kind: &str, source_locator: &str) {
+        if let Some(citation) = super::citation::cite(
+            self.source_id,
+            source_kind,
+            source_locator,
+            &self.locator,
+            &self.section,
+            (self.line_start, self.line_end),
+        ) {
+            self.path = Some(citation.path);
+            self.page = citation.page;
+            self.citation = Some(citation.markdown);
+        }
+    }
 }
 
 impl Default for SearchRequest {
@@ -240,6 +264,7 @@ impl Default for SearchRequest {
             top_k: 5,
             budget_tokens: 600,
             max_bytes: 8192,
+            files_only: false,
         }
     }
 }
@@ -274,6 +299,15 @@ pub struct SearchHit {
     pub line_start: usize,
     /// Last cited line in the extracted text.
     pub line_end: usize,
+    /// Full path of the cited file, for file and folder sources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// One-based PDF page of the passage, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<u32>,
+    /// Markdown link to the file at that place, to copy into an answer as given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub citation: Option<String>,
     /// Catalog provenance; the result itself is always untrusted data.
     pub source_trust: Trust,
     /// Bounded excerpt.

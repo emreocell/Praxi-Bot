@@ -132,6 +132,8 @@ pub struct KnowledgeIndexStatus {
     pub removed: usize,
     pub next_cursor: Option<String>,
     pub failures: Vec<KnowledgeFileFailure>,
+    /// What the folder scan left out (secret-looking files, oversized files, ...).
+    pub skipped: crate::knowledge_documents::KnowledgeSkipped,
 }
 
 /// A skipped file never prevents the page cursor from advancing.
@@ -246,7 +248,7 @@ pub struct KnowledgeSourceChange {
     pub path: Option<String>,
 }
 
-fn err(error: memory_store::MemoryError) -> ApiError {
+pub(crate) fn err(error: memory_store::MemoryError) -> ApiError {
     match error {
         memory_store::MemoryError::NotFound(message) => ApiError::not_found(message),
         memory_store::MemoryError::Invalid(message) => ApiError::conflict(message),
@@ -583,8 +585,16 @@ pub(crate) fn reindex_limited(
                 let mut doc = match selected.read(name) {
                     Ok(doc) => doc,
                     Err(error) if source.kind == SourceKind::File => return Err(err(error)),
-                    Err(_) => {
-                        status.failures.push(failed("unreadable_source"));
+                    Err(error) => {
+                        status.failures.push(failed(
+                            if memory_store::knowledge::source_adapters::is_secret_content_refusal(
+                                &error,
+                            ) {
+                                "secret_content"
+                            } else {
+                                "unreadable_source"
+                            },
+                        ));
                         continue;
                     }
                 };
@@ -616,6 +626,7 @@ pub(crate) fn reindex_limited(
                 status.processed += 1;
                 status.unchanged += usize::from(outcome.unchanged);
             }
+            status.skipped = selected.skipped().into();
             status.next_cursor = page
                 .last()
                 .filter(|last| {

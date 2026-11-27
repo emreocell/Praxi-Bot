@@ -987,6 +987,43 @@ mod tests {
     }
 
     #[test]
+    fn column_widths_formulas_and_other_sheets_survive_both_editors() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = fixture(dir.path());
+        let cfg = DocToolsConfig::default();
+        let (cols, other, workbook) = (
+            part(&p, "xl/worksheets/sheet1.xml"),
+            part(&p, "xl/worksheets/sheet2.xml"),
+            part(&p, "xl/workbook.xml"),
+        );
+        let cols_before = &cols[cols.find("<cols>").unwrap()..cols.find("</cols>").unwrap()];
+        assert!(cols_before.contains("width=\"30"), "{cols}");
+
+        run_append(
+            &cfg,
+            json!({"path": p, "sheet": "Data", "rows": [["pear", 5]]}),
+        )
+        .unwrap();
+        run_update(
+            &cfg,
+            json!({"path": p, "sheet": "Data", "cells": {"B2": 9}}),
+        )
+        .unwrap();
+
+        let after = part(&p, "xl/worksheets/sheet1.xml");
+        assert!(after.contains(cols_before), "column widths kept: {after}");
+        assert_eq!(part(&p, "xl/worksheets/sheet2.xml"), other);
+        assert_eq!(part(&p, "xl/workbook.xml"), workbook);
+        let read = run_read(&cfg, json!({"path": p, "sheet": "Data", "formulas": true})).unwrap();
+        assert_eq!(
+            read.data["formulas"]["B3"], "=SUM(B2:B2)",
+            "old formula kept"
+        );
+        assert_eq!(read.data["cells"][1][1], 9.0);
+        assert_eq!(read.data["cells"][4][0], "pear");
+    }
+
+    #[test]
     fn edits_default_to_the_first_sheet_and_reject_bad_requests() {
         let dir = tempfile::tempdir().unwrap();
         let p = fixture(dir.path());

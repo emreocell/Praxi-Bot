@@ -1039,6 +1039,35 @@ pub fn check_safe_mode(active: bool) -> Check {
     }
 }
 
+/// `full access lane`: whether a bot at the Full level asks only before spending money. The
+/// operator's switch that cannot be read leaves the lane off, which is a warning: the bots keep
+/// working, with more cards than the owner chose.
+#[must_use]
+pub fn check_full_access_lane(switch: &agent_core::FullLaneSwitch) -> Check {
+    const ID: &str = "full_access_lane";
+    const N: &str = "full access lane";
+    match (&switch.problem, switch.enabled) {
+        (Some(problem), _) => Check::warn(
+            ID,
+            N,
+            format!(
+                "OFF: {problem}. A bot at the Full level asks like a Balanced one until this is fixed"
+            ),
+            "fix host.toml (or remove its [security] table), then restart the daemon; the lane is on by default",
+        ),
+        (None, true) => Check::ok(
+            ID,
+            N,
+            "on: a bot at the Full level asks only before spending money",
+        ),
+        (None, false) => Check::ok(
+            ID,
+            N,
+            "switched off by the operator (host.toml or BOT_FULL_ACCESS_LANE): a bot at the Full level uses the narrower waivers and asks for the rest",
+        ),
+    }
+}
+
 /// The environment switch for safe mode (`BOT_SAFE_MODE`): `1`, `true`, `on` or `yes`.
 #[must_use]
 pub fn safe_mode_from_env(value: Option<&str>) -> bool {

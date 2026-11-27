@@ -237,21 +237,43 @@ where
 
 /// Cells of every sheet as `## sheet` sections of ` | `-separated rows (reading only).
 pub(crate) fn plain_text(bytes: Vec<u8>, max_bytes: usize) -> Result<String, ToolError> {
+    plain_text_with(bytes, max_bytes, false)
+}
+
+/// Like [`plain_text`], but a workbook that does not fit is an error instead of a
+/// silently shortened snapshot (an index must not look complete when it is not).
+pub(crate) fn complete_text(bytes: Vec<u8>, max_bytes: usize) -> Result<String, ToolError> {
+    plain_text_with(bytes, max_bytes, true)
+}
+
+fn plain_text_with(bytes: Vec<u8>, max_bytes: usize, strict: bool) -> Result<String, ToolError> {
     const MAX_TEXT_CELLS: usize = 200_000;
+    let too_big = || invalid("spreadsheet is too large to read completely");
     let mut wb: Book = open_workbook_auto_from_rs(Cursor::new(bytes))
         .map_err(|e| exec(format!("cannot open spreadsheet: {e}")))?;
     let mut out = String::new();
     for name in wb.sheet_names() {
         if out.len() >= max_bytes {
+            if strict {
+                return Err(too_big());
+            }
             break;
         }
         let mut cells: std::collections::BTreeMap<(u32, u32), String> =
             std::collections::BTreeMap::new();
+        let mut dropped = false;
         scan_sheet(&mut wb, &name, false, |pos, v, _| {
-            if !matches!(v, Data::Empty) && cells.len() < MAX_TEXT_CELLS {
-                cells.insert(pos, cell_value(&v).2);
+            if !matches!(v, Data::Empty) {
+                if cells.len() < MAX_TEXT_CELLS {
+                    cells.insert(pos, cell_value(&v).2);
+                } else {
+                    dropped = true;
+                }
             }
         })?;
+        if strict && dropped {
+            return Err(too_big());
+        }
         let _ = writeln!(out, "## {name}\n");
         let mut row = None;
         for ((r, _), text) in &cells {
@@ -265,6 +287,9 @@ pub(crate) fn plain_text(bytes: Vec<u8>, max_bytes: usize) -> Result<String, Too
             if out.len() >= max_bytes {
                 break;
             }
+        }
+        if strict && out.len() >= max_bytes {
+            return Err(too_big());
         }
         out.push_str("\n\n");
     }
@@ -625,6 +650,31 @@ mod tests {
         assert_eq!(sub.data["rows"], 2);
         assert_eq!(sub.data["cols"], 2);
         assert_eq!(sub.data["cells"][1][0], 2.5);
+    }
+
+    #[test]
+    fn complete_text_has_every_sheet_and_refuses_to_truncate() {
+        let (_d, p) = tmp_path("book.xlsx");
+        let cfg = DocToolsConfig::default();
+        let rows: Vec<Value> = (0..200).map(|n| json!(["row", n])).collect();
+        run_write(
+            &cfg,
+            json!({"path": p, "sheets": [
+                {"name":"Budget","rows": [["rent", 900], ["food", 300]], "header": false},
+                {"name":"Long","rows": rows, "header": false}
+            ]}),
+        )
+        .unwrap();
+        let bytes = std::fs::read(&p).unwrap();
+        let text = complete_text(bytes.clone(), 1 << 20).unwrap();
+        assert!(text.contains("## Budget"));
+        assert!(text.contains("rent | 900"));
+        assert!(text.contains("## Long"));
+        assert!(text.contains("row | 199"));
+        // A limit too small for the whole workbook is an error, never a short snapshot.
+        assert!(complete_text(bytes.clone(), 200).is_err());
+        // The attachment path keeps its lenient behaviour.
+        assert!(plain_text(bytes, 200).unwrap().len() < text.len());
     }
 
     #[test]

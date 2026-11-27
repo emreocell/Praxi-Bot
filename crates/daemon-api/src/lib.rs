@@ -51,6 +51,7 @@ pub mod host_links;
 pub mod host_packs;
 pub mod host_setup;
 mod knowledge;
+mod knowledge_documents;
 pub mod knowledge_runtime;
 mod knowledge_settings;
 mod knowledge_watch;
@@ -210,6 +211,9 @@ pub struct DaemonConfig {
     /// (`bot serve --safe`, `BOT_SAFE_MODE`): no scheduler and no channels start.
     /// No route can change it; leaving it means restarting the process.
     pub safe_mode: bool,
+    /// What the Full access lane switch resolved to at process start (for the doctor); the loop
+    /// itself holds the same decision.
+    pub full_access_lane: agent_core::FullLaneSwitch,
 }
 
 /// Default [`DaemonConfig::max_sse_subscribers`].
@@ -232,6 +236,10 @@ impl DaemonConfig {
             control: ControlConfig::default(),
             max_sse_subscribers: DEFAULT_MAX_SSE_SUBSCRIBERS,
             safe_mode: false,
+            full_access_lane: agent_core::FullLaneSwitch {
+                enabled: true,
+                problem: None,
+            },
         }
     }
 }
@@ -827,6 +835,12 @@ impl AppState {
     #[must_use]
     pub fn safe_mode(&self) -> bool {
         self.0.cfg.safe_mode
+    }
+
+    /// What the Full access lane switch resolved to when this process started.
+    #[must_use]
+    pub fn full_access_lane(&self) -> &agent_core::FullLaneSwitch {
+        &self.0.cfg.full_access_lane
     }
 
     /// Ownership handle for runtime transitions and peer conflict detection.
@@ -1483,6 +1497,18 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/bots/{bot}/knowledge/sources/{source}/reindex",
             post(knowledge::reindex_source),
+        )
+        .route(
+            "/v1/knowledge/folders",
+            get(knowledge_documents::browse_folders),
+        )
+        .route(
+            "/v1/bots/{bot}/knowledge/folder-preview",
+            post(knowledge_documents::preview_folder),
+        )
+        .route(
+            "/v1/bots/{bot}/knowledge/sources/{source}/file",
+            get(knowledge_documents::get_source_file),
         )
         .route(
             "/v1/bots/{bot}/knowledge/watch",

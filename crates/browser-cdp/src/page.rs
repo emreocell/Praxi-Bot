@@ -121,6 +121,9 @@ pub(crate) struct Shared {
     pub oopif: StdMutex<HashMap<String, String>>,
     /// Sessions whose domains are already enabled.
     pub ready: StdMutex<HashSet<String>>,
+    /// URL patterns the page and its out-of-process frames may not request while armed (see
+    /// [`Page::set_url_block`]). Lifted by the next main-frame navigation.
+    pub url_block: StdMutex<Option<Vec<String>>>,
     /// In-flight network requests of the main session, id -> first seen (a redirect chain reuses
     /// one id, so inserts are idempotent). Entries older than [`INFLIGHT_CAP`] are pruned.
     pub inflight: StdMutex<HashMap<String, Instant>>,
@@ -199,6 +202,7 @@ impl Default for Shared {
         Self {
             oopif: StdMutex::default(),
             ready: StdMutex::default(),
+            url_block: StdMutex::default(),
             inflight: StdMutex::default(),
             dialogs: StdMutex::default(),
             dialog_policy: StdMutex::default(),
@@ -263,6 +267,56 @@ impl Drop for Page {
         mark_target_closed(&self.shared);
         self.watcher.abort();
     }
+}
+
+/// Hosts whose frames are card entry or a hosted payment page (the host itself or any
+/// subdomain). A checkout built by one of these providers shows its card form inside such a
+/// frame, so the frame's presence is the signal even when its content cannot be read.
+const PAYMENT_FRAME_HOSTS: &[&str] = &[
+    "checkout.stripe.com",
+    "js.stripe.com",
+    "paypal.com",
+    "paypalobjects.com",
+    "adyen.com",
+    "braintreegateway.com",
+    "braintree-api.com",
+    "squareup.com",
+    "squarecdn.com",
+    "klarna.com",
+    "mollie.com",
+    "checkout.com",
+    "razorpay.com",
+    "pay.google.com",
+    "payments.google.com",
+    "paddle.com",
+    "lemonsqueezy.com",
+    "iyzipay.com",
+    "iyzico.com",
+    "paytr.com",
+    "authorize.net",
+    "worldpay.com",
+];
+
+/// How many frames of one page are read before the answer is "assume checkout".
+const MAX_PAYMENT_FRAMES: usize = 64;
+
+/// Whether `url` is served by a payment provider (host or subdomain, case-insensitive).
+fn payment_frame_host(url: &str) -> bool {
+    let Some((_, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority
+        .rsplit('@')
+        .next()
+        .unwrap_or_default()
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    PAYMENT_FRAME_HOSTS
+        .iter()
+        .any(|h| host == *h || host.ends_with(&format!(".{h}")))
 }
 
 impl Page {
@@ -449,7 +503,63 @@ impl Page {
         if let Ok(mut r) = self.shared.ready.lock() {
             r.insert(session.to_string());
         }
+        // A frame or popup that appears while the block is armed is covered from its first request.
+        let armed = lock_or_recover(&self.shared.url_block).clone();
+        if let Some(patterns) = armed {
+            self.apply_url_block(session, &patterns).await?;
+        }
         Ok(())
+    }
+
+    /// Refuse (`Some(patterns)`, `*` matches anything) or allow again (`None`) every request
+    /// whose URL matches, for this tab and the out-of-process frames it holds. A navigation of
+    /// the main frame lifts the block (the script it guarded lived in the old document).
+    ///
+    /// # Errors
+    /// The block could not be put on a session; nothing is armed then.
+    pub async fn set_url_block(&self, patterns: Option<&[String]>) -> Result<()> {
+        let wanted = patterns.filter(|p| !p.is_empty()).map(<[String]>::to_vec);
+        let previous = std::mem::replace(
+            &mut *lock_or_recover(&self.shared.url_block),
+            wanted.clone(),
+        );
+        if previous == wanted {
+            return Ok(());
+        }
+        let list = wanted.unwrap_or_default();
+        let sessions: Vec<String> = lock_or_recover(&self.shared.ready)
+            .iter()
+            .filter(|s| **s != self.session)
+            .cloned()
+            .collect();
+        let result = async {
+            self.apply_url_block(&self.session, &list).await?;
+            for session in &sessions {
+                self.apply_url_block(session, &list).await?;
+            }
+            Ok(())
+        }
+        .await;
+        if result.is_err() {
+            // Never leave the page half-armed and reported as armed.
+            *lock_or_recover(&self.shared.url_block) = previous;
+        }
+        result
+    }
+
+    async fn apply_url_block(&self, session: &str, patterns: &[String]) -> Result<()> {
+        // The main session has the domain on already; a frame's session may not.
+        self.client
+            .send_on(Some(session), "Network.enable", json!({}))
+            .await?;
+        self.client
+            .send_on(
+                Some(session),
+                "Network.setBlockedURLs",
+                json!({ "urls": patterns }),
+            )
+            .await
+            .map(|_| ())
     }
 
     async fn ensure_ready(&self, session: &str) {
@@ -495,6 +605,74 @@ impl Page {
             return Err(Error::Js(msg.to_string()));
         }
         Ok(r.pointer("/result/value").cloned().unwrap_or(Value::Null))
+    }
+
+    /// Whether the page displays a conventional checkout control: a card or transaction field,
+    /// or a frame of a payment provider, in the top document or in any frame below it.
+    /// Each frame is read in an isolated world so page scripts cannot replace the DOM methods.
+    /// A frame served from another process (a cross-origin provider) is not readable here, but
+    /// its `<iframe>` element sits in the document that embeds it and is matched by its host.
+    pub async fn has_payment_form(&self) -> Result<bool> {
+        let tree = self.cmd("Page.getFrameTree", json!({})).await?;
+        let mut frames = vec![(&tree["frameTree"], true)];
+        let mut seen = 0usize;
+        while let Some((node, is_main)) = frames.pop() {
+            seen += 1;
+            if seen > MAX_PAYMENT_FRAMES {
+                // Too many frames to read them all: unreadable counts as checkout, never as not.
+                return Ok(true);
+            }
+            if payment_frame_host(node["frame"]["url"].as_str().unwrap_or_default()) {
+                return Ok(true);
+            }
+            match self.frame_shows_payment_input(&node["frame"]["id"]).await {
+                Ok(true) => return Ok(true),
+                // The top document must answer.
+                Err(e) if is_main => return Err(e),
+                // A child that detached while we looked is gone.
+                Ok(false) | Err(_) => {}
+            }
+            if let Some(children) = node["childFrames"].as_array() {
+                frames.extend(children.iter().map(|child| (child, false)));
+            }
+        }
+        Ok(false)
+    }
+
+    async fn frame_shows_payment_input(&self, frame_id: &Value) -> Result<bool> {
+        let world = self
+            .cmd(
+                "Page.createIsolatedWorld",
+                json!({"frameId": frame_id, "worldName": "praxi-payment-check"}),
+            )
+            .await?;
+        let expression = format!(
+            r#"(() => {{
+                const visible = e => e.getClientRects().length && getComputedStyle(e).visibility === "visible";
+                const hosts = {hosts};
+                const fields = "input[autocomplete^='cc-' i], input[autocomplete^='transaction-' i]";
+                const providerFrame = f => {{
+                    try {{
+                        const host = new URL(f.src, location.href).hostname.toLowerCase();
+                        return hosts.some(h => host === h || host.endsWith("." + h));
+                    }} catch (_) {{ return false; }}
+                }};
+                return Array.from(document.querySelectorAll(fields)).some(visible)
+                    || Array.from(document.querySelectorAll("iframe")).some(f => providerFrame(f) && visible(f));
+            }})()"#,
+            hosts = json!(PAYMENT_FRAME_HOSTS),
+        );
+        let result = self
+            .cmd(
+                "Runtime.evaluate",
+                json!({
+                    "contextId": world["executionContextId"],
+                    "returnByValue": true,
+                    "expression": expression,
+                }),
+            )
+            .await?;
+        Ok(result.pointer("/result/value").and_then(Value::as_bool) == Some(true))
     }
 
     /// Evaluate JavaScript in the main frame and return the result as JSON.
@@ -1291,6 +1469,9 @@ async fn watch(
             {
                 shared.nav_gen.fetch_add(1, Ordering::SeqCst);
                 shared.dom_gen.fetch_add(1, Ordering::SeqCst);
+                if let Some(c) = &client {
+                    release_url_block(&shared, c);
+                }
                 if let Ok(mut set) = shared.inflight.lock() {
                     set.clear();
                 }
@@ -1358,6 +1539,31 @@ async fn verify_target_attached(client: Option<&CdpClient>, target_id: &str) -> 
     };
     let info = &res["targetInfo"];
     info["targetId"].as_str() == Some(target_id) && info["attached"].as_bool() != Some(false)
+}
+
+fn lock_or_recover<T>(m: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// A main-frame navigation ends the document a guarded script ran in: lift the block armed for
+/// it ([`Page::set_url_block`]) on every session that has it.
+fn release_url_block(shared: &Shared, client: &Arc<CdpClient>) {
+    if lock_or_recover(&shared.url_block).take().is_none() {
+        return;
+    }
+    let sessions: Vec<String> = lock_or_recover(&shared.ready).iter().cloned().collect();
+    let client = Arc::clone(client);
+    tokio::spawn(async move {
+        for session in sessions {
+            let _ = client
+                .send_on(
+                    Some(&session),
+                    "Network.setBlockedURLs",
+                    json!({ "urls": [] }),
+                )
+                .await;
+        }
+    });
 }
 
 fn mark_target_closed(shared: &Shared) {
@@ -1496,6 +1702,31 @@ mod tests {
                 })
                 .into(),
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn payment_providers_are_recognised_by_host_and_subdomain_only() {
+        for url in [
+            "https://js.stripe.com/v3/elements-inner-card.html",
+            "https://www.paypal.com/smart/buttons?x=1",
+            "https://checkoutshopper-live.adyen.com/checkoutshopper/",
+            "https://assets.braintreegateway.com/web/3.97.0/html/hosted-fields-frame.min.html",
+            "https://web.squarecdn.com/v1/card.html",
+            "https://x.klarna.com:443/pay",
+            "HTTPS://PAY.GOOGLE.COM/gp/p/ui/pay",
+        ] {
+            assert!(payment_frame_host(url), "{url}");
+        }
+        for url in [
+            "about:blank",
+            "https://shop.example/checkout",
+            "https://shop.example/?next=https://www.paypal.com/",
+            "https://notpaypal.com/",
+            "https://paypal.com.evil.example/",
+            "https://user@shop.example/paypal.com",
+        ] {
+            assert!(!payment_frame_host(url), "{url}");
         }
     }
 
@@ -1812,5 +2043,109 @@ mod tests {
             .unwrap()
             .insert("fetch".into(), Instant::now());
         assert_eq!(busy_count_younger_than(&shared, None, LONG_LIVED_AGE), 1);
+    }
+    type CommandLog = Arc<StdMutex<Vec<(String, Option<String>, Value)>>>;
+
+    /// A fake browser: answers every command, logs it, and attaches the one page as session `S`.
+    async fn fake_browser() -> (
+        Arc<CdpClient>,
+        CommandLog,
+        tokio::sync::mpsc::UnboundedSender<Value>,
+    ) {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let log: CommandLog = Arc::default();
+        let (tx, mut events) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let seen = Arc::clone(&log);
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            loop {
+                tokio::select! {
+                    msg = ws.next() => {
+                        let Some(Ok(Message::Text(t))) = msg else { break };
+                        let req: Value = serde_json::from_str(t.as_str()).unwrap();
+                        let method = req["method"].as_str().unwrap_or_default().to_owned();
+                        seen.lock().unwrap().push((
+                            method.clone(),
+                            req["sessionId"].as_str().map(str::to_owned),
+                            req["params"].clone(),
+                        ));
+                        let result = if method == "Target.attachToTarget" {
+                            json!({"sessionId": "S"})
+                        } else {
+                            json!({})
+                        };
+                        ws.send(Message::text(json!({"id": req["id"], "result": result}).to_string()))
+                            .await
+                            .unwrap();
+                    }
+                    Some(event) = events.recv() => {
+                        ws.send(Message::text(event.to_string())).await.unwrap();
+                    }
+                }
+            }
+        });
+        (CdpClient::connect(&url).await.unwrap(), log, tx)
+    }
+
+    fn blocks(log: &CommandLog) -> Vec<Value> {
+        log.lock()
+            .unwrap()
+            .iter()
+            .filter(|(m, _, _)| m == "Network.setBlockedURLs")
+            .map(|(_, _, p)| p["urls"].clone())
+            .collect()
+    }
+
+    /// The network block of payment APIs: armed on the page's session, a no-op when nothing
+    /// changes, put on a frame that appears while armed, and lifted by the next navigation of the
+    /// main frame (the guarded script lived in the old document).
+    #[tokio::test]
+    async fn the_url_block_is_armed_inherited_by_new_frames_and_lifted_by_navigation() {
+        let (client, log, events) = fake_browser().await;
+        let page = Page::attach(client, "T").await.unwrap();
+        let patterns = vec!["*api.stripe.com*".to_owned()];
+
+        page.set_url_block(None).await.unwrap();
+        assert!(blocks(&log).is_empty(), "nothing armed, nothing sent");
+
+        page.set_url_block(Some(&patterns)).await.unwrap();
+        assert_eq!(blocks(&log), [json!(["*api.stripe.com*"])]);
+        page.set_url_block(Some(&patterns)).await.unwrap();
+        assert_eq!(blocks(&log).len(), 1, "arming twice sends once");
+
+        // An out-of-process frame that is set up while the block is armed gets it at once.
+        page.enable_domains("FRAME", false).await.unwrap();
+        assert_eq!(blocks(&log).len(), 2);
+        assert!(
+            log.lock()
+                .unwrap()
+                .iter()
+                .any(|(m, s, _)| m == "Network.setBlockedURLs" && s.as_deref() == Some("FRAME"))
+        );
+
+        // The main frame navigates: the block is lifted on both sessions.
+        events
+            .send(json!({
+                "method": "Page.frameNavigated",
+                "sessionId": "S",
+                "params": {"frame": {"id": "F", "url": "https://example.com/"}}
+            }))
+            .unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while blocks(&log).len() < 4 && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let lifted = blocks(&log);
+        assert_eq!(&lifted[2..], [json!([]), json!([])], "{lifted:?}");
+        assert!(page.shared.url_block.lock().unwrap().is_none());
+
+        // Armed again, then lifted by the caller.
+        page.set_url_block(Some(&patterns)).await.unwrap();
+        page.set_url_block(None).await.unwrap();
+        assert_eq!(blocks(&log).last(), Some(&json!([])));
     }
 }

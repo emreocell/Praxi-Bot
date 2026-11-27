@@ -46,6 +46,65 @@ async fn open(b: &Browser, html: &str) -> Page {
 
 #[tokio::test]
 #[ignore = "needs Chrome/Edge"]
+async fn checkout_detection_uses_visible_payment_fields() {
+    let browser = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let page = open(
+        &browser,
+        r#"<input name="email" type="email"><input id="number" autocomplete="cc-number" hidden>"#,
+    )
+    .await;
+    assert!(!page.has_payment_form().await.unwrap());
+    page.evaluate("document.querySelector('#number').hidden = false")
+        .await
+        .unwrap();
+    assert!(page.has_payment_form().await.unwrap());
+    browser.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn checkout_detection_reads_child_frames_and_any_payment_provider_frame() {
+    let browser = Browser::launch(LaunchOptions::default()).await.unwrap();
+    // A card field one frame down (srcdoc frames share the page's process).
+    let nested = open(
+        &browser,
+        r#"<iframe srcdoc="<input autocomplete='cc-number'>" width=300 height=60></iframe>"#,
+    )
+    .await;
+    assert!(nested.has_payment_form().await.unwrap());
+    // The card field itself is two frames down.
+    let deeper = open(
+        &browser,
+        r#"<iframe srcdoc="<iframe srcdoc=&quot;<input autocomplete='cc-csc'>&quot; width=200 height=40></iframe>" width=300 height=80></iframe>"#,
+    )
+    .await;
+    assert!(deeper.has_payment_form().await.unwrap());
+    // A provider other than Stripe: the frame's host is the signal, its page need not load.
+    for host in [
+        "www.paypal.com",
+        "checkoutshopper-live.adyen.com",
+        "assets.braintreegateway.com",
+        "web.squarecdn.com",
+        "x.klarna.com",
+    ] {
+        let page = open(
+            &browser,
+            &format!(r#"<iframe src="https://{host}/frame" width=300 height=60></iframe>"#),
+        )
+        .await;
+        assert!(page.has_payment_form().await.unwrap(), "{host}");
+    }
+    let plain = open(
+        &browser,
+        r#"<iframe srcdoc="<p>hello</p>" width=300 height=60></iframe><iframe src="https://example.org/embed" width=100 height=40></iframe>"#,
+    )
+    .await;
+    assert!(!plain.has_payment_form().await.unwrap());
+    browser.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
 async fn form_flow_fill_select_click_diff() {
     let b = Browser::launch(LaunchOptions::default()).await.unwrap();
     let p = open(&b, FORM).await;
@@ -248,6 +307,79 @@ async fn waits_screenshots_evaluate_and_tabs() {
     again.detach().await.unwrap();
     p2.close().await.unwrap();
     b.close().await.unwrap();
+}
+
+/// The browser-level URL block that stops a script's request to a payment API: a request to a
+/// matching host fails and never reaches the server, an unmatched host is untouched, lifting the
+/// block lets the request through again, and so does the next navigation of the main frame.
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn a_url_block_stops_requests_to_a_matching_host_until_lifted() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let seen = Arc::clone(&hits);
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut s, _)) = listener.accept().await else {
+                return;
+            };
+            let seen = Arc::clone(&seen);
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let n = s.read(&mut buf).await.unwrap_or(0);
+                if String::from_utf8_lossy(&buf[..n]).starts_with("POST /pay") {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                }
+                let _ = s
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    )
+                    .await;
+            });
+        }
+    });
+    let browser = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let page = browser
+        .new_page(&format!("http://127.0.0.1:{port}/"))
+        .await
+        .expect("open page");
+    let probe = "fetch('/pay', {method:'POST'}).then(() => 'sent', () => 'blocked')";
+    let block = [format!("*127.0.0.1:{port}/pay*")];
+    let other = [String::from("*api.stripe.com*")];
+
+    assert_eq!(page.evaluate(probe).await.unwrap(), "sent");
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+    // A block on another host leaves this one alone.
+    page.set_url_block(Some(&other)).await.unwrap();
+    assert_eq!(page.evaluate(probe).await.unwrap(), "sent");
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+
+    page.set_url_block(Some(&block)).await.unwrap();
+    assert_eq!(page.evaluate(probe).await.unwrap(), "blocked");
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        2,
+        "the blocked request never left"
+    );
+
+    page.set_url_block(None).await.unwrap();
+    assert_eq!(page.evaluate(probe).await.unwrap(), "sent");
+    assert_eq!(hits.load(Ordering::SeqCst), 3);
+
+    // Armed again; a navigation of the main frame lifts it.
+    page.set_url_block(Some(&block)).await.unwrap();
+    assert_eq!(page.evaluate(probe).await.unwrap(), "blocked");
+    page.navigate(&format!("http://127.0.0.1:{port}/next"))
+        .await
+        .unwrap();
+    assert_eq!(page.evaluate(probe).await.unwrap(), "sent");
+    assert_eq!(hits.load(Ordering::SeqCst), 4);
+    browser.close().await.unwrap();
 }
 
 /// Tiny HTTP server: `/` embeds `/inner` from a different site (localhost vs 127.0.0.1) -> OOPIF.

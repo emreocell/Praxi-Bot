@@ -367,6 +367,19 @@ fn build_agent_with_skills(
             }
         }
     };
+    let lane = agent_core::full_access_lane_switch(
+        std::fs::read_to_string(data_dir.join("host.toml")),
+        std::env::var("BOT_FULL_ACCESS_LANE").ok().as_deref(),
+    );
+    if let Some(problem) = &lane.problem {
+        // The kill switch cannot be read, so the lane stays off for this run of the daemon: bots
+        // at the Full level ask like Balanced ones until the file is fixed and the daemon restarts.
+        support_logs::tracing::error!(
+            target: "praxi_support",
+            reason = "full_access_lane_off",
+            "the Full access lane is OFF for this run: {problem}. Fix host.toml and restart the daemon (the lane is on by default)."
+        );
+    }
     // The discovery threshold is `LoopConfig`'s default (40).
     Ok(AgentLoop::new(
         Arc::clone(storage),
@@ -379,6 +392,8 @@ fn build_agent_with_skills(
             secret_requests,
             memory,
             safe_mode,
+            full_access_lane: lane.enabled,
+            full_access_lane_problem: lane.problem,
             knowledge_decider: Some(Arc::new(agent_core::HeuristicKnowledgeDecider::new(
                 Arc::clone(storage),
             ))),
@@ -1263,6 +1278,7 @@ pub fn serve(
     let mut cfg = DaemonConfig::new(api_token.clone());
     cfg.shutdown_grace = grace;
     cfg.safe_mode = safe_mode;
+    cfg.full_access_lane = agent.full_access_lane();
     // Extra browser origins (e.g. the desktop app's dev server), comma separated.
     if let Ok(extra) = std::env::var(ALLOWED_ORIGINS_ENV) {
         cfg.allowed_origins.extend(parse_origins(&extra));

@@ -4577,6 +4577,8 @@ mod tests {
             content_tainted: false,
             exposure_untrusted: false,
             expected_origin: None,
+            unattended_mail: false,
+            payment: tool_registry::PaymentApproval::Unchecked,
             control_guard: None,
             lane: None,
         }
@@ -6759,6 +6761,8 @@ mod tests {
                 content_tainted: false,
                 exposure_untrusted: false,
                 expected_origin: None,
+                unattended_mail: false,
+                payment: tool_registry::PaymentApproval::Unchecked,
                 control_guard: None,
                 lane: None,
             };

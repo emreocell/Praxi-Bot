@@ -52,6 +52,8 @@ rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# Builds a small PDF fixture for page-citation tests (already part of the graph through doc-tools).
+lopdf = { version = "0.47", default-features = false }
 tiktoken-rs = "0.12"
 tokio.workspace = true
 

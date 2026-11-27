@@ -138,7 +138,16 @@ fn setup_with(prepare: impl FnOnce(&std::path::Path)) -> T {
     setup_with_config(prepare, LoopConfig::default())
 }
 
-fn setup_with_config(prepare: impl FnOnce(&std::path::Path), mut config: LoopConfig) -> T {
+fn setup_with_config(prepare: impl FnOnce(&std::path::Path), config: LoopConfig) -> T {
+    setup_with_daemon(prepare, config, |_| {})
+}
+
+/// [`setup_with_config`] with a say in the daemon's own settings.
+fn setup_with_daemon(
+    prepare: impl FnOnce(&std::path::Path),
+    mut config: LoopConfig,
+    configure: impl FnOnce(&mut DaemonConfig),
+) -> T {
     // These API fixtures script tool names directly.
     config.legacy_tool_surface = true;
     let dir = tempfile::tempdir().unwrap();
@@ -154,7 +163,9 @@ fn setup_with_config(prepare: impl FnOnce(&std::path::Path), mut config: LoopCon
         Providers::single(Arc::new(FakeProvider)),
         config,
     );
-    let state = AppState::new(agent.clone(), storage, DaemonConfig::new(TOKEN)).unwrap();
+    let mut daemon = DaemonConfig::new(TOKEN);
+    configure(&mut daemon);
+    let state = AppState::new(agent.clone(), storage, daemon).unwrap();
     state.set_owner_key(OWNER_KEY.into());
     state.set_detector(Arc::new(cli_provider::Detector::with_env(
         cli_provider::PathEnv::for_test(dir.path().join("sealed-cli-path")),

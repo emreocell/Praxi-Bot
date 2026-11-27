@@ -81,6 +81,9 @@ import type {
   KnowledgeSource,
   KnowledgeSourceInput,
   KnowledgeSettings,
+  KnowledgeFolderListing,
+  KnowledgeFolderPreview,
+  KnowledgeSkipped,
   KnowledgeSettingsInput,
   KnowledgeSourceChange,
   KnowledgeEmbeddingApproval,
@@ -103,6 +106,45 @@ function mockNoBots(): boolean {
 }
 
 const NOW = 1_750_000_000_000;
+
+const NO_SKIPPED: KnowledgeSkipped = { listed: [], secret: 0, too_large: 0, hidden: 0, unsupported: 0 };
+
+/** A small folder tree for the "My documents" picker in review mode. */
+const MOCK_FOLDERS: Record<string, string[]> = {
+  "/home/ada": ["Documents", "Pictures", "Work"],
+  "/home/ada/Documents": ["Housing", "Taxes"],
+  "/home/ada/Documents/Housing": [],
+  "/home/ada/Documents/Taxes": [],
+  "/home/ada/Pictures": [],
+  "/home/ada/Work": []
+};
+
+function mockFolderListing(requested: string): KnowledgeFolderListing {
+  const path = (requested || "/home/ada").replace(/\/+$/, "") || "/";
+  const names = MOCK_FOLDERS[path];
+  if (!names) throw new ApiError(400, "bad_request", "that folder cannot be opened");
+  const parent = path === "/" ? null : path.slice(0, path.lastIndexOf("/")) || "/";
+  return {
+    path, parent, selectable: path !== "/", truncated: false, roots: [],
+    entries: names.map((name) => ({ name, path: `${path}/${name}`, selectable: true }))
+  };
+}
+
+function mockFolderPreview(path: string): KnowledgeFolderPreview {
+  const folder = path.replace(/\/+$/, "");
+  if (!MOCK_FOLDERS[folder]) throw new ApiError(409, "conflict", "choose an absolute local directory");
+  const files = [
+    { locator: "lease.pdf", bytes: 812_000 }, { locator: "deposit-receipt.pdf", bytes: 96_000 },
+    { locator: "insurance-2024.docx", bytes: 41_000 }, { locator: "budget.xlsx", bytes: 120_000 },
+    { locator: "notes/moving.md", bytes: 3_400 }
+  ];
+  return {
+    files, file_count: files.length, total_bytes: files.reduce((sum, f) => sum + f.bytes, 0),
+    by_type: { pdf: 2, docx: 1, xlsx: 1, text: 1 },
+    skipped: { listed: [{ locator: ".env", reason: "secret" }, { locator: "passwords.txt", reason: "secret" }], secret: 2, too_large: 0, hidden: 3, unsupported: 7 },
+    estimated_seconds: 4
+  };
+}
 
 const ATLAS = "11111111-1111-4111-8111-111111111111";
 const NOVA = "22222222-2222-4222-8222-222222222222";
@@ -1326,6 +1368,10 @@ export class MockApiClient extends ApiClient {
     return new Blob([svg], { type: "image/svg+xml" });
   }
 
+  override async getKnowledgeFile(_bot: string, _source: string, locator: string): Promise<Blob> {
+    return new Blob([`Mock copy of ${locator}\n`], { type: "text/plain" });
+  }
+
   override async getBotWorkspaceFile(
     botId: string,
     path: string,
@@ -1581,6 +1627,8 @@ export class MockApiClient extends ApiClient {
       if (seg[2]) return ok(this.missions.steer(id, seg[2]));
       return ok(this.missions.get(id));
     }
+    if (seg[0] === "knowledge" && seg[1] === "folders" && method === "GET") return ok(mockFolderListing(String(opts.query?.path ?? "")));
+    if (seg[0] === "bots" && seg[2] === "knowledge" && seg[3] === "folder-preview" && method === "POST") return ok(mockFolderPreview((opts.body as { path: string }).path));
     if (seg[0] === "bots" && seg[2] === "incoming-webhooks") {
       return ok(this.incomingWebhookRoute(method, seg, opts.body));
     }
@@ -1757,14 +1805,14 @@ export class MockApiClient extends ApiClient {
             locator: input.path ?? input.url ?? `saved:${input.kind}`, enabled: true, requires_path_selection: false, revision: 1,
             remote_profile_fingerprint: null, documents: 1, chunks: 1, updated_ms: Date.now() };
           sources.push(source); this.knowledgeSources.set(bot, sources);
-          return ok({ source, indexing: { processed: 1, unchanged: 0, removed: 0, next_cursor: null, failures: [] } });
+          return ok({ source, indexing: { processed: 1, unchanged: 0, removed: 0, next_cursor: null, failures: [], skipped: NO_SKIPPED } });
         }
         const source = sources.find((item) => item.id === seg[4]);
         if (!source) throw new ApiError(404, "not_found", "source");
         const input = opts.body as KnowledgeSourceChange;
         if (source.revision !== input.expected_revision) throw new ApiError(409, "conflict", "source changed");
         if (method === "DELETE") { this.knowledgeSources.set(bot, sources.filter((item) => item !== source)); return ok(undefined); }
-        if (seg[5] === "reindex") return ok({ source, indexing: { processed: 1, unchanged: 1, removed: 0, next_cursor: null, failures: [] } });
+        if (seg[5] === "reindex") return ok({ source, indexing: { processed: 1, unchanged: 1, removed: 0, next_cursor: null, failures: [], skipped: NO_SKIPPED } });
         if (seg[5] === "embed") {
           if (settings.embedding?.provider_id === "local-onnx") return ok({ status: "failed", embedded_chunks: 0, cache_hits: 0, skipped_chunks: 0, remaining_chunks: 1, next_attempt_ms: null, failure_code: "local_embeddings_unavailable" });
           return ok({ status: source.remote_profile_fingerprint ? "complete" : "awaiting_consent", embedded_chunks: source.remote_profile_fingerprint ? 1 : 0, cache_hits: 0, skipped_chunks: 0, remaining_chunks: source.remote_profile_fingerprint ? 0 : 1, next_attempt_ms: null, failure_code: null });

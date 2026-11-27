@@ -395,6 +395,12 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
         "safe mode",
         Box::new(move || doctor::check_safe_mode(safe)),
     );
+    let lane = s.full_access_lane().clone();
+    add(
+        "full_access_lane",
+        "full access lane",
+        Box::new(move || doctor::check_full_access_lane(&lane)),
+    );
     let d = data_dir.clone();
     add(
         "disk_space",

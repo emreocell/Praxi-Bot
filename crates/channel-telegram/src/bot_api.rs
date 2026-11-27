@@ -709,11 +709,21 @@ impl ThrottledEditor {
     /// # Errors
     /// Transport or Telegram API errors.
     pub async fn push(&mut self, api: &BotApiClient, full_text: &str) -> Result<Option<i64>> {
+        self.push_at(api, full_text, Instant::now()).await
+    }
+
+    /// [`Self::push`] with the current time given by the caller, so a test can step
+    /// through a throttle window without sleeping.
+    pub(crate) async fn push_at(
+        &mut self,
+        api: &BotApiClient,
+        full_text: &str,
+        now: Instant,
+    ) -> Result<Option<i64>> {
         if full_text.is_empty() {
             return Ok(self.message_id);
         }
         full_text.clone_into(&mut self.pending_text);
-        let now = Instant::now();
 
         match self.message_id {
             None => {

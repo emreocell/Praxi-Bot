@@ -2740,6 +2740,7 @@ async fn an_unregistered_native_launch_step_asks_after_untrusted_content() {
 struct FakeKnowledge {
     egress: bool,
     calls: std::sync::atomic::AtomicUsize,
+    last_files_only: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -2752,11 +2753,17 @@ impl builtin_tools::knowledge::KnowledgeBackend for FakeKnowledge {
         true
     }
 
+    fn has_enabled_document_sources(&self, _bot: protocol::BotId) -> bool {
+        true
+    }
+
     async fn search(
         &self,
         _bot: protocol::BotId,
-        _request: memory_store::knowledge::SearchRequest,
+        request: memory_store::knowledge::SearchRequest,
     ) -> Result<memory_store::knowledge::SearchResponse, tool_registry::ToolError> {
+        self.last_files_only
+            .store(request.files_only, Ordering::SeqCst);
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(memory_store::knowledge::SearchResponse {
             content_trust: memory_store::knowledge::RetrievedContentTrust::UntrustedData,
@@ -2772,6 +2779,7 @@ fn knowledge_tool(egress: bool) -> (Arc<FakeKnowledge>, Arc<dyn tool_registry::T
     let backend = Arc::new(FakeKnowledge {
         egress,
         calls: std::sync::atomic::AtomicUsize::new(0),
+        last_files_only: std::sync::atomic::AtomicBool::new(false),
     });
     (
         Arc::clone(&backend),
@@ -2825,6 +2833,60 @@ async fn a_run_that_retrieved_knowledge_is_tainted_and_a_later_shell_asks() {
     assert_eq!(fact["ingests_untrusted"], true);
     assert_eq!(fact["reads_private"], true);
     assert_eq!(fact["label"], "knowledge");
+    lp.cancel(run).unwrap();
+}
+
+/// `documents_search` reads the owner's own files: the same private, untrusted
+/// read as knowledge retrieval, so a later shell asks. The host (not the model)
+/// narrows it to files and folders.
+#[tokio::test]
+async fn a_run_that_searched_documents_is_tainted_and_a_later_shell_asks() {
+    let env = setup();
+    let backend = Arc::new(FakeKnowledge {
+        egress: false,
+        calls: std::sync::atomic::AtomicUsize::new(0),
+        last_files_only: std::sync::atomic::AtomicBool::new(false),
+    });
+    let documents = builtin_tools::knowledge::documents_tool(backend.clone());
+    let shell = executor("shell_run", PermissionCategory::Shell, Effect::Destructive);
+    let fake = Fake::new(vec![
+        calls(&[("c1", "documents_search", json!({"query": "lease deposit"}))]),
+        calls(&[("c2", "shell_run", executor_input("shell_run"))]),
+        text("done"),
+    ]);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&shell)],
+        waived(),
+        cfg(Policy::full()),
+    );
+    lp.tool_registry().register(Arc::clone(&documents));
+    let mut rx = lp.subscribe();
+    let run = lp.run_turn(env.chat, "go").unwrap();
+    let event = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))).await;
+    let Event::ApprovalNeeded(card) = &event else {
+        unreachable!()
+    };
+    assert_eq!(card.tool_name, "shell_run");
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+    assert!(backend.last_files_only.load(Ordering::SeqCst));
+    assert_eq!(shell.count.load(Ordering::SeqCst), 0);
+    let fact = env
+        .storage
+        .list_steps(run)
+        .unwrap()
+        .iter()
+        .filter(|s| s.name == "tools")
+        .filter_map(|s| s.output.as_ref())
+        .flat_map(|o| o["results"].as_array().cloned().unwrap_or_default())
+        .find(|r| r["name"] == "documents_search")
+        .map(|r| r["fact"].clone())
+        .expect("a stored document search result");
+    assert_eq!(fact["ran"], true);
+    assert_eq!(fact["ingests_untrusted"], true);
+    assert_eq!(fact["reads_private"], true);
     lp.cancel(run).unwrap();
 }
 
