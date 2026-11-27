@@ -311,6 +311,10 @@ What still asks, and why:
   and the button's label only), and for replayed workflow browser steps. The same read applies to the command or arguments a coding CLI
   engine hands over for its own tool, in any field, and to a program started on your
   computer. The card is once-only and bound to that page.
+* **Locks, garage doors and alarms.** A [Home Assistant](home-assistant.md) service that
+  opens a lock or a garage door, disarms an alarm, or is not a plain device call asks on
+  every level, Full access included, unless you allowed that exact service in the
+  Home Assistant card.
 * **The never-list** (catastrophic commands), a **deny** in the bot's own rules, an
   **ask you wrote yourself** (a category, or a source such as schedules, set on a bot that is
   otherwise Full access: your rule wins over the preset), the owner's per-site and
