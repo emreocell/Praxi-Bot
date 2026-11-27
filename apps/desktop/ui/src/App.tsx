@@ -279,7 +279,9 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
   const onboardingBlocked = !onboardingAllowed(activeComputerId);
   const hostVersionBlocked = hostState?.kind === "version_mismatch" && hostState.blocking;
   // The bots' computer has no bots to show (not set up yet, or not answering): one calm screen, never a blank app.
-  const hostEmpty = onboardingBlocked && phase === "ready" && client !== null && bots.length === 0;
+  // A connection whose client is withheld (version check pending or blocked) shows the version screen, not this one;
+  // no connection at all is the "not answering" case this screen is for.
+  const hostEmpty = onboardingBlocked && phase === "ready" && (client !== null || conn === null) && bots.length === 0;
   useEffect(() => {
     if (onboardingBlocked && route.kind === "onboarding") {
       setRoute({ kind: "home" });
