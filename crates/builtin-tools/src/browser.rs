@@ -4784,6 +4784,62 @@ mod tests {
         assert!(order(&fake).iter().all(|c| !c.starts_with("eval:")));
     }
 
+    /// A payment page the browser gives no document identity for is asked about, but no
+    /// approval binds it: two identity-less pages are not the same document.
+    #[tokio::test]
+    async fn an_identity_less_payment_page_is_never_approved() {
+        use tool_registry::PaymentApproval;
+
+        let (_dir, fake, tools) = build();
+        let eval = get(&tools, "browser_eval");
+        let paying = json!({"js": "fetch('https://api.stripe.com/v1/charges', {method:'POST'})"});
+        let ctx = |payment| ToolContext {
+            payment,
+            ..ToolContext::default()
+        };
+        let evals = |fake: &FakeBrowser| {
+            fake.calls
+                .lock()
+                .iter()
+                .filter(|c| c.starts_with("eval:"))
+                .count()
+        };
+
+        *fake.url.lock() = None;
+        // Still a payment (so the gate asks), reported with a token no document has.
+        let token = eval
+            .payment_page(&ctx(PaymentApproval::Check), &paying)
+            .await
+            .expect("an identity-less payment page is still a payment");
+        assert_eq!(token, super::payment::UNBOUND);
+        // The approval cannot be redeemed, on this page or another one without identity.
+        for _ in 0..2 {
+            assert!(matches!(
+                eval.call(&ctx(PaymentApproval::Approved(token)), paying.clone())
+                    .await,
+                Err(ToolError::PermissionDenied(_))
+            ));
+        }
+        assert_eq!(evals(&fake), 0);
+
+        // Once a page has an identity, the unbound approval still does not match it.
+        *fake.url.lock() = Some("https://shop.example/checkout".into());
+        assert!(matches!(
+            eval.call(&ctx(PaymentApproval::Approved(token)), paying.clone())
+                .await,
+            Err(ToolError::PermissionDenied(_))
+        ));
+        let real = eval
+            .payment_page(&ctx(PaymentApproval::Check), &paying)
+            .await
+            .unwrap();
+        assert_ne!(real, super::payment::UNBOUND);
+        eval.call(&ctx(PaymentApproval::Approved(real)), paying)
+            .await
+            .unwrap();
+        assert_eq!(evals(&fake), 1);
+    }
+
     fn text(o: &ToolOutput) -> String {
         match &o.content[0] {
             ContentPart::Text { text } => text.clone(),

@@ -59,6 +59,13 @@ fn takes_payment_input(op: Op) -> bool {
     )
 }
 
+/// The token of a payment page that cannot be bound to a document (no capture epoch). `None`
+/// from `payment_page` means "not a payment", so such a page is reported with this value
+/// instead: it is asked about like any payment, and no approval can ever match it.
+pub(super) const UNBOUND: u64 = 0;
+
+/// Identifies one document of the page: its capture epoch and URL. Never [`UNBOUND`];
+/// `None` when the driver reports no epoch.
 async fn document_token(driver: &dyn BrowserDriver, url: Option<&str>) -> Option<u64> {
     let mut hasher = DefaultHasher::new();
     driver.capture_epoch().await?.hash(&mut hasher);
@@ -122,7 +129,7 @@ impl BrowserTool {
         Some(
             document_token(driver, url.as_deref())
                 .await
-                .unwrap_or_default(),
+                .unwrap_or(UNBOUND),
         )
     }
 
@@ -167,7 +174,10 @@ impl BrowserTool {
             }
             PaymentApproval::Approved(approved) => {
                 let url = driver.current_url().await;
-                let same = document_token(driver, url.as_deref()).await == Some(approved);
+                // An approval of an unbound page binds nothing: two pages without an identity
+                // are not the same document.
+                let same = approved != UNBOUND
+                    && document_token(driver, url.as_deref()).await == Some(approved);
                 if same {
                     // The owner approved a payment on this document: its own requests to a payment
                     // API (a checkout tokenising a card) must go through.

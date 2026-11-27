@@ -606,28 +606,47 @@ fn is_name_char(c: char) -> bool {
 /// The longest `${...}` body that is read as a variable name and its default.
 const MAX_EXPANSION_NAME: usize = 256;
 
-/// The name a `$` at `chars[at]` introduces (`$name`, `${name}`) and how many characters the
-/// expansion spans, or `None` for a `$` that starts something else (`$(`, `$'`, a lone `$`).
-fn expansion_at(chars: &[char], at: usize) -> Option<(String, usize)> {
-    match chars.get(at + 1)? {
-        '{' => {
-            // A name is short; a `${` with no `}` near it is not an expansion worth reading.
+/// What a `$` at `chars[at]` introduces.
+enum Expansion {
+    /// `$name` / `${name}`: the body and how many characters the expansion spans.
+    Named(String, usize),
+    /// A `${` whose `}` is not within [`MAX_EXPANSION_NAME`] characters: what it expands to
+    /// cannot be told, and leaving it literal could hide a program name (`s${<300 a>}tripe`).
+    Opaque,
+    /// Something else (`$(`, `$'`, a lone `$`).
+    Other,
+}
+
+fn expansion_at(chars: &[char], at: usize) -> Expansion {
+    match chars.get(at + 1) {
+        Some('{') => {
             let close = chars[at + 2..]
                 .iter()
                 .take(MAX_EXPANSION_NAME)
-                .position(|&c| c == '}')?;
-            let body: String = chars[at + 2..at + 2 + close].iter().collect();
-            Some((body, close + 3))
+                .position(|&c| c == '}');
+            match close {
+                Some(close) => {
+                    Expansion::Named(chars[at + 2..at + 2 + close].iter().collect(), close + 3)
+                }
+                None => Expansion::Opaque,
+            }
         }
-        c if is_name_char(*c) => {
+        Some(c) if is_name_char(*c) => {
             let len = chars[at + 1..]
                 .iter()
                 .take_while(|c| is_name_char(**c))
                 .count();
-            Some((chars[at + 1..at + 1 + len].iter().collect(), len + 1))
+            Expansion::Named(chars[at + 1..at + 1 + len].iter().collect(), len + 1)
         }
-        _ => None,
+        _ => Expansion::Other,
     }
+}
+
+/// Whether the text holds a `${` whose name is opaque or unterminated.
+fn has_opaque_expansion(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    (0..chars.len())
+        .any(|i| chars[i] == '$' && matches!(expansion_at(&chars, i), Expansion::Opaque))
 }
 
 /// `NAME=value` words of the command line, in order.
@@ -652,7 +671,7 @@ fn expand_variables(text: &str, vars: &[(String, String)], known: bool) -> Strin
     let mut i = 0;
     while i < chars.len() {
         if chars[i] == '$'
-            && let Some((body, span)) = expansion_at(&chars, i)
+            && let Expansion::Named(body, span) = expansion_at(&chars, i)
         {
             // `${NAME:-default}`: the default is what an unset variable becomes.
             let (name, default) = body.split_once(":-").unwrap_or((body.as_str(), ""));
@@ -708,7 +727,9 @@ fn spellings(command: &str) -> Vec<String> {
 }
 
 fn command_moves_money_at(command: &str, depth: u8) -> bool {
-    quoted_code_moves_money(command)
+    // A `${` that cannot be read could be spelling anything: an opaque command is asked about.
+    has_opaque_expansion(command)
+        || quoted_code_moves_money(command)
         || spellings(command).iter().any(|s| {
             tool_registry::payment::text_names_payment_host(s) || segments_move_money(s, depth)
         })
@@ -826,6 +847,23 @@ mod tests {
         ] {
             assert!(!command_moves_money(cmd), "{cmd}");
         }
+    }
+
+    #[test]
+    fn an_unreadable_expansion_is_asked_about_not_left_literal() {
+        let long = "a".repeat(MAX_EXPANSION_NAME + 44);
+        for cmd in [
+            // Too long to read as a name: could be empty, could join `stripe`.
+            format!("s${{{long}}}tripe charges create"),
+            // Never closed.
+            "s${x tripe charges create".to_owned(),
+            format!("echo ${{{long}"),
+        ] {
+            assert!(command_moves_money(&cmd), "{cmd}");
+        }
+        // A short, closed expansion is still read, and one that is no payment stays free.
+        assert!(command_moves_money("s${x}tripe charges create"));
+        assert!(!command_moves_money("echo ${HOME} ${x:-fallback}"));
     }
 
     #[test]
