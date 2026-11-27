@@ -1113,7 +1113,17 @@ mod tests {
         assert_eq!(install_folders(d.path()), Vec::<String>::new());
         assert_eq!(installed_browser(d.path()), None);
         // A normal archive of the same shape (small contents) is fine.
-        let ok = zip_of(&[file("chrome-linux64/chrome", &[7u8; 4096], Some(0o755))]);
+        // (Incompressible bytes: a real build unpacks to about twice its archive.)
+        let mut x = 0x2545_f491_4f6c_dd1d_u64;
+        let noise: Vec<u8> = (0..4096)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                x.to_le_bytes()[0]
+            })
+            .collect();
+        let ok = zip_of(&[file("chrome-linux64/chrome", &noise, Some(0o755))]);
         assert!(install_zip(d.path(), &ok).await.is_ok());
     }
 
