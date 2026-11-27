@@ -216,13 +216,13 @@ impl ComposioControl for ComposioHost {
     async fn actions(&self, slug: &str) -> Result<Vec<ComposioActionDto>, ComposioControlError> {
         Ok(self
             .svc
-            .toolkit_actions(slug)
+            .preview_actions(slug)
             .await
             .map_err(map_err)?
-            .iter()
+            .into_iter()
             .map(|action| ComposioActionDto {
-                name: action.name.clone(),
-                description: action.description.clone(),
+                name: action.name,
+                description: action.description,
             })
             .collect())
     }

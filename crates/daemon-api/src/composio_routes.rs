@@ -55,8 +55,8 @@ fn composio(s: &AppState) -> Result<Arc<dyn ComposioControl>, ApiError> {
 }
 
 /// `GET /v1/composio/logos/{slug}`: the app's logo, fetched and validated by the daemon (the
-/// webview's CSP allows no remote images). Authenticated like every route; the bytes are served
-/// with `nosniff` and a CSP that forbids anything active even if a viewer rendered them as a page.
+/// webview's CSP allows no remote images). Owner-only like the catalog it belongs to; the bytes are
+/// served with `nosniff` and a CSP that forbids anything active even if a viewer rendered them as a page.
 pub(crate) async fn composio_logo(
     State(s): State<AppState>,
     Path(slug): Path<String>,

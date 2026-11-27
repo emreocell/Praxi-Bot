@@ -666,7 +666,9 @@ async fn app_management_and_identity_routes_need_the_confirmed_admin_desktop_on_
         (Method::GET, "/v1/composio", None),
         (Method::GET, "/v1/composio/apps", None),
         (Method::GET, "/v1/composio/apps/github", None),
+        (Method::GET, "/v1/composio/toolkits?search=git", None),
         (Method::GET, "/v1/composio/toolkits/github/actions", None),
+        (Method::GET, "/v1/composio/logos/github", None),
         (Method::GET, "/v1/composio/login", None),
         (
             Method::PUT,

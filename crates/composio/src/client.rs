@@ -180,27 +180,35 @@ impl std::fmt::Debug for ComposioClient {
     }
 }
 
-/// Whether `url` is an https URL without credentials on Composio's domain.
+/// Hosts that serve a hosted connect link.
+const LINK_HOSTS: [&str; 2] = ["connect.composio.dev", "app.composio.dev"];
+
+/// Whether `url` is a hosted Composio connect link: `https://<host>/link/<token>` where the host
+/// is exactly one of [`LINK_HOSTS`] (no user, port or escapes), the token matches
+/// `^[A-Za-z0-9_-]{1,128}$`, and only a query or fragment follows it. Printable ASCII only.
+///
+/// The same rule, with the same cases (`link_vectors.json`), guards the UI (`isComposioLink`) and
+/// the desktop shell's browser opener.
 #[must_use]
 pub fn is_composio_https_url(url: &str) -> bool {
-    let Ok(u) = Url::parse(url) else {
+    if !url.chars().all(|c| c.is_ascii_graphic() && c != '\\') {
+        return false;
+    }
+    let Some((host, path)) = url
+        .strip_prefix("https://")
+        .and_then(|rest| rest.split_once('/'))
+    else {
         return false;
     };
-    let Some(rest) = url.strip_prefix("https://") else {
+    let Some(token) = path
+        .strip_prefix("link/")
+        .and_then(|after| after.split(['?', '#']).next())
+    else {
         return false;
     };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    let hosted_link = rest
-        .strip_prefix("app.composio.dev/link/")
-        .and_then(|path| path.split(['?', '#']).next())
-        .is_some_and(valid_id);
-    !url.chars().any(|c| c.is_control() || c == '\\')
-        && (matches!(authority, "connect.composio.dev" | "backend.composio.dev") || hosted_link)
-        && u.scheme() == "https"
-        && u.username().is_empty()
-        && u.password().is_none()
-        && u.port().is_none()
-        && u.host_str() == Some(authority)
+    LINK_HOSTS.contains(&host)
+        && valid_id(token)
+        && Url::parse(url).is_ok_and(|u| u.scheme() == "https" && u.host_str() == Some(host))
 }
 
 impl ComposioClient {
@@ -1022,32 +1030,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_composio_https_hosts_are_accepted() {
-        assert!(is_composio_https_url("https://connect.composio.dev/link/x"));
-        assert!(is_composio_https_url(
-            "https://app.composio.dev/link/lt_example"
-        ));
-        assert!(!is_composio_https_url("https://composio.dev/a"));
-        for bad in [
-            "https://app.composio.dev/",
-            "https://app.composio.dev/link/../settings",
-            "https://app.composio.dev/link/lt_example/other",
-            "http://connect.composio.dev/x",
-            "http://169.254.169.254/latest",
-            "https://evilcomposio.dev/x",
-            "https://composio.dev.evil.com/x",
-            "https://user:pw@connect.composio.dev/x",
-            "https://connect.composio.dev:8443/x",
-            "https://logos.composio.dev/consent",
-            "https://unexpected.composio.dev/consent",
-            "https://%63onnect.composio.dev/x",
-            "https://connect.composio.dev:443/x",
-            "https://xn--composo-9za.dev/x",
-            "javascript:alert(1)",
-            "",
-        ] {
-            assert!(!is_composio_https_url(bad), "{bad}");
+    fn only_hosted_connect_links_on_composio_hosts_are_accepted() {
+        let v: Value = serde_json::from_str(include_str!("link_vectors.json")).unwrap();
+        for url in v["accept"].as_array().unwrap() {
+            let url = url.as_str().unwrap();
+            assert!(is_composio_https_url(url), "{url:?}");
         }
+        for url in v["reject"].as_array().unwrap() {
+            let url = url.as_str().unwrap();
+            assert!(!is_composio_https_url(url), "{url:?}");
+        }
+        let longest = usize::try_from(v["longest_token"].as_u64().unwrap()).unwrap();
+        let link = |n: usize| format!("https://connect.composio.dev/link/{}", "a".repeat(n));
+        assert!(is_composio_https_url(&link(longest)));
+        assert!(!is_composio_https_url(&link(longest + 1)));
     }
 
     #[test]

@@ -329,15 +329,20 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/v1/voice"),
     // downloads hundreds of MB onto the owner's disk
     ("POST", "/v1/voice/local/install"),
-    // Account identities and action discovery are for the confirmed owner.
+    // Account identities, the catalog and its logos, and action discovery are for the confirmed
+    // owner: the app lists they feed are owner-only, and no phone or node shows them.
     ("GET", "/v1/composio"),
     ("HEAD", "/v1/composio"),
     ("GET", "/v1/composio/apps"),
     ("HEAD", "/v1/composio/apps"),
     ("GET", "/v1/composio/apps/{}"),
     ("HEAD", "/v1/composio/apps/{}"),
+    ("GET", "/v1/composio/toolkits"),
+    ("HEAD", "/v1/composio/toolkits"),
     ("GET", "/v1/composio/toolkits/{}/actions"),
     ("HEAD", "/v1/composio/toolkits/{}/actions"),
+    ("GET", "/v1/composio/logos/{}"),
+    ("HEAD", "/v1/composio/logos/{}"),
     // A successful login poll installs the user's credential.
     ("GET", "/v1/composio/login"),
     ("HEAD", "/v1/composio/login"),

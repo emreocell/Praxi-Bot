@@ -1,29 +1,41 @@
 import type { ComposioApp, ComposioToolkit } from "../api/types";
 
+/** Hosts that serve a hosted connect link. */
+const LINK_HOSTS = new Set(["connect.composio.dev", "app.composio.dev"]);
+const DASHBOARD_HOSTS = new Set(["platform.composio.dev", "dashboard.composio.dev"]);
+/** Printable ASCII without the backslash: no space, control, escape-like or look-alike character. */
+const PLAIN_URL = /^[\x21-\x5b\x5d-\x7e]+$/;
+
 /**
- * Whether `href` is an https link on Composio's own domain, without
- * credentials or a custom port.  Connect links and the key page are opened in
- * the system browser only when this holds.
+ * Whether `href` may be opened in the system browser. A connect link is a hosted link:
+ * `https://<host>/link/<token>` with the host exactly `connect.composio.dev` or `app.composio.dev`
+ * (no user, port or escapes), a token of `^[A-Za-z0-9_-]{1,128}$`, and only a query or fragment
+ * after it. With `dashboard`, the key page: https on the platform or dashboard host.
+ *
+ * The same rule, with the same cases (`crates/composio/src/link_vectors.json`), guards the
+ * daemon (`is_composio_https_url`) and the desktop shell's browser opener.
  */
 export function isComposioLink(href: string, dashboard = false): boolean {
-  let url: URL;
+  const match = PLAIN_URL.test(href) ? /^https:\/\/([^/]*)(\/[^?#]*)?/.exec(href) : null;
+  if (!match) {
+    return false;
+  }
+  const [, host = "", path = ""] = match;
+  if (dashboard) {
+    return DASHBOARD_HOSTS.has(host);
+  }
+  const token = /^\/link\/([A-Za-z0-9_-]{1,128})$/.exec(path)?.[1];
+  return LINK_HOSTS.has(host) && token !== undefined && isParsedAs(href, host);
+}
+
+/** The URL parser agrees on the host (no userinfo, port or escape slipped through the split). */
+function isParsedAs(href: string, host: string): boolean {
   try {
-    url = new URL(href);
+    const url = new URL(href);
+    return url.protocol === "https:" && url.host === host;
   } catch {
     return false;
   }
-  const host = href.match(/^https:\/\/([^/?#]+)/)?.[1];
-  const hostedLink = /^https:\/\/app\.composio\.dev\/link\/[a-zA-Z0-9_-]{1,128}(?:[?#]|$)/.test(href);
-  return (
-    url.protocol === "https:" &&
-    url.username === "" &&
-    url.password === "" &&
-    url.port === "" &&
-    !/[\p{Cc}\\]/u.test(href) &&
-    (dashboard
-      ? host === "platform.composio.dev" || host === "dashboard.composio.dev"
-      : host === "connect.composio.dev" || host === "backend.composio.dev" || hostedLink)
-  );
 }
 
 /** Slugs of apps whose sign-in is not finished. */

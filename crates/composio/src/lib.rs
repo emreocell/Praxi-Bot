@@ -31,8 +31,8 @@ pub use keys::{KEY_SECRET, KEY_SETUP_URL, KeySource, LOGIN_URL, LocalKeySource, 
 pub use probe::ProbeOutcome;
 pub use schema::{clean_text, sanitize, validate};
 pub use service::{
-    ActionInfo, AppView, Audit, ComposioService, ConnState, Linkage, LoginStart, LoginState,
-    ServiceConfig,
+    ActionInfo, ActionPreview, AppView, Audit, ComposioService, ConnState, Linkage, LoginStart,
+    LoginState, PREVIEW_ACTIONS, PREVIEW_DESCRIPTION_CHARS, ServiceConfig,
 };
 pub use state::{AppConfig, FILE_NAME, LoginIds, StateFile};
 

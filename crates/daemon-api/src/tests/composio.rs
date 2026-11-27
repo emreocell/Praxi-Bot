@@ -282,14 +282,17 @@ async fn every_route_needs_the_token_and_works_for_the_local_owner() {
 }
 
 #[tokio::test]
-async fn identities_action_previews_and_login_poll_require_owner_proof_even_for_head() {
+async fn identities_catalog_logos_action_previews_and_login_poll_require_owner_proof_even_for_head()
+{
     let t = setup();
     t.state.set_composio(Arc::new(Fake::default()));
     for path in [
         "/v1/composio",
         "/v1/composio/apps",
         "/v1/composio/apps/github",
+        "/v1/composio/toolkits?search=ins",
         "/v1/composio/toolkits/github/actions",
+        "/v1/composio/logos/gmail",
         "/v1/composio/login",
     ] {
         for method in [Method::GET, Method::HEAD] {

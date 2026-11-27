@@ -1,26 +1,31 @@
 //! Narrow system-browser opener, available only to the main window.
 
+/// Whether `href` may be opened as a Composio page: a hosted connect link
+/// (`https://connect.composio.dev|app.composio.dev/link/<token>`, token `^[A-Za-z0-9_-]{1,128}$`,
+/// only a query or fragment after it) or, with `dashboard`, the key page on the platform or
+/// dashboard host. Printable ASCII only. The same rule and cases as `is_composio_https_url`
+/// (crates/composio) and `isComposioLink` (the UI): see `link_vectors.json`.
 fn allowed(href: &str, dashboard: bool) -> bool {
+    if !href.chars().all(|c| c.is_ascii_graphic() && c != '\\') {
+        return false;
+    }
     let Some(rest) = href.strip_prefix("https://") else {
         return false;
     };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    !href.chars().any(|c| c.is_control() || c == '\\')
-        && if dashboard {
-            matches!(host, "platform.composio.dev" | "dashboard.composio.dev")
-        } else {
-            matches!(host, "connect.composio.dev" | "backend.composio.dev")
-                || rest
-                    .strip_prefix("app.composio.dev/link/")
-                    .and_then(|path| path.split(['?', '#']).next())
-                    .is_some_and(|token| {
-                        !token.is_empty()
-                            && token.len() <= 128
-                            && token
-                                .bytes()
-                                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-                    })
-        }
+    let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    if dashboard {
+        return matches!(host, "platform.composio.dev" | "dashboard.composio.dev");
+    }
+    matches!(host, "connect.composio.dev" | "app.composio.dev")
+        && path
+            .strip_prefix("link/")
+            .and_then(|after| after.split(['?', '#']).next())
+            .is_some_and(|token| {
+                (1..=128).contains(&token.len())
+                    && token
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            })
 }
 
 /// Validate and hand a URL to the operating system browser.
@@ -109,6 +114,25 @@ mod tests {
     }
 
     #[test]
+    fn the_connect_link_rule_matches_the_daemon_and_the_ui() {
+        let v: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../crates/composio/src/link_vectors.json"
+        ))
+        .unwrap();
+        for url in v["accept"].as_array().unwrap() {
+            let url = url.as_str().unwrap();
+            assert!(allowed(url, false), "{url:?}");
+        }
+        for url in v["reject"].as_array().unwrap() {
+            let url = url.as_str().unwrap();
+            assert!(!allowed(url, false), "{url:?}");
+        }
+        let link = |n: usize| format!("https://app.composio.dev/link/{}", "a".repeat(n));
+        assert!(allowed(&link(128), false));
+        assert!(!allowed(&link(129), false));
+    }
+
+    #[test]
     fn exact_browser_hosts_and_separate_dashboard() {
         assert!(allowed("https://connect.composio.dev/link/x", false));
         assert!(allowed("https://app.composio.dev/link/lt_example", false));
@@ -128,6 +152,7 @@ mod tests {
             "https://%63onnect.composio.dev/x",
             "https://connect.composio.dev.evil/x",
             "https://connect.composio.dev\\@evil/x",
+            "https://backend.composio.dev/x",
         ] {
             assert!(!allowed(bad, false), "{bad}");
         }
