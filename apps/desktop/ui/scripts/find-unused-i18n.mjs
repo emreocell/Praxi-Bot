@@ -1,4 +1,4 @@
-/* global console, process */
+/* global console, process, URL */
 // Lists locale keys that have no static or modeled dynamic use in the UI sources.
 // Dynamic patterns: template-literal prefixes, humanError codes, live-view families, etc.
 // Keys under englishFallbackPrefixes are never reported (staged English-first copy).
@@ -264,7 +264,6 @@ function expandConstKeyPrefixes(src, used, allKeys) {
     if (!base || !KEY_LIKE.test(`${base}${m[2]}`) && !m[2].startsWith(".")) continue;
     const literal = `${base}${m[2]}`;
     if (allKeys.has(literal)) used.add(literal);
-    const prefix = literal.endsWith(".") ? literal : `${literal}.`;
     if (m[2] === "" || m[2].startsWith(".")) {
       for (const k of allKeys) {
         if (k.startsWith(base + (m[2] || "."))) used.add(k);
