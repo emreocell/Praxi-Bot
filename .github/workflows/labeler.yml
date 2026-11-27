@@ -26,6 +26,6 @@ jobs:
       pull-requests: write
     steps:
       # No checkout step on purpose.
-      - uses: actions/labeler@v5
+      - uses: actions/labeler@v7
         with:
           sync-labels: true
