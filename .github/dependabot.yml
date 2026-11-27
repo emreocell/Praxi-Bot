@@ -100,6 +100,7 @@ updates:
     labels:
       - "documentation"
 
+  # Opens PRs that bump immutable `uses: ...@<sha>` pins (and tagged refs if any remain).
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
