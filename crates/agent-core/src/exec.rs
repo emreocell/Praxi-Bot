@@ -32,7 +32,7 @@ use task_runtime::{ExecError, RetryPolicy, StepExecutor, StepSpec, StepStatus};
 use tokio_util::sync::CancellationToken;
 use tool_registry::{ContentPart, Tool, ToolContext, ToolOutput, ToolSpec};
 
-use crate::approval::ExecPermit;
+use crate::approval::{ExecPermit, QuestionRoute};
 use crate::compaction::Compaction;
 use crate::history::{
     GUARD_NOTE, build_messages, status_of, step_output, tool_defs, truncate_utf8,
@@ -2670,41 +2670,23 @@ impl TurnExecutor {
                 );
                 (texts(), false)
             }
-            // Nobody is at the screen of an unattended Full run (a schedule, a trigger, a mail), and
-            // the model must not invent the answer: the question is parked for the owner.
-            Some((QUESTION_CARD_KIND, data)) if self.sh.nobody_answers(ctx) => (
-                self.sh
-                    .park_unattended_question(ctx, data["question"].as_str().unwrap_or_default()),
-                true,
-            ),
-            Some((QUESTION_CARD_KIND, data))
-                if ctx.mission.as_deref().is_some_and(|m| {
-                    // A mission asks its questions once, in one batch. Later questions
-                    // would park the whole mission, so they become blocked items.
-                    self.sh
-                        .mission_store
-                        .read()
-                        .as_ref()
-                        .is_some_and(|s| !s.take_question_slot(m).unwrap_or(true))
-                }) =>
-            {
-                let question = data["question"].as_str().unwrap_or_default();
-                let mission = ctx.mission.as_deref().unwrap_or_default();
-                (self.sh.park_item_for_question(ctx, mission, question), true)
-            }
             Some((QUESTION_CARD_KIND, data)) => {
                 let question = data["question"].as_str().unwrap_or_default();
                 let options: Vec<String> =
                     serde_json::from_value(data["options"].clone()).unwrap_or_default();
-                match self.sh.request_answer(ctx, call, question, options).await {
-                    Ok(answer) => (format!("The user answered: {answer}"), false),
-                    Err(reason) => (
+                match self.sh.route_question(ctx, call, question, options).await {
+                    QuestionRoute::Answered(answer) => {
+                        (format!("The user answered: {answer}"), false)
+                    }
+                    QuestionRoute::Declined(reason) => (
                         format!(
                             "The user declined to answer{}.",
                             reason.map_or_else(String::new, |r| format!(": {r}"))
                         ),
                         true,
                     ),
+                    // Unattended run, or a mission past its one batch: the owner finds it later.
+                    QuestionRoute::Parked(text) => (text, true),
                 }
             }
             Some((SECRET_REQUEST_CARD_KIND, data))

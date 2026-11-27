@@ -1,13 +1,14 @@
 //! Whole-turn CLI handoff. Tool execution stays in `exec_tools`, including policy,
 //! approvals, redaction, spills, timeouts and the existing run stream events.
 use crate::{
+    approval::QuestionRoute,
     exec::{CliApproval, TurnExecutor},
     shared::{ModelOut, STEP_TOOLS, Shared, xe},
 };
 use async_trait::async_trait;
 use cli_provider::runtime::{
-    CliEngine, CliError, Engine, NativePermission, NativeTurn, ToolReply, Turn, TurnHost,
-    run_native_turn,
+    CliEngine, CliError, Engine, NativePermission, NativeQuestion, NativeTurn, ToolReply, Turn,
+    TurnHost, run_native_turn,
 };
 use permission_engine::Decision;
 use protocol::{Event, ToolCallId, event::MessageDelta};
@@ -230,6 +231,69 @@ impl Host {
     }
 }
 
+impl Host {
+    /// A multiple-choice question of the CLI (Kimi Code's `AskUserQuestion`): the index of the
+    /// answer to pass back, or `None` when the CLI is to be told it was skipped.
+    ///
+    /// Praxi never picks an answer for the owner, at any level. A question is model-written prose,
+    /// which the never-list and the money check (made for commands and tool input) cannot judge,
+    /// so the Full lane's waiver does not reach it: it goes where an `ask_user` question goes, a
+    /// card with the CLI's real options, or, when nobody is at the screen or a mission is past
+    /// its one batch of questions, parked for the owner (the CLI is told it was skipped).
+    pub(crate) async fn native_question(&self, request: NativeQuestion) -> Option<usize> {
+        let ctx = self.sh.ctx(&self.run).ok()?;
+        let answer = match self
+            .sh
+            .route_question(
+                &ctx,
+                ToolCallId::new(),
+                &request.question,
+                request.options.clone(),
+            )
+            .await
+        {
+            QuestionRoute::Answered(answer) => answer,
+            QuestionRoute::Declined(_) => return None,
+            QuestionRoute::Parked(_) => {
+                // The CLI is told "skipped", so the owner finds the question in the run's report.
+                let note = format!(
+                    "
+
+Kimi Code CLI asked: {} (options: {}). Nobody was at the screen, so it was skipped; answer it when you can.
+
+",
+                    request.question,
+                    request.options.join(" / ")
+                );
+                self.text(&note);
+                return None;
+            }
+        };
+        let wanted = answer.trim();
+        let found = request
+            .options
+            .iter()
+            .position(|o| o == wanted)
+            .or_else(|| {
+                request
+                    .options
+                    .iter()
+                    .position(|o| o.trim().eq_ignore_ascii_case(wanted))
+            });
+        if found.is_none() {
+            // The CLI takes one of its own answers only: free text cannot be passed on.
+            self.text(
+                "
+
+The CLI's question only accepts one of its listed answers, so your reply was not passed on and the question was skipped.
+
+",
+            );
+        }
+        found
+    }
+}
+
 /// How deep a CLI's own JSON is read for strings.
 const LEAF_DEPTH: usize = 12;
 
@@ -318,6 +382,9 @@ impl TurnHost for RecordingHost {
     }
     async fn permission(&self, request: NativePermission) -> bool {
         self.inner.native_permission(request).await
+    }
+    async fn question(&self, request: NativeQuestion) -> Option<usize> {
+        self.inner.native_question(request).await
     }
 }
 

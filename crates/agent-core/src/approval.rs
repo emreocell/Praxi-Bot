@@ -3241,6 +3241,35 @@ impl Shared {
         self.audit(ctx, "user", AUDIT_GRANT_ALWAYS, &grant_detail(&grant));
     }
 
+    /// Where a question of the run goes: parked for the owner when nobody is at the screen
+    /// ([`Self::nobody_answers`]) or when a mission session used its one batch of questions, else
+    /// a card the run waits on. One rule for the `ask_user` tool and for a coding CLI's own
+    /// question, so neither can answer for the owner.
+    pub(crate) async fn route_question(
+        self: &Arc<Self>,
+        ctx: &RunCtx,
+        call_id: ToolCallId,
+        question: &str,
+        options: Vec<String>,
+    ) -> QuestionRoute {
+        if self.nobody_answers(ctx) {
+            return QuestionRoute::Parked(self.park_unattended_question(ctx, question));
+        }
+        if let Some(mission) = ctx.mission.as_deref()
+            && self
+                .mission_store
+                .read()
+                .as_ref()
+                .is_some_and(|s| !s.take_question_slot(mission).unwrap_or(true))
+        {
+            return QuestionRoute::Parked(self.park_item_for_question(ctx, mission, question));
+        }
+        match self.request_answer(ctx, call_id, question, options).await {
+            Ok(answer) => QuestionRoute::Answered(answer),
+            Err(reason) => QuestionRoute::Declined(reason),
+        }
+    }
+
     /// Park the run until the user answers a question card.
     /// `Ok(answer)`, or `Err(reason)` if the user declined to answer.
     pub(crate) async fn request_answer(
@@ -3532,6 +3561,16 @@ fn mission_give_up_text(key: Option<&str>, reason: &str) -> String {
             "Not waiting: this is a mission, so a person is not asked right now, and a CAPTCHA cannot be solved from the ledger. Mark the item you are working on as failed with mission_item (error: {reason}), do not retry the site, and take the next open item now."
         ),
     }
+}
+
+/// How [`Shared::route_question`] disposed of a question.
+pub(crate) enum QuestionRoute {
+    /// The owner answered the card.
+    Answered(String),
+    /// The owner declined to answer (or the card expired), with the reason if there is one.
+    Declined(Option<String>),
+    /// Nobody was asked: the question is parked for the owner. Carries what the model reads.
+    Parked(String),
 }
 
 /// What the model reads when an unattended run's question is parked for the owner: it neither

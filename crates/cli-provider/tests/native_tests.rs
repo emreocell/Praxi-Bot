@@ -2,7 +2,9 @@
 use async_trait::async_trait;
 use cli_provider::{
     ApprovalLevel, Driver, PathEnv,
-    runtime::{NativePermission, NativeTurn, ToolReply, Turn, TurnHost, run_native_turn},
+    runtime::{
+        NativePermission, NativeQuestion, NativeTurn, ToolReply, Turn, TurnHost, run_native_turn,
+    },
 };
 use parking_lot::Mutex;
 use serde_json::{Value, json};
@@ -14,6 +16,9 @@ mod common;
 
 struct Host {
     allow: bool,
+    /// What the person chooses for a question (`None`: nobody chose).
+    choose: Option<usize>,
+    questions: Mutex<Vec<NativeQuestion>>,
     permissions: Mutex<Vec<NativePermission>>,
     text: Mutex<String>,
 }
@@ -31,6 +36,10 @@ impl TurnHost for Host {
     async fn permission(&self, request: NativePermission) -> bool {
         self.permissions.lock().push(request);
         self.allow
+    }
+    async fn question(&self, request: NativeQuestion) -> Option<usize> {
+        self.questions.lock().push(request);
+        self.choose
     }
 }
 
@@ -75,6 +84,8 @@ async fn run(
     let (dir, workspace, env) = setup();
     let host = Arc::new(Host {
         allow,
+        choose: None,
+        questions: Mutex::new(Vec::new()),
         permissions: Mutex::new(Vec::new()),
         text: Mutex::new(String::new()),
     });
@@ -152,6 +163,76 @@ async fn acp_agent_permissions_follow_the_level_and_fs_is_refused() {
     assert!(log(&dir, "permission_answer").contains("\"optionId\":\"yes\""));
 }
 
+/// One run of the Kimi fake session that asks two multiple-choice questions.
+async fn kimi_questions(
+    level: ApprovalLevel,
+    allow: bool,
+    choose: Option<usize>,
+) -> (tempfile::TempDir, Arc<Host>) {
+    let (dir, workspace, env) = setup();
+    let env = env.with_env_var("FAKE_MODE", "acp-kimi-question");
+    let host = Arc::new(Host {
+        allow,
+        choose,
+        questions: Mutex::new(Vec::new()),
+        permissions: Mutex::new(Vec::new()),
+        text: Mutex::new(String::new()),
+    });
+    let nt = NativeTurn {
+        turn: turn(),
+        driver: Driver::Kimi,
+        level,
+        workspace: workspace.path().to_owned(),
+    };
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        run_native_turn("fixture", &env, nt, host.clone(), CancellationToken::new()),
+    )
+    .await
+    .expect("kimi turn timed out")
+    .expect("kimi turn failed");
+    (dir, host)
+}
+
+#[tokio::test]
+async fn kimi_questions_reach_the_host_with_the_real_options_and_are_never_answered_for_the_owner()
+{
+    // Whatever the level and whatever a permission approval would say (`allow: true`), the
+    // question is a question: no permission request, the CLI's own answers, option 1 never
+    // picked on its own. Nobody chose: the CLI gets its "Skip".
+    for level in [ApprovalLevel::Ask, ApprovalLevel::Auto, ApprovalLevel::Full] {
+        if !cli_provider::level_plan(Driver::Kimi, level).offered {
+            continue;
+        }
+        let (dir, host) = kimi_questions(level, true, None).await;
+        assert!(host.permissions.lock().is_empty(), "{level:?}");
+        let questions = host.questions.lock();
+        assert_eq!(questions.len(), 2, "{level:?}");
+        assert_eq!(questions[0].question, "Which database?");
+        assert_eq!(questions[0].options, ["Postgres", "SQLite"]);
+        assert_eq!(questions[1].options, ["Yes", "No"]);
+        for name in ["question_answer", "question_answer_2"] {
+            let answer = log(&dir, name);
+            assert!(
+                answer.contains("\"optionId\":\"q0_skip\""),
+                "{level:?} {answer}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn kimi_gets_the_answer_the_owner_chose() {
+    let (dir, host) = kimi_questions(ApprovalLevel::Ask, false, Some(1)).await;
+    assert!(host.permissions.lock().is_empty());
+    // The second option of each question, not the first.
+    assert!(log(&dir, "question_answer").contains("\"optionId\":\"q0_opt_1\""));
+    assert!(log(&dir, "question_answer_2").contains("\"optionId\":\"q0_opt_1\""));
+    // An index the CLI did not offer is a skip, not a wrapped or clamped answer.
+    let (dir, _host) = kimi_questions(ApprovalLevel::Ask, true, Some(7)).await;
+    assert!(log(&dir, "question_answer").contains("q0_skip"));
+}
+
 /// The level the desktop's one consent step starts on: Ask when the engine offers it, else its first
 /// offered level (`OpenCode`, and Kimi on Linux and macOS, cannot be held at Ask).
 fn level_picker_starts_on(driver: Driver) -> ApprovalLevel {
@@ -178,6 +259,8 @@ async fn every_engine_runs_its_first_message_with_the_settings_the_picker_gives_
         };
         let host = Arc::new(Host {
             allow: true,
+            choose: None,
+            questions: Mutex::new(Vec::new()),
             permissions: Mutex::new(Vec::new()),
             text: Mutex::new(String::new()),
         });
@@ -214,6 +297,8 @@ async fn refuses_below_enforceable_levels_and_workspace_executables() {
     let (dir, workspace, env) = setup();
     let host = Arc::new(Host {
         allow: true,
+        choose: None,
+        questions: Mutex::new(Vec::new()),
         permissions: Mutex::new(Vec::new()),
         text: Mutex::new(String::new()),
     });

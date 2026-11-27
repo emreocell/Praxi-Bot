@@ -58,7 +58,7 @@ Praxi PR #97'nin `fix/c244a-mcp-start-and-tool-availability` dalındaki `crates/
 Her botun bir motor kipi vardır. Bunu yalnızca yerel sahip ayarlayabilir (bot ayarlarında **Motor**):
 
 - **Praxi yönetir** (varsayılan): Praxi dosyaları ve komutları kendi araçları ve izin motoruyla yürütür; CLI'nin yerleşik araçları kapalıdır (bugün yalnızca Claude Code için).
-- **Kendi araçlarıyla**: CLI, senin seçtiğin bir çalışma klasöründe kendi dosya ve komut araçlarını korur. Botun onay düzeyi CLI'nin kendi izin kipine eşlenir ve CLI'nin ilettiği her izin isteği normal bir Praxi onay kartına dönüşür. Praxi'nin kendi araçları (tarayıcı, uygulamalar, gizli bilgiler, hafıza) CLI'ye çalışma başına bir yerel MCP uç noktasıyla sunulur ve Praxi onaylarını korur.
+- **Kendi araçlarıyla**: CLI, senin seçtiğin bir çalışma klasöründe kendi dosya ve komut araçlarını korur. Botun onay düzeyi CLI'nin kendi izin kipine eşlenir ve CLI'nin ilettiği her izin isteği normal bir Praxi onay kartına dönüşür. Praxi'nin kendi araçları (tarayıcı, uygulamalar, gizli bilgiler, hafıza) CLI'ye çalışma başına bir yerel MCP uç noktasıyla sunulur ve Praxi onaylarını korur. Kimi Code CLI'nin sorduğu çoktan seçmeli bir soru (izin isteği olarak gelir) her düzeyde, CLI'nin kendi cevaplarını gösteren bir soru kartıdır ve seçtiğin cevap CLI'ye aynen gider. Praxi senin yerine cevap seçmez: ekranda kimse yoksa (zamanlama, tetikleyici, e-posta), kartı reddedersen ya da cevaplardan biri olmayan bir şey yazarsan CLI'ye sorunun atlandığı söylenir ve soru, sonra cevaplayabilmen için çalışmanın yanıtına yazılır.
 
 Varsayılan düzey **Sor**'dur. **Tam erişim** için her bot başına ayrı bir onay gerekir. Bir botu kendi araçlarıyla çalışmaya geçirmek de onay ister; ikisi de denetim günlüğüne yazılır.
 

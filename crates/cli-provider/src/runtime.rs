@@ -130,6 +130,16 @@ pub struct NativePermission {
     pub input: Value,
 }
 
+/// A multiple-choice question a CLI asks the person (Kimi Code's `AskUserQuestion`), which is not a
+/// permission: answering means choosing one of the CLI's own answers.
+#[derive(Debug, Clone)]
+pub struct NativeQuestion {
+    /// The question as the CLI worded it. Untrusted CLI output.
+    pub question: String,
+    /// The answers the CLI offers, in its order. Untrusted CLI output.
+    pub options: Vec<String>,
+}
+
 /// Host boundary: implementations use the agent's existing permission resolver and executor.
 #[async_trait]
 pub trait TurnHost: Send + Sync + 'static {
@@ -142,6 +152,12 @@ pub trait TurnHost: Send + Sync + 'static {
     /// The default refuses, so a host that does not support native mode never allows anything.
     async fn permission(&self, _request: NativePermission) -> bool {
         false
+    }
+    /// Answer a question the CLI asks: the index of the chosen entry of
+    /// [`NativeQuestion::options`], or `None` when nobody chose one (the CLI is then told the
+    /// question was skipped). Never picks an answer on its own: the default skips.
+    async fn question(&self, _request: NativeQuestion) -> Option<usize> {
+        None
     }
 }
 

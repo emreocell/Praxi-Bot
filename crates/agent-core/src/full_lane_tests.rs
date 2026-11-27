@@ -1486,3 +1486,160 @@ async fn a_coding_clis_tool_obeys_a_deny_a_lock_an_explicit_ask_and_a_tainted_re
         Err(())
     );
 }
+
+// ── A coding CLI's own multiple-choice question (Kimi Code's `AskUserQuestion`) ──
+
+/// What came of one question of the CLI: the index it was answered with, the question cards the
+/// owner saw (question and options) and the text the run showed meanwhile.
+struct Asked {
+    answer: Option<usize>,
+    cards: Vec<(String, Vec<String>)>,
+    shown: String,
+}
+
+/// Put `question` to `host` and let the owner `reply` on the card (`None`: decline it).
+async fn ask_native(
+    lp: &crate::AgentLoop,
+    env: &crate::tests::Env,
+    host: &crate::cli::Host,
+    rx: &mut tokio::sync::broadcast::Receiver<crate::StreamItem>,
+    question: &str,
+    options: &[&str],
+    reply: Option<&str>,
+) -> Asked {
+    let ask = host.native_question(cli_provider::runtime::NativeQuestion {
+        question: question.into(),
+        options: options.iter().map(|o| (*o).to_owned()).collect(),
+    });
+    tokio::pin!(ask);
+    let mut cards = Vec::new();
+    let mut shown = String::new();
+    loop {
+        tokio::select! {
+            answer = &mut ask => {
+                // The note the run showed may still be queued.
+                while let Ok(item) = rx.try_recv() {
+                    if let Event::MessageDelta(delta) = item.envelope.event {
+                        shown.push_str(&delta.text);
+                    }
+                }
+                return Asked { answer, cards, shown };
+            }
+            item = rx.recv() => match item.expect("the stream stays open").envelope.event {
+                Event::QuestionAsked(card) => {
+                    cards.push((card.question.clone(), card.options.clone()));
+                    match reply {
+                        Some(text) => lp.answer_question(card.call_id, text).unwrap(),
+                        None => lp.deny(card.call_id, env.user, None).unwrap(),
+                    }
+                }
+                Event::MessageDelta(delta) => shown.push_str(&delta.text),
+                Event::ApprovalNeeded(_) => panic!("a question is not an approval card"),
+                _ => {}
+            },
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_coding_clis_question_shows_its_real_options_and_gets_the_owners_pick() {
+    // A person at the screen, at any level: a card with the CLI's own options, and the answer
+    // is the one the owner gave, not the first.
+    for preset in [FULL, BALANCED] {
+        let (env, lp, host, mut rx) = native_host(Start::Owner, preset).await;
+        let asked = ask_native(
+            &lp,
+            &env,
+            &host,
+            &mut rx,
+            "Which database?",
+            &["Postgres", "SQLite", "MySQL"],
+            Some("SQLite"),
+        )
+        .await;
+        assert_eq!(asked.answer, Some(1), "{preset}");
+        assert_eq!(
+            asked.cards,
+            [(
+                "Which database?".to_owned(),
+                vec!["Postgres".into(), "SQLite".into(), "MySQL".into()]
+            )],
+            "{preset}"
+        );
+        // A declined card, or a reply that is none of the CLI's answers, is a skip, never option 1.
+        let declined = ask_native(&lp, &env, &host, &mut rx, "Which?", &["A", "B"], None).await;
+        assert_eq!(declined.answer, None, "{preset}");
+        let free = ask_native(
+            &lp,
+            &env,
+            &host,
+            &mut rx,
+            "Which?",
+            &["A", "B"],
+            Some("something else"),
+        )
+        .await;
+        assert_eq!(free.answer, None, "{preset}");
+        assert!(free.shown.contains("was not passed on"), "{preset}");
+    }
+}
+
+/// The Full level does not answer a question on the owner's behalf, not even a plain yes or no:
+/// a question is prose, which the never-list and the money check cannot judge.
+#[tokio::test]
+async fn a_question_is_never_answered_for_the_owner_even_at_the_full_level() {
+    for (what, options) in [
+        ("Install the dependencies?", ["Yes", "No"]),
+        ("Install the dependencies?", ["No", "Yes"]),
+        ("Run stripe charges create --amount 5000?", ["Yes", "No"]),
+        ("Run rm -rf / to clean up?", ["Yes", "No"]),
+    ] {
+        let (env, lp, host, mut rx) = native_host(Start::Owner, FULL).await;
+        let asked = ask_native(&lp, &env, &host, &mut rx, what, &options, Some("No")).await;
+        let no = options.iter().position(|o| *o == "No");
+        assert_eq!(asked.answer, no, "{what}");
+        assert_eq!(asked.cards.len(), 1, "{what}: raised no card");
+        let audit = env
+            .storage
+            .list_audit_for_run(env.user, host.run.id)
+            .unwrap();
+        assert!(
+            !audit.iter().any(|r| r.action == "approval.auto_allowed"),
+            "{what}: waived"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_unattended_runs_question_is_parked_for_the_owner_not_answered() {
+    for start in [Start::Schedule, Start::Trigger] {
+        let (env, lp, host, mut rx) = native_host(start, FULL).await;
+        let asked = ask_native(
+            &lp,
+            &env,
+            &host,
+            &mut rx,
+            "Which database?",
+            &["Postgres", "SQLite"],
+            None,
+        )
+        .await;
+        // Nobody to answer: the CLI is told "skipped", no card waits, and the question is in the
+        // run's text with its options.
+        assert_eq!(asked.answer, None, "{start:?}");
+        assert!(asked.cards.is_empty(), "{start:?}");
+        assert!(
+            asked.shown.contains("Which database?") && asked.shown.contains("Postgres / SQLite"),
+            "{start:?}: {}",
+            asked.shown
+        );
+        let audit = env
+            .storage
+            .list_audit_for_run(env.user, host.run.id)
+            .unwrap();
+        assert!(
+            audit.iter().any(|r| r.action == "question.parked"),
+            "{start:?}"
+        );
+    }
+}

@@ -151,6 +151,12 @@ Each bot has an engine mode, set by the local owner only (bot settings, "Engine"
   every permission request the CLI forwards becomes a normal Praxi approval card.
   Praxi's own tools (browser, apps, secrets, memory) are offered to the CLI over a
   per-run local MCP endpoint and keep Praxi's approvals.
+  A multiple-choice question the Kimi Code CLI asks (it arrives as a permission request)
+  is a question card with the CLI's own answers, at every level, and the answer you pick is
+  the one the CLI gets. Praxi never picks an answer for you: when nobody is at the screen
+  (a schedule, a trigger, a mail) or you decline or type something that is not one of the
+  answers, the CLI is told the question was skipped, and the question is written into the
+  run's reply so you can answer it later.
 
 The default level is **Ask**. **Full access** needs its own consent per bot. Switching
 a bot to native tools needs a consent too; both are recorded in the audit log.

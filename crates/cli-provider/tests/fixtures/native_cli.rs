@@ -173,6 +173,32 @@ fn acp(args: &[String]) {
         &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{
         "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"native acp"}}}}),
     );
+    // `kimi acp` 2.7.3 bridges its `AskUserQuestion` tool through `session/request_permission`
+    // (`handleQuestion` of the bundled ACP server): the question is the tool call's text, each
+    // answer is an `allow_once` option and `q0_skip` is the `reject_once` "Skip". Then a second
+    // question, then an ordinary tool permission, so one run shows both kinds.
+    if std::env::var("FAKE_MODE").as_deref() == Ok("acp-kimi-question") {
+        let question = |id: u64, text: &str, labels: &[&str]| {
+            let mut options: Vec<Value> = labels
+                .iter()
+                .enumerate()
+                .map(
+                    |(i, l)| json!({"optionId":format!("q0_opt_{i}"),"name":l,"kind":"allow_once"}),
+                )
+                .collect();
+            options.push(json!({"optionId":"q0_skip","name":"Skip","kind":"reject_once"}));
+            json!({"jsonrpc":"2.0","id":id,"method":"session/request_permission","params":{
+                "sessionId":"s1","options":options,
+                "toolCall":{"toolCallId":"turn-1:ask","title":"AskUserQuestion",
+                    "content":[{"type":"content","content":{"type":"text","text":text}}]}}})
+        };
+        emit(&question(90, "Which database?", &["Postgres", "SQLite"]));
+        log("question_answer", &read(&mut stdin).to_string());
+        emit(&question(91, "Proceed?", &["Yes", "No"]));
+        log("question_answer_2", &read(&mut stdin).to_string());
+        emit(&json!({"jsonrpc":"2.0","id":prompt["id"],"result":{"stopReason":"end_turn"}}));
+        return;
+    }
     emit(
         &json!({"jsonrpc":"2.0","id":90,"method":"session/request_permission","params":{
         "sessionId":"s1","toolCall":{"toolCallId":"t","title":"touch note.txt","kind":"execute","rawInput":{"command":"touch note.txt"}},

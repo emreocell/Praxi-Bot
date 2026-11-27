@@ -667,6 +667,26 @@ impl Run<'_> {
                         }
                     }
                     "session/request_permission" => {
+                        // A question is not a permission: an approval of it would pick the
+                        // first answer, at any level, so it never goes through `allowed`.
+                        if self.nt.driver == Driver::Kimi
+                            && let Some(question) = kimi_question(&v["params"])
+                        {
+                            let chosen = self
+                                .host
+                                .question(NativeQuestion {
+                                    question: question.question.clone(),
+                                    options: question.labels(),
+                                })
+                                .await;
+                            let outcome = question.outcome(chosen);
+                            send(
+                                stdin,
+                                json!({"jsonrpc":"2.0","id":id,"result":{"outcome":outcome}}),
+                            )
+                            .await?;
+                            continue;
+                        }
                         let tc = &v["params"]["toolCall"];
                         let title = tc["title"].as_str().unwrap_or("tool");
                         let kind = tc["kind"].as_str().unwrap_or(title);
@@ -842,6 +862,107 @@ async fn send_prompt(
 
 /// ACP permission answer. Below Full only the agent's "once" options are used, so a
 /// single approval never becomes a remembered grant; without one the request is cancelled.
+/// Most answers of one question that reach the owner's card.
+const MAX_ANSWERS: usize = 12;
+/// Longest question or answer shown, in characters.
+const MAX_QUESTION_CHARS: usize = 500;
+const MAX_ANSWER_CHARS: usize = 200;
+
+/// A Kimi Code question that came as a permission request. Without form elicitation `kimi acp`
+/// (2.7.x) bridges its `AskUserQuestion` tool through `session/request_permission`: the tool call
+/// is titled `AskUserQuestion` and carries the question as text, each answer is an `allow_once`
+/// option (`q0_opt_<n>`, named with the answer) and a `reject_once` "Skip" (`q0_skip`) dismisses
+/// it. Approving such a request therefore picks an answer for the person.
+struct KimiQuestion {
+    question: String,
+    /// `(optionId, answer)` of every `allow_once` option, in the CLI's order.
+    answers: Vec<(String, String)>,
+    /// The `reject_once` option that dismisses the question.
+    skip: Option<String>,
+}
+
+fn kimi_question(params: &Value) -> Option<KimiQuestion> {
+    let options = params["options"].as_array().map_or(&[][..], Vec::as_slice);
+    let title = params["toolCall"]["title"].as_str().unwrap_or_default();
+    // The title says it; so does an option list made only of question options, should a
+    // later build rename the tool. Either way the request is a question.
+    let looks_like_question = title == "AskUserQuestion"
+        || (!options.is_empty()
+            && options
+                .iter()
+                .all(|o| o["optionId"].as_str().is_some_and(is_question_option_id)));
+    if !looks_like_question {
+        return None;
+    }
+    let text: String = params["toolCall"]["content"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .filter_map(|c| c["content"]["text"].as_str())
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    let text = if text.trim().is_empty() {
+        "Kimi Code CLI asked a question".to_owned()
+    } else {
+        text
+    };
+    let answers = options
+        .iter()
+        .filter(|o| o["kind"] == "allow_once")
+        .filter_map(|o| {
+            Some((
+                o["optionId"].as_str()?.to_owned(),
+                o["name"].as_str()?.to_owned(),
+            ))
+        })
+        .take(MAX_ANSWERS)
+        .map(|(id, name)| (id, name.chars().take(MAX_ANSWER_CHARS).collect()))
+        .collect();
+    let skip = options
+        .iter()
+        .find(|o| o["kind"] == "reject_once")
+        .and_then(|o| o["optionId"].as_str())
+        .map(str::to_owned);
+    Some(KimiQuestion {
+        question: text.chars().take(MAX_QUESTION_CHARS).collect(),
+        answers,
+        skip,
+    })
+}
+
+/// `q<n>_opt_<m>` or `q<n>_skip`: the option ids of Kimi's question bridge.
+fn is_question_option_id(id: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    id.strip_prefix('q')
+        .and_then(|rest| rest.split_once('_'))
+        .is_some_and(|(n, tail)| {
+            digits(n) && (tail == "skip" || tail.strip_prefix("opt_").is_some_and(digits))
+        })
+}
+
+impl KimiQuestion {
+    fn labels(&self) -> Vec<String> {
+        self.answers
+            .iter()
+            .map(|(_, label)| label.clone())
+            .collect()
+    }
+
+    /// The ACP outcome: the answer the person chose, else the dismissal. Never a default answer.
+    fn outcome(&self, chosen: Option<usize>) -> Value {
+        match chosen.and_then(|i| self.answers.get(i)) {
+            Some((option_id, _)) => json!({"outcome":"selected","optionId":option_id}),
+            None => match &self.skip {
+                Some(option_id) => json!({"outcome":"selected","optionId":option_id}),
+                None => json!({"outcome":"cancelled"}),
+            },
+        }
+    }
+}
+
 fn acp_outcome(options: &Value, allow: bool, full: bool) -> Value {
     let want = if allow { "allow" } else { "reject" };
     let list = options.as_array().map_or(&[][..], Vec::as_slice);
@@ -903,6 +1024,57 @@ fn codex_card(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `handleQuestion` of `kimi acp` 2.7.3 (read from the bundled server).
+    fn kimi_ask(options: &Value, title: &str) -> Value {
+        json!({"sessionId":"s","options":options,"toolCall":{"toolCallId":"t:ask","title":title,
+            "content":[{"type":"content","content":{"type":"text","text":"Which one?"}}]}})
+    }
+
+    #[test]
+    fn a_kimi_question_is_told_from_a_permission_and_never_defaults_to_the_first_answer() {
+        let options = json!([
+            {"optionId":"q0_opt_0","name":"Alpha","kind":"allow_once"},
+            {"optionId":"q0_opt_1","name":"Beta","kind":"allow_once"},
+            {"optionId":"q0_skip","name":"Skip","kind":"reject_once"}]);
+        let q = kimi_question(&kimi_ask(&options, "AskUserQuestion")).expect("a question");
+        assert_eq!(q.question, "Which one?");
+        assert_eq!(q.labels(), ["Alpha", "Beta"]);
+        assert_eq!(q.outcome(Some(1))["optionId"], "q0_opt_1");
+        // Nobody chose, or an index that is not an answer: the dismissal, not option 0.
+        assert_eq!(q.outcome(None)["optionId"], "q0_skip");
+        assert_eq!(q.outcome(Some(2))["optionId"], "q0_skip");
+        // Renamed tool, same option ids: still a question.
+        assert!(kimi_question(&kimi_ask(&options, "Ask")).is_some());
+        // Without a skip option the answer is a cancel.
+        let q = kimi_question(&kimi_ask(
+            &json!([{"optionId":"q0_opt_0","name":"Alpha","kind":"allow_once"}]),
+            "AskUserQuestion",
+        ))
+        .expect("a question");
+        assert_eq!(q.outcome(None), json!({"outcome":"cancelled"}));
+        // An ordinary tool permission stays one.
+        let permission = kimi_ask(
+            &json!([{"optionId":"approve","name":"Approve","kind":"allow_once"},
+                   {"optionId":"approve_for_session","name":"Always","kind":"allow_always"},
+                   {"optionId":"reject","name":"Reject","kind":"reject_once"}]),
+            "Shell",
+        );
+        assert!(kimi_question(&permission).is_none());
+        assert!(kimi_question(&json!({"options":[],"toolCall":{}})).is_none());
+    }
+
+    #[test]
+    fn question_option_ids_are_matched_exactly() {
+        for id in ["q0_opt_0", "q12_opt_3", "q0_skip"] {
+            assert!(is_question_option_id(id), "{id}");
+        }
+        for id in [
+            "", "q_opt_0", "q0_opt_", "q0_opt_x", "q0_skip2", "approve", "opt_0",
+        ] {
+            assert!(!is_question_option_id(id), "{id}");
+        }
+    }
 
     #[test]
     fn kimi_session_setup_uses_the_modes_kimi_acp_offers() {
