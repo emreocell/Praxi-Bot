@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, PoisonError, RwLock};
+use std::time::Duration;
 
 use secret_store::SecretStore;
 
@@ -12,7 +13,7 @@ use crate::config::{AccountConfig, AccountKind, SendMode};
 use crate::cred::resolve_secret;
 use crate::error::EmailError;
 use crate::guard::MailGuard;
-use crate::imap::{FolderInfo, SearchQuery};
+use crate::imap::{FolderInfo, MAX_LIMIT, SearchQuery};
 use crate::imap_provider::ImapSmtpProvider;
 use crate::message::{MessageDetail, MessageSummary};
 use crate::probe::ProbeReport;
@@ -75,6 +76,9 @@ pub struct EmailConnector {
     /// Outgoing-mail guardrails (send log, opt-out list, limits).
     guard: RwLock<Arc<MailGuard>>,
 }
+
+/// Longest a search that also looks in the junk folders takes, over all its folders.
+const JUNK_SEARCH_BUDGET: Duration = Duration::from_secs(30);
 
 /// `m` marked with the folder it was found in and whether that is a junk folder.
 fn tagged(mut m: MessageSummary, folder: &str, junk: bool) -> MessageSummary {
@@ -627,13 +631,18 @@ impl Scoped<'_> {
         query: &SearchQuery,
         limit: usize,
     ) -> Result<SearchResult, EmailError> {
+        // One budget for the whole call: the asked folder and every junk folder after it.
+        let deadline = tokio::time::Instant::now() + JUNK_SEARCH_BUDGET;
+        let limit = limit.clamp(1, MAX_LIMIT);
         let provider = self.provider(account).await?;
         let req = SearchRequest {
             folder,
             query,
             limit,
         };
-        let first = provider.search(&req).await?;
+        let first = tokio::time::timeout_at(deadline, provider.search(&req))
+            .await
+            .map_err(|_| EmailError::Timeout(JUNK_SEARCH_BUDGET.as_secs()))??;
         if query.include_junk != Some(true) || !provider.capabilities().folders {
             return Ok(SearchResult {
                 messages: first.messages,
@@ -642,9 +651,11 @@ impl Scoped<'_> {
                 folders_searched: Vec::new(),
             });
         }
-        let junk = match provider.list_folders().await {
-            Ok(list) => crate::wait::junk_folders(&list),
-            Err(_) => Vec::new(),
+        // The one definition of "junk folder" (also the wait's): at most
+        // `MAX_JUNK_FOLDERS` of them besides the asked folder.
+        let junk = match tokio::time::timeout_at(deadline, provider.list_folders()).await {
+            Ok(Ok(list)) => crate::wait::junk_folders(&list),
+            _ => Vec::new(),
         };
         let asked_is_junk = junk.iter().any(|j| j == folder);
         let mut total = first.total;
@@ -655,16 +666,22 @@ impl Scoped<'_> {
             .map(|m| tagged(m, folder, asked_is_junk))
             .collect();
         for j in junk.iter().filter(|j| j.as_str() != folder) {
-            let more = provider
-                .search(&SearchRequest {
+            // A folder that is slow or cannot be searched is skipped; so is everything after
+            // the budget ran out. The answer lists the folders that were searched.
+            let Ok(Ok(more)) = tokio::time::timeout_at(
+                deadline,
+                provider.search(&SearchRequest {
                     folder: j,
                     query,
                     limit,
-                })
-                .await;
-            let Ok(more) = more else { continue };
+                }),
+            )
+            .await
+            else {
+                continue;
+            };
             searched.push(j.clone());
-            total += more.total;
+            total = total.saturating_add(more.total);
             messages.extend(more.messages.into_iter().map(|m| tagged(m, j, true)));
         }
         // Newest first across folders; mail without a readable date goes last.
@@ -870,16 +887,25 @@ impl Scoped<'_> {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         let workspace = place.as_ref().and_then(|p| p.folder_for(self.bot));
-        let dir = match &workspace {
-            Some(ws) => ws.join("downloads").join("email").join(&acct.name),
-            None => self
+        // `root` is the folder the host owns; the write goes to `dir` below it and refuses a
+        // link anywhere on the way.
+        let (root, dir) = if let Some(ws) = &workspace {
+            (
+                ws.clone(),
+                ws.join("downloads").join("email").join(&acct.name),
+            )
+        } else {
+            let base = self
                 .conn
                 .attachments_dir
                 .read()
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone()
-                .ok_or_else(|| EmailError::Config("no attachments directory is configured".into()))?
-                .join(&acct.name),
+                .ok_or_else(|| {
+                    EmailError::Config("no attachments directory is configured".into())
+                })?;
+            let dir = base.join(&acct.name);
+            (base, dir)
         };
         let data = self
             .conn
@@ -906,10 +932,11 @@ impl Scoped<'_> {
         let bytes = data.bytes.clone();
         let name = file_name.clone();
         let target = dir.clone();
-        let path =
-            tokio::task::spawn_blocking(move || attachment::write_unique(&target, &name, &bytes))
-                .await
-                .map_err(|_| EmailError::Config("cannot save the attachment".into()))??;
+        let path = tokio::task::spawn_blocking(move || {
+            attachment::write_unique(&root, &target, &name, &bytes)
+        })
+        .await
+        .map_err(|_| EmailError::Config("cannot save the attachment".into()))??;
         if let Some(place) = place.as_ref().filter(|_| workspace.is_some()) {
             place.saved(&path);
         }

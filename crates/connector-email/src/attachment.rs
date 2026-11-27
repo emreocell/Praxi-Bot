@@ -273,46 +273,153 @@ fn cut_to_bytes(name: &str, max: usize) -> String {
     }
 }
 
-/// Write `bytes` into `dir` under `name` (made unique when taken), never replacing a
-/// file and never following a link: the file is created exclusively, with no
-/// execute permission. Returns the path written.
+/// Write `bytes` into `dir` (which must lie under `root`, the folder the host owns) under
+/// `name` (made unique when taken), never replacing a file and never following a link: every
+/// folder below `root` must be a real folder (a link anywhere on the way is refused, also
+/// when it appears while this runs) and the file is created exclusively, with no execute
+/// permission. A bot's workspace can be written by other tools, so a planted
+/// `downloads/email` link must not lead the write out of it. Returns the path written.
 ///
 /// # Errors
-/// [`EmailError::Config`] when the folder or the file cannot be created.
-pub fn write_unique(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, EmailError> {
+/// [`EmailError::Config`] when `dir` is not under `root`, a folder on the way is a link, or
+/// the folder or the file cannot be created.
+pub fn write_unique(
+    root: &Path,
+    dir: &Path,
+    name: &str,
+    bytes: &[u8],
+) -> Result<PathBuf, EmailError> {
     let fail = || EmailError::Config("cannot save the attachment".into());
-    std::fs::create_dir_all(dir).map_err(|_| fail())?;
+    let relative = dir.strip_prefix(root).map_err(|_| fail())?;
+    let mut parts = Vec::new();
+    for c in relative.components() {
+        match c {
+            std::path::Component::Normal(p) => parts.push(p),
+            _ => return Err(fail()),
+        }
+    }
+    // The root is the host's own folder: made if missing, followed if it is a link itself.
+    std::fs::create_dir_all(root).map_err(|_| fail())?;
     let (stem, ext) = name
         .rsplit_once('.')
         .map_or((name, String::new()), |(s, e)| (s, format!(".{e}")));
+    let folder = open_folder_below(root, &parts).map_err(|()| fail())?;
     for n in 0..1000u32 {
         let candidate = if n == 0 {
             name.to_owned()
         } else {
             format!("{stem}-{n}{ext}")
         };
-        let path = dir.join(&candidate);
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        match options.open(&path) {
+        match create_in(&folder, &candidate) {
             Ok(mut file) => {
                 if file.write_all(bytes).and_then(|()| file.flush()).is_err() {
                     drop(file);
-                    let _ = std::fs::remove_file(&path);
+                    remove_in(&folder, &candidate);
                     return Err(fail());
                 }
-                return Ok(path);
+                return Ok(dir.join(&candidate));
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(_) => return Err(fail()),
         }
     }
     Err(fail())
+}
+
+/// A folder opened one component at a time below `root`, none of them a link (made when
+/// missing). On unix this is a chain of `openat` calls from the root's descriptor with
+/// `O_NOFOLLOW`, so nothing can be swapped in between a check and the use.
+#[cfg(unix)]
+struct Folder(std::os::fd::OwnedFd);
+
+#[cfg(unix)]
+fn open_folder_below(root: &Path, parts: &[&std::ffi::OsStr]) -> Result<Folder, ()> {
+    use rustix::fs::{Mode, OFlags, mkdirat, open, openat};
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut fd = open(
+        root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| ())?;
+    for part in parts {
+        fd = match openat(&fd, *part, flags, Mode::empty()) {
+            Ok(next) => next,
+            Err(rustix::io::Errno::NOENT) => {
+                // A concurrent creator is fine (EEXIST); what is there must open as a folder.
+                match mkdirat(&fd, *part, Mode::from_raw_mode(0o777)) {
+                    Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+                    Err(_) => return Err(()),
+                }
+                openat(&fd, *part, flags, Mode::empty()).map_err(|_| ())?
+            }
+            Err(_) => return Err(()),
+        };
+    }
+    Ok(Folder(fd))
+}
+
+/// Create `name` in `folder`: exclusive, not followed, `0600`.
+#[cfg(unix)]
+fn create_in(folder: &Folder, name: &str) -> std::io::Result<std::fs::File> {
+    use rustix::fs::{Mode, OFlags, openat};
+    openat(
+        &folder.0,
+        name,
+        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::RUSR | Mode::WUSR,
+    )
+    .map(std::fs::File::from)
+    .map_err(std::io::Error::from)
+}
+
+/// Remove a half-written `name` from `folder`, through the same descriptor.
+#[cfg(unix)]
+fn remove_in(folder: &Folder, name: &str) {
+    let _ = rustix::fs::unlinkat(&folder.0, name, rustix::fs::AtFlags::empty());
+}
+
+/// Without `openat`: each folder on the way is checked with `symlink_metadata` before it is
+/// used and the finished path must resolve under the root.
+#[cfg(not(unix))]
+struct Folder(PathBuf);
+
+#[cfg(not(unix))]
+fn open_folder_below(root: &Path, parts: &[&std::ffi::OsStr]) -> Result<Folder, ()> {
+    let mut path = root.to_path_buf();
+    for part in parts {
+        path.push(part);
+        match std::fs::symlink_metadata(&path) {
+            Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {}
+            Ok(_) => return Err(()),
+            Err(_) => {
+                std::fs::create_dir(&path).map_err(|_| ())?;
+                if !std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
+                    return Err(());
+                }
+            }
+        }
+    }
+    let real = std::fs::canonicalize(&path).map_err(|_| ())?;
+    let real_root = std::fs::canonicalize(root).map_err(|_| ())?;
+    if real.starts_with(real_root) {
+        Ok(Folder(real))
+    } else {
+        Err(())
+    }
+}
+
+#[cfg(not(unix))]
+fn remove_in(folder: &Folder, name: &str) {
+    let _ = std::fs::remove_file(folder.0.join(name));
+}
+
+#[cfg(not(unix))]
+fn create_in(folder: &Folder, name: &str) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(folder.0.join(name))
 }
 
 /// Whether the declared type and the sniffed one disagree in a way that matters:
@@ -474,8 +581,8 @@ mod tests {
     fn a_write_never_replaces_a_file_and_leaves_no_execute_bit() {
         let dir = tempfile::tempdir().unwrap();
         let sub = dir.path().join("acct");
-        let a = write_unique(&sub, "a.txt", b"one").unwrap();
-        let b = write_unique(&sub, "a.txt", b"two").unwrap();
+        let a = write_unique(dir.path(), &sub, "a.txt", b"one").unwrap();
+        let b = write_unique(dir.path(), &sub, "a.txt", b"two").unwrap();
         assert_ne!(a, b);
         assert_eq!(std::fs::read(&a).unwrap(), b"one");
         assert_eq!(std::fs::read(&b).unwrap(), b"two");
@@ -490,17 +597,75 @@ mod tests {
         }
     }
 
+    #[test]
+    fn nested_folders_are_made_and_a_folder_outside_the_root_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let deep = root.join("downloads").join("email").join("acct");
+        let saved = write_unique(&root, &deep, "a.txt", b"x").unwrap();
+        assert_eq!(saved, deep.join("a.txt"));
+        assert_eq!(std::fs::read(&saved).unwrap(), b"x");
+        let outside = dir.path().join("elsewhere");
+        assert!(write_unique(&root, &outside, "a.txt", b"x").is_err());
+        assert!(!outside.exists());
+        let dotdot = root.join("..").join("elsewhere");
+        assert!(write_unique(&root, &dotdot, "a.txt", b"x").is_err());
+        assert!(!outside.exists());
+    }
+
     #[cfg(unix)]
     #[test]
-    fn a_planted_link_is_not_followed() {
+    fn a_planted_file_link_is_not_followed() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("secret.txt");
         std::fs::write(&target, b"keep").unwrap();
         let folder = dir.path().join("in");
         std::fs::create_dir_all(&folder).unwrap();
         std::os::unix::fs::symlink(&target, folder.join("a.txt")).unwrap();
-        let saved = write_unique(&folder, "a.txt", b"stranger").unwrap();
+        let saved = write_unique(dir.path(), &folder, "a.txt", b"stranger").unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"keep");
         assert_eq!(saved.file_name().unwrap(), "a-1.txt");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_folder_link_leads_nowhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        // `downloads/email` points out of the workspace, as another tool could plant it.
+        std::fs::create_dir_all(root.join("downloads")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("downloads").join("email")).unwrap();
+        let target = root.join("downloads").join("email").join("acct");
+        assert!(write_unique(&root, &target, "a.txt", b"stranger").is_err());
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+        // The last folder (the account's) being the link is refused as well.
+        std::fs::remove_file(root.join("downloads").join("email")).unwrap();
+        std::fs::create_dir_all(root.join("downloads").join("email")).unwrap();
+        std::os::unix::fs::symlink(&outside, &target).unwrap();
+        assert!(write_unique(&root, &target, "a.txt", b"stranger").is_err());
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+        // A link in place of a dangling target is not made into a folder either.
+        std::fs::remove_file(&target).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("not-there"), &target).unwrap();
+        assert!(write_unique(&root, &target, "a.txt", b"stranger").is_err());
+        assert!(!dir.path().join("not-there").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_as_the_root_itself_is_the_hosts_choice() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let root = dir.path().join("root-link");
+        std::os::unix::fs::symlink(&real, &root).unwrap();
+        let saved = write_unique(&root, &root.join("acct"), "a.txt", b"x").unwrap();
+        assert_eq!(
+            std::fs::read(real.join("acct").join("a.txt")).unwrap(),
+            b"x"
+        );
+        assert_eq!(saved, root.join("acct").join("a.txt"));
     }
 }

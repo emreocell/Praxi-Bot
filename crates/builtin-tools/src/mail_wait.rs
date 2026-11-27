@@ -323,7 +323,14 @@ impl Tool for EmailWaitFor {
             WaitEnd::Cancelled => Err(ToolError::Execution(
                 "wait cancelled: the run was stopped".into(),
             )),
-            WaitEnd::TimedOut { polls } => Ok(json_out(timed_out_json(polls, waited))),
+            WaitEnd::TimedOut {
+                polls,
+                junk_candidate,
+            } => Ok(json_out(timed_out_json(
+                polls,
+                waited,
+                junk_candidate.as_ref(),
+            ))),
             WaitEnd::Found(mut detail) => {
                 // The page the browser was on when the wait STARTED decides which site the
                 // links must belong to: opening the next site since changes nothing.

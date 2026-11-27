@@ -192,7 +192,7 @@ async fn times_out_when_nothing_arrives() {
     .await
     .unwrap();
     assert!(
-        matches!(end, WaitEnd::TimedOut { polls } if polls >= 2),
+        matches!(end, WaitEnd::TimedOut { polls, .. } if polls >= 2),
         "{end:?}"
     );
     assert!(started.elapsed() < Duration::from_secs(5));

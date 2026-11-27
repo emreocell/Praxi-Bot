@@ -191,6 +191,8 @@ impl MessageWire {
                 .collect(),
             found_in: None,
             from_junk: Some(self.is_junk()),
+            // The API reports no SPF/DKIM result.
+            sender_authenticated: None,
         })
     }
 }

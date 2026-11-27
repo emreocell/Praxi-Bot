@@ -330,7 +330,7 @@ async fn wait_finds_mail_that_is_already_there_and_ignores_other_senders() {
 }
 
 #[tokio::test]
-async fn wait_polls_the_junk_folder_too() {
+async fn wait_polls_the_junk_folder_too_but_spam_alone_never_completes_it() {
     let (imap, conn) = rig().await;
     imap.deliver(
         "Junk",
@@ -347,7 +347,15 @@ async fn wait_polls_the_junk_folder_too() {
     )
     .await
     .unwrap();
-    assert!(matches!(end, WaitEnd::Found(_)), "{end:?}");
+    // The junk folder was read, and the forgery-prone match is only reported.
+    let WaitEnd::TimedOut {
+        junk_candidate: Some(c),
+        ..
+    } = end
+    else {
+        panic!("{end:?}")
+    };
+    assert_eq!(c.folder, "Junk");
 }
 
 #[tokio::test]
@@ -389,7 +397,7 @@ async fn wait_times_out_without_matching_mail() {
         .await
         .unwrap();
     assert!(
-        matches!(end, WaitEnd::TimedOut { polls } if polls >= 1),
+        matches!(end, WaitEnd::TimedOut { polls, .. } if polls >= 1),
         "{end:?}"
     );
 }
@@ -1192,18 +1200,21 @@ async fn a_found_mail_says_which_folder_it_was_in_and_whether_that_is_junk() {
         &scoped,
         Some("own"),
         &filter,
-        &patient(),
+        &quick(),
         std::future::pending(),
     )
     .await
     .unwrap();
-    let WaitEnd::Found(d) = end else {
-        panic!("expected the mail from the junk folder")
+    // Nothing vouches for a mail in the junk folder, so it is a candidate, not the mail.
+    let WaitEnd::TimedOut {
+        junk_candidate: Some(c),
+        ..
+    } = end
+    else {
+        panic!("a junk match must not end the wait: {end:?}")
     };
+    assert_eq!(c.folder, "Junk");
     let basis = link_basis(None, None);
-    let v = found_json(&d, "own", &basis, &[]);
-    assert_eq!(v["folder"], "Junk", "{v}");
-    assert_eq!(v["from_junk"], true, "{v}");
 
     imap.deliver(
         "INBOX",

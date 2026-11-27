@@ -688,6 +688,27 @@ fn file_name(path: &str) -> String {
         .unwrap_or_else(|| path.to_owned())
 }
 
+/// `s` as a bare address (`a@b`, nothing else) in the form it is compared and delivered
+/// in; `None` for anything else: a display name, a comma or semicolon list, a group, angle
+/// brackets, quotes, control characters (a CR or LF would start another header) or
+/// whitespace. It goes through the parse that builds the SMTP envelope, and what that reads
+/// must be the very text given, so no part of the text can hide from the check or the
+/// delivery. The reply recipient comes from a stranger's headers.
+pub(crate) fn bare_mailbox(s: &str) -> Option<String> {
+    if s.is_empty()
+        || s.len() > 320
+        || s.chars().any(|c| {
+            c.is_control() || c.is_whitespace() || matches!(c, '<' | '>' | '"' | ',' | ';' | '\\')
+        })
+    {
+        return None;
+    }
+    let envelope = crate::smtp::envelope_address(s).ok()?;
+    envelope
+        .eq_ignore_ascii_case(s)
+        .then(|| envelope.to_lowercase())
+}
+
 /// How a reply is handed to the mailbox.
 struct ReplyVia {
     /// The message's provider id (for API mailboxes' thread reply).
@@ -703,6 +724,51 @@ fn reply_subject(original: &str) -> String {
     } else {
         format!("Re: {t}")
     }
+}
+
+/// The warnings that still stop a reply to the owner's own address: all but the
+/// repeat-recipient one, which is for strangers (a conversation with the owner is not cold mail).
+fn stops_owner_thread(report: &GuardReport) -> Vec<&guard::Warning> {
+    report
+        .warnings
+        .iter()
+        .filter(|w| w.code != "same_recipient")
+        .collect()
+}
+
+/// A reply the model wrote no recipient for: the only kind that can go without a card.
+fn names_no_recipient(i: &SendInput) -> bool {
+    (i.reply_to_uid.is_some() || i.reply_to_message_id.is_some())
+        && i.mail.to.is_empty()
+        && i.mail.cc.is_empty()
+        && i.mail.bcc.is_empty()
+        && i.reply_all != Some(true)
+}
+
+/// The address of `i` (a reply already resolved) when the mail goes to exactly one plain
+/// address, nobody else, and that address is one the owner listed as theirs in `acct`'s
+/// `allowed_senders`: compared as the canonical address (lower case, IDNA domain, the `+tag`
+/// kept) with the entry's own canonical form, never by a looser rule. Not for a draft-only
+/// identity.
+fn owner_reply_address(acct: &crate::AccountConfig, i: &SendInput) -> Option<String> {
+    if acct.identity.send_mode == SendMode::DraftOnly
+        || !(i.mail.cc.is_empty() && i.mail.bcc.is_empty())
+    {
+        return None;
+    }
+    let [to] = i.mail.to.as_slice() else {
+        return None;
+    };
+    let to = bare_mailbox(to)?;
+    let key = guard::canonical_address(&to)?.full;
+    acct.allowed_senders
+        .iter()
+        .filter_map(|e| match protocol::sender::SenderRule::parse(e)? {
+            protocol::sender::SenderRule::Address(a) => guard::canonical_address(&a),
+            protocol::sender::SenderRule::Domain(_) => None,
+        })
+        .any(|k| k.full == key)
+        .then_some(to)
 }
 
 impl EmailTool {
@@ -733,14 +799,21 @@ impl EmailTool {
                     "the message has no single sender address to reply to; pass `to`".into(),
                 )
             })?;
+        // One plain address or nothing: a reply address that is a list, carries a name or a
+        // line break is not replied to.
+        let primary = bare_mailbox(&primary).ok_or_else(|| {
+            ToolError::InvalidInput(
+                "the message's reply address is not one plain e-mail address; pass `to`".into(),
+            )
+        })?;
         if i.mail.to.is_empty() {
             i.mail.to = vec![primary.clone()];
         }
         if i.reply_all == Some(true) && i.mail.cc.is_empty() {
             let mut cc: Vec<String> = Vec::new();
-            for r in &original.recipients {
-                if *r != own && *r != primary && !cc.contains(r) && cc.len() < 10 {
-                    cc.push(r.clone());
+            for r in original.recipients.iter().filter_map(|r| bare_mailbox(r)) {
+                if r != own && r != primary && !cc.contains(&r) && cc.len() < 10 {
+                    cc.push(r);
                 }
             }
             i.mail.cc = cc;
@@ -785,12 +858,10 @@ impl EmailTool {
     /// draft-only identity. Everything is read from the mailbox and the settings right now;
     /// nothing the model wrote vouches for it (the model passes no recipient at all). The
     /// repeat-recipient warning does not apply: a conversation with the owner is not cold mail.
+    /// [`EmailTool::send`] decides again on the mail it really sends.
     async fn owner_thread(&self, ctx: &ToolContext, input: &Value) -> Option<String> {
         let mut i = parse_send(input.clone()).ok()?;
-        if (i.reply_to_uid.is_none() && i.reply_to_message_id.is_none())
-            || !(i.mail.to.is_empty() && i.mail.cc.is_empty() && i.mail.bcc.is_empty())
-            || i.reply_all == Some(true)
-        {
+        if !names_no_recipient(&i) {
             return None;
         }
         let c = self.conn.scoped(ctx.bot_id.as_deref());
@@ -798,31 +869,11 @@ impl EmailTool {
             return None;
         }
         let acct = c.resolve(i.account.as_deref()).ok()?;
-        if acct.identity.send_mode == SendMode::DraftOnly {
-            return None;
-        }
         self.resolve_reply(ctx, &mut i).await.ok()??;
-        let [to] = i.mail.to.as_slice() else {
-            return None;
-        };
-        if !(i.mail.cc.is_empty() && i.mail.bcc.is_empty()) {
-            return None;
-        }
-        let theirs = acct
-            .allowed_senders
-            .iter()
-            .filter_map(|e| protocol::sender::SenderRule::parse(e))
-            .any(|r| matches!(r, protocol::sender::SenderRule::Address(_)) && r.matches(to));
-        if !theirs {
-            return None;
-        }
-        let key = guard::canonical_address(&crate::smtp::envelope_address(to).ok()?)?.full;
-        self.conn
-            .guard()
-            .check_invite(&acct.name, &[key])
-            .warnings
-            .is_empty()
-            .then(|| to.clone())
+        let to = owner_reply_address(&acct, &i)?;
+        // The very warnings `send` weighs for this mail, the dropped opt-out line included.
+        let plan = plan_send(&self.conn, ctx, &i, &acct).ok()?;
+        stops_owner_thread(&plan.report).is_empty().then_some(to)
     }
 
     /// `email_search`.
@@ -904,9 +955,9 @@ impl EmailTool {
 
     /// `email_send`: the guard checks, the opt-out line, the provider call and the log entry.
     async fn send(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
-        // Decided before the reply fills in its own recipients (the model must not have named any).
-        let owner_thread = self.owner_thread(ctx, &input).await.is_some();
         let mut i = parse_send(input)?;
+        // Judged before the reply fills in its own recipients (the model must not have named any).
+        let named_nobody = names_no_recipient(&i);
         let reply = self.resolve_reply(ctx, &mut i).await?;
         let c = self.conn.scoped(ctx.bot_id.as_deref());
         let guard = self.conn.guard();
@@ -919,6 +970,15 @@ impl EmailTool {
             return draft_fallback(&c, &chosen, &i.mail).await;
         }
         let plan = plan_send(&self.conn, ctx, &i, &chosen)?;
+        // Decided again here, under the send lock, on the reply as it is about to go out (the
+        // original was read again just now): a reply address that changed since the grant was
+        // weighed is judged as it is now, anything but the owner's own address is an ordinary
+        // send, and so is one that hits any warning but the repeat-recipient one.
+        let owner_thread = named_nobody
+            && reply.is_some()
+            && c.owns(i.account.as_deref())
+            && owner_reply_address(&chosen, &i).is_some()
+            && stops_owner_thread(&plan.report).is_empty();
         // Consumes the card the owner was shown. No argument of the model reaches this.
         let card = if ctx.unattended_mail {
             // No card was shown: the Full level lets a mail without warnings go with nobody asked.
@@ -941,8 +1001,9 @@ impl EmailTool {
                     .into(),
             ));
         }
-        // A reply to the owner's own address answers only to the opt-out list and the daily
-        // limit (the repeat-recipient warning is for strangers); `owner_thread` checked those.
+        // `owner_thread` already means "no warning but the repeat-recipient one": that one is
+        // for strangers, every other (the opt-out list, the daily limit, a dropped opt-out
+        // line) kept the reply from being an owner-thread reply at all.
         if !plan.report.warnings.is_empty() && !overridden && !owner_thread {
             let why: Vec<&str> = plan
                 .report

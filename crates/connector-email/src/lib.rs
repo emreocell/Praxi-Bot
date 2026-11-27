@@ -62,9 +62,9 @@ pub use provider::{
 pub use smtp::{CalendarPart, OutgoingMail};
 pub use tools::TOOL_NAMES;
 pub use wait::{
-    LinkBasis, MailHandle, PageOrigin, PageOriginSlot, TrackingResolver, WaitBinding, WaitEnd,
-    WaitFilter, WaitOwner, WaitPlan, WaitProgress, Waiters, WebResolver, expand_tracking_links,
-    found_json, junk_folders, link_basis, timed_out_json, wait_for_mail,
+    JunkCandidate, LinkBasis, MailHandle, PageOrigin, PageOriginSlot, TrackingResolver,
+    WaitBinding, WaitEnd, WaitFilter, WaitOwner, WaitPlan, WaitProgress, Waiters, WebResolver,
+    expand_tracking_links, found_json, junk_folders, link_basis, timed_out_json, wait_for_mail,
 };
 pub use wait_store::WaitStore;
 
@@ -93,6 +93,8 @@ mod fake_imap;
 mod guard_tests;
 #[cfg(test)]
 mod identity_tests;
+#[cfg(test)]
+mod junk_tests;
 #[cfg(test)]
 mod kind_tests;
 #[cfg(test)]

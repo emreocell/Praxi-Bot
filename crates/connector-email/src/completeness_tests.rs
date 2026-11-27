@@ -20,7 +20,7 @@ use crate::fake_imap::{FakeImap, attachment_mail, date_ago, html_mail, text_mail
 use crate::testutil::{Protocol, server};
 use crate::wait::{
     TrackingResolver, WaitEnd, WaitFilter, WaitPlan, expand_tracking_links, found_json, link_basis,
-    wait_for_mail,
+    timed_out_json, wait_for_mail,
 };
 use crate::{AccountConfig, AccountKind, EmailConnector, tools};
 
@@ -221,7 +221,7 @@ async fn a_junk_folder_that_cannot_be_searched_does_not_fail_the_search() {
 }
 
 #[tokio::test]
-async fn a_wait_that_finds_the_mail_in_spam_says_so_in_words() {
+async fn a_wait_that_sees_the_mail_in_spam_reports_it_as_a_candidate_in_words() {
     let (imap, conn) = junk_rig().await;
     imap.deliver(
         "Spam",
@@ -235,7 +235,7 @@ async fn a_wait_that_finds_the_mail_in_spam_says_so_in_words() {
     );
     let filter = WaitFilter::new(Some("site.test"), None, None).unwrap();
     let plan = WaitPlan {
-        timeout: Duration::from_secs(4),
+        timeout: Duration::from_millis(600),
         max_age: Duration::from_secs(900),
         since: None,
         first_pause: Duration::from_millis(40),
@@ -250,17 +250,24 @@ async fn a_wait_that_finds_the_mail_in_spam_says_so_in_words() {
     )
     .await
     .unwrap();
-    let WaitEnd::Found(detail) = end else {
-        panic!("not found");
+    let WaitEnd::TimedOut {
+        polls,
+        junk_candidate: Some(c),
+    } = end
+    else {
+        panic!("spam alone must not end the wait: {end:?}");
     };
-    let basis = link_basis(Some("https://site.test"), Some("https://site.test:443"));
-    let v = found_json(&detail, "own", &basis, &[]);
-    assert_eq!(v["from_junk"], true);
-    assert_eq!(v["folder"], "Spam");
+    let v = timed_out_json(polls, plan.timeout, Some(&c));
+    assert_eq!(v["found"], false);
+    assert_eq!(v["junk_candidate"]["folder"], "Spam", "{v}");
     assert!(
-        v["junk_note"].as_str().unwrap().contains("spam folder"),
+        v["junk_candidate"]["note"]
+            .as_str()
+            .unwrap()
+            .contains("NOT the expected mail"),
         "{v}"
     );
+    assert!(!v.to_string().contains("482913"), "no code from spam: {v}");
 }
 
 // ---- AgentMail: spam by label -------------------------------------------------------------------
@@ -340,7 +347,7 @@ async fn an_agentmail_search_for_spam_marks_each_match_by_the_providers_label() 
 }
 
 #[tokio::test]
-async fn an_agentmail_wait_that_finds_spam_says_so() {
+async fn an_agentmail_wait_that_sees_spam_reports_a_candidate_and_never_the_mail() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(format!("/v0/inboxes/{INBOX_ENC}/messages")))
@@ -360,7 +367,7 @@ async fn an_agentmail_wait_that_finds_spam_says_so() {
     let conn = am_connector(&server, vec![am_account("bot-mail", Some(BOT))]);
     let filter = WaitFilter::new(Some("site.test"), None, None).unwrap();
     let plan = WaitPlan {
-        timeout: Duration::from_secs(4),
+        timeout: Duration::from_millis(600),
         max_age: Duration::from_secs(86_400 * 365 * 5),
         since: None,
         first_pause: Duration::from_millis(40),
@@ -375,13 +382,18 @@ async fn an_agentmail_wait_that_finds_spam_says_so() {
     )
     .await
     .unwrap();
-    let WaitEnd::Found(d) = end else {
-        panic!("not found");
+    // The provider reports no SPF/DKIM result, so its spam label can never be vouched for.
+    let WaitEnd::TimedOut {
+        polls,
+        junk_candidate: Some(c),
+    } = end
+    else {
+        panic!("spam alone must not end the wait: {end:?}");
     };
-    assert_eq!(d.from_junk, Some(true));
-    let v = found_json(&d, "bot-mail", &link_basis(None, None), &[]);
-    assert_eq!(v["from_junk"], true, "{v}");
-    assert!(v["junk_note"].as_str().is_some());
+    assert_eq!(c.folder, "INBOX");
+    let v = timed_out_json(polls, Duration::from_secs(1), Some(&c));
+    assert_eq!(v["found"], false, "{v}");
+    assert!(v["junk_candidate"]["not_used_because"].as_str().is_some());
 }
 
 /// An RFC 3339 time a few seconds ago (the wait ignores mail older than its window).
@@ -1002,4 +1014,294 @@ async fn an_attachment_named_like_a_path_never_leaves_the_account_folder() {
         assert_eq!(saved.parent().unwrap(), home, "{bad}: {saved:?}");
         assert!(saved.is_file(), "{bad}");
     }
+}
+
+// ---- Review round: the grant is judged again, strictly, on the mail that goes out -------------------
+
+/// Everything a hostile reply address must never do: reach `evil.test` or add a header.
+fn nothing_reached_the_attacker(smtp: &crate::testutil::Server) {
+    for raw in smtp.messages.lock().unwrap().iter() {
+        let raw = String::from_utf8_lossy(raw);
+        assert!(!raw.contains("evil.test"), "{raw}");
+        assert!(!raw.to_lowercase().contains("\r\nbcc:"), "{raw}");
+    }
+}
+
+#[tokio::test]
+async fn an_owner_reply_that_drops_the_opt_out_line_is_an_ordinary_send() {
+    let (imap, smtp, conn) = owner_rig(&["ann@example.com"]).await;
+    assert!(conn.guard().opt_out_line_default());
+    let uid = imap.deliver(
+        "INBOX",
+        original("Ann <ann@example.com>", "", "o1@example.com"),
+    );
+    let input = json!({"reply_to_uid": uid, "body": "x", "opt_out_line": false});
+    let t = tool(&conn, "email_send");
+    // The warning the card would show is the same one the grant weighs: no grant, no card-less send.
+    assert!(t.standing_grant(&ctx(), &input).await.is_none());
+    assert!(t.call(&ctx(), input.clone()).await.is_err());
+    assert_eq!(sent_count(&smtp), 0);
+    // With the line on (the default) the very same reply needs no card.
+    let ok = json!({"reply_to_uid": uid, "body": "x"});
+    assert!(t.standing_grant(&ctx(), &ok).await.is_some());
+}
+
+#[tokio::test]
+async fn an_owner_reply_still_meets_the_daily_limit_but_not_the_repeat_rule() {
+    let (imap, smtp, conn) = owner_rig(&["ann@example.com"]).await;
+    let mut settings = conn.guard().settings();
+    settings.daily_limit = 1;
+    conn.guard().set_settings(settings).unwrap();
+    let uid = imap.deliver(
+        "INBOX",
+        original("Ann <ann@example.com>", "", "o1@example.com"),
+    );
+    let input = json!({"reply_to_uid": uid, "body": "first"});
+    let t = tool(&conn, "email_send");
+    assert!(t.standing_grant(&ctx(), &input).await.is_some());
+    assert_eq!(
+        t.call(&ctx(), input).await.map(|o| json_of(&o)).unwrap()["sent"],
+        true
+    );
+    // The second one is a repeat recipient (not held against it) AND over the limit (is).
+    let second = json!({"reply_to_uid": uid, "body": "second"});
+    assert!(t.standing_grant(&ctx(), &second).await.is_none());
+    let e = t.call(&ctx(), second).await.unwrap_err();
+    assert!(e.to_string().contains("approved"), "{e}");
+    assert_eq!(sent_count(&smtp), 1);
+}
+
+#[tokio::test]
+async fn a_reply_address_that_changes_after_the_grant_was_weighed_is_not_sent_without_a_card() {
+    let (imap, smtp, conn) = owner_rig(&["ann@example.com"]).await;
+    let uid = imap.deliver(
+        "INBOX",
+        original("Ann <ann@example.com>", "", "o1@example.com"),
+    );
+    let input = json!({"reply_to_uid": uid, "body": "x"});
+    let t = tool(&conn, "email_send");
+    assert!(t.standing_grant(&ctx(), &input).await.is_some());
+    // The original now says something else (a different Reply-To) when the call reads it again.
+    imap.folders.lock().unwrap().get_mut("INBOX").unwrap()[0].raw = original(
+        "Ann <ann@example.com>",
+        "Reply-To: drop@evil.test\r\n",
+        "o1@example.com",
+    );
+    assert!(t.call(&ctx(), input).await.is_err());
+    assert_eq!(sent_count(&smtp), 0);
+}
+
+#[tokio::test]
+async fn hostile_reply_addresses_never_get_the_grant_and_never_reach_another_recipient() {
+    let hostile = [
+        // A line break that would start a Bcc header.
+        "Reply-To: ann@example.com\r\n Bcc: x@evil.test\r\n",
+        "Reply-To: ann@example.com, drop@evil.test\r\n",
+        "Reply-To: \"ann@example.com\" <drop@evil.test>\r\n",
+        "Reply-To: Ann <ann@example.com>, <drop@evil.test>\r\n",
+        "Reply-To: ann@example.com;drop@evil.test\r\n",
+        "Reply-To: undisclosed-recipients:;\r\n",
+    ];
+    for extra in hostile {
+        let (imap, smtp, conn) = owner_rig(&["ann@example.com"]).await;
+        let uid = imap.deliver(
+            "INBOX",
+            original("Ann <ann@example.com>", extra, "o1@example.com"),
+        );
+        let input = json!({"reply_to_uid": uid, "body": "x"});
+        let t = tool(&conn, "email_send");
+        let grant = t.standing_grant(&ctx(), &input).await;
+        let sent = t.call(&ctx(), input).await;
+        // Whatever the mail makes of the header, nothing goes to the attacker.
+        nothing_reached_the_attacker(&smtp);
+        if grant.is_none() {
+            assert!(sent.is_err(), "{extra:?}: no grant, no card: {sent:?}");
+        }
+    }
+    // The name in the From line is not the address.
+    let (imap, smtp, conn) = owner_rig(&["ann@example.com"]).await;
+    let uid = imap.deliver(
+        "INBOX",
+        original(
+            "\"ann@example.com\" <mallory@evil.test>",
+            "",
+            "o2@evil.test",
+        ),
+    );
+    let input = json!({"reply_to_uid": uid, "body": "x"});
+    let t = tool(&conn, "email_send");
+    assert!(t.standing_grant(&ctx(), &input).await.is_none());
+    assert!(t.call(&ctx(), input).await.is_err());
+    assert_eq!(sent_count(&smtp), 0);
+}
+
+#[test]
+fn a_reply_recipient_is_one_plain_address_or_nothing() {
+    use crate::tools::bare_mailbox;
+    assert_eq!(
+        bare_mailbox("ann@example.com").as_deref(),
+        Some("ann@example.com")
+    );
+    assert_eq!(
+        bare_mailbox("Ann.B+x@Example.COM").as_deref(),
+        Some("ann.b+x@example.com")
+    );
+    for bad in [
+        "",
+        "ann@example.com\r\nBcc: x@evil.test",
+        "ann@example.com\nBcc: x@evil.test",
+        "ann@example.com\r",
+        " ann@example.com",
+        "ann@example.com ",
+        "Ann <ann@example.com>",
+        "<ann@example.com>",
+        "\"Ann\" <ann@example.com>",
+        "ann@example.com, bob@example.com",
+        "ann@example.com;bob@example.com",
+        "ann@example.com bob@example.com",
+        "ann",
+        "@example.com",
+        "ann@",
+        "ann@example.com\u{0}",
+        "ann@exam\u{200B}ple.com",
+        "undisclosed-recipients:;",
+    ] {
+        assert_eq!(bare_mailbox(bad), None, "{bad:?}");
+    }
+}
+
+// ---- The one-hop resolver asks nothing it should not -----------------------------------------------
+
+#[tokio::test]
+async fn the_resolver_itself_refuses_everything_but_a_tracking_host_on_https_443() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Counting(AtomicUsize);
+    impl web_tools::UrlPolicy for Counting {
+        fn check_url(&self, _url: &url::Url) -> Result<(), web_tools::PolicyViolation> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(web_tools::PolicyViolation::new(
+                "test: nothing is reachable",
+            ))
+        }
+        fn check_ip(
+            &self,
+            _host: &str,
+            _ip: std::net::IpAddr,
+        ) -> Result<(), web_tools::PolicyViolation> {
+            Err(web_tools::PolicyViolation::new("test"))
+        }
+    }
+    let policy = Arc::new(Counting(AtomicUsize::new(0)));
+    let resolver = crate::WebResolver::with_policy(policy.clone()).unwrap();
+    for url in [
+        "http://click.sendgrid.net/ls/click",
+        "https://click.sendgrid.net:8443/ls/click",
+        "https://user:pw@click.sendgrid.net/ls/click",
+        "https://evil.test/ls/click",
+        "https://sendgrid.net.evil.test/ls/click",
+        "https://127.0.0.1/ls/click",
+        "https://169.254.169.254/latest/meta-data",
+        "ftp://click.sendgrid.net/x",
+        "not a url",
+    ] {
+        assert_eq!(resolver.hop(url).await, None, "{url}");
+    }
+    // None of them got as far as the address policy, let alone a socket.
+    assert_eq!(policy.0.load(Ordering::SeqCst), 0);
+    // A tracking host is passed to the policy (which here refuses it) and no further.
+    assert_eq!(
+        resolver.hop("https://click.sendgrid.net/ls/click").await,
+        None
+    );
+    assert_eq!(policy.0.load(Ordering::SeqCst), 1);
+}
+
+// ---- Attachments cannot be steered out of the workspace --------------------------------------------
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_planted_link_in_the_workspace_does_not_send_a_download_outside_it() {
+    let (_imap, conn, uid) = attachment_rig("notes.txt", "text/plain", b"hello").await;
+    let ws = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    conn.set_attachment_place(Place::new(ws.path(), None));
+    // Another tool left `downloads/email` pointing out of the workspace.
+    std::fs::create_dir_all(ws.path().join("downloads")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), ws.path().join("downloads").join("email")).unwrap();
+    let e = call(
+        &conn,
+        "email_download_attachment",
+        json!({"uid": uid, "attachment_id": "0"}),
+    )
+    .await
+    .unwrap_err();
+    drop(e);
+    assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+
+    // The account folder itself being the link is no better.
+    std::fs::remove_file(ws.path().join("downloads").join("email")).unwrap();
+    std::fs::create_dir_all(ws.path().join("downloads").join("email")).unwrap();
+    std::os::unix::fs::symlink(
+        outside.path(),
+        ws.path().join("downloads").join("email").join("own"),
+    )
+    .unwrap();
+    assert!(
+        call(
+            &conn,
+            "email_download_attachment",
+            json!({"uid": uid, "attachment_id": "0"}),
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+}
+
+// ---- Search: one junk definition, bounded --------------------------------------------------------
+
+#[tokio::test]
+async fn a_search_asked_in_the_junk_folder_tags_it_and_a_huge_limit_is_clamped() {
+    let (imap, conn) = junk_rig().await;
+    imap.deliver(
+        "Spam",
+        text_mail(
+            "B <b@two.test>",
+            "spam hit",
+            "s@two.test",
+            &date_ago(5),
+            "x",
+        ),
+    );
+    imap.deliver(
+        "INBOX",
+        text_mail(
+            "A <a@one.test>",
+            "inbox hit",
+            "i@one.test",
+            &date_ago(9),
+            "x",
+        ),
+    );
+    let out = call(
+        &conn,
+        "email_search",
+        json!({"folder": "Spam", "include_junk": true, "limit": 1_000_000}),
+    )
+    .await
+    .unwrap();
+    // The asked folder IS a junk folder: its matches say so, and it is not searched twice.
+    assert_eq!(subjects(&out), ["spam hit"], "{out}");
+    assert_eq!(out["messages"][0]["from_junk"], true);
+    assert_eq!(out["folders_searched"], json!(["Spam"]));
+    // A folder that is not junk is not tagged as junk.
+    let inbox = call(
+        &conn,
+        "email_search",
+        json!({"include_junk": true, "limit": 1_000_000}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(subjects(&inbox), ["spam hit", "inbox hit"], "{inbox}");
+    assert_eq!(inbox["messages"][1]["from_junk"], false);
 }
