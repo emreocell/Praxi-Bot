@@ -84,10 +84,16 @@ UPDATE_UNITS=(praxi-update.socket praxi-update@.service praxi-update-check.timer
 # line (https://nodejs.org/dist/v<version>/SHASUMS256.txt, the .tar.gz entries).
 NODE_DIR="/opt/praxi-nodejs"
 NPM_PREFIX="${DATA_DIR}/.npm-global"
+# The registry installer-driven npm installs use, pinned in a root-owned file the service user can read
+# but not change (the daemon and the praxi command point npm's global config at it).
+readonly NPM_REGISTRY="https://registry.npmjs.org/"
+NPM_GLOBAL_RC="${CONF_DIR}/npmrc"
 readonly NODE_VERSION="22.23.5"
 readonly NODE_SHA256_X64="c54118104acc524633b5abe106bbf44a53126ec8b4e5fa105cb92b5d7de8a1a1"
 readonly NODE_SHA256_ARM64="8bd3dc69eee8f3f226315a80d7d1d4faccf217a4c8fae500168ac2e38f3bdba3"
-SERVICE_PATH="${DATA_DIR}/.local/bin:${NPM_PREFIX}/bin:${NODE_DIR}/bin:/usr/local/bin:/usr/bin:/bin"
+# Root-owned directories first, the ones the service user can write last: a program the user (or a model
+# running as it) installs never shadows a system one. Mirrors identity::path_with_install_dirs (append only).
+SERVICE_PATH="/usr/local/bin:/usr/bin:/bin:${NODE_DIR}/bin:${DATA_DIR}/.local/bin:${NPM_PREFIX}/bin"
 
 VERSION="latest"
 LOCAL_FILE=""
@@ -357,9 +363,11 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
     if [[ "${SKIP_PACKAGES}" -eq 1 ]]; then
       log "[dry-run] Node.js: --skip-packages, would NOT install the runtime (provide Node.js 20+ on the service PATH yourself)"
     else
-      log "[dry-run] Node.js: would install v${NODE_VERSION} (${dry_run_node_platform:-linux-x64 or linux-arm64}, SHA-256 verified) into ${NODE_DIR}"
+      [[ -n "${dry_run_node_platform}" ]] \
+        || die "unsupported architecture '$(uname -m)' for the Node.js runtime (need x86_64 or aarch64); use --skip-packages and provide Node.js 20+ on the service PATH yourself"
+      log "[dry-run] Node.js: would install v${NODE_VERSION} (${dry_run_node_platform}, SHA-256 verified) into ${NODE_DIR}; --update refreshes it to this version"
     fi
-    log "[dry-run] npm for ${SVC_USER}: global prefix ${NPM_PREFIX} (no root needed); PATH of the daemon, the app's terminal and the praxi command: ${SERVICE_PATH}"
+    log "[dry-run] npm for ${SVC_USER}: global prefix ${NPM_PREFIX} (no root needed), registry pinned to ${NPM_REGISTRY} in ${NPM_GLOBAL_RC}; PATH of the daemon, the app's terminal and the praxi command (system directories first): ${SERVICE_PATH}"
     if [[ "${WITH_DESKTOP}" -eq 1 ]]; then
       log "[dry-run] virtual display: Xvfb ${DISPLAY_NUM} screen ${SCREEN_SPEC} (praxi-xvfb.service)"
     fi
@@ -587,30 +595,96 @@ PROFILE
     || die "the browser at /opt/praxi-browser/chrome does not start on this CPU (${ARCH}). Remove /opt/praxi-browser and re-run this installer to download the matching build."
 }
 
-# The pinned, SHA-256-verified Node.js runtime (npm included) for the service user's coding CLIs.
-# A download that cannot be fetched only warns (the daemon works without it, and the app can still fetch
-# a Node.js of its own into the data directory); a download that does not match the pin is refused.
-install_node_runtime() {
-  local platform expected_sha actual_sha node_work stage
-  platform="$(node_platform_of "${ARCH}")"
-  expected_sha="${NODE_SHA256_X64}"
-  [[ "${platform}" == "linux-x64" ]] || expected_sha="${NODE_SHA256_ARM64}"
-  local url="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${platform}.tar.gz"
-  # Idempotent: a re-run keeps the pinned runtime; an update to a newer pin replaces it.
-  if [[ -x "${NODE_DIR}/bin/node" && -x "${NODE_DIR}/bin/npm" ]] \
-    && [[ "$("${NODE_DIR}/bin/node" --version 2>/dev/null || true)" == "v${NODE_VERSION}" ]]; then
-    log "Node.js v${NODE_VERSION} (${platform}) is already installed in ${NODE_DIR}; skipping the download"
-    return 0
+# Run a command as the service user with a clean environment. Anything the installer has to execute or
+# write inside what that user controls runs as that user: root never follows what it could have planted.
+as_service_user() {
+  runuser -u "${SVC_USER}" -- env -i "PATH=/usr/bin:/bin" "HOME=${DATA_DIR}" "$@"
+}
+
+# `<node> --version`, run as the service user (never as root), or nothing when it does not run.
+node_version_of() { # <node binary>
+  as_service_user timeout 20 "$1" --version 2>/dev/null || true
+}
+
+# A directory root writes into or runs programs from: every component of its real path is a directory
+# owned by root that neither the group nor others can write (a link in the path is followed once and the
+# directory it leads to is what gets checked, so a root-made link is fine and a planted one is not).
+require_root_owned_chain() { # <dir> <what>
+  local real root p owner mode
+  real="$(readlink -f -- "$1")" || die "cannot resolve $2 ($1)"
+  root="$(readlink -f -- "${TRUSTED_ROOT_DIR}")"
+  p="${real}"
+  while :; do
+    [[ -d "${p}" && ! -L "${p}" ]] || die "$2: ${p} is not a directory"
+    read -r owner mode < <(stat -c '%u %a' -- "${p}") || die "cannot inspect ${p}"
+    [[ "${owner}" == "${TRUSTED_UID}" ]] || die "$2: ${p} is not owned by root; refusing to continue as root through it"
+    (( (8#${mode} & 8#022) == 0 )) || die "$2: ${p} is writable by group or others; refusing to continue as root through it"
+    [[ "${p}" != "${root}" && "${p}" != "/" ]] || break
+    p="$(dirname -- "${p}")"
+  done
+}
+
+# Delete a leftover of an earlier run. A link is unlinked and never followed; only a real directory is
+# removed recursively (rm -rf does not follow links inside it either).
+remove_leftover() { # <path>
+  if [[ -L "$1" ]]; then
+    rm -f -- "$1"
+  elif [[ -d "$1" ]]; then
+    rm -rf -- "$1"
+  elif [[ -e "$1" ]]; then
+    rm -f -- "$1"
   fi
-  node_work="$(mktemp -d)"
+}
+
+# Put the staged runtime in place with two renames (`mv -T` never moves into a directory a link points
+# to). The window with no ${NODE_DIR} is the time between them; if the second rename fails the first is
+# undone.
+swap_in_node_dir() { # <staged directory>
+  local old="${NODE_DIR}.old"
+  remove_leftover "${old}"
+  if [[ -e "${NODE_DIR}" ]]; then
+    mv -T -- "${NODE_DIR}" "${old}" || die "could not move the old Node.js out of the way (${NODE_DIR}); nothing was changed"
+  fi
+  if ! mv -T -- "$1" "${NODE_DIR}"; then
+    [[ ! -e "${old}" ]] || mv -T -- "${old}" "${NODE_DIR}" || true
+    die "could not move the new Node.js into ${NODE_DIR}; the previous one was put back"
+  fi
+  remove_leftover "${old}"
+}
+
+# The pinned, SHA-256-verified Node.js runtime (npm included) for the service user's coding CLIs.
+# A download that cannot be fetched or does not match the pin is an error: a server without Node.js
+# cannot install the npm-based coding CLIs, and an install that quietly lacks it is a surprise later.
+# --skip-packages is the explicit way to install without it.
+install_node_runtime() {
+  local platform expected_sha actual_sha node_work stage have
+  platform="$(node_platform_of "${ARCH}")"
+  case "${platform}" in
+    linux-x64) expected_sha="${NODE_SHA256_X64}" ;;
+    linux-arm64) expected_sha="${NODE_SHA256_ARM64}" ;;
+    *) die "unsupported architecture ${ARCH} for the Node.js runtime (need x86_64 or aarch64). Re-run with --skip-packages and provide Node.js 20+ on the service PATH yourself." ;;
+  esac
+  local url="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${platform}.tar.gz"
+  require_root_owned_chain "$(dirname -- "${NODE_DIR}")" "the folder that holds ${NODE_DIR}"
+  [[ ! -L "${NODE_DIR}" ]] || die "${NODE_DIR} is a symbolic link; refusing to install Node.js through it. Remove it and re-run the installer."
+  if [[ -e "${NODE_DIR}" ]]; then
+    require_root_owned_chain "${NODE_DIR}" "${NODE_DIR}"
+  fi
+  # Idempotent: a re-run keeps the pinned runtime; an update to a newer pin replaces it.
+  if [[ -x "${NODE_DIR}/bin/node" && -x "${NODE_DIR}/bin/npm" ]]; then
+    have="$(node_version_of "${NODE_DIR}/bin/node")"
+    if [[ "${have}" == "v${NODE_VERSION}" ]]; then
+      log "Node.js v${NODE_VERSION} (${platform}) is already installed in ${NODE_DIR}; skipping the download"
+      return 0
+    fi
+    [[ "${UPDATE}" -eq 0 ]] || log "refreshing the Node.js in ${NODE_DIR} (${have:-unknown version}) to v${NODE_VERSION}"
+  fi
+  node_work="$(mktemp -d "${WORK}/node.XXXXXX")"
   log "installing official Node.js v${NODE_VERSION} (${platform}) into ${NODE_DIR}"
   if ! curl -fSL --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 300 \
     --retry 3 --retry-delay 5 --retry-connrefused "${url}" -o "${node_work}/node.tar.gz"; then
     rm -rf "${node_work}"
-    warn "could not download Node.js v${NODE_VERSION} (${platform}) from nodejs.org. The daemon is installed without it, so
-  npm is missing for the ${SVC_USER} user. Check that this server can reach https://nodejs.org (for example: curl -I ${url}),
-  then re-run the same install command (or --update); it resumes and skips what is already installed."
-    return 0
+    die "could not download Node.js v${NODE_VERSION} (${platform}) from nodejs.org. Nothing was changed. Check that this server can reach https://nodejs.org (for example: curl -I ${url}) and re-run the same command, or re-run with --skip-packages to install without Node.js (the coding CLIs that install with npm then need a Node.js 20+ on the service PATH)."
   fi
   actual_sha="$(sha256_hex "$(sha256sum "${node_work}/node.tar.gz")")"
   if [[ "${actual_sha}" != "${expected_sha}" ]]; then
@@ -626,34 +700,71 @@ install_node_runtime() {
     die "could not unpack the Node.js archive into ${stage} (is the disk full?). Nothing was changed; re-run to retry."
   fi
   rm -rf "${node_work}"
-  if [[ "$("${stage}/bin/node" --version 2>/dev/null || true)" != "v${NODE_VERSION}" || ! -x "${stage}/bin/npm" ]]; then
-    rm -rf "${stage}"
-    die "the downloaded Node.js does not start on this system (${ARCH}). Nothing was changed; ${NODE_DIR} is as it was."
-  fi
   chown -R root:root "${stage}"
+  chmod -R go-w "${stage}"
   chmod 0755 "${stage}"
-  rm -rf "${NODE_DIR:?}.old"
-  [[ ! -e "${NODE_DIR}" ]] || mv "${NODE_DIR}" "${NODE_DIR}.old"
-  mv "${stage}" "${NODE_DIR}"
-  rm -rf "${NODE_DIR:?}.old"
+  # The first run of the downloaded program is as the service user, never as root.
+  if [[ "$(node_version_of "${stage}/bin/node")" != "v${NODE_VERSION}" || ! -x "${stage}/bin/npm" ]]; then
+    rm -rf "${stage}"
+    die "the downloaded Node.js does not start on this system (${ARCH}) as the ${SVC_USER} user. Nothing was changed; ${NODE_DIR} is as it was."
+  fi
+  swap_in_node_dir "${stage}"
   log "Node.js v${NODE_VERSION} installed in ${NODE_DIR}"
+}
+
+# --skip-packages leaves the runtime alone, an out-of-date one included: say so instead of staying quiet.
+warn_if_node_runtime_stale() {
+  local have
+  [[ -x "${NODE_DIR}/bin/node" && ! -L "${NODE_DIR}" ]] || return 0
+  have="$(node_version_of "${NODE_DIR}/bin/node")"
+  [[ "${have}" == "v${NODE_VERSION}" ]] \
+    || warn "--skip-packages: the Node.js in ${NODE_DIR} (${have:-unknown version}) is not the pinned v${NODE_VERSION} and was left as it is. Run the installer without --skip-packages to refresh it."
+}
+
+# The pinned npm registry, in a root-owned file the service user can read but not change.
+write_npm_global_rc() {
+  local tmp="${WORK}/npmrc.pin"
+  printf '# Written by the Praxi installer. The registry the installer and the app use for npm installs.\nregistry=%s\n' "${NPM_REGISTRY}" > "${tmp}"
+  rm -f -- "${NPM_GLOBAL_RC}"
+  install -m 0640 -o root -g "${SVC_USER}" "${tmp}" "${NPM_GLOBAL_RC}"
 }
 
 # The service user's npm: global installs go to ${NPM_PREFIX} (user-writable), so no root is needed. The units
 # and the wrappers say so with NPM_CONFIG_PREFIX, and ~/.npmrc says it too: the app's terminal starts its
 # shell with a cleaned environment that does not carry NPM_CONFIG_PREFIX.
+# The data directory belongs to the service user, who can swap anything inside it at any moment. So root only
+# checks what it can (the directory itself and every parent are real, root-controlled places) and the files
+# in it are made BY the service user: a link planted there leads nowhere the user could not already write.
 configure_service_npm() {
-  local rc="${DATA_DIR}/.npmrc" d
-  # The data directory belongs to the service user: never follow a link it could have planted for root.
+  local rc="${DATA_DIR}/.npmrc" real_data owner mode svc_uid d
+  real_data="$(readlink -f -- "${DATA_DIR}")" || die "cannot resolve ${DATA_DIR}"
+  require_root_owned_chain "$(dirname -- "${real_data}")" "the folder that holds ${DATA_DIR}"
+  [[ -d "${real_data}" ]] || die "${DATA_DIR} is not a directory"
+  svc_uid="$(id -u "${SVC_USER}")" || die "the ${SVC_USER} user does not exist"
+  read -r owner mode < <(stat -c '%u %a' -- "${real_data}") || die "cannot inspect ${DATA_DIR}"
+  [[ "${owner}" == "${svc_uid}" || "${owner}" == "${TRUSTED_UID}" ]] \
+    || die "${DATA_DIR} is owned by user ${owner}, not by ${SVC_USER} or root; refusing to configure npm in it"
+  (( (8#${mode} & 8#022) == 0 )) || die "${DATA_DIR} is writable by group or others (mode ${mode}); refusing to configure npm in it. Run: chmod 0750 ${DATA_DIR}"
   for d in "${NPM_PREFIX}" "${NPM_PREFIX}/bin" "${rc}"; do
     [[ ! -L "${d}" ]] || die "${d} is a symbolic link; refusing to configure npm through it. Remove it and re-run the installer."
   done
-  install -d -m 0750 -o "${SVC_USER}" -g "${SVC_USER}" "${NPM_PREFIX}" "${NPM_PREFIX}/bin"
-  if [[ ! -e "${rc}" ]] || ! grep -Eq '^[[:space:]]*prefix[[:space:]]*=' "${rc}"; then
-    printf 'prefix=%s\n' "${NPM_PREFIX}" >> "${rc}"
-  fi
-  chown -h "${SVC_USER}:${SVC_USER}" "${rc}"
-  chmod 0600 "${rc}"
+  write_npm_global_rc
+  # shellcheck disable=SC2016  # the script runs in the service user's shell
+  as_service_user sh -c '
+    set -eu
+    umask 077
+    prefix="$1"; rc="$2"
+    for d in "$prefix" "$prefix/bin" "$rc"; do
+      if [ -L "$d" ]; then echo "$d is a symbolic link" >&2; exit 3; fi
+    done
+    mkdir -p "$prefix/bin"
+    chmod 0750 "$prefix" "$prefix/bin"
+    if [ ! -e "$rc" ] || ! grep -Eq "^[[:space:]]*prefix[[:space:]]*=" "$rc"; then
+      printf "prefix=%s\n" "$prefix" >> "$rc"
+    fi
+    chmod 0600 "$rc"
+  ' sh "${NPM_PREFIX}" "${rc}" \
+    || die "could not set npm up for ${SVC_USER} in ${DATA_DIR} (see the message above)"
   if [[ ! -x "${NODE_DIR}/bin/node" ]] && ! command -v node >/dev/null 2>&1; then
     warn "no Node.js on this server: the coding CLIs that install with npm need Node.js 20+. Re-run the installer without --skip-packages to get ${NODE_DIR}."
   fi
@@ -939,6 +1050,10 @@ on_exit() {
   elif [[ "${INSTALL_SUCCEEDED:-0}" -eq 0 && "${PACKAGES_PHASE:-0}" -eq 1 ]]; then
     disable_print_services || true
   fi
+  # Killed between the two renames of the Node.js swap: put the previous runtime back before cleaning up.
+  if [[ ! -e "${NODE_DIR}" && ! -L "${NODE_DIR}" && -d "${NODE_DIR}.old" && ! -L "${NODE_DIR}.old" ]]; then
+    mv -T -- "${NODE_DIR}.old" "${NODE_DIR}" 2>/dev/null || true
+  fi
   rm -rf "${WORK:?}" "${NODE_DIR:?}".new.* "${NODE_DIR:?}.old"
   exit "${exit_rc}"
 }
@@ -1048,7 +1163,6 @@ if [[ "${SKIP_PACKAGES}" -eq 0 ]]; then
   # Also retain private-download cleanup when package installation fails.
   PACKAGES_PHASE=1
   install_packages
-  install_node_runtime
   PACKAGES_PHASE=0
 fi
 disable_print_services
@@ -1108,6 +1222,13 @@ if ! id -u "${SVC_USER}" >/dev/null 2>&1; then
 fi
 install -d -m 0750 -o "${SVC_USER}" -g "${SVC_USER}" "${DATA_DIR}"
 install -d -m 0750 -o root -g "${SVC_USER}" "${CONF_DIR}"
+
+# Node.js comes after the user exists: the downloaded program is first run as that user.
+if [[ "${SKIP_PACKAGES}" -eq 0 ]]; then
+  install_node_runtime
+else
+  warn_if_node_runtime_stale
+fi
 
 # ----------------------------------------------------------------- binaries
 mkdir -p "${WORK}/backup/units" "${WORK}/backup/conf" "${WORK}/backup/localbin"
@@ -1203,27 +1324,38 @@ done
 log "installed to ${PREFIX} ($(cat "${PREFIX}/VERSION" 2>/dev/null || echo unknown version))"
 configure_service_npm
 
+sh_quote() { # <word>: the word as one single-quoted /bin/sh word
+  local q="'"
+  printf "'%s'" "${1//"${q}"/"${q}\\${q}${q}"}"
+}
+
 # Wrapper commands: run a binary as the service user with that service's env file.
 # praxi-node must source praxi-node.env so it does not receive the daemon passphrase.
 write_wrapper() { # <command name> <binary name> <env file>
-  local cmd="$1" bin="$2" envf="$3" property doctor_properties=""
+  local cmd="$1" bin="$2" envf="$3" property
+  local -a doctor_props=()
   if [[ "${DESKTOP_ACTIVE:-0}" -eq 1 ]]; then
-    doctor_properties+=" --property=Slice=${SLICE_NAME:-praxi.slice}"
+    doctor_props+=("--property=Slice=${SLICE_NAME:-praxi.slice}")
   fi
-  # Single-quoted in the wrapper: ReadWritePaths= holds a space-separated list.
+  # One word per property: ReadWritePaths= holds a space-separated list.
   while IFS= read -r property; do
-    doctor_properties+=" --property='${property}'"
+    doctor_props+=("--property=${property}")
   done <<< "${HARDENING}"
   if [[ -f "${UNIT_DIR}/praxi-xvfb.service" ]]; then
-    doctor_properties+=" --property=JoinsNamespaceOf=praxi-xvfb.service --property=After=praxi-xvfb.service"
+    doctor_props+=("--property=JoinsNamespaceOf=praxi-xvfb.service" "--property=After=praxi-xvfb.service")
   fi
   if [[ -f "${UNIT_DIR}/praxi-desktop.service" ]]; then
-    doctor_properties+=" --property=After=praxi-desktop.service"
+    doctor_props+=("--property=After=praxi-desktop.service")
   fi
+  # The wrapper is a /bin/sh script, which has no arrays: write each property as one single-quoted word.
+  local doctor_words="" word
+  for word in "${doctor_props[@]}"; do
+    doctor_words+=" $(sh_quote "${word}")"
+  done
   cat > "/usr/local/bin/${cmd}" <<WRAP
 #!/bin/sh
 # Runs ${PREFIX}/bin/${bin} as the ${SVC_USER} user with ${envf}.
-inner='export PATH=${SERVICE_PATH} NPM_CONFIG_PREFIX=${NPM_PREFIX}; set -a; . ${envf}; set +a; exec "\$@"'
+inner='export PATH=${SERVICE_PATH} NPM_CONFIG_PREFIX=${NPM_PREFIX} NPM_CONFIG_GLOBALCONFIG=${NPM_GLOBAL_RC}; set -a; . ${envf}; set +a; exec "\$@"'
 if [ "\$(id -u)" -eq 0 ]; then
   if [ "${cmd}" = praxi ] && [ "\${1:-}" = self-update ]; then
     # Only this explicit maintenance command retains root. Do not source the
@@ -1235,7 +1367,8 @@ if [ "\$(id -u)" -eq 0 ]; then
       --property=User=${SVC_USER} --property=Group=${SVC_USER} \
       --property=WorkingDirectory=${PREFIX} --property=EnvironmentFile=${envf} \
       --setenv=PATH=${SERVICE_PATH} --setenv=NPM_CONFIG_PREFIX=${NPM_PREFIX} \
-      ${doctor_properties} ${PREFIX}/bin/${bin} "\$@"
+      --setenv=NPM_CONFIG_GLOBALCONFIG=${NPM_GLOBAL_RC} \
+      ${doctor_words} ${PREFIX}/bin/${bin} "\$@"
   fi
   exec runuser -u ${SVC_USER} -- sh -c "\$inner" sh ${PREFIX}/bin/${bin} "\$@"
 fi
@@ -1421,6 +1554,7 @@ Group=${SVC_USER}
 WorkingDirectory=${PREFIX}
 Environment=PATH=${SERVICE_PATH}
 Environment=NPM_CONFIG_PREFIX=${NPM_PREFIX}
+Environment=NPM_CONFIG_GLOBALCONFIG=${NPM_GLOBAL_RC}
 EnvironmentFile=${ENV_FILE}
 ExecStart=${PREFIX}/bin/bot ${SERVE_ARGS}
 Restart=on-failure
