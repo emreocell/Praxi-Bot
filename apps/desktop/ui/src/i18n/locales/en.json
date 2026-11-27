@@ -3665,7 +3665,7 @@
       },
       "bot_limit_reached": {
         "hint": "The model was not called. Raise the limit in the bot settings, wait for it to reset, or leave the run stopped.",
-        "title": "Bot limit reached"
+        "title": "This bot hit the limit you set"
       },
       "bot_limit_warning": {
         "hint": "It has used 80% of a spending limit. Check the limits in the bot settings.",
@@ -3744,12 +3744,12 @@
         "title": "Could not reach that computer"
       },
       "host_not_permitted": {
-        "hint": "The computer is online, but it only allows the terminal for its owner's paired desktop. Pair this computer again from the host, then try again.",
+        "hint": "The computer is online but only allows its owner's paired desktop to use the terminal. Pair this computer again from the server, then try again.",
         "title": "That computer did not allow the terminal"
       },
       "host_outdated": {
-        "hint": "The computer is online, but its Praxi-Bot version does not know the terminal yet. Update the server, then try again.",
-        "title": "That computer runs an older Praxi-Bot"
+        "hint": "The computer is online, but its Praxi version is too old for the terminal. Update the server, then try again.",
+        "title": "That computer runs an older Praxi"
       },
       "host_setup_conflict": {
         "hint": "Wait for the current setup to finish, then try again.",
@@ -3760,7 +3760,7 @@
         "title": "The terminal failed on that computer"
       },
       "host_unreachable": {
-        "hint": "Its copy may still be running. Try again, or confirm to bring the schedule back anyway.",
+        "hint": "Check that it is on and online, then try again. Or confirm bringing the schedule back anyway.",
         "title": "The server did not answer"
       },
       "input_busy": {
@@ -3773,7 +3773,7 @@
       },
       "install_copy_only": {
         "hint": "Use the command shown or the official page.",
-        "title": "This CLI cannot be installed on the server automatically"
+        "title": "This coding tool cannot install itself on the server"
       },
       "internal": {
         "hint": "Try again. If it keeps happening, copy the details and report it.",
@@ -3880,12 +3880,12 @@
         "title": "The server is missing a required component"
       },
       "provider_endpoint": {
-        "hint": "Open Settings → AI and check the web address you typed for this provider. Copy it again from the provider's website.",
+        "hint": "Open Settings, AI, and check the web address for this provider. Copy it again from the provider's website.",
         "title": "That web address does not work"
       },
       "provider_model": {
-        "hint": "Open Settings → AI and pick another model from the list. Choose one your account can use.",
-        "title": "The provider could not find the configured model"
+        "hint": "Open Settings, AI, and pick another model from the list — one your account can use.",
+        "title": "That model is not available on this account"
       },
       "reload_failed": {
         "hint": "Check them for mistakes, or restart the local service.",
@@ -4001,7 +4001,7 @@
       },
       "spend_limit_unreadable": {
         "hint": "The saved monthly limit could not be read, so paid model calls are blocked. Set the limit again on the Usage page.",
-        "title": "Spending limit unreadable"
+        "title": "Could not read your spending limit"
       },
       "starting": {
         "hint": "The app is still starting up. Try again in a few seconds.",
@@ -4036,7 +4036,7 @@
         "title": "Too many live views are open"
       },
       "trigger_source_unavailable": {
-        "hint": "Connect an IMAP mailbox this bot may use and allow scheduled mailbox reads in its permissions.",
+        "hint": "Connect a mailbox this bot may use and turn on scheduled mail reads in its permissions.",
         "title": "This mailbox cannot be watched yet"
       },
       "unauthorized": {
@@ -4122,8 +4122,8 @@
       "title": "This engine does not offer that level"
     },
     "engineNeedsCli": {
-      "hint": "Choose a model that comes from a coding CLI, then turn on its own tools.",
-      "title": "Pick a coding CLI model first"
+      "hint": "Pick a model from a coding app on this computer, then turn on its own tools.",
+      "title": "Pick a coding-app model first"
     },
     "engineNeedsNative": {
       "hint": "It works with its own tools. Press Fix to allow that for this bot.",
@@ -4144,34 +4144,34 @@
     },
     "hostBusy": {
       "hint": "Wait a few seconds and try again.",
-      "title": "The host is busy"
+      "title": "That computer is busy right now"
     },
     "hostManaged": {
       "hint": "Change it in Praxi on the computer that runs the bot.",
       "title": "This is managed on the other computer"
     },
     "hostSilent": {
-      "hint": "Check that {{name}} is on and connected to the network, then try again.",
-      "title": "{{name}} did not answer"
+      "hint": "Check that {{name}} is switched on and connected to the network, then press Try again.",
+      "title": "{{name}} is not answering"
     },
     "http_error": {
       "hint": "Try again. If it keeps happening, copy the details and report it.",
       "title": "The service answered with a problem"
     },
     "localOnly": {
-      "hint": "Use Praxi on the host computer itself, or clear it from the administrator desktop.",
-      "title": "Only the person at the host computer can do this"
+      "hint": "Do this on the computer that runs the bot, or clear it from the administrator's desktop.",
+      "title": "Only someone at that computer can do this"
     },
     "modelFailed": {
-      "hint": "Try again, or pick another model. The details below say what the model reported.",
+      "hint": "Try again, or pick another model in Settings.",
       "title": "The model could not answer"
     },
     "network": {
       "hint": "Nothing you typed is lost. Praxi keeps trying; press the button again when the notice at the top is gone.",
-      "title": "The local service is not answering right now"
+      "title": "Praxi's local service is not answering"
     },
     "noInputBackend": {
-      "hint": "The host has no keyboard and mouse access for this screen (for example a server without a desktop session). You can watch it, but not take it over.",
+      "hint": "That screen has no keyboard or mouse there (for example a server with no desktop). You can watch, not control.",
       "title": "This screen cannot be controlled"
     },
     "openSettings": "Open Settings",
@@ -4220,11 +4220,11 @@
       "title": "Safe mode is on"
     },
     "screenInputDenied": {
-      "hint": "Allow screen control for this computer in Praxi on the host, then try again.",
+      "hint": "On the computer that runs the bot, allow screen control for this device in Praxi, then try again.",
       "title": "Screen control is not allowed for this computer"
     },
     "screenNoConfirm": {
-      "hint": "The screen did not confirm that keys were released, so the pause was kept. Try again; if it keeps failing, restart Praxi on the host.",
+      "hint": "The screen did not confirm the keys were released. Try again. If it keeps failing, restart Praxi on that computer.",
       "title": "The screen did not confirm"
     },
     "sendFailed": {
@@ -4232,8 +4232,8 @@
       "title": "Your message was not sent"
     },
     "serviceConnection": {
-      "hint": "Check your connection and try again. Before repeating an action, check whether it already happened.",
-      "title": "This service cannot be reached"
+      "hint": "Check your connection and try again. Before you repeat an action, see whether it already went through.",
+      "title": "Could not reach that service"
     },
     "serviceDown": {
       "hint": "Restart it. Your bots and chats are safe.",
@@ -4245,7 +4245,7 @@
     },
     "serviceWrongTarget": {
       "hint": "Switch back to This computer, or restart the local service.",
-      "title": "Praxi is pointed at a service that does not answer"
+      "title": "Praxi is pointing at a service that does not answer"
     },
     "startup": {
       "exited": {
@@ -4308,15 +4308,15 @@
     },
     "takeoverAlreadyOwned": {
       "hint": "Wait until that device lets go, or clear its pause first if you are the owner of this computer.",
-      "title": "Another device already controls this screen"
+      "title": "Another device is already controlling this screen"
     },
     "takeoverRecoveryRequired": {
-      "hint": "The server restarted (or the connection dropped) while a screen takeover was open. Press \"Clear pause\" at the top of the window to continue.",
-      "title": "A screen takeover is still open on the server"
+      "hint": "The server restarted or the link dropped while you had the screen. Press Clear pause at the top to continue.",
+      "title": "Screen control is still paused on the server"
     },
     "takeoverRequestConflict": {
-      "hint": "Another takeover request with the same number is already known to the server. Close the live view, open it again and retry.",
-      "title": "This takeover request clashes with an earlier one"
+      "hint": "An earlier request is still open on the server. Close the live view, open it again, then try again.",
+      "title": "This screen-control request clashes with an earlier one"
     },
     "timeout": {
       "hint": "Check your connection and try again.",
@@ -4339,7 +4339,7 @@
       "title": "The computer refused: no permission"
     },
     "toolNoSuchTool": {
-      "hint": "For files and commands, give the bot a coding engine in its Permissions, or ask for something else.",
+      "hint": "For files and commands, give the bot a coding engine in Permissions, or ask for something else.",
       "title": "This bot has no tool for that"
     },
     "toolNotFound": {
@@ -4466,10 +4466,10 @@
       "badKey": "{{name}} did not accept this key. Check that you copied all of it, then paste it again.",
       "noModels": "{{name}} accepted the key but listed no models. Try again in a moment.",
       "offline": "Could not reach {{name}}. Check your internet connection and try again.",
-      "ollamaDown": "Ollama does not seem to be running. Open the Ollama app (or run `ollama serve` in a terminal), then choose it again.",
-      "ollamaNoModels": "Ollama is running but has no models installed. In a terminal run `ollama pull {{model}}` (a small model), then choose Ollama again.",
+      "ollamaDown": "Ollama does not seem to be running. Open the Ollama app (or run `ollama serve` in a terminal), then try again.",
+      "ollamaNoModels": "Ollama is running but has no models. In a terminal run `ollama pull {{model}}`, then choose Ollama again.",
       "unavailable": "Keys can only be saved from the desktop app on this computer.",
-      "unknown": "Something went wrong while connecting {{name}}. Try again, or add the key later in Settings → AI."
+      "unknown": "Something went wrong while connecting {{name}}. Try again, or add the key later in Settings under AI."
     },
     "finishHint": "Finish setup",
     "freedom": {
@@ -4813,7 +4813,7 @@
     "newBotNeedsModel": "{{name}} has no model yet, so a bot cannot be created there. Connect a model on the server first.",
     "refusal": {
       "adminRequired": "{{name}} has not confirmed this computer as its administrator yet. Run `bot host admin --all-desktops` once on {{name}}, then try again.",
-      "generic": "{{name}} did not allow this, so nothing changed. The technical reason is under Details.",
+      "generic": "{{name}} did not allow this, so nothing changed. Open Details for the technical reason.",
       "hostOnly": "This is only done on {{name}} itself, on purpose. This app cannot do it.",
       "hostTransfer": "Moving the host and pairing channels is done on {{name}} itself.",
       "lifecycle": "Pairing new devices and updating {{name}} are done on {{name}} itself with its `bot host` commands, on purpose.",
@@ -4849,7 +4849,7 @@
   },
   "hostRecovery": {
     "remoteOffline": {
-      "hint": "Praxi cannot start a server from here. Switch the server on (or start Praxi on it), then press Retry. Your message is kept in the box.",
+      "hint": "Turn the server on or start Praxi there, then press Try again. Your message stays in the box.",
       "title": "The server is offline"
     },
     "starting": "Starting this computer's Praxi service… your message will be sent as soon as it is up."
@@ -4858,7 +4858,7 @@
     "connecting": "Connecting to {{name}}…",
     "noModelKey": "{{name}} has no model key yet. You can watch its screen and manage its bots, but chats cannot be answered until a key is added on the host.",
     "notPaired": "{{name}} no longer accepts this computer. Pair again with a new ticket.",
-    "offline": "{{name}} is offline. Check that the Praxi service is running on the server. This app will retry automatically.",
+    "offline": "{{name}} is offline. Check that Praxi's service is running on the server. This app will retry on its own.",
     "updateApp": "Update needed: this app ({{local}}) is older than {{name}} ({{host}}). Update this app to use {{name}}.",
     "updateHost": "Update needed: {{name}} ({{host}}) is older than this app ({{local}}). Update {{name}} to match this app.",
     "useThisComputer": "Use this computer",
@@ -5205,17 +5205,17 @@
     "emergencyStop": "Stop all bots",
     "emergencyStopHint": "Every bot stops what it is doing right now.",
     "errors": {
-      "generic": "The request failed. Check the connection and try again.",
+      "generic": "That did not work. Check the connection and try again.",
       "network": "The connection to the screen was interrupted. Check your network and try again.",
       "pause_changed": "The control state changed. Check the screen and try again.",
       "recover_failed": "Could not recover control. Try again.",
       "release_failed": "Could not hand control back. The bot stays paused; try “I'm done” again.",
       "release_interrupted": "The takeover was interrupted before hand-back finished. Clear the pause to let the bot continue, or reacquire control.",
-      "release_unconfirmed": "The background service still reports your takeover as active. Try “I'm done” again.",
+      "release_unconfirmed": "The local service still thinks you are controlling the screen. Press I'm done again.",
       "server_restarting": "The server may be restarting. Try again when it comes back online.",
       "takeover_failed": "Could not take control. Try again.",
       "timeout": "The screen did not start in time.",
-      "too_many_streams": "This connection has too many open streams. Close another stream and try again.",
+      "too_many_streams": "Too many live views are open on this link. Close another one and try again.",
       "unauthorized": "Your session is no longer authorized. Reconnect to this computer.",
       "view_quota": "The server has too many screen sessions. Close an unused viewer or try again in a moment."
     },

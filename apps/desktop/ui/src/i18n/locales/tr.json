@@ -3648,8 +3648,8 @@
         "title": "Bu zamanlama geçerli değil"
       },
       "bad_trigger_config": {
-        "hint": "Bir kaynak seçin, posta için gönderen filtresi ekleyin; talimatı, sessiz saatleri ve sınırları kontrol edin.",
-        "title": "Bu kuralı kontrol edin"
+        "hint": "Bir kaynak seç, posta için gönderen filtresi ekle; talimatı, sessiz saatleri ve sınırları kontrol et.",
+        "title": "Bu kuralı düzelt"
       },
       "bad_voice_config": {
         "hint": "Ayarlar bölümünde yazıya dökme servisinin adresini, modelini ve anahtarını kontrol edip yeniden dene.",
@@ -3748,8 +3748,8 @@
         "title": "O bilgisayar terminale izin vermedi"
       },
       "host_outdated": {
-        "hint": "Bilgisayar çevrimiçi, ama Praxi-Bot sürümü terminali henüz tanımıyor. Sunucuyu güncelle, sonra yeniden dene.",
-        "title": "O bilgisayarda Praxi-Bot eski sürüm"
+        "hint": "Bilgisayar çevrimiçi ama Praxi sürümü terminal için eski. Sunucuyu güncelle, sonra yeniden dene.",
+        "title": "O bilgisayarda Praxi eski sürüm"
       },
       "host_setup_conflict": {
         "hint": "Süren kurulumun bitmesini bekleyip yeniden dene.",
@@ -3760,8 +3760,8 @@
         "title": "Terminal o bilgisayarda çalışmadı"
       },
       "host_unreachable": {
-        "hint": "Oradaki kopya hâlâ çalışıyor olabilir. Yeniden dene ya da yine de geri getirmeyi onayla.",
-        "title": "Sunucu yanıt vermedi"
+        "hint": "Açık ve çevrimiçi olduğundan emin olup yeniden dene. Ya da yine de geri getirmeyi onayla.",
+        "title": "Sunucu şu an yanıt vermiyor"
       },
       "input_busy": {
         "hint": "İşini bitirmesini bekle ya da canlı görünümden devral.",
@@ -3773,7 +3773,7 @@
       },
       "install_copy_only": {
         "hint": "Gösterilen komutu ya da resmî sayfayı kullan.",
-        "title": "Bu CLI sunucuya otomatik kurulamaz"
+        "title": "Bu kodlama aracı sunucuya kendiliğinden kurulamaz"
       },
       "internal": {
         "hint": "Yeniden dene. Sürerse ayrıntıları kopyalayıp bildir.",
@@ -3844,11 +3844,11 @@
         "title": "Bunu yalnızca sahibi değiştirebilir"
       },
       "message_not_editable": {
-        "hint": "Yalnızca kendi son mesajınız düzenlenebilir veya yeniden oluşturulabilir, o da bot işini bitirdikten sonra.",
+        "hint": "Yalnızca kendi son mesajını düzenleyebilir veya yeniden oluşturabilirsin; o da bot işini bitirdikten sonra.",
         "title": "Bu mesaj düzenlenemez"
       },
       "message_not_last": {
-        "hint": "Sohbet ilerledi. Yeniden yükleyin, sonra en yeni mesajı düzenleyin ya da yeniden oluşturun.",
+        "hint": "Sohbet ilerledi. Yenile, sonra en yeni mesajı düzenle ya da yeniden oluştur.",
         "title": "Bu artık son mesaj değil"
       },
       "modified_since": {
@@ -3885,7 +3885,7 @@
       },
       "provider_model": {
         "hint": "Ayarlar → Yapay zekâ bölümünü aç ve listeden başka bir model seç. Hesabının kullanabildiği birini seç.",
-        "title": "Sağlayıcı, ayarlanan modeli bulamadı"
+        "title": "Bu model hesabında kullanılamıyor"
       },
       "reload_failed": {
         "hint": "Hatalara bak ya da yerel servisi yeniden başlat.",
@@ -4000,7 +4000,7 @@
         "title": "Aylık harcama limitine ulaşıldı"
       },
       "spend_limit_unreadable": {
-        "hint": "Kayıtlı aylık limit okunamadığı için ücretli model çağrıları engellendi. Limiti Kullanım sayfasından yeniden belirleyin.",
+        "hint": "Kayıtlı aylık limit okunamadığı için ücretli model çağrıları engellendi. Limiti Kullanım sayfasından yeniden belirle.",
         "title": "Harcama limiti okunamadı"
       },
       "starting": {
@@ -4036,7 +4036,7 @@
         "title": "Çok fazla canlı görünüm açık"
       },
       "trigger_source_unavailable": {
-        "hint": "Botun kullanabileceği bir IMAP posta kutusu bağlayın ve izinlerinde zamanlanmış posta okumalarını açın.",
+        "hint": "Botun kullanabileceği bir posta kutusu bağla ve izinlerinde zamanlanmış posta okumayı aç.",
         "title": "Bu posta kutusu henüz izlenemiyor"
       },
       "unauthorized": {
@@ -4122,8 +4122,8 @@
       "title": "Bu motor o düzeyi sunmuyor"
     },
     "engineNeedsCli": {
-      "hint": "Bir kodlama CLI'sinden gelen modeli seç, sonra kendi araçlarına izin ver.",
-      "title": "Önce bir kodlama CLI modeli seç"
+      "hint": "Bu bilgisayardaki bir kodlama uygulamasından model seç, sonra kendi araçlarını aç.",
+      "title": "Önce bir kodlama uygulaması modeli seç"
     },
     "engineNeedsNative": {
       "hint": "Kendi araçlarıyla çalışıyor. Bu bot için buna izin vermek için Düzelt'e bas.",
@@ -4144,15 +4144,15 @@
     },
     "hostBusy": {
       "hint": "Birkaç saniye bekleyip yeniden dene.",
-      "title": "Sunucu meşgul"
+      "title": "O bilgisayar şu an meşgul"
     },
     "hostManaged": {
       "hint": "Botun çalıştığı bilgisayardaki Praxi'den değiştir.",
       "title": "Bu öbür bilgisayarda yönetiliyor"
     },
     "hostSilent": {
-      "hint": "{{name}} açık ve ağa bağlı mı kontrol et, sonra yeniden dene.",
-      "title": "{{name}} yanıt vermedi"
+      "hint": "{{name}} açık ve ağa bağlı mı kontrol et, sonra Yeniden dene'ye bas.",
+      "title": "{{name}} şu an yanıt vermiyor"
     },
     "http_error": {
       "hint": "Yeniden dene. Sürerse ayrıntıları kopyalayıp bildir.",
@@ -4163,15 +4163,15 @@
       "title": "Bunu yalnızca ana bilgisayarın başındaki kişi yapabilir"
     },
     "modelFailed": {
-      "hint": "Yeniden dene ya da başka bir model seç. Aşağıdaki ayrıntılar modelin ne bildirdiğini söyler.",
+      "hint": "Yeniden dene ya da Ayarlar'dan başka bir model seç.",
       "title": "Model yanıt veremedi"
     },
     "network": {
       "hint": "Yazdığın hiçbir şey kaybolmaz. Praxi denemeye devam eder; üstteki uyarı kalkınca düğmeye yeniden bas.",
-      "title": "Yerel servis şu an yanıt vermiyor"
+      "title": "Praxi'nin yerel servisi şu an yanıt vermiyor"
     },
     "noInputBackend": {
-      "hint": "Sunucuda bu ekran için klavye ve fare erişimi yok (örneğin masaüstü oturumu olmayan bir sunucu). İzleyebilirsin ama devralamazsın.",
+      "hint": "Orada bu ekran için klavye ve fare yok (örneğin masaüstü oturumu olmayan sunucu). İzleyebilirsin, devralamazsın.",
       "title": "Bu ekran denetlenemiyor"
     },
     "openSettings": "Ayarları aç",
@@ -4224,7 +4224,7 @@
       "title": "Bu bilgisayara ekran denetimi izni verilmemiş"
     },
     "screenNoConfirm": {
-      "hint": "Ekran tuşların bırakıldığını onaylamadı, bu yüzden duraklatma korundu. Yeniden dene; sürerse sunucudaki Praxi'yi yeniden başlat.",
+      "hint": "Ekran tuşların bırakıldığını onaylamadı. Yeniden dene; sürerse botun çalıştığı bilgisayarda Praxi'yi yeniden başlat.",
       "title": "Ekran onaylamadı"
     },
     "sendFailed": {
@@ -4233,7 +4233,7 @@
     },
     "serviceConnection": {
       "hint": "Bağlantını kontrol edip yeniden dene. Bir işlemi tekrarlamadan önce gerçekleşip gerçekleşmediğini kontrol et.",
-      "title": "Bu servise ulaşılamıyor"
+      "title": "Bu servise ulaşılamadı"
     },
     "serviceDown": {
       "hint": "Yeniden başlat. Botların ve sohbetlerin güvende.",
@@ -4311,12 +4311,12 @@
       "title": "Bu ekranı başka bir cihaz kontrol ediyor"
     },
     "takeoverRecoveryRequired": {
-      "hint": "Ekran devralma açıkken sunucu yeniden başladı (ya da bağlantı koptu). Devam etmek için pencerenin üstündeki \"Duraklatmayı kaldır\" düğmesine bas.",
-      "title": "Sunucuda hâlâ açık bir ekran devralma var"
+      "hint": "Ekranı kontrol ederken sunucu yeniden başladı ya da bağlantı koptu. Devam etmek için üstteki Duraklatmayı kaldır'a bas.",
+      "title": "Sunucuda ekran denetimi hâlâ duraklatılmış"
     },
     "takeoverRequestConflict": {
-      "hint": "Aynı numaralı başka bir devralma isteği sunucuda zaten kayıtlı. Canlı görünümü kapatıp yeniden aç ve tekrar dene.",
-      "title": "Bu devralma isteği öncekiyle çakışıyor"
+      "hint": "Sunucuda hâlâ açık eski bir istek var. Canlı görünümü kapat, yeniden aç ve tekrar dene.",
+      "title": "Bu ekran denetimi isteği öncekiyle çakışıyor"
     },
     "timeout": {
       "hint": "Bağlantını kontrol edip yeniden dene.",
@@ -4858,7 +4858,7 @@
     "connecting": "{{name}} sunucusuna bağlanılıyor…",
     "noModelKey": "{{name}} sunucusunda henüz model anahtarı yok. Ekranını izleyebilir ve botlarını yönetebilirsin; sunucuya bir anahtar eklenene kadar sohbetlere yanıt gelmez.",
     "notPaired": "{{name}} artık bu bilgisayarı kabul etmiyor. Yeni bir biletle yeniden eşleştir.",
-    "offline": "{{name}} çevrimdışı. Sunucuda Praxi servisinin çalıştığını kontrol et. Uygulama bağlantıyı otomatik olarak yeniden deneyecek.",
+    "offline": "{{name}} çevrimdışı. Sunucuda Praxi servisinin çalıştığını kontrol et. Uygulama kendiliğinden yeniden dener.",
     "updateApp": "Güncelleme gerekli: bu uygulama ({{local}}), {{name}} ({{host}}) sunucusundan eski. {{name}} ile çalışmak için bu uygulamayı güncelle.",
     "updateHost": "Güncelleme gerekli: {{name}} ({{host}}), bu uygulamadan ({{local}}) eski. {{name}} sunucusunu bu uygulamaya uyacak şekilde güncelle.",
     "useThisComputer": "Bu bilgisayarı kullan",
@@ -5211,7 +5211,7 @@
       "recover_failed": "Kontrol kurtarılamadı. Yeniden dene.",
       "release_failed": "Kontrol geri verilemedi. Bot duraklatılmış kalır; Bitirdim'i yeniden dene.",
       "release_interrupted": "Bitirdim tamamlanmadan devralma kesildi, bu yüzden geri verme tamamlanmadı. Botun devam etmesi için duraklatmayı kaldır veya kontrolü yeniden devral.",
-      "release_unconfirmed": "Arka plan servisi devralmanı hâlâ etkin gösteriyor. Bitirdim'i yeniden dene.",
+      "release_unconfirmed": "Yerel servis hâlâ ekranı senin kontrol ettiğini sanıyor. Bitirdim'e yeniden bas.",
       "server_restarting": "Sunucu yeniden başlatılıyor olabilir. Çevrimiçi olduğunda yeniden dene.",
       "takeover_failed": "Kontrol devralınamadı. Yeniden dene.",
       "timeout": "Ekran zamanında başlatılamadı.",
