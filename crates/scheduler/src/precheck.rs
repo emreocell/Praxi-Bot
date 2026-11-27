@@ -117,8 +117,11 @@ async fn evaluate_with_timeout(
             })
         }
         Precheck::Script { code } => {
+            // A precheck is short end to end: the same bound for the script's own compute and
+            // for the whole run, tool calls included.
             let limits = Limits {
-                timeout,
+                cpu_timeout: timeout,
+                total_timeout: timeout,
                 max_tool_calls: 10,
                 max_output_bytes: MAX_BYTES,
                 ..Limits::default()

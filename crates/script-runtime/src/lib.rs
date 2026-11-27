@@ -485,6 +485,7 @@ impl ScriptRuntime {
     ///
     /// # Errors
     /// As [`Self::run`], plus [`ScriptError::Cancelled`] when `cancel` is set.
+    #[allow(clippy::too_many_lines)] // the engine, its three limits and the cancel race in one place
     pub async fn run_cancellable(
         code: &str,
         host: Arc<dyn ScriptHost>,

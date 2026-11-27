@@ -357,7 +357,7 @@ pub fn mask_setup_secrets(text: &str) -> String {
             Some((i, c)) if !c.is_ascii_alphanumeric() && c != '=' => (&whole[..i], &whole[i..]),
             _ => (whole, ""),
         };
-        let letters: Vec<char> = core.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        let letters: Vec<char> = core.chars().filter(char::is_ascii_alphanumeric).collect();
         let has_digit = letters.iter().any(char::is_ascii_digit);
         let all_upper = letters.iter().all(|c| !c.is_ascii_lowercase());
         let sizes: Vec<usize> = core

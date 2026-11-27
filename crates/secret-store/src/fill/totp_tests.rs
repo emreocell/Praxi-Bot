@@ -462,8 +462,7 @@ fn seen_by_hook(setup: impl Fn(&FillSecrets)) -> Vec<String> {
         .with_value_hook(Arc::new(move |v| sink.lock().push(v.to_owned())));
     s.register_account(&account(NAME)).unwrap();
     setup(&s);
-    let out = seen.lock().clone();
-    out
+    seen.lock().clone()
 }
 
 fn grouped(text: &str, size: usize, sep: &str) -> String {

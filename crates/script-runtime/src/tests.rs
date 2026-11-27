@@ -562,6 +562,7 @@ async fn a_pending_fire_and_forget_call_does_not_hide_a_busy_loop() {
 /// The pause is by awaiting, not by a count of pending calls: waiting on a slow
 /// call still costs nothing, even next to other calls that already finished.
 #[tokio::test]
+#[allow(clippy::items_after_statements)] // the host stub sits next to the script it serves
 async fn awaiting_the_slow_call_while_others_finish_still_spends_no_budget() {
     let limits = Limits {
         cpu_timeout: Duration::from_millis(300),
