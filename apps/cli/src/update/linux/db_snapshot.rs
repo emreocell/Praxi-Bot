@@ -166,6 +166,32 @@ fn snapshot_name(path: &Path) -> String {
     path.to_string_lossy().replace('/', "__")
 }
 
+/// The data directory belongs to the daemon's user, and this runs as root: a directory the copy was
+/// taken from may have been replaced by a link since. Restoring through it would write (and change
+/// the owner of files) wherever the link points, so every directory above `relative` must still be a
+/// real one, and the path must hold plain names only.
+fn reached_through_real_directories(data: &Path, relative: &Path) -> Result<()> {
+    let mut directory = data.to_path_buf();
+    let mut names = relative.components().peekable();
+    while let Some(component) = names.next() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(format!("invalid database path {}", relative.display()).into());
+        };
+        if names.peek().is_none() {
+            break;
+        }
+        directory.push(name);
+        if !fs::symlink_metadata(&directory)?.is_dir() {
+            return Err(format!(
+                "{} is no longer a directory; refusing to restore into it",
+                directory.display()
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
 /// Put the snapshot's databases back, with their owner and mode. A write-ahead log left by the new
 /// release is removed first: applied to an older file it would corrupt it.
 pub(super) fn restore(data: &Path, snapshot: &Path) -> Result<()> {
@@ -173,11 +199,13 @@ pub(super) fn restore(data: &Path, snapshot: &Path) -> Result<()> {
         &fs::read(snapshot.join(MANIFEST))
             .map_err(|e| format!("no complete database snapshot to restore ({e})"))?,
     )?;
+    // Everything is checked before anything is removed or written.
     for entry in &manifest.files {
         let copy = snapshot.join(snapshot_name(&entry.path));
         if fs::metadata(&copy)?.len() != entry.len {
             return Err(format!("the snapshot of {} is damaged", entry.path.display()).into());
         }
+        reached_through_real_directories(data, &entry.path)?;
     }
     for entry in &manifest.files {
         let target = data.join(&entry.path);
@@ -343,6 +371,52 @@ mod tests {
         let error = take(dir.path(), &snapshots.path().join("snapshot")).unwrap_err();
         assert!(error.to_string().contains("not a regular file"));
         assert!(!snapshots.path().join("snapshot").exists());
+    }
+
+    #[test]
+    fn a_directory_replaced_by_a_link_is_never_restored_through() {
+        let dir = data_dir();
+        let snapshots = tempfile::tempdir().unwrap();
+        let snapshot = snapshots.path().join("snapshot");
+        take(dir.path(), &snapshot).unwrap();
+        // The release that failed (or anything running as the daemon's user) swaps a bot's
+        // directory for a link to somewhere only root can write.
+        let outside = tempfile::tempdir().unwrap();
+        fs::remove_dir_all(dir.path().join("bots/b1")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("bots/b1")).unwrap();
+        fs::write(dir.path().join("bot.db"), "newer").unwrap();
+        let error = restore(dir.path(), &snapshot).unwrap_err();
+        assert!(error.to_string().contains("no longer a directory"));
+        // Nothing was written through the link, and nothing else was touched either.
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+        assert_eq!(
+            fs::read_to_string(dir.path().join("bot.db")).unwrap(),
+            "newer"
+        );
+        // The same holds when the `bots` directory itself became a link.
+        fs::remove_file(dir.path().join("bots/b1")).unwrap();
+        fs::remove_dir(dir.path().join("bots")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("bots")).unwrap();
+        assert!(restore(dir.path(), &snapshot).is_err());
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_path_that_climbs_out_of_the_data_directory_is_refused() {
+        // The directories exist, so only the odd component can be what fails.
+        let dir = data_dir();
+        for relative in ["../etc/shadow.db", "/etc/shadow.db", "bots/../../x.db"] {
+            let error = reached_through_real_directories(dir.path(), Path::new(relative))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("invalid database path"),
+                "{relative}: {error}"
+            );
+        }
+        reached_through_real_directories(dir.path(), Path::new("bots/b1/knowledge.db")).unwrap();
+        // A file directly in the data directory needs no directory at all.
+        reached_through_real_directories(dir.path(), Path::new("bot.db")).unwrap();
     }
 
     #[test]
