@@ -42,13 +42,16 @@ import {
 } from "../lib/botProfile";
 import { invalidCustomRoles } from "../lib/botEditor";
 import { botHasAccess, changedApps, saveBotAndApps } from "../lib/mcpApps";
+import { AvatarFileError } from "../lib/avatar";
 import { botWriteMessage } from "../lib/botWrite";
 import { modelGroups } from "../lib/modelPicker";
 import {
+  applyLook,
   createFromTemplate,
   GENERAL_CHOICE,
   levelAfterPick,
   levelsFor,
+  LookNotAppliedError,
   nameAfterPick,
   purposeKey,
   shuffleLook,
@@ -91,6 +94,8 @@ function NewBotDialogContent({
     useBotFormDeps(client, undefined, true);
 
   const [createdBot, setCreatedBot] = useState<Bot | null>(null);
+  // A template bot that exists but whose look the daemon refused: Create then retries the look on it.
+  const [lookPending, setLookPending] = useState<{ bot: Bot; choice: string } | null>(null);
   // "Import from a file" and "See what it comes with" open the review view instead of this page.
   const [importSource, setImportSource] = useState<ProfileSource | null>(null);
   const [gallery, setGallery] = useState<SharedProfile[]>([]);
@@ -177,6 +182,9 @@ function NewBotDialogContent({
     setChoice(next);
   };
 
+  // The card buttons by choice, so the arrow keys move the focus to exactly the card the roving tabIndex marks.
+  const choiceRefs = useRef(new Map<string, HTMLButtonElement>());
+
   // The cards are one radio group: arrows move the choice (and the focus), Tab leaves the group.
   const onChoiceKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
@@ -186,7 +194,7 @@ function NewBotDialogContent({
     const next = choices[(at + step + choices.length) % choices.length];
     if (!next) return;
     pick(next.id);
-    e.currentTarget.querySelector<HTMLElement>(`[data-choice="${CSS.escape(next.id)}"]`)?.focus();
+    choiceRefs.current.get(next.id)?.focus();
   };
 
   const surprise = () => {
@@ -259,7 +267,21 @@ function NewBotDialogContent({
     const model = formatModelRef(effectiveExecutor);
     const answer = await askEngine(model);
     if (answer === null) return;
-    const bot = await createFromTemplate(client, { template: tpl, preset: draft.preset, model, name: draft.name, look: draft });
+    let bot: Bot;
+    if (lookPending && lookPending.choice === choice) {
+      // The bot was made by an earlier try whose look failed: give it the look again, never a second bot.
+      bot = await applyLook(client, await client.getBot(lookPending.bot.id), draft);
+    } else {
+      try {
+        bot = await createFromTemplate(client, { template: tpl, preset: draft.preset, model, name: draft.name, look: draft });
+      } catch (err) {
+        if (!(err instanceof LookNotAppliedError)) throw err;
+        // The bot exists (and is listed); say why its look is missing and let the owner retry or close.
+        setLookPending({ bot: err.bot, choice });
+        await refreshBots().catch(() => {});
+        throw err.reason;
+      }
+    }
     await applyEngine(bot.id, answer);
     await refreshBots().catch(() => {});
     onDone(bot.id);
@@ -273,7 +295,11 @@ function NewBotDialogContent({
       if (template) await saveTemplate(template);
       else await saveGeneral();
     } catch (err) {
-      setError(botWriteMessage(err, t));
+      setError(
+        err instanceof AvatarFileError
+          ? t(err.reason === "tooLarge" ? "botForm.avatarTooLarge" : "botForm.avatarUnreadable")
+          : botWriteMessage(err, t)
+      );
     } finally {
       setSaving(false);
     }
@@ -348,7 +374,11 @@ function NewBotDialogContent({
             </button>
           </div>
           <div className={styles.identityFields}>
+            <label className={styles.label} htmlFor="new-bot-name">
+              {t("botForm.name")}
+            </label>
             <input
+              id="new-bot-name"
               type="text"
               className={styles.nameInput}
               data-autofocus
@@ -356,7 +386,6 @@ function NewBotDialogContent({
               maxLength={60}
               value={draft.name}
               placeholder={t("newBot.quick.namePlaceholder")}
-              aria-label={t("botForm.name")}
               onChange={(e) => patch({ name: e.target.value })}
             />
             <CharacterShapeGrid compact value={draft.shape} color={draft.color} onChange={(shape) => patch({ shape })} />
@@ -389,7 +418,10 @@ function NewBotDialogContent({
                   tabIndex={tabStop ? 0 : -1}
                   className={[styles.choice, active ? styles.choiceActive : ""].filter(Boolean).join(" ")}
                   title={c.full}
-                  data-choice={c.id}
+                  ref={(el) => {
+                    if (el) choiceRefs.current.set(c.id, el);
+                    else choiceRefs.current.delete(c.id);
+                  }}
                   data-testid={`new-bot-choice-${c.id}`}
                   onClick={() => pick(c.id)}
                 >

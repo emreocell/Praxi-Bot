@@ -1,6 +1,7 @@
 import type { BotShapeId } from "ui/bot-shape";
 import type { Bot, BotPatchInput, PermissionPreset } from "../api/types.ts";
 import { ACCESS_LEVELS } from "./accessLevels.ts";
+import { AvatarFileError, avatarProblem } from "./avatar.ts";
 import type { PresetChoice } from "./botProfile.ts";
 import { type ImportInput, type ImportOutput, initialLevel, type SharedProfile, type SharePreset } from "./profileShare.ts";
 
@@ -37,14 +38,6 @@ function isSharePreset(v: unknown): v is SharePreset {
   return typeof v === "string" && SHARE_PRESETS.includes(v);
 }
 
-/**
- * The ceiling sent with a template import.  The page offers only the four levels; anything else
- * (a stale "custom") falls back to where the template starts, never to "full".
- */
-export function importLevel(preset: PresetChoice, requested: string | null | undefined): SharePreset {
-  return isSharePreset(preset) ? preset : initialLevel("template", isSharePreset(requested) ? requested : undefined);
-}
-
 /** Least to most freedom, to compare two levels. */
 const STRENGTH: Record<PermissionPreset, number> = {
   "read-only": 0,
@@ -59,13 +52,23 @@ function templateTop(requested: string | null | undefined): PermissionPreset {
 }
 
 /**
+ * The ceiling sent with a template import: the page's level, never above what the template asks
+ * for (the daemon clamps too, but the client does not rely on it).  The page offers only the four
+ * levels; anything else (a stale "custom") falls back to where the template starts, never to "full".
+ */
+export function importLevel(preset: PresetChoice, requested: string | null | undefined): SharePreset {
+  if (!isSharePreset(preset)) return initialLevel("template", isSharePreset(requested) ? requested : undefined);
+  const top = templateTop(requested);
+  return STRENGTH[preset] <= STRENGTH[top] ? preset : top;
+}
+
+/**
  * The levels a choice can really get, most freedom first.  All four for the general helper; for a
  * template none above what it asks for, because the import grants the lower of the two.
  */
 export function levelsFor(choice: string, requested: string | null | undefined): PermissionPreset[] {
-  if (choice === GENERAL_CHOICE) return [...ACCESS_LEVELS];
-  const top = STRENGTH[templateTop(requested)];
-  return ACCESS_LEVELS.filter((l) => STRENGTH[l] <= top);
+  const top = choice === GENERAL_CHOICE ? STRENGTH.full : STRENGTH[templateTop(requested)];
+  return ACCESS_LEVELS.filter((l) => STRENGTH[l] <= top).sort((a, b) => STRENGTH[b] - STRENGTH[a]);
 }
 
 /**
@@ -87,7 +90,7 @@ export function levelAfterPick(
 
 /** A ready-made bot cannot run on a command-line engine: the import refuses one. */
 export function templateNeedsOtherModel(choice: string, model: string): boolean {
-  return choice !== GENERAL_CHOICE && model.trim().startsWith("cli:");
+  return choice !== GENERAL_CHOICE && model.trim().toLowerCase().startsWith("cli:");
 }
 
 /**
@@ -134,22 +137,57 @@ export function shuffleLook<C extends string>(
   };
 }
 
-/** The two daemon calls a template needs (a structural slice of the API client, so tests can fake it). */
+/** The daemon calls a template needs (a structural slice of the API client, so tests can fake it). */
 export interface TemplateClient {
   importProfile(input: ImportInput): Promise<ImportOutput>;
   patchBot(id: string, input: BotPatchInput): Promise<Bot>;
 }
 
+/** The daemon refused the picture itself (not the shape or colour): wrong type, too big, not base64. */
+export function isAvatarRefusal(e: unknown): boolean {
+  const err = e as { status?: number; message?: string } | null;
+  return !!err && (err.status === 400 || err.status === 413 || err.status === 422) && /avatar/i.test(err.message ?? "");
+}
+
+/**
+ * Give a bot the chosen look.  Only a refused picture is retried without it (the shape and colour
+ * must not be lost to it); any other failure (a version conflict, the service down) is thrown.
+ */
+export async function applyLook(client: Pick<TemplateClient, "patchBot">, bot: Bot, look: Look): Promise<Bot> {
+  const patch = (l: Look) => client.patchBot(bot.id, { expected_version: bot.version, ops: lookOps(l) });
+  try {
+    return await patch(look);
+  } catch (e) {
+    if (!look.avatar || !isAvatarRefusal(e)) throw e;
+    return patch({ ...look, avatar: null });
+  }
+}
+
+/** The template bot exists but its look could not be applied: `bot` is the bot to retry on, `reason` why. */
+export class LookNotAppliedError extends Error {
+  readonly bot: Bot;
+  readonly reason: unknown;
+  constructor(bot: Bot, reason: unknown) {
+    super("look not applied");
+    this.bot = bot;
+    this.reason = reason;
+  }
+}
+
 /**
  * Create a bot from a gallery template the way the review view does: an import the daemon clamps to
- * the chosen level, with the owner's model and name and no file access yet; then the chosen look.
- * The look is cosmetic, so a refused look change keeps the created bot (with the default look).
+ * the chosen level (the client never asks for more than the template does), with the owner's model
+ * and name and no file access yet; then the chosen look.  A picture that is not a valid avatar is
+ * refused before anything is created (`AvatarFileError`); a look the daemon then refuses is a
+ * `LookNotAppliedError`, never reported as success.
  * The model must not be a command-line engine (see `templateNeedsOtherModel`).
  */
 export async function createFromTemplate(
   client: TemplateClient,
   input: { template: SharedProfile; preset: PresetChoice; model: string; name: string; look: Look }
 ): Promise<Bot> {
+  const problem = input.look.avatar ? avatarProblem(input.look.avatar) : null;
+  if (problem) throw new AvatarFileError(problem);
   const out = await client.importProfile({
     contents: JSON.stringify(input.template),
     permission_level: importLevel(input.preset, input.template.permissions?.preset),
@@ -157,9 +195,9 @@ export async function createFromTemplate(
     model: input.model,
     name: input.name.trim()
   });
-  const patch = (look: Look) => client.patchBot(out.bot.id, { expected_version: out.bot.version, ops: lookOps(look) });
-  // A picture the daemon refuses must not cost the shape and colour: try once more without it.
-  return patch(input.look)
-    .catch(() => (input.look.avatar ? patch({ ...input.look, avatar: null }) : Promise.reject(new Error("look"))))
-    .catch(() => out.bot);
+  try {
+    return await applyLook(client, out.bot, input.look);
+  } catch (e) {
+    throw new LookNotAppliedError(out.bot, e);
+  }
 }

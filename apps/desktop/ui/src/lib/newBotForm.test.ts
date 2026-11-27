@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { AvatarFileError } from "./avatar.ts";
 import {
+  applyLook,
   createFromTemplate,
+  isAvatarRefusal,
+  LookNotAppliedError,
   GENERAL_CHOICE,
   importLevel,
   levelAfterPick,
@@ -46,11 +50,37 @@ test("the general helper starts at the recommended level; a template at its own,
 });
 
 test("a template is imported under the level shown on the page; a stale custom never becomes Full", () => {
-  assert.equal(importLevel("full", "read-and-draft"), "full");
+  assert.equal(importLevel("full", "full"), "full");
   assert.equal(importLevel("read-only", "approve-destructive"), "read-only");
   assert.equal(importLevel("custom", "read-and-draft"), "read-and-draft");
   assert.equal(importLevel("custom", "full"), "approve-destructive");
   assert.equal(importLevel("custom", null), "approve-destructive");
+});
+
+test("a template import never asks for more than the owner's requested level", () => {
+  // A stale "full" on the page with a template that asks for read-only: read-only is sent.
+  assert.equal(importLevel("full", "read-only"), "read-only");
+  assert.equal(importLevel("full", "read-and-draft"), "read-and-draft");
+  assert.equal(importLevel("approve-destructive", "read-and-draft"), "read-and-draft");
+  // Asking for nothing is the daemon's default, approve-destructive.
+  assert.equal(importLevel("full", undefined), "approve-destructive");
+  assert.equal(importLevel("full", "weird"), "approve-destructive");
+  assert.equal(importLevel("read-and-draft", undefined), "read-and-draft");
+});
+
+test("levelsFor is sorted most freedom first, whatever order the source list has", () => {
+  const rank = { full: 3, "approve-destructive": 2, "read-and-draft": 1, "read-only": 0 } as const;
+  for (const requested of ["read-only", "read-and-draft", "approve-destructive", "full", undefined]) {
+    for (const choice of [GENERAL_CHOICE, "researcher"]) {
+      const levels = levelsFor(choice, requested);
+      const sorted = [...levels].sort((a, b) => rank[b] - rank[a]);
+      assert.deepEqual(levels, sorted, `${choice}/${requested}`);
+    }
+  }
+  // The first level is the top the choice can get: what every `levels[0]` fallback relies on.
+  assert.equal(levelsFor(GENERAL_CHOICE, "read-only")[0], "full");
+  assert.equal(levelsFor("researcher", "read-and-draft")[0], "read-and-draft");
+  assert.equal(levelAfterPick("full", true, "researcher", "read-and-draft", "approve-destructive"), "read-and-draft");
 });
 
 test("a template offers only the levels it can really get (the import grants the lower of the two)", () => {
@@ -84,6 +114,9 @@ test("a ready-made bot cannot be created on a command-line engine; the general h
   assert.equal(templateNeedsOtherModel("researcher", "cli:claude/default"), true);
   assert.equal(templateNeedsOtherModel("researcher", "anthropic/claude"), false);
   assert.equal(templateNeedsOtherModel(GENERAL_CHOICE, "cli:claude/default"), false);
+  // The engine prefix is not case-sensitive, nor are surrounding spaces.
+  assert.equal(templateNeedsOtherModel("researcher", "CLI:claude/default"), true);
+  assert.equal(templateNeedsOtherModel("researcher", "  Cli:claude/default "), true);
 });
 
 test("a typed name survives another pick; an empty or picked name follows the pick", () => {
@@ -142,7 +175,24 @@ const TEMPLATE = {
   permissions: { preset: "read-and-draft" }
 } as never;
 
-function fakeClient(patchFails: boolean | "avatar" = false) {
+const PNG = "data:image/png;base64,AAAA";
+
+class FakeApiError extends Error {
+  status: number;
+  code: string;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+const avatarRefused = () => new FakeApiError(400, "bad_request", "bad_patch:`avatar` is 300000 bytes; the limit is 200000");
+const versionConflict = () => new FakeApiError(409, "version_conflict", "stale version");
+
+type PatchFailure = "avatar" | "version" | "down" | null;
+
+function fakeClient(patchFails: PatchFailure = null) {
   const calls: { imports: unknown[]; patches: Array<[string, unknown]> } = { imports: [], patches: [] };
   const bot = { id: "b1", name: "Mail", version: 3, config: {}, created_at_ms: 1 };
   return {
@@ -155,7 +205,9 @@ function fakeClient(patchFails: boolean | "avatar" = false) {
       async patchBot(id: string, input: unknown) {
         calls.patches.push([id, input]);
         const ops = (input as { ops: Array<{ path: string }> }).ops;
-        if (patchFails === true || (patchFails === "avatar" && ops.some((o) => o.path === "/bot/avatar"))) throw new Error("400");
+        if (patchFails === "version") throw versionConflict();
+        if (patchFails === "down") throw new FakeApiError(0, "network", "connection refused");
+        if (patchFails === "avatar" && ops.some((o) => o.path === "/bot/avatar")) throw avatarRefused();
         return { ...bot, version: 4 } as never;
       }
     }
@@ -165,11 +217,11 @@ function fakeClient(patchFails: boolean | "avatar" = false) {
 test("a template bot is imported under the page's level, model and name, then given the chosen look", async () => {
   const { client, calls } = fakeClient();
   const look = { shape: "cloud" as const, color: "#4c8dff", avatar: null };
-  const bot = await createFromTemplate(client, { template: TEMPLATE, preset: "full", model: "anthropic/claude", name: "  Mail ", look });
+  const bot = await createFromTemplate(client, { template: TEMPLATE, preset: "read-and-draft", model: "anthropic/claude", name: "  Mail ", look });
   assert.deepEqual(calls.imports, [
     {
       contents: JSON.stringify(TEMPLATE),
-      permission_level: "full",
+      permission_level: "read-and-draft",
       computer_files: false,
       model: "anthropic/claude",
       name: "Mail"
@@ -179,24 +231,94 @@ test("a template bot is imported under the page's level, model and name, then gi
   assert.equal(bot.version, 4);
 });
 
-test("a refused look change keeps the created template bot", async () => {
-  const { client } = fakeClient(true);
-  const bot = await createFromTemplate(client, {
-    template: TEMPLATE,
-    preset: "custom",
-    model: "m",
-    name: "Mail",
-    look: { shape: "gem", color: "#fff", avatar: null }
-  });
-  assert.equal(bot.id, "b1");
-  assert.equal(bot.version, 3);
+test("a stale higher level on the page is sent as the template's own level, not as Full", async () => {
+  const { client, calls } = fakeClient();
+  const look = { shape: "cloud" as const, color: "#4c8dff", avatar: null };
+  await createFromTemplate(client, { template: TEMPLATE, preset: "full", model: "m", name: "Mail", look });
+  assert.equal((calls.imports[0] as { permission_level: string }).permission_level, "read-and-draft");
+});
+
+test("a look change the daemon refuses for another reason is shown, never reported as success", async () => {
+  for (const failure of ["version", "down"] as const) {
+    const { client, calls } = fakeClient(failure);
+    const look = { shape: "gem" as const, color: "#fff", avatar: null };
+    const err = await createFromTemplate(client, { template: TEMPLATE, preset: "read-only", model: "m", name: "Mail", look }).catch((e) => e);
+    assert.ok(err instanceof LookNotAppliedError, failure);
+    // The created bot is handed back so it is not made twice, and the root cause is kept.
+    assert.equal(err.bot.id, "b1");
+    assert.equal(err.reason instanceof FakeApiError, true);
+    assert.equal((err.reason as FakeApiError).code, failure === "version" ? "version_conflict" : "network");
+    assert.equal(calls.patches.length, 1, "no retry without the picture");
+  }
+});
+
+test("a failed look with a picture is not retried without it unless the picture was refused", async () => {
+  const { client, calls } = fakeClient("version");
+  const look = { shape: "gem" as const, color: "#fff", avatar: PNG };
+  await assert.rejects(applyLook(client, { id: "b1", version: 3 } as never, look), FakeApiError);
+  assert.equal(calls.patches.length, 1);
 });
 
 test("a refused picture does not cost the template bot its shape and colour", async () => {
   const { client, calls } = fakeClient("avatar");
-  const look = { shape: "gem" as const, color: "#fff", avatar: "data:image/png;base64,AA" };
+  const look = { shape: "gem" as const, color: "#fff", avatar: PNG };
   const bot = await createFromTemplate(client, { template: TEMPLATE, preset: "read-only", model: "m", name: "Mail", look });
   assert.equal(calls.patches.length, 2);
   assert.deepEqual(calls.patches[1], ["b1", { expected_version: 3, ops: lookOps({ ...look, avatar: null }) }]);
   assert.equal(bot.version, 4);
+});
+
+test("only a daemon refusal that names the avatar counts as a refused picture", () => {
+  assert.equal(isAvatarRefusal(avatarRefused()), true);
+  assert.equal(isAvatarRefusal(new FakeApiError(413, "too_large", "`avatar` is too big")), true);
+  assert.equal(isAvatarRefusal(versionConflict()), false);
+  assert.equal(isAvatarRefusal(new FakeApiError(400, "bad_request", "bad_patch:`color` must look like #rrggbb")), false);
+  assert.equal(isAvatarRefusal(new FakeApiError(500, "internal", "avatar")), false);
+  assert.equal(isAvatarRefusal(new Error("avatar")), false);
+  assert.equal(isAvatarRefusal(null), false);
+});
+
+test("a picture that is not a small png/jpeg/gif/webp data URL is refused before anything is created", async () => {
+  const bad: Array<[string, string]> = [
+    ["data:image/svg+xml;base64,AAAA", "unreadable"],
+    ["data:text/html;base64,AAAA", "unreadable"],
+    ["https://example.com/a.png", "unreadable"],
+    ["data:image/png;base64,", "unreadable"],
+    ["data:image/png;base64,AA AA!", "unreadable"],
+    [`data:image/png;base64,${"A".repeat(200_001)}`, "tooLarge"]
+  ];
+  for (const [avatar, reason] of bad) {
+    const { client, calls } = fakeClient();
+    const err = await createFromTemplate(client, {
+      template: TEMPLATE,
+      preset: "read-only",
+      model: "m",
+      name: "Mail",
+      look: { shape: "gem", color: "#fff", avatar }
+    }).catch((e) => e);
+    assert.ok(err instanceof AvatarFileError, avatar.slice(0, 30));
+    assert.equal(err.reason, reason);
+    assert.equal(calls.imports.length, 0);
+    assert.equal(calls.patches.length, 0);
+  }
+  // Valid types pass.
+  for (const type of ["png", "jpeg", "gif", "webp"]) {
+    const { client, calls } = fakeClient();
+    await createFromTemplate(client, {
+      template: TEMPLATE,
+      preset: "read-only",
+      model: "m",
+      name: "Mail",
+      look: { shape: "gem", color: "#fff", avatar: `data:image/${type};base64,AAAA` }
+    });
+    assert.equal(calls.imports.length, 1, type);
+  }
+});
+
+test("the dialog names the field with a visible label and moves the focus by refs, not by a selector", () => {
+  const src = read("../views/NewBotModal.tsx");
+  assert.match(src, /<label className=\{styles\.label\} htmlFor="new-bot-name">/);
+  assert.match(src, /id="new-bot-name"/);
+  assert.match(src, /choiceRefs\.current\.get\(next\.id\)\?\.focus\(\)/);
+  assert.doesNotMatch(src, /CSS\.escape|querySelector/);
 });
