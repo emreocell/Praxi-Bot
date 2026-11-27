@@ -405,7 +405,12 @@ Ubuntu'nun `chromium-browser` ve sanal `chromium` paketleri snap'e çözülebili
 asla seçmez. Yalnızca snap bulan keşif ve snap geçersiz kılmaları desteklenmez ve net bir tanılama
 üretir. `--skip-packages` ile snap olmayan, çalışan bir tarayıcıyı kendin sağla. `BOT_BROWSER_PATH`
 keşfi geçersiz kılar. `PRAXI_BROWSER_PATH` uyumlu bir yedek olarak kalır. Geçersiz bir geçersiz kılma,
-sessizce başka bir tarayıcı seçmek yerine başarısız olur.
+sessizce başka bir tarayıcı seçmek yerine başarısız olur. Keşif yalnızca senin ya da root'un
+değiştirebildiği yerlere güvenir: olağan dağıtım yollarının yanında, sahibi root ya da servis
+kullanıcısı olan ve grup veya diğer kullanıcılara yazma izni vermeyen `PATH` klasörlerine bakar
+(böyle bir klasörden dışarı çıkan bağlantı atlanır). Herkesin yazabildiği bir tarayıcı ya da klasör
+reddedilir (`BOT_BROWSER_PATH` için de; onun çözülmüş yolu günlüğe yazılır). Praxi'nin indirdiği bir
+tarayıcı da yalnızca tüm dosyaları kurulum manifestiyle hâlâ eşleştiği sürece kullanılır.
 
 Kurulum programını yeniden çalıştırmak (`bot host repair`, yükseltmeler) tarayıcı için idempotenttir:
 sabitlenmiş sürümde çalışan bir `/opt/praxi-browser` korunur ve yeniden indirilmez, paylaşılan

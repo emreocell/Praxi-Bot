@@ -236,7 +236,7 @@ pub fn child_env() -> Vec<(OsString, OsString)> {
     #[allow(unused_mut)] // only unix adds the browser path
     let mut env = retained_child_env(std::env::vars_os());
     #[cfg(unix)]
-    if let Ok(browser) = browser_cdp::find_browser() {
+    if let Ok(browser) = browser_cdp::find_browser_cached() {
         env.push(("PRAXI_BROWSER_PATH".into(), browser.into_os_string()));
     }
     env

@@ -444,7 +444,12 @@ never selected by the installer. Snap-only discovery and snap overrides are
 unsupported and produce a clear diagnostic. With `--skip-packages`, provide a
 working non-snap browser yourself. `BOT_BROWSER_PATH` overrides discovery;
 `PRAXI_BROWSER_PATH` remains a compatible fallback. An invalid override fails
-instead of silently choosing a different browser.
+instead of silently choosing a different browser. Discovery only trusts places that only you or
+root can change: besides the usual distro paths it searches the `PATH` folders that are owned by
+root or the service user and not writable by group or others (a link leading out of such a folder is
+skipped), a browser or folder that every user can write to is refused (also for `BOT_BROWSER_PATH`,
+whose resolved path is logged), and a browser Praxi downloaded is used only while every file of it
+still matches its install manifest.
 
 Re-running the installer (`bot host repair`, upgrades) is idempotent for the
 browser: a working `/opt/praxi-browser` at the pinned version is kept and not

@@ -65,7 +65,7 @@ pub use downloads::{
 };
 pub use error::{Error, Result};
 pub use human::{Feel, HumanLike};
-pub use launch::{LaunchOptions, find_browser};
+pub use launch::{LaunchOptions, find_browser, find_browser_cached};
 pub use live_view::{
     BROWSER_INPUT_LIMITATION, BrowserFrameSource, BrowserInputSink, BrowserViewConfig,
     BrowserViewStatus, BrowserViewTarget, ManualClock, TakeoverPinHook, ViewClock,

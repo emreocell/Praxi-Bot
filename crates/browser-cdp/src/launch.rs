@@ -58,13 +58,21 @@ pub const MANAGED_DIR: &str = "browser";
 /// install never has it, so it is never picked.
 pub const MANAGED_MARKER: &str = "praxi-runtime.manifest";
 
-static MANAGED_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+/// Checks that an install folder still matches the checksum manifest it was written with.
+/// Given the program (`<root>/i-*/<dir>/chrome`); `true` only when every file of the install
+/// folder is exactly what the install recorded. The checksum code lives in a crate this one does
+/// not depend on, so the daemon hands it over at start-up.
+pub type ManifestVerifier = fn(&Path) -> bool;
+
+static MANAGED_ROOT: std::sync::OnceLock<(PathBuf, ManifestVerifier)> = std::sync::OnceLock::new();
 
 /// Tell discovery where the data directory is, so a browser installed by
-/// `bot browser install` (or the Settings button) is found like any other.
+/// `bot browser install` (or the Settings button) is found like any other, and how to check
+/// its manifest. Without this call (or with a verifier that says no) a managed browser is
+/// never used: a marker file and an executable beside it prove nothing.
 /// The first call wins; call it once at start-up.
-pub fn register_data_dir(data_dir: &Path) {
-    let _ = MANAGED_ROOT.set(data_dir.join(MANAGED_DIR));
+pub fn register_managed(data_dir: &Path, verify: ManifestVerifier) {
+    let _ = MANAGED_ROOT.set((data_dir.join(MANAGED_DIR), verify));
 }
 
 /// What one candidate path is.
@@ -74,6 +82,9 @@ pub enum Probe {
     Usable,
     /// A snap browser or a wrapper that runs one (cannot run in the hardened unit).
     Snap,
+    /// Writable by every user (the file, or the folder it really lives in): anyone on the
+    /// computer could swap it for their own program.
+    Unsafe,
     /// Nothing there.
     Missing,
 }
@@ -81,10 +92,32 @@ pub enum Probe {
 fn probe_path(p: &Path) -> Probe {
     if !p.is_file() {
         Probe::Missing
+    } else if writable_by_everyone(p) {
+        Probe::Unsafe
     } else if is_snap_browser(p) {
         Probe::Snap
     } else {
         Probe::Usable
+    }
+}
+
+/// Whether the program `path` really is (links followed), or the folder it really lives in,
+/// can be written by every user. Unknown counts as yes: a path that cannot be resolved cannot
+/// be vouched for.
+fn writable_by_everyone(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let Ok(real) = path.canonicalize() else {
+            return true;
+        };
+        let other_writes = |p: &Path| std::fs::metadata(p).is_ok_and(|m| m.mode() & 0o002 != 0);
+        other_writes(&real) || real.parent().is_none_or(other_writes)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        false
     }
 }
 
@@ -119,6 +152,11 @@ pub fn select_browser(
                 p.display(),
                 install_advice()
             ))),
+            Probe::Unsafe => Err(Error::Launch(format!(
+                "BOT_BROWSER_PATH points to {} (really {}), which every user on this computer can write to, either the file or its folder. Remove the write permission for others (chmod o-w) or point it at another browser",
+                p.display(),
+                p.canonicalize().as_deref().unwrap_or(p).display()
+            ))),
             Probe::Missing => Err(Error::Launch(format!(
                 "BOT_BROWSER_PATH points to {}, which does not exist. Fix the path or unset it",
                 p.display()
@@ -132,7 +170,8 @@ pub fn select_browser(
             Probe::Snap => {
                 snap.get_or_insert(c);
             }
-            Probe::Missing => {}
+            // Never picked, never an error of its own: the next candidate gets its turn.
+            Probe::Unsafe | Probe::Missing => {}
         }
     }
     Err(match snap {
@@ -145,17 +184,85 @@ pub fn select_browser(
     })
 }
 
-/// Find an installed Chrome or Edge binary.
+/// Find an installed Chrome or Edge binary, for a launch: a browser Praxi downloaded itself is
+/// used only after every file of it was hashed against its manifest just now.
+///
+/// # Errors
+/// See [`select_browser`].
 pub fn find_browser() -> Result<PathBuf> {
+    find_browser_with(true)
+}
+
+/// [`find_browser`] for callers that only report or hand on the path (status, doctor, the
+/// shell's environment): the manifest check of a downloaded browser is remembered for a minute,
+/// because it hashes the whole install. The launch itself always uses [`find_browser`].
+///
+/// # Errors
+/// See [`select_browser`].
+pub fn find_browser_cached() -> Result<PathBuf> {
+    find_browser_with(false)
+}
+
+fn find_browser_with(fresh: bool) -> Result<PathBuf> {
     let over = std::env::var("BOT_BROWSER_PATH")
         .or_else(|_| std::env::var(BROWSER_ENV))
         .ok()
         .filter(|p| !p.trim().is_empty());
-    select_browser(
+    let found = select_browser(
         over.as_deref().map(Path::new),
         &candidate_paths(),
         &probe_path,
-    )
+    );
+    let found = match found {
+        // Last resort, and only here: hashing a whole install is not free.
+        Err(e) if over.is_none() => managed_candidate(fresh)
+            .filter(|b| probe_path(b) == Probe::Usable)
+            .ok_or(e),
+        other => other,
+    };
+    // The override is the owner's own setting and is honoured as written; the log says what it
+    // really resolved to (a link can point anywhere).
+    if let Some(o) = &over {
+        match &found {
+            Ok(p) => tracing::info!(
+                configured = %o,
+                resolved = %p.canonicalize().as_deref().unwrap_or(p).display(),
+                "using the browser named by BOT_BROWSER_PATH"
+            ),
+            Err(e) => tracing::warn!(configured = %o, "BOT_BROWSER_PATH refused: {e}"),
+        }
+    }
+    found
+}
+
+/// How long [`find_browser_cached`] trusts a manifest check.
+const MANAGED_CHECK_TTL: Duration = Duration::from_secs(60);
+
+type ManagedCheck = Option<(std::time::Instant, Option<PathBuf>)>;
+
+static MANAGED_CHECK: std::sync::Mutex<ManagedCheck> = std::sync::Mutex::new(None);
+
+/// Forget the remembered manifest check (after an install changed what is on disk).
+pub fn forget_managed_check() {
+    *MANAGED_CHECK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
+
+fn managed_candidate(fresh: bool) -> Option<PathBuf> {
+    let (root, verify) = MANAGED_ROOT.get()?;
+    let mut last = MANAGED_CHECK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !fresh
+        && let Some((at, found)) = last.as_ref()
+        && at.elapsed() < MANAGED_CHECK_TTL
+    {
+        return found.clone();
+    }
+    let found = managed_browser(root, verify);
+    *last = Some((std::time::Instant::now(), found.clone()));
+    found
 }
 
 /// Known snap executables and distro wrappers cannot run in the hardened unit.
@@ -174,12 +281,21 @@ pub fn is_snap_browser(path: &Path) -> bool {
             || String::from_utf8_lossy(&header).contains("/snap/"))
 }
 
-/// The newest finished install under `root` (`<data dir>/browser`): a folder
-/// with the install marker and a `chrome` program one level down.
+/// The newest install under `root` (`<data dir>/browser`) that passes `verify`: a folder with
+/// the install marker and a regular `chrome` file one level down, whose files all still match the
+/// manifest. The marker's existence alone never counts, so a planted folder is never used.
+/// `root` itself must belong to this user (or root) and not be writable by anyone else.
 #[must_use]
-pub fn managed_browser(root: &Path) -> Option<PathBuf> {
-    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+pub fn managed_browser(root: &Path, verify: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
+    if !dir_is_private(root) {
+        return None;
+    }
+    let mut found: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
     for dir in std::fs::read_dir(root).ok()?.flatten() {
+        // A link in place of an install folder is never followed.
+        if !dir.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
         let dir = dir.path();
         let Ok(done) = std::fs::metadata(dir.join(MANAGED_MARKER)).and_then(|m| m.modified())
         else {
@@ -190,12 +306,48 @@ pub fn managed_browser(root: &Path) -> Option<PathBuf> {
         };
         for sub in inner.flatten() {
             let bin = sub.path().join("chrome");
-            if bin.is_file() && best.as_ref().is_none_or(|(t, _)| done > *t) {
-                best = Some((done, bin));
+            if std::fs::symlink_metadata(&bin).is_ok_and(|m| m.is_file()) {
+                found.push((done, bin));
             }
         }
     }
-    best.map(|(_, p)| p)
+    found.sort_by_key(|f| std::cmp::Reverse(f.0));
+    found.into_iter().map(|(_, b)| b).find(|b| verify(b))
+}
+
+/// A folder that only this user or root can change: owned by one of them, and with no write
+/// bit for group or others. (Always true where there are no such permissions.)
+fn dir_is_private(dir: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(dir)
+            .is_ok_and(|m| m.is_dir() && owner_and_mode_trusted(m.uid(), m.mode(), service_uid()))
+    }
+    #[cfg(not(unix))]
+    {
+        dir.is_dir()
+    }
+}
+
+/// The pure rule behind [`dir_is_private`]: owned by root or the service user, and neither
+/// group nor others can write.
+#[cfg(unix)]
+fn owner_and_mode_trusted(uid: u32, mode: u32, service_uid: u32) -> bool {
+    (uid == 0 || uid == service_uid) && mode & 0o022 == 0
+}
+
+#[cfg(unix)]
+fn service_uid() -> u32 {
+    #[cfg(target_os = "linux")]
+    {
+        rustix::process::geteuid().as_raw()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // Not reachable where only Linux enumerates folders; unknown matches only root.
+        u32::MAX
+    }
 }
 
 fn candidate_paths() -> Vec<PathBuf> {
@@ -217,14 +369,15 @@ fn candidate_paths() -> Vec<PathBuf> {
     } else {
         v.push("/opt/praxi-browser/chrome".into());
         v.extend(linux_candidates(std::env::var_os("PATH").as_deref()));
-        // Last: the browser Praxi downloaded into its own data directory.
-        v.extend(MANAGED_ROOT.get().and_then(|r| managed_browser(r)));
+        // The browser Praxi downloaded comes after all of these, and only once its manifest
+        // checks out: see `find_browser`.
     }
     v
 }
 
-/// System-installed browsers on Linux: the usual places, then every `PATH`
-/// folder, then the programs behind the distro launcher scripts.
+/// System-installed browsers on Linux: the fixed distro places, then the `PATH` folders that
+/// only this user or root can change (a drop-in `chromium` in a folder anyone can write to would
+/// run as the service), then the programs behind the distro launcher scripts.
 fn linux_candidates(path_env: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
     let names = [
         "google-chrome",
@@ -234,7 +387,7 @@ fn linux_candidates(path_env: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
         "microsoft-edge",
         "microsoft-edge-stable",
     ];
-    let mut dirs: Vec<PathBuf> = [
+    let fixed: Vec<PathBuf> = [
         "/usr/bin",
         "/usr/local/bin",
         "/opt/google/chrome",
@@ -243,13 +396,20 @@ fn linux_candidates(path_env: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
     .into_iter()
     .map(PathBuf::from)
     .collect();
-    if let Some(p) = path_env {
-        dirs.extend(std::env::split_paths(p).filter(|d| d.is_absolute()));
-    }
     let mut v: Vec<PathBuf> = Vec::new();
-    for d in &dirs {
-        for n in names {
-            v.push(d.join(n));
+    for d in &fixed {
+        v.extend(names.iter().map(|n| d.join(n)));
+    }
+    if let Some(p) = path_env {
+        for d in std::env::split_paths(p).filter(|d| d.is_absolute() && !fixed.contains(d)) {
+            if dir_is_private(&d) {
+                v.extend(
+                    names
+                        .iter()
+                        .map(|n| d.join(n))
+                        .filter(|c| stays_inside(c, &d)),
+                );
+            }
         }
     }
     // The programs behind distro launcher scripts, for hosts that only have these.
@@ -264,6 +424,20 @@ fn linux_candidates(path_env: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
     let mut seen = std::collections::HashSet::new();
     v.retain(|p| seen.insert(p.clone()));
     v
+}
+
+/// Whether `candidate` is not a link, or is one whose target is still inside `dir`: a link in a
+/// `PATH` folder that leads somewhere else is not what the folder vouches for.
+fn stays_inside(candidate: &Path, dir: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(candidate) else {
+        // Nothing there: the probe will say so.
+        return true;
+    };
+    !meta.is_symlink()
+        || matches!(
+            (candidate.canonicalize(), dir.canonicalize()),
+            (Ok(real), Ok(base)) if real.starts_with(&base)
+        )
 }
 
 /// Command line flags for a launch (excluding the binary).
@@ -287,18 +461,102 @@ pub fn build_args(opts: &LaunchOptions, profile: &Path) -> Vec<String> {
 
 /// `--lang` and `--accept-lang` for the host's language, so pages see what the
 /// owner of the host would (a service-started browser says `en-US` otherwise).
-/// Nothing when the host has none, or the caller already chose one.
+/// Nothing when the host has none, when the caller already chose one, or when
+/// the text is not a plain language list (`ll`, `ll-RR`, comma separated): it
+/// goes onto a command line, so it is checked here and not by the caller.
 #[must_use]
 pub fn language_args(languages: Option<String>, extra: &[String]) -> Vec<String> {
     let chosen = extra
         .iter()
         .any(|a| a.starts_with("--lang") || a.starts_with("--accept-lang"));
     match languages {
-        Some(l) if !chosen => {
+        Some(l) if !chosen && is_language_list(&l) => {
             let first = l.split(',').next().unwrap_or(&l).to_owned();
             vec![format!("--lang={first}"), format!("--accept-lang={l}")]
         }
         _ => Vec::new(),
+    }
+}
+
+/// One to four tags of the form `ll` or `ll-RR` (two or three lower-case letters, then an
+/// optional dash and two upper-case letters), separated by commas, nothing else.
+fn is_language_list(text: &str) -> bool {
+    let tag_ok = |t: &str| {
+        let (lang, region) = match t.split_once('-') {
+            Some((l, r)) => (l, Some(r)),
+            None => (t, None),
+        };
+        (2..=3).contains(&lang.len())
+            && lang.bytes().all(|b| b.is_ascii_lowercase())
+            && region.is_none_or(|r| r.len() == 2 && r.bytes().all(|b| b.is_ascii_uppercase()))
+    };
+    let mut tags = 0;
+    for t in text.split(',') {
+        tags += 1;
+        if tags > 4 || !tag_ok(t) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Browser switches nobody who can influence a launch may add: they switch off the sandbox or
+/// site isolation or certificate checks, open the debugging port to others, point the browser at
+/// another profile, or run a program of the caller's choice. Compared by name, without leading
+/// dashes, case-insensitively; a trailing `*` means "starts with".
+const DENIED_SWITCHES: &[&str] = &[
+    "no-sandbox",
+    "disable-setuid-sandbox",
+    "disable-gpu-sandbox",
+    "disable-web-security",
+    "disable-site-isolation-trials",
+    "allow-running-insecure-content",
+    "allow-file-access-from-files",
+    "unsafely-treat-insecure-origin-as-secure",
+    "ignore-certificate-errors*",
+    "remote-debugging-*",
+    "remote-allow-origins",
+    "user-data-dir",
+    "load-extension",
+    "disable-extensions-except",
+    "renderer-cmd-prefix",
+    "utility-cmd-prefix",
+    "gpu-launcher",
+    "browser-subprocess-path",
+];
+
+/// Whether an extra launch argument is refused: a denied switch, or anything that is not a
+/// switch at all (a bare word is a page for the browser to open).
+#[must_use]
+pub fn extra_arg_denied(arg: &str) -> bool {
+    let arg = arg.trim();
+    let Some(rest) = arg.strip_prefix('-') else {
+        return true;
+    };
+    let name = rest
+        .trim_start_matches('-')
+        .split('=')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    DENIED_SWITCHES.iter().any(|d| match d.strip_suffix('*') {
+        Some(prefix) => name.starts_with(prefix),
+        None => name == *d,
+    })
+}
+
+/// Refuse a launch whose extra arguments contain a denied one. The sandbox is only ever turned
+/// off by this module's own decision (the browser runs as root), never by a caller.
+///
+/// # Errors
+/// [`Error::Launch`] naming the first refused argument.
+pub fn check_extra_args(args: &[String]) -> Result<()> {
+    match args.iter().find(|a| extra_arg_denied(a)) {
+        Some(a) => Err(Error::Launch(format!(
+            "the browser flag `{}` is not allowed: it weakens the browser's isolation or changes what it runs",
+            a.split('=').next().unwrap_or(a)
+        ))),
+        None => Ok(()),
     }
 }
 
@@ -399,6 +657,8 @@ pub fn build_args_for_host(
     a.extend(
         opts.args
             .iter()
+            // Defence in depth: `Browser::launch` refuses these with an error first.
+            .filter(|arg| !extra_arg_denied(arg))
             .filter(|arg| {
                 !linux
                     || (!arg.starts_with("--no-sandbox")
@@ -749,12 +1009,22 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    fn mode(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
     #[test]
-    fn candidates_cover_path_folders_once_and_skip_relative_ones() {
-        let path = std::ffi::OsString::from("/home/u/bin:relative/bin:/usr/bin");
+    fn candidates_cover_fixed_places_once_and_skip_relative_path_folders() {
+        let path = std::ffi::OsString::from("relative/bin:/usr/bin:/nonexistent-praxi-dir");
         let c = linux_candidates(Some(&path));
-        assert!(c.contains(&PathBuf::from("/home/u/bin/chromium")), "{c:?}");
         assert!(!c.iter().any(|p| p.starts_with("relative")), "{c:?}");
+        // A folder that does not exist (so is not one of ours) adds nothing.
+        assert!(
+            !c.iter().any(|p| p.starts_with("/nonexistent-praxi-dir")),
+            "{c:?}"
+        );
         let usr_bin = c
             .iter()
             .filter(|p| **p == Path::new("/usr/bin/chromium"))
@@ -772,25 +1042,221 @@ mod tests {
         assert!(script < real);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_path_folder_anyone_can_write_to_is_never_searched() {
+        let d = tempfile::tempdir().unwrap();
+        let mine = d.path().join("mine");
+        let group = d.path().join("group");
+        let open = d.path().join("open");
+        for (dir, m) in [(&mine, 0o755), (&group, 0o775), (&open, 0o777)] {
+            std::fs::create_dir(dir).unwrap();
+            mode(dir, m);
+        }
+        let path = std::env::join_paths([&mine, &group, &open]).unwrap();
+        let c = linux_candidates(Some(&path));
+        assert!(c.contains(&mine.join("chromium")), "{c:?}");
+        assert!(!c.iter().any(|p| p.starts_with(&group)), "group: {c:?}");
+        assert!(!c.iter().any(|p| p.starts_with(&open)), "open: {c:?}");
+        // The fixed distro places stay, whatever PATH says.
+        assert!(c.contains(&PathBuf::from("/usr/bin/chromium")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_a_path_folder_that_leads_outside_it_is_skipped() {
+        let d = tempfile::tempdir().unwrap();
+        let bin = d.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        mode(&bin, 0o755);
+        std::fs::write(bin.join("chromium-real"), b"x").unwrap();
+        std::os::unix::fs::symlink("chromium-real", bin.join("chromium")).unwrap();
+        std::os::unix::fs::symlink("/bin/sh", bin.join("google-chrome")).unwrap();
+        std::fs::write(bin.join("chromium-browser"), b"x").unwrap();
+        let path = std::env::join_paths([&bin]).unwrap();
+        let c = linux_candidates(Some(&path));
+        assert!(c.contains(&bin.join("chromium")), "inside link kept: {c:?}");
+        assert!(c.contains(&bin.join("chromium-browser")));
+        assert!(
+            !c.contains(&bin.join("google-chrome")),
+            "outside link dropped: {c:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_owner_and_mode_rule() {
+        // (uid, mode, service uid)
+        assert!(owner_and_mode_trusted(0, 0o755, 1000));
+        assert!(owner_and_mode_trusted(1000, 0o700, 1000));
+        assert!(!owner_and_mode_trusted(1001, 0o755, 1000), "someone else");
+        assert!(!owner_and_mode_trusted(0, 0o775, 1000), "group-writable");
+        assert!(!owner_and_mode_trusted(1000, 0o757, 1000), "world-writable");
+        assert!(!owner_and_mode_trusted(0, 0o1777, 1000), "even with sticky");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_browser_everyone_can_overwrite_is_unsafe_and_a_normal_one_is_usable() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("b");
+        std::fs::create_dir(&dir).unwrap();
+        mode(&dir, 0o755);
+        let chrome = dir.join("chrome");
+        std::fs::write(&chrome, b"#!/bin/sh\nexit 0\n").unwrap();
+        mode(&chrome, 0o755);
+        assert_eq!(probe_path(&chrome), Probe::Usable);
+        // The file itself.
+        mode(&chrome, 0o757);
+        assert_eq!(probe_path(&chrome), Probe::Unsafe);
+        mode(&chrome, 0o755);
+        // The folder it lives in.
+        mode(&dir, 0o777);
+        assert_eq!(probe_path(&chrome), Probe::Unsafe);
+        mode(&dir, 0o755);
+        // A link is judged by where it really leads, not by where it sits.
+        let linkdir = d.path().join("l");
+        std::fs::create_dir(&linkdir).unwrap();
+        mode(&linkdir, 0o755);
+        std::os::unix::fs::symlink(&chrome, linkdir.join("chrome")).unwrap();
+        assert_eq!(probe_path(&linkdir.join("chrome")), Probe::Usable);
+        mode(&dir, 0o777);
+        assert_eq!(probe_path(&linkdir.join("chrome")), Probe::Unsafe);
+        mode(&dir, 0o755);
+    }
+
+    #[test]
+    fn an_unsafe_override_is_refused_and_an_unsafe_candidate_is_skipped() {
+        let probe = probe_of(&[
+            ("/mine/open", Probe::Unsafe),
+            ("/usr/bin/chromium", Probe::Unsafe),
+            ("/opt/g/chrome", Probe::Usable),
+        ]);
+        let err = select_browser(
+            Some(Path::new("/mine/open")),
+            &paths(&["/opt/g/chrome"]),
+            &probe,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("/mine/open") && err.contains("BOT_BROWSER_PATH") && err.contains("o-w"),
+            "{err}"
+        );
+        assert_eq!(
+            select_browser(
+                None,
+                &paths(&["/usr/bin/chromium", "/opt/g/chrome"]),
+                &probe
+            )
+            .unwrap(),
+            Path::new("/opt/g/chrome")
+        );
+        // Only an unsafe one around: nothing usable, and no pretence otherwise.
+        assert!(matches!(
+            select_browser(None, &paths(&["/usr/bin/chromium"]), &probe),
+            Err(Error::BrowserNotFound)
+        ));
+    }
+
+    /// An install folder shaped like a real one: marker, `chrome-linux64/chrome`.
+    fn fake_install(root: &Path, name: &str) -> PathBuf {
+        let dir = root.join(name).join("chrome-linux64");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("chrome"), b"x").unwrap();
+        std::fs::write(root.join(name).join(MANAGED_MARKER), b"m").unwrap();
+        dir.join("chrome")
+    }
+
+    fn private_root() -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        mode(d.path(), 0o700);
+        d
+    }
+
     #[test]
     fn a_finished_install_is_found_and_a_half_written_one_is_not() {
-        let d = tempfile::tempdir().unwrap();
-        assert_eq!(managed_browser(d.path()), None);
+        let d = private_root();
+        let yes = |_: &Path| true;
+        assert_eq!(managed_browser(d.path(), &yes), None);
         // A folder without the marker (the install stopped before it was written).
         let half = d.path().join("i-1/chrome-linux64");
         std::fs::create_dir_all(&half).unwrap();
         std::fs::write(half.join("chrome"), b"x").unwrap();
-        assert_eq!(managed_browser(d.path()), None);
-        // The marker makes it count.
+        assert_eq!(managed_browser(d.path(), &yes), None);
+        // The marker makes it count (once the manifest check agrees).
         std::fs::write(d.path().join("i-1").join(MANAGED_MARKER), b"m").unwrap();
-        assert_eq!(managed_browser(d.path()), Some(half.join("chrome")));
+        assert_eq!(managed_browser(d.path(), &yes), Some(half.join("chrome")));
         // A marker without the program does not.
         std::fs::create_dir_all(d.path().join("i-2")).unwrap();
         std::fs::write(d.path().join("i-2").join(MANAGED_MARKER), b"m").unwrap();
-        assert_eq!(managed_browser(d.path()), Some(half.join("chrome")));
+        assert_eq!(managed_browser(d.path(), &yes), Some(half.join("chrome")));
         // The downloads folder is never a browser.
         std::fs::create_dir_all(d.path().join("downloads")).unwrap();
-        assert_eq!(managed_browser(d.path()), Some(half.join("chrome")));
+        assert_eq!(managed_browser(d.path(), &yes), Some(half.join("chrome")));
+    }
+
+    #[test]
+    fn a_marker_and_a_program_are_not_enough_without_a_passing_manifest() {
+        let d = private_root();
+        let forged = fake_install(d.path(), "i-forged");
+        assert_eq!(managed_browser(d.path(), &|_: &Path| false), None);
+        // The check is asked about the program, and its answer decides.
+        let asked = std::cell::RefCell::new(Vec::new());
+        let only_forged_fails = |b: &Path| {
+            asked.borrow_mut().push(b.to_owned());
+            false
+        };
+        assert_eq!(managed_browser(d.path(), &only_forged_fails), None);
+        assert_eq!(*asked.borrow(), vec![forged.clone()]);
+        assert_eq!(
+            managed_browser(d.path(), &|b: &Path| b == forged),
+            Some(forged)
+        );
+    }
+
+    #[test]
+    fn the_newest_install_that_passes_wins_and_a_failing_newer_one_is_passed_over() {
+        let d = private_root();
+        let old = fake_install(d.path(), "i-old");
+        std::thread::sleep(Duration::from_millis(30));
+        let new = fake_install(d.path(), "i-new");
+        assert_eq!(
+            managed_browser(d.path(), &|_: &Path| true),
+            Some(new.clone())
+        );
+        assert_eq!(managed_browser(d.path(), &|b: &Path| b != new), Some(old));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_for_an_install_folder_or_for_the_program_is_never_followed() {
+        let d = private_root();
+        // An install folder that is a link to somewhere else.
+        let elsewhere = tempfile::tempdir().unwrap();
+        fake_install(elsewhere.path(), "i-real");
+        std::os::unix::fs::symlink(elsewhere.path().join("i-real"), d.path().join("i-link"))
+            .unwrap();
+        assert_eq!(managed_browser(d.path(), &|_: &Path| true), None);
+        // A program that is a link.
+        let dir = d.path().join("i-2/chrome-linux64");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(d.path().join("i-2").join(MANAGED_MARKER), b"m").unwrap();
+        std::os::unix::fs::symlink("/bin/sh", dir.join("chrome")).unwrap();
+        assert_eq!(managed_browser(d.path(), &|_: &Path| true), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_data_folder_others_can_write_to_holds_no_usable_browser() {
+        let d = private_root();
+        fake_install(d.path(), "i-1");
+        assert!(managed_browser(d.path(), &|_: &Path| true).is_some());
+        mode(d.path(), 0o777);
+        assert_eq!(managed_browser(d.path(), &|_: &Path| true), None);
+        mode(d.path(), 0o775);
+        assert_eq!(managed_browser(d.path(), &|_: &Path| true), None);
     }
 
     #[test]
@@ -804,12 +1270,151 @@ mod tests {
             none
         );
         let mut args = vec!["--x".to_owned(), "about:blank".to_owned()];
-        insert_before_url(&mut args, a);
+        insert_before_url(&mut args, a.clone());
         assert_eq!(args.last().unwrap(), "about:blank");
         assert_eq!(args[1], "--lang=tr-TR");
         let mut empty = vec!["about:blank".to_owned()];
         insert_before_url(&mut empty, vec!["--y".into()]);
         assert_eq!(empty, ["--y", "about:blank"]);
+    }
+
+    #[test]
+    fn only_a_plain_language_list_gets_onto_the_command_line() {
+        for ok in [
+            "tr",
+            "tr-TR",
+            "tr-TR,tr",
+            "en-US,en",
+            "fil,fil-PH",
+            "de-DE,de,en-US,en",
+        ] {
+            assert_eq!(language_args(Some(ok.into()), &[]).len(), 2, "{ok}");
+        }
+        for bad in [
+            "",
+            ",",
+            "tr,",
+            "TR",
+            "t",
+            "toolong",
+            "tr_TR",
+            "tr-tr",
+            "tr-TUR",
+            "tr TR",
+            "en-US --no-sandbox",
+            "en-US,--no-sandbox",
+            "en\n--disable-web-security",
+            "tr-TR;x",
+            "tr-TR,tr,en,de,fr",
+            "../../etc",
+            "ü",
+        ] {
+            assert!(language_args(Some(bad.into()), &[]).is_empty(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn dangerous_extra_flags_are_refused_whatever_the_spelling() {
+        for bad in [
+            "--no-sandbox",
+            "--NO-SANDBOX",
+            "-no-sandbox",
+            "--no-sandbox=1",
+            " --no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-gpu-sandbox",
+            "--disable-web-security",
+            "--disable-site-isolation-trials",
+            "--ignore-certificate-errors",
+            "--ignore-certificate-errors-spki-list=abc",
+            "--remote-debugging-port=9222",
+            "--remote-debugging-address=0.0.0.0",
+            "--remote-debugging-pipe",
+            "--remote-allow-origins=*",
+            "--user-data-dir=/tmp/x",
+            "--load-extension=/tmp/ext",
+            "--renderer-cmd-prefix=sh",
+            "--gpu-launcher=sh",
+            "--browser-subprocess-path=/tmp/x",
+            "file:///etc/passwd",
+            "about:blank",
+            "",
+        ] {
+            assert!(extra_arg_denied(bad), "{bad:?}");
+            assert!(
+                matches!(check_extra_args(&[bad.to_owned()]), Err(Error::Launch(_))),
+                "{bad:?}"
+            );
+        }
+        for fine in [
+            "--foo",
+            "--lang=de-DE",
+            "--window-position=0,0",
+            "--mute-audio",
+        ] {
+            assert!(!extra_arg_denied(fine), "{fine}");
+        }
+        assert!(check_extra_args(&["--mute-audio".into(), "--foo=1".into()]).is_ok());
+        let err = check_extra_args(&["--user-data-dir=/secret/dir".into()])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("--user-data-dir") && !err.contains("/secret/dir"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn denied_flags_never_reach_the_command_line_not_even_through_the_pure_builder() {
+        let opts = LaunchOptions {
+            args: [
+                "--no-sandbox",
+                "--disable-web-security",
+                "--ignore-certificate-errors",
+                "--remote-debugging-port=1",
+                "--remote-debugging-address=0.0.0.0",
+                "--user-data-dir=/evil",
+                "--mute-audio",
+            ]
+            .map(String::from)
+            .to_vec(),
+            ..Default::default()
+        };
+        for linux in [false, true] {
+            let a = build_args_for_host(&opts, Path::new("/p"), linux, true, false, None);
+            assert!(a.contains(&"--mute-audio".to_owned()), "{a:?}");
+            assert_eq!(
+                a.iter()
+                    .filter(|x| x.starts_with("--remote-debugging"))
+                    .count(),
+                1,
+                "only our own port=0: {a:?}"
+            );
+            assert_eq!(
+                a.iter()
+                    .filter(|x| x.starts_with("--user-data-dir"))
+                    .count(),
+                1,
+                "{a:?}"
+            );
+            for banned in [
+                "--no-sandbox",
+                "--disable-web-security",
+                "--ignore-certificate",
+            ] {
+                assert!(!a.iter().any(|x| x.starts_with(banned)), "{banned}: {a:?}");
+            }
+        }
+        // The one way the sandbox goes off: this module's own root decision.
+        let a = build_args_for_host(
+            &LaunchOptions::default(),
+            Path::new("/p"),
+            true,
+            true,
+            true,
+            None,
+        );
+        assert!(a.contains(&"--no-sandbox".to_owned()));
     }
 
     #[test]

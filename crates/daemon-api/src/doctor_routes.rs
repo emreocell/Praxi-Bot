@@ -22,7 +22,7 @@ use std::time::{Duration, SystemTime};
 
 use axum::Json;
 use axum::extract::{Extension, Path, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
@@ -353,7 +353,7 @@ pub(crate) async fn run_checks(s: &AppState, deadline: Instant, permit: &RunPerm
         "browser",
         "browser",
         Box::new(move || {
-            let found = browser_cdp::find_browser();
+            let found = browser_cdp::find_browser_cached();
             let c = match &found {
                 Ok(p) => doctor::check_browser_found(Ok(p)),
                 Err(e) => doctor::check_browser_found(Err(&e.to_string())),
@@ -455,6 +455,7 @@ pub(crate) async fn get_doctor(State(s): State<AppState>) -> Result<Json<DoctorR
 pub(crate) async fn repair(
     State(s): State<AppState>,
     Extension(actor): Extension<Actor>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<RepairResult>, ApiError> {
     let Some(repair) = Repair::parse(&id) else {
@@ -466,6 +467,10 @@ pub(crate) async fn repair(
             "repairs are run by the local user from this computer's Settings",
         ));
     }
+    // Defence in depth: `/v1/doctor/repair/{}` is an owner route, so the owner gate has already
+    // asked for the owner key. A repair downloads and runs software; it never relies on the
+    // gate alone.
+    s.require_owner(&headers)?;
     let who = actor.key;
     s.storage()
         .append_audit(
@@ -546,7 +551,9 @@ fn browser_override_set() -> bool {
 
 /// `install_browser`: download, verify and unpack Chrome for Testing, then start it once. Takes
 /// a few minutes on a slow link (about 200 MB), so the Settings page sends this call without
-/// its usual time limit.
+/// its usual time limit; the server bounds it instead (`browser_install::FETCH_TIMEOUT` for the
+/// download, one minute for the test start) and runs one install at a time (a second call gets
+/// 409).
 async fn install_browser(s: &AppState) -> Result<String, ApiError> {
     use crate::browser_install::{self as bi, InstallError};
     let result = bi::install(
@@ -557,6 +564,8 @@ async fn install_browser(s: &AppState) -> Result<String, ApiError> {
         &|_| {},
     )
     .await;
+    // The status check remembers what it found; what is on disk just changed.
+    browser_cdp::launch::forget_managed_check();
     match result {
         Ok(done) if done.already_there => Ok(format!(
             "a verified browser was already installed: {}",

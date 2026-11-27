@@ -7,7 +7,7 @@ use std::time::Duration;
 use axum::http::{Method, StatusCode};
 use secret_store::SecretStore;
 
-use super::{T, call, send, setup};
+use super::{T, call, call_token_only, send, setup};
 use crate::doctor::{Check, Status};
 use crate::doctor_routes::{DoctorHost, Job, RunPermit, on_blocking_pool, run_jobs};
 
@@ -336,6 +336,60 @@ async fn unknown_repairs_are_rejected_and_never_run() {
     // GET is not a way to run a repair either.
     let r = call(&t, Method::GET, "/v1/doctor/repair/create_data_dir", None).await;
     assert_eq!(r.status, StatusCode::METHOD_NOT_ALLOWED);
+}
+
+/// The browser download is the repair that costs the most: a holder of only the API token (a CLI
+/// engine, a script, a model's shell) cannot start it, and nothing is audited or run.
+#[tokio::test]
+async fn installing_the_browser_needs_the_owner_key() {
+    let t = setup();
+    for id in ["install_browser", "create_data_dir"] {
+        let r = call_token_only(&t, Method::POST, &format!("/v1/doctor/repair/{id}"), None).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{id}: {:?}", r.json());
+        assert_eq!(
+            r.json()["error"]["code"],
+            crate::owner::OWNER_REQUIRED,
+            "{id}"
+        );
+    }
+    assert_eq!(audit_trail(&t), Vec::<(String, String, String)>::new());
+    assert!(!crate::browser_install::root_dir(&t.state.data_dir()).exists());
+}
+
+/// A second install while one runs is refused with 409 and nothing is downloaded; the refusal is
+/// audited like any repair outcome.
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[tokio::test]
+async fn a_second_browser_install_at_the_same_time_is_refused_with_409_and_audited() {
+    let t = setup();
+    let held = crate::browser_install::Running::start(&t.state.data_dir()).unwrap();
+    let r = call(&t, Method::POST, "/v1/doctor/repair/install_browser", None).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.json());
+    assert!(
+        r.json()["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("already being installed")),
+        "{:?}",
+        r.json()
+    );
+    assert!(!crate::browser_install::root_dir(&t.state.data_dir()).exists());
+    let trail = audit_trail(&t);
+    assert_eq!(
+        trail
+            .iter()
+            .map(|(a, _, r)| (a.as_str(), r.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("doctor.repair_requested", "install_browser"),
+            ("doctor.repair", "install_browser")
+        ]
+    );
+    let done = audit_actions(&t);
+    assert_eq!(done[0].1["ok"], false);
+    drop(held);
 }
 
 #[tokio::test]

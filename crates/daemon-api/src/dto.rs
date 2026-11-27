@@ -82,7 +82,7 @@ impl HostInfo {
             os: std::env::consts::OS.into(),
             arch: std::env::consts::ARCH.into(),
             has_display: browser_cdp::host::has_display(),
-            has_browser: browser_cdp::find_browser().is_ok(),
+            has_browser: browser_cdp::find_browser_cached().is_ok(),
             total_ram_mb: browser_cdp::host::total_ram_bytes() / (1024 * 1024),
         }
     }

@@ -182,6 +182,7 @@ fn popup_to_close(method: &str, params: &Value, owned: &HashSet<String>) -> Opti
 impl Browser {
     /// Launch Chrome/Edge with a fresh isolated profile (unless `user_data_dir` is given).
     pub async fn launch(mut opts: LaunchOptions) -> Result<Self> {
+        launch::check_extra_args(&opts.args)?;
         // A served session: every request goes through our filtering proxy,
         // started before the browser so nothing ever leaves without it.
         let proxy = if let Some(net) = &opts.served {

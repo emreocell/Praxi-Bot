@@ -805,8 +805,9 @@ fn run() -> Result<()> {
         _ => {}
     }
     let data_dir = data_dir(&cli)?;
-    // Lets browser discovery find a browser installed into this data directory.
-    browser_cdp::launch::register_data_dir(&data_dir);
+    // Lets browser discovery find a browser installed into this data directory, once its
+    // manifest checks out.
+    daemon_api::browser_install::register(&data_dir);
     let mut say = |s: &str| println!("{s}");
 
     if cli.remote.is_some()

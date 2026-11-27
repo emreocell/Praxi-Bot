@@ -9,7 +9,14 @@
 //! through the same fail-closed path as the managed `llama-server`: the bytes are hashed and
 //! checked before anything is unpacked, unpacking refuses unsafe paths, and the folder gets a
 //! manifest of every file's hash, written last. `browser_cdp::launch::find_browser` finds the
-//! result like any system browser, after the system ones.
+//! result after the system browsers, and starts it only when the manifest still matches every
+//! file ([`register`] hands it that check); a marker file alone never makes a folder a browser.
+//!
+//! What the unpacked folder is guaranteed to be (checked by [`harden_install`] on top of what the
+//! shared unpacker already refuses, and tested here): no path with `..` or an absolute path, no
+//! symlink or hard link, total size within [`UNPACKED_FACTOR`] times the archive, no setuid or
+//! setgid or sticky bit, files `0o755` or `0o644`, folders `0o755`. A folder that breaks one of
+//! these is deleted and the install fails.
 //!
 //! Chrome for Testing does not update itself: a newer pin ships with a newer Praxi, and the button
 //! is offered again only when no browser works.
@@ -26,7 +33,7 @@ use std::{
 use browser_cdp::launch::{MANAGED_DIR, MANAGED_MARKER, managed_browser};
 use provider_catalog::local_runtime::{
     ArchiveKind, DownloadError, DownloadSpec, TrustError, download, install_verified,
-    verified_binary,
+    verified_binary, verify_install,
 };
 
 /// Chrome for Testing version of the pins below (kept equal to `scripts/install-linux.sh`).
@@ -242,10 +249,10 @@ fn with_missing_library_note(message: &str) -> String {
 /// Data directories with an install under way: one at a time per directory.
 static RUNNING: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
-struct Running(PathBuf);
+pub(crate) struct Running(PathBuf);
 
 impl Running {
-    fn start(data_dir: &Path) -> Result<Self, InstallError> {
+    pub(crate) fn start(data_dir: &Path) -> Result<Self, InstallError> {
         let mut r = RUNNING
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -274,8 +281,29 @@ pub struct Installed {
     pub already_there: bool,
 }
 
-/// Disk the unpacked browser takes, in archive sizes (about 2.1 in practice).
+/// Disk the unpacked browser takes, in archive sizes (about 2.1 in practice). Also the most an
+/// unpacked archive may add up to: a bigger one is refused and removed.
 const UNPACKED_FACTOR: u64 = 3;
+/// The download may take this long in all (200 MB on a poor link); it resumes on the next try.
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+/// Starting the browser once to prove it runs.
+const START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How long each network or launch step of an install may take.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Limits {
+    pub fetch: std::time::Duration,
+    pub start: std::time::Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            fetch: FETCH_TIMEOUT,
+            start: START_TIMEOUT,
+        }
+    }
+}
 /// Free space left over after the install.
 const DISK_MARGIN: u64 = 512 * 1024 * 1024;
 
@@ -312,6 +340,16 @@ pub async fn install_asset(
     env: &impl Environment,
     progress: &(dyn Fn(u64) + Send + Sync),
 ) -> Result<Installed, InstallError> {
+    install_limited(data_dir, asset, env, progress, Limits::default()).await
+}
+
+pub(crate) async fn install_limited(
+    data_dir: &Path,
+    asset: BrowserAsset,
+    env: &impl Environment,
+    progress: &(dyn Fn(u64) + Send + Sync),
+    limits: Limits,
+) -> Result<Installed, InstallError> {
     let _running = Running::start(data_dir)?;
     let root = root_dir(data_dir);
     std::fs::create_dir_all(&root).map_err(|e| InstallError::Io(e.kind().to_string()))?;
@@ -326,14 +364,23 @@ pub async fn install_asset(
     };
     let (binary, already_there) = match existing {
         Some(b) => (b, true),
-        None => (fetch_and_unpack(&root, asset, env, progress).await?, false),
+        None => (
+            fetch_and_unpack(&root, asset, env, progress, limits.fetch).await?,
+            false,
+        ),
     };
-    env.start_check(&binary)
+    let started = tokio::time::timeout(limits.start, env.start_check(&binary))
         .await
-        .map_err(|reason| InstallError::CannotStart {
-            binary: binary.clone(),
-            reason,
-        })?;
+        .unwrap_or_else(|_| {
+            Err(format!(
+                "it did not start within {} seconds",
+                limits.start.as_secs()
+            ))
+        });
+    started.map_err(|reason| InstallError::CannotStart {
+        binary: binary.clone(),
+        reason,
+    })?;
     Ok(Installed {
         binary,
         already_there,
@@ -345,6 +392,7 @@ async fn fetch_and_unpack(
     asset: BrowserAsset,
     env: &impl Environment,
     progress: &(dyn Fn(u64) + Send + Sync),
+    fetch_timeout: std::time::Duration,
 ) -> Result<PathBuf, InstallError> {
     let need = asset.size_bytes * UNPACKED_FACTOR + DISK_MARGIN;
     if let Ok(free) = fs4::available_space(root)
@@ -360,24 +408,36 @@ async fn fetch_and_unpack(
         "chrome-for-testing-{CFT_VERSION}-{}.zip",
         asset.platform
     ));
-    env.fetch(&asset, &archive, progress).await?;
+    // A stalled connection must not hold the one install slot for ever; the partial file stays,
+    // so the next try continues where this one stopped.
+    tokio::time::timeout(fetch_timeout, env.fetch(&asset, &archive, progress))
+        .await
+        .map_err(|_| {
+            InstallError::Network(format!(
+                "the download took longer than {} minutes; run it again to continue",
+                fetch_timeout.as_secs().div_ceil(60)
+            ))
+        })??;
 
     let (a, r, sha) = (archive.clone(), root.to_owned(), asset.sha256);
-    let binary = tokio::task::spawn_blocking(move || {
+    let cap = asset.size_bytes.saturating_mul(UNPACKED_FACTOR);
+    let outcome = tokio::task::spawn_blocking(move || -> Result<PathBuf, InstallError> {
         // `install_verified` hashes the very file it then unpacks, so a download that was
         // swapped after `fetch` (or a fake that skipped the check) is still refused.
-        install_verified(ArchiveKind::Zip, &a, sha, &r, "chrome")
+        let binary = install_verified(ArchiveKind::Zip, &a, sha, &r, "chrome")?;
+        harden_install(&binary, &r, cap)?;
+        Ok(binary)
     })
     .await
     .map_err(|e| InstallError::Io(e.to_string()))?;
-    let binary = match binary {
+    let binary = match outcome {
         Ok(b) => b,
         Err(e) => {
             // A bad archive is thrown away, never kept for another try.
-            if e == TrustError::ArchiveMismatch {
+            if e == InstallError::Checksum {
                 let _ = std::fs::remove_file(&archive);
             }
-            return Err(e.into());
+            return Err(e);
         }
     };
 
@@ -419,10 +479,120 @@ fn restrict_dir(path: &Path) {
     let _ = path;
 }
 
-/// The managed browser, if one is installed (discovery only; nothing is hashed or started).
+/// The unpacked install folder that holds `binary` (a direct child of `root`), made safe or
+/// deleted.
+///
+/// Walks every entry without following links and refuses: a symlink, a hard link (a file with
+/// more than one name could be an alias of something outside), more than `max_bytes` in all, or
+/// anything that is not a plain file or folder. Then sets sane modes: setuid, setgid and sticky
+/// bits and every group/other write bit go; a file with an execute bit becomes `0o755`, any other
+/// file `0o644`, a folder `0o755` (the install folder itself stays `0o700`). On a refusal the
+/// whole install folder is removed.
+///
+/// # Errors
+/// [`InstallError::Unpack`] naming what was wrong.
+pub(crate) fn harden_install(
+    binary: &Path,
+    root: &Path,
+    max_bytes: u64,
+) -> Result<(), InstallError> {
+    let Some(install_dir) = binary.ancestors().find(|a| a.parent() == Some(root)) else {
+        return Err(InstallError::Unpack(
+            "the program is not inside the install folder".into(),
+        ));
+    };
+    let result = harden_tree(install_dir, max_bytes);
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(install_dir);
+    }
+    result.map_err(InstallError::Unpack)
+}
+
+fn harden_tree(top: &Path, max_bytes: u64) -> Result<(), String> {
+    let mut total = 0u64;
+    let mut stack = vec![top.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        set_mode(&dir, true).map_err(|e| format!("{}: {e}", dir.display()))?;
+        for entry in std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+            let path = entry.map_err(|e| e.kind().to_string())?.path();
+            let meta = std::fs::symlink_metadata(&path).map_err(|e| e.kind().to_string())?;
+            let shown = path
+                .strip_prefix(top)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            if meta.is_dir() {
+                stack.push(path);
+            } else if meta.is_file() {
+                if link_count(&meta) > 1 {
+                    return Err(format!("{shown} is a hard link"));
+                }
+                total = total.saturating_add(meta.len());
+                if total > max_bytes {
+                    return Err(format!(
+                        "the archive unpacks to more than the {} MB expected",
+                        max_bytes / 1_000_000
+                    ));
+                }
+                set_mode(&path, false).map_err(|e| format!("{shown}: {e}"))?;
+            } else {
+                return Err(format!("{shown} is a link or a special file"));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn link_count(meta: &std::fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    meta.nlink()
+}
+
+#[cfg(not(unix))]
+fn link_count(_: &std::fs::Metadata) -> u64 {
+    1
+}
+
+fn set_mode(path: &Path, dir: bool) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let mode = std::fs::symlink_metadata(path)?.mode();
+        let want = if dir {
+            (mode & 0o755) | 0o700
+        } else if mode & 0o100 != 0 {
+            0o755
+        } else {
+            0o644
+        };
+        if mode & 0o7777 != want {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(want))?;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (path, dir);
+    Ok(())
+}
+
+/// The check browser discovery runs before it starts a managed browser: every file of the
+/// browser's install folder must still be exactly what the install recorded in its manifest.
+#[must_use]
+pub fn verify_managed(binary: &Path) -> bool {
+    verify_install(binary).is_ok()
+}
+
+/// Tell browser discovery about this data directory and how to check a browser in it. Call once
+/// at start-up; without it no downloaded browser is ever used.
+pub fn register(data_dir: &Path) {
+    browser_cdp::launch::register_managed(data_dir, verify_managed);
+}
+
+/// The managed browser, if one is installed and passes its manifest check (this hashes the
+/// install, so it is not free).
 #[must_use]
 pub fn installed_browser(data_dir: &Path) -> Option<PathBuf> {
-    managed_browser(&root_dir(data_dir))
+    managed_browser(&root_dir(data_dir), &verify_managed)
 }
 
 #[cfg(test)]
@@ -463,6 +633,8 @@ mod tests {
         body: Vec<u8>,
         /// What `start_check` answers.
         start: Result<(), String>,
+        /// `fetch` and `start_check` never answer.
+        hang: bool,
         fetched: Mutex<u32>,
         started: Mutex<Vec<PathBuf>>,
     }
@@ -472,6 +644,7 @@ mod tests {
             Self {
                 body,
                 start: Ok(()),
+                hang: false,
                 fetched: Mutex::new(0),
                 started: Mutex::new(Vec::new()),
             }
@@ -486,15 +659,29 @@ mod tests {
             progress: &(dyn Fn(u64) + Send + Sync),
         ) -> impl Future<Output = Result<(), DownloadError>> + Send {
             *self.fetched.lock().unwrap() += 1;
-            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
-            std::fs::write(dest, &self.body).unwrap();
-            progress(self.body.len() as u64);
-            std::future::ready(Ok(()))
+            let hang = self.hang;
+            if !hang {
+                std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+                std::fs::write(dest, &self.body).unwrap();
+                progress(self.body.len() as u64);
+            }
+            async move {
+                if hang {
+                    std::future::pending::<()>().await;
+                }
+                Ok(())
+            }
         }
 
         fn start_check(&self, binary: &Path) -> impl Future<Output = Result<(), String>> + Send {
             self.started.lock().unwrap().push(binary.to_owned());
-            std::future::ready(self.start.clone())
+            let (hang, answer) = (self.hang, self.start.clone());
+            async move {
+                if hang {
+                    std::future::pending::<()>().await;
+                }
+                answer
+            }
         }
     }
 
@@ -703,6 +890,319 @@ mod tests {
         // Another data directory is not blocked by it.
         let other = tempfile::tempdir().unwrap();
         assert!(Running::start(other.path()).is_ok());
+    }
+
+    // ---- Manifest check before a managed browser is used (review finding 1) ----
+
+    #[tokio::test]
+    async fn a_planted_install_with_a_marker_and_a_program_is_never_found() {
+        let d = tempfile::tempdir().unwrap();
+        let root = root_dir(d.path());
+        let forged = root.join("i-forged/chrome-linux64");
+        std::fs::create_dir_all(&forged).unwrap();
+        restrict_dir(&root);
+        std::fs::write(forged.join("chrome"), b"#!/bin/sh\necho pwned\n").unwrap();
+        // The marker exists (any bytes), the program exists and is executable.
+        std::fs::write(root.join("i-forged").join(MANAGED_MARKER), b"junk").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                forged.join("chrome"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        assert_eq!(installed_browser(d.path()), None);
+        // Even a well-formed manifest that does not match the files does not pass.
+        std::fs::write(
+            root.join("i-forged").join(MANAGED_MARKER),
+            format!(
+                "praxi-runtime-manifest v1\n{}\tchrome-linux64/chrome\n",
+                hex(b"other")
+            ),
+        )
+        .unwrap();
+        assert_eq!(installed_browser(d.path()), None);
+    }
+
+    #[tokio::test]
+    async fn a_real_install_is_found_until_one_byte_of_it_changes() {
+        let d = tempfile::tempdir().unwrap();
+        let zip = fake_zip();
+        let env = Fake::new(zip.clone());
+        let got = install_fake(d.path(), &env, pin(&zip)).await.unwrap();
+        assert_eq!(installed_browser(d.path()), Some(got.binary.clone()));
+        // The program itself is swapped...
+        std::fs::write(&got.binary, b"#!/bin/sh\necho pwned\n").unwrap();
+        assert_eq!(installed_browser(d.path()), None);
+    }
+
+    #[tokio::test]
+    async fn an_extra_file_dropped_into_a_real_install_is_found_out() {
+        let d = tempfile::tempdir().unwrap();
+        let zip = fake_zip();
+        let got = install_fake(d.path(), &Fake::new(zip.clone()), pin(&zip))
+            .await
+            .unwrap();
+        std::fs::write(got.binary.parent().unwrap().join("libevil.so"), b"x").unwrap();
+        assert_eq!(installed_browser(d.path()), None);
+    }
+
+    // ---- The unpacked folder's guarantees (review finding 4) ----
+
+    use std::io::Cursor;
+
+    /// One entry of a test archive.
+    struct Entry<'a> {
+        name: &'a str,
+        data: &'a [u8],
+        mode: Option<u32>,
+        /// `Some(target)`: a symlink to it.
+        link: Option<&'a str>,
+    }
+
+    fn file<'a>(name: &'a str, data: &'a [u8], mode: Option<u32>) -> Entry<'a> {
+        Entry {
+            name,
+            data,
+            mode,
+            link: None,
+        }
+    }
+
+    fn zip_of(entries: &[Entry]) -> Vec<u8> {
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut w = zip::ZipWriter::new(&mut buf);
+            for e in entries {
+                let mut opts = zip::write::SimpleFileOptions::default();
+                if let Some(m) = e.mode {
+                    opts = opts.unix_permissions(m);
+                }
+                if let Some(target) = e.link {
+                    w.add_symlink(e.name, target, opts).unwrap();
+                } else {
+                    w.start_file(e.name, opts).unwrap();
+                    w.write_all(e.data).unwrap();
+                }
+            }
+            w.finish().unwrap();
+        }
+        buf.into_inner()
+    }
+
+    /// Install `zip` with a pin made for it; the program is `chrome-linux64/chrome`.
+    async fn install_zip(d: &Path, zip: &[u8]) -> Result<Installed, InstallError> {
+        install_fake(d, &Fake::new(zip.to_vec()), pin(zip)).await
+    }
+
+    fn install_folders(d: &Path) -> Vec<String> {
+        std::fs::read_dir(root_dir(d))
+            .map(|r| {
+                r.flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| n.starts_with("i-"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn an_archive_with_a_path_that_climbs_out_installs_nothing() {
+        for evil in [
+            "../evil.txt",
+            "chrome-linux64/../../evil.txt",
+            "chrome-linux64/a/../../../evil.txt",
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let zip = zip_of(&[
+                file("chrome-linux64/chrome", b"x", Some(0o755)),
+                file(evil, b"owned", None),
+            ]);
+            let err = install_zip(d.path(), &zip).await.unwrap_err();
+            assert!(matches!(err, InstallError::Unpack(_)), "{evil}: {err:?}");
+            assert!(install_folders(d.path()).is_empty(), "{evil}");
+            assert!(!root_dir(d.path()).join("evil.txt").exists(), "{evil}");
+            assert!(!d.path().join("evil.txt").exists(), "{evil}");
+            assert_eq!(installed_browser(d.path()), None);
+        }
+    }
+
+    #[tokio::test]
+    async fn an_archive_with_an_absolute_path_writes_nothing_there() {
+        let d = tempfile::tempdir().unwrap();
+        let target = d.path().join("outside.txt");
+        let name = target.to_string_lossy().into_owned();
+        let zip = zip_of(&[
+            file("chrome-linux64/chrome", b"x", Some(0o755)),
+            file(&name, b"owned", None),
+        ]);
+        let err = install_zip(d.path(), &zip).await.unwrap_err();
+        assert!(matches!(err, InstallError::Unpack(_)), "{err:?}");
+        assert!(!target.exists());
+        assert_eq!(install_folders(d.path()), Vec::<String>::new());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlink_in_the_archive_is_not_created_and_nothing_is_written_through_it() {
+        let d = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let zip = zip_of(&[
+            file("chrome-linux64/chrome", b"x", Some(0o755)),
+            Entry {
+                name: "chrome-linux64/escape",
+                data: b"",
+                mode: Some(0o777),
+                link: Some(outside.path().to_str().unwrap()),
+            },
+            // Written "through" the link if it had been created.
+            file("chrome-linux64/escape/pwned.txt", b"owned", None),
+        ]);
+        let installed = install_zip(d.path(), &zip).await;
+        assert!(!outside.path().join("pwned.txt").exists(), "{installed:?}");
+        // Either the install is refused or the folder holds no link.
+        if let Ok(done) = installed {
+            let escape = done.binary.parent().unwrap().join("escape");
+            assert!(!std::fs::symlink_metadata(escape).is_ok_and(|m| m.is_symlink()));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_or_hard_link_inside_an_unpacked_folder_is_refused_and_the_folder_removed() {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret"), b"s").unwrap();
+        for hard in [false, true] {
+            let d = tempfile::tempdir().unwrap();
+            let root = d.path().join("browser");
+            let top = root.join("i-1/chrome-linux64");
+            std::fs::create_dir_all(&top).unwrap();
+            std::fs::write(top.join("chrome"), b"x").unwrap();
+            if hard {
+                std::fs::hard_link(outside.path().join("secret"), top.join("alias")).unwrap();
+            } else {
+                std::os::unix::fs::symlink(outside.path(), top.join("alias")).unwrap();
+            }
+            let err = harden_install(&top.join("chrome"), &root, 1 << 20).unwrap_err();
+            assert!(matches!(err, InstallError::Unpack(_)), "{err:?}");
+            assert!(!root.join("i-1").exists(), "hard={hard}");
+            assert!(outside.path().join("secret").exists(), "never followed");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_archive_that_unpacks_to_far_more_than_expected_is_refused_and_removed() {
+        let d = tempfile::tempdir().unwrap();
+        // Compresses to almost nothing, unpacks to 8 MB: far beyond three times its own size.
+        let bomb = vec![0u8; 8 * 1024 * 1024];
+        let zip = zip_of(&[
+            file("chrome-linux64/chrome", b"x", Some(0o755)),
+            file("chrome-linux64/bomb.bin", &bomb, None),
+        ]);
+        assert!(
+            zip.len() * 3 < bomb.len(),
+            "the test archive must be a bomb"
+        );
+        let err = install_zip(d.path(), &zip).await.unwrap_err();
+        let InstallError::Unpack(why) = &err else {
+            panic!("{err:?}");
+        };
+        assert!(why.contains("more than"), "{why}");
+        assert_eq!(install_folders(d.path()), Vec::<String>::new());
+        assert_eq!(installed_browser(d.path()), None);
+        // A normal archive of the same shape (small contents) is fine.
+        let ok = zip_of(&[file("chrome-linux64/chrome", &[7u8; 4096], Some(0o755))]);
+        assert!(install_zip(d.path(), &ok).await.is_ok());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn modes_are_made_sane_and_setuid_setgid_and_sticky_never_survive() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let zip = zip_of(&[
+            file("chrome-linux64/chrome", b"x", Some(0o4755)),
+            file("chrome-linux64/chrome_sandbox", b"s", Some(0o6777)),
+            file("chrome-linux64/sticky", b"t", Some(0o1777)),
+            file("chrome-linux64/world.pak", b"w", Some(0o666)),
+            file("chrome-linux64/nomode.pak", b"n", None),
+            file("chrome-linux64/locales/x.pak", b"l", Some(0o664)),
+        ]);
+        let done = install_zip(d.path(), &zip).await.unwrap();
+        let dir = done.binary.parent().unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode(&done.binary), 0o755);
+        assert_eq!(
+            mode(&dir.join("chrome_sandbox")),
+            0o755,
+            "no setuid, no setgid"
+        );
+        assert_eq!(mode(&dir.join("sticky")), 0o755, "no sticky");
+        assert_eq!(mode(&dir.join("world.pak")), 0o644, "no write for others");
+        assert_eq!(mode(&dir.join("nomode.pak")), 0o644);
+        assert_eq!(mode(&dir.join("locales/x.pak")), 0o644);
+        assert_eq!(mode(&dir.join("locales")), 0o755);
+        assert_eq!(mode(dir), 0o755);
+        // Nothing in the whole install carries a special or a group/other write bit.
+        let mut stack = vec![dir.parent().unwrap().to_path_buf()];
+        while let Some(p) = stack.pop() {
+            let m = mode(&p);
+            assert_eq!(m & 0o7022, 0, "{}: {m:o}", p.display());
+            if p.is_dir() {
+                stack.extend(std::fs::read_dir(&p).unwrap().flatten().map(|e| e.path()));
+            }
+        }
+        // The manifest still matches after the modes were changed.
+        assert_eq!(installed_browser(d.path()), Some(done.binary));
+    }
+
+    // ---- Time limits (review finding 7) ----
+
+    fn quick() -> Limits {
+        Limits {
+            fetch: std::time::Duration::from_millis(100),
+            start: std::time::Duration::from_millis(100),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_download_that_stalls_is_stopped_and_frees_the_install_slot() {
+        let d = tempfile::tempdir().unwrap();
+        let zip = fake_zip();
+        let mut env = Fake::new(zip.clone());
+        env.hang = true;
+        let err = install_limited(d.path(), pin(&zip), &env, &|_| {}, quick())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, InstallError::Network(m) if m.contains("longer than")),
+            "{err:?}"
+        );
+        assert!(Running::start(d.path()).is_ok(), "the slot is free again");
+        assert_eq!(*env.started.lock().unwrap(), Vec::<PathBuf>::new());
+    }
+
+    #[tokio::test]
+    async fn a_test_start_that_never_answers_is_reported_and_the_files_stay() {
+        let d = tempfile::tempdir().unwrap();
+        let zip = fake_zip();
+        // Download fine, then hang in the start check only.
+        let ok = Fake::new(zip.clone());
+        install_limited(d.path(), pin(&zip), &ok, &|_| {}, quick())
+            .await
+            .unwrap();
+        let mut env = Fake::new(zip.clone());
+        env.hang = true;
+        let err = install_limited(d.path(), pin(&zip), &env, &|_| {}, quick())
+            .await
+            .unwrap_err();
+        let InstallError::CannotStart { reason, .. } = &err else {
+            panic!("{err:?}");
+        };
+        assert!(reason.contains("did not start within"), "{reason}");
+        assert!(installed_browser(d.path()).is_some());
     }
 
     #[test]
