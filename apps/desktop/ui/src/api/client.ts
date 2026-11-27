@@ -11,6 +11,10 @@ import type {
   SharedProfile
 } from "../lib/profileShare";
 import type {
+  ImportRunInput,
+  ImportRunOutput,
+  ImportScanInput,
+  ImportScanOutput,
   KnowledgeSource,
   KnowledgeWatchStatus,
   KnowledgeFolderListing,
@@ -918,6 +922,17 @@ export class ApiClient {
   /** Owner-only: create a bot from a profile file, never above `permission_level`. */
   importProfile(input: ImportInput): Promise<ImportOutput> {
     return this.request("POST", "/profile-share/import", { body: input });
+  }
+  /**
+   * Owner-only: look in the known places of other assistants on the machine the daemon runs on
+   * (a server scans its own files). Reads only; nothing is changed, run or sent.
+   */
+  scanImport(input: ImportScanInput = {}): Promise<ImportScanOutput> {
+    return this.request("POST", "/import/scan", { body: input });
+  }
+  /** Owner-only: import the ticked items; `confirmed_secrets` are the secret slots the owner agreed to move. */
+  runImport(input: ImportRunInput): Promise<ImportRunOutput> {
+    return this.request("POST", "/import/run", { body: input });
   }
   deleteBot(id: string): Promise<void> {
     return this.request("DELETE", `/bots/${id}`);

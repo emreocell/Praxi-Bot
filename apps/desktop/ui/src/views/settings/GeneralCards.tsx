@@ -14,6 +14,7 @@ import { MESSAGE_TIMES_VALUES } from "../../lib/messageTime";
 import { SEND_WITH_VALUES } from "../../lib/settingsPrefs";
 import { NotificationSettings } from "../NotificationSettings";
 import styles from "../SettingsModal.module.css";
+import { ImportCard } from "./ImportCard";
 import { QuickAskCard } from "./QuickAskCard";
 import { DictationCard } from "./DictationCard";
 import { VoiceInputSettings } from "./VoiceInputSettings";
@@ -265,6 +266,13 @@ export function generalCards(b: SettingsBridge, t: TFunction): CardDef[] {
         </Button>
       </SettingRow>,
       { keywords: "setup wizard guide onboarding kurulum sihirbaz rehber einrichtung assistent" }
+    ),
+    card(
+      "importAssistants",
+      t("importAssistants.card.title"),
+      t("importAssistants.card.description"),
+      <ImportCard />,
+      { keywords: "import migrate move claude cursor vscode codex openclaw hermes mcp skills instructions ice aktar tasi asistan yonerge importieren uebernehmen anweisungen assistenten" }
     )
   ];
 }

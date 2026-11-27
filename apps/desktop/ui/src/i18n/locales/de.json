@@ -4685,6 +4685,118 @@
     "giveBack": "Kontrolle zurückgeben",
     "giveBackFailed": "Die Kontrolle konnte nicht zurückgegeben werden. Versuche es erneut."
   },
+  "importAssistants": {
+    "apps": {
+      "claude": "Claude Desktop und Claude Code",
+      "codex": "Codex",
+      "cursor": "Cursor",
+      "folder": "Ordner",
+      "hermes": "Hermes",
+      "openclaw": "OpenClaw",
+      "vscode": "VS Code"
+    },
+    "card": {
+      "button": "Importieren…",
+      "description": "Übernimm MCP-Server, Skills und Anweisungen aus Claude, Cursor, VS Code, Codex, OpenClaw oder Hermes. Es wird nichts gelesen, bevor du es verlangst.",
+      "title": "Aus anderen Assistenten importieren"
+    },
+    "done": {
+      "again": "Erneut suchen",
+      "offBody": "Öffne Apps im Kontomenü und schalte die ein, die du nutzen möchtest.",
+      "offTitle": "Importierte Server sind ausgeschaltet",
+      "summary": "Importiert: {{imported}} · Übersprungen: {{skipped}} · Fehlgeschlagen: {{failed}}",
+      "title": "Import abgeschlossen"
+    },
+    "firstRun": {
+      "link": "Du nutzt schon andere Assistenten? Ihre Einrichtungen importieren"
+    },
+    "group": {
+      "instructions": "Anweisungen",
+      "instructionsNote": "Werden ans Ende der Anweisungen des gewählten Bots angehängt. Standardmäßig nicht angehakt.",
+      "mcp": "MCP-Server",
+      "mcpNote": "Importierte Server kommen ausgeschaltet an. Du schaltest sie selbst in Apps ein. Passwörter und Schlüssel werden nie angezeigt: Hake jeden an, den du in den Geheimspeicher verschieben möchtest.",
+      "notImported": "Konnte nicht importiert werden",
+      "skills": "Skills",
+      "skillsNote": "Jeder angehakte Skill wird zu deinen Praxi-Skills hinzugefügt."
+    },
+    "intro": {
+      "folderHint": "Ein Ordner mit Prompt- oder Skill-Markdown-Dateien, als Pfad auf dem Computer, auf dem der Dienst von Praxi läuft. Leer lassen, um ihn zu überspringen.",
+      "folderLabel": "Auch einen Ordner lesen (optional)",
+      "folderPlaceholder": "/home/you/prompts",
+      "look": "Nach Einrichtungen suchen",
+      "looking": "Suche läuft…",
+      "reads": "Wenn du auf die Schaltfläche drückst, liest Praxi die Einstellungen, Skills und Anweisungsdateien dieser Apps:",
+      "safe": "Praxi liest diese Dateien nur, um dir eine Liste zu zeigen. Nichts wird geändert, irgendwohin gesendet oder ausgeführt. Was importiert wird, wählst du auf dem nächsten Bildschirm; vorher wird nichts importiert.",
+      "safeTitle": "Nichts wird geändert, gesendet oder ausgeführt",
+      "title": "Bevor es losgeht",
+      "where": "Das schaut auf dem Computer nach, auf dem der Dienst von Praxi läuft. Bist du mit einem Server verbunden, werden die eigenen Dateien dieses Servers gelesen, nicht die dieses Computers."
+    },
+    "item": {
+      "botLabel": "Zu den Anweisungen hinzufügen von",
+      "botPlaceholder": "Bot wählen…",
+      "dropped": "Nicht kopiert, weil nur auf eine Variable verwiesen wurde: {{names}}.",
+      "from": "Aus {{app}} · {{source}}",
+      "moveSecret": "{{key}} ({{place}}) in den Geheimspeicher verschieben",
+      "noBots": "Du hast noch keinen Bot. Lege einen an und starte diesen Import danach erneut, um Anweisungen zu übernehmen.",
+      "off": "Kommt ausgeschaltet an",
+      "place": {
+        "env": "Umgebungsvariable",
+        "header": "Header"
+      },
+      "secretsGroup": "Geheimnisse von {{name}}"
+    },
+    "reason": {
+      "already_have": "Praxi hat das schon.",
+      "duplicate": "Derselbe Eintrag wurde mehrfach gefunden.",
+      "failed": "Der Import ist fehlgeschlagen.",
+      "invalid": "Der Eintrag ist ungültig.",
+      "never_copied": "Zugangsdaten und Schlüssel anderer Apps werden nie kopiert.",
+      "never_list": "Der Befehl steht auf der Nie-erlauben-Liste von Praxi.",
+      "not_found": "Es ist nicht mehr da. Suche erneut.",
+      "not_imported": "Diese Art von Eintrag wird nicht importiert.",
+      "ready": "Bereit zum Import.",
+      "ready_with_secrets": "Bereit. Einige Werte kommen in den Geheimspeicher, sobald du sie bestätigst.",
+      "review_first": "Sieh es dir zuerst von Hand an.",
+      "secret_failed": "Ein Geheimnis konnte nicht gespeichert werden, deshalb wurde nichts importiert.",
+      "secret_in_command": "Ein Geheimnis steht direkt im Befehl. Verschiebe es zuerst in eine Umgebungsvariable und suche dann erneut.",
+      "too_long": "Der Text ist zu lang.",
+      "unpinned": "Es startet ein Paket ohne feste Version und wurde deshalb weggelassen.",
+      "unreadable": "Die Datei konnte nicht gelesen werden.",
+      "unsupported": "Diese Art von Einrichtung wird nicht unterstützt.",
+      "variables": "Es hängt von Variablen ab, die Praxi nicht ausfüllen kann."
+    },
+    "result": {
+      "leftOut": "Weggelassen, weil du sie nicht bestätigt hast: {{keys}}.",
+      "mcp": "Hinzugefügt. Er ist ausgeschaltet.",
+      "personaFailed": "Das konnte nicht zu den Anweisungen des Bots hinzugefügt werden. Es wurde nichts geändert.",
+      "personaSaved": "Ans Ende der Anweisungen von {{bot}} angehängt.",
+      "personaTooLong": "Nicht hinzugefügt: Die Anweisungen von {{bot}} wären länger als {{max}} Zeichen. Kürze sie oder wähle einen anderen Bot.",
+      "skill": "Zu deinen Skills hinzugefügt.",
+      "stored": "In den Geheimspeicher verschoben: {{names}}."
+    },
+    "review": {
+      "back": "Zurück",
+      "emptyBody": "Praxi hat an den Stellen, an denen es nachsieht, keine Einrichtungen dieser Apps gefunden. Liegen deine woanders, gehe zurück und gib einen Ordner an.",
+      "emptyTitle": "Nichts gefunden",
+      "import": "Importieren ({{count}})",
+      "importing": "Import läuft…",
+      "lead": "Hake an, was du übernehmen möchtest. Es wird nichts importiert, bevor du auf Importieren drückst.",
+      "needBot": "Wähle für jede angehakte Anweisung einen Bot.",
+      "nothingBody": "Praxi hat einige Einträge gefunden, aber keiner lässt sich importieren. Die Gründe stehen unten.",
+      "nothingTitle": "Nichts kann importiert werden",
+      "selected": "Ausgewählt: {{count}}",
+      "title": "Das wurde gefunden"
+    },
+    "runFailed": "Der Import wurde nicht abgeschlossen. {{message}} Suche erneut, um zu sehen, was schon da ist.",
+    "scanFailed": "Die Suche nach Einrichtungen ist fehlgeschlagen. {{message}}",
+    "status": {
+      "failed": "Fehlgeschlagen",
+      "imported": "Importiert",
+      "skipped": "Übersprungen"
+    },
+    "subtitle": "Übernimm Einrichtungen, die du schon in anderen Apps gemacht hast.",
+    "title": "Aus anderen Assistenten importieren"
+  },
   "knowledge": {
     "active": "Aktiv",
     "add": "Quelle hinzufügen",

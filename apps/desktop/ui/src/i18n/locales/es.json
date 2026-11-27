@@ -4685,6 +4685,118 @@
     "giveBack": "Devolver el control",
     "giveBackFailed": "No se pudo devolver el control. Vuelve a intentarlo."
   },
+  "importAssistants": {
+    "apps": {
+      "claude": "Claude Desktop y Claude Code",
+      "codex": "Codex",
+      "cursor": "Cursor",
+      "folder": "Carpeta",
+      "hermes": "Hermes",
+      "openclaw": "OpenClaw",
+      "vscode": "VS Code"
+    },
+    "card": {
+      "button": "Importar…",
+      "description": "Trae servidores MCP, skills e instrucciones de Claude, Cursor, VS Code, Codex, OpenClaw o Hermes. No se lee nada hasta que lo pidas.",
+      "title": "Importar desde otros asistentes"
+    },
+    "done": {
+      "again": "Buscar de nuevo",
+      "offBody": "Abre Apps desde el menú de la cuenta y activa los que quieras usar.",
+      "offTitle": "Los servidores importados están desactivados",
+      "summary": "Importados: {{imported}} · Omitidos: {{skipped}} · Fallidos: {{failed}}",
+      "title": "Importación terminada"
+    },
+    "firstRun": {
+      "link": "¿Ya usas otros asistentes? Importa sus configuraciones"
+    },
+    "group": {
+      "instructions": "Instrucciones",
+      "instructionsNote": "Se añaden al final de las instrucciones del bot que elijas. No vienen marcadas por defecto.",
+      "mcp": "Servidores MCP",
+      "mcpNote": "Los servidores importados llegan desactivados. Los activas tú mismo en Apps. Las contraseñas y las claves nunca se muestran: marca cada uno que quieras mover al almacén de secretos.",
+      "notImported": "No se pudo importar",
+      "skills": "Skills",
+      "skillsNote": "Cada skill marcada se añade a tus skills de Praxi."
+    },
+    "intro": {
+      "folderHint": "Una carpeta con archivos Markdown de prompts o skills, como ruta en el ordenador donde se ejecuta el servicio de Praxi. Déjalo vacío para omitirlo.",
+      "folderLabel": "Leer también una carpeta (opcional)",
+      "folderPlaceholder": "/home/you/prompts",
+      "look": "Buscar configuraciones",
+      "looking": "Buscando…",
+      "reads": "Al pulsar el botón, Praxi lee los archivos de ajustes, skills e instrucciones de estas aplicaciones:",
+      "safe": "Praxi solo lee estos archivos para mostrarte una lista. No se cambia nada, no se envía a ningún sitio y no se ejecuta nada. Tú eliges qué importar en la pantalla siguiente, y no se importa nada antes.",
+      "safeTitle": "No se cambia, envía ni ejecuta nada",
+      "title": "Antes de empezar",
+      "where": "Esto mira el ordenador donde se ejecuta el servicio de Praxi. Si estás conectado a un servidor, mira los archivos propios de ese servidor, no los de este ordenador."
+    },
+    "item": {
+      "botLabel": "Añadir a las instrucciones de",
+      "botPlaceholder": "Elige un bot…",
+      "dropped": "No se copió porque solo apuntaba a una variable: {{names}}.",
+      "from": "De {{app}} · {{source}}",
+      "moveSecret": "Mover {{key}} ({{place}}) al almacén de secretos",
+      "noBots": "Todavía no tienes ningún bot. Crea uno y vuelve a ejecutar esta importación para traer instrucciones.",
+      "off": "Llega desactivado",
+      "place": {
+        "env": "variable de entorno",
+        "header": "cabecera"
+      },
+      "secretsGroup": "Secretos de {{name}}"
+    },
+    "reason": {
+      "already_have": "Praxi ya lo tiene.",
+      "duplicate": "El mismo elemento se encontró más de una vez.",
+      "failed": "No se pudo importar.",
+      "invalid": "La entrada no es válida.",
+      "never_copied": "Los inicios de sesión y las claves de otras aplicaciones nunca se copian.",
+      "never_list": "Su comando está en la lista de lo nunca permitido de Praxi.",
+      "not_found": "Ya no está. Busca de nuevo.",
+      "not_imported": "Este tipo de elemento no se importa.",
+      "ready": "Listo para importar.",
+      "ready_with_secrets": "Listo. Algunos valores irán al almacén de secretos cuando los confirmes.",
+      "review_first": "Revísalo primero a mano.",
+      "secret_failed": "No se pudo guardar un secreto, así que no se importó.",
+      "secret_in_command": "Hay un secreto escrito directamente en su comando. Muévelo antes a una variable de entorno y busca de nuevo.",
+      "too_long": "El texto es demasiado largo.",
+      "unpinned": "Ejecuta un paquete sin versión fija, así que se dejó fuera.",
+      "unreadable": "No se pudo leer el archivo.",
+      "unsupported": "Este tipo de configuración no es compatible.",
+      "variables": "Depende de variables que Praxi no puede rellenar."
+    },
+    "result": {
+      "leftOut": "Se dejaron fuera porque no los confirmaste: {{keys}}.",
+      "mcp": "Añadido. Está desactivado.",
+      "personaFailed": "No se pudo añadir esto a las instrucciones del bot. No se cambió nada.",
+      "personaSaved": "Añadido al final de las instrucciones de {{bot}}.",
+      "personaTooLong": "No se añadió: las instrucciones de {{bot}} superarían los {{max}} caracteres. Acórtalas o elige otro bot.",
+      "skill": "Añadida a tus skills.",
+      "stored": "Movidos al almacén de secretos: {{names}}."
+    },
+    "review": {
+      "back": "Atrás",
+      "emptyBody": "Praxi no encontró configuraciones de estas aplicaciones en los lugares donde busca. Si las tuyas están en otro sitio, vuelve atrás y escribe una carpeta.",
+      "emptyTitle": "No se encontró nada",
+      "import": "Importar ({{count}})",
+      "importing": "Importando…",
+      "lead": "Marca lo que quieras traer. No se importa nada hasta que pulses Importar.",
+      "needBot": "Elige un bot para cada elemento de instrucciones marcado.",
+      "nothingBody": "Praxi encontró algunos elementos, pero ninguno se puede importar. Los motivos están abajo.",
+      "nothingTitle": "No se puede importar nada",
+      "selected": "Seleccionado: {{count}}",
+      "title": "Lo que se encontró"
+    },
+    "runFailed": "La importación no terminó. {{message}} Busca de nuevo para ver lo que ya está.",
+    "scanFailed": "No se pudo buscar configuraciones. {{message}}",
+    "status": {
+      "failed": "Fallido",
+      "imported": "Importado",
+      "skipped": "Omitido"
+    },
+    "subtitle": "Trae las configuraciones que ya hiciste en otras aplicaciones.",
+    "title": "Importar desde otros asistentes"
+  },
   "knowledge": {
     "active": "Activo",
     "add": "Añadir fuente",

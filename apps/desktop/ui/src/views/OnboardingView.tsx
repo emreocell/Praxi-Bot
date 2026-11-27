@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Check, CircleHelp, LoaderCircle, Play, ServerOff } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CircleHelp, FolderInput, LoaderCircle, Play, ServerOff } from "lucide-react";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
@@ -33,6 +33,7 @@ import type { AppSettings } from "../store/settingsStore";
 import { BotStep, type BotLook } from "./firstrun/BotStep";
 import { BrainStep } from "./firstrun/BrainStep";
 import { FreedomStep } from "./firstrun/FreedomStep";
+import { ImportAssistantsModal } from "./ImportAssistantsModal";
 import styles from "./firstrun/FirstRun.module.css";
 
 const LANGUAGES: readonly SupportedLanguage[] = ["en", "tr", "de", "es", "fr", "pt", "id"];
@@ -82,6 +83,7 @@ export function OnboardingView({ settings, onLanguageChange, onSkip, onHelp, onD
   }));
   const [creating, setCreating] = useState(false);
   const [botError, setBotError] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const heading = useRef<HTMLHeadingElement | null>(null);
   const first = useRef(true);
   const created = useRef<Bot | null>(null);
@@ -259,7 +261,10 @@ export function OnboardingView({ settings, onLanguageChange, onSkip, onHelp, onD
                 {t("firstRun.back")}
               </Button>
             ) : (
-              <span />
+              <Button variant="ghost" size="sm" data-testid="onboarding-import" onClick={() => setImportOpen(true)}>
+                <FolderInput aria-hidden="true" />
+                {t("importAssistants.firstRun.link")}
+              </Button>
             )}
             <Button
               variant="primary"
@@ -275,6 +280,7 @@ export function OnboardingView({ settings, onLanguageChange, onSkip, onHelp, onD
           </footer>
         </div>
       </div>
+      <ImportAssistantsModal open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );
 }

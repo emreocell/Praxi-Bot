@@ -69,6 +69,7 @@ export const CARD_META: Record<string, CardMeta> = {
   quickAsk: { page: "general", group: "startup", advanced: true },
   hotkey: { page: "general", group: "startup", advanced: true },
   onboarding: { page: "general", group: "startup", advanced: true },
+  importAssistants: { page: "general", group: "startup" },
 
   // Appearance: the look, and readability (corners is basic: owners look for it next to the theme, #889)
   theme: { page: "appearance", group: "look" },

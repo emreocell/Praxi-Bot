@@ -4771,6 +4771,118 @@
     "giveBack": "Give control back",
     "giveBackFailed": "Could not give control back. Try again."
   },
+  "importAssistants": {
+    "apps": {
+      "claude": "Claude Desktop and Claude Code",
+      "codex": "Codex",
+      "cursor": "Cursor",
+      "folder": "Folder",
+      "hermes": "Hermes",
+      "openclaw": "OpenClaw",
+      "vscode": "VS Code"
+    },
+    "card": {
+      "button": "Import…",
+      "description": "Bring over MCP servers, skills and instructions from Claude, Cursor, VS Code, Codex, OpenClaw or Hermes. Nothing is read until you ask.",
+      "title": "Import from other assistants"
+    },
+    "done": {
+      "again": "Look again",
+      "offBody": "Open Apps from the account menu and switch on the ones you want to use.",
+      "offTitle": "Imported servers are switched off",
+      "summary": "Imported: {{imported}} · Skipped: {{skipped}} · Failed: {{failed}}",
+      "title": "Import finished"
+    },
+    "firstRun": {
+      "link": "Already use other assistants? Import their setups"
+    },
+    "group": {
+      "instructions": "Instructions",
+      "instructionsNote": "Added to the end of the instructions of the bot you choose. Not ticked by default.",
+      "mcp": "MCP servers",
+      "mcpNote": "Imported servers arrive switched off. You switch them on yourself in Apps. Passwords and keys are never shown: tick each one you want moved into the secret store.",
+      "notImported": "Could not be imported",
+      "skills": "Skills",
+      "skillsNote": "Each ticked skill is added to your Praxi skills."
+    },
+    "intro": {
+      "folderHint": "A folder of prompt or skill Markdown files, as a path on the computer that runs Praxi's service. Leave it empty to skip.",
+      "folderLabel": "Also read a folder (optional)",
+      "folderPlaceholder": "/home/you/prompts",
+      "look": "Look for setups",
+      "looking": "Looking…",
+      "reads": "When you press the button, Praxi reads the settings, skills and instruction files of these apps:",
+      "safe": "Praxi only reads these files to show you a list. Nothing is changed, sent anywhere or run. You choose what to import on the next screen, and nothing is imported before you do.",
+      "safeTitle": "Nothing is changed, sent or run",
+      "title": "Before you start",
+      "where": "This looks at the computer that runs Praxi's service. If you are connected to a server, it looks at that server's own files, not at this computer's."
+    },
+    "item": {
+      "botLabel": "Add to the instructions of",
+      "botPlaceholder": "Choose a bot…",
+      "dropped": "Not copied, because it only pointed to a variable: {{names}}.",
+      "from": "From {{app}} · {{source}}",
+      "moveSecret": "Move {{key}} ({{place}}) into the secret store",
+      "noBots": "You have no bot yet. Create one, then run this import again to bring instructions over.",
+      "off": "Arrives switched off",
+      "place": {
+        "env": "environment variable",
+        "header": "header"
+      },
+      "secretsGroup": "Secrets of {{name}}"
+    },
+    "reason": {
+      "already_have": "Praxi already has this.",
+      "duplicate": "The same item was found more than once.",
+      "failed": "It could not be imported.",
+      "invalid": "The entry is not valid.",
+      "never_copied": "Logins and keys of other apps are never copied.",
+      "never_list": "Its command is on Praxi's never-allowed list.",
+      "not_found": "It is not there any more. Look again.",
+      "not_imported": "This kind of item is not imported.",
+      "ready": "Ready to import.",
+      "ready_with_secrets": "Ready. Some values would go to the secret store once you confirm them.",
+      "review_first": "Look it over by hand first.",
+      "secret_failed": "A secret could not be stored, so this was not imported.",
+      "secret_in_command": "A secret is written directly in its command. Move it into an environment variable first, then look again.",
+      "too_long": "The text is too long.",
+      "unpinned": "It runs a package without a fixed version, so it was left out.",
+      "unreadable": "The file could not be read.",
+      "unsupported": "This kind of setup is not supported.",
+      "variables": "It relies on variables that Praxi cannot fill in."
+    },
+    "result": {
+      "leftOut": "Left out because you did not confirm them: {{keys}}.",
+      "mcp": "Added. It is switched off.",
+      "personaFailed": "Could not add this to the bot's instructions. Nothing was changed.",
+      "personaSaved": "Added to the end of the instructions of {{bot}}.",
+      "personaTooLong": "Not added: the instructions of {{bot}} would be longer than {{max}} characters. Shorten them or choose another bot.",
+      "skill": "Added to your skills.",
+      "stored": "Moved into the secret store: {{names}}."
+    },
+    "review": {
+      "back": "Back",
+      "emptyBody": "Praxi did not find setups of these apps in the places it looks. If yours are somewhere else, go back and type a folder.",
+      "emptyTitle": "Nothing was found",
+      "import": "Import ({{count}})",
+      "importing": "Importing…",
+      "lead": "Tick what you want to bring over. Nothing is imported until you press Import.",
+      "needBot": "Choose a bot for each ticked instructions item.",
+      "nothingBody": "Praxi found some items, but none of them can be imported. The reasons are listed below.",
+      "nothingTitle": "Nothing can be imported",
+      "selected": "Selected: {{count}}",
+      "title": "What was found"
+    },
+    "runFailed": "The import did not finish. {{message}} Look again to see what is already there.",
+    "scanFailed": "Could not look for setups. {{message}}",
+    "status": {
+      "failed": "Failed",
+      "imported": "Imported",
+      "skipped": "Skipped"
+    },
+    "subtitle": "Bring over setups you already made in other apps.",
+    "title": "Import from other assistants"
+  },
   "knowledge": {
     "active": "Active",
     "add": "Add source",

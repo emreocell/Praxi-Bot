@@ -4771,6 +4771,118 @@
     "giveBack": "Kontrolü geri ver",
     "giveBackFailed": "Kontrol geri verilemedi. Yeniden dene."
   },
+  "importAssistants": {
+    "apps": {
+      "claude": "Claude Desktop ve Claude Code",
+      "codex": "Codex",
+      "cursor": "Cursor",
+      "folder": "Klasör",
+      "hermes": "Hermes",
+      "openclaw": "OpenClaw",
+      "vscode": "VS Code"
+    },
+    "card": {
+      "button": "İçe aktar…",
+      "description": "Claude, Cursor, VS Code, Codex, OpenClaw veya Hermes'teki MCP sunucularını, becerileri ve yönergeleri getir. Sen istemeden hiçbir şey okunmaz.",
+      "title": "Diğer asistanlardan içe aktar"
+    },
+    "done": {
+      "again": "Yeniden bak",
+      "offBody": "Hesap menüsünden Uygulamalar'ı aç ve kullanmak istediklerini aç.",
+      "offTitle": "İçe aktarılan sunucular kapalı",
+      "summary": "İçe aktarılan: {{imported}} · Atlanan: {{skipped}} · Başarısız: {{failed}}",
+      "title": "İçe aktarma bitti"
+    },
+    "firstRun": {
+      "link": "Başka asistanlar mı kullanıyorsun? Kurulumlarını içe aktar"
+    },
+    "group": {
+      "instructions": "Yönergeler",
+      "instructionsNote": "Seçtiğin botun yönergelerinin sonuna eklenir. Varsayılan olarak işaretli değildir.",
+      "mcp": "MCP sunucuları",
+      "mcpNote": "İçe aktarılan sunucular kapalı gelir. Onları Uygulamalar'dan kendin açarsın. Parolalar ve anahtarlar asla gösterilmez: gizli depoya taşınmasını istediklerinin her birini işaretle.",
+      "notImported": "İçe aktarılamayanlar",
+      "skills": "Beceriler",
+      "skillsNote": "İşaretlediğin her beceri Praxi becerilerine eklenir."
+    },
+    "intro": {
+      "folderHint": "İstem veya beceri Markdown dosyalarının bulunduğu bir klasör; Praxi'nin hizmetini çalıştıran bilgisayardaki yolu olarak yaz. Atlamak için boş bırak.",
+      "folderLabel": "Bir klasörü de oku (isteğe bağlı)",
+      "folderPlaceholder": "/home/you/prompts",
+      "look": "Kurulumlara bak",
+      "looking": "Bakılıyor…",
+      "reads": "Düğmeye bastığında Praxi bu uygulamaların ayar, beceri ve yönerge dosyalarını okur:",
+      "safe": "Praxi bu dosyaları yalnızca sana bir liste göstermek için okur. Hiçbir şey değiştirilmez, bir yere gönderilmez veya çalıştırılmaz. Neyin içe aktarılacağını sonraki ekranda sen seçersin; sen seçmeden hiçbir şey içe aktarılmaz.",
+      "safeTitle": "Hiçbir şey değiştirilmez, gönderilmez veya çalıştırılmaz",
+      "title": "Başlamadan önce",
+      "where": "Bu, Praxi'nin hizmetini çalıştıran bilgisayara bakar. Bir sunucuya bağlıysan bu bilgisayarın değil, o sunucunun kendi dosyalarına bakar."
+    },
+    "item": {
+      "botLabel": "Şu botun yönergelerine ekle",
+      "botPlaceholder": "Bir bot seç…",
+      "dropped": "Yalnızca bir değişkene işaret ettiği için kopyalanmadı: {{names}}.",
+      "from": "{{app}} · {{source}}",
+      "moveSecret": "{{key}} ({{place}}) değerini gizli depoya taşı",
+      "noBots": "Henüz botun yok. Bir bot oluştur, sonra yönergeleri getirmek için bu içe aktarmayı yeniden çalıştır.",
+      "off": "Kapalı gelir",
+      "place": {
+        "env": "ortam değişkeni",
+        "header": "başlık"
+      },
+      "secretsGroup": "{{name}} için gizli bilgiler"
+    },
+    "reason": {
+      "already_have": "Praxi'de bu zaten var.",
+      "duplicate": "Aynı öğe birden fazla kez bulundu.",
+      "failed": "İçe aktarılamadı.",
+      "invalid": "Kayıt geçerli değil.",
+      "never_copied": "Diğer uygulamaların girişleri ve anahtarları asla kopyalanmaz.",
+      "never_list": "Komutu Praxi'nin asla izin verilmeyenler listesinde.",
+      "not_found": "Artık bulunamıyor. Yeniden ara.",
+      "not_imported": "Bu tür öğeler içe aktarılmaz.",
+      "ready": "İçe aktarmaya hazır.",
+      "ready_with_secrets": "Hazır. Bazı değerler, onaylayınca gizli depoya gider.",
+      "review_first": "Önce elle gözden geçir.",
+      "secret_failed": "Bir gizli değer saklanamadı, bu yüzden içe aktarılmadı.",
+      "secret_in_command": "Komutunun içine doğrudan bir gizli bilgi yazılmış. Önce onu bir ortam değişkenine taşı, sonra yeniden bak.",
+      "too_long": "Metin çok uzun.",
+      "unpinned": "Sabit sürümü olmayan bir paket çalıştırıyor, bu yüzden dışarıda bırakıldı.",
+      "unreadable": "Dosya okunamadı.",
+      "unsupported": "Bu tür bir kurulum desteklenmiyor.",
+      "variables": "Praxi'nin dolduramayacağı değişkenlere dayanıyor."
+    },
+    "result": {
+      "leftOut": "Onaylamadığın için dışarıda bırakıldı: {{keys}}.",
+      "mcp": "Eklendi. Kapalı durumda.",
+      "personaFailed": "Bu, botun yönergelerine eklenemedi. Hiçbir şey değişmedi.",
+      "personaSaved": "{{bot}} botunun yönergelerinin sonuna eklendi.",
+      "personaTooLong": "Eklenmedi: {{bot}} botunun yönergeleri {{max}} karakterden uzun olurdu. Yönergeleri kısalt veya başka bir bot seç.",
+      "skill": "Becerilerine eklendi.",
+      "stored": "Gizli depoya taşındı: {{names}}."
+    },
+    "review": {
+      "back": "Geri",
+      "emptyBody": "Praxi baktığı yerlerde bu uygulamalara ait kurulum bulamadı. Seninkiler başka bir yerdeyse geri dönüp bir klasör yaz.",
+      "emptyTitle": "Hiçbir şey bulunamadı",
+      "import": "İçe aktar ({{count}})",
+      "importing": "İçe aktarılıyor…",
+      "lead": "Getirmek istediklerini işaretle. İçe aktar düğmesine basana kadar hiçbir şey içe aktarılmaz.",
+      "needBot": "İşaretlediğin her yönerge için bir bot seç.",
+      "nothingBody": "Praxi bazı öğeler buldu ama hiçbiri içe aktarılamıyor. Nedenleri aşağıda.",
+      "nothingTitle": "İçe aktarılabilecek bir şey yok",
+      "selected": "Seçilen: {{count}}",
+      "title": "Bulunanlar"
+    },
+    "runFailed": "İçe aktarma tamamlanmadı. {{message}} Nelerin zaten orada olduğunu görmek için yeniden bak.",
+    "scanFailed": "Kurulumlara bakılamadı. {{message}}",
+    "status": {
+      "failed": "Başarısız",
+      "imported": "İçe aktarıldı",
+      "skipped": "Atlandı"
+    },
+    "subtitle": "Başka uygulamalarda hazırladığın kurulumları getir.",
+    "title": "Diğer asistanlardan içe aktar"
+  },
   "knowledge": {
     "active": "Etkin",
     "add": "Kaynak ekle",

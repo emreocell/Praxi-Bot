@@ -3366,6 +3366,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/import/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import what the owner ticked. Scans again first: what is written is what is on disk now. */
+        post: operations["run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/import/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Look for the setups of other assistants on this machine. Reads files; writes nothing. */
+        post: operations["scan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/incoming-webhooks/{hook}": {
         parameters: {
             query?: never;
@@ -8758,6 +8792,33 @@ export interface components {
             name?: string | null;
             permission_level?: null | components["schemas"]["SharePreset"];
         };
+        /** @description One line of the preview. */
+        ImportItemDto: {
+            /** @description `claude`, `cursor`, `vscode`, `codex`, `openclaw`, `hermes` or `folder`. */
+            app: string;
+            /** @description Ticked by default. */
+            default_on: boolean;
+            /** @description A safe one-line summary (never a value). */
+            detail?: string | null;
+            /** @description Names whose value was only a variable reference and is not copied. */
+            dropped: string[];
+            /** @description Stable between a scan and a run. */
+            id: string;
+            /** @description Can be imported. */
+            import: boolean;
+            /** @description `mcp_server`, `skill`, `instructions` or `other`. */
+            kind: string;
+            /** @description Server or skill name, or a file name. */
+            name: string;
+            /** @description Outcome in English. */
+            note: string;
+            /** @description Outcome as a code (`ready`, `already_have`, `unpinned`, ...). */
+            reason: string;
+            /** @description Values that go to the secret store (names only). */
+            secrets: components["schemas"]["ImportSecretDto"][];
+            /** @description The file it came from (`~/.cursor/mcp.json`). */
+            source: string;
+        };
         ImportMessage: {
             /** Format: uuid */
             chat_id: string;
@@ -8826,6 +8887,23 @@ export interface components {
             /** @description Tool patterns removed. */
             tools_exclude: string[];
         };
+        /** @description What happened to one item. */
+        ImportResultDto: {
+            /** @description The item's `id`. */
+            id: string;
+            /** @description Outcome in English. */
+            message: string;
+            /** @description Outcome code when it was skipped or failed. */
+            reason?: string | null;
+            /** @description Environment variables / headers left out (not confirmed, or not storable). */
+            secrets_left_out: string[];
+            /** @description Secret names stored. */
+            secrets_stored: string[];
+            /** @description `imported`, `skipped` or `failed`. */
+            status: string;
+            /** @description Instruction items: the text to add to a bot. */
+            text?: string | null;
+        };
         /**
          * @description A tool step or approval row. Kept only for its count; it is never stored
          *     in the run or approval tables.
@@ -8846,6 +8924,34 @@ export interface components {
             state: string;
             /** Format: int64 */
             updated_at_ms: number;
+        };
+        /** @description The outcome of a run. */
+        ImportRunDto: {
+            /** @description One entry per requested id, in order. */
+            results: components["schemas"]["ImportResultDto"][];
+        };
+        /** @description Import the ticked items. */
+        ImportRunInput: {
+            /** @description `name` of every secret the owner agreed to move into the secret store. */
+            confirmed_secrets?: string[];
+            /** @description Same as in the scan. */
+            folder?: string | null;
+            /** @description `id` of every ticked item. */
+            ids: string[];
+            /** @description Same as in the scan. */
+            only?: string | null;
+        };
+        /** @description The preview. */
+        ImportScanDto: {
+            /** @description Everything found, importable or not. */
+            items: components["schemas"]["ImportItemDto"][];
+        };
+        /** @description What to look at. */
+        ImportScanInput: {
+            /** @description A folder (on the machine of this daemon) of skill and prompt markdown. Read only when set. */
+            folder?: string | null;
+            /** @description Only this app: `claude`, `cursor`, `vscode`, `codex`, `openclaw`, `hermes` or `folder`. */
+            only?: string | null;
         };
         ImportScheduleItem: {
             /**
@@ -8897,6 +9003,15 @@ export interface components {
         };
         ImportSchedulesReport: {
             items: components["schemas"]["ImportScheduleResult"][];
+        };
+        /** @description A value that moves to the secret store when the owner confirms it. Never the value. */
+        ImportSecretDto: {
+            /** @description The environment variable or header it belongs to. */
+            key: string;
+            /** @description The secret's name in the store. */
+            name: string;
+            /** @description `env` or `header`. */
+            place: string;
         };
         ImportWorkflow: {
             /** Format: uuid */
@@ -21302,6 +21417,84 @@ export interface operations {
                 };
             };
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportRunInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportRunDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    scan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportScanInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportScanDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

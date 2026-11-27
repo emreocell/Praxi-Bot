@@ -5,12 +5,15 @@ import { applyPatchOps, type PatchOp } from "../lib/botPatch.ts";
 import { ApiClient, ApiError } from "./client.ts";
 import { MOCK_MCP_CATALOG } from "./mockCatalog.ts";
 import { seedKnowledgeSources } from "./mockLibrary.ts";
+import { mockImportRun, mockImportScan } from "./mockImport.ts";
 import { MockHostSetup } from "./mockHostSetup.ts";
 import { MockLiveViewService } from "./mockLiveView.ts";
 import { MockMissions } from "./mockMissions.ts";
 import { MockTriggers } from "./mockTriggers.ts";
 import { longChatEvents, longChatMessages } from "./mockLongChat.ts";
 import type {
+  ImportRunInput,
+  ImportScanInput,
   BotSpendLimits,
   CreateMission,
   OwnerNotifySettings,
@@ -1659,6 +1662,10 @@ export class MockApiClient extends ApiClient {
     }
     if (seg[0] === "knowledge" && seg[1] === "folders" && method === "GET") return ok(mockFolderListing(String(opts.query?.path ?? "")));
     if (seg[0] === "bots" && seg[2] === "knowledge" && seg[3] === "folder-preview" && method === "POST") return ok(mockFolderPreview((opts.body as { path: string }).path));
+    if (seg[0] === "import" && method === "POST") {
+      if (seg[1] === "scan") return ok(mockImportScan((opts.body ?? {}) as ImportScanInput));
+      if (seg[1] === "run") return ok(mockImportRun(opts.body as ImportRunInput));
+    }
     if (seg[0] === "bots" && seg[2] === "incoming-webhooks") {
       return ok(this.incomingWebhookRoute(method, seg, opts.body));
     }

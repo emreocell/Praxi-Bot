@@ -771,3 +771,89 @@ export interface BotWorkspaceLimitsInput {
   soft_limit_bytes: number | null;
   hard_limit_bytes: number | null;
 }
+
+// --- Import from other assistants (`POST /v1/import/scan` and `/v1/import/run`, owner-only) ------
+// Hand-written until the daemon routes are in the generated schema.
+
+/** The other assistants the daemon knows where to look for (`folder` = a folder the owner typed). */
+export type ImportApp = "claude" | "cursor" | "vscode" | "codex" | "openclaw" | "hermes" | "folder";
+export type ImportKind = "mcp_server" | "skill" | "instructions" | "other";
+/** Stable code for why an item is (not) importable or was skipped; the UI words it per language. */
+export type ImportReason =
+  | "ready"
+  | "ready_with_secrets"
+  | "already_have"
+  | "duplicate"
+  | "unpinned"
+  | "never_list"
+  | "unsupported"
+  | "invalid"
+  | "unreadable"
+  | "secret_in_command"
+  | "variables"
+  | "review_first"
+  | "too_long"
+  | "never_copied"
+  | "not_imported"
+  // Only in run results: why an item that should be imported was not.
+  | "not_found"
+  | "failed"
+  | "secret_failed";
+
+/** A value that would go to the secret store. Only its name is ever shown: the daemon holds the value. */
+export interface ImportSecretSlot {
+  /** Name in the secret store; what `confirmed_secrets` carries. */
+  name: string;
+  /** The environment variable or header name. */
+  key: string;
+  place: "env" | "header";
+}
+
+export interface ImportItem {
+  id: string;
+  app: ImportApp;
+  kind: ImportKind;
+  name: string;
+  /** Where it was found, e.g. `~/.cursor/mcp.json`. */
+  source: string;
+  import: boolean;
+  default_on: boolean;
+  reason: ImportReason;
+  /** English fallback for `reason`. */
+  note: string;
+  /** Safe one-line summary, never a value. */
+  detail?: string | null;
+  secrets: ImportSecretSlot[];
+  /** Names whose value was only a variable reference and was not copied. */
+  dropped: string[];
+}
+
+export interface ImportResult {
+  id: string;
+  status: "imported" | "skipped" | "failed";
+  reason?: ImportReason | null;
+  /** English fallback. */
+  message: string;
+  /** Secret-store names that were stored. */
+  secrets_stored: string[];
+  /** Keys (not names) that were left out because the owner did not confirm them. */
+  secrets_left_out: string[];
+  /** Instructions only: the text to append to a bot's persona. */
+  text?: string | null;
+}
+
+export interface ImportScanInput {
+  only?: ImportApp;
+  /** A folder of prompt / skill Markdown on the machine the daemon runs on. */
+  folder?: string;
+}
+export interface ImportScanOutput {
+  items: ImportItem[];
+}
+export interface ImportRunInput extends ImportScanInput {
+  ids: string[];
+  confirmed_secrets: string[];
+}
+export interface ImportRunOutput {
+  results: ImportResult[];
+}
