@@ -825,6 +825,7 @@
       "placeholder": "Tam yol, örneğin C:\\Users\\sen\\Documents",
       "save": "Kaydet ve bağla"
     },
+    "forgetClientSecret": "Kayıtlı istemci sırrını da sil (başka bir uygulama hâlâ kullanıyorsa kalır)",
     "getKey": "API anahtarı al",
     "google": {
       "allAdded": "Üç Google uygulaması da eklendi. Bağlı olanları Bağlı bölümünden yönetin.",
@@ -963,6 +964,8 @@
       "notOpened": "Giriş sayfası tarayıcınızda açılamadı. Sayfayı yeniden açın ya da bağlantıyı kopyalayın.",
       "open": "Giriş sayfasını aç",
       "openAgain": "Sayfayı yeniden aç",
+      "openAnyway": "Yine de aç",
+      "origin": "Giriş sayfası şu adreste:",
       "paste": {
         "body": "Bir adım daha var. Bu pencere yanıtı kendi başına yakalayamıyor. Giriş yaptıktan sonra tarayıcı açılmayan bir sayfa gösterir (127.0.0.1 adresine bağlanamadığını söyler). Bu beklenen bir durum. Tarayıcının adres çubuğundaki adresin tamamını kopyalayıp buraya yapıştırın.",
         "label": "Tarayıcının son durduğu sayfanın adresi",
@@ -971,6 +974,8 @@
       "retry": "Yeniden dene",
       "starting": "Giriş sayfası hazırlanıyor…",
       "title": "{{name}} girişi",
+      "unexpectedSite": "Bu giriş sayfası {{site}} adresinde ve uygulamanın ait olduğu site değil, bu yüzden açılmadı. Yalnızca böyle bir şey bekliyorsanız açın ve tanımadığınız bir sayfaya asla parola yazmayın.",
+      "unknownSite": "bilinmeyen bir site",
       "waiting": "Tarayıcınızda girişi tamamlayın. Praxi kendiliğinden devam eder, kopyalayacak bir şey yok.",
       "waitingServer": "Tarayıcınızda girişi tamamlayın. Yanıt bu uygulamaya döner, uygulama da sunucunuza iletir. Kopyalayacak bir şey yok."
     },

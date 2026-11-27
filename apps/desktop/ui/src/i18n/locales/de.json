@@ -825,6 +825,7 @@
       "placeholder": "Vollständiger Pfad, zum Beispiel C:\\Users\\du\\Documents",
       "save": "Speichern und verbinden"
     },
+    "forgetClientSecret": "Also forget the saved client secret (it stays if another app still uses it)",
     "getKey": "API-Schlüssel holen",
     "google": {
       "allAdded": "Alle drei Google-Apps sind hinzugefügt. Verwalte sie unter Verbunden.",
@@ -963,6 +964,8 @@
       "notOpened": "Die Anmeldeseite ließ sich im Browser nicht öffnen. Öffne sie erneut oder kopiere den Link.",
       "open": "Anmeldeseite öffnen",
       "openAgain": "Seite erneut öffnen",
+      "openAnyway": "Open it anyway",
+      "origin": "The sign-in page is on:",
       "paste": {
         "body": "Ein Schritt noch. Dieses Fenster kann die Antwort nicht selbst auffangen. Nach der Anmeldung zeigt der Browser eine Seite, die sich nicht öffnet (127.0.0.1 nicht erreichbar). Das ist normal. Kopiere die ganze Adresse aus der Adressleiste und füge sie hier ein.",
         "label": "Adresse der Seite, bei der der Browser gelandet ist",
@@ -971,6 +974,8 @@
       "retry": "Erneut versuchen",
       "starting": "Die Anmeldeseite wird vorbereitet…",
       "title": "Anmeldung bei {{name}}",
+      "unexpectedSite": "This sign-in page is on {{site}}, which is not the site this app belongs to, so it was not opened. Open it only if you expect this, and never type a password on a page you do not recognise.",
+      "unknownSite": "an unknown site",
       "waiting": "Schließe die Anmeldung im Browser ab. Praxi macht von selbst weiter, es muss nichts kopiert werden.",
       "waitingServer": "Schließe die Anmeldung im Browser ab. Die Antwort kommt zu dieser App zurück und wird an deinen Server weitergegeben. Es muss nichts kopiert werden."
     },

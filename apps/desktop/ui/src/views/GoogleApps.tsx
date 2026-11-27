@@ -4,7 +4,7 @@ import { Button } from "ui";
 import type { McpCatalogEntry, McpServer } from "../api/types";
 import { BrandIcon } from "../components/BrandIcon";
 import formStyles from "../components/Form.module.css";
-import { openSignInLink } from "../lib/externalLink";
+import { openGoogleConsoleLink } from "../lib/externalLink";
 import {
   GOOGLE_STEPS,
   type GoogleFieldError,
@@ -150,7 +150,7 @@ function GoogleSetup({
                 </div>
                 <div className={own.links}>
                   {services.map((s) => (
-                    <Button key={s.id} size="sm" variant="secondary" onClick={() => void openSignInLink(s.href)}>
+                    <Button key={s.id} size="sm" variant="secondary" onClick={() => void openGoogleConsoleLink(s.href)}>
                       {s.label}
                     </Button>
                   ))}
@@ -159,7 +159,7 @@ function GoogleSetup({
             ) : (
               <div className={own.links}>
                 {step.links.map((l) => (
-                  <Button key={l.href} size="sm" variant="secondary" onClick={() => void openSignInLink(l.href)}>
+                  <Button key={l.href} size="sm" variant="secondary" onClick={() => void openGoogleConsoleLink(l.href)}>
                     {l.label}
                   </Button>
                 ))}

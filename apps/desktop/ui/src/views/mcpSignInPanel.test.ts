@@ -34,7 +34,7 @@ const render = (state: SignInState) =>
 
 test("a daemon here or a relayed one: wait for the browser, nothing to paste", () => {
   for (const mode of ["local", "relay"] as const) {
-    const html = render({ name: "linear", step: "browser", url: "https://a.example/auth", opened: true, mode, redirectUri: "x" });
+    const html = render({ name: "linear", step: "browser", url: "https://a.example/auth", opened: true, mode, redirectUri: "x", origin: "https://a.example", needsConfirm: false });
     assert.match(html, /Finish signing in in your browser/);
     assert.ok(!html.includes('data-testid="mcp-sign-in-paste"'), mode);
     assert.match(html, /data-testid="mcp-sign-in-cancel"/);
@@ -43,14 +43,14 @@ test("a daemon here or a relayed one: wait for the browser, nothing to paste", (
 });
 
 test("the paste step is shown plainly, with the one field, when the window cannot catch the answer", () => {
-  const html = render({ name: "linear", step: "browser", url: "https://a.example/auth", opened: true, mode: "paste", redirectUri: "x" });
+  const html = render({ name: "linear", step: "browser", url: "https://a.example/auth", opened: true, mode: "paste", redirectUri: "x", origin: "https://a.example", needsConfirm: false });
   assert.match(html, /data-testid="mcp-sign-in-paste"/);
   assert.match(html, /cannot catch the answer on its own/);
   assert.match(html, /Finish sign-in/);
 });
 
 test("a page that could not be opened offers the link, a failure says why and what next", () => {
-  const closed = render({ name: "linear", step: "browser", url: "https://a.example/auth", opened: false, mode: "relay", redirectUri: "x" });
+  const closed = render({ name: "linear", step: "browser", url: "https://a.example/auth", opened: false, mode: "relay", redirectUri: "x", origin: "https://a.example", needsConfirm: false });
   assert.match(closed, /could not be opened in your browser/);
   assert.match(closed, /data-testid="mcp-sign-in-copy"/);
   const admin = render({ name: "linear", step: "failed", reason: "admin_needed", detail: "HTTP 403 · host_admin_required" });
@@ -101,4 +101,24 @@ test("the Google section lists one card per app with read-only wording and opens
   assert.match(html, /What can go wrong/);
   assert.match(html, /verified this app/);
   assert.ok(!/apps\.google\./.test(html), "an untranslated key is showing");
+});
+
+test("the panel names the site of the sign-in page, and asks first when it is not the app's own", () => {
+  const own = render({ name: "linear", step: "browser", url: "https://a.example/auth", opened: true, mode: "local", redirectUri: "x", origin: "https://a.example", needsConfirm: false });
+  assert.match(own, /data-testid="mcp-sign-in-origin"/);
+  assert.match(own, /<code>https:\/\/a\.example<\/code>/);
+  assert.ok(!own.includes('data-testid="mcp-sign-in-unexpected"'));
+  const other = render({ name: "linear", step: "browser", url: "https://evil.example/auth", opened: false, mode: "local", redirectUri: "x", origin: "https://evil.example", needsConfirm: true });
+  assert.match(other, /data-testid="mcp-sign-in-unexpected"/);
+  assert.match(other, /https:\/\/evil\.example, which is not the site this app belongs to/);
+  assert.match(other, /Open it anyway/);
+  // Not a failure to open: nothing was tried.
+  assert.ok(!/could not be opened in your browser/.test(other));
+  assert.ok(!/apps\.signIn\./.test(other), "an untranslated key is showing");
+});
+
+test("a wrong pasted address is answered next to the field", () => {
+  const html = render({ name: "linear", step: "browser", url: "https://a.example/auth", opened: true, mode: "paste", redirectUri: "x", origin: "https://a.example", needsConfirm: false, wrongPaste: true });
+  assert.match(html, /data-testid="mcp-sign-in-wrong-paste"/);
+  assert.match(html, /not from this sign-in/);
 });

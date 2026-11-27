@@ -2274,6 +2274,68 @@ async fn phones_nodes_and_hosts_never_change_mail_search_or_dictation_settings()
     r.net.shutdown().await;
 }
 
+/// On a host, a sign-in for an app is started and finished by the host's administrator desktop
+/// alone: an unconfirmed desktop is told how to become one, every other role is refused, and the
+/// confirmed desktop gets through to the handler (no MCP host is installed in this rig: 503).
+#[tokio::test]
+async fn app_sign_in_on_a_host_needs_the_administrator_desktop() {
+    let r = rig().await;
+    let calls = [
+        (
+            "/v1/mcp/servers/gmail/auth/start",
+            json!({"relay_port": 53123}),
+        ),
+        (
+            "/v1/mcp/servers/gmail/auth/callback",
+            json!({"redirect_url": "http://127.0.0.1:53123/callback?code=c&state=s"}),
+        ),
+        ("/v1/mcp/servers/gmail/auth/cancel", json!({})),
+        ("/v1/mcp/servers/gmail/test", json!({})),
+    ];
+    for (path, body) in &calls {
+        let unconfirmed = peer_call(
+            &r.t,
+            Some((r.legacy_key.as_str(), crate::PeerRole::Desktop)),
+            Method::POST,
+            path,
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(unconfirmed.status, StatusCode::FORBIDDEN, "{path}");
+        assert_eq!(
+            unconfirmed.json()["error"]["code"],
+            "host_admin_required",
+            "{path}"
+        );
+        for role in [
+            crate::PeerRole::Phone,
+            crate::PeerRole::Node,
+            crate::PeerRole::Host,
+        ] {
+            let denied = peer_call(
+                &r.t,
+                Some((r.admin_key.as_str(), role)),
+                Method::POST,
+                path,
+                Some(body.clone()),
+            )
+            .await;
+            assert_eq!(denied.status, StatusCode::FORBIDDEN, "{role:?} {path}");
+        }
+        r.t.state.leader().reset_admin_budget();
+        let admin = peer_call(
+            &r.t,
+            Some((r.admin_key.as_str(), crate::PeerRole::Desktop)),
+            Method::POST,
+            path,
+            Some(body.clone()),
+        )
+        .await;
+        assert_ne!(admin.status, StatusCode::FORBIDDEN, "{path}");
+    }
+    r.net.shutdown().await;
+}
+
 /// The confirmed desktop is the owner of its host (card c860): the owner settings that used to be
 /// closed to it are open now, and the never-list stays closed (see `peer_owner.rs` for the matrix).
 #[tokio::test]

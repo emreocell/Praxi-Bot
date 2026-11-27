@@ -825,6 +825,7 @@
       "placeholder": "Full path, for example C:\\Users\\you\\Documents",
       "save": "Save and connect"
     },
+    "forgetClientSecret": "Also forget the saved client secret (it stays if another app still uses it)",
     "getKey": "Get API key",
     "google": {
       "allAdded": "All three Google apps are added. Manage them under Connected.",
@@ -963,6 +964,8 @@
       "notOpened": "The sign-in page could not be opened in your browser. Open it again, or copy the link.",
       "open": "Open the sign-in page",
       "openAgain": "Open the page again",
+      "openAnyway": "Open it anyway",
+      "origin": "The sign-in page is on:",
       "paste": {
         "body": "One more step. This window cannot catch the answer on its own. After you sign in, the browser shows a page that does not open (it says it cannot connect to 127.0.0.1). That is expected. Copy the full address from the browser's address bar and paste it here.",
         "label": "Address of the page the browser ended on",
@@ -971,6 +974,8 @@
       "retry": "Try again",
       "starting": "Getting the sign-in page ready…",
       "title": "Signing in to {{name}}",
+      "unexpectedSite": "This sign-in page is on {{site}}, which is not the site this app belongs to, so it was not opened. Open it only if you expect this, and never type a password on a page you do not recognise.",
+      "unknownSite": "an unknown site",
       "waiting": "Finish signing in in your browser. Praxi carries on by itself; there is nothing to copy.",
       "waitingServer": "Finish signing in in your browser. The answer comes back to this app, which passes it on to your server. There is nothing to copy."
     },

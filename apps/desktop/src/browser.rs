@@ -43,9 +43,13 @@ fn sign_in_allowed(href: &str) -> bool {
 
 /// Validate and hand a sign-in page to the operating system browser: any
 /// `https` address without credentials in it. The address comes from the
-/// daemon (an authorization server's page) or from the app's own setup guide;
-/// a plain `http` or `file` address, or one with a user name in front of the
-/// host, is refused.
+/// daemon (the authorization page of a sign-in the owner started, which the
+/// sign-in panel shows by origin and confirms when it is not the app's own
+/// site) or from the app's own setup guide (Google Cloud console pages); a
+/// plain `http` or `file` address, or one with a user name in front of the
+/// host, is refused. Callers must never pass an address taken from a tool
+/// result, a catalog `homepage` or other text a server supplies: this check
+/// cannot tell whose site it is.
 ///
 /// # Errors
 /// Unapproved URL or OS opener failure.

@@ -1630,8 +1630,14 @@ export class ApiClient {
       body: patch
     });
   }
-  deleteMcpServer(name: string): Promise<void> {
-    return this.request("DELETE", `/mcp/servers/${encodeURIComponent(name)}`);
+  /**
+   * Remove an app. With `forgetClientSecret` the sign-in client secret it used is deleted too, unless
+   * another app still uses it (several Google apps share one).
+   */
+  deleteMcpServer(name: string, opts: { forgetClientSecret?: boolean } = {}): Promise<void> {
+    return this.request("DELETE", `/mcp/servers/${encodeURIComponent(name)}`, {
+      query: opts.forgetClientSecret ? { forget_client_secret: "true" } : undefined
+    });
   }
   reconnectMcpServer(name: string): Promise<McpServer> {
     return this.request(

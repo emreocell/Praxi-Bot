@@ -3387,7 +3387,11 @@ export interface paths {
          */
         put: operations["update_mcp_server"];
         post?: never;
-        /** Disconnect and remove a server (its tools disappear) and save `mcp.toml`. */
+        /**
+         * Disconnect and remove a server (its tools disappear) and save `mcp.toml`.
+         *     With `forget_client_secret` the OAuth client secret it used goes too, when
+         *     no other server still uses it.
+         */
         delete: operations["delete_mcp_server"];
         options?: never;
         head?: never;
@@ -20661,7 +20665,13 @@ export interface operations {
     };
     delete_mcp_server: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Also delete the OAuth client secret the server used, unless another
+                 *     server still uses it (several apps can share one client).
+                 */
+                forget_client_secret?: boolean;
+            };
             header?: never;
             path: {
                 /** @description Server name */

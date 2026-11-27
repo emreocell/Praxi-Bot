@@ -796,6 +796,16 @@ pub trait McpControl: Send + Sync {
     /// # Errors
     /// [`McpControlError`].
     async fn remove(&self, name: &str) -> Result<(), McpControlError>;
+    /// [`Self::remove`], then also delete the OAuth client secret the server
+    /// pointed at, unless another server still uses that secret. The default
+    /// (a host without a secret store) only removes the server.
+    ///
+    /// # Errors
+    /// [`McpControlError`] from the removal; a secret that cannot be deleted
+    /// does not undo it.
+    async fn remove_forgetting_client_secret(&self, name: &str) -> Result<(), McpControlError> {
+        self.remove(name).await
+    }
     /// Lift a quarantine / retry the connection.  A connect failure is not an
     /// error: it shows as `status: error` in the returned server.
     ///

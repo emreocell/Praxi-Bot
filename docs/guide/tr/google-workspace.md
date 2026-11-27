@@ -82,6 +82,17 @@ sunucu için bir şey kaydetmen gerekmez.
 uygulamayı kaldırır. Praxi'nin erişimini Google tarafında da kaldırmak için Google hesabının
 **Güvenlik → Üçüncü taraf erişimi** bölümünde oluşturduğun istemciyi kaldır.
 
+Tüm Google uygulamaları tek bir istemci sırrını paylaşır. **Bağlantıyı kes** adımı **Kayıtlı istemci
+sırrını da sil** seçeneğini sunar; başka bir Google uygulaması sırrı kullanmıyorsa işaretli gelir ve
+sır yalnızca hiçbiri kullanmıyorsa silinir. İlk girişi iptal etmek ya da zaman aşımına bırakmak,
+yarım kalan uygulamayı ve sırrını aynı şekilde kaldırır. Sırrı yenilemek için Google konsolunda yeni
+bir sır oluştur ve **Başka bir Google istemcisi kullan** seçeneğini kullan: saklanan sırrın yerine
+geçer ve tüm Google uygulamalarına uygulanır.
+
+Giriş kartı, giriş yaptığın sayfanın adresini gösterir. Praxi uygulamanın kendi sitesinden (Google için
+`accounts.google.com`) başka bir siteye yönlendirilirse sayfayı kendiliğinden açmaz; sayfanın nerede
+olduğunu söyler ve yalnızca **Yine de aç** düğmesine basınca açar.
+
 ## `mcp.toml` içinde
 
 Kartlar olağan sunucu ayarlarını yazar; sen de elle yazabilirsin:

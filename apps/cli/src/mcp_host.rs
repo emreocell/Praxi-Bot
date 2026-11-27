@@ -97,6 +97,8 @@ pub struct McpHost {
     poller: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// The daemon's production redactor (audit rows of MCP routes).
     redactor: Option<mcp_bridge::ExternalRedactor>,
+    /// Where the OAuth client secrets live (to forget one with its last server).
+    secrets: Option<Arc<dyn SecretStore>>,
 }
 
 impl McpHost {
@@ -168,8 +170,8 @@ impl McpHost {
             .with_pin_store(Arc::new(mcp_bridge::FilePinStore::open(
                 data_dir.join("mcp-tool-pins.json"),
             )));
-        if let Some(s) = secrets {
-            manager = manager.with_secret_store(s);
+        if let Some(s) = &secrets {
+            manager = manager.with_secret_store(Arc::clone(s));
         }
         // The daemon's live redactor masks every MCP diagnostic (stderr,
         // rmcp warnings, connect and discovery errors).
@@ -212,6 +214,7 @@ impl McpHost {
             events: broadcast::channel(64).0,
             poller: Mutex::new(None),
             redactor,
+            secrets,
         });
         for c in &loaded {
             host.announced
@@ -409,6 +412,21 @@ impl McpHost {
             .get(name)
             .cloned()
             .ok_or_else(|| McpControlError::NotFound(format!("mcp server {name}")))
+    }
+
+    /// Whether a configured server still refers to the secret `reference`
+    /// (as its OAuth client secret, a header or an environment variable).
+    fn secret_in_use(&self, reference: &str) -> bool {
+        self.configs.lock().values().any(|c| {
+            c.oauth
+                .as_ref()
+                .and_then(|o| o.client_secret_ref.as_deref())
+                == Some(reference)
+                || c.secret_headers
+                    .values()
+                    .chain(c.secret_env.values())
+                    .any(|v| v.contains(reference))
+        })
     }
 
     fn check_http(&self, name: &str) -> Result<(), McpControlError> {
@@ -632,6 +650,19 @@ async fn abort_sign_in(flows: &mut HashMap<String, SignInFlow>, name: &str) {
         flow.task.abort();
         let _ = flow.task.await;
     }
+}
+
+/// Only a secret the apps made for themselves (`mcp_<app>_...`, as the desktop
+/// names a client secret, or `mcp/<app>/...`) is deleted with its last server:
+/// never a sign-in record, a host credential or one owned by another feature,
+/// even when a hand-edited `mcp.toml` points at it.
+fn forgettable_client_secret(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    (lower.starts_with("mcp_") || lower.starts_with("mcp/"))
+        && !secret_store::is_managed_oauth_name(name)
+        && !secret_store::is_host_credential(name)
+        && !secret_store::is_reserved_name(name)
+        && !secret_store::is_fill_name(name)
 }
 
 fn invalid(m: impl Into<String>) -> McpControlError {
@@ -1323,6 +1354,28 @@ impl McpControl for McpHost {
         };
         if let Some(old) = old {
             old.close().await;
+        }
+        Ok(())
+    }
+
+    async fn remove_forgetting_client_secret(&self, name: &str) -> Result<(), McpControlError> {
+        let reference = self
+            .config_of(name)?
+            .oauth
+            .and_then(|o| o.client_secret_ref);
+        self.remove(name).await?;
+        let (Some(reference), Some(store)) = (reference, self.secrets.clone()) else {
+            return Ok(());
+        };
+        // Under the operations lock, so a server added at the same time cannot
+        // point at the secret between the check and the delete.
+        let _op = self.ops.lock().await;
+        if self.secret_in_use(&reference) || !forgettable_client_secret(&reference) {
+            return Ok(());
+        }
+        let deleted = tokio::task::spawn_blocking(move || store.delete(&reference)).await;
+        if !matches!(deleted, Ok(Ok(_))) {
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "warning: an OAuth client secret could not be deleted");
         }
         Ok(())
     }
@@ -2869,6 +2922,114 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(dto.bots, None);
+        host.shutdown().await;
+    }
+
+    fn google_like(name: &str, secret_ref: &str) -> McpServerConfig {
+        let mut config = McpServerConfig::http(name, format!("https://{name}.example/mcp"));
+        config.enabled = false;
+        config.oauth = Some(mcp_bridge::OAuthConfig {
+            client_id: Some("123456-abc.apps.googleusercontent.com".into()),
+            client_secret_ref: Some(secret_ref.into()),
+            issuer: Some("https://accounts.google.com".into()),
+            scopes: vec!["https://www.googleapis.com/auth/gmail.readonly".into()],
+            ..mcp_bridge::OAuthConfig::default()
+        });
+        config
+    }
+
+    #[test]
+    fn only_an_apps_own_secret_names_can_be_forgotten_with_it() {
+        for ok in [
+            "mcp_google_client_secret",
+            "mcp/google/client_secret",
+            "MCP_Google_Secret",
+        ] {
+            assert!(forgettable_client_secret(ok), "{ok}");
+        }
+        for no in [
+            "provider.second.api_key",
+            "mcp/google/oauth",
+            "mcp/google/oauth-refresh",
+            "composio/key",
+            "fill/site/login",
+            "webhook/abc",
+            "telegram_token",
+        ] {
+            assert!(!forgettable_client_secret(no), "{no}");
+        }
+    }
+
+    /// The shared client secret goes with the last app that used it, and only when asked.
+    #[tokio::test]
+    async fn the_client_secret_is_forgotten_with_its_last_server_only_when_asked() {
+        // The name the desktop gives the one client secret all Google apps share.
+        const SHARED: &str = "mcp_google_client_secret";
+        let dir = tempfile::tempdir().unwrap();
+        let mut by_header = McpServerConfig::http("other", "https://other.example/mcp");
+        by_header.enabled = false;
+        by_header
+            .secret_headers
+            .insert("X-Key".into(), format!("Bearer {{secret:{SHARED}}}"));
+        TomlFileStore::new(dir.path().join(MCP_FILE))
+            .save(&[
+                google_like("a", SHARED),
+                google_like("b", SHARED),
+                google_like("c", SHARED),
+                google_like("d", "provider.second.api_key"),
+                by_header,
+            ])
+            .unwrap();
+        let store = Arc::new(secret_store::MemoryStore::new());
+        store.set(SHARED, "client-secret-value").unwrap();
+        store
+            .set("provider.second.api_key", "provider-key")
+            .unwrap();
+        let host = McpHost::start_with_policy(
+            dir.path(),
+            ToolRegistry::new(),
+            Some(store.clone()),
+            None,
+            None,
+            fast_policy(),
+        );
+        let present = |name: &str| store.get(name).unwrap().is_some();
+
+        // Without the flag nothing but the server goes.
+        host.remove("a").await.unwrap();
+        assert!(present(SHARED));
+        // Another Google app still uses it.
+        host.remove_forgetting_client_secret("b").await.unwrap();
+        assert!(present(SHARED));
+        // The last Google app goes, but a server that names it in a header keeps it alive.
+        host.remove_forgetting_client_secret("c").await.unwrap();
+        assert!(present(SHARED), "a header still names it");
+        host.remove("other").await.unwrap();
+        // A secret that is not an app's own (no `mcp/` namespace) is never deleted this way.
+        host.remove_forgetting_client_secret("d").await.unwrap();
+        assert!(present("provider.second.api_key"));
+        assert!(host.list().is_empty(), "every server is gone");
+
+        // The last user of a secret in the app namespace takes it along.
+        host.add(
+            serde_json::from_value(json!({
+                "name": "e", "transport": "http", "url": "https://e.example/mcp",
+                "enabled": false,
+                "oauth": {"client_id": "123456-abc.apps.googleusercontent.com",
+                          "client_secret_ref": SHARED,
+                          "issuer": "https://accounts.google.com"},
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            host.remove_forgetting_client_secret("nope").await,
+            Err(McpControlError::NotFound(_))
+        ));
+        assert!(present(SHARED), "an unknown server deletes nothing");
+        host.remove_forgetting_client_secret("e").await.unwrap();
+        assert!(!present(SHARED));
         host.shutdown().await;
     }
 

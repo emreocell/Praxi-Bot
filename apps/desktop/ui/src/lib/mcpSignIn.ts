@@ -16,7 +16,7 @@
  * whether the person is signed in. Nothing here is a credential.
  */
 
-import type { McpAuthStart, McpAuthState } from "../api/types.ts";
+import type { McpAuthStart, McpAuthState, McpCatalogEntry, McpServer } from "../api/types.ts";
 import { humanError } from "./humanError.ts";
 
 export type SignInMode = "local" | "relay" | "paste";
@@ -52,7 +52,19 @@ export type SignInReason =
 export type SignInStep =
   | { step: "starting" }
   /** The page is (or should be) open; waiting for the person to finish there. */
-  | { step: "browser"; url: string; opened: boolean; mode: SignInMode; redirectUri: string }
+  | {
+      step: "browser";
+      url: string;
+      opened: boolean;
+      mode: SignInMode;
+      redirectUri: string;
+      /** Where the page is (`scheme://host`), shown to the person before they open it. */
+      origin: string;
+      /** The page is not on the app's own site: it is opened only after an explicit confirm. */
+      needsConfirm: boolean;
+      /** The address the person pasted last is not this sign-in's (it was not sent on). */
+      wrongPaste?: boolean;
+    }
   /** The redirect arrived; the daemon is exchanging the code. */
   | { step: "finishing" }
   | { step: "done" }
@@ -72,6 +84,11 @@ export interface RelayApi {
 export interface SignInDeps {
   /** The daemon runs on another computer than this app. */
   remote: boolean;
+  /**
+   * The hosts the sign-in page is expected on: the issuer the app is configured with or, without
+   * one, the host of the app's own address. A page anywhere else is not opened by itself.
+   */
+  expectedHosts: readonly string[];
   start(relayPort?: number): Promise<McpAuthStart>;
   status(): Promise<McpAuthState>;
   /** Hand the redirect address to the daemon; resolves with the final state. */
@@ -103,6 +120,65 @@ export function stateOf(authorizationUrl: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** `scheme://host[:port]` and the bare host of an address; `null` when it is not a URL. */
+export function originOf(address: string): { origin: string; host: string } | null {
+  try {
+    const url = new URL(address);
+    return { origin: url.origin, host: url.hostname.toLowerCase() };
+  } catch {
+    return null;
+  }
+}
+
+/** The host of an address or of a bare host name, lower case; `null` when there is none. */
+export function hostOf(addressOrHost: string): string | null {
+  return originOf(addressOrHost.includes("://") ? addressOrHost : `https://${addressOrHost}`)?.host ?? null;
+}
+
+/**
+ * The same site: equal hosts, or one is a subdomain of the other (`accounts.example.com` and
+ * `example.com`). The shorter name must have two labels, so `com` or `app` never match everything.
+ */
+export function sameSite(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.includes(".") && long.endsWith(`.${short}`);
+}
+
+/** Whether `url` is on one of the `expected` hosts. Nothing expected, or an unreadable URL: no. */
+export function isExpectedSignInPage(url: string, expected: readonly string[]): boolean {
+  const host = originOf(url)?.host;
+  if (!host) return false;
+  return expected.some((e) => {
+    const wanted = hostOf(e);
+    return wanted !== null && sameSite(host, wanted);
+  });
+}
+
+/**
+ * The hosts the sign-in page of an app is expected on. A client registered for an issuer (Google)
+ * is only ever sent there, so the issuer alone counts; an app discovered at sign-in is expected
+ * on the site of its own address (the server's or the catalog's). Anything else is confirmed.
+ */
+export function expectedSignInHosts(
+  server: Pick<McpServer, "url" | "oauth"> | undefined,
+  entry: McpCatalogEntry | undefined
+): string[] {
+  const issuer = server?.oauth?.issuer ?? entry?.install.oauth_client?.issuer;
+  if (issuer) return [issuer];
+  return [server?.url, entry?.install.url].filter((u): u is string => typeof u === "string" && u !== "");
+}
+
+/**
+ * Whether a pasted address can be this sign-in's redirect at all: the same address as
+ * `redirectUri` up to the query. A quick check so a wrong paste fails at once; the daemon still
+ * compares the address and the `state` itself.
+ */
+export function looksLikeRedirect(pasted: string, redirectUri: string): boolean {
+  const base = redirectUri.split(/[?#]/)[0];
+  return base !== "" && pasted.trim().startsWith(`${base}?`);
 }
 
 function messageOf(error: unknown): string {
@@ -195,14 +271,19 @@ export async function runSignIn(
   if (mode !== "relay") {
     await stopRelay();
   }
-  const opened = await deps.open(started.authorization_url).catch(() => false);
-  finish({
-    step: "browser",
+  // An authorization server the app was not set up with is the server's say-so (discovery): it is
+  // shown and opened only when the person confirms.
+  const needsConfirm = !isExpectedSignInPage(started.authorization_url, deps.expectedHosts);
+  const opened = needsConfirm ? false : await deps.open(started.authorization_url).catch(() => false);
+  const browserStep = {
+    step: "browser" as const,
     url: started.authorization_url,
     opened,
-    mode,
-    redirectUri: started.redirect_uri
-  });
+    redirectUri: started.redirect_uri,
+    origin: originOf(started.authorization_url)?.origin ?? "",
+    needsConfirm
+  };
+  finish({ ...browserStep, mode });
 
   const deadline = deps.now() + Math.min(started.expires_in * 1000, opts.maxMs ?? SIGN_IN_MAX_MS);
   const stop = async (step: "cancelled" | "expired"): Promise<SignInState> => {
@@ -233,6 +314,7 @@ export async function runSignIn(
   let redirect: string | null = null;
   let waitFailed: unknown = null;
   let waiting = mode === "relay";
+  let shownMode = mode;
   if (relay && deps.relay) {
     const wanted = stateOf(started.authorization_url);
     if (wanted === null) {
@@ -253,16 +335,25 @@ export async function runSignIn(
   for (;;) {
     if (control.cancelled) return stop("cancelled");
     if (redirect === null && control.pasted) {
-      redirect = control.pasted;
+      const pasted = control.pasted;
       control.pasted = null;
+      if (looksLikeRedirect(pasted, started.redirect_uri)) {
+        redirect = pasted;
+      } else {
+        // Not this sign-in's address: say so at once, keep waiting for the right one.
+        finish({ ...browserStep, mode: shownMode, wrongPaste: true });
+      }
     }
     if (redirect !== null) break;
     if (mode === "relay" && !waiting && waitFailed !== null) {
       const why = messageOf(waitFailed);
       if (why === "cancelled") return stop("cancelled");
       if (why === "timeout") return stop("expired");
-      // The listener died (not cancelled, not late): the paste step still works.
+      // The listener died (not cancelled, not late; too many stray requests too): the person
+      // pastes the address instead, and the panel asks for it.
       waitFailed = null;
+      shownMode = "paste";
+      finish({ ...browserStep, mode: shownMode });
     }
     if (deps.now() > deadline) return stop("expired");
     await deps.sleep(pollMs);

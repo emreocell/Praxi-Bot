@@ -13,6 +13,7 @@ import {
   googleServerConfig,
   googleServerOf,
   googleServices,
+  isGoogleConsoleLink,
   testFailure
 } from "./googleSetup.ts";
 
@@ -214,4 +215,23 @@ test("the test button's failures map to a plain reason", () => {
   assert.equal(testFailure(e("HTTP 403 forbidden")), "permission");
   assert.equal(testFailure(e("HTTP 429 too many")), "rate");
   assert.equal(testFailure(e("boom")), "other");
+});
+
+test("the setup guide opens pages of the Google Cloud console and nothing else", () => {
+  for (const step of GOOGLE_STEPS) {
+    for (const l of step.links) assert.ok(isGoogleConsoleLink(l.href), l.href);
+  }
+  for (const l of googleServices([entry("google-gmail", [])])) assert.ok(isGoogleConsoleLink(l.href), l.href);
+  for (const bad of [
+    "http://console.cloud.google.com/",
+    "https://console.cloud.google.com.evil.example/",
+    "https://evil.example/console.cloud.google.com",
+    "https://user@console.cloud.google.com/",
+    "https://accounts.google.com/",
+    "https://console.cloud.google.com:8443/",
+    "javascript:alert(1)",
+    ""
+  ]) {
+    assert.equal(isGoogleConsoleLink(bad), false, bad);
+  }
 });

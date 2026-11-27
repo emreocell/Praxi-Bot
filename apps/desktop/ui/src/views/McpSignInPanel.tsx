@@ -65,16 +65,35 @@ export function McpSignInPanel({
           {text}
         </p>
       ) : null}
-      {state.step === "browser" && !state.opened ? (
+      {state.step === "browser" && !state.opened && !state.needsConfirm ? (
         <p className={`${own.text} ${own.bad}`} role="alert">
           {t("apps.signIn.notOpened")}
         </p>
       ) : null}
+      {state.step === "browser" && state.wrongPaste ? (
+        <p className={`${own.text} ${own.bad}`} role="alert" data-testid="mcp-sign-in-wrong-paste">
+          {t("apps.signIn.failed.wrong_address")}
+        </p>
+      ) : null}
       {state.step === "browser" ? (
         <>
+          {state.origin ? (
+            <p className={own.text} data-testid="mcp-sign-in-origin">
+              {t("apps.signIn.origin")} <code>{state.origin}</code>
+            </p>
+          ) : null}
+          {state.needsConfirm ? (
+            <p className={`${own.text} ${own.bad}`} role="alert" data-testid="mcp-sign-in-unexpected">
+              {t("apps.signIn.unexpectedSite", { site: state.origin || t("apps.signIn.unknownSite") })}
+            </p>
+          ) : null}
           <div className={own.row}>
             <Button size="sm" variant="secondary" data-testid="mcp-sign-in-open" onClick={() => void openSignInLink(state.url)}>
-              {state.opened ? t("apps.signIn.openAgain") : t("apps.signIn.open")}
+              {state.needsConfirm
+                ? t("apps.signIn.openAnyway")
+                : state.opened
+                  ? t("apps.signIn.openAgain")
+                  : t("apps.signIn.open")}
             </Button>
             <Button
               size="sm"

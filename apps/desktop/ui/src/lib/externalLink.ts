@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isComposioLink } from "./composioApps";
+import { isGoogleConsoleLink } from "./googleSetup";
 import { sanitizeUrl } from "./markdown";
 import type { RelayApi } from "./mcpSignIn";
 
@@ -38,9 +39,14 @@ function browserOnly(): boolean {
 }
 
 /**
- * Open a sign-in page (an app's consent page, a Google console page) in the system browser with the
- * app's own opener. Only https addresses; `false` when the page could not be opened, so the caller
- * can show the address instead.
+ * Open a sign-in page in the system browser with the app's own opener. Only https addresses; `false`
+ * when the page could not be opened, so the caller can show the address instead.
+ *
+ * The opener accepts any https host, so what goes in decides how safe it is. Only two kinds of
+ * address may be passed: the `authorization_url` the daemon returned for a sign-in the owner started
+ * (the sign-in panel shows its origin and asks first when it is not the app's own site), and a page
+ * of the setup guide (`openGoogleConsoleLink`). Never an address read from a tool result, a catalog
+ * `homepage` or any other text a server supplies.
  */
 export async function openSignInLink(href: string): Promise<boolean> {
   if (!/^https:\/\//i.test(href)) return false;
@@ -54,6 +60,11 @@ export async function openSignInLink(href: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** A page of the Google Cloud console (the setup guide); any other address is refused. */
+export async function openGoogleConsoleLink(href: string): Promise<boolean> {
+  return isGoogleConsoleLink(href) ? openSignInLink(href) : false;
 }
 
 /**

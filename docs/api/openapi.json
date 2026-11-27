@@ -12777,7 +12777,7 @@
         "tags": [
           "mcp"
         ],
-        "summary": "Disconnect and remove a server (its tools disappear) and save `mcp.toml`.",
+        "summary": "Disconnect and remove a server (its tools disappear) and save `mcp.toml`.\nWith `forget_client_secret` the OAuth client secret it used goes too, when\nno other server still uses it.",
         "operationId": "delete_mcp_server",
         "parameters": [
           {
@@ -12787,6 +12787,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "forget_client_secret",
+            "in": "query",
+            "description": "Also delete the OAuth client secret the server used, unless another\nserver still uses it (several apps can share one client).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],

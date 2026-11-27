@@ -146,6 +146,16 @@ export interface GoogleStep {
 }
 
 const CONSOLE = "https://console.cloud.google.com";
+
+/** Whether `href` is a page of the Google Cloud console: the only pages the setup guide opens. */
+export function isGoogleConsoleLink(href: string): boolean {
+  try {
+    const url = new URL(href);
+    return url.protocol === "https:" && url.host === "console.cloud.google.com" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
 const LIBRARY = `${CONSOLE}/apis/library`;
 
 /** The services to switch on for the apps the owner wants (each app also has its own MCP service). */

@@ -19,7 +19,7 @@ import { Segmented } from "../components/SettingsUi";
 import { useToast } from "../components/Toast";
 import { oauthRelay, openExternal, openSignInLink } from "../lib/externalLink";
 import { addGoogleApp, GoogleClientError, googleEntries } from "../lib/googleSetup";
-import { type SignInControl, type SignInState, runSignIn } from "../lib/mcpSignIn";
+import { type SignInControl, type SignInState, expectedSignInHosts, runSignIn } from "../lib/mcpSignIn";
 import { isLocalBaseUrl } from "../lib/liveViewState";
 import { GoogleApps } from "./GoogleApps";
 import { McpSampleTest } from "./McpSampleTest";
@@ -240,6 +240,7 @@ function ConnectedCell({
   sample,
   onSignOut,
   onDisconnect,
+  lastUserOfSecret = false,
   onSaveBots,
   onSaveTools,
   onSaveTrust,
@@ -259,7 +260,10 @@ function ConnectedCell({
   /** The catalog entry has a fixed read-only test (Google apps): offer it under Manage. */
   sample: boolean;
   onSignOut: () => void;
-  onDisconnect: () => void;
+  /** No other app uses this one's client secret: forgetting it is offered ticked. */
+  lastUserOfSecret?: boolean;
+  /** `forgetClientSecret`: also delete the sign-in client secret (when no other app uses it). */
+  onDisconnect: (forgetClientSecret: boolean) => void;
   onSaveBots: (from: BotScope, to: BotScope) => void;
   onSaveTools: (exclude: string[]) => void;
   onSaveTrust: (trusted: boolean) => void;
@@ -267,6 +271,7 @@ function ConnectedCell({
   const { t } = useTranslation();
   const { bots, client } = useDaemon();
   const [confirm, setConfirm] = useState(false);
+  const [forgetSecret, setForgetSecret] = useState(false);
   const [open, setOpen] = useState(false);
   const [fixOpen, setFixOpen] = useState(false);
   const [auth, setAuth] = useState<McpAuthState | null>(null);
@@ -474,6 +479,17 @@ function ConnectedCell({
             <span className={styles.grow} />
             {confirm ? (
               <>
+                {server.oauth?.client_secret_ref ? (
+                  <label className={formStyles.hint}>
+                    <input
+                      type="checkbox"
+                      checked={forgetSecret}
+                      data-testid={`mcp-forget-secret-${server.name}`}
+                      onChange={(e) => setForgetSecret(e.target.checked)}
+                    />{" "}
+                    {t("apps.forgetClientSecret")}
+                  </label>
+                ) : null}
                 <Button
                   size="sm"
                   variant="danger"
@@ -481,7 +497,8 @@ function ConnectedCell({
                   onClick={() => {
                     setConfirm(false);
                     setOpen(false);
-                    onDisconnect();
+                    onDisconnect(forgetSecret);
+                    setForgetSecret(false);
                   }}
                 >
                   {t("apps.disconnectConfirm")}
@@ -491,7 +508,15 @@ function ConnectedCell({
                 </Button>
               </>
             ) : (
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirm(true)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  setForgetSecret(lastUserOfSecret);
+                  setConfirm(true);
+                }}
+              >
                 {t("apps.disconnect")}
               </Button>
             )}
@@ -842,6 +867,10 @@ export function AppsModal({
     const control: SignInControl = { cancelled: false, pasted: null };
     const title = catalog.find((e) => e.id === name)?.name ?? name;
     const hasTest = Boolean(catalog.find((e) => e.id === name)?.install.test);
+    const expectedHosts = expectedSignInHosts(
+      servers.find((x) => x.name === name),
+      catalog.find((e) => e.id === name)
+    );
     setSigning((m) => ({ ...m, [name]: control }));
     // A daemon on another computer is finished by the redirect this app catches and forwards.
     const remote = client.hostName !== null || !isLocalBaseUrl(client.baseUrl);
@@ -851,6 +880,7 @@ export function AppsModal({
       const last = await runSignIn(
         {
           remote,
+          expectedHosts,
           start: (port) => client.startMcpAuth(name, port),
           status: () => client.mcpAuthStatus(name),
           complete: (url) => client.completeMcpAuth(name, url),
@@ -883,8 +913,9 @@ export function AppsModal({
       });
       // A connection nobody finished is not kept as a half-made server. A failed one stays, so
       // "Try again" has something to sign in to and its Sign in button is under Manage.
+      // The client secret typed for it goes too, unless another app still uses it.
       if (!signedIn && !failed && fresh[name]) {
-        await client.deleteMcpServer(name).catch(() => undefined);
+        await client.deleteMcpServer(name, { forgetClientSecret: true }).catch(() => undefined);
       }
       setFresh((m) => {
         const next = { ...m };
@@ -1184,9 +1215,13 @@ export function AppsModal({
           await reload();
         })
       }
-      onDisconnect={() =>
+      lastUserOfSecret={
+        !!s.oauth?.client_secret_ref &&
+        !servers.some((o) => o.name !== s.name && o.oauth?.client_secret_ref === s.oauth?.client_secret_ref)
+      }
+      onDisconnect={(forgetClientSecret) =>
         void run(s.name, async () => {
-          await client?.deleteMcpServer(s.name);
+          await client?.deleteMcpServer(s.name, { forgetClientSecret });
           toast.show(t("apps.disconnectedToast", { name: s.name }), "info");
           await reload();
         })

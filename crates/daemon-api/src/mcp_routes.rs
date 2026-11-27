@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 
@@ -13,6 +13,8 @@ use crate::mcp::{
     McpServerDto, McpServerInput, McpTestResult, McpToolDto, SetSecret,
 };
 use crate::routes::ApiJson;
+use serde::Deserialize;
+use utoipa::IntoParams;
 
 /// Largest accepted secret value.
 const MAX_SECRET_BYTES: usize = 64 * 1024;
@@ -239,19 +241,42 @@ pub(crate) async fn update_mcp_server(
     .await
 }
 
+/// Optional query of `DELETE /v1/mcp/servers/{name}`.
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteMcpServerQuery {
+    /// Also delete the OAuth client secret the server used, unless another
+    /// server still uses it (several apps can share one client).
+    #[serde(default)]
+    pub forget_client_secret: bool,
+}
+
 /// Disconnect and remove a server (its tools disappear) and save `mcp.toml`.
+/// With `forget_client_secret` the OAuth client secret it used goes too, when
+/// no other server still uses it.
 #[utoipa::path(delete, path = "/v1/mcp/servers/{name}", tag = "mcp", security(("bearer" = [])),
-    params(("name" = String, Path, description = "Server name")),
+    params(("name" = String, Path, description = "Server name"), DeleteMcpServerQuery),
     responses((status = 204), (status = 404, body = ErrorBody),
               (status = 503, body = ErrorBody, description = "MCP management is not available")))]
 pub(crate) async fn delete_mcp_server(
     State(s): State<AppState>,
     actor: MaybeActor,
     Path(name): Path<String>,
+    Query(query): Query<DeleteMcpServerQuery>,
 ) -> Result<StatusCode, ApiError> {
     let host = mcp(&s)?;
-    audited(&s, &actor, "mcp.server_delete", &name, async {
-        host.remove(&name).await?;
+    let action = if query.forget_client_secret {
+        "mcp.server_delete_with_client_secret"
+    } else {
+        "mcp.server_delete"
+    };
+    audited(&s, &actor, action, &name, async {
+        if query.forget_client_secret {
+            host.remove_forgetting_client_secret(&name).await?;
+        } else {
+            host.remove(&name).await?;
+        }
         Ok(StatusCode::NO_CONTENT)
     })
     .await

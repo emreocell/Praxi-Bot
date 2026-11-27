@@ -94,6 +94,18 @@ runs; **Disconnect** removes the app. To revoke Praxi's access on Google's side
 as well, open your Google account's **Security → Third-party access** and remove
 the client you created.
 
+All Google apps share one client secret. **Disconnect** offers **Also forget the
+saved client secret**; it is ticked when no other Google app uses the secret, and
+the secret is only deleted when none does. Cancelling or timing out a first
+sign-in removes the half-made app and its secret the same way. To rotate the
+secret, create a new one in the Google console and use **Use a different Google
+client**: it replaces the stored one for every Google app.
+
+The page you sign in on is shown in the sign-in card. If Praxi is sent to a
+site other than the app's own (for Google: `accounts.google.com`), it does not
+open the page by itself; it says where the page is and opens it only when you
+press **Open it anyway**.
+
 ## In `mcp.toml`
 
 The cards write ordinary server settings; you can write them yourself:

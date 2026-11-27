@@ -12,8 +12,9 @@
 //!
 //! The listener is bound to `127.0.0.1` only, serves one purpose, ignores
 //! anything that is not the expected redirect (a stray local request cannot
-//! use it up), and goes away after the first good redirect, a cancel or the
-//! time limit. No code or token is logged or kept.
+//! use it up, and after [`MAX_STRAY_REQUESTS`] of them the wait ends so a local
+//! process cannot keep the port busy), and goes away after the first good
+//! redirect, a cancel or the time limit. No code or token is logged or kept.
 
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,6 +32,10 @@ const MAX_HEAD: usize = 8 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long a sign-in is waited for (the daemon waits the same five minutes).
 pub const WAIT_LIMIT: Duration = Duration::from_secs(5 * 60);
+
+/// Requests that are not the expected redirect (wrong path or `state`, a slow
+/// or foreign connection) the listener puts up with before it gives up.
+pub const MAX_STRAY_REQUESTS: usize = 50;
 
 /// What [`listen`] reports: the handle to wait on and the port to give the daemon.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -92,7 +97,8 @@ pub fn cancel(id: u64) {
 /// (`http://127.0.0.1:<port>/callback?...`).
 ///
 /// # Errors
-/// `not_listening` (unknown or already used id), `cancelled`, `timeout`.
+/// `not_listening` (unknown or already used id), `cancelled`, `timeout`,
+/// `too_many_requests` (more than [`MAX_STRAY_REQUESTS`] strays).
 pub async fn wait(id: u64, state: &str) -> Result<String, String> {
     let (listener, cancel) = {
         let mut guard = slot();
@@ -106,7 +112,7 @@ pub async fn wait(id: u64, state: &str) -> Result<String, String> {
     };
     let port = listener.local_addr().map_err(|_| "not_listening")?.port();
     let outcome = tokio::select! {
-        found = accept_redirect(&listener, port, state) => found.ok_or_else(|| "not_listening".to_owned()),
+        found = accept_redirect(&listener, port, state, MAX_STRAY_REQUESTS) => found,
         () = cancel.notified() => Err("cancelled".to_owned()),
         () = tokio::time::sleep(WAIT_LIMIT) => Err("timeout".to_owned()),
     };
@@ -119,22 +125,40 @@ pub async fn wait(id: u64, state: &str) -> Result<String, String> {
     outcome
 }
 
-async fn accept_redirect(listener: &TcpListener, port: u16, state: &str) -> Option<String> {
+async fn accept_redirect(
+    listener: &TcpListener,
+    port: u16,
+    state: &str,
+    max_strays: usize,
+) -> Result<String, String> {
+    let mut strays = 0usize;
     loop {
-        let (mut socket, peer) = listener.accept().await.ok()?;
-        if !peer.ip().is_loopback() {
-            continue;
-        }
-        let Ok(Some(head)) = tokio::time::timeout(READ_TIMEOUT, read_head(&mut socket)).await
-        else {
-            continue;
-        };
-        match redirect_from_request(&head, port, state) {
-            Ok(url) => {
-                respond(&mut socket, "200 OK", DONE_PAGE).await;
-                return Some(url);
+        let (mut socket, peer) = listener
+            .accept()
+            .await
+            .map_err(|_| "not_listening".to_owned())?;
+        let answer = if peer.ip().is_loopback() {
+            match tokio::time::timeout(READ_TIMEOUT, read_head(&mut socket)).await {
+                Ok(Some(head)) => redirect_from_request(&head, port, state).ok(),
+                _ => None,
             }
-            Err(()) => respond(&mut socket, "400 Bad Request", REFUSED_PAGE).await,
+        } else {
+            None
+        };
+        if let Some(url) = answer {
+            respond(&mut socket, "200 OK", DONE_PAGE).await;
+            return Ok(url);
+        }
+        respond(&mut socket, "400 Bad Request", REFUSED_PAGE).await;
+        strays += 1;
+        if strays >= max_strays {
+            // Only the count is logged, never an address or a query.
+            support_logs::tracing::warn!(
+                target: "praxi_support",
+                reason = "oauth_relay_stray_requests",
+                count = strays
+            );
+            return Err("too_many_requests".into());
         }
     }
 }
@@ -322,6 +346,48 @@ mod tests {
                 .is_err()
         );
         assert_eq!(wait(id, "st-9").await.unwrap_err(), "not_listening");
+    }
+
+    #[tokio::test]
+    async fn too_many_stray_requests_end_the_wait_and_close_the_port() {
+        let _one = GATE.lock().await;
+        let Listening { id, port } = listen().await.unwrap();
+        let waiting = tokio::spawn(wait(id, "st-3"));
+        until_waiting(id).await;
+        // One short of the limit: still waiting, and the good redirect still gets through.
+        for _ in 0..MAX_STRAY_REQUESTS - 1 {
+            assert!(get(port, "/favicon.ico").await.starts_with("HTTP/1.1 400"));
+        }
+        assert!(!waiting.is_finished());
+        // The last stray is answered, and then the listener is gone.
+        assert!(get(port, "/favicon.ico").await.starts_with("HTTP/1.1 400"));
+        assert_eq!(waiting.await.unwrap().unwrap_err(), "too_many_requests");
+        assert!(
+            tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                .await
+                .is_err()
+        );
+        assert_eq!(wait(id, "st-3").await.unwrap_err(), "not_listening");
+        // The slot is free for the next sign-in.
+        let next = listen().await.unwrap();
+        cancel(next.id);
+    }
+
+    #[tokio::test]
+    async fn the_good_redirect_after_many_strays_is_still_returned() {
+        let _one = GATE.lock().await;
+        let Listening { id, port } = listen().await.unwrap();
+        let waiting = tokio::spawn(wait(id, "st-4"));
+        until_waiting(id).await;
+        for _ in 0..MAX_STRAY_REQUESTS - 1 {
+            get(port, "/callback?code=x&state=wrong").await;
+        }
+        let page = get(port, "/callback?code=c4&state=st-4").await;
+        assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+        assert_eq!(
+            waiting.await.unwrap().unwrap(),
+            format!("http://127.0.0.1:{port}/callback?code=c4&state=st-4")
+        );
     }
 
     #[tokio::test]

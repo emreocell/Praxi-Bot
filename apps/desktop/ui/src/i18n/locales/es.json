@@ -825,6 +825,7 @@
       "placeholder": "Ruta completa, por ejemplo C:\\Users\\tu-usuario\\Documents",
       "save": "Guardar y conectar"
     },
+    "forgetClientSecret": "Also forget the saved client secret (it stays if another app still uses it)",
     "getKey": "Obtener clave de API",
     "google": {
       "allAdded": "Las tres aplicaciones de Google están añadidas. Gestiónalas en Conectadas.",
@@ -963,6 +964,8 @@
       "notOpened": "No se pudo abrir la página de inicio de sesión en el navegador. Ábrela de nuevo o copia el enlace.",
       "open": "Abrir la página de inicio de sesión",
       "openAgain": "Abrir la página de nuevo",
+      "openAnyway": "Open it anyway",
+      "origin": "The sign-in page is on:",
       "paste": {
         "body": "Un paso más. Esta ventana no puede captar la respuesta por sí sola. Tras iniciar sesión, el navegador muestra una página que no abre (dice que no puede conectar con 127.0.0.1). Es lo esperado. Copia la dirección completa de la barra de direcciones y pégala aquí.",
         "label": "Dirección de la página donde terminó el navegador",
@@ -971,6 +974,8 @@
       "retry": "Reintentar",
       "starting": "Preparando la página de inicio de sesión…",
       "title": "Iniciar sesión en {{name}}",
+      "unexpectedSite": "This sign-in page is on {{site}}, which is not the site this app belongs to, so it was not opened. Open it only if you expect this, and never type a password on a page you do not recognise.",
+      "unknownSite": "an unknown site",
       "waiting": "Termina de iniciar sesión en el navegador. Praxi continúa solo; no hay nada que copiar.",
       "waitingServer": "Termina de iniciar sesión en el navegador. La respuesta vuelve a esta aplicación, que la pasa a tu servidor. No hay nada que copiar."
     },

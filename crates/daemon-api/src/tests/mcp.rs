@@ -23,6 +23,8 @@ struct FakeMcp {
     oauth: std::sync::atomic::AtomicBool,
     /// The `relay_port` of every `auth_start` that reached the host.
     relay_ports: Mutex<Vec<Option<u16>>>,
+    /// The servers removed together with their client secret.
+    forgotten: Mutex<Vec<String>>,
 }
 
 impl FakeMcp {
@@ -32,6 +34,7 @@ impl FakeMcp {
             events: broadcast::channel(16).0,
             oauth: std::sync::atomic::AtomicBool::new(false),
             relay_ports: Mutex::new(Vec::new()),
+            forgotten: Mutex::new(Vec::new()),
         })
     }
 
@@ -231,6 +234,11 @@ impl McpControl for FakeMcp {
         }
         drop(all);
         self.emit(name, McpStatus::Disconnected);
+        Ok(())
+    }
+    async fn remove_forgetting_client_secret(&self, name: &str) -> Result<(), McpControlError> {
+        self.remove(name).await?;
+        self.forgotten.lock().push(name.to_owned());
         Ok(())
     }
     async fn reconnect(&self, name: &str) -> Result<McpServerDto, McpControlError> {
@@ -1274,6 +1282,141 @@ async fn auth_start_takes_an_optional_relay_port() {
     )
     .await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+}
+
+/// Disconnect can also forget the OAuth client secret: the flag reaches the host only when it is
+/// set, only as a boolean, and only for the owner.
+#[tokio::test]
+async fn disconnect_can_forget_the_client_secret_and_only_for_the_owner() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+    let (t, fake) = with_mcp();
+    for name in ["a", "b", "c"] {
+        let r = call(&t, Method::POST, "/v1/mcp/servers", Some(stdio_body(name))).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.json());
+    }
+    let plain = call(&t, Method::DELETE, "/v1/mcp/servers/a", None).await;
+    assert_eq!(plain.status, StatusCode::NO_CONTENT);
+    let forgotten = call(
+        &t,
+        Method::DELETE,
+        "/v1/mcp/servers/b?forget_client_secret=true",
+        None,
+    )
+    .await;
+    assert_eq!(forgotten.status, StatusCode::NO_CONTENT);
+    assert_eq!(*fake.forgotten.lock(), vec!["b".to_owned()]);
+    let rows = t.state.storage().list_audit(t.state.user_id()).unwrap();
+    assert!(
+        rows.iter()
+            .any(|r| r.action == "mcp.server_delete_with_client_secret")
+    );
+    // `false` is the plain removal; anything else is refused before the host hears of it.
+    let off = call(
+        &t,
+        Method::DELETE,
+        "/v1/mcp/servers/c?forget_client_secret=false",
+        None,
+    )
+    .await;
+    assert_eq!(off.status, StatusCode::NO_CONTENT);
+    for bad in ["?forget_client_secret=maybe", "?other=1"] {
+        let r = call(&t, Method::DELETE, &format!("/v1/mcp/servers/c{bad}"), None).await;
+        assert!(r.status.is_client_error(), "{bad}: {}", r.status);
+    }
+    assert_eq!(*fake.forgotten.lock(), vec!["b".to_owned()]);
+    // No paired role can use it to delete a secret on the host.
+    call(&t, Method::POST, "/v1/mcp/servers", Some(stdio_body("d"))).await;
+    for role in [
+        crate::PeerRole::Phone,
+        crate::PeerRole::Node,
+        crate::PeerRole::Host,
+        crate::PeerRole::Desktop,
+    ] {
+        let mut request = Request::builder()
+            .method(Method::DELETE)
+            .uri("/v1/mcp/servers/d?forget_client_secret=true")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(crate::PeerIdentity {
+            key: "test-peer".into(),
+            role,
+        });
+        let response = crate::peer_router(t.state.clone())
+            .oneshot(request)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{role:?}");
+    }
+    assert_eq!(*fake.forgotten.lock(), vec!["b".to_owned()]);
+    assert!(fake.servers.lock().iter().any(|s| s.name == "d"));
+}
+
+/// A paired peer cannot start a relayed sign-in (a `relay_port` would point the redirect at a
+/// port of its choosing) nor hand in a callback: neither reaches the host, whatever the body.
+#[tokio::test]
+async fn a_peer_cannot_start_a_relayed_sign_in_or_post_a_callback() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+    let (t, fake) = with_mcp();
+    fake.oauth.store(true, std::sync::atomic::Ordering::SeqCst);
+    let calls = [
+        (
+            "/v1/mcp/servers/gmail/auth/start",
+            json!({"relay_port": 53123}),
+        ),
+        (
+            "/v1/mcp/servers/gmail/auth/callback",
+            json!({"redirect_url": "http://127.0.0.1:53123/callback?code=c&state=s"}),
+        ),
+        ("/v1/mcp/servers/gmail/auth/cancel", json!({})),
+    ];
+    for role in [
+        crate::PeerRole::Phone,
+        crate::PeerRole::Node,
+        crate::PeerRole::Host,
+        crate::PeerRole::Desktop,
+    ] {
+        for (path, body) in &calls {
+            for uri in [
+                (*path).to_owned(),
+                format!("{path}/"),
+                path.replacen("servers", "%73ervers", 1),
+            ] {
+                let mut request = Request::builder()
+                    .method(Method::POST)
+                    .uri(&uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap();
+                request.extensions_mut().insert(crate::PeerIdentity {
+                    key: "test-peer".into(),
+                    role,
+                });
+                let response = crate::peer_router(t.state.clone())
+                    .oneshot(request)
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::FORBIDDEN, "{role:?} {uri}");
+            }
+        }
+    }
+    assert!(
+        fake.relay_ports.lock().is_empty(),
+        "a peer request reached the host"
+    );
+    // The owner's own request still works.
+    let ok = call(
+        &t,
+        Method::POST,
+        "/v1/mcp/servers/gmail/auth/start",
+        Some(json!({"relay_port": 53123})),
+    )
+    .await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.json());
+    assert_eq!(*fake.relay_ports.lock(), vec![Some(53123)]);
 }
 
 #[tokio::test]

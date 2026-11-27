@@ -69,6 +69,16 @@ test("deleteMcpServer resolves on 204 and setSecret is write-only", async () => 
   const c = client();
   assert.equal(await c.deleteMcpServer("gh"), undefined);
   assert.equal(calls[0].method, "DELETE");
+  assert.equal(new URL(calls[0].url).search, "");
+
+  // Forgetting the sign-in client secret is asked for explicitly, never by default.
+  calls = stubFetch(204, null);
+  await c.deleteMcpServer("gh", { forgetClientSecret: true });
+  assert.equal(new URL(calls[0].url).pathname, "/v1/mcp/servers/gh");
+  assert.equal(new URL(calls[0].url).search, "?forget_client_secret=true");
+  calls = stubFetch(204, null);
+  await c.deleteMcpServer("gh", { forgetClientSecret: false });
+  assert.equal(new URL(calls[0].url).search, "");
 
   calls = stubFetch(204, null);
   assert.equal(await c.setSecret("mcp_gh_token", "s3cret"), undefined);

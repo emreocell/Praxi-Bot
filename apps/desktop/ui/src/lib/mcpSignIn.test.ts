@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { McpAuthStart, McpAuthState } from "../api/types.ts";
 import {
+  expectedSignInHosts,
+  isExpectedSignInPage,
+  looksLikeRedirect,
   runSignIn,
+  sameSite,
   signInReason,
   signInRetryable,
   stateOf,
@@ -58,6 +62,7 @@ function world(over: Partial<SignInDeps> & { relay?: RelayApi | null } = {}) {
   };
   const deps: SignInDeps = {
     remote: true,
+    expectedHosts: ["https://accounts.example"],
     start: async (port) => {
       calls.start.push(port);
       return started({ relayed: port !== undefined, redirect_uri: `http://127.0.0.1:${port ?? 41000}/callback` });
@@ -302,4 +307,146 @@ test("the state is read from the authorization address", () => {
   assert.equal(stateOf(URL_OK), "st-1");
   assert.equal(stateOf("https://x.example/auth"), null);
   assert.equal(stateOf("not a url"), null);
+});
+
+test("a sign-in page on another site than the app's own is shown, not opened, until the person confirms", async () => {
+  const w = world({
+    start: async (port) =>
+      started({
+        authorization_url: "https://login.evil.example/auth?state=st-1",
+        relayed: port !== undefined,
+        redirect_uri: `http://127.0.0.1:${port}/callback`
+      })
+  });
+  const { seen, report } = steps();
+  const ctl = control();
+  const run = runSignIn(w.deps, "google-gmail", report, ctl, { pollMs: 10 });
+  await new Promise((r) => setTimeout(r, 0));
+  // Nothing was handed to the opener; the panel is told where the page is and that it needs a confirm.
+  assert.deepEqual(w.calls.opened, []);
+  const browser = seen.find((s) => s.step === "browser");
+  assert.ok(browser?.step === "browser");
+  assert.equal(browser.origin, "https://login.evil.example");
+  assert.equal(browser.needsConfirm, true);
+  assert.equal(browser.opened, false);
+  ctl.cancelled = true;
+  assert.equal((await run).step, "cancelled");
+});
+
+test("a page on the app's own site opens by itself and carries its origin", async () => {
+  for (const expectedHosts of [["https://accounts.example"], ["accounts.example"], ["https://api.accounts.example/mcp"]]) {
+    const w = world({ expectedHosts });
+    const { seen, report } = steps();
+    const ctl = control();
+    const run = runSignIn(w.deps, "linear", report, ctl, { pollMs: 10 });
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(w.calls.opened, [URL_OK], expectedHosts.join());
+    const browser = seen.find((s) => s.step === "browser");
+    assert.ok(browser?.step === "browser");
+    assert.equal(browser.origin, "https://accounts.example");
+    assert.equal(browser.needsConfirm, false);
+    ctl.cancelled = true;
+    await run;
+  }
+  // No known site to compare with: the page is confirmed, never trusted by default.
+  const w = world({ expectedHosts: [] });
+  const { seen, report } = steps();
+  const ctl = control();
+  const run = runSignIn(w.deps, "linear", report, ctl, { pollMs: 10 });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(w.calls.opened, []);
+  const browser = seen.find((s) => s.step === "browser");
+  assert.equal(browser?.step === "browser" && browser.needsConfirm, true);
+  ctl.cancelled = true;
+  await run;
+});
+
+test("look-alike hosts are not the same site", () => {
+  const google = ["https://accounts.google.com"];
+  assert.ok(isExpectedSignInPage("https://accounts.google.com/o/oauth2/v2/auth?state=s", google));
+  for (const bad of [
+    "https://accounts.google.com.evil.example/auth",
+    "https://evil-accounts.google.com.example/",
+    "https://accountsxgoogle.com/",
+    "https://google.com.evil.example/",
+    "https://evilaccounts.google.com/",
+    "http://",
+    "not a url",
+    ""
+  ]) {
+    // `evilaccounts.google.com` is a different host under google.com: it has to be confirmed too.
+    assert.equal(isExpectedSignInPage(bad, google), false, bad);
+  }
+  // A sub-site of the expected host is the same site; a bare top-level name matches nothing.
+  assert.ok(sameSite("login.example.com", "example.com"));
+  assert.ok(sameSite("example.com", "login.example.com"));
+  assert.equal(sameSite("evil.com", "com"), false);
+  assert.equal(sameSite("badexample.com", "example.com"), false);
+  assert.equal(isExpectedSignInPage("https://evil.com/", ["https://com"]), false);
+});
+
+test("the expected host is the issuer the client belongs to, else the app's own address", () => {
+  const entry = {
+    install: { url: "https://gmailmcp.googleapis.com/mcp/v1", oauth_client: { issuer: "https://accounts.google.com" } }
+  } as unknown as Parameters<typeof expectedSignInHosts>[1];
+  const plain = { install: { url: "https://mcp.linear.app/mcp" } } as unknown as Parameters<typeof expectedSignInHosts>[1];
+  assert.deepEqual(expectedSignInHosts(undefined, entry), ["https://accounts.google.com"]);
+  assert.deepEqual(
+    expectedSignInHosts({ url: "https://evil.example/mcp", oauth: { issuer: "https://accounts.google.com" } } as never, entry),
+    ["https://accounts.google.com"]
+  );
+  assert.deepEqual(expectedSignInHosts({ url: "https://mcp.linear.app/mcp" } as never, plain), [
+    "https://mcp.linear.app/mcp",
+    "https://mcp.linear.app/mcp"
+  ]);
+  assert.deepEqual(expectedSignInHosts(undefined, undefined), []);
+});
+
+test("an address that is not this sign-in's redirect fails at once and is never sent on", async () => {
+  const w = world({ relay: null });
+  const { seen, report } = steps();
+  const ctl = control();
+  const run = runSignIn(w.deps, "linear", report, ctl, { pollMs: 10 });
+  await new Promise((r) => setTimeout(r, 0));
+  ctl.pasted = "https://evil.example/callback?code=c&state=st-1";
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(w.calls.complete, []);
+  const wrong = seen.filter((s) => s.step === "browser" && s.wrongPaste);
+  assert.equal(wrong.length, 1);
+  assert.equal(ctl.pasted, null);
+  // The flow is still waiting: the right address goes through.
+  ctl.pasted = "http://127.0.0.1:41000/callback?code=c&state=st-1";
+  assert.equal((await run).step, "done");
+  assert.deepEqual(w.calls.complete, ["http://127.0.0.1:41000/callback?code=c&state=st-1"]);
+});
+
+test("the redirect check compares up to the query and nothing looser", () => {
+  const redirect = "http://127.0.0.1:41000/callback";
+  assert.ok(looksLikeRedirect("http://127.0.0.1:41000/callback?code=c&state=s", redirect));
+  assert.ok(looksLikeRedirect("  http://127.0.0.1:41000/callback?code=c&state=s \n", `${redirect}?x=1`));
+  for (const bad of [
+    "http://127.0.0.1:41001/callback?code=c",
+    "http://127.0.0.1:41000/callback",
+    "http://127.0.0.1:41000/callbackx?code=c",
+    "http://127.0.0.1.evil.example:41000/callback?code=c",
+    "https://127.0.0.1:41000/callback?code=c",
+    ""
+  ]) {
+    assert.equal(looksLikeRedirect(bad, redirect), false, bad);
+  }
+  assert.equal(looksLikeRedirect("anything?x", ""), false);
+});
+
+test("a listener that gave up on stray requests hands over to the paste step, which is then shown", async () => {
+  const w = world();
+  const { seen, report } = steps();
+  const ctl = control();
+  const run = runSignIn(w.deps, "x", report, ctl, { pollMs: 10 });
+  await new Promise((r) => setTimeout(r, 0));
+  w.fail(new Error("too_many_requests"));
+  await new Promise((r) => setTimeout(r, 5));
+  const last = [...seen].reverse().find((s) => s.step === "browser");
+  assert.equal(last?.step === "browser" && last.mode, "paste");
+  ctl.pasted = "http://127.0.0.1:53123/callback?code=c&state=st-1";
+  assert.equal((await run).step, "done");
 });
