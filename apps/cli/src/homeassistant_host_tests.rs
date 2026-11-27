@@ -673,6 +673,8 @@ async fn a_failed_save_of_a_new_address_leaves_the_old_secret_and_hub_alone() {
     assert!(!g.visible(None));
 }
 
+// Needs Unix directory permissions to make removal fail.
+#[cfg(unix)]
 #[tokio::test]
 async fn removing_keeps_the_secret_and_the_hub_when_the_file_cannot_be_removed() {
     use std::os::unix::fs::PermissionsExt;
