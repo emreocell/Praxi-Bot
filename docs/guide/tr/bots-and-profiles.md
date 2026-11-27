@@ -145,7 +145,7 @@ Araç adları yerleşik adlardır, örneğin `fs_read`, `fs_write`, `shell_run`,
 | Dosyalar | `fs_read`, `fs_list`, `fs_search`, `fs_write`, `fs_edit`, `fs_move`, `fs_delete`, `checkpoint_list`, `checkpoint_restore` |
 | Kabuk | `shell_run` |
 | Tarayıcı | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_forward`, `browser_reload`, `browser_tabs`, `browser_screenshot`, `browser_pointer`, `browser_upload`, `browser_downloads`, `browser_attach`, `browser_eval` |
-| Web (salt okunur, tarayıcısız) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata` (bkz. [Web araçları](web.md)) |
+| Web (salt okunur, tarayıcısız) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata`, `web_research`, `web_research_report` (bkz. [Web araçları](web.md#araştırma-raporları)) |
 | Zamanlamalar (yalnızca Genel hazır ayar) | `schedule_list`, `schedule_create`, `schedule_update`, `schedule_pause`, `schedule_resume`, `schedule_delete` (bkz. [Zamanlanmış görevler](scheduled-tasks.md)) |
 | Masaüstü (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_open`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
 | Betikler | `script_run` |

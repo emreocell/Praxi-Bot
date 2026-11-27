@@ -2415,7 +2415,7 @@ host = "smtp.example.com"
 
         let dir = tempfile::tempdir().unwrap();
         let reg = ToolRegistry::new();
-        assert_eq!(register_web(dir.path(), 0, &reg, None), 5);
+        assert_eq!(register_web(dir.path(), 0, &reg, None), 6);
         assert_eq!(web_names(&reg), web_tools::TOOL_NAMES);
         for name in web_tools::TOOL_NAMES {
             let t = reg.get(name).unwrap();
@@ -2486,7 +2486,7 @@ max_redirects = 2
             "searxng (http://127.0.0.1:8080) > brave"
         );
         let reg = ToolRegistry::new();
-        assert_eq!(register_web(dir.path(), 0, &reg, Some(&store)), 5);
+        assert_eq!(register_web(dir.path(), 0, &reg, Some(&store)), 6);
     }
 
     #[test]
@@ -2504,7 +2504,7 @@ unknown_key = 1
             assert_eq!(warnings.len(), 1, "{bad}");
             assert!(warnings[0].contains("web.toml"), "{warnings:?}");
             let reg = ToolRegistry::new();
-            assert_eq!(register_web(dir.path(), 0, &reg, None), 5, "{bad}");
+            assert_eq!(register_web(dir.path(), 0, &reg, None), 6, "{bad}");
         }
     }
 
@@ -2520,7 +2520,7 @@ searxng_url = \"not a url\"
         )
         .unwrap();
         let reg = ToolRegistry::new();
-        assert_eq!(register_web(dir.path(), 0, &reg, None), 5);
+        assert_eq!(register_web(dir.path(), 0, &reg, None), 6);
 
         // A Brave key without a secret store is dropped with a warning.
         std::fs::write(
@@ -2542,7 +2542,7 @@ max_bytes = 99999999999
         assert_eq!(cfg.http.timeout, web_tools::HttpConfig::default().timeout);
         assert_eq!(cfg.http.max_bytes, WEB_MAX_BYTES_CAP);
         let reg = ToolRegistry::new();
-        assert_eq!(register_web(dir.path(), 0, &reg, None), 5);
+        assert_eq!(register_web(dir.path(), 0, &reg, None), 6);
     }
 
     #[test]

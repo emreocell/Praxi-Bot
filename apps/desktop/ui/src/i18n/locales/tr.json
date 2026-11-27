@@ -3107,6 +3107,11 @@
         "failed": "Not kaydedilmedi",
         "running": "Not kaydediliyor"
       },
+      "research_report": {
+        "done": "Araştırma raporunu kaydetti",
+        "failed": "Raporu kaydedemedi",
+        "running": "Araştırma raporunu kaydediyor"
+      },
       "schedule_create": {
         "done": "Yinelenen görev oluşturuldu",
         "failed": "Yinelenen görev oluşturulmadı",
@@ -3171,6 +3176,11 @@
         "done": "Sayfa okundu",
         "failed": "Sayfa okunamadı",
         "running": "Sayfa okunuyor"
+      },
+      "web_research": {
+        "done": "Bir soruyu araştırdı",
+        "failed": "Soruyu araştıramadı",
+        "running": "Bir soruyu araştırıyor"
       },
       "web_search": {
         "done": "Web'de arandı",

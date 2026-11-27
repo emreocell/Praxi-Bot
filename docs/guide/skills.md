@@ -23,8 +23,9 @@ Later layers override earlier ones by name:
 
 Bundled skills today: `cookie-consent-banners`, `custom-dropdowns`,
 `date-pickers`, `github-basics`, `linux-file-upload-dialog`,
-`macos-file-dialogs`, `shadow-dom-and-iframes`, `sign-in-forms`,
-`web-tables-and-spreadsheets`, `windows-file-upload-dialog`,
+`macos-file-dialogs`, `research` (plans sub-questions, runs `web_research`, saves a
+cited report; see [Research reports](web.md#research-reports)),
+`shadow-dom-and-iframes`, `sign-in-forms`, `web-tables-and-spreadsheets`, `windows-file-upload-dialog`,
 `windows-save-as-dialog`, `windows-settings-navigation`.
 
 The **starter pack** covers everyday jobs: `document-to-action-items`,

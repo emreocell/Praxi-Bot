@@ -33,11 +33,11 @@ const base = (): Record<string, unknown> => ({
   text: { en: { name: "Demo", blurb: "A demo.", goal: "Write about {{topic}}." } }
 });
 
-test("the shipped file is valid and holds the six recipes", () => {
+test("the shipped file is valid and holds the seven recipes", () => {
   assert.deepEqual(book.errors, []);
   assert.deepEqual(
     book.recipes.map((r) => r.id),
-    ["backlinks", "inbox-triage", "daily-brief", "price-watch", "leads", "weekly-report"]
+    ["backlinks", "inbox-triage", "daily-brief", "price-watch", "leads", "weekly-report", "research"]
   );
 });
 

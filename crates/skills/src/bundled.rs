@@ -67,6 +67,10 @@ pub(crate) const BUNDLED: &[(&str, &str)] = &[
         include_str!("../../../skills/grounded-citations/SKILL.md"),
     ),
     (
+        "research",
+        include_str!("../../../skills/research/SKILL.md"),
+    ),
+    (
         "blocked-page-recovery",
         include_str!("../../../skills/blocked-page-recovery/SKILL.md"),
     ),

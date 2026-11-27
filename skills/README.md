@@ -12,6 +12,7 @@ Each directory under `skills/` contains a `SKILL.md` playbook embedded into the 
 - `macos-file-dialogs` — Operate the native macOS Open and Save panels: Go to Folder, the replace prompt, hidden files and verifying the result.
 - `office-doc-prep` — Create and inspect docx, xlsx, and csv office files with built-in tools.
 - `outreach-drafts` — Draft personalized outreach emails per lead for owner review; never sends.
+- `research` — Plan sub-questions, run `web_research`, and save a cited report with `web_research_report`.
 - `shadow-dom-and-iframes` — Reach elements hidden inside shadow DOM or iframes when browser_snapshot does not list them.
 - `sign-in-forms` — Handle multi-step sign-in flows, SSO redirects, and 2FA prompts safely using stored fill secrets.
 - `signup-to-site` — Sign up on a website with the bot's own mail identity and a daemon-made password, confirm by mail, keep any key the site shows, record the site in the ledger, and hand over CAPTCHA or 2FA.

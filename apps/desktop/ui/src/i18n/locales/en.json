@@ -3107,6 +3107,11 @@
         "failed": "Didn't save a note",
         "running": "Saving a note"
       },
+      "research_report": {
+        "done": "Saved a research report",
+        "failed": "Couldn't save the report",
+        "running": "Saving a research report"
+      },
       "schedule_create": {
         "done": "Created a recurring task",
         "failed": "Didn't create a recurring task",
@@ -3171,6 +3176,11 @@
         "done": "Read a page",
         "failed": "Couldn't read a page",
         "running": "Reading a page"
+      },
+      "web_research": {
+        "done": "Researched a question",
+        "failed": "Couldn't research the question",
+        "running": "Researching a question"
       },
       "web_search": {
         "done": "Searched the web",

@@ -21,8 +21,9 @@ Sonraki katmanlar, aynı ada sahip önceki katmanın yerine geçer:
 
 Bugün yerleşik olan beceriler: `cookie-consent-banners`, `custom-dropdowns`,
 `date-pickers`, `github-basics`, `linux-file-upload-dialog`,
-`macos-file-dialogs`, `shadow-dom-and-iframes`, `sign-in-forms`,
-`web-tables-and-spreadsheets`, `windows-file-upload-dialog`,
+`macos-file-dialogs`, `research` (alt soruları planlar, `web_research` çalıştırır, kaynaklı bir
+rapor kaydeder; bkz. [Araştırma raporları](web.md#araştırma-raporları)),
+`shadow-dom-and-iframes`, `sign-in-forms`, `web-tables-and-spreadsheets`, `windows-file-upload-dialog`,
 `windows-save-as-dialog`, `windows-settings-navigation`.
 
 **Başlangıç paketi** gündelik işleri kapsar: `document-to-action-items`,

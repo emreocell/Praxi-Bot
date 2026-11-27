@@ -11,6 +11,8 @@ JavaScript isteyen, girişle açılan ya da tıklayarak gezmeyi gerektiren sayfa
 | `web_feed` | Bir RSS, RDF ya da Atom akışını çeker ve ayrıştırır. |
 | `web_sitemap` | Bir `sitemap.xml` dosyasını, site haritası dizinini ya da metin site haritasını çeker ve ayrıştırır. |
 | `web_metadata` | Sayfa başlığı, açıklama, kanonik URL, OpenGraph, Twitter kartı, akışlar ve JSON-LD. |
+| `web_research` | Sınırlı tek bir araştırma turu: her alt soru için arar, aynı sayfaları eler, en iyi kaynakları okur ve numaralı döndürür. Bkz. [Araştırma raporları](#araştırma-raporları). |
+| `web_research_report` | Kaynaklı bir yanıtı botun çalışma alanına (`research/` klasörü) Markdown rapor olarak kaydeder. Bir dosya yazımıdır, bu yüzden botun dosya izinlerine tabidir. |
 
 İsteğe bağlı [web kazıma eklentisi](web-scraping.md), daha temiz makale metni, bağlantı listeleri
 ve tek bir sitenin küçük taramaları için `web_scrape` aracını ekler. Varsayılan olarak kurulu
@@ -22,6 +24,45 @@ ile çözülür. Tarayıcı, yalnızca sayfanın kendisi gerçek bir tarayıcı 
 “Genel asistan” ve “Tarayıcı araştırmacısı” hazır ayarlarından oluşturulan botlar bu araçları
 kullanabilir. Kendi `[tools] allow` listesi olan bir bota `"web_*"` ekle (bkz.
 [Botlar ve profiller](bots-and-profiles.md)).
+
+## Araştırma raporları
+
+Birkaç kaynak gerektiren bir soruda (“karşılaştır...”, “... şu an ne durumda”, “araştır...”) bot,
+dağınık bir yanıt yerine kaynaklı bir rapor yazabilir. Bunu sade bir cümleyle iste (“X'i araştır,
+kaynaklarıyla rapor ver”), **Hedefle başla** altındaki **Araştırma** tarifini kullan ya da
+yerleşik `research` [becerisinin](skills.md) kendiliğinden yüklenmesine izin ver. Bot üç adımda
+çalışır:
+
+1. **Plan yapar.** Sorunu üç ile altı odaklı arama sorgusuna böler.
+2. **`web_research` toplar.** Tek bir çağrı her sorgu için arama yapar, aynı ve neredeyse aynı
+   sayfaları (başka adreste duran aynı makale, kopya yayın) eler, en iyi kaynakları okur ve
+   `[1]`, `[2]`... diye numaralar. Yalnızca okur: arama sorguları ve sayfa çekimleri dışında hiçbir
+   şey dışarı gönderilmez. Araç bottan web adresi almaz, yani okuduğu sayfalar arama motorunun
+   döndürdükleridir. Her adres ve yönlendirme, `web_extract` ile aynı ağ sınırlarından ve site
+   kurallarından geçer.
+3. **Yazar ve kaydeder.** Bot yanıtı, bir sayfadan gelen her iddianın sonuna `[n]` koyarak yazar.
+   Ardından `web_research_report` her numarayı gerçekten okunanlarla karşılaştırır, kullanım
+   sırasına göre yeniden numaralar, **Kaynaklar** listesini kendisi ekler ve
+   `research/<tarih>-<başlık>-<kimlik>.md` dosyasını botun çalışma alanına kaydeder. Sana kısa bir
+   özet ve dosya yolu döner. Araştırmada olmayan bir numara reddedilir; uydurma bir kaynak listeye
+   giremez.
+
+Bot ne isterse istesin sınırlar: en çok 15 kaynak (varsayılan 8), 10 ile 240 saniye (varsayılan
+90), toplamda 4.000 ile 80.000 karakter sayfa metni (varsayılan 36.000, yaklaşık 9.000 token) ve
+sekiz arama. Okunabilir metni neredeyse hiç olmayan bir sayfa (giriş duvarı, betikle kurulan
+sayfa) “kullanılmadı” diye listelenir, böylece bot onu tarayıcıyla açabilir. Hiçbir sayfa
+okunamadıysa bot, hafızasından yanıtlamak yerine bunu söylemekle yükümlüdür.
+
+Sayfa metni güvenilmezdir: rastgele bir işaret taşıyan başlangıç ve bitiş satırları arasında gelir,
+böylece bir sayfa çiti kapatamaz; bot onu kanıt sayar, asla talimat saymaz. `web_extract` gibi,
+`web_research` de sen o bota izin vermedikçe çalışmadan önce sorar (bkz.
+[Bir botun sormadan çekmesine izin vermek](#bir-botun-sormadan-çekmesine-izin-vermek)); **Tam**
+seviyede diğer web okumalarıyla aynı kuralları izler, bu yüzden [görevlerde](../missions.md) ve
+zamanlanmış çalıştırmalarda da çalışır. Çalışma alanı klasörü olmayan bir bot, dosya yerine
+bitmiş raporu yanıtında verir. Raporlar senin dosyalarındır: botun dosya izinlerine tabidir ve bir
+sayfa okuduktan sonra yazılan her şey gibi dışarıdan gelen içerik olarak işaretlenir.
+
+Önemli iddiaları kaynağında kontrol et: rapor, arkasındaki sayfalar kadar iyidir.
 
 ## Arama arka ucu
 
@@ -169,6 +210,8 @@ kullanır. Sorgu gizliliği senin için önemliyse `searxng_url` adresini kendi 
     olmadıkça bir çekmeyi muaf tutmaz.
   - `web_extract`, `web_feed`, `web_sitemap` ve `web_metadata`, modelin seçtiği her adrese
     ulaşır. Bu yüzden **varsayılan politikada her çağrıda onay ister**, tıpkı `browser_open` gibi.
+    `web_research` adres almaz ama bir aramanın döndürdüğü sayfaları okur, bu yüzden aynı şekilde
+    sorar (sayfa başına değil, araştırma turu başına bir soru).
     Çalışma güvenilmeyen ya da özel içerik okuduktan sonra, o bot ayarı açık olmadıkça kalıcı bir
     izin ya da `full` hazır ayarı altında bile sorarlar.
   - `web_scrape` (yalnızca isteğe bağlı eklenti kuruluysa) `web_extract` gibi ele alınır: modelin

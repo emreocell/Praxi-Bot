@@ -156,7 +156,9 @@ pub(crate) const FULL_BROWSER_CALLS: [&str; 14] = [
     "browser_pointer",
 ];
 
-/// The public-web READ tools (`web-tools`): a search, a page, a feed, a sitemap, a page's
+/// The public-web READ tools (`web-tools`): a search, a bounded research pass (`web_research`:
+/// searches for the questions it was given and reads the pages those searches return; it has no
+/// address input), a page, a feed, a sitemap, a page's
 /// metadata, and a page read through the optional scraping add-on (`web_scrape`: clean article
 /// text, a link list, a small crawl of ONE site; it exists only where the owner installed the
 /// add-on, and it obeys robots.txt, never logs in). They follow the same rule as `browser_open` in the Full level: no card for an
@@ -164,8 +166,9 @@ pub(crate) const FULL_BROWSER_CALLS: [&str; 14] = [
 /// or address carries a private word, a data shape or exceeds the budget. They fetch over HTTP
 /// with the tool's own address guard (private networks refused); they start no program and
 /// type nothing into a page.
-pub(crate) const FULL_WEB_READ_CALLS: [&str; 6] = [
+pub(crate) const FULL_WEB_READ_CALLS: [&str; 7] = [
     "web_search",
+    "web_research",
     "web_extract",
     "web_scrape",
     "web_feed",

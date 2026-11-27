@@ -8,7 +8,7 @@ Status: gap 1 implemented in the `feat/c478-agent-tools` change; gaps 2-3 deferr
 | --- | --- | --- |
 | Files | `fs_read/list/search`, `fs_write/edit/move/delete`, `checkpoint_*` | private read / local write / destructive |
 | Documents | `pdf_extract`, `docx_*`, `xlsx_*`, `csv_*`, `json_query` | private read / local write |
-| Web | `web_search`, `web_extract` (URL to Markdown, SSRF guard), `web_feed`, `web_sitemap`, `web_metadata` | untrusted + egress |
+| Web | `web_search`, `web_extract` (URL to Markdown, SSRF guard), `web_feed`, `web_sitemap`, `web_metadata`, `web_research` (bounded search-and-read pass, no URL input; its `web_research_report` is a workspace write through `fs_write`) | untrusted + egress |
 | Browser / desktop | `browser_*`, `desktop_*` | untrusted private + egress, some `executes` |
 | Shell / code | `shell_run`, `script_run`, `git_*`, `process_list` | executes |
 | Mail / calendar | `email_*`, calendar connector | private, untrusted, egress on send |

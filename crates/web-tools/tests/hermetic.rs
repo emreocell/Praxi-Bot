@@ -77,7 +77,7 @@ fn html(body: &str) -> ResponseTemplate {
 }
 
 #[test]
-fn registers_five_tools_with_builtin_conventions() {
+fn registers_the_web_tools_with_builtin_conventions() {
     let reg = ToolRegistry::new();
     let added = web_tools::register(&reg, WebToolsConfig::default()).unwrap();
     assert_eq!(added, TOOL_NAMES);
@@ -1796,4 +1796,162 @@ async fn a_rejected_key_and_a_spent_quota_are_not_reported_as_robot_checks() {
         .unwrap_err();
     assert!(err.contains("all configured search backends"), "{err}");
     assert!(!err.contains("refused this computer as a robot"), "{err}");
+}
+
+fn article(topic: &str, seed: &str) -> String {
+    let body = (0..30)
+        .map(|i| {
+            format!("<p>{seed} explains that {topic} matters in way number {i} for readers.</p>")
+        })
+        .collect::<String>();
+    format!(
+        "<html><head><title>{seed} on {topic}</title></head><body><article><h1>{seed}</h1>{body}</article></body></html>"
+    )
+}
+
+#[tokio::test]
+async fn web_research_searches_reads_numbers_and_remembers_the_sources() {
+    let server = MockServer::start().await;
+    let base = server.uri();
+    // Two sub-questions; the second returns the first's top page again under another spelling.
+    for (q, hits) in [
+        (
+            "heat pump running cost",
+            json!([
+                {"title": "Costs", "url": format!("{base}/costs"), "content": "c"},
+                {"title": "Blocked", "url": format!("{base}/secret/page"), "content": "b"},
+                {"title": "Broken", "url": format!("{base}/missing"), "content": "m"},
+            ]),
+        ),
+        (
+            "heat pump efficiency",
+            json!([
+                {"title": "Costs again", "url": format!("{base}/costs/?utm_source=x#top"), "content": "c"},
+                {"title": "Efficiency", "url": format!("{base}/efficiency"), "content": "e"},
+            ]),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .and(query_param("q", q))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "results": hits })))
+            .mount(&server)
+            .await;
+    }
+    for (p, seed) in [("/costs", "costs-site"), ("/efficiency", "efficiency-site")] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(html(&article("heat pumps", seed)))
+            .mount(&server)
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path("/secret/page"))
+        .respond_with(html(&article("heat pumps", "secret-site")))
+        .mount(&server)
+        .await;
+
+    let spill = tempfile::tempdir().unwrap();
+    let mut c = cfg(loopback_ok());
+    c.search.searxng_url = Some(base.clone());
+    c.spill_dir = Some(spill.path().to_path_buf());
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, c).unwrap();
+    let spec = reg.get("web_research").unwrap().spec().clone();
+    assert!(spec.is_valid());
+    assert_eq!(spec.category, tool_registry::PermissionCategory::Browser);
+    assert_eq!(spec.effect, tool_registry::Effect::Write);
+    let schema = spec.input_schema.to_string();
+    assert!(
+        !schema.contains("\"url\""),
+        "the tool takes no address: {schema}"
+    );
+
+    let guard: Arc<dyn tool_registry::UrlGuard> = Arc::new(DenyPath("/secret"));
+    let out = tool_registry::with_url_guard(
+        guard,
+        call(
+            &reg,
+            "web_research",
+            json!({
+                "question": "Are heat pumps cheaper to run?",
+                "sub_questions": ["heat pump running cost", "heat pump efficiency", "heat pump efficiency"],
+                "max_sources": 5,
+            }),
+        ),
+    )
+    .await
+    .unwrap();
+    let t = text(&out);
+    assert!(t.starts_with("[untrusted external content"), "{t}");
+    assert!(t.contains("### Source [1] costs-site on heat pumps"), "{t}");
+    assert!(
+        t.contains("### Source [2] efficiency-site on heat pumps"),
+        "{t}"
+    );
+    assert!(
+        !t.contains("secret-site"),
+        "an owner-blocked site is never read: {t}"
+    );
+    assert!(t.contains("Not used:"), "{t}");
+    assert!(t.contains("/missing") && t.contains("HTTP 404"), "{t}");
+    assert!(t.contains("/secret/page") && t.contains("blocked"), "{t}");
+    assert!(t.contains("sub-question 2: heat pump efficiency"));
+    assert!(
+        !t.contains("sub-question 3"),
+        "a repeated sub-question is searched once: {t}"
+    );
+    let hit_secret = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .any(|r| r.url.path() == "/secret/page");
+    assert!(!hit_secret, "the blocked page must never be requested");
+
+    let j = json_part(&out);
+    assert_eq!(j["untrusted_external_content"], true);
+    let id = j["research_id"].as_str().unwrap().to_owned();
+    let srcs = j["sources"].as_array().unwrap();
+    assert_eq!(srcs.len(), 2);
+    assert_eq!(
+        srcs[0]["found_for"],
+        json!([1, 2]),
+        "found by both searches"
+    );
+
+    // The source list is remembered for the report tool, in memory and in the spill folder.
+    let pack =
+        web_tools::research::get_pack(Some(&web_tools::research::pack_dir(spill.path())), &id)
+            .unwrap();
+    assert_eq!(pack.sources.len(), 2);
+    assert_eq!(pack.sources[0].n, 1);
+    assert!(pack.sources[0].url.ends_with("/costs"));
+}
+
+#[tokio::test]
+async fn web_research_refuses_an_empty_or_oversized_question_and_clamps_its_limits() {
+    let reg = ToolRegistry::new();
+    web_tools::register(&reg, cfg(loopback_ok())).unwrap();
+    for bad in [
+        json!({"question": "   "}),
+        json!({"question": "x".repeat(401)}),
+        json!({"question": "ok", "sub_questions": ["y".repeat(401)]}),
+        json!({"sub_questions": ["no question"]}),
+    ] {
+        let err = call(&reg, "web_research", bad.clone()).await.unwrap_err();
+        assert!(!err.is_empty(), "{bad}");
+    }
+    // Limits far outside the allowed range are clamped, not trusted: with no search backend
+    // the call fails fast on the search, it does not hang for a million seconds.
+    let started = std::time::Instant::now();
+    let err = call(
+        &reg,
+        "web_research",
+        json!({"question": "q", "max_seconds": 1_000_000, "max_sources": 1_000_000, "max_chars": 1}),
+    )
+    .await
+    .unwrap_err();
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+    assert!(err.contains("search") || err.contains("backend"), "{err}");
 }

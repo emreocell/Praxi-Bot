@@ -14,7 +14,7 @@ function findRecipe(id: string): Recipe | undefined {
 
 test("the shipped recipe book matches recipes.json validation", () => {
   assert.deepEqual(BOOK.errors, []);
-  assert.equal(BOOK.recipes.length, 6);
+  assert.equal(BOOK.recipes.length, 7);
 });
 
 test("findRecipe returns a recipe by id and undefined for unknown ids", () => {

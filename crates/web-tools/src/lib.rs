@@ -23,6 +23,7 @@ pub mod extract;
 pub mod http;
 pub mod metadata;
 pub mod policy;
+pub mod research;
 pub mod scrape;
 pub mod search;
 pub mod tools;
@@ -34,6 +35,7 @@ pub use extract::{ExtractOptions, Extracted, Link, html_to_markdown};
 pub use http::{Fetched, GetOptions, HttpConfig, HttpFetcher};
 pub use metadata::{FeedLink, PageMetadata, extract_metadata};
 pub use policy::{DefaultUrlPolicy, PolicyViolation, TrustedHostPolicy, UrlPolicy};
+pub use research::{REPORT_TOOL, RESEARCH_TOOL};
 pub use scrape::{SCRAPE_TOOL, ScrapeConfig};
 pub use search::{
     BING_ENDPOINT, BRAVE_ENDPOINT, BingBackend, BraveBackend, DEFAULT_CHALLENGE_COOLDOWN,

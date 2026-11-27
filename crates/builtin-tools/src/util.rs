@@ -17,6 +17,8 @@ use tool_registry::{
 #[must_use]
 pub fn classify(name: &str) -> Option<ContentClass> {
     Some(match name {
+        // `web_research_report` writes the model's own cited text to the bot's workspace through
+        // `fs_write`: a local write, like it.
         // Questions, todos, schedule lifecycle, a local write, or a listing
         // of the bot's own bookkeeping (secret names and origins carry no value; removing
         // bots this bot made brings no content in; `browser_handover` only checks that a
@@ -32,7 +34,8 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         "ask_user" | "todo_write" | "schedule_pause" | "schedule_delete" | "fs_write"
         | "fs_move" | "fs_delete" | "checkpoint_list" | "checkpoint_restore" | "schedule_list"
         | "secrets_list" | "secret_request" | "bot_delete" | "account_list" | "account_discard"
-        | "account_totp_save" | "browser_handover" | "browser_capture_secret" => {
+        | "account_totp_save" | "browser_handover" | "browser_capture_secret"
+        | "web_research_report" => {
             ContentClass::none()
         }
         // Pure helpers: only the clock and the model's own short text go in.
