@@ -39,6 +39,10 @@ A note that is only true for a while shows **expires** with a date. When that ti
 
 **Forget** hides a note and stops it being used. It stays in your undo history on this computer. To remove everything from disk, close Praxi and delete `memory.db` in the data folder; the bots then start with an empty memory.
 
+## What a bot noted on its own
+
+A bot that works without you (a scheduled run, a mission session, a sub-agent) cannot quote a message of yours, so it cannot save a memory the way it does in a chat. It can still keep what it **learned while working** (a site moved, a command that works). Such a note is kept apart from what you said: it belongs to that bot only, it never describes you, it records which run saved it and whether that run had read outside content, and the bot sees it in its own section, labelled as not confirmed by you. If the run had read outside content, it is **untrusted**: it waits in **Needs your OK** until you approve it, and is then quoted as data. Each bot keeps at most 200 of these. Editing the text of one in the memory settings makes it yours. See [Notes and memory tools](agent-tools.md).
+
 ## Needs your OK
 
 Notes picked up from web pages, files, tools or other bots appear in the **Needs your OK** list at the top of the memory settings. **Approve** lets the bot use it (it is still shown to the model as quoted data, not as a command). **Discard** forgets it. Until you decide, the bot does not use it and it never appears in the preview.

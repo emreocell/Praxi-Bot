@@ -184,6 +184,7 @@ mod tests {
                 source_chat_id: None,
                 source_message_id: None,
                 pending: false,
+                origin: None,
                 trust: Trust::User,
                 importance: 0.5,
                 valid_until_ms: None,

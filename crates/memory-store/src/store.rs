@@ -12,7 +12,9 @@ use crate::embed::{Embedder, normalize};
 use crate::error::{MemoryError, Result};
 use crate::recall::RecallConfig;
 use crate::secrets::contains_secret;
-use crate::types::{JournalEntry, JournalOp, Kind, Memory, MemoryPatch, NewMemory, Trust};
+use crate::types::{
+    JournalEntry, JournalOp, Kind, Memory, MemoryOrigin, MemoryPatch, NewMemory, Trust,
+};
 use crate::vec::{register, to_blob};
 
 /// Embedded migrations; version = index + 1.
@@ -26,11 +28,12 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0003_tombstones",
         include_str!("../migrations/0003_tombstones.sql"),
     ),
+    ("0004_origin", include_str!("../migrations/0004_origin.sql")),
 ];
 
 pub(crate) const COLS: &str = "rowid, id, user_id, bot_id, kind, content, source_quote, \
     source_chat_id, source_message_id, trust, importance, created_ms, last_used_ms, \
-    valid_until_ms, deleted, pending";
+    valid_until_ms, deleted, pending, origin_json";
 
 /// Current time in Unix milliseconds.
 #[must_use]
@@ -95,6 +98,10 @@ pub(crate) fn row_to_memory(r: &Row<'_>) -> rusqlite::Result<(i64, Memory)> {
             valid_until_ms: r.get(13)?,
             deleted: r.get::<_, i64>(14)? != 0,
             pending: r.get::<_, i64>(15)? != 0,
+            origin: r
+                .get::<_, Option<String>>(16)?
+                .map(|j| serde_json::from_str(&j).map_err(|e| conv_err(format!("origin {e}"))))
+                .transpose()?,
         },
     ))
 }
@@ -303,6 +310,7 @@ impl MemoryStore {
             valid_until_ms: new.valid_until_ms,
             deleted: false,
             pending: new.pending,
+            origin: new.origin.clone(),
         };
         let emb = self.embed_for_index(&mem.content);
         let mut conn = self.conn();
@@ -310,7 +318,7 @@ impl MemoryStore {
         tx.execute(
             "INSERT INTO memories (id, user_id, bot_id, kind, content, source_quote, \
              source_chat_id, source_message_id, trust, importance, created_ms, last_used_ms, \
-             valid_until_ms, deleted, pending) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,?14)",
+             valid_until_ms, deleted, pending, origin_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,?14,?15)",
             params![
                 mem.id.to_string(),
                 mem.user_id.0.to_string(),
@@ -326,6 +334,7 @@ impl MemoryStore {
                 mem.last_used_ms,
                 mem.valid_until_ms,
                 i64::from(mem.pending),
+                origin_json(mem.origin.as_ref())?,
             ],
         )?;
         let rowid = tx.last_insert_rowid();
@@ -336,6 +345,31 @@ impl MemoryStore {
         journal_insert(&tx, &mem, JournalOp::Add, None, Some(&mem), reason)?;
         tx.commit()?;
         Ok(mem)
+    }
+
+    /// How many live memories `bot_id` saved itself in unattended runs, and how many of those
+    /// came from `run_id`. Counts held ("needs your OK") ones too.
+    ///
+    /// # Errors
+    /// SQLite failure.
+    pub fn count_own_notes(
+        &self,
+        user_id: UserId,
+        bot_id: BotId,
+        run_id: &str,
+    ) -> Result<(usize, usize)> {
+        let conn = self.conn();
+        let (all, run): (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(json_extract(origin_json, '$.run_id') = ?3), 0) \
+             FROM memories WHERE user_id = ?1 AND bot_id = ?2 AND deleted = 0 \
+             AND origin_json IS NOT NULL",
+            params![user_id.0.to_string(), bot_id.0.to_string(), run_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        Ok((
+            usize::try_from(all).unwrap_or(usize::MAX),
+            usize::try_from(run).unwrap_or(usize::MAX),
+        ))
     }
 
     /// Fetch one memory (any user; internal use) including deleted rows.
@@ -391,6 +425,9 @@ impl MemoryStore {
         let mut after = before.clone();
         if let Some(c) = &patch.content {
             c.trim().clone_into(&mut after.content);
+            // New text comes from the owner or from a chat: it is no longer what the bot
+            // noted on its own.
+            after.origin = None;
         }
         if let Some(q) = &patch.source_quote {
             after.source_quote = Some(q.clone());
@@ -558,7 +595,7 @@ fn write_snapshot(conn: &Connection, m: &Memory) -> Result<()> {
     conn.execute(
         "UPDATE memories SET bot_id=?2, kind=?3, content=?4, source_quote=?5, source_chat_id=?6, \
          source_message_id=?7, trust=?8, importance=?9, last_used_ms=?10, valid_until_ms=?11, \
-         deleted=?12, pending=?13 WHERE id=?1",
+         deleted=?12, pending=?13, origin_json=?14 WHERE id=?1",
         params![
             m.id.to_string(),
             m.bot_id.map(|b| b.0.to_string()),
@@ -573,9 +610,16 @@ fn write_snapshot(conn: &Connection, m: &Memory) -> Result<()> {
             m.valid_until_ms,
             i64::from(m.deleted),
             i64::from(m.pending),
+            origin_json(m.origin.as_ref())?,
         ],
     )?;
     Ok(())
+}
+
+fn origin_json(origin: Option<&MemoryOrigin>) -> Result<Option<String>> {
+    origin
+        .map(|o| serde_json::to_string(o).map_err(|e| MemoryError::Invalid(format!("origin: {e}"))))
+        .transpose()
 }
 
 /// (Re)index a memory in FTS and, when a vector is available, the vector table.
@@ -779,6 +823,79 @@ mod tests {
         let v: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, 4, "the origin column came after 0003");
+    }
+
+    #[test]
+    fn migration_4_keeps_memories_and_adds_a_null_origin() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for (i, (_, sql)) in MIGRATIONS.iter().take(3).enumerate() {
+            conn.execute_batch(sql).unwrap();
+            conn.execute_batch(&format!("PRAGMA user_version = {}", i + 1))
+                .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO memories (id, user_id, kind, content, trust, importance, created_ms, \
+             last_used_ms, deleted, pending) \
+             VALUES ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222', \
+             'profile','Likes tea','user',0.5,1,1,0,0)",
+            [],
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let (m_origin, content): (Option<String>, String) = conn
+            .query_row("SELECT origin_json, content FROM memories", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((m_origin, content.as_str()), (None, "Likes tea"));
+        let mem = conn
+            .query_row(&format!("SELECT {COLS} FROM memories"), [], row_to_memory)
+            .unwrap()
+            .1;
+        assert!(mem.origin.is_none());
+    }
+
+    #[test]
+    fn editing_the_text_of_a_bot_noted_memory_makes_it_the_owners() {
+        let store =
+            MemoryStore::open_in_memory(Arc::new(crate::embed::HashEmbedder::new(32))).unwrap();
+        let user = UserId::new();
+        let mut new = NewMemory::new(user, Some(BotId::new()), Kind::Episodic, "Site X moved");
+        new.origin = Some(MemoryOrigin {
+            run_id: "r1".into(),
+            source: "schedule".into(),
+            reference: None,
+            untrusted: false,
+        });
+        let m = store.add(&new, "test").unwrap();
+        assert_eq!(store.get(m.id).unwrap().unwrap().origin, new.origin);
+        // Approving it (no text change) keeps the provenance.
+        let approved = store
+            .update(
+                user,
+                m.id,
+                &MemoryPatch {
+                    pending: Some(false),
+                    ..MemoryPatch::default()
+                },
+                "approve",
+            )
+            .unwrap();
+        assert_eq!(approved.origin, new.origin);
+        // The owner rewriting the words takes it over.
+        let edited = store
+            .update(
+                user,
+                m.id,
+                &MemoryPatch {
+                    content: Some("Site X moved to /v2".into()),
+                    ..MemoryPatch::default()
+                },
+                "edit",
+            )
+            .unwrap();
+        assert!(edited.origin.is_none());
+        assert!(store.get(m.id).unwrap().unwrap().origin.is_none());
     }
 }

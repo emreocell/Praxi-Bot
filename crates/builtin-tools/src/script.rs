@@ -348,6 +348,8 @@ impl ScriptHost for GateHost {
             expected_origin: authorization.expected_origin,
             unattended_mail: authorization.unattended_mail,
             payment: authorization.payment,
+            // The gate does not say which kind it was: any taint counts as private here.
+            exposure_private: self.gate.content_tainted(&self.run_id),
             // A script is never covered by a run-scoped control grant.
             control_guard: None,
             lane: self.lane.clone(),

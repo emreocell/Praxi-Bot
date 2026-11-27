@@ -32,7 +32,12 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         | "secrets_list" | "secret_request" | "bot_delete" | "account_list" | "account_discard"
         | "browser_handover" => ContentClass::none(),
         // Pure helpers: only the clock and the model's own short text go in.
-        "time_now" | "calculate" | "wait" => ContentClass::declared(false, false, false),
+        // Writing or deleting a note only changes the bot's own notes file on this machine:
+        // not egress. What a tainted run stores is marked and read back fenced (see `notes`),
+        // so a poisoned note is data to the next run, not an instruction.
+        "time_now" | "calculate" | "wait" | "notes_write" => {
+            ContentClass::declared(false, false, false)
+        }
         // Editing reads old content and reports match counts, including no-op edits.
         // Observation, including a click or a scroll. Those pick an on-screen
         // target and cannot carry bytes off the machine. A drag can drop a
@@ -49,15 +54,12 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // outside (Downloads, attachments, mail) is marked untrusted per call by the loop
         // (`taint::arrived_from_outside`). Full screen content (`desktop_get_state`) stays
         // untrusted: the code cannot tell a browser or mail window from another program.
-        // The bot's own notes (`notes_read`) are private too: a later
-        // egress asks. A note written in an untrusted run reports untrusted
-        // exposure per call (see `notes`).
+        // The bot's own notes (`notes_read`) are private unless proven otherwise: the tool
+        // reports the marks of the notes it returns per call (see `notes`), so a note written
+        // in a clean run taints nothing and an untrusted or private one does.
         "fs_read" | "fs_list" | "fs_search" | "fs_edit" | "notes_read" => {
             ContentClass::private_read()
         }
-        // Persisting or deleting a note from a tainted run changes what later
-        // runs read, so it asks like `memory_save` / `memory_forget`.
-        "notes_write" => ContentClass::declared(false, true, true),
         // A shell, a script, browser navigation and input, a drag, or a
         // desktop mutation that types, replaces a value, presses a key, or
         // launches a program can read and can send data off the machine. Tab
@@ -227,6 +229,7 @@ mod tests {
             bot_id: None,
             content_tainted: false,
             exposure_untrusted: false,
+            exposure_private: false,
             expected_origin: None,
             unattended_mail: false,
             payment: tool_registry::PaymentApproval::Unchecked,
@@ -267,6 +270,7 @@ mod tests {
                     bot_id: None,
                     content_tainted: false,
                     exposure_untrusted: false,
+                    exposure_private: false,
                     expected_origin: None,
                     unattended_mail: false,
                     payment: tool_registry::PaymentApproval::Unchecked,
@@ -293,6 +297,7 @@ mod tests {
             bot_id: None,
             content_tainted: false,
             exposure_untrusted: false,
+            exposure_private: false,
             expected_origin: None,
             unattended_mail: false,
             payment: tool_registry::PaymentApproval::Unchecked,

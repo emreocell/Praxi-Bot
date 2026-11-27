@@ -47,6 +47,21 @@ str_enum!(
     }
 );
 
+/// Where a memory the bot saved ITSELF in an unattended run came from. Absent on everything the
+/// owner said.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryOrigin {
+    /// The run that saved it.
+    pub run_id: String,
+    /// Kind of run: `schedule`, `mission`, `routine` or `subagent`.
+    pub source: String,
+    /// The schedule or mission id, when the run kind carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    /// The run held untrusted content (a page, a mail, a download) when it saved this.
+    pub untrusted: bool,
+}
+
 str_enum!(
     /// Journal operation.
     JournalOp {
@@ -97,6 +112,9 @@ pub struct Memory {
     /// Held for the owner's review ("Needs your OK"): never recalled until approved.
     #[serde(default)]
     pub pending: bool,
+    /// Set when the bot saved this itself in an unattended run; `None` for what the owner said.
+    #[serde(default)]
+    pub origin: Option<MemoryOrigin>,
 }
 
 /// Input for [`MemoryStore::add`](crate::MemoryStore::add).
@@ -124,6 +142,8 @@ pub struct NewMemory {
     pub valid_until_ms: Option<i64>,
     /// Hold for the owner's review instead of recalling it right away.
     pub pending: bool,
+    /// Provenance of a memory the bot saved itself in an unattended run.
+    pub origin: Option<MemoryOrigin>,
 }
 
 impl NewMemory {
@@ -147,6 +167,7 @@ impl NewMemory {
             importance: 0.5,
             valid_until_ms: None,
             pending: false,
+            origin: None,
         }
     }
 }

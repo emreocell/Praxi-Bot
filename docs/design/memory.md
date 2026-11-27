@@ -103,6 +103,24 @@ excerpt (redacted like the excerpt). A quote must be a whitespace/case-
 normalised span of one of them, like the `memory_save` tool. A quote found only
 in the assistant part is rejected as `QuoteNotFromUser`.
 
+## Bot-noted memories in unattended runs
+
+The quote rule needs an owner message, which a schedule, a mission session or a
+sub-agent does not have. In those runs `memory_save` does not weaken the rule:
+it stores a different thing. The row carries `memories.origin_json`
+(`MemoryOrigin`: run id, kind of run, schedule or mission id, `untrusted`),
+which is `NULL` for everything the owner said. Such a row is always scoped to
+the calling bot (never shared, never `profile`), `Trust::Untrusted` when the
+run held outside content (an external trigger and a sub-agent always count),
+and held for review under the bot's memory mode (an untrusted one is always
+held). `render_recall_block` prints three sections that never mix: owner
+memories (`<recalled_memory>`), bot-noted ones (`<bot_noted_memory>`, each
+line with its provenance and "not confirmed by the owner") and untrusted data
+(`<untrusted_memory_data>`, provenance on the line too). Bounds: 500
+characters, 10 per run, 200 per bot (`MAX_OWN_*`). Changing the text of a row
+(`MemoryStore::update` with `content`) clears `origin_json`: it is then the
+owner's. `mission` run kinds are no longer treated as human turns by the tool.
+
 ## Chat and bot deletion (finding 6)
 
 * `DELETE /v1/chats/{id}` calls `MemoryStore::erase_chat` after the chat is

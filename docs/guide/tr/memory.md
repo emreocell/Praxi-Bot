@@ -39,6 +39,10 @@ Yalnızca bir süre doğru olan bir not **sona erer** ve bir tarih gösterir. Bu
 
 **Unut**, bir notu gizler ve kullanılmasını durdurur. Bu bilgisayardaki geri alma geçmişinde kalır. Her şeyi diskten silmek için Praxi'yi kapat ve veri klasöründeki `memory.db` dosyasını sil; botlar boş bir bellekle başlar.
 
+## Botun kendi başına not ettikleri
+
+Sensiz çalışan bir bot (zamanlanmış bir çalışma, bir görev oturumu, bir alt ajan) senin bir mesajından alıntı yapamaz; bu yüzden bir sohbetteki gibi hafıza kaydedemez. Yine de **çalışırken öğrendiklerini** (bir sitenin taşınması, işe yarayan bir komut) tutabilir. Böyle bir not, senin söylediklerinden ayrı tutulur: yalnızca o bota aittir, seni asla anlatmaz, hangi çalışmanın kaydettiğini ve o çalışmanın dış içerik okuyup okumadığını da kaydeder. Bot onu kendi bölümünde, senin onaylamadığın bir not olarak etiketlenmiş halde görür. Çalışma dış içerik okuduysa not **güvenilmez** olur: sen onaylayana kadar **Onayın gerekiyor** bölümünde bekler, sonra da veri olarak alıntılanır. Her bot bunlardan en çok 200 tane tutar. Bellek ayarlarında birinin metnini düzenlersen artık senin olur. Bkz. [Not ve hafıza araçları](agent-tools.md).
+
 ## Onayın gerekiyor
 
 Web sayfalarından, dosyalardan, araçlardan veya başka botlardan alınan notlar bellek ayarlarının en üstündeki **Onayın gerekiyor** listesinde görünür. **Onayla**, botun notu kullanmasına izin verir (modele yine komut olarak değil, alıntılanmış veri olarak gösterilir). **At** notu unutturur. Sen karar verene kadar bot onu kullanmaz ve önizlemede asla görünmez.

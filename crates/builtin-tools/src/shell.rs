@@ -668,6 +668,7 @@ mod tests {
             bot_id: None,
             content_tainted: false,
             exposure_untrusted: false,
+            exposure_private: false,
             expected_origin: None,
             unattended_mail: false,
             payment: tool_registry::PaymentApproval::Unchecked,

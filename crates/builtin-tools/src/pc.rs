@@ -297,6 +297,7 @@ impl ToolWrapper for Renamed {
             bot_id: ctx.bot_id.clone(),
             content_tainted: ctx.content_tainted,
             exposure_untrusted: ctx.exposure_untrusted,
+            exposure_private: ctx.exposure_private,
             expected_origin: None,
             unattended_mail: false,
             // The daemon's payment decision for this call is about the computer's own page: it

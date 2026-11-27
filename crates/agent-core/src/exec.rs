@@ -2551,6 +2551,7 @@ impl TurnExecutor {
                     expected_origin: authorization.expected_origin,
                     unattended_mail: authorization.unattended_mail,
                     payment: authorization.payment,
+                    exposure_private: exposure.private,
                     control_guard,
                     lane: ctx.lane(),
                 };

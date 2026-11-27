@@ -928,6 +928,8 @@ impl Replayer {
             expected_origin: authorization.expected_origin,
             unattended_mail: authorization.unattended_mail,
             payment: authorization.payment,
+            // The gate does not say which kind it was: any taint counts as private here.
+            exposure_private: gate.content_tainted(&self.opts.run_id),
             ..ToolContext::default()
         };
         match tool.call(&ctx, input).await {

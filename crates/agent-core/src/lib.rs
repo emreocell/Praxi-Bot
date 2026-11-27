@@ -85,6 +85,8 @@ mod mission_start_tests;
 #[cfg(test)]
 mod mode_tests;
 #[cfg(test)]
+mod notes_tests;
+#[cfg(test)]
 mod pc_scope_tests;
 #[cfg(test)]
 mod router_tests;

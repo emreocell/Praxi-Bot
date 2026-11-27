@@ -164,6 +164,9 @@ pub struct ToolContext {
     /// The run holds UNTRUSTED content (a page, mail, a download, another bot's reply). Files
     /// written or moved by a tool in such a run get an untrusted origin mark.
     pub exposure_untrusted: bool,
+    /// The run holds PRIVATE content of the owner (a file, a mailbox, a memory, a screen). A note
+    /// written in such a run is marked private, so a later read of it taints that run as private.
+    pub exposure_private: bool,
     /// The origin (`scheme://host:port`) the loop saw the browser page on when it allowed this
     /// page action. The browser tool refuses to act if the page is on another origin by then
     /// (a navigation or redirect in between), so an allowance never follows the page elsewhere.
@@ -192,6 +195,7 @@ impl Default for ToolContext {
             bot_id: None,
             content_tainted: false,
             exposure_untrusted: false,
+            exposure_private: false,
             expected_origin: None,
             unattended_mail: false,
             payment: PaymentApproval::Unchecked,
