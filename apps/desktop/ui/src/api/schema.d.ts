@@ -1610,6 +1610,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/chats/{id}/voice-transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Write a finished voice conversation into a chat as ordinary text messages (no run starts). */
+        post: operations["save_transcript"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/components": {
         parameters: {
             query?: never;
@@ -5652,6 +5669,96 @@ export interface paths {
         /** Update the dictation configuration. */
         put: operations["update_voice"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/voice/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open a live voice conversation. The response is an event stream (`data:` lines of JSON, one
+         *     `type` field each): `ready`, then `audio`, `you`, `bot`, `turn_complete`, `interrupted`,
+         *     `tool_call`, `tool_cancelled`, `reconnecting` and finally `ended`. Closing the response ends
+         *     the session. Owner only; one session at a time.
+         */
+        post: operations["open"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/voice/live/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** End a conversation now. */
+        delete: operations["close"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/voice/live/{id}/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload microphone audio (raw 16-bit little-endian PCM, 16 kHz, mono; up to one second). */
+        post: operations["audio"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/voice/live/{id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pass an update to the voice model (the bot finished a task the owner was told to wait for). */
+        post: operations["note"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/voice/live/{id}/tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Return the bot's answer to a `tool_call`. */
+        post: operations["tool_result"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10017,6 +10124,25 @@ export interface components {
              */
             tpm?: number | null;
         };
+        /** @description Body of `POST /v1/voice/live/{id}/note`. */
+        LiveNote: {
+            /** @description Plain text the voice model passes on. */
+            text: string;
+        };
+        /** @description Body of `POST /v1/voice/live`. */
+        LiveOpenInput: {
+            /** @description Name of the bot the owner is talking to. */
+            assistant_name?: string | null;
+            /** @description UI language hint (ISO-639-1). */
+            language?: string | null;
+        };
+        /** @description Body of `POST /v1/voice/live/{id}/tool`. */
+        LiveToolResult: {
+            /** @description `call_id` of the `tool_call` event. */
+            call_id: string;
+            /** @description The bot's final text, or why it could not do it. */
+            text: string;
+        };
         /** @description Advice for this machine. `recommended` null means "no recommendation". */
         LocalAdviceDto: {
             basis: components["schemas"]["MemoryBasisDto"];
@@ -13470,6 +13596,12 @@ export interface components {
             gemini_model: string;
             /** @description A Gemini provider with a key exists under Bots & models. */
             gemini_provider_key_available: boolean;
+            /** @description Keep the audio of live conversations on this computer (default off). */
+            live_keep_audio: boolean;
+            /** @description Gemini Live model used for live voice conversations (e.g. `gemini-3.8-live`). */
+            live_model: string;
+            /** @description Prebuilt voice the live model speaks with (e.g. `Kore`). */
+            live_voice: string;
             /** @description Id of the on-device speech model used when the provider is `local_voice`. */
             local_model: string;
             /** @description Base URL of the OpenAI-compatible transcription service (without `/audio/transcriptions`). */
@@ -13498,6 +13630,12 @@ export interface components {
             gemini_key?: string | null;
             /** @description Gemini Live model name. */
             gemini_model?: string | null;
+            /** @description Keep the audio of live conversations on this computer. */
+            live_keep_audio?: boolean | null;
+            /** @description Gemini Live model for live voice conversations. */
+            live_model?: string | null;
+            /** @description Prebuilt voice name for live voice conversations. */
+            live_voice?: string | null;
             /** @description Id of an on-device speech model from `GET /v1/voice/local`. */
             local_model?: string | null;
             /** @description `https://...`, or `http://` for a loopback server only. */
@@ -13515,6 +13653,26 @@ export interface components {
          * @enum {string}
          */
         VoiceProvider: "whisper" | "gemini_live" | "local_voice";
+        /** @description Body of `POST /v1/chats/{id}/voice-transcript`. */
+        VoiceTranscriptInput: {
+            /** @description Lines in order. */
+            turns: components["schemas"]["VoiceTurn"][];
+        };
+        /** @description Result of `POST /v1/chats/{id}/voice-transcript`. */
+        VoiceTranscriptOutput: {
+            /**
+             * Format: int32
+             * @description Messages written.
+             */
+            saved: number;
+        };
+        /** @description One line of a finished conversation. */
+        VoiceTurn: {
+            /** @description `user` (the owner) or `assistant` (the voice model). */
+            role: string;
+            /** @description What was said. */
+            text: string;
+        };
         /**
          * @description Findings from the static review of untrusted manifest text.
          * @enum {string}
@@ -18411,6 +18569,49 @@ export interface operations {
                 };
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    save_transcript: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Chat id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceTranscriptInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceTranscriptOutput"];
+                };
+            };
+            /** @description bad transcript */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -27749,6 +27950,234 @@ export interface operations {
                 };
             };
             /** @description voice is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    open: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveOpenInput"];
+            };
+        };
+        responses: {
+            /** @description Server-sent events of the conversation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description no Gemini key, or another conversation is open */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid live voice settings */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the voice service failed */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description voice is not available */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    close: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description session_id of the ready event */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ended (or already gone) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    audio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description session_id of the ready event */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": number[];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description bad audio */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description no such conversation */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the session cannot take audio right now */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    note: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description session_id of the ready event */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveNote"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description no such conversation */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the session is gone */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    tool_result: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description session_id of the ready event */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveToolResult"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description no such conversation */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the session is gone */
             503: {
                 headers: {
                     [name: string]: unknown;

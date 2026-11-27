@@ -209,6 +209,9 @@ import type {
   ViewHeartbeat,
   TranscribeInput,
   TranscribeOutput,
+  LiveVoiceEvent,
+  LiveVoiceOpenInput,
+  VoiceTurn,
   VoiceConfig,
   VoiceConfigInput,
   LocalVoiceStatus,
@@ -2119,6 +2122,83 @@ export class ApiClient {
   async synthesizeVoice(text: string, language: string, signal: AbortSignal): Promise<Blob> {
     const res = await this.send("POST", "/voice/synthesize", { body: { text, language }, signal, localOwnerOnly: true });
     return res.blob();
+  }
+
+  /**
+   * Open a live voice conversation: the answer is an event stream that lasts as long as the
+   * conversation. Owner only and this computer's daemon only (it spends the stored Gemini key).
+   * Aborting `signal` ends the conversation.
+   */
+  async liveVoiceOpen(
+    input: LiveVoiceOpenInput,
+    onEvent: (event: LiveVoiceEvent) => void,
+    signal: AbortSignal
+  ): Promise<void> {
+    const res = await this.send("POST", "/voice/live", { body: input, noTimeout: true, localOwnerOnly: true, signal });
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new ApiError(0, "network", "missing live voice stream");
+    }
+    const parse = createSseParser((message) => {
+      try {
+        onEvent(JSON.parse(message.data) as LiveVoiceEvent);
+      } catch {
+        // A malformed event is skipped; the next one still counts.
+      }
+    });
+    const decoder = new TextDecoder();
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          break;
+        }
+        parse(decoder.decode(chunk.value, { stream: true }));
+      }
+      parse(decoder.decode());
+    } catch (e) {
+      if (!signal.aborted) {
+        throw e;
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+  }
+
+  /** Microphone audio of the open conversation: raw 16-bit little-endian PCM, 16 kHz, mono. */
+  liveVoiceAudio(sessionId: string, pcm: Uint8Array, signal?: AbortSignal): Promise<void> {
+    return this.request("POST", `/voice/live/${encodeURIComponent(sessionId)}/audio`, {
+      raw: new Blob([pcm as BlobPart]),
+      localOwnerOnly: true,
+      signal
+    });
+  }
+
+  /** The bot's answer to a `tool_call` event (or why it could not). */
+  liveVoiceToolResult(sessionId: string, callId: string, text: string): Promise<void> {
+    return this.request("POST", `/voice/live/${encodeURIComponent(sessionId)}/tool`, {
+      body: { call_id: callId, text },
+      localOwnerOnly: true
+    });
+  }
+
+  /** A short update the voice model passes on to the owner. */
+  liveVoiceNote(sessionId: string, text: string): Promise<void> {
+    return this.request("POST", `/voice/live/${encodeURIComponent(sessionId)}/note`, {
+      body: { text },
+      localOwnerOnly: true
+    });
+  }
+
+  liveVoiceClose(sessionId: string): Promise<void> {
+    return this.request("DELETE", `/voice/live/${encodeURIComponent(sessionId)}`, { localOwnerOnly: true, keepalive: true });
+  }
+
+  /** Write a finished voice conversation into a chat as text messages (no run starts). */
+  saveVoiceTranscript(chatId: string, turns: VoiceTurn[]): Promise<{ saved: number }> {
+    return this.request("POST", `/chats/${encodeURIComponent(chatId)}/voice-transcript`, {
+      body: { turns }
+    });
   }
 
   listCalendarAccounts(): Promise<CalendarAccount[]> {

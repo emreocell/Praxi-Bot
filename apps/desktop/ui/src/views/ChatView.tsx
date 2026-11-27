@@ -79,6 +79,8 @@ import { ComposerPlusMenu } from "../components/ComposerPlusMenu";
 import { DictateButton } from "../components/DictateButton";
 import { useVoiceCall } from "../components/voiceCall/useVoiceCall";
 import { VoiceCallPanel } from "../components/voiceCall/VoiceCallPanel";
+import { useLiveVoice } from "../components/liveVoice/useLiveVoice";
+import { LiveVoicePanel, TalkButton } from "../components/liveVoice/LiveVoicePanel";
 import { MessageInfo } from "../components/MessageInfo";
 import { MessageActions } from "../components/MessageActions";
 import { composerPlaceholderKey, shouldFocusOnBoxClick, shouldTypeToFocus } from "../lib/composerFocus";
@@ -1624,6 +1626,24 @@ export function ChatView({
       }
     }
   });
+  // Live voice conversation (docs/design/voice-live.md): what needs the bot goes out as an ordinary
+  // message, approvals stay click-only, and the words are written into this chat when it ends.
+  const liveVoice = useLiveVoice({
+    chatId,
+    botId: chat?.bot_id,
+    botName: view?.name ?? bot?.name ?? "",
+    runs: chatRuns,
+    awaitingApproval,
+    runActive: active,
+    callOpen: voiceCall.state.phase !== "idle",
+    sendText: async (spoken) => {
+      if (client) {
+        await client.sendMessage(chatId, spoken, undefined, await ownerKey(client.baseUrl));
+      }
+    },
+    onSaved: () => void loadMessages()
+  });
+  const liveOpen = liveVoice.state.phase !== "idle";
   // The bot that answered: a mentioned bot's run has its own bot id.
   const guestBot = (botId: string | null | undefined) =>
     botId && botId !== chat?.bot_id ? bots.find((b) => b.id === botId) : undefined;
@@ -1888,6 +1908,7 @@ export function ChatView({
 
       {!liveChatSlots?.root ? <MissionChatHeader chat={chatMission} /> : null}
       <div className={styles.scrollWrap}>
+      <LiveVoicePanel live={liveVoice} botName={view?.name ?? bot?.name ?? ""} />
       {findOpen ? (
         <ChatFindBar key={findSeed.n} rootRef={timelineRef} contentKey={entries} initialQuery={findSeed.q} onClose={() => setFindOpen(false)} />
       ) : null}
@@ -2467,12 +2488,13 @@ export function ChatView({
                 inputRef.current?.focus();
               }}
               onAttach={() => fileInputRef.current?.click()}
-              voiceTitle={t(voiceCall.blockedReason ?? "voice.call.start")}
-              voiceBlocked={(voiceCall.state.phase === "idle" || voiceCall.state.phase === "failed") && Boolean(voiceCall.blockedReason)}
-              voiceNotice={voiceCall.state.notice ? t(voiceCall.state.notice) : voiceCall.blockedReason ? t(voiceCall.blockedReason) : undefined}
+              voiceTitle={t(liveOpen ? "voice.live.blockedByLive" : (voiceCall.blockedReason ?? "voice.call.start"))}
+              voiceBlocked={liveOpen || ((voiceCall.state.phase === "idle" || voiceCall.state.phase === "failed") && Boolean(voiceCall.blockedReason))}
+              voiceNotice={liveOpen ? t("voice.live.blockedByLive") : voiceCall.state.notice ? t(voiceCall.state.notice) : voiceCall.blockedReason ? t(voiceCall.blockedReason) : undefined}
               voiceExpanded={voiceCall.state.phase !== "idle"}
               voiceControls={voiceCall.state.phase !== "idle" ? "voice-call-panel" : undefined}
               onVoice={() => {
+                if (liveOpen) return;
                 if (voiceCall.state.phase === "idle" || voiceCall.state.phase === "failed") voiceCall.start();
                 else document.querySelector<HTMLElement>('[data-testid="voice-call"]')?.focus();
               }}
@@ -2490,6 +2512,7 @@ export function ChatView({
                 e.target.value = "";
               }}
             />
+            <TalkButton live={liveVoice} name={view?.name ?? bot?.name ?? ""} className={styles.plus} />
             <DictateButton
               className={styles.plus}
               onText={(dictated) => {

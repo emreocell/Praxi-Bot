@@ -113,6 +113,7 @@ pub mod terminal;
 mod triggers;
 pub mod usage;
 pub mod voice;
+pub mod voice_live;
 mod voice_routes;
 pub mod web;
 mod web_routes;
@@ -163,6 +164,7 @@ pub use policy::{PolicyLoadError, load_policy, validate_policy};
 pub use schedule_tools::{ScheduleLimits, load_schedule_limits};
 pub use skills::SkillAssignments;
 pub use voice::{VoiceControl, VoiceControlError};
+pub use voice_live::{LiveDown, LiveLink, LiveOpen, LiveUp};
 pub use web::{WebControl, WebControlError};
 
 /// Default TCP port of `bot serve`.
@@ -346,6 +348,8 @@ struct Inner {
     web: OnceLock<Arc<dyn WebControl>>,
     /// Dictation (speech-to-text) management (see [`AppState::set_voice`]).
     voice: OnceLock<Arc<dyn VoiceControl>>,
+    /// The one open live voice conversation (see [`voice_live`]).
+    live_voice: parking_lot::Mutex<Option<voice_live::LiveSlot>>,
     /// Skill catalog index (see [`AppState::set_skills`]).
     skills: OnceLock<::skills::SkillIndex>,
     /// Serialises owner catalog mutations with per-bot assignment writes.
@@ -563,6 +567,7 @@ impl AppState {
             homeassistant: OnceLock::new(),
             web: OnceLock::new(),
             voice: OnceLock::new(),
+            live_voice: parking_lot::Mutex::new(None),
             skills: OnceLock::new(),
             skill_mutations: parking_lot::Mutex::new(()),
             web_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
@@ -2180,6 +2185,18 @@ fn api_routes() -> Router<AppState> {
             get(spend_routes::get_spend_limit).put(spend_routes::put_spend_limit),
         )
         .route("/v1/voice", get(vo::get_voice).put(vo::update_voice))
+        .route("/v1/voice/live", post(voice_live::open))
+        .route(
+            "/v1/voice/live/{id}",
+            axum::routing::delete(voice_live::close),
+        )
+        .route("/v1/voice/live/{id}/audio", post(voice_live::audio))
+        .route("/v1/voice/live/{id}/tool", post(voice_live::tool_result))
+        .route("/v1/voice/live/{id}/note", post(voice_live::note))
+        .route(
+            "/v1/chats/{id}/voice-transcript",
+            post(voice_live::save_transcript),
+        )
         .route("/v1/voice/local", get(vo::get_local_voice))
         .route("/v1/voice/local/install", post(vo::install_local_voice))
         .route(

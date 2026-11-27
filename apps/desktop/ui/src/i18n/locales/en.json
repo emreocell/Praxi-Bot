@@ -3901,6 +3901,10 @@
         "hint": "It is still reading your files. Try again in a moment.",
         "title": "The knowledge base is busy"
       },
+      "live_voice_not_configured": {
+        "hint": "Add a Gemini key in Settings → General → Voice dictation, then press Talk again.",
+        "title": "Live voice needs a Gemini key"
+      },
       "login_busy": {
         "hint": "Finish or cancel it, then try again.",
         "title": "Another sign-in is running on the server"
@@ -4714,6 +4718,7 @@
       "slash": "Slash commands (type / in the composer)"
     },
     "intro": "Handy shortcuts while the app is open.",
+    "liveVoiceEnd": "End the live voice conversation",
     "menuAccept": "Pick the highlighted item",
     "menuDismiss": "Close the menu",
     "menuMove": "Move through the slash / mention menu",
@@ -9087,6 +9092,63 @@
       "title": "Microphone and push-to-talk",
       "unsupported": "This window cannot record audio, so there is nothing to set up here."
     },
+    "live": {
+      "approvalHint": "Approve or deny on the card in the chat. Approvals cannot be given by voice.",
+      "blockedByCall": "End the voice call first, then press Talk.",
+      "blockedByLive": "Live voice is open. End it first to start a voice call.",
+      "cancel": "Cancel",
+      "close": "Close",
+      "empty": "Say something to get started.",
+      "end": "End",
+      "micMuted": "Microphone muted",
+      "micOn": "Microphone on",
+      "mute": "Mute microphone",
+      "notice": {
+        "busy": "Another live conversation is already open. End it first.",
+        "daemonUnavailable": "The voice service is unavailable. Reconnect the background service on this computer and try again.",
+        "dropped": "The connection was lost.",
+        "error": "The connection to the voice service was lost. The text so far is saved in the chat.",
+        "idle": "The conversation ended because nothing was said for a while. The text is saved in the chat.",
+        "keyMissing": "Add a Gemini key in Settings → General → Voice dictation, then try again.",
+        "limit": "The conversation reached its time limit. The text is saved in the chat.",
+        "ownerRequired": "Owner authorization is missing. Open Praxi-Bot on this computer and reconnect the local background service, then try again.",
+        "runActive": "A bot is running. Wait for it to finish, or stop it in the chat, then press Talk. The microphone is off.",
+        "serviceFailed": "Google's voice service refused the request. Check the Gemini key and the live model in Settings → General → Voice dictation.",
+        "settingsInvalid": "The live voice settings are not valid. Check them in Settings → General → Voice dictation.",
+        "unavailable": "Live voice is not available in this background service. Update Praxi-Bot and try again."
+      },
+      "openSettings": "Open settings",
+      "phase": {
+        "approval": "Waiting for your approval",
+        "ended": "The conversation ended",
+        "failed": "The conversation could not start",
+        "idle": "Live voice",
+        "listening": "Listening",
+        "reconnecting": "One moment…",
+        "speaking": "{{name}} is speaking",
+        "starting": "Connecting…",
+        "working": "{{name}} is working on it…"
+      },
+      "retry": "Try again",
+      "saveFailed": "The conversation could not be saved to the chat.",
+      "settings": {
+        "description": "Talk with your bot out loud, in real time, with Google's Gemini Live. Uses the Gemini key above.",
+        "keepAudio": "Keep the audio of live conversations on this computer",
+        "keepAudioHint": "Off by default: audio only passes through memory and is never saved. The text of each conversation is added to the chat either way.",
+        "model": "Live model",
+        "title": "Live voice conversation",
+        "voice": "Voice"
+      },
+      "speakHint": "Just start speaking to interrupt. Your voice is streamed to Google's Gemini while the microphone is on.",
+      "stopTalking": "Stop talking",
+      "talk": "Talk",
+      "talkAgain": "Talk again",
+      "talkTitle": "Talk with {{name}} out loud",
+      "title": "Live voice conversation",
+      "transcript": "Conversation",
+      "unmute": "Unmute microphone",
+      "you": "You"
+    },
     "local": {
       "details": "Download about {{size}} MB from {{host}} (checked against a fixed checksum). Licence: {{license}}.",
       "download": "Download ({{size}} MB)",
@@ -9101,7 +9163,7 @@
     "micBusy": "The microphone is in use by another app. Close it and try again.",
     "micDenied": "Allow microphone access for Praxi-Bot. In Windows Settings → Privacy & security → Microphone, enable Microphone access and Let desktop apps access your microphone. Then restart Praxi-Bot and retry.",
     "micMissing": "No microphone was found. Connect one and try again.",
-    "notConfigured": "Dictation is not set up yet. Add a transcription service in Settings → General → Voice dictation.",
+    "notConfigured": "Dictation is not set up on this computer yet. Add a transcription service in Settings → General → Voice dictation.",
     "offlineDiagnostics": {
       "both": "Dictation and read-aloud model files are present.",
       "dictationMissing": "The selected dictation model files and the read-aloud model files are missing or incomplete.",

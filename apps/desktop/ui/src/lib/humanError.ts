@@ -68,6 +68,7 @@ export const DAEMON_ERROR_CODES = [
   "invalid_skill_name",
   "invite_rate_limit",
   "knowledge_busy",
+  "live_voice_not_configured",
   "login_busy",
   "login_files_changed",
   "login_forbidden",
@@ -185,6 +186,7 @@ const ACTIONS: Record<string, ErrorAction> = {
   setup_required: "settings",
   secret_store_failed: "retry",
   composio_not_configured: "settings",
+  live_voice_not_configured: "settings",
   disabled: "settings",
   engineNeedsNative: "fixEngine",
   cliSignedOut: "settings",
@@ -314,6 +316,10 @@ export function humanError(err: unknown): HumanError {
   if (code === "email_provider_error") {
     const kind = emailProviderKind(raw);
     return pack(kind === "other" ? "codes.email_provider_error" : `emailProvider.${kind}`, "email_provider_error", details);
+  }
+  // The host DID answer: its transcription service failed behind a 502. Say that, not "no answer".
+  if (code === "voice_upstream_failed") {
+    return pack("codes.voice_upstream_failed", "voice_upstream_failed", details);
   }
   // The host never answered (no connection, or the proxy timed out waiting for it): not a refusal.
   if (host && (code === "network" || status === 502 || status === 504)) {

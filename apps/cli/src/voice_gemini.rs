@@ -72,15 +72,15 @@ fn setup_message(model: &str) -> serde_json::Value {
     }
 }
 
-fn upstream(msg: &str) -> VoiceControlError {
+pub(crate) fn upstream(msg: &str) -> VoiceControlError {
     VoiceControlError::Upstream(msg.to_owned())
 }
 
-fn dropped() -> VoiceControlError {
+pub(crate) fn dropped() -> VoiceControlError {
     upstream("the Gemini Live connection dropped")
 }
 
-fn parse(msg: Message) -> Option<serde_json::Value> {
+pub(crate) fn parse(msg: Message) -> Option<serde_json::Value> {
     match msg {
         Message::Text(t) => serde_json::from_str(t.as_str()).ok(),
         // The Live API sends its JSON in binary frames.
@@ -89,7 +89,7 @@ fn parse(msg: Message) -> Option<serde_json::Value> {
     }
 }
 
-fn closed(reason: Option<String>, key: &str) -> VoiceControlError {
+pub(crate) fn closed(reason: Option<String>, key: &str) -> VoiceControlError {
     let reason = reason.unwrap_or_default().replace(key, "<key>");
     let reason: String = reason.chars().take(160).collect();
     VoiceControlError::Upstream(format!("Gemini Live closed the connection: {reason}"))

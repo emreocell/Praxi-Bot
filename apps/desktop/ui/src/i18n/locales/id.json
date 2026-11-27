@@ -2844,6 +2844,10 @@
         "hint": "It is still reading your files. Try again in a moment.",
         "title": "The knowledge base is busy"
       },
+      "live_voice_not_configured": {
+        "hint": "Add a Gemini key in Settings → General → Voice dictation, then press Talk again.",
+        "title": "Live voice needs a Gemini key"
+      },
       "login_busy": {
         "hint": "Finish or cancel it, then try again.",
         "title": "Another sign-in is running on the server"
@@ -3637,6 +3641,7 @@
       "slash": "Slash commands (type / in the composer)"
     },
     "intro": "Handy shortcuts while the app is open.",
+    "liveVoiceEnd": "End the live voice conversation",
     "menuAccept": "Pick the highlighted item",
     "menuDismiss": "Close the menu",
     "menuMove": "Move through the slash / mention menu",

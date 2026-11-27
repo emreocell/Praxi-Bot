@@ -15,6 +15,14 @@ import { sttKeyInput, type SttProvider } from "../../lib/voiceAudio";
 import { useDaemon } from "../../state/DaemonContext";
 import { LocalVoicePanel } from "./LocalVoicePanel";
 
+const DEFAULT_LIVE_MODEL = "gemini-3.8-live";
+/** The prebuilt voices the Gemini Live models speak with. */
+const LIVE_VOICES = [
+  "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe",
+  "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+  "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+];
+
 /** Where dictation / voice-call audio is transcribed; keys are write-only (secret store). */
 export function DictationCard() {
   const { t } = useTranslation();
@@ -28,6 +36,9 @@ export function DictationCard() {
   const [localModel, setLocalModel] = useState("whisper-small");
   const [drafts, setDrafts] = useState<Partial<Record<SttProvider, string>>>({});
   const [useProviderKey, setUseProviderKey] = useState(true);
+  const [liveModel, setLiveModel] = useState("");
+  const [liveVoice, setLiveVoice] = useState("Kore");
+  const [liveKeepAudio, setLiveKeepAudio] = useState(false);
   const [busy, setBusy] = useState(false);
   // The offline option is offered only when this build contains it.
   const [localAvailable, setLocalAvailable] = useState(false);
@@ -43,6 +54,9 @@ export function DictationCard() {
     setGeminiModel(c.gemini_model);
     setLocalModel(c.local_model);
     setUseProviderKey(c.use_provider_key);
+    setLiveModel(c.live_model);
+    setLiveVoice(c.live_voice);
+    setLiveKeepAudio(c.live_keep_audio);
   }, [client]);
   useEffect(() => {
     client?.getVoice().then(apply).catch(() => undefined);
@@ -76,6 +90,9 @@ export function DictationCard() {
           stt_model: model,
           gemini_model: geminiModel,
           local_model: localModel,
+          live_model: liveModel,
+          live_voice: liveVoice,
+          live_keep_audio: liveKeepAudio,
           ...extra
         })
       );
@@ -169,6 +186,28 @@ export function DictationCard() {
           </MoreInfo>
         </>
       )}
+      <section className={choice.stack} aria-labelledby="live-voice-settings" data-testid="live-voice-settings">
+        <h4 id="live-voice-settings" className={formStyles.hint}>{t("voice.live.settings.title")}</h4>
+        <p className={formStyles.hint}>{t("voice.live.settings.description")}</p>
+        <input
+          className={formStyles.input}
+          aria-label={t("voice.live.settings.model")}
+          value={liveModel}
+          placeholder={DEFAULT_LIVE_MODEL}
+          onChange={(e) => setLiveModel(e.target.value)}
+        />
+        <select className={formStyles.input} aria-label={t("voice.live.settings.voice")} value={liveVoice} onChange={(e) => setLiveVoice(e.target.value)}>
+          {LIVE_VOICES.includes(liveVoice) ? null : <option value={liveVoice}>{liveVoice}</option>}
+          {LIVE_VOICES.map((v) => (
+            <option key={v} value={v}>{v}</option>
+          ))}
+        </select>
+        <label data-testid="live-voice-keep-audio">
+          <input type="checkbox" checked={liveKeepAudio} onChange={(e) => setLiveKeepAudio(e.target.checked)} />{" "}
+          {t("voice.live.settings.keepAudio")}
+        </label>
+        <p className={formStyles.hint}>{t("voice.live.settings.keepAudioHint")}</p>
+      </section>
       <MoreInfo label={t("voice.stt.whereTitle")} testId="voice-where">
         <p>{privacy}</p>
       </MoreInfo>

@@ -3901,6 +3901,10 @@
         "hint": "Hâlâ dosyalarını okuyor. Biraz sonra yeniden dene.",
         "title": "Bilgi tabanı meşgul"
       },
+      "live_voice_not_configured": {
+        "hint": "Ayarlar → Genel → Sesli dikte bölümünden bir Gemini anahtarı ekle, sonra Konuş'a yeniden bas.",
+        "title": "Canlı ses için Gemini anahtarı gerekli"
+      },
       "login_busy": {
         "hint": "Onu bitir ya da iptal et, sonra yeniden dene.",
         "title": "Sunucuda başka bir giriş sürüyor"
@@ -4714,6 +4718,7 @@
       "slash": "Eğik çizgi komutları (yazı kutusuna / yaz)"
     },
     "intro": "Uygulama açıkken kullanışlı kısayollar.",
+    "liveVoiceEnd": "Canlı sesli sohbeti bitir",
     "menuAccept": "Vurgulanan öğeyi seç",
     "menuDismiss": "Menüyü kapat",
     "menuMove": "Eğik çizgi / anma menüsünde gezin",
@@ -9087,6 +9092,63 @@
       "title": "Mikrofon ve bas-konuş",
       "unsupported": "Bu pencere ses kaydedemiyor, bu yüzden burada ayarlanacak bir şey yok."
     },
+    "live": {
+      "approvalHint": "Sohbetteki karttan onayla ya da reddet. Onay sesle verilemez.",
+      "blockedByCall": "Önce sesli aramayı bitir, sonra Konuş'a bas.",
+      "blockedByLive": "Canlı ses açık. Sesli arama başlatmak için önce onu bitir.",
+      "cancel": "Vazgeç",
+      "close": "Kapat",
+      "empty": "Başlamak için bir şey söyle.",
+      "end": "Bitir",
+      "micMuted": "Mikrofon kapalı",
+      "micOn": "Mikrofon açık",
+      "mute": "Mikrofonu sustur",
+      "notice": {
+        "busy": "Başka bir canlı konuşma zaten açık. Önce onu bitir.",
+        "daemonUnavailable": "Ses hizmetine ulaşılamıyor. Bu bilgisayardaki arka plan hizmetine yeniden bağlan ve yeniden dene.",
+        "dropped": "Bağlantı koptu.",
+        "error": "Ses hizmetiyle bağlantı koptu. Şimdiye kadarki yazılı hali sohbete kaydedildi.",
+        "idle": "Bir süre hiçbir şey söylenmediği için konuşma bitti. Yazılı hali sohbete kaydedildi.",
+        "keyMissing": "Ayarlar → Genel → Sesli dikte bölümünden bir Gemini anahtarı ekle, sonra yeniden dene.",
+        "limit": "Konuşma süre sınırına ulaştı. Yazılı hali sohbete kaydedildi.",
+        "ownerRequired": "Sahip yetkisi eksik. Praxi-Bot'u bu bilgisayarda açıp yerel arka plan hizmetine yeniden bağlan, sonra yeniden dene.",
+        "runActive": "Bir bot çalışıyor. Bitmesini bekle ya da sohbetten durdur, sonra Konuş'a bas. Mikrofon kapalı.",
+        "serviceFailed": "Google'ın ses hizmeti isteği reddetti. Ayarlar → Genel → Sesli dikte bölümünden Gemini anahtarını ve canlı modeli kontrol et.",
+        "settingsInvalid": "Canlı ses ayarları geçerli değil. Ayarlar → Genel → Sesli dikte bölümünden kontrol et.",
+        "unavailable": "Bu arka plan hizmetinde canlı ses yok. Praxi-Bot'u güncelleyip yeniden dene."
+      },
+      "openSettings": "Ayarları aç",
+      "phase": {
+        "approval": "Onayını bekliyor",
+        "ended": "Konuşma bitti",
+        "failed": "Konuşma başlatılamadı",
+        "idle": "Canlı ses",
+        "listening": "Dinliyor",
+        "reconnecting": "Bir saniye…",
+        "speaking": "{{name}} konuşuyor",
+        "starting": "Bağlanıyor…",
+        "working": "{{name}} üzerinde çalışıyor…"
+      },
+      "retry": "Yeniden dene",
+      "saveFailed": "Konuşma sohbete kaydedilemedi.",
+      "settings": {
+        "description": "Botunla Google'ın Gemini Live'ı ile gerçek zamanlı, sesli konuş. Yukarıdaki Gemini anahtarını kullanır.",
+        "keepAudio": "Canlı konuşmaların sesini bu bilgisayarda sakla",
+        "keepAudioHint": "Varsayılan olarak kapalı: ses yalnızca bellekten geçer, hiç kaydedilmez. Her konuşmanın yazılı hali iki durumda da sohbete eklenir.",
+        "model": "Canlı model",
+        "title": "Canlı sesli sohbet",
+        "voice": "Ses"
+      },
+      "speakHint": "Sözünü kesmek için konuşmaya başlaman yeter. Mikrofon açıkken sesin Google'ın Gemini'sine aktarılır.",
+      "stopTalking": "Susturma",
+      "talk": "Konuş",
+      "talkAgain": "Yeniden konuş",
+      "talkTitle": "{{name}} ile sesli konuş",
+      "title": "Canlı sesli sohbet",
+      "transcript": "Konuşma",
+      "unmute": "Mikrofonu aç",
+      "you": "Sen"
+    },
     "local": {
       "details": "{{host}} adresinden yaklaşık {{size}} MB iner (sabit bir sağlama toplamıyla doğrulanır). Lisans: {{license}}.",
       "download": "İndir ({{size}} MB)",
@@ -9101,7 +9163,7 @@
     "micBusy": "Mikrofon başka bir uygulama tarafından kullanılıyor. Onu kapatıp tekrar dene.",
     "micDenied": "Praxi-Bot için mikrofon erişimine izin verin. Windows Ayarları → Gizlilik ve güvenlik → Mikrofon bölümünde Mikrofon erişimi ve Masaüstü uygulamalarının mikrofonunuza erişmesine izin ver seçeneklerini açın. Ardından Praxi-Bot uygulamasını yeniden başlatıp tekrar deneyin.",
     "micMissing": "Mikrofon bulunamadı. Bir mikrofon bağlayıp tekrar dene.",
-    "notConfigured": "Dikte henüz ayarlanmadı. Ayarlar → Genel → Sesli dikte bölümünden bir yazıya dökme hizmeti ekle.",
+    "notConfigured": "Bu bilgisayarda dikte henüz ayarlanmadı. Ayarlar → Genel → Sesli dikte bölümünden bir yazıya dökme hizmeti ekle.",
     "offlineDiagnostics": {
       "both": "Dikte ve sesli okuma modellerinin dosyaları hazır.",
       "dictationMissing": "Seçili dikte modelinin ve sesli okuma modelinin dosyaları yok veya eksik.",

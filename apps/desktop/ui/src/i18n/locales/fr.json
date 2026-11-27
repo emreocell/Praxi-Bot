@@ -2977,6 +2977,10 @@
         "hint": "Il est encore en train de lire vos fichiers. Réessayez dans un instant.",
         "title": "La base de connaissances est occupée"
       },
+      "live_voice_not_configured": {
+        "hint": "Ajoutez une clé Gemini dans Réglages → Général → Dictée vocale, puis appuyez de nouveau sur Parler.",
+        "title": "La voix en direct nécessite une clé Gemini"
+      },
       "login_busy": {
         "hint": "Terminez-la ou annulez-la, puis réessayez.",
         "title": "Une autre connexion est en cours sur le serveur"
@@ -3774,6 +3778,7 @@
       "slash": "Commandes slash (tapez / dans la zone de saisie)"
     },
     "intro": "Raccourcis pratiques lorsque l'application est ouverte.",
+    "liveVoiceEnd": "Terminer la conversation vocale en direct",
     "menuAccept": "Choisir l'élément en surbrillance",
     "menuDismiss": "Fermer le menu",
     "menuMove": "Parcourir le menu slash / mention",

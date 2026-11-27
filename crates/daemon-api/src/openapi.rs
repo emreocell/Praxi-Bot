@@ -75,6 +75,7 @@ use crate::triggers;
 use crate::trusted_folders;
 use crate::usage;
 use crate::voice;
+use crate::voice_live;
 use crate::voice_routes;
 use crate::web;
 use crate::web_routes;
@@ -428,6 +429,12 @@ impl Modify for Security {
         trusted_folders::remove,
         usage::export_csv,
         usage::usage,
+        voice_live::audio,
+        voice_live::close,
+        voice_live::note,
+        voice_live::open,
+        voice_live::save_transcript,
+        voice_live::tool_result,
         voice_routes::get_local_voice,
         voice_routes::get_voice,
         voice_routes::install_local_voice,
@@ -894,6 +901,12 @@ impl Modify for Security {
         trusted_folders::TrustFolderInput,
         trusted_folders::TrustedFoldersDto,
         voice::LocalVoiceInstallInput,
+        voice_live::LiveNote,
+        voice_live::LiveOpenInput,
+        voice_live::LiveToolResult,
+        voice_live::VoiceTranscriptInput,
+        voice_live::VoiceTranscriptOutput,
+        voice_live::VoiceTurn,
         voice::LocalVoiceModelDto,
         voice::LocalVoiceStatusDto,
         voice::SynthesizeInput,

@@ -72,6 +72,16 @@ Run `bot doctor` or open **Settings → Diagnostics** to see whether offline voi
 and which model files are present. Settings verifies the model checksums when it shows install
 status, and the voice process checks them again before use.
 
+**Where dictation runs.** Your microphone is on this computer, so dictation (and voice calls) transcribe
+with this computer's own settings, also when the bot you are chatting with works on a paired server
+("My server"). Only when this computer has no transcription service set up does the recording go to the
+server's service instead. If neither is set up, the app says dictation is not set up and points to
+**Settings → General**. If the transcription service itself fails (wrong key, no network on that machine) the
+message says so, instead of reporting that the server did not answer.
+
+Audio leaves your machine only while you dictate or are in a call, and only to the service
+you configured. Free-tier keys are subject to Google's own limits and terms.
+
 ## Starting and using a call
 
 1. Open a chat with the bot you want to talk to.

@@ -15,6 +15,7 @@ use daemon_api::voice::{
     LocalVoiceStatusDto, SynthesizeInput, TranscribeOutput, VoiceConfigDto, VoiceConfigInput,
     VoiceControl, VoiceControlError, VoiceProvider,
 };
+use daemon_api::voice_live::{LiveLink, LiveOpen};
 use provider_catalog::{ProviderConfig, ProviderSettings, config_path};
 use secret_store::SecretStore;
 use serde::{Deserialize, Serialize};
@@ -47,6 +48,23 @@ struct VoiceFile {
     /// Reuse a matching provider key from Bots & models (default on).
     #[serde(default = "default_true")]
     use_provider_key: bool,
+    /// Gemini Live model for live voice conversations.
+    #[serde(default = "default_live_model")]
+    live_model: String,
+    /// Prebuilt voice the live model speaks with.
+    #[serde(default = "default_live_voice")]
+    live_voice: String,
+    /// Keep the audio of live conversations on this computer (default off).
+    #[serde(default)]
+    live_keep_audio: bool,
+}
+
+fn default_live_model() -> String {
+    crate::voice_live::DEFAULT_MODEL.to_owned()
+}
+
+fn default_live_voice() -> String {
+    crate::voice_live::DEFAULT_VOICE.to_owned()
 }
 
 fn default_true() -> bool {
@@ -78,6 +96,9 @@ impl Default for VoiceFile {
             gemini_model: default_gemini_model(),
             local_model: default_local_model(),
             use_provider_key: true,
+            live_model: default_live_model(),
+            live_voice: default_live_voice(),
+            live_keep_audio: false,
         }
     }
 }
@@ -205,8 +226,15 @@ impl VoiceHost {
             use_provider_key: file.use_provider_key,
             gemini_provider_key_available: self.gemini_provider_key().is_some(),
             stt_provider_key_available: self.stt_provider_key(&file.stt_base_url).is_some(),
+            live_model: file.live_model.clone(),
+            live_voice: file.live_voice.clone(),
+            live_keep_audio: file.live_keep_audio,
         }
     }
+}
+
+fn is_model_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')
 }
 
 /// Validate a transcription base URL: `https`, or `http` for a loopback host that is not the
@@ -334,11 +362,7 @@ impl VoiceControl for VoiceHost {
         }
         if let Some(m) = &input.gemini_model {
             let m = m.trim();
-            if m.chars().count() > 100
-                || !m
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
-            {
+            if m.chars().count() > 100 || !m.chars().all(is_model_char) {
                 return Err(VoiceControlError::Invalid(
                     "`gemini_model` is not a valid model name".into(),
                 ));
@@ -348,6 +372,36 @@ impl VoiceControl for VoiceHost {
             } else {
                 m.to_owned()
             };
+        }
+        if let Some(m) = &input.live_model {
+            let m = m.trim();
+            if m.chars().count() > 100 || !m.chars().all(is_model_char) || m.contains("transcribe")
+            {
+                return Err(VoiceControlError::Invalid(
+                    "`live_model` is not a valid live conversation model name".into(),
+                ));
+            }
+            file.live_model = if m.is_empty() {
+                default_live_model()
+            } else {
+                m.to_owned()
+            };
+        }
+        if let Some(v) = &input.live_voice {
+            let v = v.trim();
+            if v.chars().count() > 40 || !v.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return Err(VoiceControlError::Invalid(
+                    "`live_voice` is not a valid voice name".into(),
+                ));
+            }
+            file.live_voice = if v.is_empty() {
+                default_live_voice()
+            } else {
+                v.to_owned()
+            };
+        }
+        if let Some(keep) = input.live_keep_audio {
+            file.live_keep_audio = keep;
         }
         if let Some(m) = &input.local_model {
             let m = m.trim();
@@ -484,6 +538,26 @@ impl VoiceControl for VoiceHost {
         Ok(TranscribeOutput {
             text: text.trim().to_owned(),
         })
+    }
+
+    async fn live_open(&self, open: LiveOpen) -> Result<LiveLink, VoiceControlError> {
+        let file = self.load();
+        let key = self
+            .effective_gemini_key(&file)
+            .ok_or(VoiceControlError::NotConfigured)?;
+        crate::voice_live::open(crate::voice_live::SessionConfig {
+            ws_base: crate::voice_gemini::validate_ws_base(&self.gemini_ws_base)?,
+            key,
+            model: file.live_model,
+            voice: file.live_voice,
+            open,
+            // Audio is never written unless the owner switched it on.
+            keep_audio: file
+                .live_keep_audio
+                .then(|| self.data_dir.join("voice-live")),
+            limits: crate::voice_live::Limits::default(),
+        })
+        .await
     }
 
     fn local_status(&self) -> LocalVoiceStatusDto {
@@ -927,6 +1001,56 @@ mod tests {
             })
             .await;
         assert!(matches!(bad, Err(VoiceControlError::Invalid(_))));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[tokio::test]
+    async fn live_voice_settings_are_validated_and_need_a_gemini_key() {
+        let dir = std::env::temp_dir().join(format!("praxi-voice-live-{}", rand_u64()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = VoiceHost::new(&dir, 7000, None);
+        let dto = host.get();
+        assert_eq!(
+            (
+                dto.live_model.as_str(),
+                dto.live_voice.as_str(),
+                dto.live_keep_audio
+            ),
+            ("gemini-3.8-live", "Kore", false),
+            "audio is not kept unless the owner turns it on"
+        );
+        for bad in [
+            VoiceConfigInput {
+                live_model: Some("gemini 3".into()),
+                ..Default::default()
+            },
+            VoiceConfigInput {
+                live_model: Some("gemini-3.5-transcribe-live".into()),
+                ..Default::default()
+            },
+            VoiceConfigInput {
+                live_voice: Some("../Kore".into()),
+                ..Default::default()
+            },
+        ] {
+            assert!(matches!(
+                host.update(bad).await,
+                Err(VoiceControlError::Invalid(_))
+            ));
+        }
+        let dto = host
+            .update(VoiceConfigInput {
+                live_model: Some("gemini-3.8-live-extended-thinking".into()),
+                live_voice: Some("Puck".into()),
+                live_keep_audio: Some(true),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(dto.live_voice, "Puck");
+        assert!(dto.live_keep_audio);
+        // No key anywhere: an honest "not set up", and nothing leaves the machine.
+        let err = host.live_open(LiveOpen::default()).await.err().unwrap();
+        assert_eq!(err, VoiceControlError::NotConfigured);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

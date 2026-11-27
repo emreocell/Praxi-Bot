@@ -48,6 +48,12 @@ pub struct VoiceConfigDto {
     pub gemini_provider_key_available: bool,
     /// A provider under Bots & models has a key and the same base URL as `stt_base_url`.
     pub stt_provider_key_available: bool,
+    /// Gemini Live model used for live voice conversations (e.g. `gemini-3.8-live`).
+    pub live_model: String,
+    /// Prebuilt voice the live model speaks with (e.g. `Kore`).
+    pub live_voice: String,
+    /// Keep the audio of live conversations on this computer (default off).
+    pub live_keep_audio: bool,
 }
 
 /// Body of `PUT /v1/voice`; omitted fields keep their value.
@@ -83,6 +89,15 @@ pub struct VoiceConfigInput {
     /// Reuse the matching provider key from Bots & models (default on).
     #[serde(default)]
     pub use_provider_key: Option<bool>,
+    /// Gemini Live model for live voice conversations.
+    #[serde(default)]
+    pub live_model: Option<String>,
+    /// Prebuilt voice name for live voice conversations.
+    #[serde(default)]
+    pub live_voice: Option<String>,
+    /// Keep the audio of live conversations on this computer.
+    #[serde(default)]
+    pub live_keep_audio: Option<bool>,
 }
 
 impl std::fmt::Debug for VoiceConfigInput {
@@ -101,6 +116,9 @@ impl std::fmt::Debug for VoiceConfigInput {
             .field("stt_key", &self.stt_key.as_ref().map(|_| "<redacted>"))
             .field("clear_stt_key", &self.clear_stt_key)
             .field("use_provider_key", &self.use_provider_key)
+            .field("live_model", &self.live_model)
+            .field("live_voice", &self.live_voice)
+            .field("live_keep_audio", &self.live_keep_audio)
             .finish()
     }
 }
@@ -269,6 +287,19 @@ pub trait VoiceControl: Send + Sync {
             installing: None,
             last_error: None,
         }
+    }
+
+    /// Open a live voice conversation. The default says "not available".
+    ///
+    /// # Errors
+    /// [`VoiceControlError`] (`NotConfigured` without a Gemini key).
+    async fn live_open(
+        &self,
+        _open: crate::voice_live::LiveOpen,
+    ) -> Result<crate::voice_live::LiveLink, VoiceControlError> {
+        Err(VoiceControlError::Invalid(
+            "live voice is not available in this build".into(),
+        ))
     }
 
     /// Start downloading one on-device model (returns at once; poll [`Self::local_status`]).

@@ -88,6 +88,8 @@ import type {
   UpdateFillSecretInput
 } from "./types.ts";
 import type {
+  LiveVoiceEvent,
+  LiveVoiceOpenInput,
   KnowledgeSource,
   KnowledgeSourceInput,
   KnowledgeSettings,
@@ -1402,6 +1404,30 @@ export class MockApiClient extends ApiClient {
     ];
   }
 
+  /** A scripted live voice conversation: no microphone, no network; ends when the signal aborts. */
+  override async liveVoiceOpen(_input: LiveVoiceOpenInput, onEvent: (event: LiveVoiceEvent) => void, signal: AbortSignal): Promise<void> {
+    const pause = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, ms);
+        signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+    onEvent({ type: "ready", session_id: crypto.randomUUID(), model: "gemini-3.8-live", input_rate: 16000, output_rate: 24000, max_seconds: 900 });
+    const say = async (role: "you" | "bot", words: string[]) => {
+      for (const word of words) {
+        if (signal.aborted) return;
+        onEvent({ type: role, text: word });
+        if (role === "bot") onEvent({ type: "audio", data: "" });
+        await pause(140);
+      }
+      if (!signal.aborted) onEvent({ type: "turn_complete" });
+    };
+    await pause(700);
+    await say("you", ["Can ", "you ", "give ", "me ", "a ", "quick ", "summary ", "of ", "today?"]);
+    await pause(500);
+    await say("bot", ["Of ", "course. ", "You ", "have ", "two ", "meetings ", "and ", "one ", "unread ", "message ", "from ", "the ", "design ", "team."]);
+    await pause(60 * 60_000);
+  }
+
   override async searchChatHistory(q: string, offset = 0, signal?: AbortSignal): Promise<import("./types").SearchPage> {
     const results: import("./types").SearchPage["results"] = [];
     for (const chat of this.chats) {
@@ -1702,6 +1728,8 @@ export class MockApiClient extends ApiClient {
     const ok = (v: unknown) => v as T;
     const seg = path.split("/").filter(Boolean).map(decodeURIComponent);
     if (path === "/connectivity" && method === "GET") return ok({ services: [] });
+    // Live voice uploads and the close call: nothing to do in the mock app.
+    if (seg[0] === "voice" && seg[1] === "live") return ok(undefined);
     if (seg[0] === "bots" && seg[2] === "triggers") return ok(this.triggers.route(method, seg, opts.body));
     if (path === "/bot-cursor") {
       if (method === "PUT") this.botCursor = opts.body as BotCursorSettings;
@@ -2250,6 +2278,16 @@ export class MockApiClient extends ApiClient {
           const previous = await this.request<Message[]>("GET", `/chats/${seg[1]}/messages`);
           this.messages.set(seg[1], [...previous, { id: crypto.randomUUID(), chat_id: seg[1], role: "user", content: input.text ?? "", created_at_ms: Date.now() } as Message]);
           return ok({ delivery: "started", run_id: crypto.randomUUID() });
+        }
+        if (seg[2] === "voice-transcript") {
+          const turns = (opts.body as { turns: { role: string; text: string }[] }).turns;
+          const previous = await this.request<Message[]>("GET", `/chats/${seg[1]}/messages`);
+          const now = Date.now();
+          this.messages.set(seg[1], [
+            ...previous,
+            ...turns.map((turn, i) => ({ id: crypto.randomUUID(), chat_id: seg[1], role: turn.role, content: turn.text, created_at_ms: now + i }) as Message)
+          ]);
+          return ok({ saved: turns.length });
         }
         if (seg[2] === "resend") {
           return ok({ run_id: crypto.randomUUID(), message_id: crypto.randomUUID() });
@@ -3476,6 +3514,9 @@ export class MockApiClient extends ApiClient {
     gemini_model: "gemini-3.5-transcribe-live",
     gemini_key_set: false,
     local_model: "whisper-small",
+    live_model: "gemini-3.8-live",
+    live_voice: "Kore",
+    live_keep_audio: false,
     use_provider_key: true,
     gemini_provider_key_available: true,
     stt_provider_key_available: false
@@ -3524,6 +3565,9 @@ export class MockApiClient extends ApiClient {
       gemini_key?: string;
       clear_gemini_key?: boolean;
       use_provider_key?: boolean;
+      live_model?: string;
+      live_voice?: string;
+      live_keep_audio?: boolean;
     };
     this.voice = {
       ...this.voice,
@@ -3531,6 +3575,9 @@ export class MockApiClient extends ApiClient {
       stt_provider: b.stt_provider || this.voice.stt_provider,
       gemini_model: b.gemini_model || this.voice.gemini_model,
       local_model: b.local_model || this.voice.local_model,
+      live_model: b.live_model || this.voice.live_model,
+      live_voice: b.live_voice || this.voice.live_voice,
+      live_keep_audio: b.live_keep_audio ?? this.voice.live_keep_audio,
       gemini_key_set: b.clear_gemini_key ? false : b.gemini_key ? true : this.voice.gemini_key_set,
       stt_base_url: b.stt_base_url || this.voice.stt_base_url,
       stt_model: b.stt_model || this.voice.stt_model,

@@ -9,6 +9,7 @@ import { micErrorKey } from "../lib/micError";
 import { openMic, watchLevel, type MicMeter } from "../lib/micMeter";
 import { stopSpeaking } from "../lib/speaker";
 import { createVad, LISTEN_VAD } from "../lib/voiceCall/vad";
+import { transcribeRecording } from "../lib/dictationTarget";
 import { transcribePayload } from "../lib/voiceAudio";
 import {
   detectPlatform,
@@ -20,7 +21,7 @@ import {
   type DictationEvent,
   type DictationState
 } from "../lib/voiceInput";
-import { useDaemon } from "../state/DaemonContext";
+import { useDaemon, useLocalDaemonClient } from "../state/DaemonContext";
 import { DEFAULT_SETTINGS, loadSettingsSync } from "../store/settingsStore";
 import { RecordingIndicator } from "./MicLevel";
 import { useToast } from "./Toast";
@@ -36,7 +37,8 @@ const MAX_RECORD_MS = 120_000;
  */
 export function DictateButton({ onText, className }: { onText: (text: string) => void; className?: string }) {
   const { t, i18n } = useTranslation();
-  const { client, localApi } = useDaemon();
+  const { client } = useDaemon();
+  const localClient = useLocalDaemonClient();
   const toast = useToast();
   const [state, setState] = useState<DictationState>(IDLE);
   const [level, setLevel] = useState(0);
@@ -47,8 +49,8 @@ export function DictateButton({ onText, className }: { onText: (text: string) =>
   const timer = useRef<number | null>(null);
   const discard = useRef(false);
   // Latest props/callbacks for the long-lived listeners below.
-  const live = useRef({ client, localApi, onText, lang: i18n.language, t });
-  live.current = { client, localApi, onText, lang: i18n.language, t };
+  const live = useRef({ client, localClient, onText, lang: i18n.language, t });
+  live.current = { client, localClient, onText, lang: i18n.language, t };
 
   const release = useCallback(() => {
     if (timer.current !== null) {
@@ -64,21 +66,21 @@ export function DictateButton({ onText, className }: { onText: (text: string) =>
 
   const send = useCallback(
     async (blob: Blob) => {
-      const { client: c, localApi: local, onText: done, lang, t: tr } = live.current;
+      const { client: c, localClient: local, onText: done, lang, t: tr } = live.current;
       try {
-        const active = c ?? local;
-        if (!active) {
+        if (!c && !local) {
           return;
         }
-        const own = local && local.baseUrl !== active.baseUrl ? await local.getVoice() : null;
-        const target = own?.stt_provider === "local_voice" && local ? local : active;
-        const provider = target === local && own ? own.stt_provider : (await target.getVoice()).stt_provider;
-        const out = await target.transcribe({
-          ...(await transcribePayload(blob, provider)),
-          language: lang.split("-")[0],
-          local_only: provider === "local_voice"
-        });
-        done(out.text);
+        // The microphone is on this computer: this computer's own daemon transcribes, whichever
+        // computer the bot works on. The paired server is only a fallback (lib/dictationTarget.ts).
+        done(
+          await transcribeRecording(blob, {
+            local,
+            active: c,
+            language: lang.split("-")[0] ?? lang,
+            encode: (b, provider) => transcribePayload(b, provider)
+          })
+        );
       } catch (e) {
         const note = e instanceof ApiError && e.status === 409 ? tr("voice.notConfigured")
           : e instanceof ApiError && e.status === 429 && e.code === "busy" ? tr("voice.offlineReadAloud.busy")

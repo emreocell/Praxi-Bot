@@ -3560,6 +3560,10 @@
         "hint": "Todavía está leyendo tus archivos. Inténtalo de nuevo en un momento.",
         "title": "La base de conocimiento está ocupada"
       },
+      "live_voice_not_configured": {
+        "hint": "Añade una clave de Gemini en Ajustes → General → Dictado por voz y vuelve a pulsar Hablar.",
+        "title": "La voz en vivo necesita una clave de Gemini"
+      },
       "login_busy": {
         "hint": "Termínalo o cancélalo y vuelve a intentarlo.",
         "title": "Hay otro inicio de sesión en curso en el servidor"
@@ -4373,6 +4377,7 @@
       "slash": "Comandos con barra (escribe / en el cuadro de mensaje)"
     },
     "intro": "Atajos que puedes usar mientras la app está abierta.",
+    "liveVoiceEnd": "Finalizar la conversación de voz en vivo",
     "menuAccept": "Elegir el elemento resaltado",
     "menuDismiss": "Cerrar el menú",
     "menuMove": "Moverte por el menú de comandos o menciones",

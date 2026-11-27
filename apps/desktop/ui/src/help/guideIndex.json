@@ -965,6 +965,20 @@
     "summary": "Voice call mode in the desktop app lets you talk to a bot without typing. You"
   },
   {
+    "doc": "voice-live.md",
+    "title": "Live voice conversation (Talk)",
+    "headings": [
+      "Before you start",
+      "Talking",
+      "Asking the bot to do things",
+      "What is stored",
+      "Cost",
+      "Settings",
+      "If it does not work"
+    ],
+    "summary": "once, and you can interrupt it just by speaking. When you finish, the conversation is added to the chat as"
+  },
+  {
     "doc": "web-scraping.md",
     "title": "Web scraping add-on (optional)",
     "headings": [

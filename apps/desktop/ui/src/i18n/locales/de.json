@@ -3560,6 +3560,10 @@
         "hint": "Sie liest noch deine Dateien. Versuche es gleich noch einmal.",
         "title": "Die Wissensdatenbank ist ausgelastet"
       },
+      "live_voice_not_configured": {
+        "hint": "Füge in Einstellungen → Allgemein → Sprachdiktat einen Gemini-Schlüssel hinzu und tippe dann erneut auf Sprechen.",
+        "title": "Live-Sprache braucht einen Gemini-Schlüssel"
+      },
       "login_busy": {
         "hint": "Schließe sie ab oder brich sie ab und versuche es dann erneut.",
         "title": "Auf dem Server läuft eine andere Anmeldung"
@@ -4373,6 +4377,7 @@
       "slash": "Slash-Befehle (im Eingabefeld / tippen)"
     },
     "intro": "Praktische Kürzel, solange die App geöffnet ist.",
+    "liveVoiceEnd": "Live-Sprachgespräch beenden",
     "menuAccept": "Markierten Eintrag auswählen",
     "menuDismiss": "Menü schließen",
     "menuMove": "Durch das Slash-/Erwähnungsmenü navigieren",
