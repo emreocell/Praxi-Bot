@@ -73,6 +73,11 @@ may use it and which services may run without a card. See
 [Home Assistant](home-assistant.md). (The **Home Assistant** MCP server in the
 catalog below is a different, optional connection.)
 
+## REST APIs
+
+Choose **REST APIs** in the top bar to connect any web service that publishes an OpenAPI
+document, and turn on its operations bot by bot. See [Connect a REST API](rest-apis.md).
+
 ## MCP servers
 
 Choose **MCP servers** in the top bar for direct and self-managed connections:

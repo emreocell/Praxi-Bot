@@ -34,6 +34,7 @@ mod logs_cmd;
 mod mcp_host;
 mod mcp_paste;
 mod mcp_serve;
+mod openapi_host;
 mod pc_target;
 mod peer;
 mod presets;

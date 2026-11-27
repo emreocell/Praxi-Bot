@@ -72,6 +72,11 @@ Ana görünümdeki **Home Assistant** kartı akıllı evini dosya düzenlemeden 
 Bkz. [Home Assistant](home-assistant.md). (Aşağıdaki katalogdaki **Home Assistant** MCP sunucusu ayrı,
 isteğe bağlı bir bağlantıdır.)
 
+## REST API'ler
+
+Üst çubuktaki **REST API'ler**'i seçerek OpenAPI belgesi yayımlayan herhangi bir web servisini
+bağlayabilir, işlemlerini bot bot açabilirsin. Bkz. [REST API bağlama](rest-apis.md).
+
 ## MCP sunucuları
 
 Doğrudan ve kendin yönettiğin bağlantılar için üst çubukta **MCP sunucuları**'na tıkla:

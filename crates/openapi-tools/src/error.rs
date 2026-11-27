@@ -36,6 +36,9 @@ pub enum OpenApiError {
     /// The server host is a private / loopback address and that is not allowed.
     #[error("host `{0}` is a private or loopback address; set allow_private_hosts to permit it")]
     PrivateHost(String),
+    /// The spec document could not be downloaded.
+    #[error("cannot download the spec: {0}")]
+    Fetch(String),
     /// Invalid configuration (e.g. a malformed secret name).
     #[error("invalid configuration: {0}")]
     Config(String),

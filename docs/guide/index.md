@@ -90,6 +90,7 @@ Seven short pages in plain words. Read them in this order:
 | Connect external apps (OAuth, Composio, and MCP servers in the desktop app) | [Connecting apps](apps.md) |
 | See what each app needs to connect (sign-in, where it runs, licence) | [What you need to connect each app](app-catalog.md) |
 | Connect Gmail, Drive and Calendar with your own Google client, also on a server | [Google Workspace](google-workspace.md) |
+| Connect any REST API from its OpenAPI document and choose what each bot may call | [Connect a REST API](rest-apis.md) |
 | Configure external MCP servers by hand (`mcp.toml` and API) | [MCP servers](mcp-servers.md) |
 | Let another MCP agent use a selected Praxi bot; client recipes and troubleshooting | [Praxi as an MCP server](mcp-server.md) |
 | Pick a provider, use the Gemini free tier | [Providers and models](providers-and-models.md) |

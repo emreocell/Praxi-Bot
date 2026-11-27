@@ -15732,6 +15732,386 @@
         ]
       }
     },
+    "/v1/openapi-apps": {
+      "get": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "The connected REST APIs and the operations found in their documents.",
+        "operationId": "list_openapi_apps",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OpenApiAppDto"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "Connect a REST API from its `OpenAPI` 3.x document (`spec_url` or `spec_text`).\nThe credential goes to the secret store and is never returned. Requests only\never go to `base_url`'s host; redirects to other hosts are not followed.\nEvery operation starts disabled.",
+        "operationId": "add_openapi_app",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenApiAppInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiAppDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "unusable document, base URL or address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "the document could not be downloaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/openapi-apps/{id}": {
+      "get": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "One connected REST API.",
+        "operationId": "get_openapi_app",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "app id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiAppDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "Change the name, base URL or credentials, or the set of enabled operations\nand the bots that may use each. Applied to the bots' tools at once.",
+        "operationId": "update_openapi_app",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "app id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenApiAppUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiAppDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "unknown operation, too many enabled or bad base URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "Disconnect an API: its tools, its saved document and its credential are removed.",
+        "operationId": "remove_openapi_app",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "app id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "removed"
+          },
+          "404": {
+            "description": "no such app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/openapi-apps/{id}/refresh": {
+      "post": {
+        "tags": [
+          "openapi-apps"
+        ],
+        "summary": "Download the document again (apps added from a URL). Enabled operations that\nstill exist stay enabled.",
+        "operationId": "refresh_openapi_app",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "app id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiAppDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no such app",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "the app has no document URL or the document is unusable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "the document could not be downloaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not available in this daemon",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/owner-notices": {
       "get": {
         "tags": [
@@ -34771,6 +35151,380 @@
           "run"
         ]
       },
+      "OpenApiAppDto": {
+        "type": "object",
+        "description": "A connected API (`GET /v1/openapi-apps`).",
+        "required": [
+          "id",
+          "name",
+          "title",
+          "version",
+          "base_url",
+          "auth",
+          "operations",
+          "skipped",
+          "warnings",
+          "security_hints",
+          "enabled_count",
+          "max_enabled"
+        ],
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/OpenApiAuthDto",
+            "description": "Credentials."
+          },
+          "base_url": {
+            "type": "string",
+            "description": "The only origin and path prefix requests go to."
+          },
+          "enabled_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many operations are enabled for at least one bot.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Short id (also the tool-name prefix: `api_<id>_<operation>`)."
+          },
+          "max_enabled": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Largest number of operations that can be enabled at once.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name chosen by the owner."
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenApiOperationDto"
+            },
+            "description": "Operations found, in document order."
+          },
+          "security_hints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Authentication the document declares, for a hint to the owner."
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenApiSkippedDto"
+            },
+            "description": "Operations left out, with the reason."
+          },
+          "spec_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the document came from again on refresh; absent when it was pasted or uploaded."
+          },
+          "title": {
+            "type": "string",
+            "description": "`info.title` of the document (third-party text)."
+          },
+          "version": {
+            "type": "string",
+            "description": "`info.version` of the document."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Notes from the import (unresolved references and similar)."
+          }
+        }
+      },
+      "OpenApiAppInput": {
+        "type": "object",
+        "description": "Body of `POST /v1/openapi-apps`. Give the document as `spec_url` or `spec_text`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "auth": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OpenApiAuthInput",
+                "description": "Credentials; default none."
+              }
+            ]
+          },
+          "base_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The API's base URL. Defaults to the first `servers` entry of the document."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "spec_text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The document itself (JSON or YAML), for example read from a file."
+          },
+          "spec_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to download the document (http or https, public address)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenApiAppUpdate": {
+        "type": "object",
+        "description": "Body of `PUT /v1/openapi-apps/{id}`; omitted fields keep their value.",
+        "properties": {
+          "auth": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OpenApiAuthInput",
+                "description": "New credentials (`secret` omitted keeps the stored secret)."
+              }
+            ]
+          },
+          "base_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New base URL."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New display name."
+          },
+          "operations": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/OpenApiEnabledOperation"
+            },
+            "description": "The complete set of enabled operations; anything not listed is off."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenApiAuthDto": {
+        "type": "object",
+        "description": "The credentials of an API as stored (no secret value).",
+        "required": [
+          "kind",
+          "secret_set"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/OpenApiAuthKind",
+            "description": "Kind of credential."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Header or query parameter name (API key kinds)."
+          },
+          "secret_set": {
+            "type": "boolean",
+            "description": "A secret is stored (its value is never returned)."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "User name (basic)."
+          }
+        }
+      },
+      "OpenApiAuthInput": {
+        "type": "object",
+        "description": "Credentials in a request. `secret` is write-only.",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/OpenApiAuthKind",
+            "description": "Kind of credential."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Header or query parameter name (API key kinds)."
+          },
+          "secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The key, token or password. Omit it to keep the stored one."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "User name (basic)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenApiAuthKind": {
+        "type": "string",
+        "description": "How the API is authenticated.",
+        "enum": [
+          "none",
+          "api_key_header",
+          "api_key_query",
+          "bearer",
+          "basic"
+        ]
+      },
+      "OpenApiEffect": {
+        "type": "string",
+        "description": "How an operation changes things, from its HTTP method.",
+        "enum": [
+          "read",
+          "write",
+          "destructive"
+        ]
+      },
+      "OpenApiEnabledOperation": {
+        "type": "object",
+        "description": "One enabled operation in an update.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "bots": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bots that may use it; `null` = every bot, `[]` = none."
+          },
+          "name": {
+            "type": "string",
+            "description": "Tool name of the operation."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenApiOperationDto": {
+        "type": "object",
+        "description": "One operation found in the document.",
+        "required": [
+          "name",
+          "method",
+          "path",
+          "summary",
+          "tags",
+          "effect",
+          "always_ask",
+          "enabled"
+        ],
+        "properties": {
+          "always_ask": {
+            "type": "boolean",
+            "description": "Money-like (pay, charge, checkout, ...): asks on every autonomy level."
+          },
+          "bots": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Bots that may use it; `null` = every bot. Meaningful when `enabled`."
+          },
+          "effect": {
+            "$ref": "#/components/schemas/OpenApiEffect",
+            "description": "Effect class from the method."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "At least one bot may use it."
+          },
+          "method": {
+            "type": "string",
+            "description": "HTTP method (upper case)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Tool name a bot sees."
+          },
+          "path": {
+            "type": "string",
+            "description": "Path template."
+          },
+          "summary": {
+            "type": "string",
+            "description": "First line of the operation's summary (third-party text)."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags of the operation."
+          }
+        }
+      },
+      "OpenApiSkippedDto": {
+        "type": "object",
+        "description": "An operation the importer left out.",
+        "required": [
+          "method",
+          "path",
+          "reason"
+        ],
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "HTTP method."
+          },
+          "path": {
+            "type": "string",
+            "description": "Path template."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why it was left out."
+          }
+        }
+      },
       "OpenTerminalInput": {
         "type": "object",
         "required": [
@@ -40527,6 +41281,9 @@
     },
     {
       "name": "homeassistant"
+    },
+    {
+      "name": "openapi-apps"
     },
     {
       "name": "web"

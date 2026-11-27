@@ -70,6 +70,8 @@ pub mod mission_host;
 mod mission_routes;
 mod mission_wakes;
 pub mod openapi;
+pub mod openapi_apps;
+mod openapi_apps_routes;
 pub mod owner;
 mod owner_notify;
 pub mod pc_access;
@@ -154,6 +156,7 @@ pub use error::ApiError;
 pub use homeassistant::{HomeAssistantControl, HomeAssistantControlError};
 pub use mcp::{McpControl, McpControlError};
 pub use openapi::openapi_json;
+pub use openapi_apps::{OpenApiAppsControl, OpenApiAppsError};
 pub use policy::{PolicyLoadError, load_policy, validate_policy};
 pub use schedule_tools::{ScheduleLimits, load_schedule_limits};
 pub use skills::SkillAssignments;
@@ -320,6 +323,8 @@ struct Inner {
     mcp_server: parking_lot::Mutex<mcp_server::McpServerBook>,
     /// Composio app connections (see [`AppState::set_composio`]).
     composio: OnceLock<Arc<dyn ComposioControl>>,
+    /// REST APIs from `OpenAPI` documents (see [`AppState::set_openapi_apps`]).
+    openapi_apps: OnceLock<Arc<dyn OpenApiAppsControl>>,
     /// Missing-component installer (see [`AppState::set_components`]).
     components: OnceLock<Arc<dyn ComponentControl>>,
     /// E-mail account management (see [`AppState::set_email`]).
@@ -542,6 +547,7 @@ impl AppState {
             mcp: OnceLock::new(),
             mcp_server: parking_lot::Mutex::new(mcp_server::McpServerBook::default()),
             composio: OnceLock::new(),
+            openapi_apps: OnceLock::new(),
             components: OnceLock::new(),
             email: OnceLock::new(),
             email_channel: OnceLock::new(),
@@ -693,6 +699,11 @@ impl AppState {
         let _ = self.0.mcp.set(mcp);
     }
 
+    /// Enable `/v1/openapi-apps/*` with the embedder's manager (call once, at start).
+    pub fn set_openapi_apps(&self, apps: Arc<dyn OpenApiAppsControl>) {
+        let _ = self.0.openapi_apps.set(apps);
+    }
+
     /// Enable `/v1/composio/*` with the embedder Composio service (call once,
     /// before serving).
     pub fn set_composio(&self, composio: Arc<dyn ComposioControl>) {
@@ -820,6 +831,9 @@ impl AppState {
         self.0.components.get().cloned()
     }
 
+    pub(crate) fn openapi_apps(&self) -> Option<Arc<dyn OpenApiAppsControl>> {
+        self.0.openapi_apps.get().cloned()
+    }
     pub(crate) fn composio(&self) -> Option<Arc<dyn ComposioControl>> {
         self.0.composio.get().cloned()
     }
@@ -1384,6 +1398,7 @@ fn api_routes() -> Router<AppState> {
     use homeassistant_routes as ha;
     use live_view as v;
     use mcp_routes as m;
+    use openapi_apps_routes as oa;
     use routes as r;
     use voice_routes as vo;
     use web_routes as w;
@@ -2090,6 +2105,23 @@ fn api_routes() -> Router<AppState> {
             axum::routing::put(ha::put_homeassistant_bots),
         )
         .route("/v1/homeassistant/test", post(ha::test_homeassistant))
+            "/v1/openapi-apps",
+            get(oa::list_openapi_apps).post(oa::add_openapi_app).layer(
+                axum::extract::DefaultBodyLimit::max(
+                    openapi_apps_routes::MAX_SPEC_BYTES + 64 * 1024,
+                ),
+            ),
+        )
+        .route(
+            "/v1/openapi-apps/{id}",
+            get(oa::get_openapi_app)
+                .put(oa::update_openapi_app)
+                .delete(oa::remove_openapi_app),
+        )
+        .route(
+            "/v1/openapi-apps/{id}/refresh",
+            post(oa::refresh_openapi_app),
+        )
         .route(
             "/v1/connection-test/provider",
             post(connection_test::test_provider),

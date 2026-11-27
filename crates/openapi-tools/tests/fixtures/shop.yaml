@@ -1,0 +1,71 @@
+openapi: 3.0.3
+info:
+  title: Shop
+  version: 1.0.0
+servers:
+  - url: http://placeholder.invalid/api
+paths:
+  /products:
+    get:
+      operationId: listProducts
+      summary: List products
+      responses:
+        '200': { description: ok }
+    post:
+      operationId: createProduct
+      summary: Add a product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+      responses:
+        '201': { description: created }
+  /products/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: deleteProduct
+      summary: Remove a product
+      responses:
+        '204': { description: gone }
+  /checkout/sessions:
+    post:
+      operationId: createSession
+      summary: Start a checkout
+      responses:
+        '200': { description: ok }
+  /invoices:
+    get:
+      operationId: listInvoices
+      summary: List invoices
+      responses:
+        '200': { description: ok }
+  /orders/{id}/pay:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: settle
+      summary: Settle an order
+      responses:
+        '200': { description: ok }
+  /files/{id}/payload:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getFile
+      summary: Download a file
+      responses:
+        '200': { description: ok }

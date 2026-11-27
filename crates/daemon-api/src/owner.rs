@@ -371,6 +371,16 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/v1/voice"),
     // downloads hundreds of MB onto the owner's disk
     ("POST", "/v1/voice/local/install"),
+    // Connected REST APIs: the list shows base URLs and credential names, and every change
+    // stores a credential or lets a bot call that API
+    ("GET", "/v1/openapi-apps"),
+    ("HEAD", "/v1/openapi-apps"),
+    ("GET", "/v1/openapi-apps/{}"),
+    ("HEAD", "/v1/openapi-apps/{}"),
+    ("POST", "/v1/openapi-apps"),
+    ("PUT", "/v1/openapi-apps/{}"),
+    ("DELETE", "/v1/openapi-apps/{}"),
+    ("POST", "/v1/openapi-apps/{}/refresh"),
     // Account identities, the catalog and its logos, and action discovery are for the confirmed
     // owner: the app lists they feed are owner-only, and no phone or node shows them.
     ("GET", "/v1/composio"),

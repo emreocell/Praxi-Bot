@@ -22,6 +22,7 @@ use crate::error::OpenApiError;
 use crate::import::{
     ApiSpec, BodyKind, HttpMethod, ImportOptions, Operation, ParamBinding, ParamLocation,
 };
+use crate::risk::{Risk, risk_of};
 
 /// Credentials for an API, expressed as secret *references*. The values are
 /// resolved from the [`SecretStore`] at call time and are never part of a tool
@@ -73,6 +74,11 @@ impl Auth {
     }
 }
 
+/// Decides, for a tool name and the calling bot (`None` = no bot), whether the
+/// tool may be seen and called. Evaluated on every listing and every call, so
+/// the owner's changes apply without rebuilding the tools.
+pub type AccessGate = Arc<dyn Fn(&str, Option<&str>) -> bool + Send + Sync>;
+
 /// Runtime settings shared by all tools of one API.
 #[derive(Clone)]
 pub struct OpenApiConfig {
@@ -91,11 +97,13 @@ pub struct OpenApiConfig {
     pub category: PermissionCategory,
     /// `User-Agent` header.
     pub user_agent: String,
+    /// Per-bot access to each tool; `None` = every bot.
+    pub gate: Option<AccessGate>,
 }
 
 impl OpenApiConfig {
     /// Defaults: no auth, 30 s timeout, 256 KiB responses, private hosts
-    /// blocked, [`PermissionCategory::Accounts`].
+    /// blocked, [`PermissionCategory::Accounts`], every bot allowed.
     #[must_use]
     pub fn new(secrets: Arc<dyn SecretStore>) -> Self {
         Self {
@@ -106,6 +114,7 @@ impl OpenApiConfig {
             allow_private_hosts: false,
             category: PermissionCategory::Accounts,
             user_agent: concat!("praxi-bot-openapi-tools/", env!("CARGO_PKG_VERSION")).to_string(),
+            gate: None,
         }
     }
 }
@@ -181,8 +190,10 @@ pub fn tools(spec: &ApiSpec, cfg: &OpenApiConfig) -> Result<Vec<Arc<dyn Tool>>, 
             // Credentials are injected by the executor; never expose (or let the
             // model override) the parameter that carries them.
             op.params.retain(|p| !shared.is_auth_param(p));
+            let risk = risk_of(&op);
             Arc::new(OpenApiTool {
-                spec: tool_spec(&op, spec, cfg.category),
+                spec: tool_spec(&op, spec, risk, cfg.category),
+                risk,
                 op,
                 shared: shared.clone(),
             }) as Arc<dyn Tool>
@@ -220,7 +231,7 @@ pub fn import_tools(
     Ok((spec, t))
 }
 
-fn tool_spec(op: &Operation, api: &ApiSpec, category: PermissionCategory) -> ToolSpec {
+fn tool_spec(op: &Operation, api: &ApiSpec, risk: Risk, category: PermissionCategory) -> ToolSpec {
     let mut props = Map::new();
     let mut required = Vec::new();
     for p in &op.params {
@@ -249,8 +260,8 @@ fn tool_spec(op: &Operation, api: &ApiSpec, category: PermissionCategory) -> Too
             "required": required,
             "additionalProperties": false,
         }),
-        effect: effect_for(op.method),
-        category,
+        effect: risk.effect,
+        category: risk.category(category),
         platforms: vec![Platform::All],
         // Every operation contacts the API host (egress) and the response can
         // be both private account data and untrusted third-party text.
@@ -265,6 +276,10 @@ struct Shared {
 }
 
 impl Shared {
+    fn allows(&self, tool: &str, bot_id: Option<&str>) -> bool {
+        self.cfg.gate.as_ref().is_none_or(|g| g(tool, bot_id))
+    }
+
     fn is_auth_param(&self, p: &ParamBinding) -> bool {
         match &self.cfg.auth {
             Auth::ApiKeyHeader { header, .. } => {
@@ -329,6 +344,7 @@ impl Shared {
 
 struct OpenApiTool {
     spec: ToolSpec,
+    risk: Risk,
     op: Operation,
     shared: Arc<Shared>,
 }
@@ -570,6 +586,15 @@ impl Tool for OpenApiTool {
         &self.spec
     }
 
+    fn visible_to(&self, bot_id: Option<&str>) -> bool {
+        self.shared.allows(&self.spec.name, bot_id)
+    }
+
+    /// Money-like operations (see [`crate::risk`]) ask on every autonomy level.
+    fn always_ask(&self) -> bool {
+        self.risk.always_ask
+    }
+
     fn egress_host(&self, _input: &Value) -> Option<String> {
         Url::parse(&self.shared.base_url)
             .ok()
@@ -577,6 +602,12 @@ impl Tool for OpenApiTool {
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        if !self.shared.allows(&self.spec.name, ctx.bot_id.as_deref()) {
+            return Err(ToolError::PermissionDenied(format!(
+                "`{}` is not enabled for this bot",
+                self.spec.name
+            )));
+        }
         let rb = self.build(input)?;
         let mut redactor = Redactor::new();
         let rb = self.shared.apply_auth(rb, &mut redactor)?;
@@ -701,7 +732,7 @@ fn decode_text(bytes: &[u8], truncated: bool) -> Option<String> {
 }
 
 /// DNS resolver that drops private / loopback / reserved addresses.
-struct GuardResolver;
+pub(crate) struct GuardResolver;
 
 fn filter_public(addrs: impl IntoIterator<Item = SocketAddr>) -> Vec<SocketAddr> {
     addrs
@@ -733,7 +764,7 @@ fn is_private_ip(ip: IpAddr) -> bool {
     }
 }
 
-fn private_host(url: &Url) -> Option<String> {
+pub(crate) fn private_host(url: &Url) -> Option<String> {
     match url.host()? {
         url::Host::Domain(d) => {
             let d = d.to_ascii_lowercase();

@@ -1,3 +1,4 @@
+import { MockOpenApiApps } from "./mockOpenApiApps.ts";
 import { historySnippetParts, type ExportFormat } from "../lib/chatHistory.ts";
 import { transcriptMarkdown } from "../lib/transcript.ts";
 import { MOCK_HOST_ID, mockHostScenario } from "./mockHostScenario.ts";
@@ -2915,6 +2916,11 @@ export class MockApiClient extends ApiClient {
       case "PUT /email":
       case "DELETE /email":
         return ok(this.email(method, seg, opts.body));
+      case "GET /openapi-apps":
+      case "POST /openapi-apps":
+      case "PUT /openapi-apps":
+      case "DELETE /openapi-apps":
+        return ok(this.mockOpenApi.route(method, seg, opts.body));
       case "GET /composio":
       case "POST /composio":
       case "PUT /composio":
@@ -3710,6 +3716,8 @@ export class MockApiClient extends ApiClient {
       error: null
     };
   }
+
+  private readonly mockOpenApi = new MockOpenApiApps();
 
   /** Review-state stand-in for `/v1/composio/*` (no network, no key). */
   private composio(method: string, seg: string[], {

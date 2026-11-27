@@ -377,6 +377,14 @@ fn is_composio_path(path: &str) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
+/// Connected REST APIs are the owner's too (same rule as Composio).
+pub const PEER_OWNER_PREFIX_OPENAPI_APPS: &str = "/v1/openapi-apps";
+
+fn is_openapi_apps_path(path: &str) -> bool {
+    path.strip_prefix(PEER_OWNER_PREFIX_OPENAPI_APPS)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+}
+
 /// Installing local components is the owner's too (same rule as Composio).
 pub const PEER_OWNER_PREFIX_COMPONENTS: &str = "/v1/components";
 
@@ -781,6 +789,10 @@ async fn guard(State(state): State<AppState>, mut req: Request, next: Next) -> R
         && peer.role != PeerRole::Desktop
     {
         return ApiError::forbidden("mailboxes are read from the owner's desktop only")
+            .into_response();
+    }
+    if is_openapi_apps_path(&check_path) && peer.role != PeerRole::Desktop {
+        return ApiError::forbidden("REST APIs are managed by the owner's desktop only")
             .into_response();
     }
     if is_composio_path(&check_path) && peer.role != PeerRole::Desktop {

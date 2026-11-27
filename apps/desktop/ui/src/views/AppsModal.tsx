@@ -1,5 +1,5 @@
 import { wordDiff, type DiffPart } from "../lib/textDiff.ts";
-import { ArrowLeft, Check, ChevronDown, Search, Server, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Globe, Search, Server, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { upsertApp, withoutConnected } from "../lib/composioApps";
 import { useTranslation } from "react-i18next";
@@ -53,6 +53,7 @@ import { type FlowCancel, type FlowState, runConnectFlow } from "../lib/connectF
 import { ComposioAccount } from "./ComposioAccount";
 import { HomeAssistantCard } from "./HomeAssistantCard";
 import { MissingComponent, componentFor } from "./MissingComponent";
+import { OpenApiApps } from "./OpenApiApps";
 import { useComposio } from "../state/useComposio";
 import { directEntries, filterDirect, isRemoteServer } from "../lib/appTiles";
 import { openComposioLink } from "../lib/externalLink";
@@ -817,6 +818,7 @@ function AppsDialog({
   const { servers, catalog, error, reload } = useMcp(open);
   const [query, setQuery] = useState("");
   const [advanced, setAdvanced] = useState(false);
+  const [restApis, setRestApis] = useState(false);
   const [group, setGroup] = useState("all");
   const [busy, setBusy] = useState<string | null>(null);
   const c = useComposio(open, query, group);
@@ -971,6 +973,7 @@ function AppsDialog({
       setGroup("all");
       setSelected(null);
       setAdvanced(start?.advanced ?? false);
+      setRestApis(false);
     }
   }, [open, start]);
 
@@ -1026,6 +1029,7 @@ function AppsDialog({
     setSelected(null);
     setFlow(null);
     setAdvanced(false);
+    setRestApis(false);
     requestAnimationFrame(() => accountSection.current?.focus());
   };
   const entryOf = (name: string) => catalog.find((e) => e.id === name);
@@ -1287,10 +1291,26 @@ function AppsDialog({
             className={`${styles.pill} ${advanced ? styles.pillOn : ""}`}
             aria-pressed={advanced}
             data-testid="apps-advanced"
-            onClick={() => setAdvanced((a) => !a)}
+            onClick={() => {
+              setRestApis(false);
+              setAdvanced((a) => !a);
+            }}
           >
             <Server aria-hidden="true" />
             {t("apps.composioHub.mcpServers")}
+          </button>
+          <button
+            type="button"
+            className={`${styles.pill} ${restApis ? styles.pillOn : ""}`}
+            aria-pressed={restApis}
+            data-testid="apps-rest"
+            onClick={() => {
+              setAdvanced(false);
+              setRestApis((r) => !r);
+            }}
+          >
+            <Globe aria-hidden="true" />
+            {t("apps.restApis.pill")}
           </button>
           </>
           )}
@@ -1305,7 +1325,7 @@ function AppsDialog({
           </button>
         </header>
 
-        <div className={styles.body} key={selected?.slug ?? (advanced ? "mcp" : "hub")}>
+        <div className={styles.body} key={selected?.slug ?? (restApis ? "rest" : advanced ? "mcp" : "hub")}>
           {advanced && error ? (
             <p className={formStyles.error} role="alert">
               {error}
@@ -1369,6 +1389,8 @@ function AppsDialog({
               })}
               onDisconnect={() => disconnectApp(selected.slug, selected.name)}
             />
+          ) : restApis ? (
+            <OpenApiApps />
           ) : advanced ? (
             <>
             <h3 className={styles.sectionLabel}>{t("apps.advanced.title")}</h3>

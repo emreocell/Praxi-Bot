@@ -949,6 +949,10 @@ pub(crate) async fn forget_bot_links(s: &AppState, bot: &Bot) {
     if let Some(mcp) = s.mcp() {
         let _ = mcp.forget_bot(&bot.id.to_string()).await;
     }
+    // Likewise in the enabled-operation lists of connected REST APIs.
+    if let Some(apps) = s.openapi_apps() {
+        let _ = apps.forget_bot(&bot.id.to_string()).await;
+    }
     // Accounts bound to the bot are removed, never unbound: an unbound account
     // is usable by every bot, so unbinding would silently widen access.  Ids
     // are never reused, so an account that survives a failure here stays inert

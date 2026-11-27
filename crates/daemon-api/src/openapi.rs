@@ -51,6 +51,8 @@ use crate::mcp_routes;
 use crate::mcp_server;
 use crate::memory;
 use crate::mission_routes;
+use crate::openapi_apps;
+use crate::openapi_apps_routes;
 use crate::owner_notify;
 use crate::page_reader_routes;
 use crate::peer;
@@ -475,6 +477,12 @@ impl Modify for Security {
         homeassistant_routes::put_homeassistant_bots,
         homeassistant_routes::delete_homeassistant,
         homeassistant_routes::test_homeassistant,
+        openapi_apps_routes::list_openapi_apps,
+        openapi_apps_routes::get_openapi_app,
+        openapi_apps_routes::add_openapi_app,
+        openapi_apps_routes::update_openapi_app,
+        openapi_apps_routes::refresh_openapi_app,
+        openapi_apps_routes::remove_openapi_app,
         web_routes::get_web_search,
         web_routes::test_web_search,
         web_routes::update_web_search,
@@ -945,6 +953,16 @@ impl Modify for Security {
         homeassistant::HomeAssistantBotsInput,
         homeassistant::HomeAssistantTestInput,
         homeassistant::HomeAssistantTestReport,
+        openapi_apps::OpenApiAppDto,
+        openapi_apps::OpenApiAppInput,
+        openapi_apps::OpenApiAppUpdate,
+        openapi_apps::OpenApiAuthDto,
+        openapi_apps::OpenApiAuthInput,
+        openapi_apps::OpenApiAuthKind,
+        openapi_apps::OpenApiEffect,
+        openapi_apps::OpenApiEnabledOperation,
+        openapi_apps::OpenApiOperationDto,
+        openapi_apps::OpenApiSkippedDto,
         web::WebSearchConfigDto,
         web::WebSearchConfigInput,
         web::WebSearchTestInput,
@@ -1001,6 +1019,7 @@ impl Modify for Security {
         (name = "voice"),
         (name = "calendar"),
         (name = "homeassistant"),
+        (name = "openapi-apps"),
         (name = "web"),
         (name = "workspaces"),
         (name = "connection-test"),

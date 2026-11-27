@@ -45,6 +45,7 @@ kılavuzda arama yapar ve sayfa çevrilmişse Türkçesini açar.
 | [Sağlayıcılar ve modeller](providers-and-models.md) | Sağlayıcılar, anahtar ekleme, model rolleri, Gemini ücretsiz katmanı ve yerel modeller. |
 | [Beceriler](skills.md) | Beceri nedir, nerede durur, nasıl yazılır, güvenle yüklenir ve bota verilir. |
 | [Zamanlanmış görevler](scheduled-tasks.md) | Zamanlama ifadeleri, kaçırılan çalışmalar, onaylar ve botun kendi zamanlamaları. |
+| [REST API bağlama](rest-apis.md) | OpenAPI belgesinden REST API bağlama, işlemleri bot başına açma ve hangi çağrıların onay istediği. |
 | [MCP sunucuları](mcp-servers.md) | `mcp.toml` ayarları, güven ve izin kuralları, bot başına erişim ve OAuth. |
 | [Sesli arama modu](voice-call.md) | Eller serbest sesli sohbet, yazıya çevirme sağlayıcıları ve gizlilik. |
 | [Web araçları](web.md) | Web araması, sayfa okuma, ağ güvenliği, onaylar ve tarayıcı kullanımı. |

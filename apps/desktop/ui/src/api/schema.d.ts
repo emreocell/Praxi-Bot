@@ -4160,6 +4160,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/openapi-apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The connected REST APIs and the operations found in their documents. */
+        get: operations["list_openapi_apps"];
+        put?: never;
+        /**
+         * Connect a REST API from its `OpenAPI` 3.x document (`spec_url` or `spec_text`).
+         *     The credential goes to the secret store and is never returned. Requests only
+         *     ever go to `base_url`'s host; redirects to other hosts are not followed.
+         *     Every operation starts disabled.
+         */
+        post: operations["add_openapi_app"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/openapi-apps/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One connected REST API. */
+        get: operations["get_openapi_app"];
+        /**
+         * Change the name, base URL or credentials, or the set of enabled operations
+         *     and the bots that may use each. Applied to the bots' tools at once.
+         */
+        put: operations["update_openapi_app"];
+        post?: never;
+        /** Disconnect an API: its tools, its saved document and its credential are removed. */
+        delete: operations["remove_openapi_app"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/openapi-apps/{id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Download the document again (apps added from a URL). Enabled operations that
+         *     still exist stay enabled.
+         */
+        post: operations["refresh_openapi_app"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/owner-notices": {
         parameters: {
             query?: never;
@@ -11015,6 +11080,132 @@ export interface components {
          * @enum {string}
          */
         NoticeSource: "mission" | "run";
+        /** @description A connected API (`GET /v1/openapi-apps`). */
+        OpenApiAppDto: {
+            /** @description Credentials. */
+            auth: components["schemas"]["OpenApiAuthDto"];
+            /** @description The only origin and path prefix requests go to. */
+            base_url: string;
+            /**
+             * Format: int32
+             * @description How many operations are enabled for at least one bot.
+             */
+            enabled_count: number;
+            /** @description Short id (also the tool-name prefix: `api_<id>_<operation>`). */
+            id: string;
+            /**
+             * Format: int32
+             * @description Largest number of operations that can be enabled at once.
+             */
+            max_enabled: number;
+            /** @description Display name chosen by the owner. */
+            name: string;
+            /** @description Operations found, in document order. */
+            operations: components["schemas"]["OpenApiOperationDto"][];
+            /** @description Authentication the document declares, for a hint to the owner. */
+            security_hints: string[];
+            /** @description Operations left out, with the reason. */
+            skipped: components["schemas"]["OpenApiSkippedDto"][];
+            /** @description Where the document came from again on refresh; absent when it was pasted or uploaded. */
+            spec_url?: string | null;
+            /** @description `info.title` of the document (third-party text). */
+            title: string;
+            /** @description `info.version` of the document. */
+            version: string;
+            /** @description Notes from the import (unresolved references and similar). */
+            warnings: string[];
+        };
+        /** @description Body of `POST /v1/openapi-apps`. Give the document as `spec_url` or `spec_text`. */
+        OpenApiAppInput: {
+            auth?: null | components["schemas"]["OpenApiAuthInput"];
+            /** @description The API's base URL. Defaults to the first `servers` entry of the document. */
+            base_url?: string | null;
+            /** @description Display name. */
+            name: string;
+            /** @description The document itself (JSON or YAML), for example read from a file. */
+            spec_text?: string | null;
+            /** @description Where to download the document (http or https, public address). */
+            spec_url?: string | null;
+        };
+        /** @description Body of `PUT /v1/openapi-apps/{id}`; omitted fields keep their value. */
+        OpenApiAppUpdate: {
+            auth?: null | components["schemas"]["OpenApiAuthInput"];
+            /** @description New base URL. */
+            base_url?: string | null;
+            /** @description New display name. */
+            name?: string | null;
+            /** @description The complete set of enabled operations; anything not listed is off. */
+            operations?: components["schemas"]["OpenApiEnabledOperation"][] | null;
+        };
+        /** @description The credentials of an API as stored (no secret value). */
+        OpenApiAuthDto: {
+            /** @description Kind of credential. */
+            kind: components["schemas"]["OpenApiAuthKind"];
+            /** @description Header or query parameter name (API key kinds). */
+            name?: string | null;
+            /** @description A secret is stored (its value is never returned). */
+            secret_set: boolean;
+            /** @description User name (basic). */
+            username?: string | null;
+        };
+        /** @description Credentials in a request. `secret` is write-only. */
+        OpenApiAuthInput: {
+            /** @description Kind of credential. */
+            kind: components["schemas"]["OpenApiAuthKind"];
+            /** @description Header or query parameter name (API key kinds). */
+            name?: string | null;
+            /** @description The key, token or password. Omit it to keep the stored one. */
+            secret?: string | null;
+            /** @description User name (basic). */
+            username?: string | null;
+        };
+        /**
+         * @description How the API is authenticated.
+         * @enum {string}
+         */
+        OpenApiAuthKind: "none" | "api_key_header" | "api_key_query" | "bearer" | "basic";
+        /**
+         * @description How an operation changes things, from its HTTP method.
+         * @enum {string}
+         */
+        OpenApiEffect: "read" | "write" | "destructive";
+        /** @description One enabled operation in an update. */
+        OpenApiEnabledOperation: {
+            /** @description Bots that may use it; `null` = every bot, `[]` = none. */
+            bots?: string[] | null;
+            /** @description Tool name of the operation. */
+            name: string;
+        };
+        /** @description One operation found in the document. */
+        OpenApiOperationDto: {
+            /** @description Money-like (pay, charge, checkout, ...): asks on every autonomy level. */
+            always_ask: boolean;
+            /** @description Bots that may use it; `null` = every bot. Meaningful when `enabled`. */
+            bots?: string[] | null;
+            /** @description Effect class from the method. */
+            effect: components["schemas"]["OpenApiEffect"];
+            /** @description At least one bot may use it. */
+            enabled: boolean;
+            /** @description HTTP method (upper case). */
+            method: string;
+            /** @description Tool name a bot sees. */
+            name: string;
+            /** @description Path template. */
+            path: string;
+            /** @description First line of the operation's summary (third-party text). */
+            summary: string;
+            /** @description Tags of the operation. */
+            tags: string[];
+        };
+        /** @description An operation the importer left out. */
+        OpenApiSkippedDto: {
+            /** @description HTTP method. */
+            method: string;
+            /** @description Path template. */
+            path: string;
+            /** @description Why it was left out. */
+            reason: string;
+        };
         OpenTerminalInput: {
             /** Format: int32 */
             cols: number;
@@ -23761,6 +23952,292 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_openapi_apps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenApiAppDto"][];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    add_openapi_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenApiAppInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenApiAppDto"];
+                };
+            };
+            /** @description malformed input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description unusable document, base URL or address */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the document could not be downloaded */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_openapi_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description app id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenApiAppDto"];
+                };
+            };
+            /** @description no such app */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_openapi_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description app id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenApiAppUpdate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenApiAppDto"];
+                };
+            };
+            /** @description malformed input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description no such app */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description unknown operation, too many enabled or bad base URL */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    remove_openapi_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description app id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description no such app */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    refresh_openapi_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description app id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenApiAppDto"];
+                };
+            };
+            /** @description no such app */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the app has no document URL or the document is unusable */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description the document could not be downloaded */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description not available in this daemon */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

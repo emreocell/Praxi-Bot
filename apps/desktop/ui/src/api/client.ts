@@ -117,6 +117,9 @@ import type {
   EmailTestReport,
   InputBatch,
   InputResult,
+  OpenApiApp,
+  OpenApiAppInput,
+  OpenApiAppUpdate,
   ComposioAction,
   ComposioApp,
   ComposioCatalog,
@@ -1793,6 +1796,26 @@ export class ApiClient {
     return this.request("POST", `/secrets/${encodeURIComponent(name)}`, {
       body: { value }
     });
+  }
+
+  // ---- REST APIs from OpenAPI documents (owner-only routes) -------------
+
+  openapiApps(): Promise<OpenApiApp[]> {
+    return this.request("GET", "/openapi-apps");
+  }
+  /** Connect an API from its OpenAPI document (`spec_url` or `spec_text`); every operation starts off. */
+  openapiAddApp(input: OpenApiAppInput): Promise<OpenApiApp> {
+    return this.request("POST", "/openapi-apps", { body: input });
+  }
+  /** Rename, change base URL or credentials, or replace the set of enabled operations. */
+  openapiUpdateApp(id: string, input: OpenApiAppUpdate): Promise<OpenApiApp> {
+    return this.request("PUT", `/openapi-apps/${encodeURIComponent(id)}`, { body: input });
+  }
+  openapiRefreshApp(id: string): Promise<OpenApiApp> {
+    return this.request("POST", `/openapi-apps/${encodeURIComponent(id)}/refresh`);
+  }
+  openapiRemoveApp(id: string): Promise<void> {
+    return this.request("DELETE", `/openapi-apps/${encodeURIComponent(id)}`);
   }
 
   // ---- Composio app connections (owner-only routes) ---------------------

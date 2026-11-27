@@ -45,6 +45,7 @@
       "Connect and manage an app",
       "What asks before it runs",
       "Home Assistant",
+      "REST APIs",
       "MCP servers",
       "MCP server status",
       "Managing connections and signing out",
@@ -753,6 +754,19 @@
       "Operating a host"
     ],
     "summary": "This guide sets up Praxi as an always-on host on a cheap Linux server, for"
+  },
+  {
+    "doc": "rest-apis.md",
+    "title": "Connect a REST API (OpenAPI)",
+    "headings": [
+      "Connect an API",
+      "Turn on operations, per bot",
+      "What asks for approval",
+      "What Praxi guards",
+      "Limits and things to know",
+      "HTTP API"
+    ],
+    "summary": "Any web service that publishes an OpenAPI 3.0 or 3.1 document can become a set of"
   },
   {
     "doc": "scheduled-tasks.md",
