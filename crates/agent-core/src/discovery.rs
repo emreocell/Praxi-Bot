@@ -36,6 +36,7 @@ const DIRECT_EXTRAS: &[&str] = &[
     "memory_search",
     "notes_read",
     "knowledge_search",
+    "documents_search",
 ];
 
 const MAX_ACTIVATIONS: usize = DEFAULT_DIRECT_TOOL_LIMIT - CORE.len() - 2;

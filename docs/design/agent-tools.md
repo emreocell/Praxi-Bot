@@ -12,7 +12,7 @@ Status: gap 1 implemented in the `feat/c478-agent-tools` change; gaps 2-3 deferr
 | Browser / desktop | `browser_*`, `desktop_*` | untrusted private + egress, some `executes` |
 | Shell / code | `shell_run`, `script_run`, `git_*`, `process_list` | executes |
 | Mail / calendar | `email_*`, calendar connector | private, untrusted, egress on send |
-| Memory | `memory_search/save/forget`, `session_search`, `knowledge_search` | private read; writes ask when tainted |
+| Memory | `memory_search/save/forget`, `session_search`, `knowledge_search`, `documents_search` | private read; writes ask when tainted |
 | Scheduling | `schedule_*` (always ask for create/update/resume) | egress-like, delegated future authority |
 | Bots, skills, workflows, secrets | `bot_*`, `skill_*`, `workflow_*`, `secret_request`, `secrets_list` | per tool |
 | Meta | `ask_user`, `todo_write` | none, always allowed |

@@ -191,6 +191,13 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/bots/{}/knowledge/sources/{}/reindex"),
     ("POST", "/v1/bots/{}/knowledge/sources/{}/embed"),
     ("PUT", "/v1/bots/{}/knowledge/sources/{}/watch"),
+    // browsing the host's folders, previewing a folder and opening an indexed file
+    // reveal the layout and contents of the machine: owner-only (HEAD as for GET)
+    ("GET", "/v1/knowledge/folders"),
+    ("HEAD", "/v1/knowledge/folders"),
+    ("POST", "/v1/bots/{}/knowledge/folder-preview"),
+    ("GET", "/v1/bots/{}/knowledge/sources/{}/file"),
+    ("HEAD", "/v1/bots/{}/knowledge/sources/{}/file"),
     ("GET", "/v1/bots/{}/knowledge/watch"),
     ("HEAD", "/v1/bots/{}/knowledge/watch"),
     ("PUT", "/v1/bots/{}/knowledge/settings"),

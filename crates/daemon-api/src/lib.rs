@@ -51,6 +51,7 @@ pub mod host_links;
 pub mod host_packs;
 pub mod host_setup;
 mod knowledge;
+mod knowledge_documents;
 pub mod knowledge_runtime;
 mod knowledge_settings;
 mod knowledge_watch;
@@ -1477,6 +1478,18 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/bots/{bot}/knowledge/sources/{source}/reindex",
             post(knowledge::reindex_source),
+        )
+        .route(
+            "/v1/knowledge/folders",
+            get(knowledge_documents::browse_folders),
+        )
+        .route(
+            "/v1/bots/{bot}/knowledge/folder-preview",
+            post(knowledge_documents::preview_folder),
+        )
+        .route(
+            "/v1/bots/{bot}/knowledge/sources/{source}/file",
+            get(knowledge_documents::get_source_file),
         )
         .route(
             "/v1/bots/{bot}/knowledge/watch",

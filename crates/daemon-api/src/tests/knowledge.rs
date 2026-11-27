@@ -4,6 +4,8 @@ use memory_store::knowledge::{KnowledgeStore, Scope, SearchRequest};
 use protocol::{BotId, ChatId, RunId};
 use uuid::Uuid;
 
+#[path = "knowledge_documents.rs"]
+mod documents;
 #[path = "knowledge_regressions.rs"]
 mod review;
 

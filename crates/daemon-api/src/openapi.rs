@@ -39,6 +39,7 @@ use crate::host_packs;
 use crate::host_setup;
 use crate::incoming_webhook;
 use crate::knowledge;
+use crate::knowledge_documents;
 use crate::knowledge_settings;
 use crate::knowledge_watch;
 use crate::live_view;
@@ -248,6 +249,9 @@ impl Modify for Security {
         knowledge::list_sources,
         knowledge::reindex_source,
         knowledge::update_source,
+        knowledge_documents::browse_folders,
+        knowledge_documents::get_source_file,
+        knowledge_documents::preview_folder,
         knowledge_settings::confirm_embedding_approval,
         knowledge_settings::get_settings,
         knowledge_settings::put_settings,

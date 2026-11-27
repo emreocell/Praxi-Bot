@@ -1824,7 +1824,7 @@ impl TurnExecutor {
                 };
                 *ctx.landed_origin.lock() = resolved.tool.landed_origin(&tctx).await;
             }
-            if resolved.name == builtin_tools::knowledge::KNOWLEDGE_SEARCH
+            if builtin_tools::knowledge::is_search_tool(&resolved.name)
                 && let Ok(mut request) = serde_json::from_value::<
                     memory_store::knowledge::SearchRequest,
                 >(resolved.input.clone())

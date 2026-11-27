@@ -395,7 +395,8 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         cfg.data_dir.clone(),
     ));
     if let Some(backend) = cfg.knowledge {
-        all.push(knowledge::tool(backend));
+        all.push(knowledge::tool(Arc::clone(&backend)));
+        all.push(knowledge::documents_tool(backend));
     }
     if let Some(email) = &cfg.email {
         all.extend(connector_email::tools(email));

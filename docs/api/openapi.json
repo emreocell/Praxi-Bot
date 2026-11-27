@@ -2784,6 +2784,63 @@
         ]
       }
     },
+    "/v1/bots/{bot}/knowledge/folder-preview": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Show what choosing this folder would index. Reads no document. Owner only.",
+        "operationId": "preview_folder",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeFolderPreviewInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeFolderPreview"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/bots/{bot}/knowledge/settings": {
       "get": {
         "tags": [
@@ -3151,6 +3208,90 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/KnowledgeEmbeddingProgress"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/bots/{bot}/knowledge/sources/{source}/file": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Open the file behind a citation: its bytes, for a document that is indexed\nfrom an enabled file or folder source of this bot. Owner only.",
+        "operationId": "get_source_file",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "source",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "locator",
+            "in": "query",
+            "description": "Path of the file inside the source",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "download",
+            "in": "query",
+            "description": "Send as a download",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File bytes with nosniff and sandbox headers",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -12434,6 +12575,53 @@
             }
           }
         }
+      }
+    },
+    "/v1/knowledge/folders": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "List the sub-folders of a folder on the machine the daemon runs on. Owner only.",
+        "operationId": "browse_folders",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Absolute folder path; default is the home folder",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeFolderListing"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
       }
     },
     "/v1/local-install": {
@@ -28929,6 +29117,134 @@
           }
         }
       },
+      "KnowledgeFolderEntry": {
+        "type": "object",
+        "description": "A sub-folder in the folder picker.",
+        "required": [
+          "name",
+          "path",
+          "selectable"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "selectable": {
+            "type": "boolean",
+            "description": "False for credential/browser-profile folders and the daemon's own data."
+          }
+        }
+      },
+      "KnowledgeFolderListing": {
+        "type": "object",
+        "description": "One folder and its sub-folders (names only; no file is listed or read).",
+        "required": [
+          "path",
+          "selectable",
+          "entries",
+          "truncated",
+          "roots"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeFolderEntry"
+            }
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "roots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Drive roots on Windows; empty elsewhere."
+          },
+          "selectable": {
+            "type": "boolean",
+            "description": "Whether this very folder may be chosen."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "More than 500 sub-folders: only the first ones are listed."
+          }
+        }
+      },
+      "KnowledgeFolderPreview": {
+        "type": "object",
+        "description": "What indexing a folder would read, before anything is read or stored.",
+        "required": [
+          "files",
+          "file_count",
+          "total_bytes",
+          "by_type",
+          "skipped",
+          "estimated_seconds"
+        ],
+        "properties": {
+          "by_type": {
+            "type": "object",
+            "description": "Files per kind: `pdf`, `docx`, `xlsx`, `text`, `web`, `code`.",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "estimated_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rough time to index on a typical computer, in seconds.",
+            "minimum": 0
+          },
+          "file_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgePreviewFile"
+            },
+            "description": "The first 200 files; `file_count` is the full count."
+          },
+          "skipped": {
+            "$ref": "#/components/schemas/KnowledgeSkipped"
+          },
+          "total_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "KnowledgeFolderPreviewInput": {
+        "type": "object",
+        "description": "Folder to preview.",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path on the machine the daemon runs on."
+          }
+        },
+        "additionalProperties": false
+      },
       "KnowledgeIndexStatus": {
         "type": "object",
         "description": "A bounded indexing page. Replay starts from hashes already committed.",
@@ -28936,7 +29252,8 @@
           "processed",
           "unchanged",
           "removed",
-          "failures"
+          "failures",
+          "skipped"
         ],
         "properties": {
           "failures": {
@@ -28958,6 +29275,10 @@
           "removed": {
             "type": "integer",
             "minimum": 0
+          },
+          "skipped": {
+            "$ref": "#/components/schemas/KnowledgeSkipped",
+            "description": "What the folder scan left out (secret-looking files, oversized files, ...)."
           },
           "unchanged": {
             "type": "integer",
@@ -29002,6 +29323,24 @@
           },
           "source": {
             "$ref": "#/components/schemas/KnowledgeSourceDto"
+          }
+        }
+      },
+      "KnowledgePreviewFile": {
+        "type": "object",
+        "description": "A file that would be indexed.",
+        "required": [
+          "locator",
+          "bytes"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "locator": {
+            "type": "string"
           }
         }
       },
@@ -29098,6 +29437,59 @@
           }
         },
         "additionalProperties": false
+      },
+      "KnowledgeSkipped": {
+        "type": "object",
+        "description": "What a scan left out. Hidden and unsupported entries are only counted.",
+        "required": [
+          "listed",
+          "secret",
+          "too_large",
+          "hidden",
+          "unsupported"
+        ],
+        "properties": {
+          "hidden": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "listed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSkippedFile"
+            }
+          },
+          "secret": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "too_large": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unsupported": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "KnowledgeSkippedFile": {
+        "type": "object",
+        "description": "A file or folder that is left out, with the reason.",
+        "required": [
+          "locator",
+          "reason"
+        ],
+        "properties": {
+          "locator": {
+            "type": "string",
+            "description": "Path inside the folder; folders end in `/`."
+          },
+          "reason": {
+            "type": "string",
+            "description": "`secret` (looks like it holds secrets) or `too_large`."
+          }
+        }
       },
       "KnowledgeSourceAction": {
         "type": "string",

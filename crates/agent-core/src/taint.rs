@@ -321,6 +321,7 @@ pub(crate) fn comparable_label(label: &str) -> bool {
     ) || label.starts_with("file ")
         || label.starts_with("mailbox ")
         || label.starts_with("tool knowledge")
+        || label.starts_with("tool documents")
 }
 
 /// Drop control and invisible characters and cap the length. Done when the
@@ -1948,6 +1949,7 @@ mod hashed_history_tests {
             "file notes.txt",
             "mailbox INBOX",
             "tool knowledge_search",
+            "tool documents_search",
         ] {
             assert!(comparable_label(label), "{label}");
         }

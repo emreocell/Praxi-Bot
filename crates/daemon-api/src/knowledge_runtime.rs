@@ -149,7 +149,9 @@ pub(crate) fn install(state: &AppState) {
     if state.0.knowledge_runtime.set(Arc::clone(&runtime)).is_ok() {
         let tools = state.agent().tool_registry();
         tools.unregister(builtin_tools::knowledge::KNOWLEDGE_SEARCH);
-        tools.register(builtin_tools::knowledge::tool(runtime));
+        tools.register(builtin_tools::knowledge::tool(runtime.clone()));
+        tools.unregister(builtin_tools::knowledge::DOCUMENTS_SEARCH);
+        tools.register(builtin_tools::knowledge::documents_tool(runtime));
         tools.unregister(builtin_tools::knowledge_brain::KNOWLEDGE_BRAIN_WRITE);
         tools.register(builtin_tools::knowledge_brain::tool(state.storage_arc()));
     }
@@ -352,6 +354,9 @@ impl KnowledgeBackend for KnowledgeRuntime {
     }
     fn has_enabled_sources(&self, bot: BotId) -> bool {
         self.local.has_enabled_sources(bot)
+    }
+    fn has_enabled_document_sources(&self, bot: BotId) -> bool {
+        self.local.has_enabled_document_sources(bot)
     }
 
     async fn search(

@@ -143,3 +143,28 @@ async fn peer_knowledge_node_cannot_change_profile_authority() {
 async fn peer_knowledge_host_cannot_change_profile_authority() {
     rejects_knowledge_changes(crate::PeerRole::Host).await;
 }
+
+/// Choosing a folder is the local owner's act: a paired device may neither browse the
+/// host's folders nor preview one, whatever its role.
+#[tokio::test]
+async fn peers_cannot_browse_or_preview_the_hosts_folders() {
+    let t = setup();
+    let (id, _) = make_chat(&t).await;
+    for role in [
+        crate::PeerRole::Phone,
+        crate::PeerRole::Desktop,
+        crate::PeerRole::Node,
+    ] {
+        let browse = peer_request(&t, role, Method::GET, "/v1/knowledge/folders", json!({})).await;
+        assert_eq!(browse.status, StatusCode::FORBIDDEN, "{role:?} browse");
+        let preview = peer_request(
+            &t,
+            role,
+            Method::POST,
+            &format!("/v1/bots/{id}/knowledge/folder-preview"),
+            json!({"path": "/"}),
+        )
+        .await;
+        assert_eq!(preview.status, StatusCode::FORBIDDEN, "{role:?} preview");
+    }
+}
