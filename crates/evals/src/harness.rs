@@ -562,12 +562,7 @@ fn collect(
             // An automatic grant (the Full lane, a remembered rule) is no one's answer: the call
             // keeps counting as allowed. Only a card answer, or an event from before the daemon
             // said what granted it, counts as approved.
-            Event::ToolCallApproved(a)
-                if matches!(
-                    a.granted_by,
-                    None | Some(protocol::event::GrantedBy::OwnerCard)
-                ) =>
-            {
+            Event::ToolCallApproved(a) if a.is_owner_answer() => {
                 set(&mut calls, a.call_id, |c| {
                     "approved".clone_into(&mut c.decision);
                 });

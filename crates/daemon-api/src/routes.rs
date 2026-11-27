@@ -218,7 +218,10 @@ fn run_approvals(s: &AppState, run: &storage::Run) -> Result<Vec<ApprovalDto>, A
                 requested_at_ms: ms(env.ts_ms),
                 decided_at_ms: None,
             }),
-            Event::ToolCallApproved(d) => decide(&mut out, d.call_id, "approved", ms(env.ts_ms)),
+            // An automatic grant is no one's answer to a card.
+            Event::ToolCallApproved(d) if d.is_owner_answer() => {
+                decide(&mut out, d.call_id, "approved", ms(env.ts_ms));
+            }
             Event::ToolCallDenied(d) => decide(&mut out, d.call_id, "denied", ms(env.ts_ms)),
             _ => {}
         }

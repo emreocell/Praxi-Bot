@@ -174,7 +174,7 @@
       ],
       "properties": {
         "approved_by": {
-          "description": "The owner who answered the card; for an automatic grant, the user the run belongs to (nobody answered).",
+          "description": "The owner who answered the card. For an automatic grant nobody answered, so it is [`UserId::SYSTEM`] (the nil UUID): a reader that predates `granted_by` and only looks at this field still cannot take the grant for the owner's own click.",
           "type": "string",
           "format": "uuid"
         },

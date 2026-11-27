@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { DaemonEvent } from "../api/types.ts";
 import { buildRunReport, renderHtml, renderMarkdown, scrubText, type ReportText } from "./runReport.ts";
 import { renderRunReportJson } from "./runReportJson.ts";
-import { applyEvent, EMPTY_EVENTS, type RunState } from "../state/timeline.ts";
+import { applyEvent, EMPTY_EVENTS, type RunState, type ToolItem } from "../state/timeline.ts";
 
 const t = (key: string, v?: Record<string, unknown>) => `${key}${v ? JSON.stringify(v) : ""}`;
 const text: ReportText = {
@@ -192,28 +192,37 @@ test("JSON v4 names what granted an approved call, from the daemon's fields only
   const recorded = (extra: Record<string, unknown>, offset = 300) => ({
     step_id: "step-1", kind: "approval_recorded", offset_ms: offset, outcome: "approved", ...extra
   });
-  // An owner's card answer.
+  const automatic = (extra: Record<string, unknown>, offset = 200) => ({
+    step_id: "step-1", kind: "automatic_grant", offset_ms: offset, outcome: null, ...extra
+  });
+  // An owner's card answer is the only thing that stays `approval_recorded`.
   assert.deepEqual(
     exportRecordedEvents([started, requested, waiting, granted({ granted_by: "owner_card", level: "ask" })]),
     [pending, recorded({ granted_by: "owner_card", level: "ask", rule: null })]
   );
-  // An automatic grant has no card: no waiting event, but the grant is recorded and the call's outcome follows.
+  // An automatic grant has no card: no waiting event and no `approval_recorded` (a version 3
+  // reader counts that as an owner's approval), but the grant is recorded and the outcome follows.
   assert.deepEqual(
     exportRecordedEvents([started, requested, granted({ granted_by: "full_access", level: "full" }), completed]),
     [
-      recorded({ granted_by: "full_access", level: "full", rule: null }, 200),
+      automatic({ granted_by: "full_access", level: "full", rule: null }),
       { step_id: "step-1", kind: "tool_outcome", offset_ms: 300, outcome: "done" }
     ]
   );
   assert.deepEqual(
     exportRecordedEvents([started, requested, granted({ granted_by: "remembered_choice", level: "balanced", rule_id: "always:shell_run" })]),
-    [recorded({ granted_by: "remembered_choice", level: "balanced", rule: "always:shell_run" }, 200)]
+    [automatic({ granted_by: "remembered_choice", level: "balanced", rule: "always:shell_run" })]
   );
   for (const by of ["owner_schedule", "owner_mission", "balanced_level", "standing_grant", "site_rule"]) {
     assert.deepEqual(
       exportRecordedEvents([started, requested, granted({ granted_by: by, level: "full" })]),
-      [recorded({ granted_by: by, level: "full", rule: null }, 200)]
+      [automatic({ granted_by: by, level: "full", rule: null })]
     );
+  }
+  // No automatic grant ever shows up as a recorded approval.
+  for (const by of ["full_access", "owner_schedule", "owner_mission", "balanced_level", "standing_grant", "remembered_choice", "site_rule"]) {
+    const events: Array<{ kind: string }> = exportRecordedEvents([started, requested, granted({ granted_by: by })]);
+    assert.deepEqual(events.map((e) => e.kind), ["automatic_grant"], by);
   }
 });
 
@@ -227,9 +236,23 @@ test("JSON drops provenance it does not recognise or that does not look like a d
   // A level or rule id outside the closed shapes is dropped, so call text can never ride along.
   for (const rule_id of [`always:${PRIVATE.input}`, "always:../../etc/passwd", "elsewhere:shell_run", `chat:${"x".repeat(65)}`, 7]) {
     assert.deepEqual(exported({ granted_by: "remembered_choice", level: "PRIVATE-LEVEL", rule_id }), [
-      { step_id: "step-1", kind: "approval_recorded", offset_ms: 200, outcome: "approved", granted_by: "remembered_choice", level: null, rule: null }
+      { step_id: "step-1", kind: "automatic_grant", offset_ms: 200, outcome: null, granted_by: "remembered_choice", level: null, rule: null }
     ]);
   }
+});
+
+test("JSON re-checks a rule against the rule-id shape at export, whatever the timeline holds", () => {
+  const item = (rule: { scope: "always"; name?: string }) => ({
+    kind: "tool", key: "k", callId: "c1", name: "shell_run", input: {}, status: "done", requestedMs: 1100,
+    gated: false, approvalDecision: { outcome: "approved", offsetMs: 1200, grant: { by: "remembered_choice", rule } }
+  }) as unknown as ToolItem;
+  const ruleOf = (rule: { scope: "always"; name?: string }) => {
+    const report = run({ items: [item(rule)] });
+    return JSON.parse(renderRunReportJson(report)).approval_events[0].rule;
+  };
+  assert.equal(ruleOf({ scope: "always", name: "shell_run" }), "always:shell_run");
+  assert.equal(ruleOf({ scope: "always" }), "always");
+  for (const name of [`${PRIVATE.input}`, "x".repeat(65), "../a", ""]) assert.equal(ruleOf({ scope: "always", name }), null, name);
 });
 
 test("JSON records a denial only after an observed gate and leaves reserved reasons ambiguous", () => {

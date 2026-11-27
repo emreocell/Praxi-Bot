@@ -1,4 +1,4 @@
-import type { GrantedBy, GrantLevel, RunState, ToolItem, ToolStatus } from "../state/timeline.ts";
+import { validRuleId, type GrantedBy, type GrantLevel, type RunState, type ToolItem, type ToolStatus } from "../state/timeline.ts";
 import { isDiscoveryTool } from "./toolLabels.ts";
 
 type StepOutcome = ToolStatus | "answered" | "unanswered" | "stored" | "cancelled" | null;
@@ -15,13 +15,15 @@ interface ExportStep {
 type ApprovalEvent = { step_id: string; offset_ms: number | null } & (
   | { kind: "waiting_for_approval"; outcome: null }
   | ({ kind: "approval_recorded"; outcome: "approved" | "denied" } & Provenance)
+  | ({ kind: "automatic_grant"; outcome: null } & Provenance)
   | { kind: "tool_outcome"; outcome: "done" | "error" }
 );
 
 /**
  * What let an approved call run, from the daemon's own `granted_by` / `level` / `rule_id`. Each
  * field is `null` when the daemon did not say (an approval recorded before version 4, or a
- * denial). `rule` is the scope and tool or category name of a remembered rule, never call text.
+ * denial). `rule` is the scope and tool or category name of a remembered rule, never call text;
+ * it is checked against the rule-id shape again here, whatever the timeline holds.
  */
 interface Provenance {
   granted_by: GrantedBy | null;
@@ -44,8 +46,11 @@ function appendApprovalEvents(
   startedMs: number
 ): void {
   const decision = item.approvalDecision;
-  // A call an automatic rule allowed has no card, but its recorded grant is still an approval.
-  if (!item.gated && !decision?.grant) return;
+  const grant = decision?.grant;
+  // An automatic grant (Full, Balanced, a standing or remembered rule) is no owner approval and
+  // is not exported as one: version 3 readers count `approval_recorded` as an answered card.
+  const automatic = decision?.outcome === "approved" && grant !== undefined && grant.by !== "owner_card";
+  if (!item.gated && !automatic) return;
   const completionOffset = item.completedMs === undefined ? null : milliseconds(item.completedMs - startedMs);
 
   // Only an approval notice or a pending-card snapshot writes the summary. Export its presence, not its text.
@@ -53,16 +58,17 @@ function appendApprovalEvents(
     events.push({ step_id: stepId, kind: "waiting_for_approval", offset_ms: null, outcome: null });
   }
   if (decision?.outcome === "approved" || decision?.outcome === "denied") {
-    const grant = decision.grant;
-    events.push({
-      step_id: stepId,
-      kind: "approval_recorded",
-      offset_ms: milliseconds(decision.offsetMs),
-      outcome: decision.outcome,
+    const provenance: Provenance = {
       granted_by: grant?.by ?? null,
       level: grant?.level ?? null,
-      rule: grant?.rule ? (grant.rule.name ? `${grant.rule.scope}:${grant.rule.name}` : grant.rule.scope) : null
-    });
+      rule: validRuleId(grant?.rule) ?? null
+    };
+    const offset_ms = milliseconds(decision.offsetMs);
+    events.push(
+      automatic
+        ? { step_id: stepId, kind: "automatic_grant", offset_ms, outcome: null, ...provenance }
+        : { step_id: stepId, kind: "approval_recorded", offset_ms, outcome: decision.outcome, ...provenance }
+    );
   }
   if (item.status === "done" || item.status === "error") {
     events.push({ step_id: stepId, kind: "tool_outcome", offset_ms: completionOffset, outcome: item.status });

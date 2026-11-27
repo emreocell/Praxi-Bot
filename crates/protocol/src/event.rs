@@ -113,8 +113,9 @@ pub enum AutonomyLevel {
 pub struct ToolCallApproved {
     pub run_id: RunId,
     pub call_id: ToolCallId,
-    /// The owner who answered the card; for an automatic grant, the user the
-    /// run belongs to (nobody answered).
+    /// The owner who answered the card. For an automatic grant nobody answered, so it is
+    /// [`UserId::SYSTEM`] (the nil UUID): a reader that predates `granted_by` and only looks
+    /// at this field still cannot take the grant for the owner's own click.
     pub approved_by: UserId,
     /// What granted the call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -127,6 +128,17 @@ pub struct ToolCallApproved {
     /// Never a path, address, command or other text of the call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule_id: Option<String>,
+}
+
+impl ToolCallApproved {
+    /// Whether a person answered a card for this call: an `owner_card` grant, or an event
+    /// from before `granted_by` existed (which always meant an answered card, though it does
+    /// not say so). Every count or display of "the owner approved" must use this, not the
+    /// event's mere presence: an automatic grant is also a `tool_call_approved`.
+    #[must_use]
+    pub fn is_owner_answer(&self) -> bool {
+        matches!(self.granted_by, None | Some(GrantedBy::OwnerCard))
+    }
 }
 
 /// The user denied a pending tool call.
@@ -527,6 +539,32 @@ mod tests {
         full["rule_id"] = serde_json::json!("always:shell_run");
         let event: Event = serde_json::from_value(full.clone()).unwrap();
         assert_eq!(serde_json::to_value(event).unwrap(), full);
+    }
+
+    #[test]
+    fn only_a_card_answer_or_a_legacy_event_is_an_owner_answer() {
+        let approved = |granted_by| ToolCallApproved {
+            run_id: RunId::new(),
+            call_id: ToolCallId::new(),
+            approved_by: UserId::new(),
+            granted_by,
+            level: None,
+            rule_id: None,
+        };
+        assert!(approved(None).is_owner_answer());
+        assert!(approved(Some(GrantedBy::OwnerCard)).is_owner_answer());
+        for by in [
+            GrantedBy::FullAccess,
+            GrantedBy::OwnerSchedule,
+            GrantedBy::OwnerMission,
+            GrantedBy::BalancedLevel,
+            GrantedBy::StandingGrant,
+            GrantedBy::RememberedChoice,
+            GrantedBy::SiteRule,
+        ] {
+            assert!(!approved(Some(by)).is_owner_answer(), "{by:?}");
+        }
+        assert!(UserId::SYSTEM.is_system() && !UserId::new().is_system());
     }
 
     #[test]

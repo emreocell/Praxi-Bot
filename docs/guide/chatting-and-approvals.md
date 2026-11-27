@@ -656,7 +656,10 @@ opened row:
 Only calls that would otherwise have asked carry a line: a read the level
 allows anyway shows nothing. The line comes from the daemon's own record of the
 decision, never from anything a page, a mail or a tool said. A step approved
-before this record existed shows a plain "Approved". Calls made by a coding
+before this record existed shows a plain "Approved". In the daemon's event
+journal an automatic grant carries the all-zero system user id as its approver
+(`00000000-0000-0000-0000-000000000000`), never yours, so a tool that reads the
+journal without knowing `granted_by` cannot mistake it for a click of yours. Calls made by a coding
 engine on its own steps, and calls from a script, have no step to attach a line
 to.
 
@@ -729,19 +732,32 @@ send the run anywhere.
   (`done` or `error`). Decision times use the daemon event's time relative to
   the start of the run, not the time someone clicked; unavailable or invalid
   offsets are `null`.
-- Version 4 adds three fields to `approval_recorded`, each `null` when the
-  daemon did not say: `granted_by` (`owner_card`, `full_access`,
-  `owner_schedule`, `owner_mission`, `balanced_level`, `standing_grant`,
-  `remembered_choice` or `site_rule`), `level` (`ask`, `balanced` or `full`, the
-  bot's level when the call was decided) and `rule` (the remembered rule that
-  covered the call, `<scope>:<name>` with scope `chat`, `always`, `category`,
-  `task` or `standing` and a tool or category name; never a path, address or
-  command). A call that an automatic rule allowed has no card, so it gives
-  `approval_recorded` and `tool_outcome` but no `waiting_for_approval`. An
-  approval recorded before version 4 has all three fields `null`: it was an
-  approval, but its source is not claimed. A denial always has `null` fields.
-  The three fields are additive, so a reader of version 3 that ignores unknown
-  fields still works; only `schema_version` changed.
+- Version 4 adds three fields, each `null` when the daemon did not say:
+  `granted_by` (`owner_card`, `full_access`, `owner_schedule`, `owner_mission`,
+  `balanced_level`, `standing_grant`, `remembered_choice` or `site_rule`),
+  `level` (`ask`, `balanced` or `full`, the bot's level when the call was
+  decided) and `rule` (the remembered rule that covered the call,
+  `<scope>:<name>` with scope `chat`, `always`, `category`, `task` or `standing`
+  and a tool or category name of at most 64 characters from `A-Z a-z 0-9 _ . -`;
+  never a path, address or command; the export checks this shape again, so
+  anything else becomes `null`). The fields sit on `approval_recorded`, which
+  stays what it was in version 3: **you answered a card** (`granted_by` is
+  `owner_card`, or `null` for an approval recorded before version 4: it was an
+  approval, but its source is not claimed).
+- Version 4 also adds the event kind `automatic_grant` for a call that an
+  automatic rule allowed in place of a card (Full access, the Balanced level, a
+  standing permission, a remembered choice, a site rule). It has `outcome`
+  `null`, the same three fields (`granted_by` is never `owner_card`), and no
+  `waiting_for_approval` before it, because there was no card. It is a separate
+  kind on purpose: a reader written for version 3 counts `approval_recorded`
+  events as answers of yours, and keeps doing so correctly. Such a reader must
+  ignore event kinds it does not know; it then simply does not see the
+  automatic grants. A step that
+  version 3 exported with no approval events at all (no card was shown) now
+  also gives an `automatic_grant` when the daemon recorded one.
+- Only `schema_version` changed for a reader that ignores unknown kinds and
+  fields, so a version 3 reader keeps working on a version 4 file. Version 3
+  files stay valid version 3 files: the new fields and kind are never required.
 - A denial is reported as a decision only when the corresponding gate was
   observed. Expiry and policy veto aren't owner denials. The daemon sends the
   reason as text, so if an owner types a reason that looks like expiry or

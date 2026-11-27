@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use permission_engine::profiles::NewRule;
 use permission_engine::{Capability, Policy, ProfileAction, SubjectKind};
 use protocol::event::{AutonomyLevel, GrantedBy, ToolCallApproved};
-use protocol::{Event, PermissionCategory};
+use protocol::{Event, PermissionCategory, ToolCallId, UserId};
 use serde_json::{Value, json};
 use task_runtime::RunState;
 use tool_registry::{ContentClass, Effect};
@@ -28,6 +28,9 @@ fn approvals(rx: &mut tokio::sync::broadcast::Receiver<StreamItem>) -> Vec<ToolC
     let mut out = Vec::new();
     while let Ok(item) = rx.try_recv() {
         if let Event::ToolCallApproved(a) = item.envelope.event {
+            // Only a person's answer carries a user: an automatic grant carries the system
+            // marker, so a reader that ignores `granted_by` cannot take it for a click.
+            assert_eq!(a.approved_by.is_system(), !a.is_owner_answer(), "{a:?}");
             out.push(a);
         }
     }
@@ -67,8 +70,42 @@ async fn answer_first_card(scope: ApprovalScope, calls_made: usize) -> Vec<ToolC
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
     assert_eq!(w.count.load(Ordering::SeqCst), calls_made);
     let events = approvals(&mut rx);
-    assert!(events.iter().all(|a| a.approved_by == env.user));
+    assert!(
+        events
+            .iter()
+            .all(|a| a.is_owner_answer() == (a.approved_by == env.user))
+    );
     events
+}
+
+/// Every approval event is on disk before the tool runs, an automatic grant included: a crash
+/// after the call starts must not leave a run that executed with no record of who allowed it.
+#[test]
+fn every_approval_event_is_journaled_before_the_tool_runs() {
+    use crate::shared::needs_barrier;
+    let approved = |granted_by| {
+        Event::ToolCallApproved(ToolCallApproved {
+            run_id: protocol::RunId::new(),
+            call_id: ToolCallId::new(),
+            approved_by: UserId::new(),
+            granted_by,
+            level: None,
+            rule_id: None,
+        })
+    };
+    assert!(needs_barrier(&approved(None)));
+    for by in [
+        GrantedBy::OwnerCard,
+        GrantedBy::FullAccess,
+        GrantedBy::OwnerSchedule,
+        GrantedBy::OwnerMission,
+        GrantedBy::BalancedLevel,
+        GrantedBy::StandingGrant,
+        GrantedBy::RememberedChoice,
+        GrantedBy::SiteRule,
+    ] {
+        assert!(needs_barrier(&approved(Some(by))), "{by:?}");
+    }
 }
 
 #[tokio::test]
@@ -208,7 +245,8 @@ async fn the_full_lane_says_whose_run_it_served() {
             (Some(expected), Some(AutonomyLevel::Full), None),
             "{start:?}"
         );
-        assert_eq!(events[0].approved_by, env.user, "{start:?}");
+        assert_eq!(events[0].approved_by, UserId::SYSTEM, "{start:?}");
+        assert!(!events[0].is_owner_answer(), "{start:?}");
         // The journal on disk has the same event, so a reopened run shows it too.
         let journal = storage::read_event_log(env.storage.data_dir(), run).unwrap();
         assert!(

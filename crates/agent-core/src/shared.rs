@@ -2917,12 +2917,13 @@ pub(crate) fn redact_value(r: &SharedRedactor, v: &mut serde_json::Value) -> boo
 
 /// Events that must be on disk before `emit` returns: approvals, questions,
 /// control hand-over and run state.  Everything else is journaled in batches.
-fn needs_barrier(event: &Event) -> bool {
+pub(crate) fn needs_barrier(event: &Event) -> bool {
     matches!(
         event,
         Event::RunStarted(_)
             | Event::RunFinished(_)
             | Event::ApprovalNeeded(_)
+            | Event::ToolCallApproved(_)
             | Event::ToolCallDenied(_)
             | Event::QuestionAsked(_)
             | Event::SecretRequested(_)
@@ -2931,12 +2932,6 @@ fn needs_barrier(event: &Event) -> bool {
             | Event::SubagentStarted(_)
             | Event::SubagentFinished(_)
             | Event::Error(_)
-    ) || matches!(
-        event,
-        // An owner's answer is on disk before the tool runs; an automatic grant is a record of a
-        // decision no one waits for, so it is batched like the call's other events.
-        Event::ToolCallApproved(a)
-            if matches!(a.granted_by, None | Some(protocol::event::GrantedBy::OwnerCard))
     )
 }
 

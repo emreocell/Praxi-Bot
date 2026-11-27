@@ -5,8 +5,8 @@
  * (`grantOf` checks them). An approval recorded before the daemon said who granted it stays a
  * plain "Approved", never "You approved".
  */
-import type { ApprovalGrant, ToolItem } from "../state/timeline.ts";
-import { humanizeName, resolveToolCall } from "./toolLabels.ts";
+import { validRuleId, type ApprovalGrant, type ToolItem } from "../state/timeline.ts";
+import { humanizeName } from "./toolLabels.ts";
 
 export interface DecisionLine {
   key: string;
@@ -18,20 +18,22 @@ const CATEGORIES = new Set([
   "accounts", "browser", "desktop", "fs", "messaging", "money", "remote", "script", "shell", "system"
 ]);
 
-/** The tool as a lower-case phrase: `shell_run` -> `shell run`, `mcp:github/x` -> `github x`. */
-function toolPhrase(tool: Pick<ToolItem, "name" | "input">): string {
-  return humanizeName(resolveToolCall(tool.name, tool.input).name.replace(/^mcp:/, ""));
-}
-
-function rememberedLine(grant: ApprovalGrant, tool: Pick<ToolItem, "name" | "input">, t: (key: string) => string): DecisionLine {
-  const rule = grant.rule;
+/**
+ * The line of a remembered choice. It is built only from the rule the daemon named: a category
+ * from the allowlist, or a tool name that has the shape of a rule id. The live tool name and
+ * input of the step are never read, so text a model or a server chose cannot reach the line.
+ */
+function rememberedLine(grant: ApprovalGrant, t: (key: string) => string): DecisionLine {
+  const rule = validRuleId(grant.rule) ? grant.rule : undefined;
   if (rule?.scope === "category" && rule.name && CATEGORIES.has(rule.name)) {
     return { key: "chat.chain.grant.rememberedCategory", values: { what: t(`botForm.category.${rule.name}`) } };
   }
-  const what = toolPhrase(tool);
-  if (rule?.scope === "always") return { key: "chat.chain.grant.rememberedAlways", values: { what } };
-  if (rule?.scope === "chat") return { key: "chat.chain.grant.rememberedChat", values: { what } };
-  if (rule?.scope === "task") return { key: "chat.chain.grant.rememberedTask", values: { what } };
+  const what = rule?.name ? humanizeName(rule.name) : "";
+  if (what) {
+    if (rule?.scope === "always") return { key: "chat.chain.grant.rememberedAlways", values: { what } };
+    if (rule?.scope === "chat") return { key: "chat.chain.grant.rememberedChat", values: { what } };
+    if (rule?.scope === "task") return { key: "chat.chain.grant.rememberedTask", values: { what } };
+  }
   return { key: "chat.chain.grant.remembered", values: {} };
 }
 
@@ -40,7 +42,7 @@ function rememberedLine(grant: ApprovalGrant, tool: Pick<ToolItem, "name" | "inp
  * the run, already formatted (null when it was not recorded).
  */
 export function decisionLine(
-  tool: Pick<ToolItem, "name" | "input" | "approvalDecision">,
+  tool: Pick<ToolItem, "approvalDecision">,
   time: string | null,
   t: (key: string) => string
 ): DecisionLine | null {
@@ -70,6 +72,6 @@ export function decisionLine(
     case "site_rule":
       return { key: "chat.chain.grant.siteRule", values: {} };
     case "remembered_choice":
-      return rememberedLine(grant, tool, t);
+      return rememberedLine(grant, t);
   }
 }

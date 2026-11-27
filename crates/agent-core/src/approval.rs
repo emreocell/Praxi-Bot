@@ -1253,15 +1253,18 @@ impl Shared {
     }
 
     /// Journal that an automatic rule stood in for the card of `call_id`
-    /// ([`ToolCallApproved`] with the provenance; nobody answered, so `approved_by` is the
-    /// run's own user). Called once the call is committed to run.
+    /// ([`ToolCallApproved`] with the provenance; nobody answered, so `approved_by` is
+    /// [`protocol::UserId::SYSTEM`], never the run's user: a reader that ignores `granted_by` must not
+    /// read it as the owner's click). Called once the call is committed to run. The event is
+    /// journaled with a barrier like every approval, so a crash after the tool starts cannot
+    /// lose who allowed it.
     pub(crate) fn emit_grant(&self, ctx: &RunCtx, call_id: ToolCallId, grant: Provenance) {
         self.emit(
             ctx,
             Event::ToolCallApproved(ToolCallApproved {
                 run_id: ctx.run_id,
                 call_id,
-                approved_by: ctx.user_id,
+                approved_by: protocol::UserId::SYSTEM,
                 granted_by: Some(grant.granted_by),
                 level: Some(grant.level),
                 rule_id: grant.rule_id,

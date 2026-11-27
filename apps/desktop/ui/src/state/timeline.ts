@@ -83,11 +83,22 @@ export type GrantRuleScope = "chat" | "always" | "category" | "task" | "standing
 export interface ApprovalGrant {
   by: GrantedBy;
   level?: GrantLevel;
-  /** The remembered rule: its scope, and the tool or category name it names (never call text). */
+  /** The remembered rule: its scope, and the tool or category name it names (never call text; see `validRuleId`). */
   rule?: { scope: GrantRuleScope; name?: string };
 }
 
 const RULE_ID = /^(chat|always|category|task|standing)(?::([A-Za-z0-9_.-]{1,64}))?$/;
+
+/**
+ * `rule` as a daemon-shaped rule id (`<scope>` or `<scope>:<name>`), or undefined. Everything
+ * that shows or exports a rule goes through this, so a grant built by hand or by a newer reader
+ * still cannot carry text longer than 64 characters or outside `[A-Za-z0-9_.-]`.
+ */
+export function validRuleId(rule: ApprovalGrant["rule"]): string | undefined {
+  if (!rule) return undefined;
+  const id = rule.name === undefined ? rule.scope : `${rule.scope}:${rule.name}`;
+  return RULE_ID.test(id) ? id : undefined;
+}
 
 /**
  * The provenance an approval event carries, checked field by field: a value this build does not
