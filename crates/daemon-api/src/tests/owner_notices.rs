@@ -284,6 +284,15 @@ async fn a_blocked_mission_is_pushed_once_and_its_questions_are_answered_from_a_
     .await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
     assert_eq!(r.json(), json!({"answered": 1, "skipped": 0}));
+    // A notice answers once: the same message again changes nothing and says so.
+    let again = call(
+        &t,
+        Method::POST,
+        &path,
+        Some(json!({"answers": [{"key": "b.example", "answer": "Other Ltd"}]})),
+    )
+    .await;
+    assert_eq!(again.status, StatusCode::CONFLICT, "{:?}", again.json());
     let item = store
         .items(&id, None)
         .unwrap()
@@ -394,6 +403,11 @@ async fn unknown_notices_and_notices_without_questions_answer_cleanly() {
 }
 
 fn scheduled_run(t: &T, bot: &str, kind: &str) -> RunId {
+    scheduled_run_saying(t, bot, kind, "Posted 3 new leads to the sheet.", false)
+}
+
+/// A finished run whose last message is `said`, written after it read private data or not.
+fn scheduled_run_saying(t: &T, bot: &str, kind: &str, said: &str, private: bool) -> RunId {
     let chat = storage::Chat {
         id: ChatId::new(),
         user_id: t.state.user_id(),
@@ -432,10 +446,10 @@ fn scheduled_run(t: &T, bot: &str, kind: &str) -> RunId {
             chat_id: chat.id,
             run_id: Some(run),
             role: "assistant".into(),
-            content: "Posted 3 new leads to the sheet.".into(),
+            content: said.into(),
             created_at_ms: storage::now_ms(),
             exposure_untrusted: false,
-            exposure_private: false,
+            exposure_private: private,
             exposure_sources: Vec::new(),
         })
         .unwrap();
@@ -608,4 +622,162 @@ async fn a_bridge_that_reconnects_replays_what_it_missed() {
     let mut back = open_stream(&t, "?after=0").await;
     let f = read_until(&mut back, |f| !notices(f).is_empty()).await;
     assert_eq!(notices(&f)[0]["kind"], "blocked");
+}
+
+#[tokio::test]
+async fn a_stale_mission_notice_cannot_answer_what_the_mission_asks_now() {
+    let t = setup();
+    let bot = full_bot(&t).await;
+    let id = blocked_mission(&t, &bot);
+    let store = t.state.mission_store().unwrap();
+    // The mission blocked and the owner was told; it blocked again on the same item and the
+    // owner was told again.
+    t.state
+        .mission_supervisor()
+        .unwrap()
+        .conclude(&id)
+        .await
+        .unwrap();
+    let mission = store.get(&id).unwrap().unwrap();
+    t.state.notify_mission_concluded(&mission);
+    let list = call(&t, Method::GET, "/v1/owner-notices", None)
+        .await
+        .json();
+    let (old, new) = (
+        list[0]["id"].as_str().unwrap(),
+        list[1]["id"].as_str().unwrap(),
+    );
+    let body = json!({"answers": [{"key": "b.example", "answer": "Webioo Ltd"}]});
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/owner-notices/{old}/answers"),
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.json());
+    assert_eq!(store.progress(&id).unwrap().blocked, 2, "nothing changed");
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/owner-notices/{new}/answers"),
+        Some(body),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+}
+
+#[tokio::test]
+async fn a_question_of_a_run_is_answered_only_while_the_run_still_waits_for_it() {
+    let t = setup();
+    let bot = full_bot(&t).await;
+    t.state.start_notice_watcher();
+    let sched = uuid::Uuid::now_v7();
+    let run = scheduled_run(&t, &bot, &format!("turn:schedule:{sched}"));
+    let call_id = protocol::ToolCallId::new();
+    t.state.agent().emit_run_event(
+        run,
+        Event::QuestionAsked(protocol::event::QuestionAsked {
+            run_id: run,
+            call_id,
+            question: "Which sheet?".into(),
+            options: vec![],
+        }),
+    );
+    let list = wait_for_notices(&t, 1).await;
+    let notice = list[0]["id"].as_str().unwrap();
+    let path = format!("/v1/owner-notices/{notice}/answers");
+    // The wait is gone (answered in the app, or the run ended): a late chat message is refused
+    // and says why, and the notice is not used up.
+    let body = json!({"answers": [{"key": call_id.to_string(), "answer": "Sheet 2"}]});
+    let r = call(&t, Method::POST, &path, Some(body.clone())).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{:?}", r.json());
+    assert!(
+        r.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not waiting"),
+        "{:?}",
+        r.json()
+    );
+    // The same key twice in one message is a mistake, not two answers.
+    let twice = json!({"answers": [
+        {"key": call_id.to_string(), "answer": "a"},
+        {"key": call_id.to_string(), "answer": "b"},
+    ]});
+    let r = call(&t, Method::POST, &path, Some(twice)).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.json());
+}
+
+#[tokio::test]
+async fn what_a_run_said_after_reading_private_data_stays_out_of_the_notice() {
+    let t = setup();
+    let bot = full_bot(&t).await;
+    t.state.start_notice_watcher();
+    let said = "Your landlord wrote that the deposit of 4,200 EUR is due on the 3rd.";
+    let sched = uuid::Uuid::now_v7();
+    let run = scheduled_run_saying(&t, &bot, &format!("turn:schedule:{sched}"), said, true);
+    t.state.agent().emit_run_event(
+        run,
+        Event::RunFinished(protocol::event::RunFinished {
+            run_id: run,
+            error: None,
+        }),
+    );
+    let list = wait_for_notices(&t, 1).await;
+    let text = list[0]["done"][0]["text"].as_str().unwrap();
+    assert!(
+        !text.contains("landlord") && !text.contains("4,200"),
+        "{text}"
+    );
+    assert!(text.contains("open it in the app"), "{text}");
+    assert!(!list.to_string().contains("landlord"));
+}
+
+#[tokio::test]
+async fn a_run_that_asks_endlessly_makes_one_bounded_notice() {
+    let t = setup();
+    let bot = full_bot(&t).await;
+    t.state.start_notice_watcher();
+    let sched = uuid::Uuid::now_v7();
+    let run = scheduled_run(&t, &bot, &format!("turn:schedule:{sched}"));
+    for i in 0..200 {
+        t.state.agent().emit_run_event(
+            run,
+            Event::QuestionAsked(protocol::event::QuestionAsked {
+                run_id: run,
+                call_id: protocol::ToolCallId::new(),
+                question: format!("Question {i}?"),
+                options: vec![],
+            }),
+        );
+        t.state.agent().emit_run_event(
+            run,
+            Event::ApprovalNeeded(protocol::event::ApprovalNeeded {
+                run_id: run,
+                call_id: protocol::ToolCallId::new(),
+                tool_name: "shop_buy".into(),
+                input: json!({}),
+                summary: format!("Pay {i}"),
+                details: None,
+            }),
+        );
+        // Let the watcher keep up, so the test is about the bound and not about lagging.
+        tokio::task::yield_now().await;
+    }
+    let list = wait_for_notices(&t, 1).await;
+    let n = &list[0];
+    assert_eq!(
+        n["questions"].as_array().unwrap().len(),
+        channel_api::notice::MAX_LISTED + 1,
+        "one more than a message lists, so it says there is more"
+    );
+    assert_eq!(
+        n["app_only"].as_array().unwrap().len(),
+        channel_api::notice::MAX_LISTED + 1
+    );
+    assert_eq!(
+        n["questions"][0]["title"], "Question 0?",
+        "the first are kept"
+    );
 }

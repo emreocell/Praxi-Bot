@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use channel_api::notice::{
-    Feedback, NoticeLang, OwnerNotice, feedback, parse_reply, parse_retry_callback, render,
+    Feedback, Flavor, NoticeLang, OwnerNotice, feedback, parse_reply, parse_retry_callback, render,
     reply_error_feedback, retry_callback,
 };
 use futures::FutureExt;
@@ -534,6 +534,15 @@ fn approval_markup(
     InlineKeyboardMarkup::from_rows(vec![row])
 }
 
+/// The text after `/answer` (or `/answer@bot`), if `text` is that command.
+fn answer_arg(text: &str) -> Option<&str> {
+    let t = text.trim();
+    (t == "/answer" || t.starts_with("/answer ") || t.starts_with("/answer@")).then(|| {
+        t.split_once(char::is_whitespace)
+            .map_or("", |(_, rest)| rest.trim())
+    })
+}
+
 impl TelegramChannel {
     /// Construct a [`TelegramChannel`] without spawning the background polling task.
     ///
@@ -810,7 +819,6 @@ impl TelegramChannel {
         if followed {
             return;
         }
-        self.inner.notices.remember(notice);
         for chat_id in self.inner.pairing.paired_users() {
             let lang = self.notice_lang(chat_id);
             let markup = notice
@@ -822,24 +830,39 @@ impl TelegramChannel {
                     )]])
                 })
                 .flatten();
-            if let Err(e) = self
-                .send_redacted(chat_id, &render(notice, lang), markup.as_ref())
-                .await
-            {
-                self.report_error(&e);
+            let text = render(notice, lang, Flavor::Plain);
+            match self.send_redacted(chat_id, &text, markup.as_ref()).await {
+                // Only a notice the owner was shown can be answered or retried from their chat.
+                Ok(_) => self.inner.notices.remember(notice, &chat_id.to_string()),
+                Err(e) => self.report_error(&e),
             }
         }
     }
 
-    /// `/answer <text>`: answer the questions of the newest notice that still has some. Only
-    /// questions are answered here; an approval is never decided from a chat.
-    async fn handle_answer_command(&self, chat_id: i64, text: &str) -> Result<()> {
+    /// `/answer <text>`: answer the questions of the newest notice shown to this user that still
+    /// has some. Only the paired user, typing in their own private chat, can (a message that was
+    /// forwarded from somewhere else carries someone else's words). Only questions are answered
+    /// here; an approval is never decided from a chat.
+    async fn handle_answer_command(
+        &self,
+        chat_id: i64,
+        user_id: i64,
+        forwarded: bool,
+        text: &str,
+    ) -> Result<()> {
+        if !self.owns_chat(chat_id, user_id) {
+            return Ok(());
+        }
         let lang = self.notice_lang(chat_id);
         let say = |f: Feedback| {
             let text = feedback(lang, f);
             async move { self.send_redacted(chat_id, &text, None).await.map(|_| ()) }
         };
-        let Some(notice) = self.inner.notices.open_question() else {
+        if forwarded {
+            return say(Feedback::Forwarded).await;
+        }
+        let owner = user_id.to_string();
+        let Some(notice) = self.inner.notices.open_question(&owner) else {
             return say(Feedback::NothingOpen).await;
         };
         let replies = match parse_reply(text, &notice) {
@@ -853,7 +876,7 @@ impl TelegramChannel {
             .await
         {
             Ok((answered, skipped)) => {
-                self.inner.notices.mark_answered(&notice.id);
+                self.inner.notices.mark_answered(&notice.id, &owner);
                 say(Feedback::Answered { answered, skipped }).await
             }
             Err(e) => {
@@ -863,15 +886,22 @@ impl TelegramChannel {
         }
     }
 
-    /// The "Try again" button of a notice.
+    /// The paired user, in their own private chat (the chat id of a private chat is the user's).
+    fn owns_chat(&self, chat_id: i64, user_id: i64) -> bool {
+        chat_id == user_id && self.inner.pairing.is_paired(user_id)
+    }
+
+    /// The "Try again" button of a notice: only the paired user, on a notice shown to them.
     async fn handle_retry_callback(
         &self,
         chat_id: i64,
+        user_id: i64,
         query_id: &str,
         notice_id: &str,
     ) -> Result<()> {
         let lang = self.notice_lang(chat_id);
-        let ok = self.inner.notices.knows(notice_id)
+        let ok = self.owns_chat(chat_id, user_id)
+            && self.inner.notices.knows(notice_id, &user_id.to_string())
             && self.inner.api_client.retry_notice(notice_id).await.is_ok();
         let text = feedback(
             lang,
@@ -1381,8 +1411,14 @@ impl TelegramChannel {
             return Ok(());
         }
 
+        let forwarded = msg.forwarded;
         match msg.kind {
             IncomingKind::Text(text) => {
+                if let Some(arg) = answer_arg(&text) {
+                    return self
+                        .handle_answer_command(chat_id, user_id, forwarded, arg)
+                        .await;
+                }
                 self.handle_paired_text(chat_id, &text, msg.update_id).await
             }
             IncomingKind::Voice {
@@ -1402,6 +1438,11 @@ impl TelegramChannel {
                 Ok(())
             }
             IncomingKind::Callback { query_id, data, .. } => {
+                if let Some(notice_id) = parse_retry_callback(&data) {
+                    return self
+                        .handle_retry_callback(chat_id, user_id, &query_id, notice_id)
+                        .await;
+                }
                 self.handle_callback(chat_id, &query_id, &data, msg.update_id)
                     .await
             }
@@ -1544,15 +1585,6 @@ impl TelegramChannel {
         }
         if trimmed == "/status" || trimmed.starts_with("/status@") {
             return self.handle_status_command(chat_id).await;
-        }
-        if trimmed == "/answer"
-            || trimmed.starts_with("/answer ")
-            || trimmed.starts_with("/answer@")
-        {
-            let arg = trimmed
-                .split_once(char::is_whitespace)
-                .map_or("", |(_, rest)| rest.trim());
-            return self.handle_answer_command(chat_id, arg).await;
         }
         if trimmed == "/lang" || trimmed.starts_with("/lang ") || trimmed.starts_with("/lang@") {
             let arg = trimmed
@@ -2168,12 +2200,6 @@ impl TelegramChannel {
             return Ok(());
         }
 
-        if let Some(notice_id) = parse_retry_callback(data) {
-            return self
-                .handle_retry_callback(chat_id, query_id, notice_id)
-                .await;
-        }
-
         if let Some((call_id, payload)) = parse_question_callback(data) {
             let answer = {
                 let rt = self.inner.runtime.lock();
@@ -2239,6 +2265,12 @@ impl TelegramChannel {
     #[cfg(test)]
     pub(crate) fn active_runs_for_test(&self) -> usize {
         self.inner.runtime.lock().active_runs.len()
+    }
+
+    /// The book of notices shown to users (tests plant one for a user nobody pushed it to).
+    #[cfg(test)]
+    pub(crate) fn inner_notices_for_test(&self) -> &NoticeBook {
+        &self.inner.notices
     }
 
     /// Follow `run_id` in `chat_id` the way a message sent from that chat would.

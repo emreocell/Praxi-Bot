@@ -12,7 +12,7 @@
 //!   (`app_only`); only the questions of blocked mission items and of a run can be answered from
 //!   a chat.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -57,6 +57,11 @@ const BATCH_WINDOW: Duration = Duration::from_secs(4);
 const HELD_TICK: Duration = Duration::from_secs(30);
 /// Longest text kept per notice line.
 const TEXT_MAX: usize = 300;
+/// Runs whose questions are being batched at once; more are told about in the app only.
+const MAX_WATCHED_RUNS: usize = 256;
+/// Questions (and app-only items) kept per run and batch: one more than a message lists, so the
+/// message still says "more in the app".
+const MAX_WANTS: usize = MAX_LISTED + 1;
 
 // ----------------------------------------------------------------------------- settings
 
@@ -102,6 +107,9 @@ impl Default for OwnerNotifySettings {
     }
 }
 
+/// Longest time zone name accepted (the longest IANA name is 32 characters).
+const MAX_ZONE_CHARS: usize = 64;
+
 fn parse_hhmm(s: &str) -> Option<NaiveTime> {
     let (h, m) = s.trim().split_once(':')?;
     if h.len() != 2 || m.len() != 2 {
@@ -129,12 +137,18 @@ impl OwnerNotifySettings {
     /// What is wrong, for the owner.
     pub fn validate(&self) -> Result<(), String> {
         if let Some(q) = &self.quiet_hours {
-            if parse_hhmm(&q.start).is_none() || parse_hhmm(&q.end).is_none() {
+            let (Some(start), Some(end)) = (parse_hhmm(&q.start), parse_hhmm(&q.end)) else {
                 return Err("quiet hours need times like 22:00 and 08:00".into());
+            };
+            if start == end {
+                return Err("quiet hours need a start that differs from the end".into());
             }
-            if !q.timezone.trim().is_empty() && q.timezone.trim().parse::<chrono_tz::Tz>().is_err()
-            {
-                return Err(format!("unknown time zone {:?}", q.timezone));
+            let zone = q.timezone.trim();
+            if zone.len() > MAX_ZONE_CHARS {
+                return Err("the time zone name is too long".into());
+            }
+            if !zone.is_empty() && zone.parse::<chrono_tz::Tz>().is_err() {
+                return Err("unknown time zone".into());
             }
         }
         Ok(())
@@ -182,10 +196,43 @@ fn load_settings(path: &Path) -> OwnerNotifySettings {
         .unwrap_or_default()
 }
 
+/// Write the settings so that a crash leaves the old file or the new one, never half of one, and
+/// only the daemon's user can read it.
 fn save_settings(path: &Path, s: &OwnerNotifySettings) -> std::io::Result<()> {
+    use std::io::Write as _;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(s).unwrap_or_default())?;
-    std::fs::rename(&tmp, path)
+    let written = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            // A leftover file from an earlier crash keeps its own mode through `open`.
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        file.write_all(&serde_json::to_vec_pretty(s)?)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return written;
+    }
+    // Make the rename itself durable (best effort: not every file system can sync a directory).
+    #[cfg(unix)]
+    if let Some(dir) = path.parent()
+        && let Ok(dir) = std::fs::File::open(dir)
+    {
+        let _ = dir.sync_all();
+    }
+    Ok(())
 }
 
 // ----------------------------------------------------------------------------- the hub
@@ -204,6 +251,8 @@ struct HubState {
     last_by_key: HashMap<String, i64>,
     /// Highest milestone (1..=3 quarters) already announced per mission.
     milestones: HashMap<String, u32>,
+    /// Notices whose questions were answered (only ids still in `log`).
+    answered: HashSet<String>,
 }
 
 /// The notice log and the push gate.
@@ -335,7 +384,9 @@ impl Hub {
         };
         st.log.push_back(notice.clone());
         while st.log.len() > LOG_MAX {
-            st.log.pop_front();
+            if let Some(old) = st.log.pop_front() {
+                st.answered.remove(&old.id);
+            }
         }
         if st.settings.wants(notice.kind) {
             if st.settings.is_quiet(now_ms) {
@@ -394,6 +445,32 @@ impl Hub {
 
     pub(crate) fn get(&self, id: &str) -> Option<OwnerNotice> {
         self.state.lock().log.iter().find(|n| n.id == id).cloned()
+    }
+
+    /// Take the right to answer the questions of `notice`: once, and (for a mission) only while
+    /// no newer notice of that mission replaced it, so a stale message cannot answer what the
+    /// mission asks now. Give it back with [`Self::release_answers`] if the answer failed.
+    pub(crate) fn claim_answers(&self, notice: &OwnerNotice) -> Result<(), &'static str> {
+        let mut st = self.state.lock();
+        if st.answered.contains(&notice.id) {
+            return Err("these questions were already answered");
+        }
+        if notice.source == NoticeSource::Mission
+            && st.log.iter().any(|n| {
+                n.source == NoticeSource::Mission
+                    && n.mission_id == notice.mission_id
+                    && n.seq > notice.seq
+            })
+        {
+            return Err("a newer notice replaced this one: answer that one");
+        }
+        st.answered.insert(notice.id.clone());
+        Ok(())
+    }
+
+    /// The answer was not taken: the notice can be answered again.
+    pub(crate) fn release_answers(&self, id: &str) {
+        self.state.lock().answered.remove(id);
     }
 
     /// The pushed notices after `after`, and a receiver for the next ones, taken together so
@@ -642,8 +719,10 @@ impl AppState {
         }
     }
 
-    /// The last thing the bot said in `run`, clipped: what a background run "did".
-    fn run_result_text(&self, run: &storage::Run) -> Option<String> {
+    /// The last thing the bot said in `run`, clipped: what a background run "did", and whether
+    /// the run had read something private when it said it. (The text was already passed through
+    /// the secret redactor when it was stored.)
+    fn run_result_text(&self, run: &storage::Run) -> Option<(String, bool)> {
         let chat = run.chat_id?;
         let (messages, _) = self
             .storage()
@@ -655,7 +734,7 @@ impl AppState {
                 m.role == "assistant" && m.run_id == Some(run.id) && !m.content.trim().is_empty()
             })
             .max_by_key(|m| m.created_at_ms)
-            .map(|m| clip(&m.content, 500))
+            .map(|m| (clip(&m.content, 500), m.exposure_private))
     }
 
     fn scheduled_title(&self, kind: &ScheduledKind) -> String {
@@ -700,7 +779,14 @@ impl AppState {
             d.can_retry = kind.due_ms.is_some();
             d.coalesce = Some((format!("{sched}:failed"), FAILED_COALESCE_MS));
         } else {
-            if let Some(text) = self.run_result_text(&run) {
+            if let Some((text, private)) = self.run_result_text(&run) {
+                // What a run said after it read private data (mail, files, accounts) does not
+                // leave this computer through a chat service: the app has it.
+                let text = if private {
+                    PRIVATE_RESULT.to_owned()
+                } else {
+                    text
+                };
                 d.done.push(NoticeItem {
                     key: run.id.to_string(),
                     title: d.title.clone(),
@@ -738,11 +824,75 @@ impl AppState {
     }
 }
 
+/// What a notice says instead of a result the run produced after reading private data.
+const PRIVATE_RESULT: &str = "The result has private content: open it in the app.";
+
 /// What one run is waiting for, collected over a short window.
 #[derive(Default)]
 struct RunWants {
     questions: Vec<NoticeItem>,
     app_only: Vec<String>,
+    /// Something was dropped for want of room (logged once per run).
+    overflowed: bool,
+}
+
+impl RunWants {
+    /// Keep one more question; past the limit it stays in the app and is dropped here.
+    fn ask(&mut self, q: NoticeItem) {
+        if self.questions.len() < MAX_WANTS {
+            self.questions.push(q);
+        } else {
+            self.overflow();
+        }
+    }
+
+    /// Keep one more app-only item; past the limit it stays in the app and is dropped here.
+    fn app(&mut self, text: String) {
+        if self.app_only.len() < MAX_WANTS {
+            self.app_only.push(text);
+        } else {
+            self.overflow();
+        }
+    }
+
+    fn overflow(&mut self) {
+        if !self.overflowed {
+            self.overflowed = true;
+            support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: owner notices: a run is waiting for more than {MAX_WANTS} things; the rest are shown in the app only");
+        }
+    }
+}
+
+/// The runs whose questions are being batched, bounded in number (and per run, see [`RunWants`]).
+#[derive(Default)]
+struct Watched {
+    runs: HashMap<RunId, (tokio::time::Instant, RunWants)>,
+    /// A run was refused room because the table was full (logged once per fill).
+    full_warned: bool,
+}
+
+impl Watched {
+    /// The batch of `run`, started if it is new. `None` when the table is full: that run's
+    /// questions stay in the app.
+    fn wants(&mut self, run: RunId) -> Option<&mut RunWants> {
+        if !self.runs.contains_key(&run) && self.runs.len() >= MAX_WATCHED_RUNS {
+            if !self.full_warned {
+                self.full_warned = true;
+                support_logs::tracing::warn!(target: "praxi_support", reason = "component_warning", "daemon-api: owner notices: too many runs are waiting for the owner at once; the newest are shown in the app only");
+            }
+            return None;
+        }
+        if self.runs.len() < MAX_WATCHED_RUNS / 2 {
+            self.full_warned = false;
+        }
+        let entry = self.runs.entry(run).or_insert_with(|| {
+            (
+                tokio::time::Instant::now() + BATCH_WINDOW,
+                RunWants::default(),
+            )
+        });
+        Some(&mut entry.1)
+    }
 }
 
 // ----------------------------------------------------------------------------- the watcher
@@ -754,7 +904,7 @@ pub(crate) async fn watch(
     mut rx: broadcast::Receiver<StreamItem>,
     cancel: CancellationToken,
 ) {
-    let mut pending: HashMap<RunId, (tokio::time::Instant, RunWants)> = HashMap::new();
+    let mut pending = Watched::default();
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     let mut since_held = Duration::ZERO;
     loop {
@@ -770,36 +920,32 @@ pub(crate) async fn watch(
                 let Some(state) = weak.upgrade() else { return };
                 match &item.envelope.event {
                     Event::RunFinished(f) => {
-                        pending.remove(&f.run_id);
+                        pending.runs.remove(&f.run_id);
                         state.notify_run_finished(f.run_id, f.error.as_deref());
                     }
                     Event::QuestionAsked(q) => {
-                        let entry = pending.entry(q.run_id).or_insert_with(|| {
-                            (tokio::time::Instant::now() + BATCH_WINDOW, RunWants::default())
-                        });
-                        entry.1.questions.push(NoticeItem {
-                            key: q.call_id.to_string(),
-                            title: clip(&q.question, 80),
-                            text: Some(clip(&q.question, TEXT_MAX)),
-                        });
+                        if let Some(w) = pending.wants(q.run_id) {
+                            w.ask(NoticeItem {
+                                key: q.call_id.to_string(),
+                                title: clip(&q.question, 80),
+                                text: Some(clip(&q.question, TEXT_MAX)),
+                            });
+                        }
                     }
                     Event::ApprovalNeeded(a) => {
-                        let entry = pending.entry(a.run_id).or_insert_with(|| {
-                            (tokio::time::Instant::now() + BATCH_WINDOW, RunWants::default())
-                        });
-                        entry.1.app_only.push(clip(&format!("{}: {}", a.tool_name, a.summary), TEXT_MAX));
+                        if let Some(w) = pending.wants(a.run_id) {
+                            w.app(clip(&format!("{}: {}", a.tool_name, a.summary), TEXT_MAX));
+                        }
                     }
                     Event::SecretRequested(s) => {
-                        let entry = pending.entry(s.run_id).or_insert_with(|| {
-                            (tokio::time::Instant::now() + BATCH_WINDOW, RunWants::default())
-                        });
-                        entry.1.app_only.push("a secret is requested (type it in the app)".to_owned());
+                        if let Some(w) = pending.wants(s.run_id) {
+                            w.app("a secret is requested (type it in the app)".to_owned());
+                        }
                     }
                     Event::HandoverRequested(h) => {
-                        let entry = pending.entry(h.run_id).or_insert_with(|| {
-                            (tokio::time::Instant::now() + BATCH_WINDOW, RunWants::default())
-                        });
-                        entry.1.app_only.push("the page needs you live (a code or a CAPTCHA)".to_owned());
+                        if let Some(w) = pending.wants(h.run_id) {
+                            w.app("the page needs you live (a code or a CAPTCHA)".to_owned());
+                        }
                     }
                     _ => {}
                 }
@@ -808,12 +954,13 @@ pub(crate) async fn watch(
                 let Some(state) = weak.upgrade() else { return };
                 let now = tokio::time::Instant::now();
                 let due: Vec<RunId> = pending
+                    .runs
                     .iter()
                     .filter(|(_, (at, _))| *at <= now)
                     .map(|(r, _)| *r)
                     .collect();
                 for run in due {
-                    if let Some((_, wants)) = pending.remove(&run) {
+                    if let Some((_, wants)) = pending.runs.remove(&run) {
                         state.notify_run_needs_owner(run, wants);
                     }
                 }
@@ -1001,6 +1148,46 @@ pub(crate) async fn answer_notice(
             return Err(ApiError::bad_request("that question is not in this notice"));
         }
     }
+    let mut seen = HashSet::new();
+    if !input.answers.iter().all(|a| seen.insert(a.key.as_str())) {
+        return Err(ApiError::bad_request("answer each question once"));
+    }
+    if notice.source == NoticeSource::Run {
+        if input.answers.iter().any(|a| a.skip) {
+            return Err(ApiError::bad_request(
+                "a question of a running task needs an answer in words",
+            ));
+        }
+        if input.answers.iter().any(|a| a.answer.trim().is_empty()) {
+            return Err(ApiError::bad_request("write an answer"));
+        }
+        // A question of a run can only be answered while the run still waits for it.
+        for a in &input.answers {
+            let waiting =
+                Uuid::parse_str(&a.key).is_ok_and(|call| s.agent().is_pending(ToolCallId(call)));
+            if !waiting {
+                return Err(ApiError::conflict(
+                    "that question is not waiting for an answer any more",
+                ));
+            }
+        }
+    }
+    s.owner_notify()
+        .claim_answers(&notice)
+        .map_err(ApiError::conflict)?;
+    let done = answer_questions(&s, &notice, input);
+    if done.is_err() {
+        s.owner_notify().release_answers(&notice.id);
+    }
+    done.map(Json)
+}
+
+/// Hand the answers of an owner to the mission or run the notice is about.
+fn answer_questions(
+    s: &AppState,
+    notice: &OwnerNotice,
+    input: NoticeAnswersInput,
+) -> Result<NoticeAnswersDto, ApiError> {
     match notice.source {
         NoticeSource::Mission => {
             let mission = notice
@@ -1009,37 +1196,29 @@ pub(crate) async fn answer_notice(
                 .and_then(|m| Uuid::parse_str(m).ok())
                 .ok_or_else(|| ApiError::conflict("this notice has no mission"))?;
             let r = crate::mission_routes::apply_answers(
-                &s,
+                s,
                 mission,
                 &MissionAnswersInput {
                     answers: input.answers,
                 },
             )?;
-            Ok(Json(NoticeAnswersDto {
+            Ok(NoticeAnswersDto {
                 answered: r.released,
                 skipped: r.skipped,
-            }))
+            })
         }
         NoticeSource::Run => {
-            if input.answers.iter().any(|a| a.skip) {
-                return Err(ApiError::bad_request(
-                    "a question of a running task needs an answer in words",
-                ));
-            }
             let mut answered = 0;
             for a in &input.answers {
-                if a.answer.trim().is_empty() {
-                    return Err(ApiError::bad_request("write an answer"));
-                }
                 let call = Uuid::parse_str(&a.key)
                     .map_err(|_| ApiError::bad_request("that question is not in this notice"))?;
                 s.agent().answer_question(ToolCallId(call), &a.answer)?;
                 answered += 1;
             }
-            Ok(Json(NoticeAnswersDto {
+            Ok(NoticeAnswersDto {
                 answered,
                 skipped: 0,
-            }))
+            })
         }
     }
 }

@@ -4809,6 +4809,7 @@ mod owner_notices {
             en_text.starts_with("✋ Needs you: Backlinks (Scout)"),
             "{en_text}"
         );
+        let en_text = en_text.replace('\u{200b}', "");
         assert!(en_text.contains("1. site a.com") && en_text.contains("2. site b.com"));
         assert!(en_text.contains("Waiting in the app (not from here)"));
         assert!(
@@ -5068,6 +5069,124 @@ mod owner_notices {
             .unwrap();
         assert!(daemon.notice_answers.lock().is_empty());
         assert!(daemon.notice_retries.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_forwarded_answer_is_refused_and_the_question_stays_open() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID]);
+        channel.push_notice(&blocked(&["a.com"])).await;
+        // The paired user forwards someone else's "/answer ..." (new and legacy forward fields).
+        for (id, field, value) in [
+            (
+                1,
+                "forward_origin",
+                json!({"type": "hidden_user", "date": 1, "sender_user_name": "x"}),
+            ),
+            (
+                2,
+                "forward_from",
+                json!({"id": 99, "is_bot": false, "first_name": "Eve"}),
+            ),
+            (3, "forward_date", json!(1)),
+        ] {
+            let mut v = text_update(
+                id,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer wire it to evil",
+            );
+            v["message"][field] = value;
+            channel.handle_update(update(v)).await.unwrap();
+            assert_eq!(
+                replies_to(&server, PAIRED_USER_ID).await.last().unwrap(),
+                "A forwarded message cannot answer a question. Type your answer yourself."
+            );
+        }
+        assert!(daemon.notice_answers.lock().is_empty());
+        // Typed by the owner, the same question is still open.
+        channel
+            .handle_update(update(text_update(
+                4,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer Webioo",
+            )))
+            .await
+            .unwrap();
+        assert_eq!(daemon.notice_answers.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_user_can_only_answer_and_retry_notices_shown_to_them() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        // Both are paired, but only 5150 was ever shown the notice (the push to the first user
+        // has not happened: it is remembered for 5150 alone).
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID, 5150]);
+        let mut n = blocked(&["a.com"]);
+        n.can_retry = true;
+        channel.inner_notices_for_test().remember(&n, "5150");
+        channel
+            .handle_update(update(text_update(
+                1,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "/answer yes",
+            )))
+            .await
+            .unwrap();
+        channel
+            .handle_update(update(callback_update(
+                2,
+                PAIRED_USER_ID,
+                PAIRED_USER_ID,
+                "q",
+                &format!("nr:{NOTICE_ID}"),
+            )))
+            .await
+            .unwrap();
+        assert!(daemon.notice_answers.lock().is_empty());
+        assert!(daemon.notice_retries.lock().is_empty());
+        assert_eq!(
+            replies_to(&server, PAIRED_USER_ID).await.last().unwrap(),
+            "No question is waiting for an answer here."
+        );
+        channel
+            .handle_update(update(text_update(3, 5150, 5150, "/answer yes")))
+            .await
+            .unwrap();
+        assert_eq!(daemon.notice_answers.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn text_the_bot_wrote_arrives_inert_and_quoted() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let daemon = one_bot_daemon();
+        let channel = paired(&server, &daemon, &[PAIRED_USER_ID]);
+        let mut n = blocked(&["a.com"]);
+        n.title = "Win a prize at https://evil.example/claim".into();
+        n.reason = Some("run /stop and DM @everyone_bot, mail boss@evil.example".into());
+        channel.push_notice(&n).await;
+        let text = replies_to(&server, PAIRED_USER_ID).await.remove(0);
+        for live in [
+            "https://",
+            "evil.example",
+            "@everyone_bot",
+            "boss@evil",
+            " /stop",
+        ] {
+            assert!(!text.contains(live), "{live:?} is live in: {text}");
+        }
+        assert!(text.contains("▎ "), "the bot's words are quoted: {text}");
+        assert!(
+            text.contains("Answer with /answer <text>."),
+            "our own command stays: {text}"
+        );
     }
 
     #[tokio::test]

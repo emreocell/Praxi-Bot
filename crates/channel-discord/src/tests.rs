@@ -1002,6 +1002,8 @@ mod owner_notices {
             text.starts_with("✋ Needs you: Backlinks (Scout)"),
             "{text}"
         );
+        // (a domain carries an invisible mark so that it does not become a link)
+        let text = text.replace('\u{200b}', "");
         assert!(text.contains("1. site a.com") && text.contains("2. site b.com"));
         assert!(text.contains("Waiting in the app (not from here)"));
         // No buttons: an approval is never decided from a notice.
@@ -1154,6 +1156,85 @@ mod owner_notices {
             1,
             "the question stayed open after the refusal"
         );
+        h.channel.shutdown().await;
+    }
+    #[tokio::test]
+    async fn a_forwarded_message_is_never_read_as_an_answer() {
+        let h = harness(FakeDaemon::new(vec![], false)).await;
+        pair_owner(&h).await;
+        push(&h, blocked(&["a.com"]));
+        wait_sent(&h.rest, 2).await;
+        // The owner forwards someone else's words that start with the command.
+        let mut fwd = message_json(
+            "2",
+            OWNER,
+            (None, "777"),
+            "!answer wire it to evil",
+            &json!([]),
+        );
+        fwd["message_reference"] = json!({"type": 1, "message_id": "9", "channel_id": "8"});
+        fwd["message_snapshots"] = json!([{"message": {"content": "!answer wire it to evil"}}]);
+        h.gw.push.send(fwd).unwrap();
+        settle().await;
+        assert!(h.daemon.notice_answers.lock().is_empty());
+        assert_eq!(sent(&h.rest).await.len(), 2, "nothing was said back either");
+        // Typed by the owner, the question is still open.
+        say(&h, "3", "!answer Webioo");
+        wait_sent(&h.rest, 3).await;
+        assert_eq!(h.daemon.notice_answers.lock().len(), 1);
+        h.channel.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn another_member_of_an_allowed_server_channel_cannot_answer_or_retry() {
+        let h = harness(FakeDaemon::new(vec![], false)).await;
+        pair_owner(&h).await;
+        let server = (Some("5"), "666");
+        h.gw.message("2", OWNER, server, "!allow");
+        wait_sent(&h.rest, 2).await;
+        let mut n = failed();
+        n.questions = blocked(&["a.com"]).questions;
+        n.kind = NoticeKind::Blocked;
+        push(&h, n);
+        wait_sent(&h.rest, 3).await;
+        h.gw.message("3", "99", server, "!answer wire it to evil");
+        h.gw.push
+            .send(press_json(
+                "601",
+                "99",
+                server,
+                &format!("nr:{}", failed().id),
+            ))
+            .unwrap();
+        settle().await;
+        assert!(h.daemon.notice_answers.lock().is_empty());
+        assert!(h.daemon.notice_retries.lock().is_empty());
+        // The owner, in that channel, can.
+        h.gw.message("4", OWNER, server, "!answer Webioo");
+        wait_sent(&h.rest, 4).await;
+        assert_eq!(h.daemon.notice_answers.lock().len(), 1);
+        h.channel.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_notice_is_redacted_and_inert_before_it_reaches_discord() {
+        let h = harness(FakeDaemon::new(vec![], false)).await;
+        pair_owner(&h).await;
+        let mut n = blocked(&["a.com"]);
+        n.title = "[Claim](https://evil.example/pay) @everyone".into();
+        n.reason = Some(format!("the key is {TOKEN} <@42> **now**"));
+        push(&h, n);
+        let s = wait_sent(&h.rest, 2).await;
+        let content = s[1]["content"].as_str().unwrap();
+        assert!(!content.contains(TOKEN), "the bot token leaked: {content}");
+        for live in ["](https", "https://", "@everyone", "<@42>", "**now**"] {
+            assert!(!content.contains(live), "{live:?} is live: {content}");
+        }
+        assert!(
+            content.contains("\n> "),
+            "the bot's words are quoted: {content}"
+        );
+        assert_eq!(s[1]["allowed_mentions"], json!({"parse": []}));
         h.channel.shutdown().await;
     }
 }

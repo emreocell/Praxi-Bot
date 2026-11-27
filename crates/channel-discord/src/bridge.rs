@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use channel_api::notice::{
-    Feedback, NoticeLang, OwnerNotice, feedback, parse_reply, parse_retry_callback, render,
+    Feedback, Flavor, NoticeLang, OwnerNotice, feedback, parse_reply, parse_retry_callback, render,
     reply_error_feedback, retry_callback,
 };
 use channel_api::{
@@ -474,25 +474,34 @@ impl Inner {
         let Some(chat) = self.owner_chat().await else {
             return;
         };
-        self.notices.remember(notice);
+        let Some(owner) = self.state.owner() else {
+            return;
+        };
         let lang = self.notice_lang();
-        let mut msg = OutgoingMessage::text(render(notice, lang));
+        // The transport redacts secrets and breaks mentions in everything it sends (`clean`).
+        let mut msg = OutgoingMessage::text(render(notice, lang, Flavor::Discord));
         if notice.can_retry {
             msg = msg.with_buttons(vec![vec![InlineButton::new(
                 feedback(lang, Feedback::TryAgainLabel),
                 retry_callback(&notice.id),
             )]]);
         }
-        if let Err(e) = self.transport.send(chat, msg).await {
-            Self::log("could not send a notice", &e);
+        match self.transport.send(chat, msg).await {
+            // Only a notice the owner was shown can be answered or retried.
+            Ok(_) => self.notices.remember(notice, &owner),
+            Err(e) => Self::log("could not send a notice", &e),
         }
     }
 
-    /// `/answer <text>`: answer the questions of the newest notice that still has some. Only
-    /// questions are answered here; an approval is never decided from a chat.
-    async fn cmd_answer(&self, chat: &ChatRef, text: &str) {
+    /// `/answer <text>`: answer the questions of the newest notice shown to the owner that still
+    /// has some. Only the owner can (the caller checked), never from a forward. Only questions
+    /// are answered here; an approval is never decided from a chat.
+    async fn cmd_answer(&self, chat: &ChatRef, sender: &str, text: &str) {
         let lang = self.notice_lang();
-        let Some(notice) = self.notices.open_question() else {
+        if !self.state.is_owner(sender) {
+            return;
+        }
+        let Some(notice) = self.notices.open_question(sender) else {
             self.say(chat, &feedback(lang, Feedback::NothingOpen)).await;
             return;
         };
@@ -506,7 +515,7 @@ impl Inner {
         };
         match self.daemon.answer_notice(&notice.id, &replies).await {
             Ok((answered, skipped)) => {
-                self.notices.mark_answered(&notice.id);
+                self.notices.mark_answered(&notice.id, sender);
                 self.say(
                     chat,
                     &feedback(lang, Feedback::Answered { answered, skipped }),
@@ -721,7 +730,7 @@ impl Inner {
                     self.say(chat, &Msg::Help.render(lang)).await;
                     return;
                 }
-                "answer" => return self.cmd_answer(chat, arg).await,
+                "answer" => return self.cmd_answer(chat, sender, arg).await,
                 "bots" => return self.cmd_bots(chat, parts.channel_id).await,
                 "use" => return self.cmd_use(chat, parts.channel_id, arg).await,
                 "status" => return self.cmd_status(chat).await,
@@ -1334,8 +1343,9 @@ impl Inner {
         }
         if let Some(notice_id) = parse_retry_callback(data) {
             let nl = self.notice_lang();
-            let ok =
-                self.notices.knows(notice_id) && self.daemon.retry_notice(notice_id).await.is_ok();
+            let ok = self.state.is_owner(sender)
+                && self.notices.knows(notice_id, sender)
+                && self.daemon.retry_notice(notice_id).await.is_ok();
             let f = if ok {
                 Feedback::Retried
             } else {

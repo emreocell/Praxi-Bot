@@ -71,6 +71,13 @@ flood your phone.
 approval is listed as "waiting in the app", with no button here. The chat can only
 answer questions and say "try again"; it can never approve anything.
 
+**What is in a message is not trusted.** Titles, reasons, results and questions come from
+the bot, and through it from web pages. They are shown as quoted lines with links,
+mentions, commands and formatting made harmless, so a page cannot put a live link or a
+`/command` button into your chat. What a task said after it read private data (mail,
+files, accounts) is not sent here at all: the message says to open the app. Only you,
+typing in your own chat, can answer or retry; a forwarded message cannot.
+
 In **Settings > Notifications > Telegram, Discord and other channels** you choose
 which of these you want (finished, failed and needs-you are on; progress is off) and
 set **quiet hours**. Messages that arrive during quiet hours wait and are sent when

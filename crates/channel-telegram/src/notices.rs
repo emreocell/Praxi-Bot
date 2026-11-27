@@ -74,21 +74,26 @@ pub async fn follow_notices<F>(
 
 struct Entry {
     notice: OwnerNotice,
+    /// Whom the notice was shown to (a Telegram user id, a Discord user id): nobody else can
+    /// answer or retry it through this bridge.
+    owner: String,
     answered: bool,
 }
 
-/// The newest notices a bridge sent, so `/answer` knows which question list it answers.
+/// The newest notices a bridge showed, so `/answer` knows which question list it answers and
+/// whose it is.
 #[derive(Default)]
 pub struct NoticeBook {
     items: Mutex<VecDeque<Entry>>,
 }
 
 impl NoticeBook {
-    /// Remember a notice that was pushed.
-    pub fn remember(&self, notice: &OwnerNotice) {
+    /// Remember a notice that was shown to `owner`.
+    pub fn remember(&self, notice: &OwnerNotice, owner: &str) {
         let mut items = self.items.lock();
         items.push_back(Entry {
             notice: notice.clone(),
+            owner: owner.to_owned(),
             answered: false,
         });
         while items.len() > BOOK_MAX {
@@ -96,15 +101,16 @@ impl NoticeBook {
         }
     }
 
-    /// The newest blocked notice that still has questions nobody answered.
+    /// The newest blocked notice shown to `owner` that still has questions nobody answered.
     #[must_use]
-    pub fn open_question(&self) -> Option<OwnerNotice> {
+    pub fn open_question(&self, owner: &str) -> Option<OwnerNotice> {
         self.items
             .lock()
             .iter()
             .rev()
             .find(|e| {
-                !e.answered
+                e.owner == owner
+                    && !e.answered
                     && e.notice.kind == NoticeKind::Blocked
                     && !e.notice.questions.is_empty()
             })
@@ -116,17 +122,25 @@ impl NoticeBook {
         self.items.lock().clear();
     }
 
-    /// The questions of `id` were taken.
-    pub fn mark_answered(&self, id: &str) {
-        for e in self.items.lock().iter_mut().filter(|e| e.notice.id == id) {
+    /// The questions of `id`, shown to `owner`, were taken.
+    pub fn mark_answered(&self, id: &str, owner: &str) {
+        for e in self
+            .items
+            .lock()
+            .iter_mut()
+            .filter(|e| e.notice.id == id && e.owner == owner)
+        {
             e.answered = true;
         }
     }
 
-    /// Whether `id` is a notice this bridge pushed (a retry button may only name one).
+    /// Whether `id` is a notice this bridge showed to `owner` (a retry button may only name one).
     #[must_use]
-    pub fn knows(&self, id: &str) -> bool {
-        self.items.lock().iter().any(|e| e.notice.id == id)
+    pub fn knows(&self, id: &str, owner: &str) -> bool {
+        self.items
+            .lock()
+            .iter()
+            .any(|e| e.notice.id == id && e.owner == owner)
     }
 }
 
@@ -267,7 +281,7 @@ mod tests {
     #[test]
     fn the_book_offers_the_newest_open_question_and_forgets_answered_ones() {
         let book = NoticeBook::default();
-        assert!(book.open_question().is_none());
+        assert!(book.open_question("me").is_none());
         let mut a = notice(1, NoticeKind::Blocked);
         a.questions = vec![NoticeItem {
             key: "k".into(),
@@ -278,17 +292,37 @@ mod tests {
         b.questions = a.questions.clone();
         let done = notice(3, NoticeKind::Finished);
         for n in [&a, &b, &done] {
-            book.remember(n);
+            book.remember(n, "me");
         }
         assert_eq!(
-            book.open_question().unwrap().id,
+            book.open_question("me").unwrap().id,
             b.id,
             "newest question first"
         );
-        book.mark_answered(&b.id);
-        assert_eq!(book.open_question().unwrap().id, a.id);
-        book.mark_answered(&a.id);
-        assert!(book.open_question().is_none());
-        assert!(book.knows(&done.id) && !book.knows("nope"));
+        book.mark_answered(&b.id, "me");
+        assert_eq!(book.open_question("me").unwrap().id, a.id);
+        book.mark_answered(&a.id, "me");
+        assert!(book.open_question("me").is_none());
+        assert!(book.knows(&done.id, "me") && !book.knows("nope", "me"));
+    }
+
+    #[test]
+    fn a_notice_belongs_to_the_user_it_was_shown_to() {
+        let book = NoticeBook::default();
+        let mut a = notice(1, NoticeKind::Blocked);
+        a.questions = vec![NoticeItem {
+            key: "k".into(),
+            title: "t".into(),
+            text: None,
+        }];
+        book.remember(&a, "alice");
+        assert!(book.open_question("bob").is_none());
+        assert!(!book.knows(&a.id, "bob"));
+        book.mark_answered(&a.id, "bob");
+        assert!(
+            book.open_question("alice").is_some(),
+            "someone else's answer closes nothing"
+        );
+        assert!(book.knows(&a.id, "alice"));
     }
 }

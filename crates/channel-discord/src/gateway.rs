@@ -72,8 +72,8 @@ fn chat_for(d: &Value) -> Option<ChatRef> {
     })
 }
 
-/// Turn a gateway `MESSAGE_CREATE` into an event. Bots (including this one) and
-/// system messages are dropped.
+/// Turn a gateway `MESSAGE_CREATE` into an event. Bots (including this one), system messages
+/// and forwarded messages are dropped.
 #[must_use]
 pub fn message_event(d: &Value) -> Option<IncomingMessage> {
     let author = &d["author"];
@@ -82,6 +82,15 @@ pub fn message_event(d: &Value) -> Option<IncomingMessage> {
     }
     // 0 = normal message, 19 = reply; everything else is a system notice.
     if !matches!(d["type"].as_u64().unwrap_or(0), 0 | 19) {
+        return None;
+    }
+    // A forward (`message_reference.type` 1, with `message_snapshots`) carries someone else's
+    // words under the forwarder's name: it is never read as the sender's own text or command.
+    if d["message_reference"]["type"].as_u64() == Some(1)
+        || d["message_snapshots"]
+            .as_array()
+            .is_some_and(|a| !a.is_empty())
+    {
         return None;
     }
     let id = d["id"].as_str()?;

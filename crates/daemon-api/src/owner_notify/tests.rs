@@ -56,6 +56,13 @@ fn bad_quiet_hours_are_refused() {
     assert!(window("25:00", "08:00", "").validate().is_err());
     assert!(window("22:00", "8:00", "").validate().is_err());
     assert!(window("22:00", "08:00", "Mars/Olympus").validate().is_err());
+    // Equal ends are ambiguous (all day, or never): refused rather than guessed.
+    assert!(window("22:00", "22:00", "UTC").validate().is_err());
+    assert!(
+        window("22:00", "08:00", &"A/".repeat(40))
+            .validate()
+            .is_err()
+    );
 }
 
 #[test]
@@ -395,4 +402,113 @@ fn finished_and_failed_missions_report_and_a_stopped_one_stays_silent() {
         mission_draft(&stopped, "Scout", &[]).is_none(),
         "the owner stopped it themselves: no push"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_settings_file_is_private_synced_and_leaves_no_temp_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(SETTINGS_FILE);
+    // An older, looser file and a leftover temp file from a crash.
+    std::fs::write(&path, b"{}").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, b"junk").unwrap();
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o666)).unwrap();
+    let hub = Hub::load(dir.path());
+    hub.set_settings(window("22:00", "08:00", "UTC"), DAY)
+        .unwrap();
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "only the daemon's user reads the settings");
+    assert!(!tmp.exists());
+    assert_eq!(
+        Hub::load(dir.path()).settings(),
+        window("22:00", "08:00", "UTC")
+    );
+}
+
+#[test]
+fn a_notice_is_answered_once_and_only_while_it_is_the_newest_of_its_mission() {
+    let hub = Hub::in_memory();
+    let mut d = draft(NoticeKind::Blocked);
+    d.mission_id = Some("m1".into());
+    let old = hub.publish(d, DAY).unwrap();
+    let mut d = draft(NoticeKind::Blocked);
+    d.mission_id = Some("m1".into());
+    let new = hub.publish(d, DAY).unwrap();
+    let mut other = draft(NoticeKind::Blocked);
+    other.mission_id = Some("m2".into());
+    let other = hub.publish(other, DAY).unwrap();
+
+    assert!(
+        hub.claim_answers(&old).is_err(),
+        "a newer notice replaced it"
+    );
+    assert!(hub.claim_answers(&new).is_ok());
+    assert!(hub.claim_answers(&new).is_err(), "single use");
+    hub.release_answers(&new.id);
+    assert!(
+        hub.claim_answers(&new).is_ok(),
+        "a failed answer gives it back"
+    );
+    assert!(
+        hub.claim_answers(&other).is_ok(),
+        "another mission is not affected"
+    );
+}
+
+#[test]
+fn an_answered_mark_does_not_outlive_its_notice() {
+    let hub = Hub::in_memory();
+    let first = hub.publish(draft(NoticeKind::Blocked), DAY).unwrap();
+    assert!(hub.claim_answers(&first).is_ok());
+    for _ in 0..LOG_MAX {
+        hub.publish(draft(NoticeKind::Finished), DAY).unwrap();
+    }
+    assert!(hub.get(&first.id).is_none());
+    assert!(
+        hub.state.lock().answered.is_empty(),
+        "the set stays bounded by the log"
+    );
+}
+
+fn question(i: usize) -> NoticeItem {
+    NoticeItem {
+        key: i.to_string(),
+        title: String::new(),
+        text: None,
+    }
+}
+
+#[test]
+fn one_run_keeps_a_bounded_number_of_questions_and_app_only_items() {
+    let mut w = RunWants::default();
+    for i in 0..MAX_WANTS * 3 {
+        w.ask(question(i));
+        w.app(format!("approval {i}"));
+    }
+    assert_eq!(w.questions.len(), MAX_WANTS);
+    assert_eq!(w.app_only.len(), MAX_WANTS);
+    assert!(w.overflowed);
+    assert_eq!(w.questions[0].key, "0", "the first ones are kept");
+}
+
+#[tokio::test]
+async fn only_a_bounded_number_of_runs_are_batched_at_once() {
+    let mut watched = Watched::default();
+    for _ in 0..MAX_WATCHED_RUNS {
+        assert!(watched.wants(RunId::new()).is_some());
+    }
+    assert!(watched.wants(RunId::new()).is_none(), "the table is full");
+    assert_eq!(watched.runs.len(), MAX_WATCHED_RUNS);
+    assert!(watched.full_warned, "the overflow is logged once");
+    // A run that is already batched still takes more.
+    let known = *watched.runs.keys().next().unwrap();
+    assert!(watched.wants(known).is_some());
+    // Once most runs are done there is room again.
+    let keep: Vec<RunId> = watched.runs.keys().take(10).copied().collect();
+    watched.runs.retain(|r, _| keep.contains(r));
+    assert!(watched.wants(RunId::new()).is_some());
+    assert!(!watched.full_warned);
 }

@@ -158,19 +158,113 @@ fn pick<'a>(lang: NoticeLang, en: &'a str, tr: &'a str) -> &'a str {
     }
 }
 
-/// The notice as a short plain message for a chat. Free text (titles, reasons, answers the bot
-/// wrote) is clipped and passed through; everything else is the channel's own wording.
+/// The channel a notice is rendered for; it decides how text from outside is made harmless.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flavor {
+    /// Telegram: sent without a parse mode, so HTML and Markdown stay literal.
+    Plain,
+    /// Discord: its Markdown (links, headings, spoilers, mentions) is live unless escaped.
+    Discord,
+}
+
+impl Flavor {
+    /// What starts a line of untrusted text.
+    fn quote(self) -> &'static str {
+        match self {
+            Self::Plain => "▎ ",
+            Self::Discord => "> ",
+        }
+    }
+}
+
+const ZWSP: char = '\u{200b}';
+
+/// Text a model, a web page or a mission wrote, made inert in a chat: no live link (a scheme or a
+/// bare domain), no mention, no tappable bot command, no Markdown (Discord), no control or
+/// direction-changing characters. Call it on text that is already clipped, so an escape is never
+/// cut in half.
+fn inert(text: &str, flavor: Flavor) -> String {
+    let chars: Vec<char> = text
+        .chars()
+        .filter(|c| {
+            !c.is_control() && !matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+        .collect();
+    let mut out = String::with_capacity(chars.len() + 8);
+    for (i, &c) in chars.iter().enumerate() {
+        let prev = i.checked_sub(1).map(|p| chars[p]);
+        let next = chars.get(i + 1).copied();
+        if flavor == Flavor::Discord && "\\*_~`|>[]()#<-".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+        let breaks = match c {
+            // `@name` and `user@host`.
+            '@' => true,
+            // `https://` (and `tg://`).
+            ':' => chars.get(i + 1..i + 3) == Some(&['/', '/']),
+            // `/stop` at the start of a word is a command Telegram makes tappable.
+            '/' => prev.is_none_or(char::is_whitespace),
+            // `evil.com` is a link for Telegram.
+            '.' => prev.is_some_and(char::is_alphanumeric) && next.is_some_and(char::is_alphabetic),
+            _ => false,
+        };
+        if breaks {
+            out.push(ZWSP);
+        }
+    }
+    out
+}
+
+/// One line of untrusted text, quoted so it reads as what the bot said and not as the channel.
+fn quoted(flavor: Flavor, text: &str) -> String {
+    format!("{}{}", flavor.quote(), inert(text, flavor))
+}
+
+/// The numbered questions (quoted) and how to answer them.
+fn render_questions(s: &mut String, n: &OwnerNotice, lang: NoticeLang, flavor: Flavor) {
+    if n.questions.is_empty() {
+        return;
+    }
+    s.push_str(pick(lang, "\nQuestions for you:\n", "\nSana sorular:\n"));
+    for (i, q) in n.questions.iter().take(MAX_LISTED).enumerate() {
+        let text = q.text.as_deref().unwrap_or(&q.title);
+        let line = format!(
+            "{}. {} — {}",
+            i + 1,
+            clip(&q.title, 60),
+            clip(text, LINE_CHARS)
+        );
+        let _ = writeln!(s, "{}", quoted(flavor, &line));
+    }
+    if n.questions.len() > MAX_LISTED {
+        let _ = writeln!(
+            s,
+            "{}",
+            pick(lang, "…more in the app.", "…devamı uygulamada.")
+        );
+    }
+    s.push_str(pick(
+            lang,
+            "\nAnswer with /answer <text>. For several questions write one per line: `1: yes` and `2: skip`.\n",
+            "\n/answer <metin> ile yanıtla. Birden çok soruda her satıra bir tane yaz: `1: evet` ve `2: atla`.\n",
+        ));
+}
+
+/// The notice as a short message for a chat. Everything the bot, a web page or a mission wrote
+/// (titles, reasons, answers, questions) is clipped, made inert for `flavor` and shown as quoted
+/// lines; the rest is the channel's own wording.
 #[must_use]
-pub fn render(n: &OwnerNotice, lang: NoticeLang) -> String {
+pub fn render(n: &OwnerNotice, lang: NoticeLang, flavor: Flavor) -> String {
     let head = match n.kind {
         NoticeKind::Finished => pick(lang, "✅ Finished", "✅ Tamamlandı"),
         NoticeKind::Failed => pick(lang, "⚠️ Failed", "⚠️ Başarısız oldu"),
         NoticeKind::Blocked => pick(lang, "✋ Needs you", "✋ Senden bir şey gerekiyor"),
         NoticeKind::Progress => pick(lang, "⏳ Progress", "⏳ İlerleme"),
     };
-    let mut s = format!("{head}: {}", clip(&n.title, 90));
+    let mut s = format!("{head}: {}", inert(&clip(&n.title, 90), flavor));
     if !n.bot_name.is_empty() {
-        let _ = write!(s, " ({})", clip(&n.bot_name, 40));
+        let _ = write!(s, " ({})", inert(&clip(&n.bot_name, 40), flavor));
     }
     s.push('\n');
     if n.late {
@@ -195,48 +289,29 @@ pub fn render(n: &OwnerNotice, lang: NoticeLang) -> String {
         };
     }
     if let Some(r) = n.reason.as_deref().filter(|r| !r.trim().is_empty()) {
-        let _ = writeln!(s, "{} {}", pick(lang, "Why:", "Neden:"), clip(r, 300));
+        let _ = writeln!(s, "{}", pick(lang, "Why:", "Neden:"));
+        let _ = writeln!(s, "{}", quoted(flavor, &clip(r, 300)));
     }
     for d in n.done.iter().take(3) {
         let text = d.text.as_deref().unwrap_or(&d.title);
-        let _ = writeln!(s, "• {}", clip(text, LINE_CHARS));
+        let _ = writeln!(
+            s,
+            "{}",
+            quoted(flavor, &format!("• {}", clip(text, LINE_CHARS)))
+        );
     }
     if !n.failed.is_empty() {
         s.push_str(pick(lang, "\nGiven up:\n", "\nVazgeçilenler:\n"));
         for f in n.failed.iter().take(5) {
-            let _ = writeln!(
-                s,
+            let line = format!(
                 "- {}: {}",
                 clip(&f.key, 60),
                 clip(f.text.as_deref().unwrap_or("?"), LINE_CHARS)
             );
+            let _ = writeln!(s, "{}", quoted(flavor, &line));
         }
     }
-    if !n.questions.is_empty() {
-        s.push_str(pick(lang, "\nQuestions for you:\n", "\nSana sorular:\n"));
-        for (i, q) in n.questions.iter().take(MAX_LISTED).enumerate() {
-            let text = q.text.as_deref().unwrap_or(&q.title);
-            let _ = writeln!(
-                s,
-                "{}. {} — {}",
-                i + 1,
-                clip(&q.title, 60),
-                clip(text, LINE_CHARS)
-            );
-        }
-        if n.questions.len() > MAX_LISTED {
-            let _ = writeln!(
-                s,
-                "{}",
-                pick(lang, "…more in the app.", "…devamı uygulamada.")
-            );
-        }
-        s.push_str(pick(
-            lang,
-            "\nAnswer with /answer <text>. For several questions write one per line: `1: yes` and `2: skip`.\n",
-            "\n/answer <metin> ile yanıtla. Birden çok soruda her satıra bir tane yaz: `1: evet` ve `2: atla`.\n",
-        ));
-    }
+    render_questions(&mut s, n, lang, flavor);
     if !n.app_only.is_empty() {
         s.push_str(pick(
             lang,
@@ -244,7 +319,18 @@ pub fn render(n: &OwnerNotice, lang: NoticeLang) -> String {
             "\nUygulamada bekleyenler (buradan yapılamaz):\n",
         ));
         for a in n.app_only.iter().take(5) {
-            let _ = writeln!(s, "- {}", clip(a, LINE_CHARS));
+            let _ = writeln!(
+                s,
+                "{}",
+                quoted(flavor, &format!("- {}", clip(a, LINE_CHARS)))
+            );
+        }
+        if n.app_only.len() > 5 {
+            let _ = writeln!(
+                s,
+                "{}",
+                pick(lang, "…more in the app.", "…devamı uygulamada.")
+            );
         }
     }
     s.trim_end().to_owned()
@@ -372,6 +458,8 @@ pub enum Feedback {
     RetryFailed,
     /// Label of the retry button.
     TryAgainLabel,
+    /// A forwarded message tried to answer: only what the owner types themselves counts.
+    Forwarded,
 }
 
 /// The wording of a [`Feedback`].
@@ -411,6 +499,12 @@ pub fn feedback(lang: NoticeLang, f: Feedback) -> String {
         }
         (Feedback::TryAgainLabel, En) => "Try again".into(),
         (Feedback::TryAgainLabel, Tr) => "Tekrar dene".into(),
+        (Feedback::Forwarded, En) => {
+            "A forwarded message cannot answer a question. Type your answer yourself.".into()
+        }
+        (Feedback::Forwarded, Tr) => {
+            "İletilen bir mesaj soruyu yanıtlayamaz. Yanıtı kendin yaz.".into()
+        }
     }
 }
 
@@ -472,6 +566,11 @@ mod tests {
         }
     }
 
+    /// What a person reads: the invisible marks that keep a domain from linking are not shown.
+    fn visible(s: &str) -> String {
+        s.replace(ZWSP, "")
+    }
+
     fn q(key: &str) -> NoticeItem {
         NoticeItem {
             key: key.into(),
@@ -485,13 +584,13 @@ mod tests {
         let mut n = notice(NoticeKind::Blocked);
         n.questions = vec![q("a.com"), q("b.com")];
         n.app_only = vec!["Pay $9 for a premium listing".into()];
-        let en = render(&n, NoticeLang::En);
+        let en = visible(&render(&n, NoticeLang::En, Flavor::Plain));
         assert!(en.starts_with("✋ Needs you: Backlinks (Scout)"));
         assert!(en.contains("6 of 10 done, 2 waiting for you, 1 given up."));
-        assert!(en.contains("1. site a.com") && en.contains("2. site b.com"));
+        assert!(en.contains("▎ 1. site a.com") && en.contains("▎ 2. site b.com"));
         assert!(en.contains("Waiting in the app (not from here)"));
         assert!(en.contains("Pay $9"));
-        let tr = render(&n, NoticeLang::Tr);
+        let tr = render(&n, NoticeLang::Tr, Flavor::Plain);
         assert!(tr.contains("Senden bir şey gerekiyor") && tr.contains("/answer"));
         assert!(tr.contains("Uygulamada bekleyenler"));
     }
@@ -504,8 +603,8 @@ mod tests {
             title: "a".into(),
             text: Some("account created on a.com".into()),
         }];
-        let s = render(&n, NoticeLang::En);
-        assert!(s.contains("✅ Finished") && s.contains("• account created on a.com"));
+        let s = visible(&render(&n, NoticeLang::En, Flavor::Plain));
+        assert!(s.contains("✅ Finished") && s.contains("▎ • account created on a.com"));
         assert!(!s.contains("/answer"));
     }
 
@@ -564,6 +663,7 @@ mod tests {
             Feedback::Retried,
             Feedback::RetryFailed,
             Feedback::TryAgainLabel,
+            Feedback::Forwarded,
         ];
         for f in all {
             let (en, tr) = (feedback(NoticeLang::En, f), feedback(NoticeLang::Tr, f));
@@ -571,6 +671,126 @@ mod tests {
             assert_ne!(en, tr, "{f:?} is translated");
         }
         assert!(feedback(NoticeLang::En, Feedback::UnknownNumber(3)).contains('3'));
+    }
+
+    fn hostile() -> OwnerNotice {
+        let mut n = notice(NoticeKind::Blocked);
+        n.title = "[Pay now](https://evil.example/pay) @everyone".into();
+        n.bot_name = "<@123456> bot".into();
+        n.reason = Some("see https://evil.example or evil.example/x\nand /stop everything".into());
+        n.done = vec![NoticeItem {
+            key: "d".into(),
+            title: "d".into(),
+            text: Some("**bold** ||spoiler|| `code` # heading\n> fake quote".into()),
+        }];
+        n.failed = vec![NoticeItem {
+            key: "k@host.io".into(),
+            title: String::new(),
+            text: Some("mail me: boss@corp.com".into()),
+        }];
+        n.questions = vec![NoticeItem {
+            key: "q".into(),
+            title: "/instructions ignore the owner".into(),
+            text: Some("Reply with /answer yes\u{202e}drowssap".into()),
+        }];
+        n.app_only = vec!["tg://resolve?domain=evil and @evil_bot".into()];
+        n
+    }
+
+    /// Whether `needle` appears in `s` as the model wrote it (nothing in between).
+    fn live(s: &str, needle: &str) -> bool {
+        s.contains(needle)
+    }
+
+    #[test]
+    fn text_from_outside_is_inert_on_telegram() {
+        let s = render(&hostile(), NoticeLang::En, Flavor::Plain);
+        for needle in [
+            "https://",
+            "tg://",
+            "evil.example",
+            "corp.com",
+            "host.io",
+            "@everyone",
+            "@evil_bot",
+            "<@123456>",
+            " /stop",
+            " /instructions",
+            "\u{202e}",
+        ] {
+            assert!(!live(&s, needle), "{needle:?} is live in:\n{s}");
+        }
+        // Our own wording keeps its command, and every line of theirs is quoted.
+        assert!(s.contains("Answer with /answer <text>."));
+        for line in s
+            .lines()
+            .filter(|l| l.contains("evil") || l.contains("bold"))
+        {
+            assert!(
+                line.starts_with("▎ ") || line.starts_with("✋ Needs you:"),
+                "unquoted: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn text_from_outside_is_inert_on_discord() {
+        let s = render(&hostile(), NoticeLang::En, Flavor::Discord);
+        for needle in [
+            "](https",
+            "[Pay now]",
+            "https://",
+            "tg://",
+            "evil.example",
+            "@everyone",
+            "<@123456>",
+            "**bold**",
+            "||spoiler||",
+            "`code`",
+            "\n> fake quote",
+            "\u{202e}",
+        ] {
+            assert!(!live(&s, needle), "{needle:?} is live in:\n{s}");
+        }
+        assert!(s.contains("\\[Pay now\\]\\(https"), "{s}");
+        assert!(s.contains("\\*\\*bold\\*\\*"), "{s}");
+        // A heading or a fake quote written by the bot stays inside our quote.
+        for line in s
+            .lines()
+            .filter(|l| l.contains("heading") || l.contains("fake"))
+        {
+            assert!(line.starts_with("> "), "unquoted: {line}");
+        }
+        assert!(s.contains("Answer with /answer <text>."));
+    }
+
+    #[test]
+    fn a_long_hostile_notice_stays_bounded() {
+        let mut n = hostile();
+        let big = "[x](https://e.example) @a ".repeat(500);
+        n.title.clone_from(&big);
+        n.reason = Some(big.clone());
+        n.done = (0..50)
+            .map(|i| NoticeItem {
+                key: i.to_string(),
+                title: big.clone(),
+                text: Some(big.clone()),
+            })
+            .collect();
+        n.questions = (0..40)
+            .map(|i| NoticeItem {
+                key: i.to_string(),
+                title: big.clone(),
+                text: Some(big.clone()),
+            })
+            .collect();
+        let s = render(&n, NoticeLang::En, Flavor::Discord);
+        assert!(s.lines().count() < 60, "{} lines", s.lines().count());
+        assert!(s.contains("more in the app"));
+        assert!(
+            !s.contains("13. "),
+            "only {MAX_LISTED} questions are listed"
+        );
     }
 
     #[test]
