@@ -171,6 +171,15 @@ question in one message that you can answer from the chat. See
 quiet hours, and why approvals (anything involving money) always stay in the app.
 A short progress note at 25%, 50% and 75% is available but off by default.
 
+## From your phone
+
+With Telegram or Discord paired you can steer missions without the app: `/missions`,
+`/mission <id>`, `/pause <id>`, `/resume <id>`, `/stop <id>` (asks for a button tap) and
+`/mission new <text>`, in English or Turkish, only from your own private chat. See
+[Telegram](telegram.md#manage-missions-from-your-phone) and [Discord](discord.md#manage-missions-from-your-phone).
+Answering the blocked items of a mission still happens through the "needs you" message
+(`/answer`) or the app.
+
 ## Limits of this first version
 
 Missions are delivered in waves (see the [design](../design/missions-adr.md)).

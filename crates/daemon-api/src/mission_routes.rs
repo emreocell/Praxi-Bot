@@ -547,8 +547,19 @@ pub(crate) async fn create_mission(
     })?;
     // The goal is the one text of a mission that is the owner's own words (the route is
     // owner-only): named sites and typed URLs in it count for the approval code. The briefs the
-    // supervisor writes later are tagged `mission_brief` and never do.
-    s.storage().set_message_source(goal_message, "owner")?;
+    // supervisor writes later are tagged `mission_brief` and never do. A bridge says where the
+    // words were typed (`x-praxi-message-source`, as for a chat message) and the goal is labelled
+    // like that chat message would be: a hint can only lower the standing, never raise it.
+    let source = match headers
+        .get("x-praxi-message-source")
+        .and_then(|v| v.to_str().ok())
+    {
+        // Typed by the paired Telegram user (the bridge also holds the owner key).
+        Some("telegram") => "telegram_owner",
+        Some("discord") => "discord",
+        _ => "owner",
+    };
+    s.storage().set_message_source(goal_message, source)?;
     let m = store
         .create(
             &NewMission {

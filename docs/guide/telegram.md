@@ -22,14 +22,60 @@ Then open your bot in Telegram and send `/pair 123456` (your code).
 | `/bots` | Lists your bots |
 | `/use <bot name or id>` | Chooses the bot this chat talks to |
 | `/stop` | Stops the current run |
+| `/missions`, `/mission <id>`, `/pause <id>`, `/resume <id>`, `/stop <id>`, `/mission new <text>` | Manage your missions from the phone (see [below](#manage-missions-from-your-phone)) |
 | `/answer <text>` | Answers the questions in the latest "needs you" message (see below) |
-| `/status` | Shows status |
+| `/status` | One glance: server health, your bots, runs working now and missions by state |
+| `/help` | The commands, in English and Turkish |
 | `/lang tr` or `/lang en` | Sets this chat's language to Turkish or English (`/lang` alone shows the current one) |
 | anything else | Sent to the selected bot as a message |
 
 When a bot needs approval or asks a question, you get a message with buttons. The
 run waits until you tap one (or, for scheduled runs, until the 30-minute timeout
 pauses it).
+
+## Manage missions from your phone
+
+A bot that works for you around the clock needs a remote control. These commands work
+in your own private chat with the bot, typed by you:
+
+| Message | Does |
+| --- | --- |
+| `/missions` | Lists your missions: open ones first, each with its 8-character id, state and `done/total` |
+| `/mission <id>` | One mission: state, counts, what waits for you and the last report (or, before there is one, the latest results) |
+| `/pause <id>` | Pauses it: a session in flight stops and no new one starts |
+| `/resume <id>` | Continues a paused or blocked mission (the bot has to still be on the Full level) |
+| `/stop <id>` | Stops it for good. The bot **asks first**; nothing happens until you tap **Stop it** (or **Keep going**). The question expires after 5 minutes and works once |
+| `/mission new <text>` | Starts a mission with `<text>` as the goal, on the bot this chat talks to (see `/bots`, `/use`). That bot has to be on the **Full level**, like any mission |
+| `/status` | Server health, your bots, how many runs work now, missions running, waiting for you and paused |
+
+Turkish names work everywhere: `/gorevler`, `/gorev <id>`, `/gorev yeni <metin>`,
+`/duraklat`, `/surdur`, `/durdur <id>`, `/durum`, `/yardim`. A bare `/stop` (or `/durdur`)
+still stops the run of this chat; `/stop <id>` is the mission command.
+
+The **id** is the 8 characters `/missions` shows (the end of the mission's id: the start
+is a timestamp, so missions started together look alike). Case and dashes do not matter,
+and a longer part of the id or the whole id works too. If it fits two missions you are
+asked for more characters.
+
+How it is kept safe:
+
+- **Only you.** The command has to come from the paired Telegram account, in its own
+  private chat. A message from anyone else, from a group, or **forwarded** from somewhere
+  else is refused (a forward carries someone else's words under your name). A button
+  only counts when pressed by you on a question this bot asked a moment ago.
+- **Nothing is stopped by a command alone.** Stopping cannot be undone, so it needs the
+  button. Pause and resume change nothing that cannot be undone and run at once.
+- **Limits.** At most 20 commands a minute, and 3 new missions per 10 minutes; past that
+  the bot says so once and ignores the rest until the window has passed.
+- **A new mission is chat text like any other.** Its goal is labelled as typed in
+  Telegram by the paired owner (the same standing as a chat message from here, below a
+  mission started in the app), a pasted secret is cut out before it is sent, and the
+  mission runs under the bot's own limits, budgets and approval rules. Money, mail sending
+  and secrets still ask **in the app**.
+- **Escaping.** Mission titles, reasons and results are the bot's words (and, through it,
+  web pages'). They are quoted with links, mentions and `/commands` made harmless.
+- Answers never repeat the daemon's own error text; you get a short line that says what
+  to do.
 
 ## When a bot reports back on its own
 

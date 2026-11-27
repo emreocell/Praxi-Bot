@@ -4,7 +4,7 @@
 use axum::http::{Method, StatusCode};
 use serde_json::{Value, json};
 
-use super::{PROFILE, T, call, call_token_only, setup};
+use super::{PROFILE, T, call, call_token_only, send, setup};
 use protocol::{BotId, ChatId, RunId};
 
 const FULL_PROFILE: &str = r#"
@@ -757,4 +757,40 @@ async fn a_two_factor_code_is_never_taken_as_an_answer() {
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
     assert_eq!(r.json(), json!({"released": 1, "skipped": 1}));
     call(&t, Method::POST, &format!("/v1/missions/{id}/cancel"), None).await;
+}
+
+/// The source label of a mission's goal message, for a start that came with `hint`.
+async fn goal_source(t: &T, full: &str, hint: Option<&str>) -> String {
+    let body = json!({"bot_id": full, "goal": "Get backlinks for my site"});
+    let token = format!("Bearer {}", super::TOKEN);
+    let mut extra = vec![("authorization", token.as_str())];
+    if let Some(h) = hint {
+        extra.push(("x-praxi-message-source", h));
+    }
+    let r = send(&t.app, Method::POST, "/v1/missions", Some(body), &extra).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let chat: uuid::Uuid = r.json()["mission"]["chat_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let messages = t.state.storage().list_messages(ChatId(chat)).unwrap();
+    t.state.storage().message_source(messages[0].id).unwrap()
+}
+
+#[tokio::test]
+async fn a_goal_typed_in_a_bridge_is_labelled_like_a_chat_message_from_it() {
+    let t = setup();
+    t.state.enable_missions().unwrap();
+    t.state.start_missions();
+    let full = bot(&t, FULL_PROFILE, "Ada").await;
+    // The app (no hint) and an unknown hint keep the goal as the owner's own words.
+    assert_eq!(goal_source(&t, &full, None).await, "owner");
+    assert_eq!(goal_source(&t, &full, Some("local_ui")).await, "owner");
+    // Telegram: the paired owner writing over their channel; Discord: a lower standing.
+    assert_eq!(
+        goal_source(&t, &full, Some("telegram")).await,
+        "telegram_owner"
+    );
+    assert_eq!(goal_source(&t, &full, Some("discord")).await, "discord");
 }

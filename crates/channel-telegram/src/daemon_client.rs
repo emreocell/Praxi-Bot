@@ -6,6 +6,7 @@ use std::fmt;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use channel_api::control::{Action, MissionBrief, MissionView};
 use channel_api::notice::{OwnerNotice, Reply};
 use futures::stream::BoxStream;
 use futures_util::StreamExt;
@@ -195,6 +196,42 @@ pub trait DaemonClient: Send + Sync {
             "retrying a notice is not supported by this client".to_owned(),
         ))
     }
+
+    /// `GET /v1/missions`: the owner's missions, newest first. The default reports that this
+    /// client has no missions (a `503`, which the bridges word as "not available").
+    async fn list_missions(&self) -> Result<Vec<MissionBrief>> {
+        Err(missions_unsupported())
+    }
+
+    /// `GET /v1/missions/{id}`: one mission with its ledger and last report.
+    async fn mission(&self, _id: &str) -> Result<MissionView> {
+        Err(missions_unsupported())
+    }
+
+    /// `POST /v1/missions/{id}/pause|resume|cancel` (owner key): returns the mission after it.
+    async fn mission_action(&self, _id: &str, _action: Action) -> Result<MissionBrief> {
+        Err(missions_unsupported())
+    }
+
+    /// `POST /v1/missions` (owner key): start a mission for `bot_id`. The goal is the owner's own
+    /// words from this channel; the daemon labels it with the channel's message source.
+    async fn start_mission(&self, _bot_id: BotId, _goal: &str) -> Result<MissionBrief> {
+        Err(missions_unsupported())
+    }
+
+    /// How many runs are working right now (`GET /v1/runs`).
+    async fn running_run_count(&self) -> Result<usize> {
+        Err(TelegramError::Daemon(
+            "counting runs is not supported by this client".to_owned(),
+        ))
+    }
+}
+
+fn missions_unsupported() -> TelegramError {
+    TelegramError::DaemonHttp {
+        status: 503,
+        message: "missions are not supported by this client".to_owned(),
+    }
 }
 
 /// One event of the daemon's owner-notice stream (`GET /v1/owner-notices/stream`).
@@ -276,12 +313,13 @@ impl HttpDaemonClient {
         body: Option<Value>,
         idempotency_key: Option<&str>,
     ) -> Result<Value> {
+        let starts_mission = method == Method::POST && path == "/v1/missions";
         let mut rb = self
             .http
             .request(method, format!("{}{path}", self.base_url))
             .bearer_auth(self.token.expose())
             .timeout(Duration::from_secs(30));
-        if path.starts_with("/v1/chats/") && path.ends_with("/messages") {
+        if (path.starts_with("/v1/chats/") && path.ends_with("/messages")) || starts_mission {
             rb = rb.header("x-praxi-message-source", self.message_source);
         }
         if let Some(key) = &self.owner_key {
@@ -622,6 +660,49 @@ impl DaemonClient for HttpDaemonClient {
             )
             .await?;
         Ok(())
+    }
+
+    async fn list_missions(&self) -> Result<Vec<MissionBrief>> {
+        let v = self.request(Method::GET, "/v1/missions", None).await?;
+        serde_json::from_value(v).map_err(|e| TelegramError::Malformed(e.to_string()))
+    }
+
+    async fn mission(&self, id: &str) -> Result<MissionView> {
+        let v = self
+            .request(Method::GET, &format!("/v1/missions/{id}"), None)
+            .await?;
+        serde_json::from_value(v).map_err(|e| TelegramError::Malformed(e.to_string()))
+    }
+
+    async fn mission_action(&self, id: &str, action: Action) -> Result<MissionBrief> {
+        let verb = match action {
+            Action::Pause => "pause",
+            Action::Resume => "resume",
+            Action::Stop => "cancel",
+        };
+        let v = self
+            .request(Method::POST, &format!("/v1/missions/{id}/{verb}"), None)
+            .await?;
+        serde_json::from_value(v["mission"].clone())
+            .map_err(|e| TelegramError::Malformed(e.to_string()))
+    }
+
+    async fn start_mission(&self, bot_id: BotId, goal: &str) -> Result<MissionBrief> {
+        let body = json!({ "bot_id": bot_id.0, "goal": goal });
+        let v = self
+            .request(Method::POST, "/v1/missions", Some(body))
+            .await?;
+        serde_json::from_value(v["mission"].clone())
+            .map_err(|e| TelegramError::Malformed(e.to_string()))
+    }
+
+    async fn running_run_count(&self) -> Result<usize> {
+        let v = self.request(Method::GET, "/v1/runs", None).await?;
+        Ok(v.as_array().map_or(0, |runs| {
+            runs.iter()
+                .filter(|r| r["state"].as_str() == Some("running"))
+                .count()
+        }))
     }
 
     async fn subscribe_run(&self, run_id: RunId) -> Result<BoxStream<'static, Envelope>> {

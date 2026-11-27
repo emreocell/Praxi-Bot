@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod approval;
 pub mod conformance;
+pub mod control;
 mod error;
 pub mod notice;
 pub mod pairing;

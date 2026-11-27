@@ -39,12 +39,37 @@ Commands start with `!` (a `/` also works if you send it as plain text).
 | `!bots` | Lists your bots |
 | `!use <name>` | Chooses the bot this chat talks to |
 | `!stop` | Stops the current task |
+| `!missions`, `!mission <id>`, `!pause <id>`, `!resume <id>`, `!stop <id>`, `!mission new <text>` | Manage your missions (see [below](#manage-missions-from-your-phone)) |
 | `!answer <text>` | Answers the questions in the latest "needs you" message (see below) |
-| `!status` | Shows how many tasks run and wait for your OK |
+| `!status` | Server health, your bots, runs working now, missions by state and tasks waiting for your OK |
 | `!lang en`, `!lang tr`, `!lang de` | Language of the bot's own messages |
 | `!allow` / `!disallow` | In a server channel: let the bot answer you there / stop (owner only) |
 | `!help` | Short help |
 | anything else | Sent to the selected bot |
+
+## Manage missions from your phone
+
+In your **private chat** with the bot, only you can list, read, pause, resume and stop
+missions and start new ones. They are the same commands as on [Telegram](telegram.md#manage-missions-from-your-phone),
+with `!` in front:
+
+| Message | Does |
+| --- | --- |
+| `!missions` | Lists your missions with their 8-character ids, state and `done/total` |
+| `!mission <id>` | Details and the last report |
+| `!pause <id>`, `!resume <id>` | Pause or continue |
+| `!stop <id>` | Stops it for good; you confirm with the **Stop it** button (or **Keep going**) |
+| `!mission new <text>` | Starts a mission on the bot this chat uses; it has to be on the Full level |
+| `!status` | Health, bots, runs, missions |
+
+Turkish names work too: `!gorevler`, `!gorev <id>`, `!gorev yeni <metin>`, `!duraklat`,
+`!surdur`, `!durdur <id>`, `!durum`, `!yardim`. A bare `!stop` still stops the current task.
+
+These commands do **not** work in a server channel you allowed (you are told to use the
+private chat), and Discord forwards are ignored. At most 20 commands a minute and 3 new
+missions per 10 minutes. A goal you start from Discord counts like a Discord chat
+message (not as typed in the app): the sites you name in it do not become pre-approved.
+What a mission wrote is shown with Discord's formatting, links and mentions made harmless.
 
 ## When a bot reports back on its own
 
