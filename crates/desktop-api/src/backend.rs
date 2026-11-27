@@ -117,6 +117,31 @@ pub trait DesktopBackend: Send + Sync {
         Some(Refusal::Chord)
     }
 
+    /// The top-level window under the screen point `(x, y)` (physical pixels), as this backend
+    /// numbers windows, or `Ok(None)` when it cannot tell (the default: the check is skipped and
+    /// the action goes ahead as before). Used to refuse a pointer action that would land on a
+    /// different window than the one that was observed.
+    ///
+    /// # Errors
+    /// The OS query failed; callers treat that as "cannot tell".
+    async fn window_at(&self, _x: f64, _y: f64) -> Result<Option<u64>, DesktopError> {
+        Ok(None)
+    }
+
+    /// Whether this backend drives the screen of the machine it runs on (not a paired computer
+    /// reached over a link). Only then are the bot cursor's positions meaningful for this
+    /// daemon's own live view. Defaults to `false`.
+    fn is_local_screen(&self) -> bool {
+        false
+    }
+
+    /// A surface for the bot's own pointer: a click-through, always-on-top, never-focused
+    /// window that shows where the bot is about to click. `None` (the default) when this backend
+    /// cannot draw one (no display, an unsupported platform, a remote computer).
+    fn cursor_surface(&self) -> Option<std::sync::Arc<dyn crate::cursor::CursorSurface>> {
+        None
+    }
+
     /// Report what this backend supports.
     fn capabilities(&self) -> Capabilities;
 

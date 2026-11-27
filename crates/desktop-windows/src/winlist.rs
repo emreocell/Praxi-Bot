@@ -11,7 +11,8 @@ use desktop_api::{
 use windows::{
     Win32::{
         Foundation::{
-            CloseHandle, ERROR_SUCCESS, HANDLE, HWND, LPARAM, RECT, SetLastError, WAIT_OBJECT_0,
+            CloseHandle, ERROR_SUCCESS, HANDLE, HWND, LPARAM, POINT, RECT, SetLastError,
+            WAIT_OBJECT_0,
         },
         Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute},
         Storage::FileSystem::{GetFullPathNameW, SearchPathW},
@@ -35,10 +36,11 @@ use windows::{
                 SHELLEXECUTEINFOW, ShellExecuteExW,
             },
             WindowsAndMessaging::{
-                BringWindowToTop, EnumWindows, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongW,
-                GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
-                IsIconic, IsWindow, IsWindowVisible, SW_RESTORE, SW_SHOWNORMAL,
-                SetForegroundWindow, ShowWindow, WS_EX_TOOLWINDOW,
+                BringWindowToTop, EnumWindows, GA_ROOT, GWL_EXSTYLE, GetAncestor,
+                GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
+                GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
+                SW_RESTORE, SW_SHOWNORMAL, SetForegroundWindow, ShowWindow, WS_EX_TOOLWINDOW,
+                WindowFromPoint,
             },
         },
     },
@@ -643,6 +645,26 @@ fn association_command(path: &str) -> Option<String> {
         return None;
     }
     String::from_utf16(&buf[..end]).ok()
+}
+
+/// The top-level window under the screen point `(x, y)` (physical pixels), numbered like
+/// [`list_windows`]. Click-through windows (the bot-cursor overlay) are skipped by Windows' own
+/// hit testing. `None`: no window there.
+pub fn window_at(x: f64, y: f64) -> Option<u64> {
+    #[allow(clippy::cast_possible_truncation)]
+    let point = POINT {
+        x: x.round() as i32,
+        y: y.round() as i32,
+    };
+    // SAFETY: plain hit-test queries; a null result is handled.
+    let root = unsafe {
+        let hit = WindowFromPoint(point);
+        if hit.0.is_null() {
+            return None;
+        }
+        GetAncestor(hit, GA_ROOT)
+    };
+    (!root.0.is_null()).then(|| id_from_hwnd(root))
 }
 
 #[cfg(test)]

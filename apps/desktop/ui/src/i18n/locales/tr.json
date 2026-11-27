@@ -1438,6 +1438,10 @@
       "sunset": "Gün batımı"
     }
   },
+  "botCursor": {
+    "description": "Bot bilgisayarınızı veya tarayıcısını kullanırken kendi imlecini ve tıkladığı yerde bir dalga çizer. Böylece nereye tıklayacağını görürsünüz. Sizin imlecinize hiç dokunulmaz. Her yerde gizlemek için bunu kapatın.",
+    "title": "Botun imlecini göster"
+  },
   "botEdit": {
     "addFallback": "Yedek ekle",
     "allSaved": "Kaydedilmemiş değişiklik yok",

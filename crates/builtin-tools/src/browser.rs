@@ -316,6 +316,9 @@ pub trait BrowserDriver: Send + Sync {
     async fn grounded_screenshot(&self) -> Result<GroundedShot, String> {
         Err(NO_POINTER.into())
     }
+    /// Take the bot's own pointer off the page (the owner takes over or a hand-over starts).
+    /// Best effort and a no-op when none is drawn or the backend draws none.
+    async fn bot_cursor_hide(&self) {}
     /// Use the browser the owner already has open (remote debugging on this computer)
     /// instead of the assistant's own. `None` looks for one at the usual places. Returns a
     /// description of the browser now in use.
@@ -1710,6 +1713,19 @@ impl BrowserDriver for CdpDriver {
         }
         .await;
         result.ok().flatten().and_then(|o| origin_of(&o))
+    }
+
+    async fn bot_cursor_hide(&self) {
+        // Never launches a browser and never waits long: this runs on the way to a hand-over.
+        let hide: std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>,
+        > = Box::pin(async {
+            with_session!(self, None, false, |sess| {
+                sess.page.bot_cursor_hide().await;
+                Ok::<(), browser_cdp::Error>(())
+            })
+        });
+        let _ = tokio::time::timeout(Duration::from_secs(2), hide).await;
     }
 
     async fn grounded_screenshot(&self) -> Result<GroundedShot, String> {
@@ -3213,6 +3229,8 @@ impl BrowserTool {
         self.shared
             .observed_epoch
             .store(epoch_now, std::sync::atomic::Ordering::SeqCst);
+        // A human has driven in between: the bot's own pointer is not theirs.
+        d.bot_cursor_hide().await;
         self.refuse_observation_while_latched()?;
         let fresh = d.snapshot(false).await.map_err(exec_err)?;
         permit.observed();
@@ -4051,6 +4069,8 @@ impl BrowserTool {
             &site,
             &snapshot,
         );
+        // The owner answers on the page now: the bot's own pointer is not left on top of it.
+        shared.driver.bot_cursor_hide().await;
         Ok(ToolOutput {
             content: vec![
                 tool_registry::ContentPart::Json {

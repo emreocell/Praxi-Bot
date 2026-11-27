@@ -13,6 +13,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use desktop_api::covered::{covered_message, covering_window};
+use desktop_api::cursor::{CursorOverlay, CursorSurface, Gesture, NullSurface};
 use desktop_api::snapshot::AppSpec;
 use desktop_api::{
     ActGuard, Action, ClickMethod, CoordinateSpace, DesktopBackend, DesktopError, Quality, Region,
@@ -260,6 +262,83 @@ struct Shared {
     control: Option<Arc<dyn DesktopControlGate>>,
     /// Owner-stored secrets the type tools may type; `None` refuses `secret`.
     fill_secrets: Option<Arc<FillSecrets>>,
+    /// The bot cursor of each desktop backend (keyed by the backend's address: every run that
+    /// drives one desktop shares one pointer), made on the first pointer action.
+    cursors: Mutex<HashMap<usize, Arc<CursorOverlay>>>,
+}
+
+/// Environment switch the desktop app sets on the daemon it starts: the app draws the bot cursor
+/// itself (its own click-through overlay windows), so this daemon must not open a second one.
+const APP_OVERLAY_ENV: &str = "BOT_APP_OVERLAY";
+
+/// Whether this daemon draws the bot cursor itself (a native overlay window). `app_overlay` is
+/// the value of [`APP_OVERLAY_ENV`]: unset, empty or `0` means nobody else draws it. The
+/// positions are published for the live viewer either way.
+fn native_cursor_wanted(app_overlay: Option<&str>) -> bool {
+    matches!(app_overlay.map(str::trim), None | Some("" | "0"))
+}
+
+/// What draws the bot cursor of `backend`: its own overlay surface, or (when the desktop app
+/// draws it) nothing but the published positions, or no cursor at all for a backend that is not
+/// this machine's screen.
+fn pick_surface(
+    backend: &Arc<dyn DesktopBackend>,
+    app_overlay: Option<&str>,
+) -> Option<Arc<dyn CursorSurface>> {
+    if native_cursor_wanted(app_overlay) {
+        backend.cursor_surface()
+    } else if backend.is_local_screen() {
+        Some(Arc::new(NullSurface))
+    } else {
+        None
+    }
+}
+
+/// Most bot cursors kept (one per desktop backend); more would be a leak of per-run backends.
+const MAX_CURSORS: usize = 8;
+
+/// One point a desktop action touches, and how the bot cursor treats it.
+struct Touch {
+    target: Target,
+    gesture: Gesture,
+    /// The input lands wherever the pointer is (a coordinate, or a real click), so the window
+    /// on top at the point must be the observed one.
+    verify: bool,
+}
+
+fn is_coordinate(t: &Target) -> bool {
+    matches!(t, Target::ByCoordinate { .. })
+}
+
+/// The points an action touches, in order.
+fn touches(action: &Action) -> Vec<Touch> {
+    match action {
+        Action::Click { target, method } => vec![Touch {
+            target: target.clone(),
+            gesture: Gesture::Click,
+            verify: is_coordinate(target) || *method != ClickMethod::Accessibility,
+        }],
+        Action::Drag { from, to, method } => [(from, Gesture::Click), (to, Gesture::Move)]
+            .into_iter()
+            .map(|(t, gesture)| Touch {
+                target: t.clone(),
+                gesture,
+                verify: is_coordinate(t) || *method != ClickMethod::Accessibility,
+            })
+            .collect(),
+        Action::Scroll { target, .. } => vec![Touch {
+            target: target.clone(),
+            gesture: Gesture::Move,
+            verify: is_coordinate(target),
+        }],
+        Action::SetValue { target, .. } => vec![Touch {
+            target: target.clone(),
+            gesture: Gesture::Move,
+            verify: false,
+        }],
+        // Typed text and key presses go to the focus: the pointer does not move.
+        Action::TypeText { .. } | Action::KeyPress { .. } => Vec::new(),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -711,6 +790,98 @@ impl Shared {
         .ok_or_else(|| exec_err("desktop backend is unavailable for this run"))
     }
 
+    /// The screen point a target stands for: the point itself, or the centre of the element the
+    /// last observation of this run saw. `None` when it cannot be told.
+    fn target_point(&self, run_id: &str, t: &Target) -> Option<(f64, f64)> {
+        let mut states = self.state.lock();
+        let st = states.get(run_id)?;
+        match t {
+            Target::ByCoordinate {
+                x,
+                y,
+                space: CoordinateSpace::Absolute,
+            } => Some((*x, *y)),
+            Target::ByCoordinate {
+                x,
+                y,
+                space: CoordinateSpace::Normalized999,
+            } => {
+                let b = st.window_bounds?;
+                Some((b.x + x / 999.0 * b.width, b.y + y / 999.0 * b.height))
+            }
+            Target::ByIndex { index, .. } => {
+                let (_, rect) = st.targets.get(index)?;
+                rect.as_ref()
+                    .map(|r| (r.x + r.width / 2.0, r.y + r.height / 2.0))
+            }
+        }
+    }
+
+    /// The bot cursor for `backend`, made on first use. `None` when nothing draws it here: a
+    /// backend with no screen of its own (a paired computer; the tool runs elsewhere), or no
+    /// surface and no app overlay.
+    fn cursor_for(&self, backend: &Arc<dyn DesktopBackend>) -> Option<Arc<CursorOverlay>> {
+        let key = Arc::as_ptr(backend).cast::<()>() as usize;
+        let mut map = self.cursors.lock();
+        if let Some(c) = map.get(&key) {
+            return Some(Arc::clone(c));
+        }
+        if !::live_view::bot_cursor::enabled() {
+            return None;
+        }
+        let app_overlay = std::env::var(APP_OVERLAY_ENV).ok();
+        let surface = pick_surface(backend, app_overlay.as_deref())?;
+        if map.len() >= MAX_CURSORS {
+            map.clear();
+        }
+        let overlay = CursorOverlay::new(surface);
+        map.insert(key, Arc::clone(&overlay));
+        Some(overlay)
+    }
+
+    /// Hide every bot cursor now: the owner took control, an action was refused, a run ended.
+    fn release_cursors(&self) {
+        let all: Vec<_> = self.cursors.lock().values().cloned().collect();
+        for c in all {
+            c.release();
+        }
+    }
+
+    /// A human has the screen (pause, takeover, local override).
+    fn human_in_control(&self) -> bool {
+        self.control
+            .as_ref()
+            .is_some_and(|g| g.latch_refusal().is_some() || g.observation_refused().is_some())
+    }
+
+    /// Refuse, before anything is sent, when a pointer action at `(x, y)` would land on another
+    /// program's window than the observed one (a dialog opened, another program came to the
+    /// front). Silent when the backend cannot tell.
+    async fn refuse_if_covered(
+        &self,
+        run_id: &str,
+        backend: &Arc<dyn DesktopBackend>,
+        x: f64,
+        y: f64,
+    ) -> Result<(), ToolError> {
+        let Some(expected) = self.scope(run_id) else {
+            return Ok(());
+        };
+        let Ok(at) = backend.window_at(x, y).await else {
+            return Ok(());
+        };
+        if at.is_none() || at == Some(expected) {
+            return Ok(());
+        }
+        let Ok(windows) = backend.windows().await else {
+            return Ok(());
+        };
+        match covering_window(expected, at, &windows) {
+            Some(top) => Err(exec_err(covered_message(top, x, y))),
+            None => Ok(()),
+        }
+    }
+
     async fn act(
         &self,
         run_id: &str,
@@ -719,6 +890,26 @@ impl Shared {
         guard: Option<&ActGuard>,
     ) -> Result<String, ToolError> {
         let backend = self.backend(run_id)?;
+        if self.human_in_control() {
+            self.release_cursors();
+        } else {
+            let points: Vec<_> = touches(&action)
+                .into_iter()
+                .filter_map(|t| self.target_point(run_id, &t.target).map(|p| (p, t)))
+                .collect();
+            for ((x, y), t) in &points {
+                if t.verify {
+                    self.refuse_if_covered(run_id, &backend, *x, *y).await?;
+                }
+            }
+            if !points.is_empty()
+                && let Some(cursor) = self.cursor_for(&backend)
+            {
+                for ((x, y), t) in &points {
+                    cursor.point((*x, *y), t.gesture).await;
+                }
+            }
+        }
         let guard = guard.cloned();
         let res = permit
             .protect(async move {
@@ -729,9 +920,12 @@ impl Shared {
                     None => backend.act(action).await,
                 }
             })
-            .await
-            .map_err(exec_err)?
-            .map_err(|e| derr(&e))?;
+            .await;
+        // A refused or failed action, or a human who took the screen meanwhile: no pointer left.
+        if !matches!(res, Ok(Ok(_))) || self.human_in_control() {
+            self.release_cursors();
+        }
+        let res = res.map_err(exec_err)?.map_err(|e| derr(&e))?;
         let mut head = format!("dispatched: {}", res.dispatched);
         if let Some(v) = res.verified {
             let _ = write!(head, ", verified: {v}");
@@ -1041,6 +1235,7 @@ pub fn tools_dynamic_with_secrets(
         settings,
         control,
         fill_secrets,
+        cursors: Mutex::new(HashMap::new()),
     });
     let d = PermissionCategory::Desktop;
     let index_prop = json!({
@@ -1516,6 +1711,7 @@ impl DesktopTool {
             // the human drives by now. The epoch is not compared here: an
             // action legitimately waits through a pause and its release.
             if !observing && gate.observation_refused().is_some() {
+                self.shared.release_cursors();
                 return Ok(crate::control::OBSERVATION_WITHHELD.to_owned());
             }
         }
@@ -2179,6 +2375,12 @@ pub(crate) mod fake {
         pub secure_edit: bool,
         /// The verified program identity this backend reports (`None` = it cannot verify).
         pub identity: Mutex<Option<String>>,
+        /// The window `window_at` reports under every point (`None` = cannot tell).
+        pub point_window: Mutex<Option<u64>>,
+        /// Windows listed besides the observed one.
+        pub extra_windows: Mutex<Vec<WindowInfo>>,
+        /// The bot-cursor surface this backend offers (`None` = no overlay possible).
+        pub surface: Mutex<Option<Arc<dyn desktop_api::CursorSurface>>>,
     }
 
     impl FakeDesktop {
@@ -2201,6 +2403,9 @@ pub(crate) mod fake {
                 guarded: Mutex::new(Vec::new()),
                 secure_edit: false,
                 identity: Mutex::new(None),
+                point_window: Mutex::new(None),
+                extra_windows: Mutex::new(Vec::new()),
+                surface: Mutex::new(None),
             }
         }
 
@@ -2227,7 +2432,7 @@ pub(crate) mod fake {
             id,
             title: "Fake Notepad".into(),
             pid: 4242,
-            bounds: Rect {
+            bounds: desktop_api::snapshot::Rect {
                 x: 100.0,
                 y: 200.0,
                 width: 400.0,
@@ -2370,6 +2575,7 @@ pub(crate) mod fake {
                 hook("windows");
             }
             let mut wins = vec![window(77)];
+            wins.extend(self.extra_windows.lock().iter().cloned());
             if let (Some(at), Some(delay)) = (*self.launched_at.lock(), self.launch_window_delay)
                 && at.elapsed() >= delay
             {
@@ -2398,6 +2604,18 @@ pub(crate) mod fake {
             self.identity.lock().clone()
         }
 
+        async fn window_at(&self, _x: f64, _y: f64) -> Result<Option<u64>, DesktopError> {
+            Ok(*self.point_window.lock())
+        }
+
+        fn is_local_screen(&self) -> bool {
+            true
+        }
+
+        fn cursor_surface(&self) -> Option<Arc<dyn desktop_api::CursorSurface>> {
+            self.surface.lock().clone()
+        }
+
         fn capabilities(&self) -> Capabilities {
             Capabilities {
                 platform: "fake".into(),
@@ -2411,6 +2629,7 @@ pub(crate) mod fake {
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)] // CURSOR_TESTS serialises the tests that share the global owner switch
 mod tests {
     #[test]
     fn a_program_of_another_os_is_refused_before_any_card() {
@@ -3515,6 +3734,283 @@ mod tests {
             .call(&ctx, json!({}))
             .await
             .unwrap();
+    }
+
+    /// Records what the bot-cursor overlay asks a surface to draw.
+    #[derive(Default)]
+    struct RecSurface(Mutex<Vec<String>>);
+    impl CursorSurface for RecSurface {
+        fn move_to(&self, x: f64, y: f64) -> Result<(), String> {
+            self.0.lock().push(format!("move {x:.0},{y:.0}"));
+            Ok(())
+        }
+        fn ripple(&self, x: f64, y: f64) -> Result<(), String> {
+            self.0.lock().push(format!("ripple {x:.0},{y:.0}"));
+            Ok(())
+        }
+        fn hide(&self) -> Result<(), String> {
+            self.0.lock().push("hide".into());
+            Ok(())
+        }
+    }
+
+    /// The tests that draw share the process-wide bot-cursor switch: one at a time.
+    static CURSOR_TESTS: Mutex<()> = Mutex::new(());
+
+    fn with_surface(
+        fake: &Arc<FakeDesktop>,
+    ) -> (Arc<RecSurface>, parking_lot::MutexGuard<'static, ()>) {
+        let guard = CURSOR_TESTS.lock();
+        ::live_view::bot_cursor::set_enabled(true);
+        let s = Arc::new(RecSurface::default());
+        *fake.surface.lock() = Some(s.clone());
+        (s, guard)
+    }
+
+    #[test]
+    fn the_native_cursor_is_skipped_only_when_the_app_draws_it() {
+        assert!(native_cursor_wanted(None));
+        assert!(native_cursor_wanted(Some("")));
+        assert!(native_cursor_wanted(Some("0")));
+        assert!(native_cursor_wanted(Some(" 0 ")));
+        assert!(!native_cursor_wanted(Some("1")));
+        assert!(!native_cursor_wanted(Some("yes")));
+    }
+
+    #[test]
+    fn with_the_app_overlay_no_native_surface_is_used_but_a_local_screen_still_publishes() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (rec, _guard) = with_surface(&fake);
+        let backend: Arc<dyn DesktopBackend> = fake.clone();
+        let native = pick_surface(&backend, None).unwrap();
+        let rec_dyn: Arc<dyn CursorSurface> = rec;
+        assert!(Arc::ptr_eq(&native, &rec_dyn));
+        let app = pick_surface(&backend, Some("1")).unwrap();
+        assert!(
+            !Arc::ptr_eq(&app, &rec_dyn),
+            "the null surface, not the native one"
+        );
+        // A backend with no overlay of its own and no local screen gets no cursor either way.
+        let bare: Arc<dyn DesktopBackend> = Arc::new(NoScreen);
+        assert!(pick_surface(&bare, None).is_none());
+        assert!(pick_surface(&bare, Some("1")).is_none());
+    }
+
+    struct NoScreen;
+    #[async_trait]
+    impl DesktopBackend for NoScreen {
+        async fn snapshot(&self, _: Option<u64>) -> Result<Snapshot, DesktopError> {
+            Err(DesktopError::Unsupported("x".into()))
+        }
+        async fn act(&self, _: Action) -> Result<desktop_api::ActionResult, DesktopError> {
+            Err(DesktopError::Unsupported("x".into()))
+        }
+        async fn screenshot(
+            &self,
+            _: Region,
+            _: Quality,
+        ) -> Result<desktop_api::Image, DesktopError> {
+            Err(DesktopError::Unsupported("x".into()))
+        }
+        async fn windows(&self) -> Result<Vec<desktop_api::WindowInfo>, DesktopError> {
+            Ok(Vec::new())
+        }
+        async fn launch(&self, _: AppSpec) -> Result<desktop_api::snapshot::Pid, DesktopError> {
+            Err(DesktopError::Unsupported("x".into()))
+        }
+        fn capabilities(&self) -> desktop_api::Capabilities {
+            desktop_api::Capabilities {
+                platform: "none".into(),
+                accessibility_tree: false,
+                screenshot: false,
+                app_launch: false,
+                has_display: false,
+            }
+        }
+    }
+
+    #[test]
+    fn actions_name_the_points_they_touch_and_which_ones_are_verified() {
+        let coord = Target::ByCoordinate {
+            x: 1.0,
+            y: 2.0,
+            space: CoordinateSpace::Absolute,
+        };
+        let index = Target::ByIndex {
+            index: 3,
+            generation: 1,
+        };
+        let click = |target: Target, method| Action::Click { target, method };
+        let t = touches(&click(coord.clone(), ClickMethod::Global));
+        assert_eq!(
+            (t.len(), t[0].gesture, t[0].verify),
+            (1, Gesture::Click, true)
+        );
+        // An accessibility invoke by index sends no pointer event: nothing to verify.
+        assert!(!touches(&click(index.clone(), ClickMethod::Accessibility))[0].verify);
+        assert!(touches(&click(index.clone(), ClickMethod::Global))[0].verify);
+        let drag = touches(&Action::Drag {
+            from: coord.clone(),
+            to: coord,
+            method: ClickMethod::Global,
+        });
+        assert_eq!(drag.len(), 2);
+        assert!(drag.iter().all(|t| t.verify));
+        assert!(touches(&Action::TypeText { text: "x".into() }).is_empty());
+        assert!(
+            touches(&Action::KeyPress {
+                keys: vec!["a".into()]
+            })
+            .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_click_draws_the_bot_cursor_at_the_element_and_a_ripple() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (rec, _guard) = with_surface(&fake);
+        let (_d, t) = build(fake.clone(), None);
+        let ctx = ToolContext::default();
+        observed(&t, &ctx).await;
+        get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 2, "gen": 1}))
+            .await
+            .unwrap();
+        let log = rec.0.lock().clone();
+        // Element 2 is the box (120,230) 80x24: its centre.
+        assert!(log.len() >= 3, "{log:?}");
+        assert_eq!(log[log.len() - 2], "move 160,242", "{log:?}");
+        assert_eq!(log[log.len() - 1], "ripple 160,242", "{log:?}");
+        assert_eq!(fake.actions.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn typing_and_key_presses_do_not_move_the_bot_cursor() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (rec, _guard) = with_surface(&fake);
+        let (_d, t) = build(fake.clone(), None);
+        let ctx = ToolContext::default();
+        observed(&t, &ctx).await;
+        get(&t, "desktop_key")
+            .call(&ctx, json!({"keys": "Return"}))
+            .await
+            .unwrap();
+        assert!(rec.0.lock().is_empty(), "{:?}", rec.0.lock());
+    }
+
+    #[tokio::test]
+    async fn a_coordinate_click_under_another_programs_window_is_refused_before_anything_is_sent() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (rec, _guard) = with_surface(&fake);
+        fake.extra_windows.lock().push(desktop_api::WindowInfo {
+            id: 99,
+            title: "Update available".into(),
+            pid: 555,
+            bounds: desktop_api::snapshot::Rect {
+                x: 100.0,
+                y: 200.0,
+                width: 400.0,
+                height: 300.0,
+            },
+            focused: false,
+        });
+        let (_d, t) = build(fake.clone(), None);
+        let ctx = ToolContext::default();
+        observed(&t, &ctx).await;
+        // Nothing on top (the backend cannot tell): the click goes ahead as before.
+        get(&t, "desktop_click")
+            .call(&ctx, json!({"x": 150, "y": 250}))
+            .await
+            .unwrap();
+        assert_eq!(fake.actions.lock().len(), 1);
+        // Another program's window is on top at the point.
+        *fake.point_window.lock() = Some(99);
+        observed(&t, &ctx).await;
+        let before = rec.0.lock().len();
+        let err = get(&t, "desktop_click")
+            .call(&ctx, json!({"x": 150, "y": 250}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("Update available") && err.contains("NOT made"),
+            "{err}"
+        );
+        assert_eq!(fake.actions.lock().len(), 1, "nothing was sent");
+        assert_eq!(
+            rec.0.lock().len(),
+            before,
+            "and the cursor did not go there"
+        );
+        // The observed window itself on top is fine.
+        *fake.point_window.lock() = Some(77);
+        get(&t, "desktop_click")
+            .call(&ctx, json!({"x": 150, "y": 250}))
+            .await
+            .unwrap();
+        assert_eq!(fake.actions.lock().len(), 2);
+    }
+
+    /// Says a human has the screen once told to.
+    struct Takeover {
+        backend: Arc<dyn DesktopBackend>,
+        human: std::sync::atomic::AtomicBool,
+    }
+    #[async_trait]
+    impl DesktopControlGate for Takeover {
+        fn desktop_for_run(&self, _: &str) -> Option<Arc<dyn DesktopBackend>> {
+            Some(self.backend.clone())
+        }
+        fn observation_refused(&self) -> Option<String> {
+            self.human
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .then(|| "the user is controlling".to_owned())
+        }
+        async fn before_action(&self, _req: &ControlRequest) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn the_bot_cursor_disappears_when_the_owner_takes_control() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (rec, _guard) = with_surface(&fake);
+        let d = tempfile::tempdir().unwrap();
+        let gate = Arc::new(Takeover {
+            backend: fake.clone(),
+            human: std::sync::atomic::AtomicBool::new(false),
+        });
+        let t = tools(fake.clone(), None, d.path(), settings(), Some(gate.clone()));
+        let ctx = ToolContext::default();
+        observed(&t, &ctx).await;
+        get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 2, "gen": 1}))
+            .await
+            .unwrap();
+        assert!(!rec.0.lock().iter().any(|e| e == "hide"));
+        gate.human.store(true, std::sync::atomic::Ordering::SeqCst);
+        let out = get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 2, "gen": 2}))
+            .await;
+        let _ = out;
+        assert_eq!(rec.0.lock().last().map(String::as_str), Some("hide"));
+    }
+
+    #[tokio::test]
+    async fn a_switched_off_bot_cursor_draws_nothing_but_the_action_still_runs() {
+        let fake = Arc::new(FakeDesktop::new(false));
+        let (rec, _guard) = with_surface(&fake);
+        ::live_view::bot_cursor::set_enabled(false);
+        let (_d, t) = build(fake.clone(), None);
+        let ctx = ToolContext::default();
+        observed(&t, &ctx).await;
+        get(&t, "desktop_click")
+            .call(&ctx, json!({"index": 2, "gen": 1}))
+            .await
+            .unwrap();
+        ::live_view::bot_cursor::set_enabled(true);
+        assert!(rec.0.lock().is_empty());
+        assert_eq!(fake.actions.lock().len(), 1);
     }
 
     /// Latches on demand (a Stop / takeover landing mid-script).

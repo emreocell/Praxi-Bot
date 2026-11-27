@@ -97,6 +97,8 @@ export interface AppSettings extends AppearanceSettings {
   lastSeenVersion: string;
   /** The "Getting started" checklist was put away from the empty chat (Help still shows it). */
   gettingStartedHidden: boolean;
+  /** Draw the bot's own pointer (desktop overlay, browser page, live viewer). The daemon holds the real switch; this mirror lets the overlay windows and the viewer follow it. */
+  botCursor: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -139,7 +141,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   micDeviceId: "",
   silenceStopSec: DEFAULT_SILENCE_STOP_SEC,
   lastSeenVersion: "",
-  gettingStartedHidden: false
+  gettingStartedHidden: false,
+  botCursor: true
 };
 
 export function shouldOpenOnboardingOnStart(
@@ -201,7 +204,8 @@ export function loadSettingsSync(): AppSettings | null {
       micDeviceId: parseMicDeviceId(parsed.micDeviceId),
       silenceStopSec: parseSilenceStopSec(parsed.silenceStopSec),
       lastSeenVersion: typeof parsed.lastSeenVersion === "string" ? parsed.lastSeenVersion : "",
-      gettingStartedHidden: parsed.gettingStartedHidden === true
+      gettingStartedHidden: parsed.gettingStartedHidden === true,
+      botCursor: parsed.botCursor !== false
     };
   } catch {
     return null;
@@ -300,6 +304,7 @@ export async function loadSettings(): Promise<AppSettings> {
       const lastSeen = await store.get<string>("lastSeenVersion");
       const lastSeenVersion = typeof lastSeen === "string" ? lastSeen : "";
       const gettingStartedHidden = (await store.get<boolean>("gettingStartedHidden")) === true;
+      const botCursor = (await store.get<boolean>("botCursor")) !== false;
 
       return {
         ...appearance,
@@ -341,7 +346,8 @@ export async function loadSettings(): Promise<AppSettings> {
         micDeviceId,
         silenceStopSec,
         lastSeenVersion,
-        gettingStartedHidden
+        gettingStartedHidden,
+        botCursor
       };
     } catch {
       // Fall back to localStorage below if reading from plugin-store fails
@@ -403,6 +409,7 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
       await store.set("silenceStopSec", settings.silenceStopSec);
       await store.set("lastSeenVersion", settings.lastSeenVersion);
       await store.set("gettingStartedHidden", settings.gettingStartedHidden);
+      await store.set("botCursor", settings.botCursor);
       await store.save();
     } catch {
       // Ignore store write errors in non-Tauri environments

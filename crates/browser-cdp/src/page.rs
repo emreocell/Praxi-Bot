@@ -161,6 +161,12 @@ pub(crate) struct Shared {
     pub live_view_strong_hooks: StdMutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
     /// Where the pointer last was (top-level viewport coordinates), so the next move starts there.
     pub pointer: StdMutex<Option<(f64, f64)>>,
+    /// The isolated world the bot cursor overlay draws from, with the navigation generation it
+    /// was made in (see [`crate::cursor`]).
+    pub(crate) cursor_ctx: StdMutex<Option<(u64, i64)>>,
+    /// Whether an overlay may be on the page right now, so a hide that has nothing to remove
+    /// costs no round trip.
+    pub(crate) cursor_drawn: AtomicBool,
 }
 
 impl Shared {
@@ -220,6 +226,8 @@ impl Default for Shared {
             live_view_action_hooks: StdMutex::default(),
             live_view_strong_hooks: StdMutex::default(),
             pointer: StdMutex::default(),
+            cursor_ctx: StdMutex::default(),
+            cursor_drawn: AtomicBool::default(),
         }
     }
 }

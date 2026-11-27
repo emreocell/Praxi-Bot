@@ -1762,3 +1762,96 @@ async fn the_owners_open_browser_can_be_attached_and_is_only_disconnected_afterw
     assert_eq!(tab.title().await.unwrap(), "Form");
     owner.close().await.unwrap();
 }
+
+// ---- the bot's own pointer ---------------------------------------------------------------------
+
+const CURSOR_PAGE: &str = "<title>idle</title><body style='margin:0'>\
+<button id=b style='position:absolute;left:100px;top:100px;width:120px;height:40px' \
+onclick=\"document.title='clicked'\">Go</button>";
+
+async fn host_present(p: &Page) -> bool {
+    p.evaluate("!!document.querySelector('[data-praxi-bot-cursor]')")
+        .await
+        .unwrap()
+        .as_bool()
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn the_bot_cursor_is_drawn_inert_hidden_from_the_page_and_removed() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = open(&b, CURSOR_PAGE).await;
+    assert!(
+        !host_present(&p).await,
+        "nothing is drawn before the bot acts"
+    );
+    live_view::bot_cursor::set_enabled(true);
+
+    let (acted, _) = point_click(&p, 150.0, 120.0).await;
+    assert!(acted.ok, "{acted:?}");
+    assert_eq!(text_of(&p, "document.title").await, "clicked");
+    assert!(
+        host_present(&p).await,
+        "the pointer is on the page after a click"
+    );
+    // Closed shadow root, inert, invisible to hit tests, not in what the model reads.
+    assert!(
+        p.evaluate("document.querySelector('[data-praxi-bot-cursor]').shadowRoot === null")
+            .await
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
+    assert_eq!(
+        text_of(&p, "document.elementFromPoint(150,120).id").await,
+        "b"
+    );
+    let snap = p.snapshot(&SnapshotOptions::default()).await.unwrap();
+    assert!(!snap.render().contains("praxi"), "{}", snap.render());
+
+    // A second action reuses it (one host), and the owner taking over removes it entirely.
+    point_click(&p, 160.0, 125.0).await;
+    assert_eq!(
+        p.evaluate("document.querySelectorAll('[data-praxi-bot-cursor]').length")
+            .await
+            .unwrap(),
+        1
+    );
+    p.bot_cursor_hide().await;
+    assert!(!host_present(&p).await);
+
+    // The owner's switch off: actions still work, nothing is drawn.
+    live_view::bot_cursor::set_enabled(false);
+    p.evaluate("document.title='idle'").await.unwrap();
+    let (acted, _) = point_click(&p, 150.0, 120.0).await;
+    assert!(acted.ok && text_of(&p, "document.title").await == "clicked");
+    assert!(!host_present(&p).await);
+    live_view::bot_cursor::set_enabled(true);
+}
+
+#[tokio::test]
+#[ignore = "needs Chrome/Edge"]
+async fn a_pointer_click_is_refused_when_the_element_under_it_changes_as_the_pointer_arrives() {
+    let b = Browser::launch(LaunchOptions::default()).await.unwrap();
+    let p = open(
+        &b,
+        "<title>idle</title><body style='margin:0'>\
+<button id=b style='position:absolute;left:100px;top:100px;width:120px;height:40px' \
+onclick=\"document.title='clicked'\" \
+onmouseover=\"if(!window.done){window.done=1;const d=document.createElement('div');d.id='ad';\
+d.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%';document.body.append(d)}\">Go</button>",
+    )
+    .await;
+    let (acted, hit) = point_click(&p, 150.0, 120.0).await;
+    assert!(!acted.ok, "{acted:?}");
+    let msg = format!("{acted:?}");
+    assert!(msg.contains("changed while the pointer moved"), "{msg}");
+    assert!(msg.contains("nothing was pressed"), "{msg}");
+    assert!(hit.contains("button"), "what was seen before: {hit}");
+    assert_eq!(
+        text_of(&p, "document.title").await,
+        "idle",
+        "no click went out"
+    );
+}

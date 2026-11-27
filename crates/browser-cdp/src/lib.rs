@@ -24,6 +24,7 @@ pub mod actions;
 pub mod attach;
 pub mod browser;
 pub mod client;
+pub mod cursor;
 pub mod destination;
 pub mod diff;
 pub mod dom;

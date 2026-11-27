@@ -1438,6 +1438,10 @@
       "sunset": "Sunset"
     }
   },
+  "botCursor": {
+    "description": "While the bot uses your computer or its browser, it draws a pointer of its own, with a ripple where it clicks, so you can see where it is about to act. Your own pointer is never moved. Turn this off to hide it everywhere.",
+    "title": "Show the bot's pointer"
+  },
   "botEdit": {
     "addFallback": "Add a fallback",
     "allSaved": "No unsaved changes",

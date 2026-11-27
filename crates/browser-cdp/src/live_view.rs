@@ -1887,6 +1887,7 @@ impl WorkerState {
                 source_rect: geom.source_rect(),
                 geometry_revision: geom.revision,
                 repeated: false,
+                bot_pointer: None,
             },
             payload: decoded.jpeg,
         });
@@ -2630,8 +2631,13 @@ impl InputSink for BrowserInputSink {
     }
 
     async fn set_takeover_active(&self, active: bool) -> Result<(), ViewError> {
-        if active && self.core.binding_if_alive().is_none() {
+        let binding = self.core.binding_if_alive();
+        if active && binding.is_none() {
             return Err(ViewError::Unavailable);
+        }
+        if active && let Some(b) = &binding {
+            // The owner drives now: the bot's own pointer leaves the page.
+            crate::cursor::hide(&b.client, &b.session_id, &b.page_shared).await;
         }
         self.core.set_takeover_pin(active);
         if !active {

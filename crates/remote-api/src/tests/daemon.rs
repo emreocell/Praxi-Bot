@@ -78,6 +78,7 @@ impl Target {
                     },
                     geometry_revision: 1,
                     repeated: false,
+                    bot_pointer: None,
                 },
                 payload: Arc::from(SECRET_PIXELS),
             })

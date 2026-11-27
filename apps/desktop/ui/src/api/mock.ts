@@ -16,6 +16,7 @@ import type {
   ImportScanInput,
   BotSpendLimits,
   CreateMission,
+  BotCursorSettings,
   OwnerNotifySettings,
   MissionAnswer,
   BrowserProfileStatus,
@@ -892,6 +893,7 @@ const MOCK_BOT_TERMINALS: BotTerminal[] = [
 
 export class MockApiClient extends ApiClient {
   private readonly incomingWebhooks = new Map<string, IncomingWebhook[]>();
+  private botCursor: BotCursorSettings = { enabled: true };
   private ownerNotify: OwnerNotifySettings = {
     finished: true,
     failed: true,
@@ -1673,6 +1675,10 @@ export class MockApiClient extends ApiClient {
     const seg = path.split("/").filter(Boolean).map(decodeURIComponent);
     if (path === "/connectivity" && method === "GET") return ok({ services: [] });
     if (seg[0] === "bots" && seg[2] === "triggers") return ok(this.triggers.route(method, seg, opts.body));
+    if (path === "/bot-cursor") {
+      if (method === "PUT") this.botCursor = opts.body as BotCursorSettings;
+      return ok(this.botCursor);
+    }
     if (seg[0] === "owner-notices") {
       if (seg[1] === "settings") {
         if (method === "PUT") this.ownerNotify = opts.body as OwnerNotifySettings;

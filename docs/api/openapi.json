@@ -1695,6 +1695,76 @@
         ]
       }
     },
+    "/v1/bot-cursor": {
+      "get": {
+        "tags": [
+          "computer"
+        ],
+        "summary": "Whether the bot's own pointer is drawn.",
+        "operationId": "get_bot_cursor",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotCursorSettings"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "computer"
+        ],
+        "summary": "Turn the bot's own pointer on or off (owner only). Off removes it everywhere at once.",
+        "operationId": "put_bot_cursor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotCursorSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotCursorSettings"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/bots": {
       "get": {
         "tags": [
@@ -22086,6 +22156,20 @@
           }
         }
       },
+      "BotCursorSettings": {
+        "type": "object",
+        "description": "Whether the bot's own pointer is drawn.",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "`false`: no bot pointer on the desktop, in the browser page or in the live viewer."
+          }
+        },
+        "additionalProperties": false
+      },
       "BotDto": {
         "type": "object",
         "description": "Public bot representation.",
@@ -22384,6 +22468,33 @@
           },
           "value": {
             "description": "The new value (`set` only)."
+          }
+        }
+      },
+      "BotPointer": {
+        "type": "object",
+        "description": "Where the bot's pointer is on a frame, as the viewer draws it.",
+        "required": [
+          "x",
+          "y",
+          "click_seq"
+        ],
+        "properties": {
+          "click_seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Counts the bot's clicks at this pointer; a viewer plays a ripple when it grows.",
+            "minimum": 0
+          },
+          "x": {
+            "type": "number",
+            "format": "double",
+            "description": "Fraction of the frame width from the left edge, `0.0..=1.0`."
+          },
+          "y": {
+            "type": "number",
+            "format": "double",
+            "description": "Fraction of the frame height from the top edge, `0.0..=1.0`."
           }
         }
       },
@@ -27664,6 +27775,17 @@
             ],
             "format": "int64",
             "minimum": 0
+          },
+          "bot_pointer": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BotPointer",
+                "description": "Where the bot's own pointer is on this frame (a fraction of its width and height), when\nthe bot has one here and the owner has not switched it off. Left out otherwise, so\nolder viewers and golden records are unchanged."
+              }
+            ]
           },
           "captured_at_ms": {
             "type": "integer",

@@ -455,6 +455,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bot-cursor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the bot's own pointer is drawn. */
+        get: operations["get_bot_cursor"];
+        /** Turn the bot's own pointer on or off (owner only). Off removes it everywhere at once. */
+        put: operations["put_bot_cursor"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bots": {
         parameters: {
             query?: never;
@@ -6135,6 +6153,11 @@ export interface components {
             /** @description `version_conflict`. */
             error: components["schemas"]["ErrorDetail"];
         };
+        /** @description Whether the bot's own pointer is drawn. */
+        BotCursorSettings: {
+            /** @description `false`: no bot pointer on the desktop, in the browser page or in the live viewer. */
+            enabled: boolean;
+        };
         /** @description Public bot representation. */
         BotDto: {
             /** @description Bot profile (ADR-0011) as JSON. */
@@ -6279,6 +6302,24 @@ export interface components {
             path: string;
             /** @description The new value (`set` only). */
             value?: unknown;
+        };
+        /** @description Where the bot's pointer is on a frame, as the viewer draws it. */
+        BotPointer: {
+            /**
+             * Format: int64
+             * @description Counts the bot's clicks at this pointer; a viewer plays a ripple when it grows.
+             */
+            click_seq: number;
+            /**
+             * Format: double
+             * @description Fraction of the frame width from the left edge, `0.0..=1.0`.
+             */
+            x: number;
+            /**
+             * Format: double
+             * @description Fraction of the frame height from the top edge, `0.0..=1.0`.
+             */
+            y: number;
         };
         /** @description Response of `GET /v1/bots/{id}/skills` and `PUT /v1/bots/{id}/skills`. */
         BotSkillsDto: {
@@ -8333,6 +8374,7 @@ export interface components {
         FrameMetadata: {
             /** Format: int64 */
             action_seq?: number | null;
+            bot_pointer?: null | components["schemas"]["BotPointer"];
             /** Format: int64 */
             captured_at_ms: number;
             cause: components["schemas"]["Cause"];
@@ -14314,6 +14356,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditVerify"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_bot_cursor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotCursorSettings"];
+                };
+            };
+        };
+    };
+    put_bot_cursor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotCursorSettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotCursorSettings"];
                 };
             };
             403: {

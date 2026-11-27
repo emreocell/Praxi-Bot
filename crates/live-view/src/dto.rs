@@ -8,7 +8,7 @@ pub const MAX_PAYLOAD: usize = 2 * 1024 * 1024;
 pub const MAX_BATCH_BYTES: usize = 16 * 1024;
 pub const MAX_EVENTS: usize = 32;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TargetKind {
@@ -433,6 +433,11 @@ pub struct FrameMetadata {
     pub source_rect: SourceRect,
     pub geometry_revision: u64,
     pub repeated: bool,
+    /// Where the bot's own pointer is on this frame (a fraction of its width and height), when
+    /// the bot has one here and the owner has not switched it off. Left out otherwise, so
+    /// older viewers and golden records are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_pointer: Option<crate::bot_cursor::BotPointer>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -19,6 +19,7 @@ import { CalendarCard } from "./CalendarCard";
 import { WebSearchCard } from "./WebSearchCard";
 import { WorkspaceStorageCard } from "./WorkspaceStorageCard";
 import { AuditLogCard } from "./AuditLogCard";
+import { BotCursorCard } from "./BotCursorCard";
 import { AllowedGrantsCard } from "./AllowedGrantsCard";
 import { PageReaderCard } from "./PageReaderCard";
 import { SafetyLevelsCard } from "./SafetyLevelsCard";
@@ -185,6 +186,19 @@ export function computerCards(b: SettingsBridge, t: TFunction): CardDef[] {
             />
             <OpenLiveViewerRow />
           </div>
+        </SettingsCard>
+      )
+    },
+    {
+      id: "bot-cursor",
+      section: "computer",
+      kind: "block",
+      title: t("botCursor.title"),
+      description: t("botCursor.description"),
+      keywords: "bot cursor pointer mouse arrow ripple click show where overlay imlec isaretci fare ok tiklama goster zeiger maus pfeil klick anzeigen",
+      node: (
+        <SettingsCard title={t("botCursor.title")} description={t("botCursor.description")}>
+          <BotCursorCard settings={b.settings} update={b.update} />
         </SettingsCard>
       )
     },

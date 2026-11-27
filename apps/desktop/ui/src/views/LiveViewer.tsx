@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { BotCursor } from "../components/BotCursor";
 import { PeerLinkBadge } from "../components/PeerLinkBadge";
 import { Button } from "ui";
 import { PendingDecisions } from "../components/PendingDecisions";
@@ -49,6 +50,8 @@ import {
   summarizeTarget,
   visibleActions
 } from "../lib/liveViewState";
+import { placeCursor, showBotCursor } from "../lib/botCursor";
+import { useReducedMotion } from "../lib/useReducedMotion";
 import { viewerKeyAction } from "../lib/liveViewLayers";
 import {
   toggleFit,
@@ -314,6 +317,7 @@ export function LiveViewer({
   // Reset captured pointer/key state if stage ceases to allow input.
   const inputGate = canSendLiveInput(state, Date.now());
   const isInteractive = inputGate.ok;
+  const reducedMotion = useReducedMotion();
 
   const isInteractiveRef = useRef(isInteractive);
   isInteractiveRef.current = isInteractive;
@@ -595,6 +599,13 @@ export function LiveViewer({
         }
       : null;
 
+  // The bot's own pointer at its last position on the frame; the owner's pointer is their own.
+  const botPose = state.latestFrame?.botPointer ?? null;
+  const botCursorAt =
+    contained && showBotCursor({ pose: botPose, ownerDriving: isInteractive }) && botPose
+      ? placeCursor(botPose, contained)
+      : null;
+
   const unavailableReason =
     state.reason ?? targetSummary?.reason ?? (selectedTarget ? null : "unavailable");
 
@@ -866,6 +877,16 @@ export function LiveViewer({
                       value={imeBuffer}
                       onChange={(e) => setImeBuffer(e.target.value)}
                       {...stageController.ime}
+                    />
+                  ) : null}
+
+                  {botCursorAt && botPose ? (
+                    <BotCursor
+                      left={botCursorAt.left}
+                      top={botCursorAt.top}
+                      clickSeq={botPose.clickSeq}
+                      animate={!reducedMotion}
+                      testId="live-viewer-bot-cursor"
                     />
                   ) : null}
 

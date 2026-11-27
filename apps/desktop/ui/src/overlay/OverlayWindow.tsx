@@ -26,6 +26,8 @@ import {
   readMonitorGeometryFromUrl,
   subscribeOverlayEvents
 } from "./events";
+import { BotCursor } from "../components/BotCursor";
+import { centerOf } from "../lib/botCursor";
 import styles from "./OverlayWindow.module.css";
 
 interface RippleInstance {
@@ -45,6 +47,9 @@ export function OverlayWindow() {
   );
   const [target, setTarget] = useState<OverlayShowTargetPayload | null>(null);
   const [ripples, setRipples] = useState<RippleInstance[]>([]);
+  // Where the bot's own pointer rests on this monitor (logical px): the middle of the target it
+  // works on, or the last place it clicked. Null until the bot acts, and again once it stops.
+  const [cursorAt, setCursorAt] = useState<{ x: number; y: number } | null>(null);
   const [reducedMotion, setReducedMotion] = useState<boolean>(() =>
     isReducedMotionPreferred()
   );
@@ -92,6 +97,9 @@ export function OverlayWindow() {
     return subscribeOverlayEvents({
       onShowTarget: (payload) => {
         setTarget(payload);
+        setCursorAt(
+          centerOf(physicalRectToLogical(payload.rect, readMonitorGeometryFromUrl()))
+        );
       },
       onClick: (payload: OverlayClickPayload) => {
         const currentMonitor = readMonitorGeometryFromUrl();
@@ -99,6 +107,7 @@ export function OverlayWindow() {
           { x: payload.x, y: payload.y },
           currentMonitor
         );
+        setCursorAt(logical);
         rippleCounter += 1;
         const rippleId = (payload.timestampMs ?? Date.now()) + rippleCounter;
         setRipples((prev) => [
@@ -112,11 +121,14 @@ export function OverlayWindow() {
       onClear: () => {
         setTarget(null);
         setRipples([]);
+        setCursorAt(null);
       },
       onControlStateChanged: (snapshot) => {
         setControlState(snapshot);
         if (snapshot.mode !== "bot_driving") {
+          // The bot stopped, paused or the owner took control: its pointer goes with it.
           setTarget(null);
+          setCursorAt(null);
         } else if (snapshot.activeTarget) {
           setTarget(snapshot.activeTarget);
         }
@@ -215,6 +227,15 @@ export function OverlayWindow() {
             </div>
           ) : null}
         </div>
+      ) : null}
+
+      {settings.botCursor && !isHumanDriving && cursorAt ? (
+        <BotCursor
+          left={cursorAt.x}
+          top={cursorAt.y}
+          animate={!reducedMotion}
+          testId="overlay-bot-cursor"
+        />
       ) : null}
 
       {ripples.map((ripple) => (

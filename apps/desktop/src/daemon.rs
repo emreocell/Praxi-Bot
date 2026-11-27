@@ -648,6 +648,9 @@ fn spawn_daemon(handle: &DaemonHandle, data_dir: &Path, fake: bool) -> Result<Ch
         cmd.arg("--fake-provider");
     }
     cmd.env("BOT_DATA_DIR", data_dir);
+    // The app draws the bot's pointer in its own overlay windows: the daemon must not add a
+    // second one of its own on the desktop.
+    cmd.env("BOT_APP_OVERLAY", "1");
     // The dev server (`tauri dev`) has its own browser origin.
     if cfg!(debug_assertions) {
         cmd.env("BOT_ALLOWED_ORIGINS", "http://localhost:1420");

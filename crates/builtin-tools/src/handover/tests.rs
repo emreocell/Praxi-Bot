@@ -51,6 +51,8 @@ struct Page {
     fail_with_code: bool,
     epoch: StdMutex<Option<String>>,
     stop_on_snapshot: StdMutex<Option<String>>,
+    /// How many times the bot's own pointer was taken off the page.
+    cursor_hidden: std::sync::atomic::AtomicUsize,
 }
 
 impl Page {
@@ -62,6 +64,7 @@ impl Page {
             fail_with_code: false,
             epoch: StdMutex::new(None),
             stop_on_snapshot: StdMutex::new(None),
+            cursor_hidden: std::sync::atomic::AtomicUsize::new(0),
         })
     }
     fn show(&self, snapshot: &str, url: &str) {
@@ -72,6 +75,10 @@ impl Page {
 
 #[async_trait]
 impl BrowserDriver for Page {
+    async fn bot_cursor_hide(&self) {
+        self.cursor_hidden
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
     async fn open(&self, _u: &str, _p: Option<&str>) -> Result<String, String> {
         Ok(self.snapshot.lock().unwrap().clone())
     }
@@ -339,6 +346,24 @@ async fn a_failing_page_never_echoes_the_code_back() {
     let shown = format!("{err} {err:?}");
     assert!(!shown.contains("987654"), "{shown}");
     handover_hub().forget("run-h3");
+}
+
+#[tokio::test]
+async fn a_handover_takes_the_bot_pointer_off_the_page() {
+    let page = Page::new(HOLD_PAGE, "https://shop.example/x");
+    assert_eq!(
+        page.cursor_hidden.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    tool(&page, "browser_handover")
+        .call(&ctx("run-h-cursor"), json!({"kind":"captcha"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        page.cursor_hidden.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    handover_hub().forget("run-h-cursor");
 }
 
 #[tokio::test]

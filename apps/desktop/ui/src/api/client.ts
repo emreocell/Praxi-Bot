@@ -37,6 +37,7 @@ import type {
   BotMemorySettings,
   BotMemorySettingsInput,
   OwnerNotice,
+  BotCursorSettings,
   OwnerNotifySettings,
   PageReader,
   MemoryEmbedding,
@@ -1443,6 +1444,14 @@ export class ApiClient {
   /** Pause, resume or stop a mission (owner only). */
   steerMission(id: string, action: "pause" | "resume" | "cancel"): Promise<MissionDetail> {
     return this.request("POST", `/missions/${id}/${action}`);
+  }
+  /** Whether the bot draws a pointer of its own (desktop overlay, browser page, live view). */
+  getBotCursor(): Promise<BotCursorSettings> {
+    return this.request("GET", "/bot-cursor");
+  }
+  /** Turn that on or off (owner only). */
+  putBotCursor(settings: BotCursorSettings): Promise<BotCursorSettings> {
+    return this.request("PUT", "/bot-cursor", { body: settings });
   }
   /** Mission and background-run digests, oldest first; `after` = only those with a larger `seq`. */
   ownerNotices(after?: number): Promise<OwnerNotice[]> {

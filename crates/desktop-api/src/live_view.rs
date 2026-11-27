@@ -2401,6 +2401,14 @@ fn ensure_active_driver(
     }
 }
 
+/// Where the bot's own pointer is on a frame that captures `rect` (virtual-screen physical
+/// pixels, so a monitor left of or above the primary one is handled by the rectangle's own
+/// origin). `None` when the bot has no pointer, the owner switched it off or it is off the
+/// captured area.
+fn bot_pointer_for(rect: &PixelRect) -> Option<::live_view::bot_cursor::BotPointer> {
+    ::live_view::bot_cursor::for_frame(TargetKind::Desktop, &rect.to_source_rect())
+}
+
 fn publish_reused_frame(
     core: &Arc<TargetCore>,
     cache: &mut CaptureSessionCache,
@@ -2451,6 +2459,7 @@ fn publish_reused_frame(
             source_rect: geom.rect.to_source_rect(),
             geometry_revision,
             repeated: !forced,
+            bot_pointer: bot_pointer_for(&geom.rect),
         },
         payload,
     });
@@ -2551,6 +2560,7 @@ fn encode_and_publish_frame(
             source_rect: geom.rect.to_source_rect(),
             geometry_revision,
             repeated: false,
+            bot_pointer: bot_pointer_for(&geom.rect),
         },
         payload: Arc::clone(&payload),
     });
@@ -3207,6 +3217,35 @@ mod tests {
         Snapshot, WindowInfo,
         snapshot::{AppSpec, Pid},
     };
+
+    #[test]
+    fn the_bot_pointer_is_mapped_onto_the_frame_even_on_a_monitor_left_of_the_primary() {
+        let _g = crate::cursor::TEST_GLOBAL.lock();
+        ::live_view::bot_cursor::set_enabled(true);
+        // Capturing the left monitor of a two-monitor desktop: its origin is negative.
+        let left = PixelRect {
+            x: -1920,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        ::live_view::bot_cursor::publish_click(TargetKind::Desktop, -960.0, 540.0);
+        let p = bot_pointer_for(&left).unwrap();
+        assert!((p.x - 0.5).abs() < 1e-9 && (p.y - 0.5).abs() < 1e-9);
+        assert_eq!(p.click_seq, 1);
+        // The same point is not on the primary monitor's frame.
+        let primary = PixelRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        assert!(bot_pointer_for(&primary).is_none());
+        ::live_view::bot_cursor::set_enabled(false);
+        assert!(bot_pointer_for(&left).is_none());
+        ::live_view::bot_cursor::set_enabled(true);
+        ::live_view::bot_cursor::clear(TargetKind::Desktop);
+    }
 
     #[test]
     fn default_desktop_backend_hook_returns_unsupported_without_breaking_fakes() {

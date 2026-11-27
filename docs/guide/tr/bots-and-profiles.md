@@ -165,6 +165,18 @@ izleyebilirsin ve yalnızca imleç üzerindeyken açılan menüler açılabilir:
   yazma ise kısa bir duraklamanın ardından, onaylanan alanda hâlâ tek adımda yapılır (böylece
   bir sayfa yazılanı çalamaz).
 
+### Botun kendi imleci
+
+Asistan bilgisayarı kullanırken, bilgisayar kullanan diğer uygulamalar gibi kendi imlecini çizer. Böylece nereye tıklamak üzere olduğunu görürsünüz. Tıkladığı yerde dalga çıkaran renkli bir oktur ve sizin kendi imlecinize hiç benzemez. Gerçek imlecinizi hiçbir zaman oynatmaz (tarayıcı, imleci oynatmayan hata ayıklama protokolüyle sürülür).
+
+- **Asistanın tarayıcısında** ok, sayfanın içinde küçük bir katmanla çizilir. Bu katman tıklanamaz, klavye odağını almaz, ekran okuyuculardan ve sayfa özetinden gizlidir ve yalnızca koordinat taşır. Önceki noktadan sonrakine süzülür. Siz devraldığınızda (`browser_handover`, canlı görünümde **Kontrolü al**) ya da tarayıcı kapandığında tamamen kaldırılır. Sayfa görüntüsünün parçası olduğu için canlı görünüm ve `browser_screenshot` da onu gösterir.
+- **Masaüstünde** saydam bir pencere asistanın imlecini gerçek ekranın üstünde izler, her tıklamada dalga çıkarır. Tıklama ya da odak almaz; asistan durunca veya siz kontrolü alınca kaybolur. Masaüstü uygulamasıyla birlikte, kullanılacak denetimi çerçeveleyen uygulamanın kendi katman pencereleri onu çizer. Uygulama olmadan başlatılan bir bot (Windows'ta `bot serve`, Linux'ta X11 oturumu) küçük bir pencereyle kendisi çizer. Uygulama başlattığı bota `BOT_APP_OVERLAY=1` vererek katmanı olduğunu bildirir, böylece iki imleç görmezsiniz.
+- **Canlı görünümde** ok, uzak ekranın üstünde asistanın son işaret ettiği yerde, her tıklama için bir dalgayla çizilir. Kontrol sizdeyken yalnızca kendi imleciniz görünür.
+
+**Ayarlar > Bilgisayar > Botun imlecini göster** ile kapatın: üç yerden birden kalkar. Bu yalnızca çizileni değiştirir, asistanın neye izin verildiğini değiştirmez.
+
+Asistan konuma göre tıklamadan önce noktanın altında ne olduğuna da bakar. Ekran görüntüsünden sonra üstüne başka bir öğe (tarayıcı) ya da başka bir pencere (masaüstü) geldiyse hiçbir şeye basılmaz ve sonuç şimdi orada ne olduğunu söyler. Bir öğeye tıklamadan önce öğe görünüme kaydırılır; biri izleyebiliyorsa yumuşak kaydırılır (aşağıdaki `human_like` bölümüne bakın).
+
 ### Adıyla tıklanacak bir şey olmadığında
 
 Çoğu öğeye, sayfa görüntüsünün verdiği başvuruyla tıklanır (`browser_click`, `browser_fill`). Bazılarının başvurusu yoktur: başka bir sitenin çerçevesindeki bir onay kutusu ("Robot değilim" kutusu), bir tuval ya da rolü olmadan çizilmiş bir anahtar. Bunlar için asistan ekran görüntüsü alır, bir nokta seçer ve orada işlem yapar:

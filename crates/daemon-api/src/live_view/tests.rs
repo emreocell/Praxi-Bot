@@ -142,6 +142,7 @@ impl Target {
                     },
                     geometry_revision: revision,
                     repeated: false,
+                    bot_pointer: None,
                 },
                 payload: Arc::from(PIXEL_SECRET),
             })

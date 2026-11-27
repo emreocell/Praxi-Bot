@@ -18,6 +18,7 @@ mod assistant_import_routes;
 mod attachment_routes;
 mod audit_routes;
 pub mod auth;
+mod bot_cursor_routes;
 mod bot_engine;
 mod bot_tools;
 pub mod changes;
@@ -515,6 +516,7 @@ impl AppState {
         let cli_models = cli_provider::models::ModelCache::load(Some(
             storage.data_dir().join("cache").join("cli-models.json"),
         ));
+        bot_cursor_routes::load(storage.data_dir());
         let state = Self(Arc::new(Inner {
             schedule_events: tokio::sync::broadcast::channel(64).0,
             owner_notify: owner_notify::Hub::load(storage.data_dir()),
@@ -1699,6 +1701,10 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/missions/{id}/answers",
             post(mission_routes::answer_mission),
+        )
+        .route(
+            "/v1/bot-cursor",
+            get(bot_cursor_routes::get_bot_cursor).put(bot_cursor_routes::put_bot_cursor),
         )
         .route("/v1/owner-notices", get(owner_notify::list_notices))
         .route(

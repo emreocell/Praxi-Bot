@@ -371,6 +371,86 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, DesktopError> {
     Ok(out)
 }
 
+/// The top-level window under the screen point `(x, y)`, numbered like [`list_windows`].
+///
+/// The root's children are walked from the top of the stack down: the first viewable one that
+/// contains the point and takes input there wins (a click-through window, such as the bot-cursor
+/// overlay, is skipped: the click goes through it). When a window manager frames clients, the
+/// client inside the frame is the answer, so the id matches the window list.
+pub fn window_at(x: f64, y: f64) -> Result<Option<u64>, DesktopError> {
+    use x11rb::connection::RequestConnection as _;
+    use x11rb::protocol::shape::{ConnectionExt as _, SK};
+    let (conn, screen_num) = connect()?;
+    let root = conn.setup().roots[screen_num].root;
+    let tree = conn
+        .query_tree(root)
+        .map_err(x11_err("query_tree"))?
+        .reply()
+        .map_err(x11_err("query_tree reply"))?;
+    let (px, py) = (x.round(), y.round());
+    let has_shape = conn
+        .extension_information(x11rb::protocol::shape::X11_EXTENSION_NAME)
+        .ok()
+        .flatten()
+        .is_some();
+    let mut top = None;
+    for win in tree.children.iter().rev() {
+        let Some(attrs) = conn
+            .get_window_attributes(*win)
+            .ok()
+            .and_then(|c| c.reply().ok())
+        else {
+            continue;
+        };
+        if attrs.map_state != MapState::VIEWABLE {
+            continue;
+        }
+        let Some(geo) = conn.get_geometry(*win).ok().and_then(|c| c.reply().ok()) else {
+            continue;
+        };
+        let (gx, gy) = (f64::from(geo.x), f64::from(geo.y));
+        if px < gx || py < gy || px >= gx + f64::from(geo.width) || py >= gy + f64::from(geo.height)
+        {
+            continue;
+        }
+        if has_shape
+            && conn
+                .shape_get_rectangles(*win, SK::INPUT)
+                .ok()
+                .and_then(|c| c.reply().ok())
+                .is_some_and(|r| r.rectangles.is_empty())
+        {
+            continue;
+        }
+        top = Some(*win);
+        break;
+    }
+    let Some(top) = top else { return Ok(None) };
+    let net_client_list = intern_atom(&conn, b"_NET_CLIENT_LIST")?;
+    let clients = candidate_windows(&conn, root, net_client_list);
+    if clients.contains(&top) {
+        return Ok(Some(u64::from(top)));
+    }
+    // A frame: look for the client inside it (a few levels deep).
+    let mut level = vec![top];
+    for _ in 0..3 {
+        let mut next = Vec::new();
+        for w in level {
+            let Some(t) = conn.query_tree(w).ok().and_then(|c| c.reply().ok()) else {
+                continue;
+            };
+            for child in t.children {
+                if clients.contains(&child) {
+                    return Ok(Some(u64::from(child)));
+                }
+                next.push(child);
+            }
+        }
+        level = next;
+    }
+    Ok(Some(u64::from(top)))
+}
+
 /// Bring `window_id` to the foreground and focus it.
 pub fn activate_window(window_id: u64) -> Result<(), DesktopError> {
     let win = u32::try_from(window_id)

@@ -5,6 +5,8 @@
 
 pub mod action;
 pub mod backend;
+pub mod covered;
+pub mod cursor;
 pub mod error;
 pub mod grid;
 pub mod guard;
@@ -15,6 +17,7 @@ pub mod snapshot;
 
 pub use action::{Action, ActionResult, ClickMethod, CoordinateSpace, Target};
 pub use backend::{Capabilities, DesktopBackend};
+pub use cursor::{CursorOverlay, CursorSurface};
 pub use error::DesktopError;
 pub use grid::Grid;
 pub use guard::{ActGuard, InputTarget, ProcessIdentity, Refusal};

@@ -360,6 +360,7 @@ impl Page {
     /// all of them agree (an opaque or mixed stack is unknown, which no rule matches).
     async fn hit_at(&self, x: f64, y: f64) -> Result<Hit> {
         let background = || Hit {
+            node: None,
             what: "nothing but the page background".to_owned(),
             origin: None,
             top: true,
@@ -378,6 +379,7 @@ impl Page {
             return Ok(background());
         };
         let hit_frame = hit["frameId"].as_str().unwrap_or_default().to_owned();
+        let hit_frame_id = hit_frame.clone();
         let d = self
             .cmd("DOM.describeNode", json!({"backendNodeId": backend_id}))
             .await?;
@@ -430,6 +432,7 @@ impl Page {
             }
         };
         Ok(Hit {
+            node: Some((backend_id, hit_frame_id)),
             what,
             origin,
             top: false,
@@ -510,20 +513,25 @@ impl Page {
     }
 
     /// The point again after the pointer travelled there (a hover can open a menu, move a frame
-    /// or navigate): the receiving origin must still be the one it was, and the approved one.
+    /// or navigate): the receiving origin must still be the one it was, and the approved one,
+    /// and the element under the point must still be the one `before` saw.
     async fn recheck_hit(
         &self,
         (x, y): (f64, f64),
-        before: Option<&str>,
+        before: &Hit,
+        before_origin: Option<&str>,
         expected: Option<&str>,
     ) -> Result<()> {
         let hit = self.hit_at(x, y).await?;
         let now = self.check_hit_origin(&hit, expected).await?;
-        if now.as_deref() != before {
+        if now.as_deref() != before_origin {
             return Err(Error::Element(
                 "the page under the pointer changed while it moved; nothing was pressed. Take a new screenshot and look again"
                     .into(),
             ));
+        }
+        if let Some(why) = under_point_changed(before, &hit) {
+            return Err(Error::Element(why));
         }
         Ok(())
     }
@@ -578,7 +586,7 @@ impl Page {
                             .into(),
                     ));
                 }
-                Some((tx, ty))
+                Some(((tx, ty), end))
             }
             _ => None,
         };
@@ -589,7 +597,7 @@ impl Page {
             }
             PointerOp::Wheel { dx, dy } => {
                 self.glide_to((x, y), req.feel, &mut rng).await?;
-                self.recheck_hit((x, y), origin.as_deref(), req.expected)
+                self.recheck_hit((x, y), &hit, origin.as_deref(), req.expected)
                     .await?;
                 self.wheel(x, y, dx, dy).await?;
                 // Let smooth-scrolling pages move before the picture is taken.
@@ -599,7 +607,7 @@ impl Page {
                 self.glide_to((x, y), req.feel, &mut rng).await?;
                 sleep(human::settle_pause(req.feel, &mut rng)).await;
                 // The mouse has arrived: what is under it now is what the press will hit.
-                self.recheck_hit((x, y), origin.as_deref(), req.expected)
+                self.recheck_hit((x, y), &hit, origin.as_deref(), req.expected)
                     .await?;
                 let (name, mask) = match button {
                     PointerButton::Left => (button.cdp(), 1),
@@ -614,10 +622,11 @@ impl Page {
                 }
             }
             PointerOp::Drag { .. } => {
-                let (tx, ty) = drop_point.unwrap_or((x, y));
+                let ((tx, ty), end_hit) =
+                    drop_point.ok_or_else(|| Error::Element("a drag needs an end point".into()))?;
                 self.glide_to((x, y), req.feel, &mut rng).await?;
                 sleep(human::settle_pause(req.feel, &mut rng)).await;
-                self.recheck_hit((x, y), origin.as_deref(), req.expected)
+                self.recheck_hit((x, y), &hit, origin.as_deref(), req.expected)
                     .await?;
                 self.mouse(
                     "mousePressed",
@@ -626,6 +635,8 @@ impl Page {
                     json!({"button": "left", "clickCount": 1, "buttons": 1}),
                 )
                 .await?;
+                // The bot's own pointer carries the drag to where it is released.
+                self.bot_cursor_move((tx, ty)).await;
                 // Always several moves: a drag handler needs them to see a drag at all.
                 let steps = 8;
                 for i in 1..=steps {
@@ -640,7 +651,7 @@ impl Page {
                     sleep(human::step_pause(req.feel, &mut rng)).await;
                 }
                 // The button is down: release it where it was approved or not at all.
-                self.recheck_hit((tx, ty), origin.as_deref(), req.expected)
+                self.recheck_hit((tx, ty), &end_hit, origin.as_deref(), req.expected)
                     .await?;
                 self.mouse(
                     "mouseReleased",
@@ -738,12 +749,29 @@ impl Page {
 
 /// What a pointer point lands on.
 struct Hit {
+    /// The node and frame the browser reported there (`None`: nothing but the page background),
+    /// so the same spot can be recognised again after the pointer has travelled to it.
+    node: Option<(i64, String)>,
     /// Words for the model.
     what: String,
     /// Origin of the receiving frame (see [`Page::hit_at`]); unused when `top`.
     origin: Option<String>,
     /// Nothing but the page background: the top document receives it.
     top: bool,
+}
+
+/// Why a click must not go ahead: the element under the point is not the one the model was
+/// shown (and told about) before the pointer travelled there. A page can move or replace what
+/// is under the point as the pointer arrives (a hover menu, a banner sliding in, a re-render),
+/// and pressing then would click something nobody chose. `None`: the same spot, press on.
+fn under_point_changed(before: &Hit, now: &Hit) -> Option<String> {
+    if before.node == now.node {
+        return None;
+    }
+    Some(format!(
+        "the element under the point changed while the pointer moved: before it was {}, now it is {}; nothing was pressed. Take a new screenshot and pick the point again",
+        before.what, now.what
+    ))
 }
 
 #[cfg(test)]
@@ -773,6 +801,43 @@ mod tests {
             let e = v.to_css(bad).unwrap_err().to_string();
             assert!(e.contains("outside the screenshot"), "{e}");
         }
+    }
+
+    fn seen(node: Option<(i64, &str)>, what: &str) -> Hit {
+        Hit {
+            node: node.map(|(id, f)| (id, f.to_owned())),
+            what: what.to_owned(),
+            origin: None,
+            top: node.is_none(),
+        }
+    }
+
+    #[test]
+    fn the_same_node_under_the_point_lets_the_press_go_on() {
+        let a = seen(Some((7, "F1")), "<button> \"Pay\"");
+        let b = seen(Some((7, "F1")), "<button> \"Pay\"");
+        assert_eq!(under_point_changed(&a, &b), None);
+        let bg = seen(None, "nothing but the page background");
+        assert_eq!(under_point_changed(&bg, &seen(None, "background")), None);
+    }
+
+    #[test]
+    fn another_node_a_new_frame_or_a_vanished_one_is_reported_with_both_names() {
+        let before = seen(Some((7, "F1")), "<button> \"Pay\"");
+        for now in [
+            seen(Some((9, "F1")), "<div role=dialog> \"Cookies\""),
+            seen(Some((7, "F2")), "<button> \"Pay\""),
+            seen(None, "nothing but the page background"),
+        ] {
+            let why = under_point_changed(&before, &now).expect("a change");
+            assert!(why.contains("<button> \"Pay\""), "{why}");
+            assert!(why.contains(&now.what), "{why}");
+            assert!(why.contains("nothing was pressed"), "{why}");
+            assert!(why.contains("new screenshot"), "{why}");
+        }
+        // Something laid over an empty spot counts too.
+        let bg = seen(None, "nothing but the page background");
+        assert!(under_point_changed(&bg, &seen(Some((3, "F1")), "<div>")).is_some());
     }
 
     #[test]

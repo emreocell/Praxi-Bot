@@ -113,6 +113,15 @@ pub struct KeySpec {
     pub modifiers: u32,
 }
 
+/// Longest a smooth scroll to an element is waited for.
+const SMOOTH_SCROLL_WAIT: Duration = Duration::from_millis(600);
+
+/// Whether an element centred at `c` needs scrolling to before it is clicked: it is off the
+/// viewport or hugging an edge (the outer tenth of the height, the outer 5% of the width).
+fn needs_scroll(c: (f64, f64), width: f64, height: f64) -> bool {
+    c.1 < height * 0.1 || c.1 > height * 0.9 || c.0 < width * 0.05 || c.0 > width * 0.95
+}
+
 /// Error text of [`Page::focused_entry`] when no element holds focus.
 const NO_FOCUS: &str = "no element has keyboard focus";
 
@@ -629,6 +638,17 @@ impl Page {
 
     /// Scroll into view and compute the click point (top-level viewport coordinates).
     async fn center(&self, e: &RefEntry) -> Result<(f64, f64)> {
+        self.center_with(e, Feel::Instant).await
+    }
+
+    /// Like [`Page::center`]; unless `feel` is instant, an element that is not comfortably on
+    /// screen is scrolled to by the browser's own smooth scrolling (so a person watching sees
+    /// the page glide, and the pointer does not jump to a page that moved under it), and the
+    /// point is only computed once the element has stopped moving.
+    async fn center_with(&self, e: &RefEntry, feel: Feel) -> Result<(f64, f64)> {
+        if feel != Feel::Instant {
+            self.smooth_scroll_into_view(e).await;
+        }
         let _ = self
             .cmd_on(
                 e.session_id.as_deref(),
@@ -652,6 +672,51 @@ impl Page {
         Ok((cx + ox, cy + oy))
     }
 
+    /// The middle of `e` in top-level viewport coordinates, without scrolling.
+    async fn element_centre(&self, e: &RefEntry) -> Option<(f64, f64)> {
+        let q = self
+            .quad(e.session_id.as_deref(), e.backend_id, "content")
+            .await
+            .ok()?;
+        let (cx, cy) = quad_center(&q)?;
+        let (ox, oy) = self.frame_offset(&e.frame_id).await;
+        Some((cx + ox, cy + oy))
+    }
+
+    /// Best effort: scroll `e` to the middle of the screen smoothly when it is near an edge or
+    /// off screen, and wait (at most [`SMOOTH_SCROLL_WAIT`]) until it stops moving. Whatever
+    /// goes wrong, [`Page::center_with`] still scrolls it into view the instant way after.
+    async fn smooth_scroll_into_view(&self, e: &RefEntry) {
+        let Some(first) = self.element_centre(e).await else {
+            return;
+        };
+        let Ok(view) = self.pointer_view().await else {
+            return;
+        };
+        if !needs_scroll(first, view.css_width, view.css_height) {
+            return;
+        }
+        let started = self
+            .call_on(
+                e,
+                "function(){ this.scrollIntoView({behavior: 'smooth', block: 'center', inline: 'nearest'}); return true; }",
+                &[],
+            )
+            .await;
+        if started.is_err() {
+            return;
+        }
+        let deadline = Instant::now() + SMOOTH_SCROLL_WAIT;
+        let mut readings = vec![first];
+        while Instant::now() < deadline && !crate::cursor::scroll_settled(&readings) {
+            sleep(std::time::Duration::from_millis(60)).await;
+            match self.element_centre(e).await {
+                Some(c) => readings.push(c),
+                None => return,
+            }
+        }
+    }
+
     async fn mouse(&self, kind: &str, x: f64, y: f64, extra: Value) -> Result<()> {
         let mut p = json!({"type": kind, "x": x, "y": y});
         if let (Some(o), Some(e)) = (p.as_object_mut(), extra.as_object()) {
@@ -659,7 +724,26 @@ impl Page {
                 o.insert(k.clone(), v.clone());
             }
         }
+        if kind == "mousePressed" {
+            // Where the bot's own pointer shows its click (best effort, never fails the press).
+            self.bot_cursor_click((x, y)).await;
+        }
         self.cmd("Input.dispatchMouseEvent", p).await.map(|_| ())
+    }
+
+    /// Put the bot's own pointer on the middle of `e` (a fill or typing that has no mouse
+    /// movement of its own), and remember it as where the pointer is.
+    async fn bot_cursor_over(&self, e: &RefEntry) {
+        if !live_view::bot_cursor::enabled() {
+            return;
+        }
+        let Some(at) = self.element_centre(e).await else {
+            return;
+        };
+        self.bot_cursor_move(at).await;
+        if let Ok(mut p) = self.shared.pointer.lock() {
+            *p = Some(at);
+        }
     }
 
     async fn call_on(&self, e: &RefEntry, function: &str, args: &[Value]) -> Result<Value> {
@@ -1064,7 +1148,7 @@ impl Page {
     ) -> Result<()> {
         let mut rng = Jitter::from_clock();
         let e = self.locate(r).await?;
-        let (x, y) = self.center(&e).await?;
+        let (x, y) = self.center_with(&e, feel).await?;
         let covered = || {
             Error::Element(format!(
                 "another element is on top of '{}' ({}) at the click point, so the approved click was NOT made",
@@ -1274,7 +1358,7 @@ impl Page {
         let res = async {
             let mut rng = Jitter::from_clock();
             let e = self.locate(r).await?;
-            let to = self.center(&e).await?;
+            let to = self.center_with(&e, feel).await?;
             self.glide(to, feel, &mut rng).await?;
             sleep(human::hover_dwell(feel, &mut rng)).await;
             Ok(())
@@ -1293,6 +1377,8 @@ impl Page {
             .ok()
             .and_then(|p| *p)
             .unwrap_or(((to.0 - 120.0).max(0.0), (to.1 - 70.0).max(0.0)));
+        // The bot's own pointer animates over the whole trip while the real events follow.
+        self.bot_cursor_move(to).await;
         for (x, y) in human::pointer_path(from, to, feel, rng) {
             self.mouse("mouseMoved", x, y, json!({})).await?;
             if let Ok(mut p) = self.shared.pointer.lock() {
@@ -1382,6 +1468,7 @@ impl Page {
                 self.shared
                     .latch_secret(nav, (e.session_id.clone(), e.backend_id));
             }
+            self.bot_cursor_over(&e).await;
             // Written THROUGH the approved node itself (resolved by its backend
             // id in its own frame), never with tab-wide `Input.insertText`, so a
             // frame that steals focus cannot receive the value.
@@ -1418,6 +1505,7 @@ impl Page {
             // Live check, so no caller can type into a secret field through this path.
             self.refuse_if_sensitive_now(&e, "typing").await?;
             self.focus_entry(&e).await?;
+            self.bot_cursor_over(&e).await;
             for ch in text.chars() {
                 if ch == '\n' {
                     self.key_inner("Enter").await?;
@@ -1620,6 +1708,7 @@ impl Page {
                 at = self.center(&entry).await?;
             }
         }
+        self.bot_cursor_move(at).await;
         // One plan along the longer axis; the other axis follows in proportion.
         let major = if dy.abs() >= dx.abs() { dy } else { dx };
         for step in human::scroll_plan(major, req.feel, &mut rng) {
@@ -2244,6 +2333,16 @@ fn collapse_space(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_element_near_an_edge_or_off_screen_is_scrolled_to_first() {
+        assert!(!needs_scroll((400.0, 300.0), 800.0, 600.0));
+        assert!(needs_scroll((400.0, 20.0), 800.0, 600.0));
+        assert!(needs_scroll((400.0, 590.0), 800.0, 600.0));
+        assert!(needs_scroll((400.0, 1500.0), 800.0, 600.0));
+        assert!(needs_scroll((10.0, 300.0), 800.0, 600.0));
+        assert!(needs_scroll((-50.0, 300.0), 800.0, 600.0));
+    }
 
     #[test]
     fn named_keys() {

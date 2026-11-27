@@ -1,0 +1,62 @@
+/* The bot's own pointer: an accent-coloured arrow with a surface outline, so it never looks like
+   the owner's black-and-white system pointer. It is a marker only: it takes no input. */
+.cursor {
+  position: absolute;
+  z-index: 3;
+  width: var(--size-bot-cursor);
+  height: var(--size-bot-cursor);
+  pointer-events: none;
+  user-select: none;
+  /* The arrow's tip is the point; the box hangs down and to the right of it. */
+  transform: translate(0, 0);
+}
+
+.glide {
+  transition:
+    left var(--motion-duration-slow) var(--motion-easing-standard),
+    top var(--motion-duration-slow) var(--motion-easing-standard);
+}
+
+.arrow {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: var(--color-accent);
+  stroke: var(--color-surface);
+  stroke-width: var(--size-border-thick);
+  stroke-linejoin: round;
+}
+
+.rippleAnchor {
+  position: absolute;
+  left: var(--space-0);
+  top: var(--space-0);
+  width: var(--size-overlay-ripple);
+  height: var(--size-overlay-ripple);
+  margin-left: calc(var(--size-overlay-ripple) / -2);
+  margin-top: calc(var(--size-overlay-ripple) / -2);
+}
+
+.ripple {
+  position: absolute;
+  inset: var(--space-0);
+  border-radius: var(--radius-pill);
+  border: var(--size-border-heavy) solid var(--color-accent);
+  background-color: var(--color-overlay-ripple);
+}
+
+.rippleAnimated {
+  animation: botCursorRipple var(--motion-duration-ripple) var(--motion-easing-standard) forwards;
+}
+
+@keyframes botCursorRipple {
+  0% {
+    transform: scale(0.35);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1.75);
+    opacity: 0;
+  }
+}

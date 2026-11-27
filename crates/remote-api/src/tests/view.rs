@@ -85,6 +85,7 @@ fn metadata(seq: u64) -> FrameMetadata {
         },
         geometry_revision: 3,
         repeated: false,
+        bot_pointer: None,
     }
 }
 

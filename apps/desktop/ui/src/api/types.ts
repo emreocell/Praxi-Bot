@@ -48,6 +48,7 @@ export type PageReader = S["PageReaderDto"];
 /** A mission or background-run digest the daemon pushes to the owner (Telegram, Discord, the panel). */
 export type OwnerNotice = S["OwnerNotice"];
 /** What is pushed to the owner's channels, and the quiet hours. */
+export type BotCursorSettings = S["BotCursorSettings"];
 export type OwnerNotifySettings = S["OwnerNotifySettings"];
 export type MemoryEmbedding = S["MemoryEmbeddingDto"];
 export type MemoryEmbeddingInput = S["MemoryEmbeddingInput"];

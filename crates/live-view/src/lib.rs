@@ -1,4 +1,5 @@
 //! Provider-independent, memory-only screen transport. Never log input or pixels.
+pub mod bot_cursor;
 pub mod dto;
 mod source;
 mod terminal;

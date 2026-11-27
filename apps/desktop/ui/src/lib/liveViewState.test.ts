@@ -298,3 +298,20 @@ test("disconnect and rate limit block input and interrupted pause requires expli
   });
   assert.equal(req?.reacquire_takeover_id, "to-1");
 });
+
+test("a frame's bot pointer is kept when valid and dropped when malformed or absent", () => {
+  const base = applySessionCreated(createInitialLiveViewState(targetBrowser), targetBrowser, sessionFixture);
+  const withPointer = applyFrameRendered(
+    base,
+    { ...frameFixture, bot_pointer: { x: 0.25, y: 0.5, click_seq: 2 } } as unknown as FrameHeader,
+    10_010
+  );
+  assert.deepEqual(withPointer.latestFrame?.botPointer, { x: 0.25, y: 0.5, clickSeq: 2 });
+  const bad = applyFrameRendered(
+    base,
+    { ...frameFixture, bot_pointer: { x: 4, y: 0.5, click_seq: 2 } } as unknown as FrameHeader,
+    10_010
+  );
+  assert.equal(bad.latestFrame?.botPointer, null);
+  assert.equal(applyFrameRendered(base, frameFixture, 10_010).latestFrame?.botPointer, null);
+});

@@ -12,6 +12,8 @@ pub mod pure;
 mod backend;
 #[cfg(windows)]
 mod capture;
+#[cfg(windows)]
+mod cursor_win;
 #[cfg(any(windows, test))]
 mod guard_glue;
 #[cfg(windows)]

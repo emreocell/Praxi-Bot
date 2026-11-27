@@ -26,7 +26,7 @@ jpeg-encoder.workspace = true
 png.workspace = true
 rustix = { version = "1", default-features = false, features = ["event", "std"] }
 tokio.workspace = true
-x11rb.workspace = true
+x11rb = { workspace = true, features = ["shape"] }
 
 [dev-dependencies]
 proptest.workspace = true

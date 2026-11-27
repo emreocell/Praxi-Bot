@@ -4,8 +4,8 @@ use std::sync::{Arc, mpsc};
 
 use async_trait::async_trait;
 use desktop_api::{
-    ActGuard, Action, ActionResult, Capabilities, DesktopBackend, DesktopError, Image, InputTarget,
-    LiveViewOptions, Quality, Refusal, Region, Snapshot, WindowInfo,
+    ActGuard, Action, ActionResult, Capabilities, CursorSurface, DesktopBackend, DesktopError,
+    Image, InputTarget, LiveViewOptions, Quality, Refusal, Region, Snapshot, WindowInfo,
     live_view::DesktopViewTarget,
     snapshot::{AppSpec, Pid},
 };
@@ -30,6 +30,7 @@ struct CachedLiveView {
 pub struct WindowsBackend {
     tx: mpsc::Sender<Job>,
     live_view: SyncMutex<Option<CachedLiveView>>,
+    cursor: std::sync::OnceLock<Option<Arc<dyn CursorSurface>>>,
 }
 
 impl WindowsBackend {
@@ -70,6 +71,7 @@ impl WindowsBackend {
         Ok(Self {
             tx,
             live_view: SyncMutex::new(None),
+            cursor: std::sync::OnceLock::new(),
         })
     }
 
@@ -185,6 +187,28 @@ impl DesktopBackend for WindowsBackend {
         let res = self.run(move |_| winlist::launch(&app)).await;
         self.notify_live_view();
         res
+    }
+
+    async fn window_at(&self, x: f64, y: f64) -> Result<Option<u64>, DesktopError> {
+        self.run(move |_| Ok(winlist::window_at(x, y))).await
+    }
+
+    fn is_local_screen(&self) -> bool {
+        true
+    }
+
+    fn cursor_surface(&self) -> Option<Arc<dyn CursorSurface>> {
+        // One window per backend, created on first use; a failure is not retried on every
+        // action (the bot works the same without the cursor).
+        self.cursor
+            .get_or_init(|| match crate::cursor_win::open() {
+                Ok(s) => Some(s),
+                Err(why) => {
+                    eprintln!("note: the bot cursor overlay is unavailable: {why}");
+                    None
+                }
+            })
+            .clone()
     }
 
     fn capabilities(&self) -> Capabilities {

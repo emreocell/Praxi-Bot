@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use desktop_api::{
-    Action, ActionResult, Capabilities, DesktopBackend, DesktopError, Image, LiveViewOptions,
-    Quality, Region, Snapshot, WindowInfo,
+    Action, ActionResult, Capabilities, CursorSurface, DesktopBackend, DesktopError, Image,
+    LiveViewOptions, Quality, Region, Snapshot, WindowInfo,
     live_view::DesktopViewTarget,
     snapshot::{AppSpec, Pid},
 };
@@ -59,6 +59,7 @@ struct CachedLiveView {
 pub struct LinuxBackend {
     worker: Mutex<AtspiWorker>,
     live_view: SyncMutex<Option<CachedLiveView>>,
+    cursor: std::sync::OnceLock<Option<Arc<dyn CursorSurface>>>,
 }
 
 impl Default for LinuxBackend {
@@ -66,6 +67,7 @@ impl Default for LinuxBackend {
         Self {
             worker: Mutex::new(AtspiWorker::default()),
             live_view: SyncMutex::new(None),
+            cursor: std::sync::OnceLock::new(),
         }
     }
 }
@@ -95,6 +97,7 @@ impl LinuxBackend {
         Ok(Self {
             worker: Mutex::new(AtspiWorker::new()),
             live_view: SyncMutex::new(None),
+            cursor: std::sync::OnceLock::new(),
         })
     }
 
@@ -171,6 +174,37 @@ impl DesktopBackend for LinuxBackend {
         .await?;
         self.notify_live_view();
         Ok(res)
+    }
+
+    async fn window_at(&self, x: f64, y: f64) -> Result<Option<u64>, DesktopError> {
+        bounded("window at point", X11_LIMIT, async move {
+            match tokio::task::spawn_blocking(move || x11::window_at(x, y)).await {
+                Ok(result) => result,
+                Err(e) => Err(DesktopError::Internal(format!("window_at task: {e}"))),
+            }
+        })
+        .await
+    }
+
+    fn is_local_screen(&self) -> bool {
+        true
+    }
+
+    fn cursor_surface(&self) -> Option<Arc<dyn CursorSurface>> {
+        if !x11::has_x11_display() {
+            return None;
+        }
+        // One window per backend, created on first use; a failure is not retried on every action
+        // (the bot works the same without the cursor).
+        self.cursor
+            .get_or_init(|| match crate::cursor_x11::open() {
+                Ok(s) => Some(s),
+                Err(why) => {
+                    eprintln!("note: the bot cursor overlay is unavailable: {why}");
+                    None
+                }
+            })
+            .clone()
     }
 
     fn capabilities(&self) -> Capabilities {

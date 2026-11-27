@@ -13,6 +13,7 @@ import type {
   ViewReason,
   ViewState
 } from "../api/types.ts";
+import { type BotCursorPose, parseBotPointer } from "./botCursor.ts";
 import type { FrameHeader, StatusHeader } from "./liveViewWire.ts";
 
 export interface TargetMetadataSummary {
@@ -91,6 +92,8 @@ export interface RenderedFrameSnapshot {
   sourceRect: FrameHeader["source_rect"];
   cause: FrameHeader["cause"];
   repeated: boolean;
+  /** Where the bot's own pointer is on this frame; null when it has none here. */
+  botPointer: BotCursorPose | null;
 }
 
 export type PendingControlRequest =
@@ -412,7 +415,8 @@ export function applyFrameRendered(
       height: header.height,
       sourceRect: header.source_rect,
       cause: header.cause,
-      repeated: header.repeated
+      repeated: header.repeated,
+      botPointer: parseBotPointer((header as { bot_pointer?: unknown }).bot_pointer)
     },
     needsResync: false,
     disconnected: false,

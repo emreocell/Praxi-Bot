@@ -153,6 +153,8 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/v1/owner-notices/settings"),
     ("POST", "/v1/owner-notices/{}/answers"),
     ("POST", "/v1/owner-notices/{}/retry"),
+    // the switch for the bot's own pointer (cosmetic, but the owner's to change)
+    ("PUT", "/v1/bot-cursor"),
     // per-bot spending limits: a bot or token holder must not lift its own cap
     ("PUT", "/v1/bots/{}/spend-limits"),
     // how outside text reaches a bot (the quarantined page reader): a bot must not switch off
