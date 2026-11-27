@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use permission_engine::Policy;
-use provider_catalog::MessageRole;
+use provider_catalog::{ChatProvider, MessageRole};
 use serde_json::json;
 use storage::{ChatSummary, Message, SearchFilter};
 use task_runtime::RunState;
@@ -782,4 +782,55 @@ fn a_summary_counts_as_a_message_that_carried_what_it_replaced() {
     let p = provenance();
     assert!(p.exposure.private);
     assert_eq!(p.private_texts, ["- a page said something"]);
+}
+
+/// A provider that replaces one stored message while the summariser call is in flight.
+struct EditsMidRound {
+    inner: std::sync::Arc<Fake>,
+    storage: std::sync::Arc<storage::Storage>,
+    victim: Uuid,
+}
+
+#[async_trait::async_trait]
+impl ChatProvider for EditsMidRound {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+    async fn stream(
+        &self,
+        req: provider_catalog::ChatRequest,
+    ) -> Result<provider_catalog::ChatStream, provider_catalog::ProviderError> {
+        if req.json_mode {
+            self.storage
+                .set_messages_superseded(&[self.victim], true)
+                .unwrap();
+        }
+        self.inner.stream(req).await
+    }
+}
+
+#[tokio::test]
+async fn a_summary_of_a_chat_that_changed_during_the_round_is_not_written() {
+    let env = setup();
+    let ids = seed(&env, pairs(5));
+    let fake = Fake::new(vec![text("a6"), reply(&["stale"], &[], &[], &[])]);
+    let provider = std::sync::Arc::new(EditsMidRound {
+        inner: fake.clone(),
+        storage: env.storage.clone(),
+        victim: ids[3],
+    });
+    let lp = crate::tests::make_loop_with(
+        &env.storage,
+        env.bot,
+        provider,
+        &[],
+        profile(""),
+        config(small()),
+    );
+    turn(&lp, &env, "q6").await;
+    assert_eq!(fake.n_requests(), 2, "the summariser was called");
+    assert!(
+        env.storage.get_chat_summary(env.chat).unwrap().is_none(),
+        "its text no longer matches the chat"
+    );
 }

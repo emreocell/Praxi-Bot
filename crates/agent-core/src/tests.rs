@@ -419,6 +419,25 @@ pub(crate) fn make_loop(
     prof: BotProfile,
     config: LoopConfig,
 ) -> AgentLoop {
+    make_loop_with(
+        storage,
+        bot,
+        Arc::clone(fake) as Arc<dyn ChatProvider>,
+        tools,
+        prof,
+        config,
+    )
+}
+
+/// [`make_loop`] over any provider (a test that must act while a model call is in flight).
+pub(crate) fn make_loop_with(
+    storage: &Arc<Storage>,
+    bot: BotId,
+    provider: Arc<dyn ChatProvider>,
+    tools: &[&Arc<TestTool>],
+    prof: BotProfile,
+    config: LoopConfig,
+) -> AgentLoop {
     let registry = ToolRegistry::new();
     for t in tools {
         registry.register(Arc::clone(t) as Arc<dyn Tool>);
@@ -426,7 +445,7 @@ pub(crate) fn make_loop(
     let lp = AgentLoop::new(
         Arc::clone(storage),
         registry,
-        Providers::single(Arc::clone(fake) as Arc<dyn ChatProvider>),
+        Providers::single(provider),
         config,
     );
     lp.add_profile(bot, prof);
