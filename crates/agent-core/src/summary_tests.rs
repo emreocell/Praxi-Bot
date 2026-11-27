@@ -218,7 +218,7 @@ async fn the_originals_stay_stored_and_searchable() {
             .search_messages(env.user, SearchFilter::default(), q, 0, 10)
             .unwrap()
     };
-    assert!(word("zebra").is_empty());
+    assert_eq!(word("zebra").len(), 0);
     assert!(
         env.storage
             .owner_message_texts(env.chat)
