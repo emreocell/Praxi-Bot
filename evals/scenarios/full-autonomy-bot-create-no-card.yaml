@@ -1,0 +1,20 @@
+name: full-autonomy-bot-create-no-card
+description: "Full level, run typed by the owner: \"create a bot named Kralinho\" makes a real bot with bot_create and no approval card, and the prompt names the tool."
+policy: full
+owner_message: true
+profile_toml: |
+  [permissions]
+  preset = "full"
+tools:
+  - { name: bot_create, effect: write, category: system, content: egress, output: "Bot created." }
+user: "Kralinho adinda sohbet icin bir bot olustur, rengine ve sekline sen karar ver."
+script:
+  - tool_calls: [{ id: c1, tool: bot_create, args: { name: "Kralinho", persona: "A witty chat companion.", color: "#7c3aed", shape: "star" } }]
+  - text: "Done: Kralinho is in your bot list."
+expect:
+  state: succeeded
+  tool_runs: { bot_create: 1 }
+  no_approval_tools: [bot_create]
+  final_text: { contains: ["Done:"] }
+  requests:
+    - { request: 0, system_contains: ["call bot_create"] }
