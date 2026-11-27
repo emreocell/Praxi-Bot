@@ -241,17 +241,16 @@ async fn asks_after_untrusted_page_as(
         cfg(policy),
     );
     let mut rx = lp.subscribe();
-    let run = match initiator {
-        Some(kind) => lp.run_turn_as(env.chat, "go", kind).unwrap(),
-        None => {
-            let crate::Delivery::NewTurn(run) = lp
-                .send_user_message_from(env.chat, "go", crate::MessageMode::Steer, "owner")
-                .unwrap()
-            else {
-                unreachable!()
-            };
-            run
-        }
+    let run = if let Some(kind) = initiator {
+        lp.run_turn_as(env.chat, "go", kind).unwrap()
+    } else {
+        let crate::Delivery::NewTurn(run) = lp
+            .send_user_message_from(env.chat, "go", crate::MessageMode::Steer, "owner")
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        run
     };
     let asked = tokio::select! {
         _ = until(&mut rx, |e| matches!(e, Event::ApprovalNeeded(_))) => true,
