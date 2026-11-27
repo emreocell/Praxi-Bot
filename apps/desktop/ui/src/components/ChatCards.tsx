@@ -23,6 +23,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "ui";
 import type { Scope } from "../api/types";
 import {
+  awaitsOwner,
   isOutboundSend,
   isSubagentTool,
   type NoticeItem,
@@ -1207,7 +1208,7 @@ export function SubagentCard({ run, renderItem, onCancel }: SubagentCardProps) {
   const asking = run.items.some(
     (i) =>
       (i.kind === "question" && i.answer === undefined && !i.closed) ||
-      (((i.kind === "secret" || i.kind === "handover") && i.outcome === undefined || i.kind === "elicitation") && !i.closed)
+      awaitsOwner(i)
   );
   const expanded = open || waiting || asking;
   const cancellable = status === "running" || waiting;

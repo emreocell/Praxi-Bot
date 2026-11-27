@@ -1,0 +1,124 @@
+/*
+ * A form from an MCP server. Deliberately unlike the secret-request and approval cards, which
+ * speak for Praxi: a dashed frame, a neutral tone, and a header that names the server.
+ */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-0);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  border: var(--size-border-thick) dashed var(--color-border-strong);
+  background-color: var(--color-surface-active);
+}
+
+.origin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--size-border) dashed var(--color-border-strong);
+  background-color: var(--color-code-bg);
+}
+
+.title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1);
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.server {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.notPraxi {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+}
+
+.countdown {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-0) var(--space-4) var(--space-4);
+}
+
+.quoteLabel {
+  margin: var(--space-0);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.quote {
+  margin: var(--space-0);
+  padding: var(--space-2) var(--space-3);
+  border-left: var(--size-border-thick) dotted var(--color-border-strong);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.external {
+  text-decoration: underline wavy var(--color-warning);
+  text-underline-offset: var(--space-1);
+}
+
+.externalNote {
+  margin: var(--space-0);
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+}
+
+.warning {
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.warn {
+  margin: var(--space-0);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: var(--size-border) solid var(--color-danger);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.fieldHint {
+  font-family: var(--font-mono);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.status {
+  margin: var(--space-0);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}

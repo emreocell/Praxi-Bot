@@ -1250,15 +1250,19 @@ export class ApiClient {
     return this.request("POST", `/secret-requests/${encodeURIComponent(callId)}/cancel`, { localOwnerOnly: true });
   }
 
-  /** Only the server receives form content. The daemon returns a status with no body. */
+  /**
+   * Only the server receives form content. The daemon returns a status with no body. Like the
+   * credential form, it is answered with this computer's owner key and nowhere else.
+   */
   decideElicitation(callId: string, content?: ElicitationContent): Promise<void> {
     return this.request("POST", `/elicitations/${encodeURIComponent(callId)}`, {
-      body: content === undefined ? { action: "decline" } : { action: "accept", content }
+      body: content === undefined ? { action: "decline" } : { action: "accept", content },
+      localOwnerOnly: true
     });
   }
 
   cancelElicitation(callId: string): Promise<void> {
-    return this.request("POST", `/elicitations/${encodeURIComponent(callId)}/cancel`);
+    return this.request("POST", `/elicitations/${encodeURIComponent(callId)}/cancel`, { localOwnerOnly: true });
   }
 
   /** List Vault / fill secrets (metadata and allow-lists only; never values). */

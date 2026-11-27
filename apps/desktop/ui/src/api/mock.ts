@@ -3831,7 +3831,9 @@ export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["even
       { ts_ms, event: {
         type: "elicitation_requested", run_id, call_id: "mock-elicitation", expires_in_secs: 600,
         server: "calendar",
-        message: tr ? "Takvimi hazırlamak için bu bilgilere ihtiyacım var." : "I need these details to prepare the calendar.",
+        message: tr
+          ? "Takvimi hazırlamak için bu bilgilere ihtiyacım var. Yardım: example.com/takvim"
+          : "I need these details to prepare the calendar. Help: example.com/calendar",
         fields: [
           { ...base, kind: "string", name: "title", label: tr ? "Etkinlik adı" : "Event name", required: true },
           { ...base, kind: "integer", name: "days", label: tr ? "Kaç gün?" : "Number of days", minimum: 1, maximum: 7 },

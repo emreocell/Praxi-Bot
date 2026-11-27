@@ -202,6 +202,17 @@ export interface EventsState {
 
 export const EMPTY_EVENTS: EventsState = { runs: {}, lastGseq: 0 };
 
+/**
+ * A credential request or hand-over the owner has not answered yet, or an MCP form that is still
+ * open. A form has no `outcome`: the daemon closes it, so only `closed` ends it. One place, so the
+ * pinned cards and the expiry timer cannot disagree about it.
+ */
+export function awaitsOwner(i: TimelineItem): i is SecretRequestItem | HandoverItem | ElicitationItem {
+  if (i.kind === "secret" || i.kind === "handover") return i.outcome === undefined && !i.closed;
+  if (i.kind === "elicitation") return !i.closed;
+  return false;
+}
+
 /** When an item appeared (for interleaving with user messages). */
 export function itemTs(i: TimelineItem): number {
   return i.kind === "tool" || i.kind === "question" || i.kind === "secret" || i.kind === "handover" || i.kind === "elicitation"
