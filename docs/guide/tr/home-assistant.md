@@ -89,3 +89,8 @@ bots = ["<bot kimliği>"]                  # isteğe bağlı: yoksa her bot, [] 
 Anahtarı `bot secrets set homeassistant/token` ile sakla. Elle düzenlediğin dosyayı okutmak için `bot serve`'ü
 yeniden başlat; uygulamadan ya da `bot ha` ile kaydetmek yeniden başlatma gerektirmez (dosya yorumları olmadan
 yeniden yazılır).
+
+Elle düzenlenen dosya, uygulamadaki form gibi denetlenir: adlar küçük harfe çevrilir, bir servis
+`alan.servis` biçiminde olmalıdır ve `trusted_services` içinde `homeassistant.*` kabul edilmez.
+Denetimden geçemeyen dosya kullanılmaz (Home Assistant kapalı kalır, `bot serve` nedenini günlüğe yazar) ve
+üzerine hiçbir zaman yazılmaz.

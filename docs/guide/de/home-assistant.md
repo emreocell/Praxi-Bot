@@ -92,3 +92,8 @@ bots = ["<Bot-ID>"]                       # optional: fehlt = alle Bots, [] = ke
 Speichere das Token mit `bot secrets set homeassistant/token`. Starte `bot serve` neu, damit eine von Hand
 bearbeitete Datei gelesen wird; Speichern in der App oder mit `bot ha` braucht keinen Neustart (und schreibt die
 Datei ohne ihre Kommentare neu).
+
+Eine von Hand bearbeitete Datei wird wie das Formular in der App geprüft: Namen werden kleingeschrieben, ein
+Dienst muss `domain.dienst` lauten, und `homeassistant.*` wird in `trusted_services` abgelehnt. Eine Datei, die
+die Prüfung nicht besteht, wird nicht verwendet (Home Assistant bleibt aus, `bot serve` protokolliert den Grund)
+und nie überschrieben.

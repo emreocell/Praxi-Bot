@@ -456,6 +456,78 @@ fn the_generic_homeassistant_service_asks_unless_it_names_plain_entities() {
 }
 
 #[test]
+fn a_risky_entity_in_a_target_object_asks_like_one_in_entity_id() {
+    // The same risky entity, written in every place a target can sit.
+    let risky = [
+        json!({"domain":"light","service":"turn_on","target":{"entity_id":"lock.front_door"}}),
+        json!({"domain":"light","service":"turn_on","target":{"entity_id":["light.a","cover.garage"]}}),
+        json!({"domain":"light","service":"turn_on","data":{"target":{"entity_id":"lock.front_door"}}}),
+        json!({"domain":"light","service":"turn_on","entity_id":"light.a","target":{"entity_id":"lock.b"}}),
+        json!({"domain":"light","service":"turn_on","entity_id":"light.a","data":{"target":{"entity_id":"switch.garage_door"}}}),
+        json!({"domain":"homeassistant","service":"turn_on","target":{"entity_id":"lock.front_door"}}),
+        json!({"domain":"homeassistant","service":"turn_on","entity_id":"light.a","target":{"entity_id":"lock.b"}}),
+        json!({"domain":"homeassistant","service":"turn_on","data":{"target":{"entity_id":"lock.b"}}}),
+        // not readable as a target at all
+        json!({"domain":"light","service":"turn_on","target":"lock.front_door"}),
+        json!({"domain":"light","service":"turn_on","data":{"target":["lock.front_door"]}}),
+        json!({"domain":"light","service":"turn_on","target":{"entity_id":"Lock.Front"}}),
+        json!({"domain":"light","service":"turn_on","target":{"entity_id":{"x":1}}}),
+    ];
+    for input in &risky {
+        assert!(asks(&[], input), "{input}");
+        // The generic service can never be waived by the owner's list.
+        if input["domain"] == "homeassistant" {
+            assert!(asks(&["homeassistant.turn_on"], input), "{input}");
+        }
+    }
+    // An area, device or `all` in a target object reaches things nobody can see, like the flat form.
+    for target in [
+        json!({"area_id":"garage"}),
+        json!({"device_id":"d1"}),
+        json!({"floor_id":"f"}),
+        json!({"label_id":"doors"}),
+        json!({"entity_id":"all"}),
+    ] {
+        for place in ["target", "data.target"] {
+            let input = if place == "target" {
+                json!({"domain":"switch","service":"turn_on","entity_id":"switch.lamp","target":target})
+            } else {
+                json!({"domain":"switch","service":"turn_on","entity_id":"switch.lamp","data":{"target":target}})
+            };
+            assert!(asks(&[], &input), "{input}");
+            let generic = json!({"domain":"homeassistant","service":"turn_on","target":target});
+            assert!(asks(&[], &generic), "{generic}");
+        }
+    }
+    // Plain targets in a target object do not ask, exactly like the flat form.
+    for input in [
+        json!({"domain":"light","service":"turn_on","target":{"entity_id":"light.kitchen"}}),
+        json!({"domain":"light","service":"turn_on","data":{"target":{"area_id":"kitchen"}}}),
+        json!({"domain":"homeassistant","service":"turn_on","target":{"entity_id":["light.a","switch.lamp"]}}),
+    ] {
+        assert!(!asks(&[], &input), "{input}");
+    }
+}
+
+#[tokio::test]
+async fn a_target_object_with_odd_ids_never_reaches_the_hub() {
+    let (port, seen) = fake_hub().await;
+    let reg = registry_for(port, &[]);
+    for input in [
+        json!({"domain":"light","service":"turn_on","data":{"target":{"entity_id":"Light.Kitchen"}}}),
+        json!({"domain":"light","service":"turn_on","data":{"target":{"entity_id":"light.a;lock.b"}}}),
+        json!({"domain":"light","service":"turn_on","data":{"target":{"entity_id":["light.a", 5]}}}),
+        json!({"domain":"light","service":"turn_on","data":{"target":"lock.front_door"}}),
+    ] {
+        let err = call(&reg, "ha_call_service", input.clone())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidInput(_)), "{input}: {err}");
+    }
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+#[test]
 fn the_owners_list_stops_the_card_for_exactly_those_services() {
     let open = json!({"domain":"cover","service":"open_cover","entity_id":"cover.garage_door"});
     let close = json!({"domain":"cover","service":"close_cover","entity_id":"cover.garage_door"});

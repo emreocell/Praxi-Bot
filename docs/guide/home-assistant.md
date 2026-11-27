@@ -100,3 +100,8 @@ bots = ["<bot id>"]                       # optional: absent = every bot, [] = n
 Store the token with `bot secrets set homeassistant/token`. Restart `bot serve`
 to read a file you edited; saving from the app or `bot ha` needs no restart (and
 rewrites the file without its comments).
+
+A hand-edited file is checked like the form in the app: names are lowercased, a
+service must be `domain.service`, and `homeassistant.*` is refused in
+`trusted_services`. A file that fails the check is not used (Home Assistant stays
+off and `bot serve` logs why) and is never overwritten.

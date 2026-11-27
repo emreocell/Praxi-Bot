@@ -215,8 +215,8 @@ fn valid_entity(id: &str) -> bool {
         .is_some_and(|(d, o)| valid_name(d) && valid_name(o))
 }
 
-/// What a service call is aimed at: the entity ids named by `entity_id` and `data.entity_id`
-/// (each a string, possibly comma separated, or a list).
+/// What a service call is aimed at: the entity ids named by `entity_id` in any place a hub
+/// reads a target from (see [`target_scopes`]), each a string, possibly comma separated, or a list.
 struct Targets {
     ids: Vec<String>,
     /// Every id is a plain `domain.object`, and at least one is named.
@@ -224,6 +224,18 @@ struct Targets {
     /// Something that is not an id, `all` or `none` (odd characters a hub may normalise into an
     /// id this code did not see, or the wrong JSON type).
     malformed: bool,
+}
+
+/// Where a target can sit: flat in the call or in its `data`, or inside a `target` object in
+/// either (the shape the hub's own UI and websocket API use). All four count, so a risky entity
+/// anywhere in the call is seen.
+fn target_scopes(input: &Value) -> [&Value; 4] {
+    [
+        input,
+        &input["data"],
+        &input["target"],
+        &input["data"]["target"],
+    ]
 }
 
 fn call_targets(input: &Value) -> Targets {
@@ -246,8 +258,8 @@ fn call_targets(input: &Value) -> Targets {
         }
         t.ids.push(id);
     };
-    for v in [&input["entity_id"], &input["data"]["entity_id"]] {
-        match v {
+    for scope in target_scopes(input) {
+        match &scope["entity_id"] {
             Value::String(s) => {
                 for part in s.split(',') {
                     take(part);
@@ -262,9 +274,17 @@ fn call_targets(input: &Value) -> Targets {
             _ => take("?"),
         }
     }
-    for key in ["area_id", "device_id", "floor_id", "label_id"] {
-        if !input["data"][key].is_null() {
-            t.explicit = false;
+    for scope in target_scopes(input) {
+        for key in ["area_id", "device_id", "floor_id", "label_id"] {
+            if !scope[key].is_null() {
+                t.explicit = false;
+            }
+        }
+    }
+    // A `target` that is not an object is something this code cannot read.
+    for target in [&input["target"], &input["data"]["target"]] {
+        if !target.is_null() && !target.is_object() {
+            t.malformed = true;
         }
     }
     if t.ids.is_empty() {
@@ -357,7 +377,11 @@ impl HomeAssistantClient {
         Ok(Self {
             base,
             token: cfg.token,
-            allowed: cfg.allowed_domains,
+            allowed: cfg
+                .allowed_domains
+                .iter()
+                .map(|d| d.trim().to_ascii_lowercase())
+                .collect(),
             trusted: cfg
                 .trusted_services
                 .iter()
@@ -568,6 +592,13 @@ impl HomeAssistantClient {
             None => serde_json::json!({}),
         };
         check_entity_ids(&body["entity_id"], "data.entity_id")?;
+        match &body["target"] {
+            Value::Null => {}
+            Value::Object(_) => {
+                check_entity_ids(&body["target"]["entity_id"], "data.target.entity_id")?;
+            }
+            _ => return Err(HaError::Invalid("`data.target` must be an object".into())),
+        }
         if let Some(e) = entity_id {
             check_entity_ids(&Value::String(e.to_owned()), "entity_id")?;
             body["entity_id"] = Value::String(e.to_owned());

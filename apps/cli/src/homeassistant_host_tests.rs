@@ -22,6 +22,11 @@ struct Hub {
 
 /// A hub that accepts one token and reports three entities.
 async fn hub() -> Hub {
+    hub_with(TOKEN).await
+}
+
+/// The same hub for another token.
+async fn hub_with(token: &'static str) -> Hub {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let auth: std::sync::Arc<Mutex<Vec<String>>> = std::sync::Arc::default();
@@ -43,7 +48,7 @@ async fn hub() -> Hub {
                     .unwrap_or("")
                     .to_owned();
                 seen.lock().unwrap().push(header.clone());
-                let (status, body) = if header.ends_with(&format!("Bearer {TOKEN}")) {
+                let (status, body) = if header.ends_with(&format!("Bearer {token}")) {
                     if line.starts_with("GET /api/states") {
                         (
                             "200 OK",
@@ -537,4 +542,299 @@ async fn only_an_address_the_owner_gave_and_a_safe_one_is_ever_dialled() {
         assert!(!r.ok, "{url}");
     }
     assert!(!f.file().exists());
+}
+
+/// A store that remembers every write and delete, in order.
+struct SpyStore {
+    inner: MemoryStore,
+    log: Mutex<Vec<String>>,
+}
+
+impl SecretStore for SpyStore {
+    fn get(
+        &self,
+        name: &str,
+    ) -> Result<Option<secret_store::SecretValue>, secret_store::SecretError> {
+        self.inner.get(name)
+    }
+    fn set(&self, name: &str, value: &str) -> Result<(), secret_store::SecretError> {
+        self.log.lock().unwrap().push(format!("set {name}"));
+        self.inner.set(name, value)
+    }
+    fn delete(&self, name: &str) -> Result<bool, secret_store::SecretError> {
+        self.log.lock().unwrap().push(format!("delete {name}"));
+        self.inner.delete(name)
+    }
+    fn list_names(&self) -> Result<Vec<String>, secret_store::SecretError> {
+        self.inner.list_names()
+    }
+}
+
+fn names(store: &Arc<dyn SecretStore>) -> Vec<String> {
+    let mut n = store.list_names().unwrap();
+    n.sort();
+    n
+}
+
+fn token_ref(f: &Fx) -> String {
+    let text = std::fs::read_to_string(f.file()).unwrap();
+    let cfg: HomeAssistantConfig = toml::from_str(&text).unwrap();
+    String::from(cfg.token)
+}
+
+#[tokio::test]
+async fn a_new_address_gets_its_token_under_a_new_name_and_the_old_host_never_sees_it() {
+    const TOKEN2: &str = "second-hub-token";
+    let a = hub_with(TOKEN).await;
+    let b = hub_with(TOKEN2).await;
+    let spy = Arc::new(SpyStore {
+        inner: MemoryStore::new(),
+        log: Mutex::new(Vec::new()),
+    });
+    let f = start_with(tempfile::tempdir().unwrap(), spy.clone());
+    f.host.save(input(a.port, Some(TOKEN))).await.unwrap();
+    assert_eq!(token_ref(&f), "homeassistant/token");
+    spy.log.lock().unwrap().clear();
+    let calls_before = a.auth.lock().unwrap().len();
+
+    f.host.save(input(b.port, Some(TOKEN2))).await.unwrap();
+    // The name the live client of hub A reads was never written: the new token went to a new
+    // name, and the old one was deleted only after the swap.
+    let new_name = token_ref(&f);
+    assert!(new_name.starts_with("homeassistant/token-"), "{new_name}");
+    assert_eq!(
+        *spy.log.lock().unwrap(),
+        vec![
+            format!("set {new_name}"),
+            "delete homeassistant/token".to_owned()
+        ]
+    );
+    assert_eq!(names(&f.store), vec![new_name.clone()]);
+    // Hub A saw nothing of the new token; hub B got only the new one.
+    assert_eq!(a.auth.lock().unwrap().len(), calls_before);
+    assert!(
+        b.auth
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|h| h.ends_with(&format!("Bearer {TOKEN2}")))
+    );
+    // The live tools talk to hub B with the new token.
+    f.registry
+        .get("ha_list_entities")
+        .unwrap()
+        .call(&ToolContext::default(), json!({}))
+        .await
+        .unwrap();
+    assert_eq!(a.auth.lock().unwrap().len(), calls_before);
+
+    // A new token for the same address replaces it the same way, and the file follows.
+    let third = hub_with("third-token").await;
+    let mut again = input(third.port, Some("third-token"));
+    again.trusted_services = vec!["cover.open_cover".into()];
+    f.host.save(again).await.unwrap();
+    let third_name = token_ref(&f);
+    assert_ne!(third_name, new_name);
+    assert_eq!(names(&f.store), vec![third_name]);
+}
+
+#[tokio::test]
+async fn a_failed_save_of_a_new_address_leaves_the_old_secret_and_hub_alone() {
+    const TOKEN2: &str = "second-hub-token";
+    let a = hub_with(TOKEN).await;
+    let b = hub_with(TOKEN2).await;
+    let f = fx();
+    f.host.save(input(a.port, Some(TOKEN))).await.unwrap();
+    let before = std::fs::read_to_string(f.file()).unwrap();
+    // The file cannot be written: its temporary name is taken by a directory.
+    std::fs::create_dir(f.dir.path().join("homeassistant.toml.tmp")).unwrap();
+    let err = f.host.save(input(b.port, Some(TOKEN2))).await.unwrap_err();
+    assert!(
+        matches!(err, HomeAssistantControlError::Internal(_)),
+        "{err:?}"
+    );
+    assert_eq!(std::fs::read_to_string(f.file()).unwrap(), before);
+    assert_eq!(names(&f.store), vec!["homeassistant/token".to_owned()]);
+    assert_eq!(
+        f.store
+            .get("homeassistant/token")
+            .unwrap()
+            .unwrap()
+            .expose(),
+        TOKEN
+    );
+    assert!(f.visible(None), "hub A is still the live one");
+
+    // The very first save fails the same way: no secret is left behind.
+    let g = fx();
+    std::fs::create_dir(g.dir.path().join("homeassistant.toml.tmp")).unwrap();
+    assert!(g.host.save(input(a.port, Some(TOKEN))).await.is_err());
+    assert_eq!(names(&g.store), Vec::<String>::new());
+    assert!(!g.visible(None));
+}
+
+#[tokio::test]
+async fn removing_keeps_the_secret_and_the_hub_when_the_file_cannot_be_removed() {
+    use std::os::unix::fs::PermissionsExt;
+    let hub = hub().await;
+    let f = fx();
+    f.host.save(input(hub.port, Some(TOKEN))).await.unwrap();
+    let dir = f.dir.path().to_path_buf();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let restore = || std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755));
+    // A superuser can still delete: nothing to prove here.
+    if std::fs::File::create(dir.join("probe")).is_ok() {
+        restore().unwrap();
+        return;
+    }
+    let err = f.host.remove().await.unwrap_err();
+    restore().unwrap();
+    assert!(
+        matches!(err, HomeAssistantControlError::Internal(_)),
+        "{err:?}"
+    );
+    assert!(f.file().exists());
+    assert_eq!(
+        f.store
+            .get("homeassistant/token")
+            .unwrap()
+            .unwrap()
+            .expose(),
+        TOKEN
+    );
+    assert!(f.visible(None) && f.host.get().configured);
+    // Nothing was lost, so the owner can simply try again.
+    f.host.remove().await.unwrap();
+    assert!(!f.file().exists() && f.store.list_names().unwrap().is_empty() && !f.visible(None));
+}
+
+#[tokio::test]
+async fn removing_deletes_the_file_before_the_secret_and_the_secret_before_the_reload() {
+    let hub = hub().await;
+    let spy = Arc::new(SpyStore {
+        inner: MemoryStore::new(),
+        log: Mutex::new(Vec::new()),
+    });
+    let f = start_with(tempfile::tempdir().unwrap(), spy.clone());
+    f.host.save(input(hub.port, Some(TOKEN))).await.unwrap();
+    spy.log.lock().unwrap().clear();
+    f.host.remove().await.unwrap();
+    assert_eq!(*spy.log.lock().unwrap(), vec!["delete homeassistant/token"]);
+    assert!(!f.file().exists() && !f.visible(None));
+}
+
+fn hand_written(body: &str) -> Fx {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(HOMEASSISTANT_FILE), body).unwrap();
+    start(dir)
+}
+
+#[tokio::test]
+async fn a_hand_edited_file_is_cleaned_like_the_api_cleans_its_input() {
+    let hub = hub().await;
+    let head = format!(
+        "url = \"http://127.0.0.1:{}\"\ntoken = \"my/own/secret\"\n",
+        hub.port
+    );
+    // Mixed case and padding are lowercased and trimmed, as the API does.
+    let f = hand_written(&format!(
+        "{head}trusted_services = [\" Cover.Open_Cover \", \"cover.open_cover\"]\nallowed_domains = [\"Light\", \" cover \"]\nbots = [\" bot-a \"]\ntimeout_secs = 9999\n"
+    ));
+    f.store.set("my/own/secret", TOKEN).unwrap();
+    assert!(f.visible(Some("bot-a")) && !f.visible(Some("bot-b")));
+    let shown = f.host.get();
+    assert_eq!(shown.trusted_services, vec!["cover.open_cover"]);
+    assert_eq!(shown.bots, Some(vec!["bot-a".to_owned()]));
+    let open = json!({"domain":"cover","service":"open_cover","entity_id":"cover.garage"});
+    assert!(!f.asks(&open), "the lowercased entry trusts the service");
+    // The domain list works in any case: `Light` allows `light`.
+    let ctx = ToolContext {
+        bot_id: Some("bot-a".into()),
+        ..ToolContext::default()
+    };
+    f.registry
+        .get("ha_call_service")
+        .unwrap()
+        .call(
+            &ctx,
+            json!({"domain":"light","service":"turn_on","entity_id":"light.kitchen"}),
+        )
+        .await
+        .unwrap();
+    let err = f
+        .registry
+        .get("ha_call_service")
+        .unwrap()
+        .call(
+            &ctx,
+            json!({"domain":"switch","service":"turn_on","entity_id":"switch.a"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("allowed_domains"), "{err}");
+    // Saving from the screen writes the cleaned form back (and the timeout within range).
+    f.host.save(input(hub.port, None)).await.unwrap();
+    let file = std::fs::read_to_string(f.file()).unwrap();
+    assert!(file.contains("timeout_secs = 60"), "{file}");
+    assert!(
+        file.contains("\"light\"") && !file.contains("Light"),
+        "{file}"
+    );
+}
+
+#[tokio::test]
+async fn a_hand_edited_file_the_api_would_refuse_is_not_loaded_and_not_overwritten() {
+    let hub = hub().await;
+    let head = format!(
+        "url = \"http://127.0.0.1:{}\"\ntoken = \"my/own/secret\"\n",
+        hub.port
+    );
+    let many = |n: usize, what: &str| {
+        (0..n)
+            .map(|i| format!("\"{what}{i}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let long = "a".repeat(65);
+    for (why, extra) in [
+        (
+            "generic service",
+            "trusted_services = [\"homeassistant.turn_on\"]".to_owned(),
+        ),
+        (
+            "generic service, cased",
+            "trusted_services = [\" HomeAssistant.Turn_Off \"]".to_owned(),
+        ),
+        (
+            "long name",
+            format!("trusted_services = [\"cover.{long}\"]"),
+        ),
+        ("no dot", "trusted_services = [\"cover\"]".to_owned()),
+        ("wildcard", "trusted_services = [\"cover.*\"]".to_owned()),
+        (
+            "too many services",
+            format!("trusted_services = [{}]", many(101, "cover.s")),
+        ),
+        ("blank domain", "allowed_domains = [\"\"]".to_owned()),
+        ("odd domain", "allowed_domains = [\"li ght\"]".to_owned()),
+        (
+            "too many domains",
+            format!("allowed_domains = [{}]", many(101, "d")),
+        ),
+        ("too many bots", format!("bots = [{}]", many(501, "bot"))),
+        ("long bot id", format!("bots = [\"{}\"]", "b".repeat(81))),
+        ("blank bot id", "bots = [\"\"]".to_owned()),
+    ] {
+        let body = format!("{head}{extra}\n");
+        let f = hand_written(&body);
+        f.store.set("my/own/secret", TOKEN).unwrap();
+        assert!(!f.visible(None), "{why}: must not load");
+        assert!(!f.host.get().configured, "{why}");
+        let err = f.host.save(input(hub.port, Some(TOKEN))).await.unwrap_err();
+        assert!(
+            matches!(err, HomeAssistantControlError::Internal(_)),
+            "{why}: {err:?}"
+        );
+        assert_eq!(std::fs::read_to_string(f.file()).unwrap(), body, "{why}");
+    }
 }

@@ -32,8 +32,17 @@ use tool_registry::ToolRegistry;
 /// Filename of the Home Assistant configuration in `<data_dir>`.
 pub const HOMEASSISTANT_FILE: &str = "homeassistant.toml";
 
-/// The secret this host stores the access token under.
+/// The secret this host stores the access token under when no hub is live yet.
 const TOKEN_SECRET: &str = "homeassistant/token";
+
+/// Every later token goes to a new name under this prefix (see `HomeAssistantHost::save`).
+const TOKEN_SECRET_PREFIX: &str = "homeassistant/token-";
+
+/// A secret this host made, which it may delete again: a hand-written reference may name one that
+/// something else still uses.
+fn host_made(name: &str) -> bool {
+    name == TOKEN_SECRET || name.starts_with(TOKEN_SECRET_PREFIX)
+}
 
 const FILE_HEADER: &str = "# Home Assistant - edited via Apps > Home Assistant, `bot ha` or by hand.\n# The access token lives in the secret store; only its name belongs here.\n\n";
 
@@ -46,7 +55,12 @@ enum Loaded {
 fn load(path: &Path) -> Loaded {
     match std::fs::read_to_string(path) {
         Ok(text) => match toml::from_str::<HomeAssistantConfig>(&text) {
-            Ok(cfg) => Loaded::Ok(Some(cfg)),
+            // A hand-edited file passes the same cleaners as the setup API, so nothing the
+            // screen would refuse reaches the live connector.
+            Ok(cfg) => match checked(cfg) {
+                Ok(cfg) => Loaded::Ok(Some(cfg)),
+                Err(e) => Loaded::Broken(format!("{}: {}", path.display(), reason(e))),
+            },
             // The parser's own text quotes the offending line, which may hold a pasted key.
             Err(e) => Loaded::Broken(format!("{}: not valid ({})", path.display(), e.message())),
         },
@@ -132,16 +146,42 @@ fn friendly(e: &HaError) -> String {
     }
 }
 
+/// Most services the owner can list, and most bots or domains the setup can name.
+const MAX_TRUSTED: usize = 100;
+const MAX_BOTS: usize = 500;
+const MAX_DOMAINS: usize = 100;
+/// Longest address, and the per-request timeout range (the client clamps to the same).
+const MAX_URL: usize = 2048;
+const MAX_TIMEOUT_SECS: u64 = 60;
+
+fn name_ok(p: &str) -> bool {
+    !p.is_empty()
+        && p.len() <= 64
+        && p.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+/// Text from a file or request, short and free of control characters, for an error message.
+fn shown(raw: &str) -> String {
+    raw.trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(40)
+        .collect()
+}
+
+fn reason(e: HomeAssistantControlError) -> String {
+    match e {
+        HomeAssistantControlError::NotFound(m)
+        | HomeAssistantControlError::Invalid(m)
+        | HomeAssistantControlError::Internal(m) => m,
+    }
+}
+
 /// An owner-listed service: exactly `domain.service`, lowercase, never the generic
 /// `homeassistant.*` (that one fans out to entities nobody can see from here).
 fn clean_service(raw: &str) -> Result<String, HomeAssistantControlError> {
     let s = raw.trim().to_ascii_lowercase();
-    let name_ok = |p: &str| {
-        !p.is_empty()
-            && p.len() <= 64
-            && p.bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-    };
     match s.split_once('.') {
         Some((d, v)) if name_ok(d) && name_ok(v) => {
             if d == "homeassistant" {
@@ -154,7 +194,7 @@ fn clean_service(raw: &str) -> Result<String, HomeAssistantControlError> {
         }
         _ => Err(invalid(format!(
             "`{}` is not a service name: write it as domain.service, for example cover.open_cover",
-            raw.trim()
+            shown(raw)
         ))),
     }
 }
@@ -165,6 +205,35 @@ fn clean_services(raw: &[String]) -> Result<Vec<String>, HomeAssistantControlErr
         let s = clean_service(r)?;
         if !out.contains(&s) {
             out.push(s);
+        }
+        if out.len() > MAX_TRUSTED {
+            return Err(invalid(format!(
+                "at most {MAX_TRUSTED} services can be allowed without asking"
+            )));
+        }
+    }
+    Ok(out)
+}
+
+/// The domains the hub may be limited to (`allowed_domains`): lowercase names like `light`. A
+/// blank entry is an error, not skipped: dropping it could turn "only these" into "every domain".
+fn clean_domains(raw: &[String]) -> Result<Vec<String>, HomeAssistantControlError> {
+    let mut out: Vec<String> = Vec::new();
+    for r in raw {
+        let d = r.trim().to_ascii_lowercase();
+        if !name_ok(&d) {
+            return Err(invalid(format!(
+                "`{}` is not a domain name (for example light)",
+                shown(r)
+            )));
+        }
+        if !out.contains(&d) {
+            out.push(d);
+        }
+        if out.len() > MAX_DOMAINS {
+            return Err(invalid(format!(
+                "at most {MAX_DOMAINS} domains can be listed"
+            )));
         }
     }
     Ok(out)
@@ -183,8 +252,25 @@ fn clean_bots(raw: Option<Vec<String>>) -> Result<Option<Vec<String>>, HomeAssis
         if !out.contains(&id) {
             out.push(id);
         }
+        if out.len() > MAX_BOTS {
+            return Err(invalid(format!("at most {MAX_BOTS} bots can be listed")));
+        }
     }
     Ok(Some(out))
+}
+
+/// A configuration read from the file, held to the same rules as one made by the API: the
+/// cleaners and length caps above, lowercase names, no `homeassistant.*` in the trusted list.
+/// (The address and the token name are checked when the client is built and the file is parsed.)
+fn checked(mut cfg: HomeAssistantConfig) -> Result<HomeAssistantConfig, HomeAssistantControlError> {
+    if cfg.url.len() > MAX_URL {
+        return Err(invalid("the url is too long"));
+    }
+    cfg.trusted_services = clean_services(&cfg.trusted_services)?;
+    cfg.allowed_domains = clean_domains(&cfg.allowed_domains)?;
+    cfg.bots = clean_bots(cfg.bots.take())?;
+    cfg.timeout_secs = cfg.timeout_secs.clamp(1, MAX_TIMEOUT_SECS);
+    Ok(cfg)
 }
 
 /// Everything the token is sent to: scheme, host, port and path. If any changes, the stored
@@ -379,24 +465,44 @@ impl HomeAssistantControl for HomeAssistantHost {
             .probe(cfg.clone(), &token)
             .await
             .map_err(|e| invalid(friendly(&e)))?;
-        // A new token always goes to this host's own secret; without one the saved reference
-        // is kept. New token first: if storing it fails nothing has changed, and if saving the
-        // file fails the old value is put back.
-        let previous = if new_token.is_some() {
-            let before = self.read_secret(TOKEN_SECRET.to_owned()).await?;
-            self.set_secret(TOKEN_SECRET.to_owned(), token).await?;
-            cfg.token = SecretRef::new(TOKEN_SECRET).map_err(|e| internal(e.to_string()))?;
-            Some(before)
+        // A new token goes to a name no live client reads. The live client resolves its token
+        // from the store at every request, so overwriting the name it uses would send the new
+        // token to the old host until the reload; a fresh name leaves the old client with the
+        // old token and gives the new client (swapped in with the file below) the new one. With
+        // no hub live nothing reads the name and the plain one is used. Nothing but the old
+        // secret changes if a step fails.
+        let stored = if new_token.is_some() {
+            let name = if self.connector.is_configured() {
+                format!(
+                    "{TOKEN_SECRET_PREFIX}{}",
+                    &uuid::Uuid::new_v4().simple().to_string()[..12]
+                )
+            } else {
+                TOKEN_SECRET.to_owned()
+            };
+            let before = self.read_secret(name.clone()).await?;
+            self.set_secret(name.clone(), token).await?;
+            cfg.token = SecretRef::new(name.clone()).map_err(|e| internal(e.to_string()))?;
+            Some((name, before))
         } else {
             None
         };
         if let Err(e) = self.persist(&cfg) {
-            if let Some(before) = previous {
-                self.restore_secret(TOKEN_SECRET.to_owned(), before).await;
+            if let Some((name, before)) = stored {
+                self.restore_secret(name, before).await;
             }
             return Err(e);
         }
         self.reload(Some(cfg.clone()));
+        // The old secret is only deleted once the live client no longer names it.
+        if let Some(old) = saved.as_ref().map(|o| String::from(o.token.clone()))
+            && stored.is_some()
+            && old != String::from(cfg.token.clone())
+            && host_made(&old)
+            && let Err(e) = self.drop_secret(old).await
+        {
+            warn(&format!("home assistant: {}", reason(e)));
+        }
         Ok(HomeAssistantSaved {
             settings: dto(Some(&cfg), &self.secrets),
             entities,
@@ -418,17 +524,26 @@ impl HomeAssistantControl for HomeAssistantHost {
     async fn remove(&self) -> Result<(), HomeAssistantControlError> {
         let _guard = self.ops.lock().await;
         let gone = self.config()?.ok_or_else(not_set_up)?;
-        // The stored key first: if it cannot be deleted nothing has changed and the owner can
-        // try again, instead of a key left behind in the secure store with no setup naming it.
+        // The file first: if it cannot be removed nothing has changed (the setup and its key
+        // still work, and the owner can try again). Then the stored key, then the live hub.
         // Only the secret this host made goes: a hand-written reference may name one that
         // something else still uses.
-        if String::from(gone.token.clone()) == TOKEN_SECRET {
-            self.drop_secret(TOKEN_SECRET.to_owned()).await?;
-        }
         std::fs::remove_file(&self.path)
             .map_err(|e| internal(format!("cannot remove {}: {e}", self.path.display())))?;
+        let name = String::from(gone.token.clone());
+        let dropped = if host_made(&name) {
+            self.drop_secret(name.clone()).await
+        } else {
+            Ok(())
+        };
         self.reload(None);
-        Ok(())
+        // The setup is gone either way; if the key could not be deleted, say which one is left.
+        dropped.map_err(|e| {
+            let why = reason(e);
+            internal(format!(
+                "Home Assistant was removed, but its stored key `{name}` is still in the secret store ({why}); delete it with `bot secrets delete {name}`"
+            ))
+        })
     }
 
     async fn test(
