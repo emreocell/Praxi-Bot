@@ -57,6 +57,7 @@ mod manager;
 pub mod mcpb;
 pub mod oauth;
 pub mod oauth_net;
+pub mod paste;
 mod pins;
 pub mod registry;
 mod roots;

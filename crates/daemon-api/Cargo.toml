@@ -48,6 +48,7 @@ percent-encoding.workspace = true
 rusqlite.workspace = true
 permission-engine = { path = "../permission-engine", version = "0.1.0" }
 protocol.workspace = true
+assistant-import = { path = "../assistant-import", version = "0.1.0" }
 provider-catalog = { path = "../provider-catalog", version = "0.1.0" }
 secret-store.workspace = true
 scheduler = { path = "../scheduler", version = "0.1.0" }

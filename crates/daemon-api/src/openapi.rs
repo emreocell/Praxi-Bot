@@ -8,6 +8,7 @@ use axum::Json;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
+use crate::assistant_import_routes;
 use crate::bot_limits_routes;
 use crate::calendar;
 use crate::calendar_routes;
@@ -379,6 +380,8 @@ impl Modify for Security {
         routes::update_chat,
         routes::update_schedule,
         routes::webhook,
+        assistant_import_routes::scan,
+        assistant_import_routes::run,
         skill_hub::hub_install,
         skill_hub::hub_preview,
         skill_market::market_index,
@@ -803,6 +806,13 @@ impl Modify for Security {
         memory::UpdateMemoryInput,
         peer::PeerLink,
         skill_hub::HubFindingDto,
+        assistant_import_routes::ImportItemDto,
+        assistant_import_routes::ImportResultDto,
+        assistant_import_routes::ImportRunDto,
+        assistant_import_routes::ImportRunInput,
+        assistant_import_routes::ImportScanDto,
+        assistant_import_routes::ImportScanInput,
+        assistant_import_routes::ImportSecretDto,
         skill_hub::HubInstallInput,
         skill_hub::HubPreviewDto,
         skill_hub::HubSourceInput,
@@ -966,6 +976,7 @@ impl Modify for Security {
         (name = "notifications"),
         (name = "secrets"),
         (name = "skills"),
+        (name = "import"),
         (name = "usage"),
         (name = "view"),
         (name = "voice"),

@@ -234,6 +234,9 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/chats/{}/skill-draft"),
     ("POST", "/v1/skills/draft/preview"),
     ("POST", "/v1/skills/draft/install"),
+    // looking through other assistants' files and importing them: the owner's own action
+    ("POST", "/v1/import/scan"),
+    ("POST", "/v1/import/run"),
     ("POST", "/v1/skills/hub/preview"),
     ("POST", "/v1/skills/hub/install"),
     ("POST", "/v1/skills/market/index"),

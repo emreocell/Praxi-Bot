@@ -12682,6 +12682,118 @@
         ]
       }
     },
+    "/v1/import/run": {
+      "post": {
+        "tags": [
+          "import"
+        ],
+        "summary": "Import what the owner ticked. Scans again first: what is written is what is on disk now.",
+        "operationId": "run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRunInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportRunDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/import/scan": {
+      "post": {
+        "tags": [
+          "import"
+        ],
+        "summary": "Look for the setups of other assistants on this machine. Reads files; writes nothing.",
+        "operationId": "scan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportScanInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportScanDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/incoming-webhooks/{hook}": {
       "post": {
         "tags": [
@@ -28715,6 +28827,82 @@
         },
         "additionalProperties": false
       },
+      "ImportItemDto": {
+        "type": "object",
+        "description": "One line of the preview.",
+        "required": [
+          "id",
+          "app",
+          "kind",
+          "name",
+          "source",
+          "import",
+          "default_on",
+          "reason",
+          "note",
+          "secrets",
+          "dropped"
+        ],
+        "properties": {
+          "app": {
+            "type": "string",
+            "description": "`claude`, `cursor`, `vscode`, `codex`, `openclaw`, `hermes` or `folder`."
+          },
+          "default_on": {
+            "type": "boolean",
+            "description": "Ticked by default."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A safe one-line summary (never a value)."
+          },
+          "dropped": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names whose value was only a variable reference and is not copied."
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable between a scan and a run."
+          },
+          "import": {
+            "type": "boolean",
+            "description": "Can be imported."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`mcp_server`, `skill`, `instructions` or `other`."
+          },
+          "name": {
+            "type": "string",
+            "description": "Server or skill name, or a file name."
+          },
+          "note": {
+            "type": "string",
+            "description": "Outcome in English."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Outcome as a code (`ready`, `already_have`, `unpinned`, ...)."
+          },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportSecretDto"
+            },
+            "description": "Values that go to the secret store (names only)."
+          },
+          "source": {
+            "type": "string",
+            "description": "The file it came from (`~/.cursor/mcp.json`)."
+          }
+        }
+      },
       "ImportMessage": {
         "type": "object",
         "required": [
@@ -28923,6 +29111,59 @@
           }
         }
       },
+      "ImportResultDto": {
+        "type": "object",
+        "description": "What happened to one item.",
+        "required": [
+          "id",
+          "status",
+          "message",
+          "secrets_stored",
+          "secrets_left_out"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The item's `id`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Outcome in English."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Outcome code when it was skipped or failed."
+          },
+          "secrets_left_out": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Environment variables / headers left out (not confirmed, or not storable)."
+          },
+          "secrets_stored": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Secret names stored."
+          },
+          "status": {
+            "type": "string",
+            "description": "`imported`, `skipped` or `failed`."
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Instruction items: the text to add to a bot."
+          }
+        }
+      },
       "ImportRow": {
         "type": "object",
         "description": "A tool step or approval row. Kept only for its count; it is never stored\nin the run or approval tables."
@@ -28968,6 +29209,97 @@
           "updated_at_ms": {
             "type": "integer",
             "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImportRunDto": {
+        "type": "object",
+        "description": "The outcome of a run.",
+        "required": [
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportResultDto"
+            },
+            "description": "One entry per requested id, in order."
+          }
+        }
+      },
+      "ImportRunInput": {
+        "type": "object",
+        "description": "Import the ticked items.",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "confirmed_secrets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`name` of every secret the owner agreed to move into the secret store."
+          },
+          "folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Same as in the scan."
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`id` of every ticked item."
+          },
+          "only": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Same as in the scan."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImportScanDto": {
+        "type": "object",
+        "description": "The preview.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportItemDto"
+            },
+            "description": "Everything found, importable or not."
+          }
+        }
+      },
+      "ImportScanInput": {
+        "type": "object",
+        "description": "What to look at.",
+        "properties": {
+          "folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A folder (on the machine of this daemon) of skill and prompt markdown. Read only when set."
+          },
+          "only": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only this app: `claude`, `cursor`, `vscode`, `codex`, `openclaw`, `hermes` or `folder`."
           }
         },
         "additionalProperties": false
@@ -29101,6 +29433,29 @@
             "items": {
               "$ref": "#/components/schemas/ImportScheduleResult"
             }
+          }
+        }
+      },
+      "ImportSecretDto": {
+        "type": "object",
+        "description": "A value that moves to the secret store when the owner confirms it. Never the value.",
+        "required": [
+          "name",
+          "key",
+          "place"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The environment variable or header it belongs to."
+          },
+          "name": {
+            "type": "string",
+            "description": "The secret's name in the store."
+          },
+          "place": {
+            "type": "string",
+            "description": "`env` or `header`."
           }
         }
       },
@@ -39409,6 +39764,9 @@
     },
     {
       "name": "skills"
+    },
+    {
+      "name": "import"
     },
     {
       "name": "usage"

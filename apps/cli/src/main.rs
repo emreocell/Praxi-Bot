@@ -280,7 +280,7 @@ enum Command {
         action: profile_cmd::ProfileCmd,
     },
     #[allow(clippy::doc_markdown)] // help text; product names stay plain
-    /// Bring MCP servers and skills from Claude, OpenClaw or Hermes (preview first).
+    /// Bring MCP servers, skills and instructions from Claude, Cursor, VS Code, Codex, OpenClaw, Hermes or a folder (preview first).
     Import {
         #[command(subcommand)]
         action: import_cmd::ImportCmd,
@@ -880,8 +880,16 @@ fn run() -> Result<()> {
             return skills_cmd::run(&data_dir, action, cli.json, &mut std::io::stdout());
         }
         Command::Import {
-            action: import_cmd::ImportCmd::Detect,
-        } => return import_cmd::detect(&data_dir, cli.json, &mut std::io::stdout()),
+            action: import_cmd::ImportCmd::Detect { from, folder },
+        } => {
+            return import_cmd::detect(
+                &data_dir,
+                from.as_deref(),
+                folder.as_deref(),
+                cli.json,
+                &mut std::io::stdout(),
+            );
+        }
         Command::Mcp {
             action: McpCmd::Serve(args),
         } => return mcp_serve::run(&cli, args, &data_dir),
@@ -1602,8 +1610,24 @@ fn run_client(cli: &Cli, command: &Command, data_dir: &std::path::Path) -> Resul
             } => remote::bots_add(&c, file, json, &mut out).await,
             Command::Profile { action } => profile_cmd::run(&c, action, json, &mut out).await,
             Command::Import {
-                action: import_cmd::ImportCmd::Run { from, yes },
-            } => import_cmd::run(&c, data_dir, from.as_deref(), *yes, json, &mut out).await,
+                action:
+                    import_cmd::ImportCmd::Run {
+                        from,
+                        folder,
+                        yes,
+                        move_secrets,
+                        bot,
+                    },
+            } => {
+                let args = import_cmd::RunArgs {
+                    from: from.as_deref(),
+                    folder: folder.as_deref(),
+                    yes: *yes,
+                    move_secrets: *move_secrets,
+                    bot: bot.as_deref(),
+                };
+                import_cmd::run(&c, &args, json, &mut out).await
+            }
             Command::Chat {
                 bot_id,
                 message,

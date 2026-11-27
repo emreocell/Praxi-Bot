@@ -14,6 +14,7 @@
 //! other exception is `GET /v1/events`, which also accepts `?token=<token>` for
 //! browser `EventSource` clients (Host / Origin still apply).
 
+mod assistant_import_routes;
 mod attachment_routes;
 mod audit_routes;
 pub mod auth;
@@ -338,6 +339,8 @@ struct Inner {
     connection_tests: Arc<tokio::sync::Semaphore>,
     /// Write-only secret sink of `POST /v1/secrets/{name}`.
     secrets: OnceLock<Arc<dyn secret_store::SecretStore>>,
+    /// Where other assistants keep their files (default: this machine; see [`AppState::set_import_roots`]).
+    import_roots: OnceLock<assistant_import::Roots>,
     owner_key: OnceLock<String>,
     /// Owner-stored fill secrets (see [`AppState::set_fill_secrets`]).
     fill_secrets: OnceLock<Arc<secret_store::FillSecrets>>,
@@ -544,6 +547,7 @@ impl AppState {
             web_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
             connection_tests: Arc::new(tokio::sync::Semaphore::new(EMAIL_TESTS_AT_ONCE)),
             secrets: OnceLock::new(),
+            import_roots: OnceLock::new(),
             owner_key: OnceLock::new(),
             fill_secrets: OnceLock::new(),
             schedules: parking_lot::Mutex::new(None),
@@ -747,6 +751,16 @@ impl AppState {
             let _ =
                 incoming_webhook::migrate_legacy_secrets(self.storage(), for_migration.as_ref());
         }
+    }
+
+    /// Where `POST /v1/import/scan` looks for other assistants' files instead of this machine's
+    /// home folder (call once; a second call is ignored). Tests use it.
+    pub fn set_import_roots(&self, roots: assistant_import::Roots) {
+        let _ = self.0.import_roots.set(roots);
+    }
+
+    pub(crate) fn import_roots(&self) -> Option<assistant_import::Roots> {
+        self.0.import_roots.get().cloned()
     }
 
     /// Add desktop / browser facts and repairs to `/v1/doctor` (call once;
@@ -1745,6 +1759,8 @@ fn api_routes() -> Router<AppState> {
         )
         .route("/v1/skills/draft/preview", post(skill_draft::draft_preview))
         .route("/v1/skills/draft/install", post(skill_draft::draft_install))
+        .route("/v1/import/scan", post(assistant_import_routes::scan))
+        .route("/v1/import/run", post(assistant_import_routes::run))
         .route("/v1/skills/hub/preview", post(skill_hub::hub_preview))
         .route("/v1/skills/hub/install", post(skill_hub::hub_install))
         .route("/v1/skills/market/index", post(skill_market::market_index))

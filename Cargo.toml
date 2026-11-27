@@ -20,6 +20,7 @@ members = [
     "crates/cli-provider",
     "crates/computer-target",
     "crates/mcp-bridge",
+    "crates/assistant-import",
     "crates/workflow-replay",
     "crates/memory-store",
     "crates/task-runtime",

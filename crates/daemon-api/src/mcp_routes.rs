@@ -40,7 +40,7 @@ fn mcp(s: &AppState) -> Result<Arc<dyn McpControl>, ApiError> {
         .ok_or_else(|| ApiError::unavailable("MCP management is not available in this daemon"))
 }
 
-type MaybeActor = Option<Extension<crate::live_view::Actor>>;
+pub(crate) type MaybeActor = Option<Extension<crate::live_view::Actor>>;
 
 /// Longest server or secret name copied into an audit row.
 const MAX_AUDIT_NAME: usize = 128;
@@ -122,7 +122,7 @@ fn audit_trust_choice(
 }
 
 /// Audit around `op`: a row before (fail closed) and one after.
-async fn audited<T, F>(
+pub(crate) async fn audited<T, F>(
     s: &AppState,
     actor: &MaybeActor,
     action: &str,

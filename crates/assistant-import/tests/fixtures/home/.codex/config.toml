@@ -1,0 +1,14 @@
+model = "gpt-5"
+
+[mcp_servers.docs]
+command = "npx"
+args = ["-y", "docs-mcp@0.4.1"]
+enabled = false
+
+[mcp_servers.docs.env]
+DOCS_TOKEN = "CANARY-codex-env-8b21"
+
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+bearer_token_env_var = "FIGMA_TOKEN"
+http_headers = { "X-Client" = "codex" }

@@ -317,6 +317,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "assistant-import"
+version = "0.1.0"
+dependencies = [
+ "mcp-bridge",
+ "secret-store",
+ "serde",
+ "serde_json",
+ "skills",
+ "tempfile",
+ "toml 1.2.3+spec-1.1.0",
+ "url",
+]
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1413,6 +1427,7 @@ dependencies = [
  "agent-core",
  "agent-router",
  "argon2",
+ "assistant-import",
  "async-trait",
  "base64 0.22.1",
  "browser-cdp",
@@ -2051,6 +2066,7 @@ name = "daemon-api"
 version = "0.1.0"
 dependencies = [
  "agent-core",
+ "assistant-import",
  "async-trait",
  "axum",
  "base64 0.22.1",
@@ -5049,6 +5065,7 @@ dependencies = [
  "parking_lot",
  "permission-engine",
  "process-wrap",
+ "proptest",
  "reqwest 0.13.5",
  "rmcp",
  "secret-store",

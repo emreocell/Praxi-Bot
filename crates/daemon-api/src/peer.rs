@@ -296,6 +296,9 @@ fn host_mode_desktop_denial(method: &Method, check_path: &str) -> Option<&'stati
     if under("/v1/secrets") && mutating {
         return Some("secrets are managed on the host itself");
     }
+    if under("/v1/import") && mutating {
+        return Some("other assistants' setups are imported on the host itself");
+    }
     if (under("/v1/mcp") || under("/v1/skills") || is_bot_skills_path(check_path)) && mutating {
         return Some("tool servers and skills are managed on the host itself");
     }

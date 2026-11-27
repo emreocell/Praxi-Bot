@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "linear": {"url": "https://mcp.linear.app/mcp", "headers": {"Authorization": "Bearer ${env:LINEAR_TOKEN}"}},
+    "files": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem@2.2.0", "${workspaceFolder}"]},
+    "db": {"command": "npx", "args": ["-y", "pg-mcp@1.2.3"], "env": {"DATABASE_URL": "postgres://u:CANARY-cursor-db-pass-5aa1@h/db"}}
+  }
+}

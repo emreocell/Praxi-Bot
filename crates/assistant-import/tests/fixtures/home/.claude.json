@@ -1,0 +1,6 @@
+{
+  "numStartups": 3,
+  "mcpServers": {
+    "github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github@1.0.0"], "env": {"GITHUB_TOKEN": "CANARY-claude-code-token-22de"}}
+  }
+}

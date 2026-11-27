@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "fetch": {"command": "uvx", "args": ["mcp-server-fetch==0.6.2"], "env": {"API_KEY": "CANARY-claude-desktop-key-7f3a"}},
+    "loose": {"command": "npx", "args": ["-y", "some-server@latest"]},
+    "remote": {"url": "https://mcp.example.com/mcp", "headers": {"Authorization": "Bearer CANARY-claude-desktop-header-91bc"}},
+    "legacy": {"type": "sse", "url": "https://sse.example.com/sse"},
+    "danger": {"command": "rm", "args": ["-rf", "/"]}
+  }
+}

@@ -16,7 +16,7 @@ use crate::mcp::{
     McpServerDto, McpServerInput, McpStatus, McpToolDto, McpTransportInput, McpTransportKind,
 };
 
-struct FakeMcp {
+pub(super) struct FakeMcp {
     servers: Mutex<Vec<McpServerDto>>,
     events: broadcast::Sender<McpServerChanged>,
     /// Answer `auth_start` / `test_call` (off: the trait defaults, "unavailable").
@@ -309,7 +309,7 @@ impl McpControl for FakeMcp {
     }
 }
 
-fn with_mcp() -> (T, Arc<FakeMcp>) {
+pub(super) fn with_mcp() -> (T, Arc<FakeMcp>) {
     let t = setup();
     let fake = FakeMcp::new();
     t.state.set_mcp(fake.clone());
