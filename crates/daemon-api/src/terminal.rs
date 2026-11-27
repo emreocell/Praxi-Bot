@@ -1130,7 +1130,10 @@ mod tests {
         }
         let env: Vec<(OsString, OsString)> = vec![
             ("HOME".into(), home.path().into()),
-            ("PATH".into(), "/usr/bin:/bin".into()),
+            (
+                "PATH".into(),
+                std::env::join_paths(["/usr/bin", "/bin"]).unwrap(),
+            ),
         ];
         let env = super::session_env(env, home.path().join("data"));
         assert!(env.iter().any(|(k, _)| k == "TERM"));
@@ -1144,7 +1147,10 @@ mod tests {
             chmod(".local/bin", 0o777);
             let env = vec![
                 ("HOME".into(), home.path().into()),
-                ("PATH".into(), "/usr/bin:/bin".into()),
+                (
+                    "PATH".into(),
+                    std::env::join_paths(["/usr/bin", "/bin"]).unwrap(),
+                ),
             ];
             let env = super::session_env(env, home.path().join("data"));
             let path = env.iter().find(|(k, _)| k == "PATH").unwrap().1.clone();
