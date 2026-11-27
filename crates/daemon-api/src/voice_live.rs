@@ -40,6 +40,8 @@ pub const OUTPUT_RATE: u32 = 24_000;
 const MAX_AUDIO_CHUNK: usize = INPUT_RATE as usize * 2;
 /// Longest accepted tool result (characters).
 const MAX_TOOL_TEXT: usize = 8_000;
+/// Source label on the saved lines of the voice model (see [`save_transcript`]).
+pub const VOICE_MODEL_SOURCE: &str = "gemini-live";
 /// Transcript limits of one write.
 const MAX_TURNS: usize = 400;
 const MAX_TURN_CHARS: usize = 8_000;
@@ -252,7 +254,8 @@ pub(crate) async fn open(
     ApiJson(input): ApiJson<LiveOpenInput>,
 ) -> Result<Sse<impl Stream<Item = Result<SseEvent, Infallible>>>, ApiError> {
     let control = voice(&s)?;
-    let session = Uuid::now_v7();
+    // Random, not time-ordered: the id is the only thing the upload routes check.
+    let session = Uuid::new_v4();
     {
         let mut slot = s.0.live_voice.lock();
         if slot.is_some() {
@@ -416,6 +419,12 @@ pub(crate) async fn close(
 }
 
 /// Write a finished voice conversation into a chat as ordinary text messages (no run starts).
+///
+/// `user` lines are what the owner said into their own microphone in their own session
+/// (speech-to-text), so they stay the owner's words. `assistant` lines are the voice model's
+/// output, which can repeat what the bot fetched from the web or an e-mail, so they are stored as
+/// untrusted content (source `gemini-live`): a later run that reads this chat is treated as having
+/// seen untrusted text and asks before it acts on it.
 #[utoipa::path(post, path = "/v1/chats/{id}/voice-transcript", tag = "chats", security(("bearer" = [])),
     params(("id" = Uuid, Path, description = "Chat id")),
     request_body = VoiceTranscriptInput,
@@ -455,6 +464,7 @@ pub(crate) async fn save_transcript(
     let base = now_ms();
     let mut saved = 0_u32;
     for (i, (role, text)) in lines.into_iter().enumerate() {
+        let from_model = role == "assistant";
         s.storage().insert_message(&Message {
             id: Uuid::now_v7(),
             user_id: s.user_id(),
@@ -464,9 +474,13 @@ pub(crate) async fn save_transcript(
             content: text.to_owned(),
             // Keep the order of the conversation even inside one millisecond.
             created_at_ms: base + i64::try_from(i).unwrap_or(0),
-            exposure_untrusted: false,
+            exposure_untrusted: from_model,
             exposure_private: false,
-            exposure_sources: Vec::new(),
+            exposure_sources: if from_model {
+                vec![VOICE_MODEL_SOURCE.to_owned()]
+            } else {
+                Vec::new()
+            },
         })?;
         saved += 1;
     }

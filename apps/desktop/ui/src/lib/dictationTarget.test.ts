@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { dictationEndpoints, isNotConfigured, transcribeRecording, type SttEndpoint, type SttProvider } from "./dictationTarget.ts";
+import { DictationNotConfigured, isNotConfigured, transcribeRecording, type SttEndpoint, type SttProvider } from "./dictationTarget.ts";
 
 const encode = async (_b: Blob, provider: SttProvider) => ({ audio_base64: "QQ==", mime: provider === "whisper" ? "audio/webm" : "audio/pcm" });
 const blob = new Blob(["x"]);
@@ -56,9 +56,43 @@ test("on-device transcription never leaves the machine", async () => {
   assert.deepEqual(local.calls, ["audio/pcm|en|true"]);
 });
 
-test("the same daemon is listed once, and a missing local daemon falls back to the active one", () => {
-  const a = { baseUrl: "u1" };
-  assert.deepEqual(dictationEndpoints(a, { baseUrl: "u1" }), [a]);
-  assert.deepEqual(dictationEndpoints(null, a), [a]);
-  assert.deepEqual(dictationEndpoints(null, null), []);
+test("no daemon on this computer: not set up, and nothing is sent to the active computer", async () => {
+  const server = endpoint("http://127.0.0.1:2", "whisper", "from the server");
+  await assert.rejects(transcribeRecording(blob, { local: null, active: server, language: "en", encode }), (e) => {
+    assert.ok(e instanceof DictationNotConfigured);
+    return isNotConfigured(e);
+  });
+  assert.deepEqual(server.calls, []);
+});
+
+test("this computer's daemon not answering is reported, and nothing goes to the active computer", async () => {
+  const down = Object.assign(new Error("network"), { status: 0, code: "network" });
+  const local = endpoint("http://127.0.0.1:1", "whisper", down);
+  const server = endpoint("http://127.0.0.1:2", "whisper", "from the server");
+  await assert.rejects(transcribeRecording(blob, { local, active: server, language: "en", encode }), { code: "network" });
+  assert.deepEqual(server.calls, []);
+  // Not even when it is the lookup of the provider that fails.
+  const noVoice: SttEndpoint & { calls: string[] } = { ...server, getVoice: async () => Promise.reject(down) };
+  await assert.rejects(transcribeRecording(blob, { local: noVoice, active: server, language: "en", encode }), { code: "network" });
+  assert.deepEqual(server.calls, []);
+});
+
+test("only the exact voice_not_configured answer moves on to the active computer", async () => {
+  for (const [status, code] of [
+    [409, "conflict"],
+    [403, "voice_not_configured"],
+    [500, "voice_not_configured"]
+  ] as const) {
+    const local = endpoint("http://127.0.0.1:1", "whisper", apiError(status, code));
+    const server = endpoint("http://127.0.0.1:2", "whisper", "from the server");
+    await assert.rejects(transcribeRecording(blob, { local, active: server, language: "en", encode }), { code });
+    assert.deepEqual(server.calls, [], `${status} ${code}`);
+  }
+});
+
+test("when this computer is the active one and not set up, it is not asked twice", async () => {
+  const local = endpoint("http://127.0.0.1:1", "whisper", apiError(409, "voice_not_configured"));
+  const same = { ...local, baseUrl: "http://127.0.0.1:1" };
+  await assert.rejects(transcribeRecording(blob, { local, active: same, language: "en", encode }), (e) => isNotConfigured(e));
+  assert.equal(local.calls.length, 1);
 });

@@ -1,8 +1,9 @@
 /**
  * Where a dictation recording is transcribed. The microphone is on THIS computer, so the owner's own
  * daemon goes first, whichever computer the bot works on. The active computer (a paired server) is
- * only a fallback when this computer has no transcription service set up. Any other failure is
- * reported as it is: the recording is never silently sent to a second machine.
+ * tried only after this computer's daemon answered 409 `voice_not_configured`. If this computer's
+ * daemon is not there at all, dictation is reported as not set up: the recording is never sent to a
+ * second machine because the first one was missing or failed.
  */
 
 export type SttProvider = "whisper" | "gemini_live" | "local_voice";
@@ -24,13 +25,31 @@ export interface SttEndpoint {
 /** The daemon answered 409 `voice_not_configured`: no transcription service is set up there. */
 export function isNotConfigured(e: unknown): boolean {
   const err = e as { status?: unknown; code?: unknown } | null;
-  return err?.status === 409 && (err.code === undefined || err.code === "voice_not_configured");
+  return err?.status === 409 && err.code === "voice_not_configured";
 }
 
-/** Local daemon first, then the active computer when it is a different daemon. */
-export function dictationEndpoints<T extends { baseUrl: string }>(local: T | null, active: T | null): T[] {
-  const list = [local, active].filter((c): c is T => c !== null);
-  return list.filter((c, i) => list.findIndex((o) => o.baseUrl === c.baseUrl) === i);
+/** Dictation has nowhere to go on this computer; looks like the daemon's own 409 to the caller. */
+export class DictationNotConfigured extends Error {
+  readonly status = 409;
+  readonly code = "voice_not_configured";
+  constructor() {
+    super("dictation is not set up on this computer");
+  }
+}
+
+async function transcribeWith(
+  ep: SttEndpoint,
+  blob: Blob,
+  language: string,
+  encode: (blob: Blob, provider: SttProvider) => Promise<{ audio_base64: string; mime: string }>
+): Promise<string> {
+  const { stt_provider } = await ep.getVoice();
+  const out = await ep.transcribe({
+    ...(await encode(blob, stt_provider)),
+    language,
+    local_only: stt_provider === "local_voice"
+  });
+  return out.text;
 }
 
 export async function transcribeRecording(
@@ -42,23 +61,17 @@ export async function transcribeRecording(
     encode: (blob: Blob, provider: SttProvider) => Promise<{ audio_base64: string; mime: string }>;
   }
 ): Promise<string> {
-  const endpoints = dictationEndpoints(opts.local, opts.active);
-  let notConfigured: unknown = null;
-  for (const ep of endpoints) {
-    try {
-      const { stt_provider } = await ep.getVoice();
-      const out = await ep.transcribe({
-        ...(await opts.encode(blob, stt_provider)),
-        language: opts.language,
-        local_only: stt_provider === "local_voice"
-      });
-      return out.text;
-    } catch (e) {
-      if (!isNotConfigured(e)) {
-        throw e;
-      }
-      notConfigured = e;
+  const { local, active, language, encode } = opts;
+  if (!local) {
+    throw new DictationNotConfigured();
+  }
+  try {
+    return await transcribeWith(local, blob, language, encode);
+  } catch (e) {
+    // Only "no service set up here" moves on. A failing or unreachable service is reported as it is.
+    if (!isNotConfigured(e) || !active || active.baseUrl === local.baseUrl) {
+      throw e;
     }
   }
-  throw notConfigured ?? new Error("no daemon to transcribe with");
+  return transcribeWith(active, blob, language, encode);
 }

@@ -7,9 +7,11 @@
 //! action always becomes an ordinary chat message with the normal permission engine and approval
 //! cards; this module never approves anything.
 //!
-//! The key travels only in the connection URL (as the official docs show) and that URL is never
-//! logged or put into an error message. Audio is not written anywhere unless the owner switched
-//! "keep audio" on; then it goes to WAV files in `<data_dir>/voice-live/`.
+//! The key travels only in the connection URL (as the official docs show), so the connection is
+//! made only over `wss://` (`ws://` only to a loopback host, for tests and local proxies; checked
+//! in [`connect`] before anything is sent), and that URL is never logged or put into an error
+//! message. Audio is not written anywhere unless the owner switched "keep audio" on; then it goes
+//! to WAV files in `<data_dir>/voice-live/` (see [`Keeper`] for permissions, size cap and pruning).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -21,7 +23,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::voice_gemini::{closed, dropped, parse, upstream};
+use crate::voice_gemini::{closed, dropped, parse, upstream, validate_ws_base};
 
 pub(crate) const DEFAULT_MODEL: &str = "gemini-3.8-live";
 pub(crate) const DEFAULT_VOICE: &str = "Kore";
@@ -37,6 +39,9 @@ const IDLE: Duration = Duration::from_secs(5 * 60);
 /// The provider closes a connection after about 10 minutes; resumption carries the conversation over.
 const MAX_RECONNECTS: u32 = 8;
 const MAX_REQUEST_CHARS: usize = 4_000;
+/// Kept audio never takes more than this in total (oldest files are deleted first). One full
+/// 30-minute conversation is about 145 MB (57 MB of microphone, 86 MB of speech), so it fits.
+const MAX_KEPT_BYTES: u64 = 200 * 1024 * 1024;
 const DOWN_BUFFER: usize = 256;
 const UP_BUFFER: usize = 64;
 
@@ -132,7 +137,9 @@ fn setup_message(cfg: &SessionConfig, handle: Option<&str>) -> serde_json::Value
 /// One connection: socket, `setup`, wait for `setupComplete` (an invalid key or model closes the
 /// socket here).
 async fn connect(cfg: &SessionConfig, handle: Option<&str>) -> Result<Ws, VoiceControlError> {
-    let url = format!("{}{WS_PATH}?key={}", cfg.ws_base, cfg.key);
+    // The key is in the URL: never over plain `ws://` to a remote host (the error names no URL).
+    let base = validate_ws_base(&cfg.ws_base)?;
+    let url = format!("{base}{WS_PATH}?key={}", cfg.key);
     let (mut ws, _) = tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(url))
         .await
         .map_err(|_| upstream("the Gemini Live connection timed out"))?
@@ -461,9 +468,15 @@ enum Side {
 }
 
 /// The two WAV files of a conversation, only when the owner asked to keep audio.
+///
+/// The files hold the owner's voice, so they are created readable by the owner only (directory
+/// `0700`, files `0600` on Unix; on Windows they inherit the owner's profile permissions). File
+/// names are a timestamp plus a random suffix. The folder is bounded: before a conversation starts
+/// and after it ends the oldest `*.wav` files are deleted until the folder holds at most
+/// [`MAX_KEPT_BYTES`]. Nothing else deletes them: the owner can remove the folder at any time.
 struct Keeper {
     dir: PathBuf,
-    stamp: u128,
+    name: String,
     you: Option<Wav>,
     assistant: Option<Wav>,
 }
@@ -473,12 +486,17 @@ impl Keeper {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis());
-        Self {
+        let random = uuid::Uuid::new_v4().simple().to_string();
+        let keeper = Self {
             dir: dir.to_path_buf(),
-            stamp,
+            name: format!("{stamp}-{}", &random[..16]),
             you: None,
             assistant: None,
+        };
+        if private_dir(dir).is_ok() {
+            prune(dir, MAX_KEPT_BYTES);
         }
+        keeper
     }
 
     fn write(&mut self, side: Side, pcm: &[u8], rate: u32) {
@@ -487,8 +505,8 @@ impl Keeper {
             Side::Assistant => (&mut self.assistant, "assistant"),
         };
         if slot.is_none() {
-            let path = self.dir.join(format!("{}-{tag}.wav", self.stamp));
-            *slot = std::fs::create_dir_all(&self.dir)
+            let path = self.dir.join(format!("{}-{tag}.wav", self.name));
+            *slot = private_dir(&self.dir)
                 .ok()
                 .and_then(|()| Wav::create(&path, rate).ok());
         }
@@ -500,11 +518,57 @@ impl Keeper {
     }
 
     fn finish(&mut self) {
+        let wrote = self.you.is_some() || self.assistant.is_some();
         for w in [self.you.take(), self.assistant.take()]
             .into_iter()
             .flatten()
         {
             let _ = w.finish();
+        }
+        if wrote {
+            prune(&self.dir, MAX_KEPT_BYTES);
+        }
+    }
+}
+
+/// Create the folder (and a pre-existing one is tightened) so only its owner can enter it.
+fn private_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)
+    }
+}
+
+/// Delete the oldest `*.wav` files in `dir` until the rest take at most `cap` bytes.
+fn prune(dir: &Path, cap: u64) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut files: Vec<(std::time::SystemTime, PathBuf, u64)> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|x| x == "wav"))
+        .filter_map(|e| {
+            let meta = e.metadata().ok().filter(std::fs::Metadata::is_file)?;
+            Some((meta.modified().ok()?, e.path(), meta.len()))
+        })
+        .collect();
+    let mut total: u64 = files.iter().map(|f| f.2).sum();
+    files.sort();
+    for (_, path, len) in files {
+        if total <= cap {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total = total.saturating_sub(len);
         }
     }
 }
@@ -518,7 +582,15 @@ struct Wav {
 impl Wav {
     fn create(path: &Path, rate: u32) -> std::io::Result<Self> {
         use std::io::Write;
-        let mut file = std::fs::File::create(path)?;
+        let mut opts = std::fs::OpenOptions::new();
+        // `create_new`: a random name never collides, and an existing file or link is not followed.
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut file = opts.open(path)?;
         let mut h = Vec::with_capacity(44);
         h.extend_from_slice(b"RIFF");
         h.extend_from_slice(&0_u32.to_le_bytes());
@@ -855,6 +927,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_key_is_never_sent_over_plain_ws_to_a_remote_host() {
+        // Nothing is listening and no DNS is needed: the endpoint is refused before any
+        // connection, so the error is the endpoint check and not a connect failure.
+        for base in [
+            "ws://example.com",
+            "ws://203.0.113.7:9",
+            "ws://localhost.example.com",
+            "http://127.0.0.1:9",
+            "wss://example.com/?x=1",
+            "wss://user:pw@example.com",
+        ] {
+            let fake = Fake::start().await;
+            let mut cfg = fake.config();
+            cfg.ws_base = base.into();
+            let err = open(cfg).await.err().expect("open must fail");
+            let text = format!("{err:?} {err}");
+            assert!(text.contains("invalid Gemini endpoint"), "{base}: {text}");
+            assert!(!text.contains("SECRETKEY"), "{base}: {text}");
+            assert!(!text.contains(base), "{base}: {text}");
+        }
+        // Loopback `ws://` (the fake service) and `wss://` pass the check.
+        let fake = Fake::start().await;
+        assert!(open(fake.config()).await.is_ok());
+        assert!(validate_ws_base("wss://generativelanguage.googleapis.com").is_ok());
+    }
+
+    #[tokio::test]
     async fn dropping_the_app_side_ends_the_session() {
         let mut fake = Fake::start().await;
         let LiveLink { up, mut down, .. } = open(fake.config()).await.unwrap();
@@ -954,5 +1053,86 @@ mod tests {
                 assert_eq!(&wav[44..], pcm);
             }
         }
+    }
+
+    #[cfg(unix)]
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    fn sparse_wav(dir: &Path, name: &str, len: u64, age_secs: u64) -> PathBuf {
+        let path = dir.join(name);
+        let f = std::fs::File::create(&path).unwrap();
+        f.set_len(len).unwrap();
+        f.set_modified(std::time::SystemTime::now() - Duration::from_secs(age_secs))
+            .unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kept_audio_is_owner_only_even_in_a_folder_that_existed_wider() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let keep = dir.path().join("voice-live");
+        std::fs::create_dir(&keep).unwrap();
+        std::fs::set_permissions(&keep, std::fs::Permissions::from_mode(0o775)).unwrap();
+        // A permissive umask must not widen the files either.
+        let mut k = Keeper::new(&keep);
+        k.write(Side::You, &[1, 0], INPUT_RATE);
+        k.write(Side::Assistant, &[2, 0], OUTPUT_RATE);
+        k.finish();
+        assert_eq!(mode_of(&keep), 0o700);
+        let files: Vec<_> = std::fs::read_dir(&keep)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(files.len(), 2);
+        for f in files {
+            assert_eq!(mode_of(&f), 0o600, "{}", f.display());
+        }
+        // A new folder is private from the start.
+        let fresh = dir.path().join("a").join("voice-live");
+        let mut k = Keeper::new(&fresh);
+        k.write(Side::You, &[1, 0], INPUT_RATE);
+        k.finish();
+        assert_eq!(mode_of(&fresh), 0o700);
+    }
+
+    #[test]
+    fn kept_audio_names_are_random_and_never_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (Keeper::new(dir.path()), Keeper::new(dir.path()));
+        assert_ne!(a.name, b.name, "two conversations in one millisecond");
+        let (stamp, random) = a.name.split_once('-').unwrap();
+        assert!(stamp.chars().all(|c| c.is_ascii_digit()), "{}", a.name);
+        assert_eq!(random.len(), 16, "{}", a.name);
+        let path = dir.path().join("x.wav");
+        Wav::create(&path, INPUT_RATE).unwrap();
+        assert!(Wav::create(&path, INPUT_RATE).is_err(), "an existing file is not reused");
+    }
+
+    #[test]
+    fn kept_audio_is_capped_and_the_oldest_goes_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let mb = 1024 * 1024;
+        let old = sparse_wav(dir.path(), "1-aaaa-you.wav", 150 * mb, 300);
+        let mid = sparse_wav(dir.path(), "2-bbbb-you.wav", 40 * mb, 200);
+        let new = sparse_wav(dir.path(), "3-cccc-you.wav", 40 * mb, 100);
+        let other = sparse_wav(dir.path(), "notes.txt", 500 * mb, 400);
+        // 230 MB of audio is over the 200 MB cap: only the oldest file has to go.
+        drop(Keeper::new(dir.path()));
+        assert!(!old.exists());
+        assert!(mid.exists() && new.exists());
+        assert!(other.exists(), "only `.wav` files are ever deleted");
+
+        // Pruning after a conversation also counts the files just written.
+        let mut k = Keeper::new(dir.path());
+        k.write(Side::Assistant, &[1, 0], OUTPUT_RATE);
+        let big = sparse_wav(dir.path(), "4-dddd-assistant.wav", 150 * mb, 10);
+        k.finish();
+        assert!(!mid.exists(), "the next oldest goes when the total is still over");
+        assert!(new.exists() && big.exists());
     }
 }

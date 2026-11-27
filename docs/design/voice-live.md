@@ -25,7 +25,9 @@ memory. Items we could not confirm are listed under "Unconfirmed".
   (`live_model`), so a rename does not need a release.
 - **Endpoint:** `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=<API key>`
   (the same endpoint the dictation provider already uses; the key is only in that URL, which is never logged
-  and never put in an error). Ephemeral tokens exist for browser clients; we do not need them because the
+  and never put in an error). The connection is checked before it is made: `wss://`, or `ws://` only to a
+  loopback host (tests, a local proxy), and no credentials, query or fragment in the base (`validate_ws_base`,
+  also called inside `connect`). No HTTP proxy is used for the socket. Ephemeral tokens exist for browser clients; we do not need them because the
   daemon, not the WebView, holds the socket and the key.
 - **Session:** first message `setup` (model, `generationConfig.responseModalities = ["AUDIO"]`, voice,
   `systemInstruction`, `tools`, `inputAudioTranscription`, `outputAudioTranscription`, `sessionResumption`,
@@ -65,7 +67,11 @@ memory. Items we could not confirm are listed under "Unconfirmed".
 - Uploads: `/audio` (raw PCM16, at most one second per request), `/tool` (the bot's answer to a `tool_call`),
   `/note` (a short update the voice model should pass on, e.g. "waiting for the owner's approval").
 - `POST /v1/chats/{id}/voice-transcript` writes the finished conversation as ordinary `user` / `assistant`
-  messages; it starts no run.
+  messages; it starts no run. The `user` lines are the owner's own speech (speech-to-text of their microphone,
+  in their own session) and stay the owner's words. The `assistant` lines are the voice model's output, which
+  can repeat what the bot read on the web or in a mail, so they are stored as **untrusted** content
+  (`exposure_untrusted`, source `gemini-live`): a later run that reads the chat is treated as having seen
+  untrusted text. Session ids are random (v4).
 - **One conversation at a time** per daemon (a second open answers 409). Everything is **owner-only**: the routes
   are in `OWNER_ROUTES`, so a bearer token alone (a CLI engine, a script, a paired phone) is refused. Opening
   a microphone stream to a paid cloud service and spending the stored key is the owner's own action.
@@ -95,8 +101,11 @@ daemon at once and never reaches the app. Consequences:
 
 - Audio is **never stored by default**. The daemon relays it and keeps nothing; the app keeps nothing.
 - Setting `live_keep_audio` (Settings → General → Dictation → Live voice, default off) writes two WAV files per conversation
-  (`<ms>-you.wav` 16 kHz and `<ms>-assistant.wav` 24 kHz) to `<data dir>/voice-live/`. They never leave the computer
-  and are not deleted automatically.
+  (`<ms>-<random>-you.wav` 16 kHz and `<ms>-<random>-assistant.wav` 24 kHz) to `<data dir>/voice-live/`. They never
+  leave the computer. The folder is `0700` and the files `0600` (Unix; Windows keeps the profile's permissions).
+  The folder is capped at **200 MB** in total: before a conversation starts and after it ends the oldest `.wav`
+  files are deleted until it fits (one full 30-minute conversation is about 145 MB). Nothing else deletes them;
+  delete the folder to remove them all.
 - Audio does go to Google while a conversation is open. On the free tier Google may use it to improve its products.
 - The transcript becomes chat messages after the conversation (that is the point of the feature); it is not
   stored while the conversation is still going on, only held in the app.

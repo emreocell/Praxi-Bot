@@ -387,6 +387,12 @@ async fn live_voice_session_streams_events_and_takes_uploads() {
         (Some(16_000), Some(24_000))
     );
     let id = ready["session_id"].as_str().unwrap().to_owned();
+    // The id is random (v4), not a time-ordered v7 that a neighbour could narrow down.
+    assert_eq!(
+        uuid::Uuid::parse_str(&id).unwrap().get_version_num(),
+        4,
+        "{id}"
+    );
     let open = v.live_open_args.lock().clone().unwrap();
     assert_eq!(open.language.as_deref(), Some("tr"));
     assert_eq!(open.assistant_name.as_deref(), Some("Nova"));
@@ -519,6 +525,47 @@ async fn live_voice_session_streams_events_and_takes_uploads() {
     assert_eq!(r.status, StatusCode::NOT_FOUND);
     let again = open_live(&t, &[("x-praxi-owner-key", super::OWNER_KEY)]).await;
     assert_eq!(again.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn voice_model_lines_are_stored_untrusted_and_the_owners_own_speech_is_not() {
+    let t = setup();
+    let (_bot, chat) = make_chat(&t).await;
+    let r = call(
+        &t,
+        Method::POST,
+        &format!("/v1/chats/{chat}/voice-transcript"),
+        Some(json!({"turns": [
+            {"role": "user", "text": "bugünkü postamı özetle"},
+            {"role": "assistant", "text": "Posta kutunda bir ileti var."},
+            {"role": "user", "text": "tamam"}
+        ]})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let chat_id = protocol::ChatId(uuid::Uuid::parse_str(&chat).unwrap());
+    let rows = t.state.storage().list_messages(chat_id).unwrap();
+    let got: Vec<_> = rows
+        .iter()
+        .map(|m| {
+            (
+                m.role.as_str(),
+                m.exposure_untrusted,
+                m.exposure_private,
+                m.exposure_sources.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            // The owner's microphone, the owner's session: the owner's words.
+            ("user", false, false, vec![]),
+            // The voice model's output may carry what the bot read on the web or in a mail.
+            ("assistant", true, false, vec!["gemini-live".to_owned()]),
+            ("user", false, false, vec![]),
+        ]
+    );
 }
 
 #[tokio::test]

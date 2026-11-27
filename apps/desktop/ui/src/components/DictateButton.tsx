@@ -9,7 +9,7 @@ import { micErrorKey } from "../lib/micError";
 import { openMic, watchLevel, type MicMeter } from "../lib/micMeter";
 import { stopSpeaking } from "../lib/speaker";
 import { createVad, LISTEN_VAD } from "../lib/voiceCall/vad";
-import { transcribeRecording } from "../lib/dictationTarget";
+import { isNotConfigured, transcribeRecording } from "../lib/dictationTarget";
 import { transcribePayload } from "../lib/voiceAudio";
 import {
   detectPlatform,
@@ -82,8 +82,10 @@ export function DictateButton({ onText, className }: { onText: (text: string) =>
           })
         );
       } catch (e) {
-        const note = e instanceof ApiError && e.status === 409 ? tr("voice.notConfigured")
-          : e instanceof ApiError && e.status === 429 && e.code === "busy" ? tr("voice.offlineReadAloud.busy")
+        const note = isNotConfigured(e)
+          ? tr("voice.notConfigured")
+          : e instanceof ApiError && e.status === 429 && e.code === "busy"
+            ? tr("voice.offlineReadAloud.busy")
             : humanLine(e);
         toast.show(note, "danger");
       } finally {

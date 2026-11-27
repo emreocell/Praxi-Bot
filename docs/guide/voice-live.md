@@ -43,10 +43,14 @@ runs exactly as if you had typed it.
 
 - **Audio is not stored** unless you turn on **Settings → General → Dictation → Live voice → Keep audio of live
   conversations on this computer**. Then two WAV files per conversation (yours and the assistant's) are saved in
-  the `voice-live` folder of the data directory. They are never uploaded and never deleted automatically.
+  the `voice-live` folder of the data directory, readable only by you. They are never uploaded. The folder
+  keeps at most 200 MB: when it is over, the oldest recordings are deleted first. Delete the folder to remove
+  them all.
 - While a conversation is open your audio goes to Google. On the free tier Google may use it to improve its
   products. Check Google's terms for the paid tier.
-- When you end the conversation, the words (yours and the assistant's) are saved in the chat as text.
+- When you end the conversation, the words (yours and the assistant's) are saved in the chat as text. The
+  assistant's words are marked as untrusted, like web pages, so a later task that reads them asks before it
+  acts on them.
 
 ## Cost
 
