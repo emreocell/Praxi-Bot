@@ -88,6 +88,15 @@ pub trait ToolGate: Send + Sync {
         self.authorize(req).await.map(|()| None)
     }
 
+    /// Optional owner-input callback for a registry tool that was allowed to run.
+    fn elicitation_handler(
+        &self,
+        _run_id: &str,
+        _tool: &str,
+    ) -> Option<tool_registry::elicitation::ElicitationHandler> {
+        None
+    }
+
     /// Authorize a registry tool call whose caller forwards the origin to `ToolContext`.
     /// # Errors
     /// A human-readable denial reason.
@@ -353,6 +362,7 @@ impl ScriptHost for GateHost {
             // A script is never covered by a run-scoped control grant.
             control_guard: None,
             lane: self.lane.clone(),
+            elicitation: self.gate.elicitation_handler(&self.run_id, name),
         };
         let out = if let Some(action) = &self.action {
             crate::control::scope_action(action.clone(), tool.call(&ctx, input)).await

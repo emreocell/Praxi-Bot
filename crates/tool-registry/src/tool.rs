@@ -187,6 +187,8 @@ pub struct ToolContext {
     /// as the browser, keeps this run apart from the parent and its siblings.
     /// `None` for a top-level run, which uses the shared state.
     pub lane: Option<String>,
+    /// The host may offer an owner-only form during this call.
+    pub elicitation: Option<crate::elicitation::ElicitationHandler>,
 }
 
 impl Default for ToolContext {
@@ -203,6 +205,7 @@ impl Default for ToolContext {
             payment: PaymentApproval::Unchecked,
             control_guard: None,
             lane: None,
+            elicitation: None,
         }
     }
 }

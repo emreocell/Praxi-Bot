@@ -1,5 +1,6 @@
 import type {
   DaemonEvent,
+  ElicitationField,
   GlobalEnvelope,
   SubagentHelper,
   TodoItem
@@ -113,6 +114,18 @@ export interface HandoverItem {
   closed?: boolean;
 }
 
+export interface ElicitationItem {
+  kind: "elicitation";
+  key: string;
+  callId: string;
+  server: string;
+  message: string;
+  fields: ElicitationField[];
+  requestedMs: number;
+  expiresMs: number;
+  closed?: boolean;
+}
+
 export interface TodoListItem {
   kind: "todo";
   key: string;
@@ -136,6 +149,7 @@ export type TimelineItem =
   | QuestionItem
   | SecretRequestItem
   | HandoverItem
+  | ElicitationItem
   | TodoListItem
   | NoticeItem;
 
@@ -190,7 +204,7 @@ export const EMPTY_EVENTS: EventsState = { runs: {}, lastGseq: 0 };
 
 /** When an item appeared (for interleaving with user messages). */
 export function itemTs(i: TimelineItem): number {
-  return i.kind === "tool" || i.kind === "question" || i.kind === "secret" || i.kind === "handover"
+  return i.kind === "tool" || i.kind === "question" || i.kind === "secret" || i.kind === "handover" || i.kind === "elicitation"
     ? i.requestedMs
     : i.ts;
 }
@@ -314,7 +328,7 @@ function closeOpenItems(items: TimelineItem[]): TimelineItem[] {
   return items.map((i) =>
     i.kind === "question" && i.answer === undefined
       ? { ...i, closed: true }
-      : (i.kind === "secret" && !i.parked) || i.kind === "handover"
+      : (i.kind === "secret" && !i.parked) || i.kind === "handover" || i.kind === "elicitation"
         ? { ...i, closed: true }
         : i.kind === "tool" &&
           (i.status === "awaiting_approval" ||
@@ -460,7 +474,7 @@ function reduce(
             i.callId === e.call_id &&
             i.answer === undefined
               ? { ...i, closed: true }
-              : (i.kind === "secret" || i.kind === "handover") &&
+              : (i.kind === "secret" || i.kind === "handover" || i.kind === "elicitation") &&
                   i.callId === e.call_id &&
                   !(i.kind === "secret" && i.parked)
                 ? { ...i, closed: true }
@@ -489,7 +503,7 @@ function reduce(
             i.callId === e.call_id &&
             i.answer === undefined
               ? { ...i, closed: true }
-              : (i.kind === "secret" || i.kind === "handover") &&
+              : (i.kind === "secret" || i.kind === "handover" || i.kind === "elicitation") &&
                   i.callId === e.call_id &&
                   !(i.kind === "secret" && i.parked)
                 ? { ...i, closed: true }
@@ -650,6 +664,31 @@ function reduce(
               : [...r.items, item]
         };
       });
+    case "elicitation_link":
+      return state;
+    case "elicitation_requested":
+      return withRun(state, e.run_id, ts, (r) => {
+        if (r.items.some((i) => i.kind === "elicitation" && i.callId === e.call_id)) return r;
+        const item: ElicitationItem = {
+          kind: "elicitation",
+          key: `elicitation-${e.call_id}`,
+          callId: e.call_id,
+          server: e.server,
+          message: e.message,
+          fields: e.fields,
+          requestedMs: ts,
+          expiresMs: ts + e.expires_in_secs * 1000,
+          closed: r.finishedMs !== undefined
+        };
+        return { ...r, items: [...r.items, item] };
+      });
+    case "elicitation_closed":
+      return withRun(state, e.run_id, ts, (r) => ({
+        ...r,
+        items: r.items.map((i) => i.kind === "elicitation" && i.callId === e.call_id
+          ? { ...i, closed: true }
+          : i)
+      }));
     case "secret_requested":
       return withRun(state, e.run_id, ts, (r) => {
         const item: SecretRequestItem = {
@@ -875,9 +914,9 @@ export function reconcile(
       }
       // A mission's form outlives its session run: it closes on its own expiry or answer.
       if (
-        ((i.kind === "secret" && !i.parked) || i.kind === "handover") &&
+        ((i.kind === "secret" && !i.parked) || i.kind === "handover" || i.kind === "elicitation") &&
         !i.closed &&
-        i.outcome === undefined &&
+        (i.kind === "elicitation" || i.outcome === undefined) &&
         i.requestedMs < asOfMs &&
         !liveRunIds.has(id)
       ) {
@@ -904,7 +943,7 @@ export function reconcile(
 }
 
 export interface NeedsYouEntry {
-  kind: "approval" | "question" | "secret" | "handover";
+  kind: "approval" | "question" | "secret" | "handover" | "elicitation";
   runId: string;
   chatId: string;
   botId: string;
@@ -919,6 +958,7 @@ export interface NeedsYouEntry {
   secret?: SecretRequestItem;
   /** The card to render, for a hand-over (CAPTCHA or one-time code). */
   handover?: HandoverItem;
+  elicitation?: ElicitationItem;
 }
 
 /** What the daemon's run list says about a run (enough to place a run the events never introduced). */
@@ -998,6 +1038,17 @@ export function needsYou(
           title: i.name,
           sinceMs: i.requestedMs,
           secret: i
+        });
+      } else if (i.kind === "elicitation" && !i.closed && i.expiresMs > nowMs) {
+        out.push({
+          kind: "elicitation",
+          runId: run.id,
+          chatId,
+          botId,
+          callId: i.callId,
+          title: i.server,
+          sinceMs: i.requestedMs,
+          elicitation: i
         });
       } else if (i.kind === "handover" && i.outcome === undefined && !i.closed && i.expiresMs > nowMs) {
         out.push({

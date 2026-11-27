@@ -2554,6 +2554,7 @@ impl TurnExecutor {
                     exposure_private: exposure.private,
                     control_guard,
                     lane: ctx.lane(),
+                    elicitation: self.sh.elicitation_handler(run.id, &tool.spec().name),
                 };
                 call_with_url_guard(url_guard.as_ref(), tool, &tctx, input).await
             },

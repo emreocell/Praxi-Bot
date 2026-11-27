@@ -947,6 +947,8 @@ pub(crate) enum EventClass {
     /// An overlay control request (it could be answered or spoofed) or a
     /// credential request (its purpose text is for the owner's own card).
     Control,
+    /// A form only the local owner or the administrator of the host may see.
+    Owner,
 }
 
 /// Classify every run event. Deliberately exhaustive (no wildcard): a new
@@ -955,10 +957,12 @@ pub(crate) fn classify(event: &protocol::Event) -> EventClass {
     use protocol::Event as E;
     match event {
         E::ApprovalNeeded(_) | E::QuestionAsked(_) => EventClass::Decision,
+        E::ElicitationRequested(_) | E::ElicitationClosed(_) => EventClass::Owner,
         E::ControlRequested(_) | E::SecretRequested(_) | E::HandoverRequested(_) => {
             EventClass::Control
         }
-        E::RunStarted(_)
+        E::ElicitationLink(_)
+        | E::RunStarted(_)
         | E::RunFinished(_)
         | E::MessageDelta(_)
         | E::ToolCallRequested(_)
@@ -982,12 +986,13 @@ pub(crate) fn classify(event: &protocol::Event) -> EventClass {
 /// `decisions`: local app with the owner key, or a paired Desktop.  Overlay
 /// control requests additionally need `local`: a remote manager never answers
 /// them.
-pub(crate) fn hidden_from(local: bool, decisions: bool, out: &Out) -> bool {
+pub(crate) fn hidden_from(local: bool, decisions: bool, owner: bool, out: &Out) -> bool {
     let Out::Run(item) = out else { return false };
     match classify(&item.envelope.event) {
         EventClass::Open => false,
         EventClass::Decision => !decisions,
         EventClass::Control => !(local && decisions),
+        EventClass::Owner => !(owner && decisions),
     }
 }
 
@@ -1031,12 +1036,12 @@ pub(crate) fn redact_for(decisions: bool, mut out: Out) -> Out {
 
 fn event_stream(
     feed: Feed,
-    audience: (bool, bool),
+    audience: (bool, bool, bool),
 ) -> impl Stream<Item = Result<SseEvent, Infallible>> {
     stream::unfold((feed, audience), |(mut feed, audience)| async move {
         let out = loop {
             let out = feed.next_item().await?;
-            if !hidden_from(audience.0, audience.1, &out) {
+            if !hidden_from(audience.0, audience.1, audience.2, &out) {
                 break redact_for(audience.1, out);
             }
         };
@@ -1194,8 +1199,19 @@ pub(crate) async fn events(
             feed.delivered = feed.scan;
         }
     }
-    Ok(Sse::new(event_stream(feed, (actor.local, actor.decisions)))
-        .keep_alive(KeepAlive::default()))
+    let messaging_channel = headers
+        .get("x-praxi-message-source")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|source| matches!(source, "telegram" | "discord"));
+    Ok(Sse::new(event_stream(
+        feed,
+        (
+            actor.local,
+            actor.decisions,
+            actor.is_owner() && !messaging_channel,
+        ),
+    ))
+    .keep_alive(KeepAlive::default()))
 }
 
 /// Counters of the SSE machinery (authenticated, unlike `/v1/health`).
@@ -1348,6 +1364,35 @@ mod tests {
         ]
     }
 
+    #[test]
+    fn elicitation_details_require_owner_authority_even_on_decision_streams() {
+        let run_id = RunId::new();
+        let out = Out::Run(StreamItem {
+            gseq: 1,
+            run_id,
+            envelope: Envelope::new(
+                1,
+                Event::ElicitationRequested(protocol::elicitation::ElicitationRequested {
+                    run_id,
+                    call_id: protocol::ToolCallId::new(),
+                    server: "test".into(),
+                    message: "private form metadata".into(),
+                    fields: vec![],
+                    expires_in_secs: 10,
+                }),
+            ),
+        });
+        for (local, decisions, owner, hidden) in [
+            (true, true, true, false),  // local owner
+            (false, true, true, false), // paired host administrator
+            (false, true, false, true), // ordinary paired desktop
+            (true, false, true, true),  // bearer-only loopback request
+            (true, true, false, true),  // channel stream (keeps approval decisions)
+        ] {
+            assert_eq!(hidden_from(local, decisions, owner, &out), hidden);
+        }
+    }
+
     /// Approval/question/control events per client kind, replayed AND live.
     #[tokio::test]
     async fn streams_carry_only_the_events_the_client_may_see() {
@@ -1358,7 +1403,7 @@ mod tests {
                 key: "k".into(),
                 role,
             });
-            (a.local, a.decisions)
+            (a.local, a.decisions, a.is_owner())
         };
         let all = [
             "message_delta",
@@ -1375,10 +1420,10 @@ mod tests {
             "tool_call_requested",
             "tool_call_requested",
         ];
-        let cases: Vec<(&str, (bool, bool), Vec<&str>)> = vec![
-            ("local management", (true, true), all.to_vec()),
+        let cases: Vec<(&str, (bool, bool, bool), Vec<&str>)> = vec![
+            ("local management", (true, true, true), all.to_vec()),
             // The bearer alone (CLI engine, bot child, script): owner key absent.
-            ("local bearer only", (true, false), progress.clone()),
+            ("local bearer only", (true, false, true), progress.clone()),
             // A paired Desktop decides approvals, never overlay requests.
             (
                 "desktop peer",

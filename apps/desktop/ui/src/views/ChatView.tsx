@@ -59,6 +59,7 @@ import { runWasRedirected } from "../lib/approvalSkip";
 import { PendingDecisions, useDecisionActions } from "../components/PendingDecisions";
 import { HandoverCard } from "../components/HandoverCard";
 import { useDragPopOut } from "../components/useDragPopOut";
+import { ElicitationCard } from "../components/ElicitationCard";
 import { SecretRequestCard } from "../components/SecretRequestCard";
 import { PastedSecretWarning } from "../components/PastedSecretWarning";
 import { detectSecrets, kindsToWarn, planStore, removeSecrets } from "../lib/secretDetect";
@@ -1724,6 +1725,11 @@ export function ChatView({
             onAnswer={decisions.answer(runId, item.callId)}
           />
         );
+      case "elicitation":
+        if (nested && !item.closed) {
+          return <p className={ccStyles.nestedText}>{t("chat.pendingPinned")}</p>;
+        }
+        return <ElicitationCard item={item} />;
       case "secret":
         if (nested && item.outcome === undefined && !item.closed) {
           return <p className={ccStyles.nestedText}>{t("chat.pendingPinned")}</p>;

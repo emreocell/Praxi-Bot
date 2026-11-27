@@ -195,3 +195,10 @@ pub trait Channel: Send + Sync {
 
 #[cfg(test)]
 mod tests;
+
+/// A clickable, navigation-only link. The chat ID stays in the URL fragment.
+#[must_use]
+pub fn desktop_chat_link(chat: impl std::fmt::Display, language: &str) -> String {
+    let locale = if language == "tr" { "tr/" } else { "" };
+    format!("{DESKTOP_CHAT_LAUNCHER}{locale}open/#{chat}")
+}

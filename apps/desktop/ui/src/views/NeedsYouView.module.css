@@ -64,3 +64,13 @@
   color: var(--color-text);
   overflow-wrap: anywhere;
 }
+
+
+.form {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.form > button {
+  justify-self: end;
+}

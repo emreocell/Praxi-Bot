@@ -1,6 +1,12 @@
 //! Bounded, secret-scrubbed diagnostics for untrusted MCP transports.
 
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::VecDeque,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use parking_lot::Mutex;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -27,6 +33,7 @@ pub type ExternalRedactor = Arc<dyn Fn(&str) -> String + Send + Sync>;
 pub(crate) struct Redactor {
     local: Arc<Local>,
     external: Option<ExternalRedactor>,
+    muted: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -88,10 +95,22 @@ impl Redactor {
         Self {
             local: Arc::new(local),
             external,
+            muted: Arc::default(),
         }
     }
 
+    pub(crate) fn mute(&self) {
+        self.muted.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn muted(&self) -> bool {
+        self.muted.load(Ordering::Acquire)
+    }
+
     fn redact(&self, text: &str) -> String {
+        if self.muted() {
+            return "[MCP diagnostic withheld after owner input]".into();
+        }
         let masked = self.local.inner.redact(text);
         match &self.external {
             Some(external) => external(&masked),
@@ -230,6 +249,9 @@ pub(crate) async fn capture_stderr(
     let mut discarding = false;
     let mut read_failed = false;
     let emit = |line: &[u8], truncated| {
+        if redactor.muted() {
+            return;
+        }
         // Truncating a UTF-8 codepoint must not insert a replacement character
         // into a secret prefix before matching. Malformed bytes discard the
         // rest of the line, preserving only its valid, scrubbed prefix.

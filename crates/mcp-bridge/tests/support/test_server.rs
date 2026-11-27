@@ -19,11 +19,13 @@ use std::sync::Arc;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
-        GetPromptRequestParams, GetPromptResponse, GetPromptResult, Implementation, JsonObject,
-        ListPromptsResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams, Prompt,
-        PromptMessage, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
-        Resource, ResourceContents, Role, ServerCapabilities, ServerConfig, Tool, ToolAnnotations,
+        CallToolRequestParams, CallToolResponse, CallToolResult, ClientResult, ContentBlock,
+        ElicitRequest, ElicitRequestParams, ElicitResult, GetPromptRequestParams,
+        GetPromptResponse, GetPromptResult, Implementation, InputRequest, InputRequiredResult,
+        JsonObject, ListPromptsResult, ListResourcesResult, ListToolsResult,
+        PaginatedRequestParams, Prompt, PromptMessage, ProtocolVersion, ReadResourceRequestParams,
+        ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, Role,
+        ServerCapabilities, ServerConfig, ServerRequest, Tool, ToolAnnotations,
     },
     service::{RequestContext, SubscriptionContext},
     transport::stdio,
@@ -100,7 +102,115 @@ async fn contract_call(request: &CallToolRequestParams) -> CallToolResult {
     CallToolResult::success(vec![ContentBlock::text(text)])
 }
 
+fn elicitation() -> bool {
+    matches!(
+        std::env::var("MCP_TEST_MODE").as_deref(),
+        Ok("elicitation" | "elicitation-legacy")
+    )
+}
+
+async fn elicitation_call(
+    request: CallToolRequestParams,
+    context: RequestContext<RoleServer>,
+) -> Result<CallToolResponse, ErrorData> {
+    if let Some(answer) = request
+        .input_responses
+        .and_then(|mut answers| answers.remove("form"))
+    {
+        return answer_result(
+            serde_json::from_value(answer).unwrap(),
+            &context,
+            &request.arguments,
+        )
+        .await;
+    }
+    let params: ElicitRequestParams = serde_json::from_value(json!({
+        "message": "Choose a region",
+        "requestedSchema": {
+            "type": "object",
+            "properties": {
+                "region": {"type": "string", "maxLength": 64, "default": "default-from-server"},
+                "password": {"type": "string"}
+            },
+            "required": ["region"]
+        }
+    }))
+    .unwrap();
+    if context
+        .protocol_version()
+        .is_some_and(|v| !v.has_initialize())
+    {
+        Ok(InputRequiredResult::from_input_requests(
+            [(
+                "form".into(),
+                InputRequest::Elicitation(ElicitRequest::new(params)),
+            )]
+            .into(),
+        )
+        .into())
+    } else {
+        let answer = context
+            .peer
+            .send_request(ServerRequest::ElicitRequest(ElicitRequest::new(params)))
+            .await
+            .map_err(|_| ErrorData::internal_error("elicitation failed", None))?;
+        let ClientResult::ElicitResult(answer) = answer else {
+            return Err(ErrorData::internal_error(
+                "not an elicitation response",
+                None,
+            ));
+        };
+        answer_result(answer, &context, &request.arguments).await
+    }
+}
+
+async fn answer_result(
+    answer: ElicitResult,
+    context: &RequestContext<RoleServer>,
+    arguments: &Option<JsonObject>,
+) -> Result<CallToolResponse, ErrorData> {
+    let expected = arguments
+        .as_ref()
+        .and_then(|args| args.get("expect"))
+        .and_then(serde_json::Value::as_str);
+    let json = serde_json::to_value(&answer).unwrap();
+    if expected.is_some_and(|action| json["action"] != action) {
+        return Err(ErrorData::internal_error("unexpected owner decision", None));
+    }
+    if let Some(content) = answer.content {
+        if content["region"] != "elicitation-canary-9413"
+            || content["password"] != serde_json::Value::Null
+        {
+            return Err(ErrorData::internal_error("unexpected form values", None));
+        }
+        // An untrusted server can put the received values in structured
+        // output, textual output, protocol logs and process stderr.
+        eprintln!("echoed form answer {content}");
+        let _ = context
+            .peer
+            .send_notification(
+                serde_json::from_value(json!({
+                    "method": "notifications/message",
+                    "params": {"level": "warning", "data": content}
+                }))
+                .unwrap(),
+            )
+            .await;
+        let mut out = CallToolResult::success(vec![ContentBlock::text(content.to_string())]);
+        out.structured_content = Some(content);
+        return Ok(out.into());
+    }
+    Ok(CallToolResult::success(vec![ContentBlock::text(json.to_string())]).into())
+}
+
 impl ServerHandler for TestServer {
+    fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
+        if std::env::var("MCP_TEST_MODE").as_deref() == Ok("elicitation-legacy") {
+            return std::borrow::Cow::Borrowed(&[ProtocolVersion::V_2025_11_25]);
+        }
+        std::borrow::Cow::Borrowed(ProtocolVersion::KNOWN_VERSIONS)
+    }
+
     fn get_info(&self) -> ServerConfig {
         let capabilities = if features() {
             ServerCapabilities::builder()
@@ -215,6 +325,9 @@ impl ServerHandler for TestServer {
             context.peer.send_notification(notification).await.unwrap();
             let duplicate = Tool::new(secret, "duplicate diagnostic test", Arc::default());
             tools.extend([duplicate.clone(), duplicate]);
+        }
+        if elicitation() {
+            tools.push(tool("elicit", "Asks for owner input", true));
         }
         if features() {
             tools.push(tool("grow", "Adds the `extra` tool", false));
@@ -352,6 +465,7 @@ impl ServerHandler for TestServer {
             tokio::time::sleep(std::time::Duration::from_millis(sleep_ms)).await;
         }
         let result = match request.name.as_ref() {
+            "elicit" if elicitation() => return elicitation_call(request, context).await,
             "echo" if wants_pid => {
                 CallToolResult::success(vec![ContentBlock::text(std::process::id().to_string())])
             }

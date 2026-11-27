@@ -641,9 +641,7 @@ impl TelegramChannel {
         for user in self.pairing().paired_users() {
             let language = self.language(user);
             let notice = Message::SecretRequestNotice.render(language);
-            let locale = if language.code() == "tr" { "tr/" } else { "" };
-            let launcher = channel_api::DESKTOP_CHAT_LAUNCHER;
-            let link = format!("{launcher}{locale}open/#{chat}");
+            let link = channel_api::desktop_chat_link(chat, language.code());
             let text = format!("{notice}\n{link}");
             if self
                 .bot_api()
@@ -2473,6 +2471,11 @@ impl TelegramChannel {
                 }
             }
             Event::ApprovalNeeded(a) => self.send_approval(chat_id, run.is_child, a).await?,
+            Event::ElicitationLink(link) => {
+                let url =
+                    channel_api::desktop_chat_link(link.chat_id, self.language(chat_id).code());
+                self.send_redacted(chat_id, &url, None).await?;
+            }
             Event::QuestionAsked(q) => {
                 let rows: Vec<Vec<InlineButton>> = q
                     .options

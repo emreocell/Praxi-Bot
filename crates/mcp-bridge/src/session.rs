@@ -117,6 +117,9 @@ impl tracing::Subscriber for Forwarder {
     fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
 
     fn event(&self, event: &tracing::Event<'_>) {
+        if self.redactor.muted() {
+            return;
+        }
         let mut line = LineVisitor::default();
         event.record(&mut line);
         let line = self.redactor.scrub(&line.0);
@@ -151,6 +154,7 @@ impl Drop for BoundedRuntime {
 /// Dropping the final `Session` closes the lease even if explicit close is skipped.
 pub(crate) struct Session {
     peer: Peer<RoleClient>,
+    pub(crate) client: crate::client::BridgeClient,
     close: Mutex<Option<oneshot::Sender<()>>>,
     completed: watch::Receiver<bool>,
     pub(crate) redactor: Redactor,
@@ -193,6 +197,7 @@ impl Session {
     #[cfg(test)]
     pub(crate) fn from_running(inner: Running, redactor: Redactor) -> Self {
         let peer = inner.peer().clone();
+        let client = inner.service().clone();
         let (close, closing) = oneshot::channel();
         let (completed, completion) = watch::channel(false);
         tokio::spawn(async move {
@@ -201,6 +206,7 @@ impl Session {
         });
         Self {
             peer,
+            client,
             close: Mutex::new(Some(close)),
             completed: completion,
             redactor,
@@ -284,7 +290,7 @@ where
             server: server.clone(),
             message: format!("cannot start MCP session thread: {error}"),
         })?;
-    let peer = readiness
+    let (peer, client) = readiness
         .await
         .map_err(|_| McpError::Transport {
             server,
@@ -293,6 +299,7 @@ where
         .map_err(|error| redactor.error(error))?;
     Ok(Session {
         peer,
+        client,
         close: Mutex::new(Some(close)),
         completed: completion,
         redactor,
@@ -305,7 +312,7 @@ async fn initialize<F, Fut>(
     timeout: Duration,
     handshake: F,
     mut closing: oneshot::Receiver<()>,
-    ready: oneshot::Sender<Result<Peer<RoleClient>>>,
+    ready: oneshot::Sender<Result<(Peer<RoleClient>, crate::client::BridgeClient)>>,
 ) where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<Running>>,
@@ -333,7 +340,7 @@ async fn initialize<F, Fut>(
     };
     // If open was cancelled just as the handshake finished, dropping its lease
     // makes drive cancel/close the service even though there is no receiver.
-    let _ = ready.send(Ok(inner.peer().clone()));
+    let _ = ready.send(Ok((inner.peer().clone(), inner.service().clone())));
     drive(inner, closing).await;
 }
 

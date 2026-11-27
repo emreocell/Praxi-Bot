@@ -3446,6 +3446,22 @@
       "xlsx": "Excel"
     }
   },
+  "elicitation": {
+    "blockedField": "alanı giriş bilgisi isteyebileceği için engellendi.",
+    "closed": "Form kapandı.",
+    "dateTimeHint": "Tarih ve saati saat dilimiyle birlikte ISO 8601 biçiminde girin.",
+    "decline": "Reddet",
+    "expired": "İsteğin süresi doldu.",
+    "expiresIn": "Yanıt vermek için kalan süre",
+    "failed": "Seçiminiz gönderilemedi. Tekrar deneyin.",
+    "invalid": "Göndermeden önce alanları kontrol edin ve varsa giriş bilgilerini silin.",
+    "no": "Hayır",
+    "select": "Bir seçenek seçin",
+    "submit": "Yanıtı gönder",
+    "title": "{{server}} adlı MCP sunucusu sizden bilgi istiyor",
+    "warning": "Bu mesaj sunucudan geliyor. Yanıtlarınız bu sunucuya gönderilir. Parola, API anahtarı veya başka bir giriş bilgisi paylaşmayın.",
+    "yes": "Evet"
+  },
   "engineConsent": {
     "action": {
       "install": "Kur",

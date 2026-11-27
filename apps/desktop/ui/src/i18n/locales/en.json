@@ -3446,6 +3446,22 @@
       "xlsx": "Excel"
     }
   },
+  "elicitation": {
+    "blockedField": "was blocked because it may ask for sign-in details.",
+    "closed": "The form is closed.",
+    "dateTimeHint": "Use an ISO 8601 date and time with a time zone.",
+    "decline": "Decline",
+    "expired": "The request expired.",
+    "expiresIn": "Time remaining to answer",
+    "failed": "The decision could not be sent. Please try again.",
+    "invalid": "Check the field values and remove any passwords or keys before sending.",
+    "no": "No",
+    "select": "Choose an option",
+    "submit": "Send answer",
+    "title": "MCP input requested by {{server}}",
+    "warning": "This message comes from the server. Your answers go to that server. Leave out passwords, API keys, and codes used to sign in.",
+    "yes": "Yes"
+  },
   "engineConsent": {
     "action": {
       "install": "Install",

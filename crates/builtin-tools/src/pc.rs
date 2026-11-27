@@ -305,6 +305,7 @@ impl ToolWrapper for Renamed {
             payment: ctx.payment.clone(),
             control_guard: None,
             lane: ctx.lane.clone(),
+            elicitation: ctx.elicitation.clone(),
         };
         self.inner.call(&ctx, input).await
     }

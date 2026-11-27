@@ -5049,6 +5049,7 @@ dependencies = [
  "parking_lot",
  "permission-engine",
  "process-wrap",
+ "protocol",
  "reqwest 0.13.5",
  "rmcp",
  "secret-store",

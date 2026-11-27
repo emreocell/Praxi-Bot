@@ -411,6 +411,12 @@ pub enum Event {
     TodoUpdated(TodoUpdated),
     QuestionAsked(QuestionAsked),
     SecretRequested(SecretRequested),
+    /// An MCP server asks the owner for form input.
+    ElicitationRequested(crate::elicitation::ElicitationRequested),
+    /// A form was answered, declined, cancelled or expired.
+    ElicitationClosed(crate::elicitation::ElicitationClosed),
+    /// The app link alone is visible on a messaging channel.
+    ElicitationLink(crate::elicitation::ElicitationLink),
     HandoverRequested(HandoverRequested),
     ModelFallback(ModelFallback),
     RouteDecided(RouteDecided),

@@ -7,6 +7,7 @@ import { isAlreadyDecidedError } from "../lib/popout";
 import { useTranslation } from "react-i18next";
 import type { NeedsYouEntry } from "../state/timeline";
 import { ApprovalCard, QuestionCard, type ApprovalCardProps } from "./ChatCards";
+import { ElicitationCard } from "./ElicitationCard";
 import { HandoverCard } from "./HandoverCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { useOptionalLiveView } from "../state/LiveViewContext";
@@ -184,6 +185,7 @@ export function PendingCard({ entry }: { entry: NeedsYouEntry }): ReactNode {
       />
     );
   }
+  if (entry.elicitation) return <ElicitationCard item={entry.elicitation} />;
   if (entry.handover) {
     return (
       <HandoverCard

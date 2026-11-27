@@ -411,6 +411,102 @@
       }
     },
     {
+      "description": "An MCP server asks the owner for form input.",
+      "type": "object",
+      "required": [
+        "call_id",
+        "expires_in_secs",
+        "fields",
+        "message",
+        "run_id",
+        "server",
+        "type"
+      ],
+      "properties": {
+        "call_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expires_in_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ElicitationField"
+          }
+        },
+        "message": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "server": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "elicitation_requested"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A form was answered, declined, cancelled or expired.",
+      "type": "object",
+      "required": [
+        "call_id",
+        "run_id",
+        "type"
+      ],
+      "properties": {
+        "call_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "elicitation_closed"
+          ]
+        }
+      }
+    },
+    {
+      "description": "The app link alone is visible on a messaging channel.",
+      "type": "object",
+      "required": [
+        "chat_id",
+        "run_id",
+        "type"
+      ],
+      "properties": {
+        "chat_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "elicitation_link"
+          ]
+        }
+      }
+    },
+    {
       "description": "The bot needs the owner for a step it must not do itself (`browser_handover`); the run waits until the owner answers on the local desktop or the request expires. The event carries what the card shows and NEVER a code: the owner's app posts it straight to the daemon (`POST /v1/handovers/{call_id}/code`).",
       "type": "object",
       "required": [
@@ -903,6 +999,121 @@
         "y": {
           "type": "number",
           "format": "double"
+        }
+      }
+    },
+    "ElicitationField": {
+      "type": "object",
+      "required": [
+        "blocked",
+        "kind",
+        "label",
+        "name",
+        "options",
+        "required"
+      ],
+      "properties": {
+        "blocked": {
+          "description": "Suspected credential fields are displayed as blocked and can never be submitted.",
+          "type": "boolean"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ElicitationFormat"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/definitions/ElicitationFieldKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "max_length": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "maximum": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "min_length": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "minimum": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "name": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ElicitationOption"
+          }
+        },
+        "required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ElicitationFieldKind": {
+      "type": "string",
+      "enum": [
+        "string",
+        "number",
+        "integer",
+        "boolean",
+        "enum"
+      ]
+    },
+    "ElicitationFormat": {
+      "type": "string",
+      "enum": [
+        "email",
+        "uri",
+        "date",
+        "date_time"
+      ]
+    },
+    "ElicitationOption": {
+      "type": "object",
+      "required": [
+        "label",
+        "value"
+      ],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
         }
       }
     },

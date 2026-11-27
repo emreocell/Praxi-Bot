@@ -509,6 +509,12 @@ pub(crate) async fn open(
     let stderr = Arc::clone(stderr);
     let diagnostics = tracing::dispatcher::get_default(Clone::clone);
     let stderr_redactor = redactor.clone();
+    let bridge = BridgeClient {
+        signals,
+        server: config.id.clone(),
+        redactor: redactor.clone(),
+        ..BridgeClient::default()
+    };
     session::open(config.id.clone(), redactor, timeout, move || async move {
         let id = config.id.as_str();
         match &config.transport {
@@ -522,7 +528,7 @@ pub(crate) async fn open(
                 let capture = child_stderr.map(|pipe| {
                     forward_stderr(id.to_owned(), pipe, stderr, stderr_redactor, diagnostics)
                 });
-                match (BridgeClient { signals }).serve(transport).await {
+                match bridge.serve(transport).await {
                     Ok(session) => Ok(session),
                     Err(e) => {
                         // The handshake failed: the child is being reaped, so
@@ -547,16 +553,13 @@ pub(crate) async fn open(
                     client,
                     http_config(id, url, headers, &secrets.headers)?,
                 );
-                BridgeClient { signals }
-                    .serve(transport)
-                    .await
-                    .map_err(|e| {
-                        if e.is_authorization_required() {
-                            McpError::AuthRequired(id.to_owned())
-                        } else {
-                            transport_err(id, e)
-                        }
-                    })
+                bridge.serve(transport).await.map_err(|e| {
+                    if e.is_authorization_required() {
+                        McpError::AuthRequired(id.to_owned())
+                    } else {
+                        transport_err(id, e)
+                    }
+                })
             }
         }
     })

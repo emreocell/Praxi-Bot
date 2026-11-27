@@ -5,6 +5,7 @@
 //! can generate and snapshot JSON Schema documents.
 
 pub mod approval_text;
+pub mod elicitation;
 pub mod envelope;
 pub mod event;
 pub mod ids;
