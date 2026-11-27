@@ -253,6 +253,7 @@ fn error_text(e: &VoiceControlError) -> String {
         | VoiceControlError::Invalid(m)
         | VoiceControlError::Internal(m) => m.clone(),
         VoiceControlError::NotConfigured => "live voice is not set up".to_owned(),
+        VoiceControlError::Busy => "voice is busy, try again in a moment".to_owned(),
     }
 }
 
