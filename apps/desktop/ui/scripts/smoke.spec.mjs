@@ -525,7 +525,9 @@ export async function flows(ctx) {
     await page.keyboard.press('Escape');
   });
   await run(s, 'mission: /mission starts a mission card in chat', async (page) => {
-    await gotoChat(page, 'Fulla');
+    // Always switch to Fulla (the Full-level bot): gotoChat keeps whatever chat is open, which may be Atlas's.
+    await page.locator('[class*="railItem"]', { hasText: 'Fulla' }).first().click();
+    await openFirstChat(page);
     const composer = page.locator('[data-composer-input]');
     await composer.fill('/mission Smoke mission: list workspace files');
     await page.keyboard.press('Escape');
