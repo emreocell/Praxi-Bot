@@ -20897,10 +20897,9 @@
       },
       "AdminCliEnvironmentDto": {
         "type": "object",
-        "description": "Who the host's coding CLIs run as, and where they live. Installs, sign-ins and checks all\nhappen as this account, whoever opened the terminal.",
+        "description": "Who the host's coding CLIs run as. Installs, sign-ins and checks all happen as this account,\nwhoever opened the terminal. Only what the desktop shows: no list of the host's folders.",
         "required": [
           "is_root",
-          "search_dirs",
           "terminal_command"
         ],
         "properties": {
@@ -20914,13 +20913,6 @@
           "is_root": {
             "type": "boolean",
             "description": "That account is the administrator: a CLI installed or signed in by anyone else is invisible."
-          },
-          "search_dirs": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Folders searched for coding CLIs that exist right now, in order."
           },
           "terminal_command": {
             "type": "string",

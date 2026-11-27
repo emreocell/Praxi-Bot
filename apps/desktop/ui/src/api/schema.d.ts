@@ -5702,16 +5702,14 @@ export interface components {
             version?: string | null;
         };
         /**
-         * @description Who the host's coding CLIs run as, and where they live. Installs, sign-ins and checks all
-         *     happen as this account, whoever opened the terminal.
+         * @description Who the host's coding CLIs run as. Installs, sign-ins and checks all happen as this account,
+         *     whoever opened the terminal. Only what the desktop shows: no list of the host's folders.
          */
         AdminCliEnvironmentDto: {
             /** @description Its home folder, where CLIs keep their installs and sign-in files. */
             home?: string | null;
             /** @description That account is the administrator: a CLI installed or signed in by anyone else is invisible. */
             is_root: boolean;
-            /** @description Folders searched for coding CLIs that exist right now, in order. */
-            search_dirs: string[];
             /**
              * @description Start of a terminal command that runs one CLI step as that account
              *     (`sudo praxi cli`), for a person who is logged in over SSH as somebody else.

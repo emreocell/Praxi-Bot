@@ -179,8 +179,13 @@ fn explain(code: &str, id: &str) -> String {
 
 async fn install(id: &str, data_dir: &Path, out: &mut dyn std::io::Write) -> Result<()> {
     let spec = known_engine(id)?;
+    // An install as the wrong user would put a program in the wrong home and then vouch for it in
+    // the service's trust record (the pin file in the data folder). Refuse before anything runs.
     if let Some(note) = wrong_user_note(data_dir) {
-        writeln!(out, "WARNING: {note}")?;
+        return Err(client::fail(
+            client::exit::REJECTED,
+            format!("{note}\nNothing was installed."),
+        ));
     }
     // No verified fixed installer (Vibe's `uv tool install`): show the vendor's command, to be run
     // by hand as this user, instead of a bare refusal.
@@ -258,7 +263,15 @@ async fn install(id: &str, data_dir: &Path, out: &mut dyn std::io::Write) -> Res
         ));
     }
     // The app signs in only to an install Praxi itself made: record it as the app's install does.
-    daemon_api::record_cli_install_pin(data_dir, detector.environment(), id);
+    if !daemon_api::record_cli_install_pin(data_dir, detector.environment(), id) {
+        return Err(client::fail(
+            client::exit::RUN_FAILED,
+            format!(
+                "{id} is installed, but the Praxi data folder ({}) does not belong to this user, so the install was not recorded. Run this as the user Praxi runs as.",
+                data_dir.display()
+            ),
+        ));
+    }
     writeln!(
         out,
         "{} is installed for {}. Sign in: bot cli login {id}",

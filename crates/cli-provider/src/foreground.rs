@@ -64,8 +64,12 @@ mod tests {
     /// A service user's layout: each `<root>/home/.local/bin/<name>` is a script that records
     /// its name, arguments and `HOME` into `<root>/seen`.
     fn service_layout(names: &[&str]) -> (tempfile::TempDir, PathEnv) {
+        service_layout_in("home", names)
+    }
+
+    fn service_layout_in(home_name: &str, names: &[&str]) -> (tempfile::TempDir, PathEnv) {
         let root = tempfile::tempdir().unwrap();
-        let home = std::fs::canonicalize(root.path()).unwrap().join("home");
+        let home = std::fs::canonicalize(root.path()).unwrap().join(home_name);
         let bin = home.join(".local/bin");
         std::fs::create_dir_all(&bin).unwrap();
         for name in names {
@@ -85,6 +89,22 @@ mod tests {
         let mut env = env;
         crate::search::augment(&mut env);
         (root, env)
+    }
+
+    /// The sign-in is started with `execve` (program + argument vector), never through a shell:
+    /// shell syntax in the path of the program is just characters in a file name.
+    #[tokio::test]
+    async fn the_sign_in_never_goes_through_a_shell() {
+        let (root, env) = service_layout_in("h o;touch PWNED;$(touch PWNED2)`x`", &["agy"]);
+        let status = run_login("agy", &env).await.unwrap();
+        assert!(status.success());
+        let seen = std::fs::read_to_string(root.path().join("seen")).unwrap();
+        assert!(seen.starts_with("agy||"), "{seen}");
+        for planted in ["PWNED", "PWNED2"] {
+            let home = env.home_dir.as_ref().unwrap();
+            assert!(!root.path().join(planted).exists() && !home.join(planted).exists());
+            assert!(!std::path::Path::new(planted).exists());
+        }
     }
 
     #[test]

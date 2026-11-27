@@ -40,8 +40,18 @@ fn layout() -> Layout {
     let token = home.join(".gemini/antigravity-cli");
     std::fs::create_dir_all(&token).unwrap();
     std::fs::write(token.join("antigravity-oauth-token"), "SENTINEL_TOKEN").unwrap();
-    // Private, like the service's own home (the temp directory is group-writable here).
-    std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o750)).unwrap();
+    // Private, like the service's own home: nobody but the owner can write any folder of it
+    // (the temp directory and what `create_dir_all` makes may be group-writable here).
+    for dir in [
+        &base,
+        &home,
+        &home.join(".local"),
+        &bin,
+        &home.join(".gemini"),
+        &token,
+    ] {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o750)).unwrap();
+    }
     Layout {
         _root: root,
         home,
@@ -139,4 +149,58 @@ fn a_cli_without_a_verified_installer_prints_the_vendors_command() {
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("uv tool install mistral-vibe"), "{err}");
+}
+
+/// An install typed as somebody else than the user that owns the data folder must stop before
+/// anything is installed or pinned: the pin file decides which programs the service later runs.
+/// (A root-owned folder stands for the service user's; skipped when the tests run as root.)
+#[test]
+fn an_install_as_the_wrong_user_stops_before_installing_or_pinning() {
+    use std::os::unix::fs::MetadataExt;
+    let l = layout();
+    let uid_of = |p: &Path| std::fs::metadata(p).unwrap().uid();
+    if uid_of(Path::new("/usr")) == uid_of(&l.home) {
+        return;
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_bot"))
+        .arg("--data-dir")
+        .arg("/usr")
+        .args(["cli", "install", "claude"])
+        .env_clear()
+        .env("HOME", &l.home)
+        .env("PATH", "/usr/bin:/bin")
+        .env("LC_ALL", "C")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(6), "{out:?}");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("Praxi runs as"), "{err}");
+    assert!(err.contains("Nothing was installed"), "{err}");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(!said.contains("Installing"), "{said}");
+    assert!(!Path::new("/usr/cli-install-pins.json").exists());
+}
+
+/// `bot cli` starts in the home folder, so the home exception is what finds the CLIs. A home
+/// whose CLI folder others can write is a plant spot, not a service user's home: nothing in it
+/// is found (and so nothing would be run).
+#[test]
+fn a_cli_folder_that_others_can_write_is_not_searched() {
+    let l = layout();
+    let installed = |l: &Layout| {
+        let out = bot(l, &["--json", "cli", "status"]);
+        assert!(out.status.success(), "{out:?}");
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        report["engines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == "agy")
+            .unwrap()["installed"]
+            .clone()
+    };
+    assert_eq!(installed(&l), true);
+    let bin = l.home.join(".local/bin");
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o777)).unwrap();
+    assert_eq!(installed(&l), false);
 }

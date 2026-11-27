@@ -230,8 +230,8 @@ pub struct AdminCliEngineDto {
     pub path: Option<String>,
 }
 
-/// Who the host's coding CLIs run as, and where they live. Installs, sign-ins and checks all
-/// happen as this account, whoever opened the terminal.
+/// Who the host's coding CLIs run as. Installs, sign-ins and checks all happen as this account,
+/// whoever opened the terminal. Only what the desktop shows: no list of the host's folders.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct AdminCliEnvironmentDto {
     /// Account the service (and every CLI it starts) runs as; `null` when the system did not say.
@@ -240,8 +240,6 @@ pub struct AdminCliEnvironmentDto {
     pub is_root: bool,
     /// Its home folder, where CLIs keep their installs and sign-in files.
     pub home: Option<String>,
-    /// Folders searched for coding CLIs that exist right now, in order.
-    pub search_dirs: Vec<String>,
     /// Start of a terminal command that runs one CLI step as that account
     /// (`sudo praxi cli`), for a person who is logged in over SSH as somebody else.
     pub terminal_command: String,
@@ -649,6 +647,10 @@ pub(crate) async fn cli_engines(
     ))
 }
 
+// Which account the host's CLIs run as. Gated like every other `/v1/admin/*` route (the
+// owner's paired desktop holding the capability, see the module docs): that desktop IS the owner,
+// and the owner key itself never crosses the peer link, so an owner-token check would lock out
+// the one caller that needs this. Answers only what the app shows.
 #[utoipa::path(get, operation_id = "admin_cli_environment", path = "/v1/admin/cli-environment", tag = "admin", security(("bearer" = [])),
     responses((status = 200, body = AdminCliEnvironmentDto), (status = 403, body = crate::error::ErrorBody)))]
 pub(crate) async fn cli_environment(
@@ -664,12 +666,6 @@ fn cli_environment_of(env: &cli_provider::PathEnv) -> AdminCliEnvironmentDto {
     let who = cli_provider::identity::run_as(env);
     AdminCliEnvironmentDto {
         terminal_command: cli_provider::identity::terminal_command(&who),
-        search_dirs: env
-            .path_dirs
-            .iter()
-            .filter(|d| d.is_dir())
-            .map(|d| d.display().to_string())
-            .collect(),
         home: who.home.as_ref().map(|h| h.display().to_string()),
         is_root: who.is_root,
         user: who.user,
@@ -989,6 +985,15 @@ pub(crate) fn routes() -> axum::Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cli_environment_answers_only_what_the_app_shows() {
+        let env = cli_provider::PathEnv::for_test(std::env::temp_dir());
+        let json = serde_json::to_value(cli_environment_of(&env)).unwrap();
+        let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["home", "is_root", "terminal_command", "user"]);
+    }
 
     #[test]
     fn provider_ids_are_plain_and_never_cli() {

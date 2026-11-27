@@ -38,32 +38,140 @@ pub(crate) fn trusted_candidate(path: &Path) -> bool {
         return false;
     };
     let home = std::env::var_os("HOME").and_then(|h| std::fs::canonicalize(h).ok());
-    outside_working_dir(&real, &cwd, home.as_deref())
+    outside_working_dir(path, &real, &cwd, home.as_deref())
 }
+
+/// Folders where the system's own programs live. When the working directory is `/` (systemd's
+/// default `WorkingDirectory`) it contains every path, so "outside the working directory" can
+/// say nothing: only these are accepted then, besides the private home below.
+#[cfg(unix)]
+const SYSTEM_DIRS: [&str; 12] = [
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib32",
+    "/lib64",
+    "/opt",
+    "/nix",
+    "/snap",
+    "/Applications",
+    "/System",
+    "/Library",
+];
 
 /// A program inside the working directory is refused (a planted file must never run by
-/// accident). The one exception is a daemon that lives in its own private home: a service
-/// user's `WorkingDirectory` is often its home (installs older than #914 still are), and that
-/// home holds the CLI install tree (`~/.local/bin`, `~/.npm-global`, ...). Every candidate is
-/// already a fixed search directory, so refusing the whole home would hide every CLI the
-/// service user installed. Applies on Unix only, and only when the folder is not writable by
-/// group or others (a shared `/tmp` as home would make it a plant spot again).
-fn outside_working_dir(real: &Path, cwd: &Path, home: Option<&Path>) -> bool {
-    !real.starts_with(cwd) || private_root_or_home(cwd, home)
+/// accident). `path` is the candidate as it was named, `real` the same file with every symlink
+/// resolved.
+///
+/// Two exceptions, Unix only, for a daemon that lives in its own private home (a service user's
+/// `WorkingDirectory` is often its home, and the CLI install tree is `~/.local/bin`,
+/// `~/.npm-global/bin`, ...): the working directory is the home folder, or it is `/`. Then a
+/// program is accepted only when [`private_home_program`] vouches for it. The home folder as a
+/// whole, and the Praxi data folder, are never trusted.
+fn outside_working_dir(path: &Path, real: &Path, cwd: &Path, home: Option<&Path>) -> bool {
+    #[cfg(unix)]
+    {
+        let euid = rustix::process::geteuid().as_raw();
+        outside_working_dir_as(euid, path, real, cwd, home)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, home);
+        !real.starts_with(cwd)
+    }
 }
 
-/// `cwd` is `/` (systemd's default `WorkingDirectory`: it contains everything, so it can exclude
-/// nothing) or the private home folder itself.
 #[cfg(unix)]
-fn private_root_or_home(cwd: &Path, home: Option<&Path>) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    (cwd.parent().is_none() || home.is_some_and(|h| h == cwd))
-        && std::fs::metadata(cwd).is_ok_and(|m| m.is_dir() && m.permissions().mode() & 0o022 == 0)
+fn outside_working_dir_as(
+    euid: u32,
+    path: &Path,
+    real: &Path,
+    cwd: &Path,
+    home: Option<&Path>,
+) -> bool {
+    let private = || home.is_some_and(|h| private_home_program(euid, path, real, h));
+    if cwd.parent().is_none() {
+        return SYSTEM_DIRS.iter().any(|d| real.starts_with(d)) || private();
+    }
+    !real.starts_with(cwd) || (home == Some(cwd) && private())
 }
 
-#[cfg(not(unix))]
-fn private_root_or_home(_cwd: &Path, _home: Option<&Path>) -> bool {
-    false
+/// A program in the service user's own home that is safe to run although the working directory
+/// is that home (or `/`):
+/// - it was named inside one of the known per-user CLI folders ([`HOME_BIN_DIRS`]; a symlink in
+///   one that points elsewhere in the same home is fine), and
+/// - the whole chain from the home folder down to the file belongs to the effective user and is
+///   not writable by group or others, and the folders above the home belong to root or that
+///   user and are not writable by group or others (a sticky shared folder such as `/tmp` is fine).
+///
+/// Without that, a `HOME` that someone else controls (`HOME=/tmp/evil`) would be enough to run
+/// a planted `agy`.
+#[cfg(unix)]
+fn private_home_program(euid: u32, path: &Path, real: &Path, home: &Path) -> bool {
+    if real == home || !real.starts_with(home) {
+        return false;
+    }
+    // The name as given, with its folder resolved but the file itself not followed.
+    let named = match (path.parent(), path.file_name()) {
+        (Some(dir), Some(name)) => std::fs::canonicalize(dir).map(|d| d.join(name)),
+        _ => return false,
+    };
+    let Ok(named) = named else {
+        return false;
+    };
+    let in_bin_dir = HOME_BIN_DIRS.iter().any(|rel| {
+        std::fs::canonicalize(home.join(rel))
+            .is_ok_and(|bin| bin.starts_with(home) && named.starts_with(bin))
+    });
+    in_bin_dir && owned_private_chain(euid, home, real)
+}
+
+/// `path` is `top` or inside it, and `top` down to `path` (each folder and the file) belongs to
+/// `euid` and cannot be written by group or others; the folders above `top` belong to root or
+/// `euid` and cannot be written by group or others unless they are sticky. Nothing is followed: both
+/// paths must already be canonical.
+#[cfg(unix)]
+fn owned_private_chain(euid: u32, top: &Path, path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(rest) = path.strip_prefix(top) else {
+        return false;
+    };
+    let private =
+        |p: &Path| std::fs::metadata(p).is_ok_and(|m| m.uid() == euid && m.mode() & 0o022 == 0);
+    let mut cur = top.to_path_buf();
+    if !private(&cur) {
+        return false;
+    }
+    for part in rest.components() {
+        cur.push(part);
+        if !private(&cur) {
+            return false;
+        }
+    }
+    top.ancestors().skip(1).all(|dir| {
+        std::fs::metadata(dir).is_ok_and(|m| {
+            (m.uid() == 0 || m.uid() == euid) && (m.mode() & 0o022 == 0 || m.mode() & 0o1000 != 0)
+        })
+    })
+}
+
+/// Whether `dir` (a folder of `path_dirs` taken from the environment, such as the npm prefix)
+/// may be searched: on Unix it must be `top` or inside it and pass [`owned_private_chain`] for
+/// the effective user. Elsewhere the check does not exist and the folder is accepted.
+pub(crate) fn private_to_user(top: &Path, dir: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        let (Ok(top), Ok(dir)) = (std::fs::canonicalize(top), std::fs::canonicalize(dir)) else {
+            return false;
+        };
+        owned_private_chain(rustix::process::geteuid().as_raw(), &top, &dir)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (top, dir);
+        true
+    }
 }
 
 /// Folders under the home directory where coding CLIs install themselves.
@@ -87,9 +195,15 @@ pub(crate) fn augment(env: &mut PathEnv) {
         env.path_dirs.push(home.join(".npm-global"));
         // Scoop puts one .exe shim per tool here (`scoop install opencode`).
         env.path_dirs.push(home.join("scoop/shims"));
+        // The prefix comes from the environment: only a folder of this user that nobody else
+        // can write to (a planted `agy` there would win for every name nothing else has).
         if let Some(prefix) = env.env_vars.get("NPM_CONFIG_PREFIX") {
-            env.path_dirs.push(PathBuf::from(prefix));
-            env.path_dirs.push(PathBuf::from(prefix).join("bin"));
+            let prefix = PathBuf::from(prefix);
+            for dir in [prefix.clone(), prefix.join("bin")] {
+                if private_to_user(&prefix, &dir) {
+                    env.path_dirs.push(dir);
+                }
+            }
         }
         let nvm = home.join(".nvm/versions/node");
         if let Ok(entries) = std::fs::read_dir(nvm) {
@@ -173,43 +287,271 @@ mod tests {
             assert!(crate::detect::find_candidate("hijack", &env).is_none());
         }
     }
+    /// A private home like the service user's: `<tmp>/home` with `.local/bin/agy` and `data/`,
+    /// every folder 0750 and the program 0755, owned by the test's user.
+    #[cfg(unix)]
+    struct PrivateHome {
+        _tmp: tempfile::TempDir,
+        outer: PathBuf,
+        home: PathBuf,
+        agy: PathBuf,
+        euid: u32,
+    }
+
+    #[cfg(unix)]
+    fn chmod(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn private_home() -> PrivateHome {
+        let tmp = tempfile::tempdir().unwrap();
+        let outer = std::fs::canonicalize(tmp.path()).unwrap();
+        let home = outer.join("home");
+        let bin = home.join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(home.join("data")).unwrap();
+        let agy = bin.join("agy");
+        std::fs::write(&agy, b"fixture").unwrap();
+        for dir in [
+            &outer,
+            &home,
+            &home.join(".local"),
+            &bin,
+            &home.join("data"),
+        ] {
+            chmod(dir, 0o750);
+        }
+        chmod(&agy, 0o755);
+        PrivateHome {
+            _tmp: tmp,
+            outer,
+            home,
+            agy,
+            euid: rustix::process::geteuid().as_raw(),
+        }
+    }
+
+    #[cfg(unix)]
+    impl PrivateHome {
+        /// The verdict for `path` (already canonical) with the home as the working directory.
+        fn trusted(&self, path: &Path) -> bool {
+            outside_working_dir_as(self.euid, path, path, &self.home, Some(&self.home))
+        }
+    }
+
     /// The service user's layout: HOME = the working directory, CLIs under `~/.local/bin`.
     #[cfg(unix)]
     #[test]
     fn a_service_home_that_is_the_working_directory_still_finds_its_own_clis() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let home = std::fs::canonicalize(tmp.path())
-            .unwrap()
-            .join("var-lib-praxi");
-        let bin = home.join(".local/bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let agy = bin.join("agy");
-        std::fs::write(&agy, b"fixture").unwrap();
-        let set = |mode| std::fs::set_permissions(&home, std::fs::Permissions::from_mode(mode));
-
-        set(0o750).unwrap();
-        assert!(outside_working_dir(&agy, &home, Some(&home)), "home is cwd");
+        let h = private_home();
+        assert!(h.trusted(&h.agy), "home is cwd");
+        let bin = h.agy.parent().unwrap();
+        assert!(h.trusted(bin), "the folder itself is searched too");
         // Without the home exception the same file is refused: the rule itself is unchanged.
-        assert!(!outside_working_dir(&agy, &home, None));
+        assert!(!outside_working_dir_as(
+            h.euid, &h.agy, &h.agy, &h.home, None
+        ));
         // Another folder that merely contains the file stays refused, even beside a home.
-        let project = home.join("project");
+        let project = h.home.join("project");
         std::fs::create_dir_all(&project).unwrap();
         let planted = project.join("claude");
         std::fs::write(&planted, b"fixture").unwrap();
-        assert!(!outside_working_dir(&planted, &project, Some(&home)));
-        // A home that others can write to is a plant spot, not a private home.
-        set(0o777).unwrap();
-        assert!(!outside_working_dir(&agy, &home, Some(&home)));
-        set(0o700).unwrap();
+        assert!(!outside_working_dir_as(
+            h.euid,
+            &planted,
+            &planted,
+            &project,
+            Some(&h.home)
+        ));
     }
 
-    /// systemd starts a service in `/` when no `WorkingDirectory` is set: nothing is "inside" it.
+    /// Only the known per-user CLI folders are exempt: not the home as a whole, not the data
+    /// folder that sits in it (the service user's home IS its data folder), not any other tree.
     #[cfg(unix)]
     #[test]
-    fn a_service_started_in_the_root_directory_refuses_nothing() {
-        let real = Path::new("/usr/bin/env");
-        assert!(outside_working_dir(real, Path::new("/"), None));
+    fn the_home_exception_covers_only_the_known_cli_folders() {
+        let h = private_home();
+        let in_data = h.home.join("data/agy");
+        std::fs::write(&in_data, b"fixture").unwrap();
+        chmod(&in_data, 0o755);
+        assert!(!h.trusted(&in_data), "data folder");
+        assert!(!h.trusted(&h.home.join("data")));
+        assert!(!h.trusted(&h.home), "the home itself");
+        let loose = h.home.join("agy");
+        std::fs::write(&loose, b"fixture").unwrap();
+        chmod(&loose, 0o755);
+        assert!(!h.trusted(&loose), "directly in the home");
+        // A known folder that is not one of the list (`.nvm`, `.cache`) is not exempt either.
+        let cache = h.home.join(".cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        chmod(&cache, 0o750);
+        std::fs::write(cache.join("agy"), b"fixture").unwrap();
+        chmod(&cache.join("agy"), 0o755);
+        assert!(!h.trusted(&cache.join("agy")));
+    }
+
+    /// A `HOME` somebody else controls is not a private home: wrong owner, or writable by others.
+    #[cfg(unix)]
+    #[test]
+    fn a_home_of_another_user_or_one_others_can_write_is_not_trusted() {
+        let h = private_home();
+        assert!(h.trusted(&h.agy));
+        // `HOME=/tmp/evil` made by another account: every folder there has another owner.
+        let other = h.euid.wrapping_add(1);
+        assert!(!outside_working_dir_as(
+            other,
+            &h.agy,
+            &h.agy,
+            &h.home,
+            Some(&h.home)
+        ));
+        let bin = h.agy.parent().unwrap().to_path_buf();
+        let dot_local = h.home.join(".local");
+        for dir in [&h.home, &dot_local, &bin] {
+            for mode in [0o770, 0o707, 0o777] {
+                chmod(dir, mode);
+                assert!(!h.trusted(&h.agy), "{} at {mode:o}", dir.display());
+            }
+            chmod(dir, 0o750);
+        }
+        for mode in [0o775, 0o757, 0o777] {
+            chmod(&h.agy, mode);
+            assert!(!h.trusted(&h.agy), "program at {mode:o}");
+        }
+        chmod(&h.agy, 0o755);
+        assert!(h.trusted(&h.agy));
+        // A shared, non-sticky folder above the home lets others swap the whole home.
+        chmod(&h.outer, 0o777);
+        assert!(!h.trusted(&h.agy), "world-writable parent");
+        chmod(&h.outer, 0o1777);
+        assert!(
+            h.trusted(&h.agy),
+            "a sticky shared parent like /tmp is fine"
+        );
+        chmod(&h.outer, 0o750);
+    }
+
+    /// A link in a CLI folder to a program elsewhere in the same private home is how native
+    /// installers lay themselves out.
+    #[cfg(unix)]
+    #[test]
+    fn links_in_a_cli_folder_stay_inside_the_private_home() {
+        let h = private_home();
+        let bin = h.agy.parent().unwrap();
+        let share = h.home.join(".local/share/claude");
+        std::fs::create_dir_all(&share).unwrap();
+        chmod(&h.home.join(".local/share"), 0o750);
+        chmod(&share, 0o750);
+        let real = share.join("claude-2.1");
+        std::fs::write(&real, b"fixture").unwrap();
+        chmod(&real, 0o755);
+        std::os::unix::fs::symlink(&real, bin.join("claude")).unwrap();
+        assert!(outside_working_dir_as(
+            h.euid,
+            &bin.join("claude"),
+            &real,
+            &h.home,
+            Some(&h.home)
+        ));
+        // Reaching the same file by its own path, outside a CLI folder, is not enough.
+        assert!(!h.trusted(&real));
+        // The link target is held to the same rules as the folder: a folder others can write on
+        // the way there (here `share`) lets them swap what the link points at.
+        chmod(&share, 0o770);
+        assert!(!outside_working_dir_as(
+            h.euid,
+            &bin.join("claude"),
+            &real,
+            &h.home,
+            Some(&h.home)
+        ));
+    }
+
+    /// systemd starts a service in `/` when no `WorkingDirectory` is set. `/` contains every
+    /// path, so it must not switch the check off: only system folders (and the private home's
+    /// CLI folders) are accepted.
+    #[cfg(unix)]
+    #[test]
+    fn a_service_started_in_the_root_directory_still_refuses_planted_programs() {
+        let root = Path::new("/");
+        let euid = rustix::process::geteuid().as_raw();
+        let env = std::fs::canonicalize("/usr/bin/env").unwrap();
+        assert!(outside_working_dir_as(euid, &env, &env, root, None));
+        let h = private_home();
+        // A program anywhere else (here: a private temp folder) is refused, not waved through.
+        let elsewhere = h.outer.join("elsewhere");
+        std::fs::write(&elsewhere, b"fixture").unwrap();
+        chmod(&elsewhere, 0o755);
+        assert!(!outside_working_dir_as(
+            euid, &elsewhere, &elsewhere, root, None
+        ));
+        assert!(!outside_working_dir_as(
+            euid,
+            &elsewhere,
+            &elsewhere,
+            root,
+            Some(&h.home)
+        ));
+        assert!(!outside_working_dir_as(
+            euid,
+            &h.home,
+            &h.home,
+            root,
+            Some(&h.home)
+        ));
+        // The service user's own CLI folders still work from `/`.
+        assert!(outside_working_dir_as(
+            euid,
+            &h.agy,
+            &h.agy,
+            root,
+            Some(&h.home)
+        ));
+        assert!(!outside_working_dir_as(
+            euid.wrapping_add(1),
+            &h.agy,
+            &h.agy,
+            root,
+            Some(&h.home)
+        ));
+    }
+
+    /// `NPM_CONFIG_PREFIX` is read from the environment, so it is searched only when it is the
+    /// user's own and closed to others.
+    #[cfg(unix)]
+    #[test]
+    fn an_npm_prefix_is_searched_only_when_only_this_user_can_write_it() {
+        let h = private_home();
+        let prefix = h.outer.join("npm");
+        std::fs::create_dir_all(prefix.join("bin")).unwrap();
+        chmod(&prefix, 0o750);
+        chmod(&prefix.join("bin"), 0o750);
+        let env_for = || {
+            let mut env = PathEnv::for_test(h.outer.join("empty-path")).with_home(h.home.clone());
+            env.env_vars
+                .insert("NPM_CONFIG_PREFIX".into(), prefix.display().to_string());
+            augment(&mut env);
+            env
+        };
+        assert!(env_for().path_dirs.contains(&prefix.join("bin")));
+        chmod(&prefix.join("bin"), 0o775);
+        let env = env_for();
+        assert!(!env.path_dirs.contains(&prefix.join("bin")));
+        assert!(
+            env.path_dirs.contains(&prefix),
+            "the prefix itself is still private"
+        );
+        chmod(&prefix, 0o777);
+        let env = env_for();
+        assert!(!env.path_dirs.contains(&prefix) && !env.path_dirs.contains(&prefix.join("bin")));
+        // The same prefix seen by another user is not theirs.
+        assert!(!owned_private_chain(
+            h.euid.wrapping_add(1),
+            &prefix,
+            &prefix
+        ));
     }
 
     #[test]

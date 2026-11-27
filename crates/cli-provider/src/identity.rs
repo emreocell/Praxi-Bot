@@ -149,19 +149,27 @@ pub fn terminal_command(who: &RunAs) -> String {
     }
 }
 
-/// Folders (under `home`) where coding CLIs put themselves, the ones that exist right now.
+/// Folders (under `home`) where coding CLIs put themselves, the ones that exist right now and
+/// that only this user can change. `home` and `NPM_CONFIG_PREFIX` come from the environment (of a
+/// terminal session, for one), so a folder owned by somebody else or writable by group or others
+/// is left out: it would put a planted program on the terminal's `PATH`.
 /// The terminal and the shell must find what the detector finds, so both use this list.
 #[must_use]
 pub fn install_dirs(home: &Path) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = crate::search::HOME_BIN_DIRS
+    let mut dirs: Vec<(&Path, PathBuf)> = crate::search::HOME_BIN_DIRS
         .iter()
-        .map(|rel| home.join(rel))
+        .map(|rel| (home, home.join(rel)))
         .collect();
-    if let Some(prefix) = std::env::var_os("NPM_CONFIG_PREFIX") {
-        dirs.push(PathBuf::from(prefix).join("bin"));
+    let prefix = std::env::var_os("NPM_CONFIG_PREFIX").map(PathBuf::from);
+    if let Some(prefix) = &prefix {
+        dirs.push((prefix, prefix.join("bin")));
     }
-    dirs.retain(|d| d.is_dir());
-    dirs
+    dirs.into_iter()
+        .filter(|(top, dir)| {
+            top.is_absolute() && dir.is_dir() && crate::search::private_to_user(top, dir)
+        })
+        .map(|(_, dir)| dir)
+        .collect()
 }
 
 /// `path` (a `PATH` value) with the existing install folders of `home` appended when they are
@@ -248,6 +256,14 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    fn private_dirs(dirs: &[&Path]) {
+        use std::os::unix::fs::PermissionsExt;
+        for dir in dirs {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o750)).unwrap();
+        }
+    }
+
     #[test]
     fn install_dirs_are_appended_once_and_only_when_they_exist() {
         let tmp = tempfile::tempdir().unwrap();
@@ -258,6 +274,15 @@ mod tests {
         );
         std::fs::create_dir_all(home.join(".local/bin")).unwrap();
         std::fs::create_dir_all(home.join(".npm-global/bin")).unwrap();
+        #[cfg(unix)]
+        private_dirs(&[
+            tmp.path(),
+            &home,
+            &home.join(".local"),
+            &home.join(".local/bin"),
+            &home.join(".npm-global"),
+            &home.join(".npm-global/bin"),
+        ]);
         let system = std::ffi::OsString::from("/usr/bin:/bin");
         let joined = path_with_install_dirs(Some(system.as_os_str()), &home).unwrap();
         let dirs: Vec<_> = std::env::split_paths(&joined).collect();
@@ -272,5 +297,37 @@ mod tests {
             path_with_install_dirs(Some(joined.as_os_str()), &home).is_none(),
             "second pass changes nothing"
         );
+    }
+
+    /// A terminal session's `HOME` and `PATH` are data from outside: a folder that others can
+    /// write, or that belongs to somebody else, must not be added to the `PATH` (it would win for
+    /// every name the system's folders lack, such as `agy`).
+    #[cfg(unix)]
+    #[test]
+    fn install_dirs_leave_out_folders_that_others_can_write() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("evil");
+        let bin = home.join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        private_dirs(&[tmp.path(), &home, &home.join(".local"), &bin]);
+        assert_eq!(install_dirs(&home), vec![bin.clone()]);
+        let mode = |dir: &Path, m| {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(m)).unwrap();
+        };
+        for dir in [&home, &bin] {
+            mode(dir, 0o777);
+            assert!(install_dirs(&home).is_empty(), "{}", dir.display());
+            assert!(path_with_install_dirs(Some("/usr/bin".as_ref()), &home).is_none());
+            mode(dir, 0o770);
+            assert!(install_dirs(&home).is_empty(), "group-writable");
+            mode(dir, 0o750);
+        }
+        // A relative HOME is never searched.
+        assert_eq!(install_dirs(Path::new("evil")), Vec::<PathBuf>::new());
+        // A home that belongs to somebody else (the tree under `/` is root's).
+        if rustix::process::geteuid().as_raw() != 0 {
+            assert_eq!(install_dirs(Path::new("/usr")), Vec::<PathBuf>::new());
+        }
     }
 }

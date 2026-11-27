@@ -1117,6 +1117,17 @@ mod tests {
         use std::ffi::OsString;
         let home = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(home.path().join(".local/bin")).unwrap();
+        // Only folders that nobody else can write are put on the `PATH`.
+        #[cfg(unix)]
+        let chmod = |dir: &str, mode| {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(home.path().join(dir), std::fs::Permissions::from_mode(mode))
+                .unwrap();
+        };
+        #[cfg(unix)]
+        for dir in ["", ".local", ".local/bin"] {
+            chmod(dir, 0o750);
+        }
         let env: Vec<(OsString, OsString)> = vec![
             ("HOME".into(), home.path().into()),
             ("PATH".into(), "/usr/bin:/bin".into()),
@@ -1127,6 +1138,18 @@ mod tests {
         let dirs: Vec<_> = std::env::split_paths(&path).collect();
         assert_eq!(dirs[0], std::path::PathBuf::from("/usr/bin"));
         assert!(dirs.contains(&home.path().join(".local/bin")));
+        // A HOME whose CLI folder others can write is session data from outside: not added.
+        #[cfg(unix)]
+        {
+            chmod(".local/bin", 0o777);
+            let env = vec![
+                ("HOME".into(), home.path().into()),
+                ("PATH".into(), "/usr/bin:/bin".into()),
+            ];
+            let env = super::session_env(env, home.path().join("data"));
+            let path = env.iter().find(|(k, _)| k == "PATH").unwrap().1.clone();
+            assert!(!std::env::split_paths(&path).any(|d| d.starts_with(home.path())));
+        }
         // No HOME, no change (nothing to look in).
         let mut bare: Vec<(OsString, OsString)> = vec![("PATH".into(), "/bin".into())];
         super::with_cli_install_dirs(&mut bare);
