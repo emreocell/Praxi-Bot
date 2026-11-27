@@ -336,7 +336,7 @@ async fn imap_accounts_have_no_list_new_and_say_so() {
 }
 
 #[tokio::test]
-async fn attachments_are_saved_under_a_generated_name_and_never_beside_the_declared_one() {
+async fn attachments_are_saved_under_a_plain_name_inside_the_account_folder_only() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(format!(
@@ -366,21 +366,17 @@ async fn attachments_are_saved_under_a_generated_name_and_never_beside_the_decla
         "no directory configured: {e}"
     );
     conn.set_attachments_dir(dir.path().to_path_buf());
-    let (saved, data) = conn
+    let got = conn
         .scoped(None)
         .save_attachment(None, "m1", "att1")
         .await
         .unwrap();
+    let (saved, data) = (got.path, got.data);
     assert_eq!(std::fs::read(&saved).unwrap(), b"hello");
     assert_eq!(data.filename.as_deref(), Some("../../evil.exe"));
-    assert!(saved.starts_with(dir.path().join("bot-mail")), "{saved:?}");
-    let name = saved.file_name().unwrap().to_string_lossy().into_owned();
-    assert!(
-        name.len() > 4
-            && name[name.len() - 4..].eq_ignore_ascii_case(".bin")
-            && !name.contains("evil"),
-        "{name}"
-    );
+    // Only the last component of the declared name is used, and a name that ends like a
+    // program gets `.bin` added, so it cannot be started by a double click.
+    assert_eq!(saved, dir.path().join("bot-mail").join("evil.exe.bin"));
 }
 
 #[tokio::test]

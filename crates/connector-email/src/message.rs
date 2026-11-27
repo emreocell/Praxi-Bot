@@ -49,6 +49,15 @@ pub struct MessageSummary {
     pub automation_headers: Option<AutomationHeaders>,
     /// MIME metadata only; unknown is distinct from no attachments.
     pub has_attachment: Option<bool>,
+    /// The folder the message was found in; set when a search looked in more than
+    /// one folder (a search that included the junk folder).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    /// Whether the message was in the junk/spam folder (IMAP) or carries the
+    /// provider's spam label (API mailboxes). `None` when the mailbox cannot tell.
+    /// Anyone can put mail in spam, so a match from there is judged more strictly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_junk: Option<bool>,
 }
 
 /// Minimal metadata for preventing unattended mail loops. No body or secrets.
@@ -216,6 +225,8 @@ pub fn parse_summary(uid: u32, header: &[u8], unread: bool, size: Option<u32>) -
                 .map_or_else(String::new, |_| "present".into()),
         }),
         has_attachment: None,
+        folder: None,
+        from_junk: None,
     }
 }
 

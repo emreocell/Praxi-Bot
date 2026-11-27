@@ -785,10 +785,18 @@ async fn a_file_name_with_path_parts_comes_back_as_a_plain_name() {
     )
     .await;
     assert_eq!(out["filename"], "evil.sh");
-    // Where it was saved never depends on the declared name.
+    // Only the last component of the declared name is used, inside the account folder, and a
+    // script keeps no ending that would let it be started by a double click.
     let saved = std::path::PathBuf::from(out["saved_to"].as_str().unwrap());
-    assert!(saved.starts_with(dir.path()), "{saved:?}");
-    assert!(!saved.to_string_lossy().contains("evil"), "{saved:?}");
+    assert!(saved.starts_with(dir.path().join("own")), "{saved:?}");
+    assert_eq!(saved.file_name().unwrap(), "evil.sh.bin");
+    assert_eq!(out["saved_as"], "evil.sh.bin");
+    assert!(
+        !saved
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir)),
+        "{saved:?}"
+    );
 }
 
 #[tokio::test]

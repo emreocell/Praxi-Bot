@@ -98,6 +98,12 @@ fn has_label(m: &MessageWire, label: &str) -> bool {
 }
 
 impl MessageWire {
+    /// Whether the provider filed this message as spam. Label names are not a
+    /// documented closed set, so both common spellings count.
+    pub(super) fn is_junk(&self) -> bool {
+        has_label(self, "spam") || has_label(self, "junk")
+    }
+
     /// Whether this is mail the inbox received (not one it sent or a draft).
     /// Label names are not documented as a closed set, so this errs towards
     /// keeping a message: only `sent`/`draft` labels and the inbox's own
@@ -126,6 +132,8 @@ impl MessageWire {
             size: self.size.and_then(|s| u32::try_from(s).ok()),
             automation_headers: None,
             has_attachment: Some(!self.attachments.is_empty()),
+            folder: None,
+            from_junk: Some(self.is_junk()),
         }
     }
 
@@ -182,7 +190,7 @@ impl MessageWire {
                 .filter(|a| !a.is_empty())
                 .collect(),
             found_in: None,
-            from_junk: None,
+            from_junk: Some(self.is_junk()),
         })
     }
 }

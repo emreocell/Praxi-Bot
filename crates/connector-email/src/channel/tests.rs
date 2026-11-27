@@ -32,6 +32,8 @@ fn summary(uid: u32, from: &str, subject: &str) -> MessageSummary {
         size: Some(500),
         automation_headers: None,
         has_attachment: None,
+        folder: None,
+        from_junk: None,
     }
 }
 

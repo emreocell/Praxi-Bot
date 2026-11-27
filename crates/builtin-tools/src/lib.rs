@@ -28,6 +28,7 @@ mod fill_secret_tests;
 pub mod handover;
 pub mod knowledge;
 pub mod knowledge_brain;
+mod mail_attachments;
 pub mod mail_wait;
 #[cfg(test)]
 mod mail_wait_tests;
@@ -401,6 +402,14 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
     }
     if let Some(email) = &cfg.email {
         all.extend(connector_email::tools(email));
+        // A bot's attachments go to its own workspace (under its write quota) when the host
+        // has workspaces; otherwise to the daemon's attachment folder below.
+        if let Some(fs) = &cfg.fs_access {
+            email.set_attachment_place(Arc::new(mail_attachments::WorkspaceAttachments {
+                fs: Arc::clone(fs),
+                ledger: cfg.provenance.clone(),
+            }));
+        }
         // What `email_download_attachment` saves came from a stranger: the whole folder is
         // untrusted-origin in the ledger too, so a later read is judged by the file, never by
         // a folder the owner happens to trust or by a path rule that could miss it.
