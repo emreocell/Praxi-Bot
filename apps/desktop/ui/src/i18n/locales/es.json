@@ -2258,6 +2258,8 @@
     },
     "chain": {
       "allowed": "Permitido por ti",
+      "approvedAt": "Approved · {{time}} into run",
+      "deniedAt": "Denied · {{time}} into run",
       "details": "Detalles",
       "groupApp": "{{app}} ×{{count}}",
       "groupSame": "{{what}} ×{{count}}",
