@@ -97,7 +97,9 @@ export async function flows(ctx) {
       // The big screen opens a session by itself, so a page that reloads can ask for one a moment before the old
       // page's DELETE lands: the daemon answers 429 (quota) once and the page ends the leftover and retries.
       const quotaRace = (f) => f === '429 POST /v1/view/sessions';
-      if (failed.length > 0 && failed.every((f) => (f.startsWith('404 ') && f.includes(' /v1/view/sessions/')) || quotaRace(f))) real = real.filter((p) => !p.startsWith('console: Failed to load resource'));
+      // A site the daemon has no icon for answers 404 on /v1/favicons/<host>; the vault row falls back to a letter tile.
+      const noFavicon = (f) => f.startsWith('404 ') && f.includes(' /v1/favicons/');
+      if (failed.length > 0 && failed.every((f) => (f.startsWith('404 ') && f.includes(' /v1/view/sessions/')) || quotaRace(f) || noFavicon(f))) real = real.filter((p) => !p.startsWith('console: Failed to load resource'));
       if (real.length) throw new Error(`browser problems: ${[...new Set(real)].join(' | ')} (failed requests: ${[...new Set(failed)].join(', ') || 'none'})`);
     } catch (e) {
       error = String(e.message ?? e);

@@ -1,4 +1,3 @@
-/* global window, document */
 // Exercises a few redesign flows in mock mode (vault, custom MCP, missions). Headless Chrome + VITE_MOCK preview.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
