@@ -30,3 +30,23 @@ export function runNow(events: EventsState, chatId: string | undefined): RunNow 
   const subagents = Object.values(events.runs).filter((r) => r.parentRunId === live.id).length;
   return { run: live, startedMs: live.startedMs, step: currentStep(live), approval, subagents };
 }
+
+/**
+ * What the BOT is doing now, for the panel's header: the open chat's live run first, else the
+ * newest live run in any other chat of this bot (a bot working elsewhere is not "idle").
+ */
+export function botRunNow(
+  events: EventsState,
+  activeChatId: string | undefined,
+  chatIds: readonly string[]
+): RunNow | null {
+  const here = runNow(events, activeChatId);
+  if (here) return here;
+  let best: RunNow | null = null;
+  for (const id of chatIds) {
+    if (id === activeChatId) continue;
+    const other = runNow(events, id);
+    if (other && (!best || other.startedMs > best.startedMs)) best = other;
+  }
+  return best;
+}

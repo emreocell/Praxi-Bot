@@ -1332,6 +1332,13 @@
     "used": "Used {{usd}} and {{amount}} of text usage. Resets {{when}}."
   },
   "botPanel": {
+    "access": {
+      "approve-destructive": "Balanced",
+      "custom": "Custom",
+      "full": "Full access",
+      "read-and-draft": "Careful",
+      "read-only": "Read-only"
+    },
     "botsComputer": "{{bot}}'s computer · {{name}}",
     "chats": "Chats",
     "close": "Close panel",
@@ -1375,6 +1382,7 @@
     "noChatMatches": "No chats match",
     "now": {
       "detailTitle": "Current run",
+      "idle": "Idle, waiting for a task",
       "open": "Open details",
       "subagents": "{{count}} sub-agents",
       "subagents_one": "{{count}} sub-agent",
@@ -1607,6 +1615,7 @@
     "writeConflict": "This bot was changed somewhere else while you were saving. Reload it and try again."
   },
   "browserProfile": {
+    "about": "About this profile",
     "confirmAll": "Close this bot’s browser and delete all its saved browser data, including named profiles. You will need to sign in again. Other bots are unaffected.",
     "confirmSite": "Close this bot’s browser and clear cookies and saved site data for {{domain}} and its saved subdomains in the default profile. You may need to sign in again.",
     "done": "Done signing in",
@@ -2646,7 +2655,7 @@
   "computerCard": {
     "big": "Enlarge",
     "browser": "Browser",
-    "close": "Close",
+    "closeView": "Close the picture",
     "connecting": "Connecting",
     "fps": "{{fps}} fps",
     "frameAlt": "Live screen of {{name}}",
@@ -2658,6 +2667,7 @@
     "live": "LIVE",
     "mainBot": "Main bot: {{name}}",
     "pausedNote": "paused",
+    "popOut": "Pop out",
     "presence": {
       "busy": "Working",
       "offline": "Offline",
@@ -2680,10 +2690,8 @@
     "sideMine": "Mine",
     "stalled": "No new picture for a moment…",
     "status": {
-      "local": "{{system}} · the bot works here",
-      "localNoSystem": "The bot works here",
-      "serverOffline": "not answering · reconnecting",
-      "serverOnline": "Server · online"
+      "server": "Server",
+      "serverOffline": "not answering · reconnecting"
     },
     "take": "Take control",
     "terminal": "Terminal",
@@ -5280,7 +5288,6 @@
     "openChatTooltip": "Open chat in new window",
     "openFailed": "Could not open the new window. Please try again.",
     "openLive": "Open live view in new window",
-    "openLiveShort": "Pop out",
     "pinFailed": "Could not change whether this window stays on top. Please try again.",
     "pinOnTop": "Pin window on top",
     "unpinOnTop": "Unpin window"

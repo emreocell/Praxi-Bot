@@ -12,11 +12,33 @@
   margin: var(--space-0);
 }
 
-.root h3 {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--color-text);
+/* Section titles: the same small caps as the rest of the right panel. */
+.label {
+  padding-inline: var(--space-half);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+}
+
+.about > summary {
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.about > summary:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-focus);
+}
+
+.about > p {
+  margin-top: var(--space-2);
+}
+
+.forgetAll {
+  align-self: flex-start;
 }
 
 .root svg {

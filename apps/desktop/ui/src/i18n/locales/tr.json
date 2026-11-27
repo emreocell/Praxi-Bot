@@ -1332,6 +1332,13 @@
     "used": "{{usd}} ve {{amount}} metin parçası kullanıldı. Sıfırlanma: {{when}}."
   },
   "botPanel": {
+    "access": {
+      "approve-destructive": "Dengeli",
+      "custom": "Özel",
+      "full": "Tam erişim",
+      "read-and-draft": "Dikkatli",
+      "read-only": "Salt okunur"
+    },
     "botsComputer": "{{bot}} botunun bilgisayarı · {{name}}",
     "chats": "Sohbetler",
     "close": "Paneli kapat",
@@ -1375,6 +1382,7 @@
     "noChatMatches": "Eşleşen sohbet yok",
     "now": {
       "detailTitle": "Şu anki çalışma",
+      "idle": "Boşta, yeni bir iş bekliyor",
       "open": "Ayrıntıyı aç",
       "subagents": "{{count}} alt ajan",
       "subagents_one": "{{count}} alt ajan",
@@ -1607,6 +1615,7 @@
     "writeConflict": "Bu bot sen kaydederken başka bir yerden değiştirildi. Yeniden yükleyip yeniden dene."
   },
   "browserProfile": {
+    "about": "Bu profil hakkında",
     "confirmAll": "Bu botun tarayıcısı kapatılacak ve adlandırılmış profiller dâhil tüm kayıtlı tarayıcı verileri silinecek. Yeniden oturum açmanız gerekecek. Diğer botlar etkilenmez.",
     "confirmSite": "Bu botun tarayıcısı kapatılacak ve varsayılan profilde {{domain}} ile kayıtlı alt alan adlarının çerezleri ve site verileri temizlenecek. Yeniden oturum açmanız gerekebilir.",
     "done": "Oturum açmayı bitirdim",
@@ -2646,7 +2655,7 @@
   "computerCard": {
     "big": "Büyüt",
     "browser": "Tarayıcı",
-    "close": "Kapat",
+    "closeView": "Görüntüyü kapat",
     "connecting": "Bağlanıyor",
     "fps": "{{fps}} kare/sn",
     "frameAlt": "{{name}} canlı ekranı",
@@ -2658,6 +2667,7 @@
     "live": "CANLI",
     "mainBot": "Ana bot: {{name}}",
     "pausedNote": "duraklatıldı",
+    "popOut": "Ayrı pencere",
     "presence": {
       "busy": "Çalışıyor",
       "offline": "Çevrimdışı",
@@ -2680,10 +2690,8 @@
     "sideMine": "Benim",
     "stalled": "Bir süredir yeni görüntü gelmedi…",
     "status": {
-      "local": "{{system}} · bot burada çalışıyor",
-      "localNoSystem": "Bot burada çalışıyor",
-      "serverOffline": "yanıt vermiyor · yeniden deneniyor",
-      "serverOnline": "Sunucu · çevrimiçi"
+      "server": "Sunucu",
+      "serverOffline": "yanıt vermiyor · yeniden deneniyor"
     },
     "take": "Kontrolü devral",
     "terminal": "Terminal",
@@ -5280,7 +5288,6 @@
     "openChatTooltip": "Sohbeti yeni pencerede aç",
     "openFailed": "Yeni pencere açılamadı. Lütfen yeniden deneyin.",
     "openLive": "Canlı görünümü yeni pencerede aç",
-    "openLiveShort": "Ayır",
     "pinFailed": "Pencerenin üstte kalma ayarı değiştirilemedi. Lütfen yeniden deneyin.",
     "pinOnTop": "Pencereyi üstte tut",
     "unpinOnTop": "Üstte tutmayı kaldır"

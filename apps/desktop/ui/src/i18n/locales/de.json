@@ -1332,6 +1332,13 @@
     "used": "{{usd}} und {{amount}} Textbausteine verbraucht. Zurückgesetzt am {{when}}."
   },
   "botPanel": {
+    "access": {
+      "approve-destructive": "Balanced",
+      "custom": "Custom",
+      "full": "Full access",
+      "read-and-draft": "Careful",
+      "read-only": "Read-only"
+    },
     "botsComputer": "Computer von {{bot}} · {{name}}",
     "chats": "Chats",
     "close": "Panel schließen",
@@ -1375,6 +1382,7 @@
     "noChatMatches": "Keine passenden Chats",
     "now": {
       "detailTitle": "Aktueller Lauf",
+      "idle": "Idle, waiting for a task",
       "open": "Details öffnen",
       "subagents": "{{count}} Subagenten",
       "subagents_one": "{{count}} Subagent",
@@ -1607,6 +1615,7 @@
     "writeConflict": "Dieser Bot wurde während des Speicherns anderswo geändert. Lade ihn neu und versuche es erneut."
   },
   "browserProfile": {
+    "about": "About this profile",
     "confirmAll": "Der Browser dieses Bots wird geschlossen. Alle gespeicherten Browserdaten einschließlich benannter Profile werden gelöscht. Sie müssen sich erneut anmelden. Andere Bots sind nicht betroffen.",
     "confirmSite": "Der Browser dieses Bots wird geschlossen. Cookies und gespeicherte Websitedaten für {{domain}} und deren gespeicherte Subdomains werden im Standardprofil gelöscht. Möglicherweise müssen Sie sich erneut anmelden.",
     "done": "Anmeldung abgeschlossen",
@@ -2646,7 +2655,7 @@
   "computerCard": {
     "big": "Vergrößern",
     "browser": "Browser",
-    "close": "Schließen",
+    "closeView": "Close the picture",
     "connecting": "Verbindet …",
     "fps": "{{fps}} fps",
     "frameAlt": "Live-Bildschirm von {{name}}",
@@ -2658,6 +2667,7 @@
     "live": "LIVE",
     "mainBot": "Hauptbot: {{name}}",
     "pausedNote": "pausiert",
+    "popOut": "Pop out",
     "presence": {
       "busy": "Arbeitet",
       "offline": "Nicht erreichbar",
@@ -2680,10 +2690,8 @@
     "sideMine": "Von mir",
     "stalled": "Seit einem Moment kommt kein neues Bild…",
     "status": {
-      "local": "{{system}} · der Bot arbeitet hier",
-      "localNoSystem": "Der Bot arbeitet hier",
-      "serverOffline": "antwortet nicht · verbindet neu",
-      "serverOnline": "Server · online"
+      "server": "Server",
+      "serverOffline": "antwortet nicht · verbindet neu"
     },
     "take": "Kontrolle übernehmen",
     "terminal": "Terminal",
@@ -5280,7 +5288,6 @@
     "openChatTooltip": "Chat in neuem Fenster öffnen",
     "openFailed": "Das neue Fenster konnte nicht geöffnet werden. Bitte versuche es erneut.",
     "openLive": "Live-Ansicht in neuem Fenster öffnen",
-    "openLiveShort": "Abdocken",
     "pinFailed": "Die Einstellung „Immer im Vordergrund“ konnte nicht geändert werden. Bitte versuche es erneut.",
     "pinOnTop": "Fenster immer im Vordergrund",
     "unpinOnTop": "Vordergrund-Fixierung aufheben"

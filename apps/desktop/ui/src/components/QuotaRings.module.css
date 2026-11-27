@@ -1,5 +1,5 @@
 .block { display: flex; flex-direction: column; gap: var(--space-2); }
-.label { margin: var(--space-0); padding-inline: var(--size-border-thick); font-size: var(--font-size-2xs); font-weight: var(--font-weight-regular); letter-spacing: var(--letter-spacing-wide); text-transform: uppercase; color: var(--color-text-faint); }
+.label { margin: var(--space-0); padding-inline: var(--size-border-thick); font-size: var(--font-size-2xs); font-weight: var(--font-weight-semibold); letter-spacing: var(--letter-spacing-wide); text-transform: uppercase; color: var(--color-text-muted); }
 .card { border: var(--size-border) solid var(--color-border); border-radius: var(--radius-card); background-color: var(--color-surface); background-image: var(--surface-sheen); }
 :global(:root[data-style="line"]) .card { background: transparent; border-color: var(--color-border-strong); }
 

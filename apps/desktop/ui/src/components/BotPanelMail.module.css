@@ -8,11 +8,15 @@
   margin-bottom: var(--space-2);
 }
 
+/* Same small caps as every right-panel section title. */
 .label {
   margin: var(--space-0);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-regular);
+  padding-inline: var(--space-half);
   color: var(--color-text-muted);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
 }
 
 .tool {

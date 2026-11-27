@@ -26,7 +26,7 @@ import { CHAT_SEARCH_MIN_CHATS, filterChats } from "../lib/chatSearch";
 import type { PresetChoice } from "../lib/botProfile";
 import { isLiteModel, modelLine } from "../lib/modelName";
 import { approvalHeadline, type T } from "../lib/approvalPlain";
-import { runNow } from "../lib/runNow";
+import { botRunNow } from "../lib/runNow";
 import { toolSentence } from "../lib/runSentence";
 import { cancelRun } from "../state/appStop";
 import { useDaemon } from "../state/DaemonContext";
@@ -66,7 +66,7 @@ const TONE_ICONS: Record<PermissionTone, typeof Lock> = {
 };
 
 /** The permission mode as a small tinted chip (shared with the profile dialog). */
-export function PermissionChip({ preset }: { preset: PresetChoice }) {
+export function PermissionChip({ preset, short = false }: { preset: PresetChoice; short?: boolean }) {
   const { t } = useTranslation();
   const tone = permissionTone(preset);
   const Icon = TONE_ICONS[tone];
@@ -82,7 +82,8 @@ export function PermissionChip({ preset }: { preset: PresetChoice }) {
       data-testid="bot-permission-chip"
     >
       <Icon aria-hidden="true" />
-      <span>{t(`botForm.preset.${preset}.name`)}</span>
+      {/* The panel shows the level's one word ("Balanced"); the full name stays in the tooltip. */}
+      <span>{short ? t(`botPanel.access.${preset}`) : t(`botForm.preset.${preset}.name`)}</span>
     </span>
   );
 }
@@ -197,7 +198,10 @@ export function BotPanel({
   const upcoming = useUpcoming(bot.id);
   const quotas = useQuotas();
   const activity = activitySections({ subagents: subs.length, upcoming: upcoming.rows.length, quota: quotas.length });
-  const now = runNow(events, activeChatId);
+  const now = botRunNow(events, activeChatId, chats.map((c) => c.id));
+  // "Idle" only when nothing says otherwise: a run the list knows about but whose events did not
+  // reach this window yet shows no line rather than a wrong one.
+  const busyElsewhere = chats.some((c) => chatActivity(c.id, needs, runs) !== null);
   const nowTick = useNow(now !== null);
   const library = librarySections({ chats: chats.length });
   const stopSub = (id: string) => {
@@ -239,7 +243,8 @@ export function BotPanel({
         </div>
         <div className={styles.meta}>
           <ModelLineText model={model} />
-          <PermissionChip preset={preset} />
+          <span className={styles.metaSep} aria-hidden="true" />
+          <PermissionChip preset={preset} short />
           {engineCli ? <span data-testid="bot-engine-label">{t("botEngine.label", { cli: engineCli })}</span> : null}
         </div>
         {preset === "full" && isLiteModel(model) ? (
@@ -248,6 +253,51 @@ export function BotPanel({
             <span>{t("botPanel.liteFullHint")}</span>
           </p>
         ) : null}
+        {/* What the bot is doing right now, on every tab: identity, then model and level, then this. */}
+        {now ? (
+          <div className={styles.now} data-kind={now.approval ? "approval" : "run"} data-testid="bot-panel-now">
+            <span className={styles.pulse} aria-hidden="true" />
+            <div className={styles.nowText}>
+              <b>
+                {now.approval
+                  ? approvalHeadline(
+                      now.approval.name,
+                      now.approval.input,
+                      now.approval.details,
+                      { computer: null, serverName: null },
+                      t as unknown as T
+                    )
+                  : now.step
+                    ? toolSentence(t, now.step)
+                    : t("botPanel.now.thinking")}
+              </b>
+              <small>
+                {[
+                  now.subagents > 0 ? t("botPanel.now.subagents", { count: now.subagents }) : null,
+                  !now.approval && now.step && isSlowStep(now.step, nowTick) ? t("chat.chain.slow") : null,
+                  formatElapsed(nowTick - now.startedMs)
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </small>
+            </div>
+            <button
+              type="button"
+              className={styles.nowOpen}
+              title={t("botPanel.now.open")}
+              aria-label={t("botPanel.now.open")}
+              data-testid="bot-panel-now-open"
+              onClick={() => setOpenSub(now.run.id)}
+            >
+              <ChevronRight aria-hidden="true" />
+            </button>
+          </div>
+        ) : busyElsewhere ? null : (
+          <p className={styles.idle} data-testid="bot-panel-now-idle">
+            <i aria-hidden="true" />
+            {t("botPanel.now.idle")}
+          </p>
+        )}
         <div className={styles.actions}>
           <button
             type="button"
@@ -327,45 +377,6 @@ export function BotPanel({
         {tab === "activity" ? (
           <>
             <StopStatusNotice variant="panel" />
-            {now ? (
-              <div className={styles.now} data-kind={now.approval ? "approval" : "run"} data-testid="bot-panel-now">
-                <span className={styles.pulse} aria-hidden="true" />
-                <div className={styles.nowText}>
-                  <b>
-                    {now.approval
-                      ? approvalHeadline(
-                          now.approval.name,
-                          now.approval.input,
-                          now.approval.details,
-                          { computer: null, serverName: null },
-                          t as unknown as T
-                        )
-                      : now.step
-                        ? toolSentence(t, now.step)
-                        : t("botPanel.now.thinking")}
-                  </b>
-                  <small>
-                    {[
-                      now.subagents > 0 ? t("botPanel.now.subagents", { count: now.subagents }) : null,
-                      !now.approval && now.step && isSlowStep(now.step, nowTick) ? t("chat.chain.slow") : null,
-                      formatElapsed(nowTick - now.startedMs)
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </small>
-                </div>
-                <button
-                  type="button"
-                  className={styles.nowOpen}
-                  title={t("botPanel.now.open")}
-                  aria-label={t("botPanel.now.open")}
-                  data-testid="bot-panel-now-open"
-                  onClick={() => setOpenSub(now.run.id)}
-                >
-                  <ChevronRight aria-hidden="true" />
-                </button>
-              </div>
-            ) : null}
             <MissionBlock key={bot.id} botId={bot.id} visible={visible} />
             {activity.map((id) => {
               switch (id) {
@@ -398,7 +409,14 @@ export function BotPanel({
               </span>
               <ChevronRight aria-hidden="true" />
             </button>
-          ) : null}<BotPanelTriggers botId={bot.id} /><details><summary>{t("botPanel.triggers.manageHooks")}</summary><BotPanelWebhooks botId={bot.id} /></details></>
+          ) : null}<BotPanelTriggers botId={bot.id} />
+          <details className={styles.more}>
+            <summary>
+              <ChevronRight aria-hidden="true" />
+              {t("botPanel.triggers.manageHooks")}
+            </summary>
+            <BotPanelWebhooks botId={bot.id} />
+          </details></>
         ) : tab === "tools" ? (
           <BotBrowserProfile key={bot.id} botId={bot.id} />
         ) : (

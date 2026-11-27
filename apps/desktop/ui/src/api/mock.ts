@@ -1527,6 +1527,8 @@ export class MockApiClient extends ApiClient {
     if (seg[0] === "bots" && seg[2] === "incoming-webhooks") {
       return ok(this.incomingWebhookRoute(method, seg, opts.body));
     }
+    // The Automation tab's triggers: none in mock mode (an unmatched route crashed the tab).
+    if (seg[0] === "bots" && seg[2] === "triggers" && method === "GET" && !seg[3]) return ok([]);
     if (seg[0] === "hosts" && seg[1] === "setup") {
       const body = opts.body as { host: string; accept: boolean };
       if (!seg[2] && method === "POST") return ok(this.hostSetup.start(opts.body as never));

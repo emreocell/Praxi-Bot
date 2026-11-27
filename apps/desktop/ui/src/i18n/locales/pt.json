@@ -2536,7 +2536,6 @@
   "computerCard": {
     "big": "Enlarge",
     "browser": "Browser",
-    "close": "Close",
     "connecting": "Connecting",
     "fps": "{{fps}} fps",
     "frameAlt": "Live screen of {{name}}",
@@ -2570,10 +2569,7 @@
     "sideMine": "Mine",
     "stalled": "No new picture for a moment…",
     "status": {
-      "local": "{{system}} · the bot works here",
-      "localNoSystem": "The bot works here",
-      "serverOffline": "not answering · reconnecting",
-      "serverOnline": "Server · online"
+      "serverOffline": "not answering · reconnecting"
     },
     "take": "Take control",
     "terminal": "Terminal",
@@ -4996,7 +4992,6 @@
     "openChatTooltip": "Abrir esta conversa em uma nova janela",
     "openFailed": "Não foi possível abrir a nova janela. Tente novamente.",
     "openLive": "Abrir a visualização ao vivo em uma nova janela",
-    "openLiveShort": "Destacar",
     "pinFailed": "Não foi possível alterar a opção de manter em primeiro plano. Tente novamente.",
     "pinOnTop": "Manter esta janela em primeiro plano",
     "unpinOnTop": "Deixar de manter em primeiro plano"

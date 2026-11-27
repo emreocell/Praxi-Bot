@@ -1,4 +1,4 @@
-import { Globe, LogIn, RefreshCw, Trash2 } from "lucide-react";
+import { LogIn, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
@@ -53,10 +53,9 @@ export function BotBrowserProfile({ botId }: { botId: string }) {
 
   return (
     <section className={styles.root} aria-labelledby="browser-profile-title" data-testid="browser-profile">
-      <h3 id="browser-profile-title"><Globe aria-hidden="true" />{t("browserProfile.title")}</h3>
+      <h3 id="browser-profile-title" className={styles.label}>{t("browserProfile.title")}</h3>
       <p>{t("browserProfile.intro")}</p>
       <p className={styles.warning}>{t("browserProfile.warning")}</p>
-      <p>{t("browserProfile.isolation")}</p>
       <div className={styles.actions}>
         <Button disabled={!client || busy || !profile} onClick={() => {
           if (!client) return;
@@ -72,9 +71,7 @@ export function BotBrowserProfile({ botId }: { botId: string }) {
       {profile?.signing_in ? <p role="status">{t("browserProfile.manualHint")}</p> : null}
       {error && forget === null ? <ErrorNotice error={error} compact /> : null}
       {profile ? <>
-        <p>{t(profile.directory_encrypted ? "browserProfile.encrypted" : "browserProfile.protection")}</p>
-        <p>{t("browserProfile.size", { bytes: profile.size_bytes.toLocaleString(i18n.language) })}</p>
-        <h4>{t("browserProfile.sites")}</h4>
+        <h4 className={styles.label}>{t("browserProfile.sites")}</h4>
         <p>{t("browserProfile.siteHint")}</p>
         {!profile.sites_available ? <p role="status">{t("browserProfile.sitesUnavailable")}</p> : profile.domains.length ? <ul className={styles.sites}>
           {profile.domains.map((domain) => <li key={domain}>
@@ -85,7 +82,15 @@ export function BotBrowserProfile({ botId }: { botId: string }) {
             </Button>
           </li>)}
         </ul> : <p>{t("browserProfile.empty")}</p>}
-        <Button variant="danger" disabled={!client || busy || profile.signing_in || profile.size_bytes === 0}
+        {/* The full facts about the profile, folded: the tab opens on what to do, not on a wall of text. */}
+        <details className={styles.about}>
+          <summary>{t("browserProfile.about")}</summary>
+          <p>{t("browserProfile.isolation")}</p>
+          <p>{t(profile.directory_encrypted ? "browserProfile.encrypted" : "browserProfile.protection")}</p>
+          <p>{t("browserProfile.size", { bytes: profile.size_bytes.toLocaleString(i18n.language) })}</p>
+        </details>
+        {/* Destructive, but behind a danger confirmation: a quiet button, not a red bar. */}
+        <Button variant="secondary" size="sm" className={styles.forgetAll} disabled={!client || busy || profile.signing_in || profile.size_bytes === 0}
           onClick={() => { setError(null); setForget(""); }}>
           <Trash2 aria-hidden="true" />{t("browserProfile.forgetAll")}
         </Button>

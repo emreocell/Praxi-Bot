@@ -1,8 +1,8 @@
 .section, .form, .card { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
-.section { margin-bottom: var(--space-5); }
+.section { margin-bottom: var(--space-0); }
 .heading, .row { display: flex; align-items: center; gap: var(--space-2); }
 .heading { justify-content: space-between; }
-.heading h3 { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-0); font-size: var(--font-size-ui-sm); font-weight: var(--font-weight-medium); }
+.heading h3 { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-0); padding-inline: var(--space-half); color: var(--color-text-muted); font-size: var(--font-size-2xs); font-weight: var(--font-weight-semibold); letter-spacing: var(--letter-spacing-wide); text-transform: uppercase; }
 .section svg { width: var(--space-4); height: var(--space-4); flex-shrink: 0; }
 .note, .empty, .error { margin: var(--space-0); font-size: var(--font-size-xs); line-height: var(--line-height-normal); color: var(--color-text-muted); }
 .empty { padding: var(--space-3) var(--space-0); }

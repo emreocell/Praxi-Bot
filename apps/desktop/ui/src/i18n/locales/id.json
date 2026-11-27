@@ -2513,7 +2513,6 @@
   "computerCard": {
     "big": "Enlarge",
     "browser": "Browser",
-    "close": "Close",
     "connecting": "Connecting",
     "fps": "{{fps}} fps",
     "frameAlt": "Live screen of {{name}}",
@@ -2547,10 +2546,7 @@
     "sideMine": "Mine",
     "stalled": "No new picture for a moment…",
     "status": {
-      "local": "{{system}} · the bot works here",
-      "localNoSystem": "The bot works here",
-      "serverOffline": "not answering · reconnecting",
-      "serverOnline": "Server · online"
+      "serverOffline": "not answering · reconnecting"
     },
     "take": "Take control",
     "terminal": "Terminal",
@@ -4969,7 +4965,6 @@
     "openChatTooltip": "Buka percakapan ini di jendela baru",
     "openFailed": "Jendela baru tidak dapat dibuka. Silakan coba lagi.",
     "openLive": "Buka tampilan langsung di jendela baru",
-    "openLiveShort": "Pisahkan jendela",
     "pinFailed": "Pengaturan jendela agar selalu di depan tidak dapat diubah. Silakan coba lagi.",
     "pinOnTop": "Selalu tampilkan jendela ini di depan",
     "unpinOnTop": "Jangan selalu tampilkan di depan"

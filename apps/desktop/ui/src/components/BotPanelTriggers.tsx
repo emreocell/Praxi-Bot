@@ -1,4 +1,4 @@
-import { Clock3, Mail, Plus, Sparkles, Webhook, X } from "lucide-react";
+import { Clock3, Mail, Plus, Webhook, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { EmailAccount, IncomingWebhook } from "../api/types";
@@ -65,7 +65,7 @@ export function BotPanelTriggers({ botId }: { botId: string }) {
   const setSource = (next: TriggerSource) => { if (draft) change({ ...draft, config: { ...draft.config, source: next } }); };
 
   return <section className={styles.section} aria-labelledby="triggers-heading" data-testid="bot-triggers">
-    <div className={styles.heading}><h3 id="triggers-heading"><Sparkles aria-hidden="true" />{tr("title")}</h3>
+    <div className={styles.heading}><h3 id="triggers-heading">{tr("title")}</h3>
       <button type="button" className={styles.iconButton} aria-label={tr("add")} title={tr("add")} data-testid="trigger-add" onClick={() => { setEditing(null); setAdopting(false); setDraft(newTrigger()); setPreview(null); setSample(""); }}><Plus aria-hidden="true" /></button></div>
     <p className={styles.note}>{tr("intro")}</p>
     {error && <p role="alert" className={styles.error}>{error}</p>}

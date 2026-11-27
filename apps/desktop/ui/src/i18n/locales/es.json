@@ -1332,6 +1332,13 @@
     "used": "Uso: {{usd}} y {{amount}} unidades de texto. Se restablece: {{when}}."
   },
   "botPanel": {
+    "access": {
+      "approve-destructive": "Balanced",
+      "custom": "Custom",
+      "full": "Full access",
+      "read-and-draft": "Careful",
+      "read-only": "Read-only"
+    },
     "botsComputer": "Equipo de {{bot}} · {{name}}",
     "chats": "Chats",
     "close": "Cerrar panel",
@@ -1375,6 +1382,7 @@
     "noChatMatches": "No hay chats que coincidan",
     "now": {
       "detailTitle": "Ejecución actual",
+      "idle": "Idle, waiting for a task",
       "open": "Abrir detalles",
       "subagents": "{{count}} subagentes",
       "subagents_one": "{{count}} subagente",
@@ -1607,6 +1615,7 @@
     "writeConflict": "El bot se modificó en otro lugar mientras guardabas. Recárgalo y vuelve a intentarlo."
   },
   "browserProfile": {
+    "about": "About this profile",
     "confirmAll": "Se cerrará el navegador de este bot y se borrarán todos sus datos guardados, incluidos los perfiles con nombre. Tendrás que volver a iniciar sesión. Los demás bots no se verán afectados.",
     "confirmSite": "Se cerrará el navegador de este bot y se borrarán las cookies y los datos guardados de {{domain}} y sus subdominios guardados en el perfil predeterminado. Es posible que tengas que volver a iniciar sesión.",
     "done": "He terminado de iniciar sesión",
@@ -2646,7 +2655,7 @@
   "computerCard": {
     "big": "Ampliar",
     "browser": "Navegador",
-    "close": "Cerrar",
+    "closeView": "Close the picture",
     "connecting": "Conectando",
     "fps": "{{fps}} fps",
     "frameAlt": "Pantalla en vivo de {{name}}",
@@ -2658,6 +2667,7 @@
     "live": "EN VIVO",
     "mainBot": "Bot principal: {{name}}",
     "pausedNote": "en pausa",
+    "popOut": "Pop out",
     "presence": {
       "busy": "Trabajando",
       "offline": "Desconectado",
@@ -2680,10 +2690,8 @@
     "sideMine": "Mía",
     "stalled": "Por ahora no hay una imagen nueva…",
     "status": {
-      "local": "{{system}} · El bot trabaja aquí",
-      "localNoSystem": "El bot trabaja aquí",
-      "serverOffline": "sin respuesta · reconectando",
-      "serverOnline": "Servidor · En línea"
+      "server": "Server",
+      "serverOffline": "sin respuesta · reconectando"
     },
     "take": "Tomar el control",
     "terminal": "Terminal",
@@ -5280,7 +5288,6 @@
     "openChatTooltip": "Abrir el chat en una nueva ventana",
     "openFailed": "No se pudo abrir la nueva ventana. Inténtalo de nuevo.",
     "openLive": "Abrir vista en vivo en nueva ventana",
-    "openLiveShort": "Separar",
     "pinFailed": "No se pudo cambiar si esta ventana permanece en primer plano. Inténtalo de nuevo.",
     "pinOnTop": "Fijar ventana siempre visible",
     "unpinOnTop": "Desfijar ventana"

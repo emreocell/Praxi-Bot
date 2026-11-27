@@ -2614,7 +2614,6 @@
   "computerCard": {
     "big": "Agrandir",
     "browser": "Navigateur",
-    "close": "Fermer",
     "connecting": "Connexion",
     "fps": "{{fps}} i/s",
     "frameAlt": "Écran en direct de {{name}}",
@@ -2648,10 +2647,7 @@
     "sideMine": "Le mien",
     "stalled": "Pas de nouvelle image depuis un instant…",
     "status": {
-      "local": "{{system}} · le bot travaille ici",
-      "localNoSystem": "Le bot travaille ici",
-      "serverOffline": "ne répond pas · reconnexion",
-      "serverOnline": "Serveur · en ligne"
+      "serverOffline": "ne répond pas · reconnexion"
     },
     "take": "Prendre le contrôle",
     "terminal": "Terminal",
@@ -5083,7 +5079,6 @@
     "openChatTooltip": "Ouvrir cette discussion dans une nouvelle fenêtre",
     "openFailed": "Impossible d’ouvrir la nouvelle fenêtre. Réessaie.",
     "openLive": "Ouvrir la vue en direct dans une nouvelle fenêtre",
-    "openLiveShort": "Détacher",
     "pinFailed": "Impossible de modifier le maintien au premier plan. Réessaie.",
     "pinOnTop": "Garder cette fenêtre au premier plan",
     "unpinOnTop": "Ne plus garder au premier plan"

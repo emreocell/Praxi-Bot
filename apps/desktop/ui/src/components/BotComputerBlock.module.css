@@ -14,10 +14,10 @@
   margin: var(--space-0);
   padding-inline: calc(var(--u) * 0.5);
   font-size: var(--font-size-2xs);
-  font-weight: var(--font-weight-regular);
+  font-weight: var(--font-weight-semibold);
   letter-spacing: var(--letter-spacing-wide);
   text-transform: uppercase;
-  color: var(--color-text-faint);
+  color: var(--color-text-muted);
 }
 
 .pc {
@@ -78,8 +78,12 @@
   background-color: var(--color-success);
 }
 
-.dot[data-offline="true"] {
+.dot[data-presence="offline"] {
   background-color: var(--color-danger);
+}
+
+.dot[data-presence="busy"] {
+  background-color: var(--color-accent-text);
 }
 
 /* "Botun | Benim": only while a server is home and PC access is on. */
@@ -196,20 +200,17 @@
   fill: currentColor;
 }
 
-.fact[data-presence="busy"] .dot {
-  background-color: var(--color-accent-text);
-}
-
+/* The card's one primary action (show / resume / try again), in the app's primary colour. */
 .cta {
   display: inline-flex;
   align-items: center;
   gap: calc(var(--u) * 1.75);
   height: var(--size-control-sm);
-  padding-inline: calc(var(--u) * 3.25);
-  border: var(--size-border) solid var(--color-border);
+  padding-inline: calc(var(--u) * 3.5);
+  border: none;
   border-radius: var(--radius-pill);
-  background-color: var(--color-surface-elevated);
-  color: var(--color-text);
+  background-color: var(--color-primary);
+  color: var(--color-primary-contrast);
   font: inherit;
   font-size: var(--font-size-ui-sm);
   font-weight: var(--font-weight-medium);
@@ -217,7 +218,7 @@
 }
 
 .cta:hover {
-  background-color: var(--color-surface-active);
+  background-color: color-mix(in srgb, var(--color-primary) 88%, var(--color-background));
 }
 
 .cta > svg {
@@ -227,6 +228,8 @@
 
 .cta:focus-visible,
 .over button:focus-visible,
+.closeView:focus-visible,
+.qualitySelect select:focus-visible,
 .lnk:focus-visible,
 .who button:focus-visible {
   outline: none;
@@ -294,6 +297,22 @@
 
 .over button {
   cursor: pointer;
+}
+
+.over button:hover,
+.closeView:hover {
+  background-color: color-mix(in srgb, var(--color-media-scrim) 88%, transparent);
+}
+
+/* "Enlarge": the live preview's main action, light on the dark picture. */
+.over .overPrimary {
+  background-color: var(--color-on-media);
+  color: var(--color-media-scrim);
+  font-weight: var(--font-weight-medium);
+}
+
+.over .overPrimary:hover {
+  background-color: color-mix(in srgb, var(--color-on-media) 86%, var(--color-media-scrim));
 }
 
 .over button > svg {
@@ -380,11 +399,64 @@
   }
 }
 
-.quality {
+/* Top right of the live preview: the quality menu and the close button, as small as the clock. */
+.topRight {
   position: absolute;
   top: calc(var(--u) * 1.5);
   right: calc(var(--u) * 1.5);
   z-index: 2;
+  display: flex;
+  gap: var(--space-1);
+}
+
+.closeView,
+.qualitySelect {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: calc(var(--u) * 5.5);
+  border-radius: calc(var(--radius-sm) * 7 / 6);
+  background-color: color-mix(in srgb, var(--color-media-scrim) 70%, transparent);
+  color: var(--color-on-media);
+}
+
+.closeView {
+  justify-content: center;
+  width: calc(var(--u) * 5.5);
+  padding: var(--space-0);
+  border: none;
+  cursor: pointer;
+}
+
+.closeView > svg {
+  width: calc(var(--u) * 3);
+  height: calc(var(--u) * 3);
+}
+
+.qualitySelect select {
+  height: 100%;
+  padding: var(--space-0) calc(var(--u) * 5) var(--space-0) calc(var(--u) * 1.75);
+  border: none;
+  border-radius: inherit;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--font-size-micro);
+  appearance: none;
+  cursor: pointer;
+}
+
+.qualitySelect option {
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+}
+
+.qualitySelect > svg {
+  position: absolute;
+  right: calc(var(--u) * 1.25);
+  width: calc(var(--u) * 3);
+  height: calc(var(--u) * 3);
+  pointer-events: none;
 }
 
 .stalled {

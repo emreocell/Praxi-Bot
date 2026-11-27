@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { EventsState, RunState, ToolItem } from "../state/timeline.ts";
-import { runNow } from "./runNow.ts";
+import { botRunNow, runNow } from "./runNow.ts";
 
 function tool(name: string, status: ToolItem["status"], at: number): ToolItem {
   return {
@@ -122,4 +122,21 @@ test("subagents counts all child runs with parentRunId matching live run, includ
   const result = runNow(events, "chat-1");
   assert.ok(result);
   assert.equal(result.subagents, 2);
+});
+
+test("botRunNow prefers the open chat's live run", () => {
+  const here = run("r-here", { startedMs: 1000 });
+  const there = run("r-there", { chatId: "chat-2", startedMs: 5000 });
+  const events: EventsState = { runs: { "r-here": here, "r-there": there }, lastGseq: 0 };
+  assert.equal(botRunNow(events, "chat-1", ["chat-1", "chat-2"])?.run.id, "r-here");
+});
+
+test("botRunNow finds the bot working in another chat (the header must not say idle)", () => {
+  const older = run("r-old", { chatId: "chat-2", startedMs: 2000 });
+  const newer = run("r-new", { chatId: "chat-3", startedMs: 3000 });
+  const done = run("r-done", { chatId: "chat-4", startedMs: 9000, finishedMs: 9500 });
+  const foreign = run("r-foreign", { chatId: "chat-9", startedMs: 9999 });
+  const events: EventsState = { runs: { "r-old": older, "r-new": newer, "r-done": done, "r-foreign": foreign }, lastGseq: 0 };
+  assert.equal(botRunNow(events, "chat-1", ["chat-1", "chat-2", "chat-3", "chat-4"])?.run.id, "r-new");
+  assert.equal(botRunNow(events, undefined, ["chat-4"]), null);
 });

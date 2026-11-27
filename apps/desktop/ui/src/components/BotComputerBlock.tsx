@@ -1,4 +1,4 @@
-import { ExternalLink, Eye, Globe, Loader2, Maximize2, Monitor, Server, Star, Terminal } from "lucide-react";
+import { ChevronDown, ExternalLink, Eye, Globe, Loader2, Maximize2, Monitor, Server, Star, Terminal, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "ui";
 import { isActivelyOwningTakeover, visibleActions } from "../lib/liveViewState";
@@ -13,10 +13,9 @@ import { useDaemon } from "../state/DaemonContext";
 import { useServerTerminal } from "../state/ServerTerminalContext";
 import { computerPresence, mainBotLabel } from "../lib/computerStage";
 import { useComputerView } from "../state/useComputerView";
-import { streamHealth } from "../lib/liveViewAdaptive";
+import { QUALITY_MODES, type QualityMode, streamHealth } from "../lib/liveViewAdaptive";
 import { cardAspect } from "../lib/liveViewSizing";
 import { useContextMenu, useMenuTranslate } from "./ContextMenu";
-import { StreamQuality } from "./StreamQuality";
 import { useDragPopOut } from "./useDragPopOut";
 import styles from "./BotComputerBlock.module.css";
 
@@ -110,14 +109,12 @@ export function BotComputerBlock({
   const name = server ? serverName || t("computerPicker.host") : t("computerCard.thisComputer");
   const offline = view.kind === "unavailable" && (view.unavailable === "offline" || view.unavailable === "notPaired" || view.unavailable === "version");
   const system = thisSystem();
-  const status = server
-    ? offline
-      ? t("computerCard.status.serverOffline")
-      : t("computerCard.status.serverOnline")
-    : system
-      ? t("computerCard.status.local", { system })
-      : t("computerCard.status.localNoSystem");
   const presence = computerPresence({ offline, working: activity !== null });
+  // One status line: is it on and is the bot working on it, then where ("Working · Windows").
+  const status =
+    server && offline
+      ? t("computerCard.status.serverOffline")
+      : [t(`computerCard.presence.${presence}`), server ? t("computerCard.status.server") : system].filter(Boolean).join(" · ");
   const mainName = mainBotLabel(mainBotName);
   const { key: rk, detail } = reasonKey(view.unavailable);
   const reason = t(rk, {
@@ -235,8 +232,8 @@ export function BotComputerBlock({
           {server ? <Server aria-hidden="true" className={styles.headIcon} /> : <Monitor aria-hidden="true" className={styles.headIcon} />}
           <div className={styles.title}>
             <b data-testid="bot-computer-where">{name}</b>
-            <small data-testid="bot-computer-status">
-              <i className={styles.dot} data-offline={offline ? "true" : undefined} aria-hidden="true" />
+            <small data-testid="bot-computer-status" data-presence={presence}>
+              <i className={styles.dot} data-presence={presence} aria-hidden="true" />
               <span>{status}</span>
             </small>
           </div>
@@ -268,19 +265,27 @@ export function BotComputerBlock({
               <img className={styles.frame} data-testid="bot-computer-frame" src={view.frameUrl} alt={t("computerCard.frameAlt", { name })} title={t("liveView.privacyNotice")} draggable={false} />
               <LiveClock since={view.liveSinceMs} />
               <StallNotice lastActivityAtMs={live.state.lastActivityAtMs} />
-              <div className={styles.quality}>
-                <StreamQuality mode={live.qualityMode} onChange={live.setQualityMode} />
+              {/* Compact controls: quality and close up top, the actions at the bottom, one primary. */}
+              <div className={styles.topRight}>
+                <QualitySelect mode={live.qualityMode} onChange={live.setQualityMode} />
+                <button
+                  type="button"
+                  className={styles.closeView}
+                  data-testid="bot-computer-close"
+                  title={t("computerCard.closeView")}
+                  aria-label={t("computerCard.closeView")}
+                  onClick={view.stop}
+                >
+                  <X aria-hidden="true" />
+                </button>
               </div>
               <div className={styles.over}>
-                <button type="button" data-testid="bot-computer-big" onClick={view.bigView}>
-                  <Maximize2 aria-hidden="true" />
-                  {t("computerCard.big")}
-                </button>
                 <button type="button" data-testid="bot-computer-take" onClick={view.takeControl}>
                   {t("computerCard.take")}
                 </button>
-                <button type="button" data-testid="bot-computer-close" onClick={view.stop}>
-                  {t("computerCard.close")}
+                <button type="button" className={styles.overPrimary} data-testid="bot-computer-big" onClick={view.bigView}>
+                  <Maximize2 aria-hidden="true" />
+                  {t("computerCard.big")}
                 </button>
               </div>
             </>
@@ -295,10 +300,6 @@ export function BotComputerBlock({
               )}
               {view.previewUrl ? null : (
                 <div className={styles.facts}>
-                  <span className={styles.fact} data-presence={presence} data-testid="bot-computer-presence">
-                    <i className={styles.dot} data-offline={presence === "offline" ? "true" : undefined} aria-hidden="true" />
-                    {t(`computerCard.presence.${presence}`)}
-                  </span>
                   {mainName ? (
                     <span className={styles.fact} data-testid="bot-computer-main" title={t("computerCard.mainBot", { name: mainName })}>
                       <Star aria-hidden="true" />
@@ -372,13 +373,35 @@ export function BotComputerBlock({
               onClick={() => popOut?.()}
             >
               <ExternalLink aria-hidden="true" />
-              {t("popout.openLiveShort")}
+              {t("computerCard.popOut")}
             </button>
           ) : null}
           <ViewNote view={view} />
         </div>
       </div>
     </section>
+  );
+}
+
+/** The picture quality as one small menu over the preview (the three-button row covered the clock). */
+function QualitySelect({ mode, onChange }: { mode: QualityMode; onChange: (mode: QualityMode) => void }) {
+  const { t } = useTranslation();
+  return (
+    <span className={styles.qualitySelect} title={t(`liveView.quality.${mode}Hint`)}>
+      <select
+        value={mode}
+        aria-label={t("liveView.quality.label")}
+        data-testid="bot-computer-quality"
+        onChange={(e) => onChange(e.target.value as QualityMode)}
+      >
+        {QUALITY_MODES.map((m) => (
+          <option key={m} value={m}>
+            {t(`liveView.quality.${m}`)}
+          </option>
+        ))}
+      </select>
+      <ChevronDown aria-hidden="true" />
+    </span>
   );
 }
 

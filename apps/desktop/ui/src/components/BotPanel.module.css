@@ -133,10 +133,37 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: calc(var(--u) * 1.5);
+  gap: var(--space-2);
   max-width: 100%;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+}
+
+/* A small dot between the model and the access level: one line, two facts. */
+.metaSep {
+  flex: none;
+  width: calc(var(--u) * 0.75);
+  height: calc(var(--u) * 0.75);
+  border-radius: 50%;
+  background-color: var(--color-text-faint);
+}
+
+/* "Idle, waiting for a task": the quiet form of the now row, so the header always answers it. */
+.idle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-0);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.idle > i {
+  flex: none;
+  width: calc(var(--u) * 1.5);
+  height: calc(var(--u) * 1.5);
+  border-radius: 50%;
+  background-color: var(--color-text-faint);
 }
 
 .liteHint {
@@ -333,11 +360,15 @@
   flex-direction: column;
 }
 
+/* Section titles of the panel: the same small caps as the settings groups (#918). */
 .label {
   margin: 0 0 var(--space-2);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-regular);
+  padding-inline: var(--space-half);
   color: var(--color-text-muted);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
 }
 
 .list {
@@ -438,20 +469,24 @@
   }
 }
 
+/* Four equal tabs across the full width: one row at every panel width (they wrapped before). */
 .tabs {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-self: center;
-  justify-content: center;
-  max-width: 100%;
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  width: 100%;
   padding: var(--size-border-thick);
   border-radius: var(--radius-control);
   background-color: var(--color-surface-elevated);
 }
 
 .tab {
-  min-height: var(--space-0);
-  padding: var(--space-1) var(--space-4) var(--space-1);
+  overflow: hidden;
+  min-width: var(--space-0);
+  min-height: calc(var(--u) * 7);
+  padding: var(--space-1) var(--space-half);
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border: none;
   border-radius: var(--radius-md);
   background: none;
@@ -494,7 +529,10 @@
 /* "Now" row: the run's current step, the sub-agents, one chevron into the detail. */
 .now {
   display: flex;
+  align-self: stretch;
   align-items: center;
+  margin-top: var(--space-1);
+  text-align: start;
   gap: calc(var(--u) * 2.25);
   min-width: var(--space-0);
   padding: var(--space-2) calc(var(--u) * 2.5);
@@ -612,7 +650,6 @@
   align-items: center;
   gap: var(--space-3);
   width: 100%;
-  margin-bottom: var(--space-3);
   padding: var(--space-3);
   border: var(--size-border) solid var(--color-border);
   border-radius: var(--radius-card);
@@ -659,4 +696,51 @@
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   color: var(--color-text);
+}
+
+/* "Signed addresses" (webhooks): a quiet disclosure row under the triggers, not a bare summary. */
+.more > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-1);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  list-style: none;
+  cursor: pointer;
+}
+
+.more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.more > summary:hover {
+  color: var(--color-text);
+}
+
+.more > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.more > summary > svg {
+  flex: none;
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.more[open] > summary > svg {
+  transform: rotate(90deg);
+}
+
+.more[open] > summary {
+  margin-bottom: var(--space-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .more > summary > svg {
+    transition: none;
+  }
 }
