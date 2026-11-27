@@ -394,6 +394,18 @@ impl PtySession {
         self.shared.lock().exit.map(|(e, _)| e)
     }
 
+    /// Where the session stands right now, without reading (or consuming) any output: alive and
+    /// quiet for `settle` is `WaitingForInput`, alive and recently printing is `Running`.
+    #[must_use]
+    pub fn state(&self, settle: Duration) -> State {
+        let sh = self.shared.lock();
+        match sh.exit {
+            Some((info, _)) => State::Exited(info),
+            None if sh.last_output.elapsed() >= settle => State::WaitingForInput,
+            None => State::Running,
+        }
+    }
+
     /// Type bytes into the program (what a keyboard would send). The bytes are queued for a
     /// writer thread, so this never waits for the program to read them.
     ///

@@ -270,6 +270,8 @@ fn start_reaper(sessions: &Arc<Sessions>) {
 pub struct PtyShellTool {
     spec: ToolSpec,
     sessions: Arc<Sessions>,
+    /// What the live view reads: the same sessions as masked text, read-only.
+    view: Arc<TerminalView>,
     access: Option<Arc<dyn crate::FsAccessProvider>>,
     provenance: Option<Arc<dyn Provenance>>,
     redactor: Option<OutputRedactor>,
@@ -277,14 +279,97 @@ pub struct PtyShellTool {
 }
 
 /// Build the tool. `access` makes `cwd` default to the calling bot's workspace; `provenance`
-/// records what a command fetches; `redactor` is the daemon's, with the vault's values.
+/// records what a command fetches; `redactor` is the daemon's, with the vault's values;
+/// `screens` is where the live view lists the sessions (text only, read-only).
 #[must_use]
 pub fn tool(
     access: Option<Arc<dyn crate::FsAccessProvider>>,
     provenance: Option<Arc<dyn Provenance>>,
     redactor: Option<OutputRedactor>,
+    screens: Option<&live_view::TargetRegistry>,
 ) -> Arc<dyn Tool> {
-    Arc::new(PtyShellTool::new(access, provenance, redactor))
+    let tool = PtyShellTool::new(access, provenance, redactor);
+    if let Some(screens) = screens {
+        tool.offer_to(screens);
+    }
+    Arc::new(tool)
+}
+
+/// The sessions as the live view shows them. It holds the sessions only to read them: looking
+/// never counts as use (`last_used` stays), so a view cannot keep an idle session alive, and it
+/// has no way to type into one.
+struct TerminalView {
+    sessions: Arc<Sessions>,
+    redactor: Option<OutputRedactor>,
+}
+
+impl live_view::BotTerminalSource for TerminalView {
+    fn terminals(&self) -> Vec<live_view::BotTerminal> {
+        // The session handles are copied out so a screen is never rendered under the map lock.
+        let rows: Vec<_> = self
+            .sessions
+            .map
+            .lock()
+            .iter()
+            .map(|(id, e)| {
+                (
+                    id.clone(),
+                    e.owner.clone(),
+                    e.command.clone(),
+                    e.started.elapsed().as_secs(),
+                    Arc::clone(&e.session),
+                )
+            })
+            .collect();
+        rows.into_iter()
+            .map(|(id, owner, command, age_secs, session)| {
+                // The same four states the bot is told (`state_line`).
+                let (state, exit_code) = match session.state(SETTLE) {
+                    State::Running => (live_view::BotTerminalState::Running, None),
+                    State::WaitingForInput => (live_view::BotTerminalState::WaitingForInput, None),
+                    State::Exited(x) if x.killed => (live_view::BotTerminalState::Failed, None),
+                    State::Exited(x) if x.code == Some(0) => {
+                        (live_view::BotTerminalState::Finished, Some(0))
+                    }
+                    State::Exited(x) => (live_view::BotTerminalState::Failed, x.code),
+                };
+                let (cols, rows) = session.size();
+                live_view::BotTerminal {
+                    id,
+                    bot_id: owner.and_then(|o| o.parse().ok()),
+                    command,
+                    state,
+                    exit_code,
+                    cols,
+                    rows,
+                    age_secs,
+                    screen: mask_lines(self.redactor.as_ref(), &session.screen()),
+                }
+            })
+            .collect()
+    }
+}
+
+/// Mask the daemon's known secrets and the common key shapes.
+fn mask(redactor: Option<&OutputRedactor>, text: &str) -> String {
+    let known = redactor.map_or_else(|| text.to_owned(), |r| r(text));
+    pattern_redactor().redact(&known)
+}
+
+/// [`mask`] for several lines. A secret broken across a line break (by the program's own
+/// wrapping, or by a terminal only 20 columns wide) matches no pattern on either line, so the
+/// lines are also masked as the one line they were. When that finds more than the line-wise pass
+/// did, the joined, masked text is shown instead of the broken-up one.
+fn mask_lines(redactor: Option<&OutputRedactor>, text: &str) -> String {
+    let masked = mask(redactor, text);
+    if !text.contains('\n') {
+        return masked;
+    }
+    let joined = mask(redactor, &text.replace('\n', ""));
+    if masked.replace('\n', "") == joined {
+        return masked;
+    }
+    format!("[a secret ran across line breaks: the lines are shown joined]\n{joined}")
 }
 
 fn pattern_redactor() -> &'static secret_store::Redactor {
@@ -844,6 +929,11 @@ impl PtyShellTool {
         provenance: Option<Arc<dyn Provenance>>,
         redactor: Option<OutputRedactor>,
     ) -> Self {
+        let sessions = Arc::new(Sessions::new(LIMITS));
+        let view = Arc::new(TerminalView {
+            sessions: Arc::clone(&sessions),
+            redactor: redactor.clone(),
+        });
         Self {
             spec: spec(
                 "shell_interactive",
@@ -873,7 +963,8 @@ impl PtyShellTool {
                 Effect::Destructive,
                 PermissionCategory::Shell,
             ),
-            sessions: Arc::new(Sessions::new(LIMITS)),
+            sessions,
+            view,
             access,
             provenance,
             redactor,
@@ -881,29 +972,18 @@ impl PtyShellTool {
         }
     }
 
-    /// Mask the daemon's known secrets and the common key shapes.
     fn mask(&self, text: &str) -> String {
-        let known = self
-            .redactor
-            .as_ref()
-            .map_or_else(|| text.to_owned(), |r| r(text));
-        pattern_redactor().redact(&known)
+        mask(self.redactor.as_ref(), text)
     }
 
-    /// [`Self::mask`] for several lines. A secret broken across a line break (by the program's
-    /// own wrapping, or by a terminal only 20 columns wide) matches no pattern on either line, so
-    /// the lines are also masked as the one line they were. When that finds more than the
-    /// line-wise pass did, the joined, masked text is shown instead of the broken-up one.
     fn mask_lines(&self, text: &str) -> String {
-        let masked = self.mask(text);
-        if !text.contains('\n') {
-            return masked;
-        }
-        let joined = self.mask(&text.replace('\n', ""));
-        if masked.replace('\n', "") == joined {
-            return masked;
-        }
-        format!("[a secret ran across line breaks: the lines are shown joined]\n{joined}")
+        mask_lines(self.redactor.as_ref(), text)
+    }
+
+    /// List the sessions in the live view (weakly: dropping the tool still ends them).
+    fn offer_to(&self, registry: &live_view::TargetRegistry) {
+        let view: Arc<dyn live_view::BotTerminalSource> = self.view.clone();
+        registry.add_terminal_source(Arc::downgrade(&view));
     }
 
     fn answer(&self, id: &str, snap: &Snapshot) -> ToolOutput {
@@ -1864,7 +1944,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_input_is_validated_before_anything_runs() {
-        let t = tool(None, None, None);
+        let t = tool(None, None, None, None);
         let c = ToolContext::default();
         for bad in [
             json!({"action":"start"}),

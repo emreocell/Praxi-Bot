@@ -17,9 +17,11 @@ import type {
   ScreenStatus,
   SessionInfo,
   TargetInfo,
-  TargetUnavailable
+  TargetUnavailable,
+  BotTerminal
 } from "../api/types.ts";
 import { type ApiClient, ApiError } from "../api/client.ts";
+import { useBotTerminals } from "./useBotTerminals.ts";
 import { isMockMode } from "../api/mockMode.ts";
 import {
   applyControlStateDto,
@@ -114,6 +116,8 @@ interface LiveViewContextValue {
   targetsStatus: TargetsStatus;
   targetsError: string | null;
   availability: TargetUnavailable[];
+  /** The terminals the bot runs, as read-only text (see `lib/liveTerminals`); empty unless the viewer is open. */
+  terminals: BotTerminal[];
   panelAction: PanelActionHighlight | null;
   recoveryPrompt: RecoveryPrompt | null;
   openViewer: (targetId?: string) => void;
@@ -256,6 +260,7 @@ export function LiveViewProvider({
   const [viewerOpen, setViewerOpen] = useState<boolean>(() =>
     typeof initialOpen === "boolean" ? initialOpen : initialMockViewerOpen()
   );
+  const terminals = useBotTerminals(client, viewerOpen);
   const [cardDemand, setCardDemandState] = useState<{
     active: boolean;
     botId: string | null;
@@ -1352,6 +1357,7 @@ export function LiveViewProvider({
       targetsStatus,
       targetsError,
       availability,
+      terminals,
       panelAction,
       recoveryPrompt,
       openViewer,
@@ -1394,6 +1400,7 @@ export function LiveViewProvider({
       targetsStatus,
       targetsError,
       availability,
+      terminals,
       panelAction,
       recoveryPrompt,
       openViewer,

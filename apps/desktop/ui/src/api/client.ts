@@ -169,6 +169,7 @@ import type {
   TakeoverRequest,
   TargetInfo,
   TargetUnavailable,
+  BotTerminal,
   PeerLink,
   ScreenStatus,
   TerminalInfo,
@@ -1444,6 +1445,10 @@ export class ApiClient {
   /** Which kinds of screen this host cannot offer, and why. */
   listViewAvailability(): Promise<TargetUnavailable[]> {
     return this.request("GET", "/view/availability");
+  }
+  /** The terminals the bot runs, as masked read-only text (they have no window in the picture). */
+  listBotTerminals(signal?: AbortSignal): Promise<BotTerminal[]> {
+    return this.request("GET", "/view/bot-terminals", { signal });
   }
   /** Idle / starting / live / paused-idle / unavailable, and the host's idle limit. */
   peerLink(signal?: AbortSignal): Promise<PeerLink | null> {

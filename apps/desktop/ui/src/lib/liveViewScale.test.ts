@@ -228,3 +228,101 @@ test("mapping is the same in fit and zoom for the same remote point, and a drag 
     );
   }
 });
+
+const WINDOWS = [
+  { width: 320, height: 200 },
+  { width: 360, height: 640 },
+  { width: 640, height: 900 },
+  { width: 1000.4, height: 523.7 },
+  { width: 1366, height: 768 },
+  { width: 1920, height: 1080 },
+  { width: 2560, height: 1440 },
+  { width: 3440, height: 1000 }
+];
+const RATIOS = [1, 1.25, 1.5, 2, 3];
+const DISPLAYS = [
+  { remote: { width: 1280, height: 800 }, stream: { width: 960, height: 600 } },
+  { remote: { width: 1920, height: 1080 }, stream: { width: 1920, height: 1080 } },
+  { remote: { width: 2560, height: 1600 }, stream: { width: 1280, height: 800 } },
+  { remote: { width: 1024, height: 768 }, stream: { width: 1024, height: 768 } }
+];
+
+test("every remote pixel round-trips through the pointer mapping at every window size, DPR, zoom and display (#895)", () => {
+  const scales: ViewScale[] = [FIT_SCALE, ACTUAL_SCALE, { kind: "zoom", factor: 0.5 }, { kind: "zoom", factor: 2 }];
+  let checked = 0;
+  for (const display of DISPLAYS) {
+    const content = remoteSize({ ...display.stream, sourceRect: display.remote });
+    assert.ok(content);
+    for (const viewport of WINDOWS) {
+      for (const dpr of RATIOS) {
+        for (const scale of scales) {
+          const g = stageGeometry(scale, viewport, content, dpr);
+          assert.ok(g);
+          // The picture keeps the display's shape whatever the size or ratio.
+          near(g.width / g.height, display.remote.width / display.remote.height, 1e-9);
+          const origin = { x: 17, y: 53 };
+          const scroll = { x: g.scrolls ? 23.5 : 0, y: g.scrolls ? 11.25 : 0 };
+          const box = pictureBox(g, { ...origin, ...viewport }, scroll);
+          for (const [rx, ry] of [
+            [0, 0],
+            [display.remote.width, display.remote.height],
+            [display.remote.width / 2, display.remote.height / 2],
+            [1, display.remote.height - 1],
+            [display.remote.width - 1, 1]
+          ] as const) {
+            const clientX = box.left + (rx / display.remote.width) * box.width;
+            const clientY = box.top + (ry / display.remote.height) * box.height;
+            const p = mapClientPointToNormalized(clientX, clientY, box, display.stream.width, display.stream.height);
+            assert.ok(p, `${rx},${ry} on ${display.remote.width}x${display.remote.height} in ${viewport.width}x${viewport.height} @${dpr} ${JSON.stringify(scale)}`);
+            near(p.x * display.remote.width, rx, 1e-6);
+            near(p.y * display.remote.height, ry, 1e-6);
+            checked += 1;
+          }
+        }
+      }
+    }
+  }
+  assert.equal(checked, DISPLAYS.length * WINDOWS.length * RATIOS.length * scales.length * 5);
+});
+
+test("at 1:1 one device pixel of the pointer is one remote pixel, on a 1x, 1.5x and 2x display (#895)", () => {
+  const content = { width: 1280, height: 800 };
+  for (const dpr of [1, 1.5, 2]) {
+    const viewport = { x: 0, y: 0, width: 3000, height: 2000 };
+    const g = stageGeometry(ACTUAL_SCALE, viewport, content, dpr);
+    assert.ok(g);
+    near(g.width, 1280 / dpr);
+    const box = pictureBox(g, viewport);
+    // A pointer 100 device pixels (100 / dpr css px) right of and 40 below the picture corner.
+    const p = mapClientPointToNormalized(box.left + 100 / dpr, box.top + 40 / dpr, box, 960, 600);
+    assert.ok(p);
+    near(p.x * 1280, 100, 1e-6);
+    near(p.y * 800, 40, 1e-6);
+  }
+});
+
+test("after a resize fit re-fits the new area but a chosen zoom keeps its size (#895)", () => {
+  const content = { width: 1280, height: 800 };
+  const before = { width: 1400, height: 800 };
+  const after = { width: 700, height: 900 };
+  const fitBefore = stageGeometry(FIT_SCALE, before, content);
+  const fitAfter = stageGeometry(FIT_SCALE, after, content);
+  assert.deepEqual([fitBefore?.width, fitBefore?.height], [1280, 800]);
+  assert.deepEqual([fitAfter?.width, fitAfter?.height], [700, 437.5]);
+  for (const scale of [ACTUAL_SCALE, { kind: "zoom", factor: 2 } as ViewScale]) {
+    const a = stageGeometry(scale, before, content, 1);
+    const b = stageGeometry(scale, after, content, 1);
+    assert.deepEqual([a?.width, a?.height], [b?.width, b?.height]);
+    // Only whether it scrolls follows the window.
+    assert.equal(b?.scrolls, true);
+  }
+  assert.equal(stageGeometry(ACTUAL_SCALE, before, content, 1)?.scrolls, false);
+});
+
+test("a change of the device ratio resizes 1:1 but not fit, so the viewer must follow the ratio (#895)", () => {
+  const content = { width: 1280, height: 800 };
+  const area = { width: 1600, height: 1000 };
+  assert.equal(stageGeometry(ACTUAL_SCALE, area, content, 1)?.width, 1280);
+  assert.equal(stageGeometry(ACTUAL_SCALE, area, content, 2)?.width, 640);
+  assert.equal(stageGeometry(FIT_SCALE, area, content, 1)?.width, stageGeometry(FIT_SCALE, area, content, 2)?.width);
+});

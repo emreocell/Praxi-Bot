@@ -4994,6 +4994,19 @@
     },
     "targetLocked": "Finish control (“I'm done”) before switching the screen target.",
     "targetsLabel": "Target screen",
+    "terminals": {
+      "count": "{{alive}} of {{count}} running",
+      "list": "Terminals",
+      "readOnly": "View only. Nothing you press reaches a terminal.",
+      "screenLabel": "Terminal screen: {{command}}",
+      "state": {
+        "failed": "Failed (code {{code}})",
+        "finished": "Finished",
+        "running": "Running",
+        "waiting": "Waiting for input"
+      },
+      "title": "Terminals the bot runs"
+    },
     "title": "Computer live view",
     "toolbar": {
       "fitOff": "Fill the window",

@@ -4934,6 +4934,19 @@
     },
     "targetLocked": "Termina el control («Terminé») antes de cambiar la pantalla de destino.",
     "targetsLabel": "Pantalla de destino",
+    "terminals": {
+      "count": "{{alive}} of {{count}} running",
+      "list": "Terminals",
+      "readOnly": "View only. Nothing you press reaches a terminal.",
+      "screenLabel": "Terminal screen: {{command}}",
+      "state": {
+        "failed": "Failed (code {{code}})",
+        "finished": "Finished",
+        "running": "Running",
+        "waiting": "Waiting for input"
+      },
+      "title": "Terminals the bot runs"
+    },
     "title": "Vista en vivo del equipo",
     "toolbar": {
       "fitOff": "Llenar la ventana",

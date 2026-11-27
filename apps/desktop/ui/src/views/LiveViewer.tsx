@@ -15,6 +15,8 @@ import { Button } from "ui";
 import { PendingDecisions } from "../components/PendingDecisions";
 import { TargetPicker } from "../components/TargetPicker";
 import { LiveViewMenu } from "./LiveViewMenu";
+import { LiveTerminals } from "./LiveTerminals";
+import { terminalsForTarget } from "../lib/liveTerminals";
 import type { HumanAction, TargetInfo } from "../api/types";
 import {
   computeImageRect,
@@ -31,6 +33,7 @@ import {
   zoomPercent
 } from "../lib/liveViewScale";
 import { useOsFullscreen } from "../state/useOsFullscreen";
+import { useDevicePixelRatio } from "../state/useDevicePixelRatio";
 import {
   createStageController,
   wheelBelongsToRemote,
@@ -164,6 +167,7 @@ export function LiveViewer({
     streamFailure,
     targetsError,
     availability,
+    terminals,
     retryStream,
     viewerOpen,
     loadingTargets,
@@ -204,6 +208,9 @@ export function LiveViewer({
   const [fit, setFit] = useState<FitMode>("fit");
   // The screen always opens fitted whole; 1:1 and zoom are the owner's choice for this viewing only.
   const [scale, setScale] = useState<ViewScale>(FIT_SCALE);
+  const dpr = useDevicePixelRatio(viewerOpen);
+  const dprRef = useRef(dpr);
+  dprRef.current = dpr;
   const osFullscreen = useOsFullscreen(viewerOpen);
   const osFullscreenRef = useRef(osFullscreen);
   osFullscreenRef.current = osFullscreen;
@@ -344,7 +351,7 @@ export function LiveViewer({
   const contentRef = useRef(content);
   contentRef.current = content;
   const applyScale = useCallback((action: "fit" | "actual" | "in" | "out") => {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = dprRef.current;
     setScale((current) =>
       action === "fit"
         ? FIT_SCALE
@@ -628,7 +635,6 @@ export function LiveViewer({
   // "Desktop · This computer", not the internal id "local".
   const hostLabel = (hostId: string) => (hostId === "local" ? t("computerCard.thisComputer") : hostId);
 
-  const dpr = window.devicePixelRatio || 1;
   const geometry = stageGeometry(scale, area, content, dpr);
   // A zoomed picture larger than the area scrolls. While watching, the area takes the keyboard focus
   // so the arrow keys and Page Up/Down scroll it; while driving, every key belongs to the remote.
@@ -920,6 +926,7 @@ export function LiveViewer({
               )}
             </div>
             </div>
+            <LiveTerminals terminals={terminalsForTarget(terminals, selectedTarget)} />
             <div
               ref={focusBarRef}
               className={styles.focusSlot}

@@ -35,6 +35,9 @@ Frame viewers do not register as overlay controllers.
 ## HTTP and wire contract
 
 - `GET /v1/view/targets` lists registered opaque targets and capability reasons.
+- `GET /v1/view/bot-terminals` lists the terminal sessions the bot runs (`shell_interactive`) as masked
+  text: id, command, state, exit code, size and the current screen. Same `screen:view` rule as the
+  targets; read-only (there is no write route), so input still only travels through a takeover.
 - `POST /v1/view/sessions` creates a watch session. Maximum two per actor, four
   per daemon, and two distinct capture targets. Session TTL is 30 seconds.
 - `GET /v1/view/sessions/{id}/frames` requires

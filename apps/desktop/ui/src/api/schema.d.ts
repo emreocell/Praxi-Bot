@@ -4950,6 +4950,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/view/bot-terminals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The terminals the bot runs (`shell_interactive`) as masked text, so the live view can show
+         *     what a pseudo-terminal prints (it has no window to appear in the picture). Read-only: there is
+         *     no way to type into a terminal through this route. Same access rule as `GET /v1/view/targets`.
+         */
+        get: operations["terminals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/view/privileges/{peer_key}": {
         parameters: {
             query?: never;
@@ -5948,6 +5969,35 @@ export interface components {
             /** @description What each period has used. */
             usage: components["schemas"]["BotLimitUsageDto"];
         };
+        /**
+         * @description One terminal session as the live view shows it. `command` and `screen` are already masked
+         *     (the vault's values and key shapes), exactly as the bot sees them.
+         */
+        BotTerminal: {
+            /**
+             * Format: int64
+             * @description Seconds since the session started.
+             */
+            age_secs: number;
+            /** Format: uuid */
+            bot_id?: string | null;
+            /** Format: int32 */
+            cols: number;
+            command: string;
+            /** Format: int32 */
+            exit_code?: number | null;
+            id: string;
+            /** Format: int32 */
+            rows: number;
+            /** @description The whole screen right now, blank rows at the end trimmed. */
+            screen: string;
+            state: components["schemas"]["BotTerminalState"];
+        };
+        /**
+         * @description Where a terminal session stands (the same four words the tool tells the bot).
+         * @enum {string}
+         */
+        BotTerminalState: "running" | "waiting_for_input" | "finished" | "failed";
         /** @description Usage of one bot. */
         BotUsage: components["schemas"]["UsageTotals"] & {
             /**
@@ -24571,6 +24621,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TargetUnavailable"][];
+                };
+            };
+        };
+    };
+    terminals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotTerminal"][];
                 };
             };
         };

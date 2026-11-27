@@ -18365,6 +18365,35 @@
         ]
       }
     },
+    "/v1/view/bot-terminals": {
+      "get": {
+        "tags": [
+          "view"
+        ],
+        "summary": "The terminals the bot runs (`shell_interactive`) as masked text, so the live view can show\nwhat a pseudo-terminal prints (it has no window to appear in the picture). Read-only: there is\nno way to type into a terminal through this route. Same access rule as `GET /v1/view/targets`.",
+        "operationId": "terminals",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BotTerminal"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/view/privileges/{peer_key}": {
       "put": {
         "tags": [
@@ -21238,6 +21267,74 @@
             "description": "What each period has used."
           }
         }
+      },
+      "BotTerminal": {
+        "type": "object",
+        "description": "One terminal session as the live view shows it. `command` and `screen` are already masked\n(the vault's values and key shapes), exactly as the bot sees them.",
+        "required": [
+          "id",
+          "command",
+          "state",
+          "cols",
+          "rows",
+          "age_secs",
+          "screen"
+        ],
+        "properties": {
+          "age_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since the session started.",
+            "minimum": 0
+          },
+          "bot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "cols": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "command": {
+            "type": "string"
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "id": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "screen": {
+            "type": "string",
+            "description": "The whole screen right now, blank rows at the end trimmed."
+          },
+          "state": {
+            "$ref": "#/components/schemas/BotTerminalState"
+          }
+        }
+      },
+      "BotTerminalState": {
+        "type": "string",
+        "description": "Where a terminal session stands (the same four words the tool tells the bot).",
+        "enum": [
+          "running",
+          "waiting_for_input",
+          "finished",
+          "failed"
+        ]
       },
       "BotUsage": {
         "allOf": [

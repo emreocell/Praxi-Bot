@@ -443,3 +443,43 @@ async fn a_secret_printed_across_lines_is_masked_in_reads_and_on_the_screen() {
     assert!(!listed.contains("abcDEF0123456789"), "{listed}");
     call(&reg, json!({"action":"kill","session":&id})).await;
 }
+
+/// #894: the live view lists the bot's terminal sessions as masked text. Looking is read-only and
+/// does not count as use, and a killed session disappears.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_live_view_lists_terminal_sessions_as_masked_read_only_text() {
+    let data = tempfile::tempdir().unwrap();
+    let screens = Arc::new(live_view::TargetRegistry::default());
+    let reg = ToolRegistry::new();
+    let mut cfg = BuiltinConfig::new(data.path().to_path_buf(), Arc::new(AllowAll));
+    cfg.view_registry = Some(Arc::clone(&screens));
+    let _ = register_builtin_tools(&reg, cfg);
+    assert_eq!(screens.terminals().len(), 0);
+
+    let started = call(
+        &reg,
+        json!({"action":"start","command":fixture("login"),"wait_ms":15000}),
+    )
+    .await;
+    let id = session_of(&started);
+    read_until(&reg, &id, "Paste code").await;
+
+    let listed = screens.terminals();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    let shown = &listed[0];
+    assert_eq!(shown.id, id);
+    assert!(shown.screen.contains("AB12-CD34"), "{}", shown.screen);
+    assert!(
+        !shown.screen.contains("abcDEF0123456789"),
+        "secret leaked: {}",
+        shown.screen
+    );
+    assert!(matches!(
+        shown.state,
+        live_view::BotTerminalState::Running | live_view::BotTerminalState::WaitingForInput
+    ));
+    assert_eq!(shown.exit_code, None);
+
+    call(&reg, json!({"action":"kill","session":&id})).await;
+    assert_eq!(screens.terminals().len(), 0);
+}

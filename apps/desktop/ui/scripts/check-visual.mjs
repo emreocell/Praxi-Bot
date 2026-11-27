@@ -68,6 +68,10 @@ const SCREENS = [
   { name: 'popover-command', query: 'screen=empty', act: composerMenu('/') },
   { name: 'popover-mention', query: 'screen=empty', act: composerMenu('@') },
   { name: 'panel-overlay', query: 'panel=1', ready: '[data-shell-part="panel"][data-open="true"]' },
+  { name: 'live-terminals', query: 'lv=open&lvTerm=1', act: async (page) => {
+    await page.getByTestId('live-viewer-terminals').waitFor({ timeout: 30000 });
+    await page.locator('[data-testid="live-viewer-stage"] img').waitFor({ timeout: 30000 });
+  } },
   { name: 'live-hint-bar', query: 'lv=open', act: async (page) => {
     await page.getByTestId('live-view-takeover').waitFor({ timeout: 30000 });
     await page.getByTestId('live-view-takeover').click();

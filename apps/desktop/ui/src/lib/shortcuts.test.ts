@@ -22,6 +22,7 @@ const LOCAL_ONLY: Record<string, string> = {
   "lib/approvalKeys.ts": "Enter allows once / Esc denies the open approval of the approval dock (the dock shows the hint itself)",
   "lib/composerFocus.ts": "type-to-focus rule: a printable key outside any field focuses the composer (no shortcut)",
   "api/mockLiveView.ts": "mock backend, not a UI shortcut",
+  "views/LiveTerminals.tsx": "arrow keys on the terminal tabs (standard tab list keys)",
   "components/AccountMenu.tsx": "arrow keys inside the account menu (covered by popup menu rows)",
   "components/BotEditorFields.tsx": "Enter inside a single field",
   "components/BotPanel.tsx": "arrow keys on the panel tabs",

@@ -40,6 +40,7 @@ import type {
   McpServer,
   McpServerConfig,
   McpTool,
+  BotTerminal,
   Message,
   OwnSkill,
   PolicyDto,
@@ -799,6 +800,32 @@ const DOCTOR_CHECKS: DoctorCheck[] = [
  * An in-memory daemon: the typed client methods run unchanged against it, so
  * the UI and its tests exercise the real request paths.
  */
+/** Two terminals a bot has open (mock mode `?lvTerm=1`): one waiting for the owner, one that finished. */
+const MOCK_BOT_TERMINALS: BotTerminal[] = [
+  {
+    id: "mock-term-1",
+    bot_id: null,
+    command: "claude auth login",
+    state: "waiting_for_input",
+    exit_code: null,
+    cols: 120,
+    rows: 30,
+    age_secs: 12,
+    screen: "Open this link to sign in:\n  https://claude.example/device\nYour code: AB12-CD34\n\nPaste code here > "
+  },
+  {
+    id: "mock-term-2",
+    bot_id: null,
+    command: "npm install",
+    state: "finished",
+    exit_code: 0,
+    cols: 120,
+    rows: 30,
+    age_secs: 95,
+    screen: "added 212 packages in 14s\n\n38 packages are looking for funding\n  run `npm fund` for details"
+  }
+];
+
 export class MockApiClient extends ApiClient {
   private readonly incomingWebhooks = new Map<string, IncomingWebhook[]>();
   private readonly browserProfiles = new Map<string, BrowserProfileStatus>([
@@ -2879,6 +2906,11 @@ export class MockApiClient extends ApiClient {
     if (sub === "availability" && method === "GET") {
       const none = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("lv") === "nodisplay";
       return none ? [{ kind: "desktop", code: "no_display" }] : [];
+    }
+    if (sub === "bot-terminals" && method === "GET") {
+      // Review state (mock mode only): `?lvTerm=1` is a bot with two terminals open (#894).
+      const shown = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("lvTerm") === "1";
+      return shown ? MOCK_BOT_TERMINALS : [];
     }
     if (sub === "privileges" && method === "PUT" && id) {
       return undefined;

@@ -64,6 +64,7 @@ const screens = [
   { name: 'schedule-builder', expect: 'form', query: 'screen=schedules', act: [{ click: '[data-testid=schedules-empty-new], [data-testid=schedules-new]', optional: true }, { clickText: /new schedule/i, optional: true }] },
   { name: 'run-timeline', expect: '[role=dialog]', query: 'screen=changes', act: [{ click: '[data-testid=run-timeline]' }] },
   { name: 'live-viewer', expect: '[data-testid=live-viewer]', query: 'screen=chat&panel=1', act: [{ click: '[data-testid=bot-computer-show]' }, { click: '[data-testid=bot-computer-big]' }] },
+  { name: 'live-viewer-terminals', expect: '[data-testid=live-viewer-terminals]', query: 'screen=chat&panel=1&lvTerm=1', act: [{ click: '[data-testid=bot-computer-show]' }, { click: '[data-testid=bot-computer-big]' }] },
   { name: 'live-viewer-menu', expect: '[data-testid=live-viewer-tools]', query: 'screen=chat&panel=1', act: [{ click: '[data-testid=bot-computer-show]' }, { click: '[data-testid=bot-computer-big]' }, { click: '[data-testid=live-viewer-view]' }] },
   // Right-click menus (act: rightClick a selector); the keyboard pass skips them because Tab closes a menu.
   { name: 'context-menu-message', expect: '[role=menu][data-testid=context-menu]', skipRing: true, scope: '[data-testid=context-menu]', query: 'screen=chat', act: [{ rightClick: '[data-message-row=assistant]' }] },

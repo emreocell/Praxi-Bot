@@ -413,6 +413,7 @@ async fn all_routes_require_auth_host_origin_and_never_query_tokens() {
     for (method, path, body) in [
         (Method::GET, "/v1/view/targets".into(), None),
         (Method::GET, "/v1/view/availability".into(), None),
+        (Method::GET, "/v1/view/bot-terminals".into(), None),
         (Method::POST, "/v1/view/sessions".into(), Some(json!({}))),
         (Method::GET, format!("/v1/view/sessions/{id}/frames"), None),
         (
@@ -1336,6 +1337,82 @@ async fn availability_follows_the_target_list_access_rule_and_carries_a_code() {
             .0,
         StatusCode::FORBIDDEN
     );
+}
+
+struct FixedTerminals(Vec<live_view::BotTerminal>);
+
+impl live_view::BotTerminalSource for FixedTerminals {
+    fn terminals(&self) -> Vec<live_view::BotTerminal> {
+        self.0.clone()
+    }
+}
+
+/// #894: the bot's terminal sessions are listed (text only, already masked by their owner) under
+/// the target list's access rule, and the route has no way to write: only GET exists.
+#[tokio::test]
+async fn terminals_are_listed_read_only_under_the_screen_view_rule() {
+    let t = Test::new();
+    let (status, body) = t
+        .call(None, Method::GET, "/v1/view/bot-terminals", None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, json!([]));
+    let source: Arc<dyn live_view::BotTerminalSource> =
+        Arc::new(FixedTerminals(vec![live_view::BotTerminal {
+            id: "t1".into(),
+            bot_id: None,
+            command: "vibe --setup".into(),
+            state: live_view::BotTerminalState::WaitingForInput,
+            exit_code: None,
+            cols: 120,
+            rows: 30,
+            age_secs: 4,
+            screen: "Pick a provider:".into(),
+        }]));
+    t.state
+        .live_view()
+        .registry
+        .add_terminal_source(Arc::downgrade(&source));
+    let (status, body) = t
+        .call(None, Method::GET, "/v1/view/bot-terminals", None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body[0]["id"], "t1");
+    assert_eq!(body[0]["state"], "waiting_for_input");
+    assert_eq!(body[0]["screen"], "Pick a provider:");
+    assert_eq!(
+        t.call(Some("alice"), Method::GET, "/v1/view/bot-terminals", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    for method in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
+        let (status, _) = t
+            .call(
+                None,
+                method,
+                "/v1/view/bot-terminals",
+                Some(json!({"text":"x"})),
+            )
+            .await;
+        assert!(
+            status == StatusCode::METHOD_NOT_ALLOWED || status == StatusCode::NOT_FOUND,
+            "no write method on terminals: {status}"
+        );
+    }
+    t.auto_grant.store(false, Ordering::SeqCst);
+    assert_eq!(
+        t.call(Some("bob"), Method::GET, "/v1/view/bot-terminals", None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    // Once its owner is gone the list is empty again (the registry holds sources weakly).
+    drop(source);
+    let (_, body) = t
+        .call(None, Method::GET, "/v1/view/bot-terminals", None)
+        .await;
+    assert_eq!(body, json!([]));
 }
 
 #[tokio::test]

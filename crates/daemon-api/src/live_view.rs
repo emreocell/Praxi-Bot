@@ -480,6 +480,25 @@ pub(crate) async fn availability(
     s.live_view().registry.request_reprobe();
     Ok(Json(s.live_view().registry.unavailable()))
 }
+/// The terminals the bot runs (`shell_interactive`) as masked text, so the live view can show
+/// what a pseudo-terminal prints (it has no window to appear in the picture). Read-only: there is
+/// no way to type into a terminal through this route. Same access rule as `GET /v1/view/targets`.
+#[utoipa::path(get,path="/v1/view/bot-terminals",tag="view",security(("bearer"=[])),responses((status=200,body=Vec<live_view::BotTerminal>)))]
+pub(crate) async fn terminals(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+) -> Result<Json<Vec<live_view::BotTerminal>>, ApiError> {
+    if !s.live_view().allowed(&actor, false) {
+        audit(
+            &s,
+            &actor,
+            "view.denied",
+            serde_json::json!({"reason":"privilege"}),
+        )?;
+        return Err(ApiError::forbidden("screen:view denied"));
+    }
+    Ok(Json(s.live_view().registry.terminals()))
+}
 /// Where this viewer stands with the screen stream: idle (nothing runs), starting, live,
 /// paused by the idle limit, or unavailable (with a fixed reason code). Same access rule
 /// as `GET /v1/view/targets`; reading it never starts capture.

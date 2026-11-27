@@ -4934,6 +4934,19 @@
     },
     "targetLocked": "Beende die Kontrolle („Ich bin fertig“), bevor du das Bildschirmziel wechselst.",
     "targetsLabel": "Zielbildschirm",
+    "terminals": {
+      "count": "{{alive}} of {{count}} running",
+      "list": "Terminals",
+      "readOnly": "View only. Nothing you press reaches a terminal.",
+      "screenLabel": "Terminal screen: {{command}}",
+      "state": {
+        "failed": "Failed (code {{code}})",
+        "finished": "Finished",
+        "running": "Running",
+        "waiting": "Waiting for input"
+      },
+      "title": "Terminals the bot runs"
+    },
     "title": "Live-Ansicht des Computers",
     "toolbar": {
       "fitOff": "Fenster ausfüllen",

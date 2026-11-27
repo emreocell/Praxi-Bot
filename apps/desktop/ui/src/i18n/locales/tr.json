@@ -4994,6 +4994,19 @@
     },
     "targetLocked": "Ekran hedefini değiştirmeden önce kontrolü geri ver (Bitirdim).",
     "targetsLabel": "Hedef ekran",
+    "terminals": {
+      "count": "{{count}} terminalden {{alive}} tanesi çalışıyor",
+      "list": "Terminaller",
+      "readOnly": "Sadece izleme. Bastığın hiçbir tuş terminale ulaşmaz.",
+      "screenLabel": "Terminal ekranı: {{command}}",
+      "state": {
+        "failed": "Başarısız (kod {{code}})",
+        "finished": "Bitti",
+        "running": "Çalışıyor",
+        "waiting": "Giriş bekliyor"
+      },
+      "title": "Botun açtığı terminaller"
+    },
     "title": "Canlı ekran görünümü",
     "toolbar": {
       "fitOff": "Pencereyi doldur",

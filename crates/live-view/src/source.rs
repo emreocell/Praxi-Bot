@@ -141,6 +141,8 @@ pub struct TargetRegistry {
     reprobe: RwLock<Option<Hook>>,
     /// Runs when a bot is retired, so its owner can drop what it holds for it.
     bot_retired: RwLock<Vec<BotHook>>,
+    /// Owners of terminal sessions (see [`BotTerminalSource`]).
+    terminals: crate::terminal::BotTerminalSources,
 }
 impl Default for TargetRegistry {
     fn default() -> Self {
@@ -150,6 +152,7 @@ impl Default for TargetRegistry {
             changes: broadcast::channel(16).0,
             reprobe: RwLock::default(),
             bot_retired: RwLock::default(),
+            terminals: crate::terminal::BotTerminalSources::default(),
         }
     }
 }
@@ -200,6 +203,15 @@ impl TargetRegistry {
     #[must_use]
     pub fn unavailable(&self) -> Vec<TargetUnavailable> {
         self.unavailable.read().expect("registry poisoned").clone()
+    }
+    /// Offer the terminal sessions of a tool to the live view (held weakly).
+    pub fn add_terminal_source(&self, source: std::sync::Weak<dyn crate::BotTerminalSource>) {
+        self.terminals.add(source);
+    }
+    /// Every terminal session of every source, newest first. Text only, already masked.
+    #[must_use]
+    pub fn terminals(&self) -> Vec<crate::BotTerminal> {
+        self.terminals.list()
     }
     /// Offer a target. Any "cannot offer this kind of screen" note for the same
     /// kind and host is cleared in the same step, so a late success never

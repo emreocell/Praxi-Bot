@@ -379,6 +379,7 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         cfg.fs_access.clone(),
         cfg.provenance.clone(),
         cfg.output_redactor.clone(),
+        cfg.view_registry.as_deref(),
     ));
     all.push(script::tool_with_control(
         registry.clone(),
