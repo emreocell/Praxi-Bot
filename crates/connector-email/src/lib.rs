@@ -32,6 +32,7 @@ mod tls;
 pub mod tools;
 pub mod verify;
 pub mod wait;
+pub mod wait_store;
 
 use std::sync::Arc;
 
@@ -58,10 +59,11 @@ pub use provider::{
 pub use smtp::{CalendarPart, OutgoingMail};
 pub use tools::TOOL_NAMES;
 pub use wait::{
-    LinkBasis, MailHandle, PageOrigin, PageOriginSlot, TrackingResolver, WaitEnd, WaitFilter,
-    WaitOwner, WaitPlan, WaitProgress, Waiters, WebResolver, expand_tracking_links, found_json,
-    junk_folders, link_basis, timed_out_json, wait_for_mail,
+    LinkBasis, MailHandle, PageOrigin, PageOriginSlot, TrackingResolver, WaitBinding, WaitEnd,
+    WaitFilter, WaitOwner, WaitPlan, WaitProgress, Waiters, WebResolver, expand_tracking_links,
+    found_json, junk_folders, link_basis, timed_out_json, wait_for_mail,
 };
+pub use wait_store::WaitStore;
 
 /// Build the e-mail tools without registering them.
 #[must_use]

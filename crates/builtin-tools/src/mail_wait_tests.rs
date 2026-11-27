@@ -131,6 +131,7 @@ fn quick() -> WaitPlan {
     WaitPlan {
         timeout: Duration::from_millis(150),
         max_age: Duration::from_secs(900),
+        since: None,
         first_pause: Duration::from_millis(20),
         max_pause: Duration::from_millis(40),
     }
@@ -180,6 +181,25 @@ fn plan_is_capped_at_ten_minutes() {
     let p = WaitPlan::minutes(99, Some(999));
     assert_eq!(p.timeout, Duration::from_secs(600));
     assert_eq!(p.max_age, Duration::from_secs(3600));
+}
+
+#[test]
+fn only_a_plan_without_a_named_age_carries_the_start_watermark() {
+    let now = i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )
+    .unwrap();
+    let default = WaitPlan::minutes(5, None);
+    let since = default.since.expect("a watermark");
+    assert!(
+        (now - since - connector_email::wait::START_GRACE_SECS).abs() <= 2,
+        "{since} vs {now}"
+    );
+    // Naming an age asks for older mail on purpose.
+    assert_eq!(WaitPlan::minutes(5, Some(30)).since, None);
 }
 
 #[tokio::test]
@@ -478,7 +498,7 @@ async fn a_pending_wait_id_works_only_for_its_own_run_and_account() {
     .unwrap();
     assert_eq!(data(&out)["pending"], true);
 
-    // Stopping run b leaves run a's wait alone; a run that is over takes its waits with it.
+    // Stopping run b leaves run a's wait alone.
     crate::wait::cancel_run_waits("run-scope-b");
     let out = collect(
         "run-scope-a",
@@ -487,14 +507,199 @@ async fn a_pending_wait_id_works_only_for_its_own_run_and_account() {
     .await
     .unwrap();
     assert_eq!(data(&out)["pending"], true);
+    // A run that is over stops polling, but its wait is kept: the bot's next run takes it
+    // over by its id (for the same account only), and an owner Stop forgets it for good.
     crate::wait::end_run_mail_waits("run-scope-a");
     let e = collect(
-        "run-scope-a",
+        "run-scope-c",
+        json!({"account": "a-mail-2", "wait_id": id_a, "block_seconds": 1}),
+    )
+    .await
+    .unwrap_err();
+    assert!(e.to_string().contains("no such wait"), "{e}");
+    let out = collect(
+        "run-scope-c",
+        json!({"account": "a-mail", "wait_id": id_a, "block_seconds": 1}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(data(&out)["pending"], true);
+    assert_eq!(data(&out)["wait_id"], id_a.as_str());
+    crate::wait::cancel_run_waits("run-scope-c");
+    let e = collect(
+        "run-scope-d",
         json!({"account": "a-mail", "wait_id": id_a, "block_seconds": 1}),
     )
     .await
     .unwrap_err();
     assert!(e.to_string().contains("no such wait"), "{e}");
+}
+
+/// The browser moves on while the wait goes on.
+struct MovingPage(parking_lot::Mutex<Option<String>>);
+
+impl MovingPage {
+    fn on(origin: &str) -> Arc<Self> {
+        Arc::new(Self(parking_lot::Mutex::new(Some(origin.to_owned()))))
+    }
+    fn go(&self, origin: &str) {
+        *self.0.lock() = Some(origin.to_owned());
+    }
+}
+
+#[async_trait]
+impl PageOrigin for MovingPage {
+    async fn top_origin(&self, _: &ToolContext) -> Option<String> {
+        self.0.lock().clone()
+    }
+}
+
+/// An inbox the test fills while a wait is polling it.
+struct LiveInbox(Arc<parking_lot::Mutex<Vec<Value>>>);
+
+impl wiremock::Respond for LiveInbox {
+    fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+        let messages = self.0.lock().clone();
+        ResponseTemplate::new(200)
+            .set_body_json(json!({"count": messages.len(), "messages": messages}))
+    }
+}
+
+async fn live_inbox(inbox: &str) -> (Arc<MailHandle>, Arc<parking_lot::Mutex<Vec<Value>>>) {
+    let server = Box::leak(Box::new(MockServer::start().await));
+    let held = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let enc = inbox.replace('@', "%40");
+    Mock::given(method("GET"))
+        .and(path(format!("/v0/inboxes/{enc}/messages")))
+        .respond_with(LiveInbox(Arc::clone(&held)))
+        .mount(server)
+        .await;
+    let mail_json = verification_mail(inbox);
+    Mock::given(method("GET"))
+        .and(path(format!("/v0/inboxes/{enc}/messages/msgone")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mail_json))
+        .mount(server)
+        .await;
+    let mail = Arc::new(MailHandle::new());
+    mail.set(connector(
+        server,
+        vec![account("a-mail", Some(BOT_A), inbox)],
+    ));
+    (mail, held)
+}
+
+/// The model's word about the site must match the page the wait STARTED on, not the one the
+/// browser shows by the time the mail comes (the positive case is the next test).
+#[tokio::test]
+async fn a_claimed_site_that_is_not_the_start_page_verifies_nothing() {
+    let (mail, inbox) = live_inbox("a@agentmail.to").await;
+    let page = MovingPage::on("https://app.example.com:443");
+    let t = EmailWaitFor::new(
+        Arc::clone(&mail),
+        Arc::clone(&page) as Arc<dyn PageOrigin>,
+        Some(WaitPlan {
+            timeout: Duration::from_secs(600),
+            ..quick()
+        }),
+    );
+    let site_a = json!({"site": "https://example.com", "block_seconds": 1});
+    let out = t.call(&ctx(BOT_A, "r-site-a"), site_a).await.unwrap();
+    let wait_id = data(&out)["wait_id"].as_str().unwrap().to_owned();
+    // The bot goes on to site B; site A's mail arrives meanwhile.
+    page.go("https://other-site.test:443");
+    inbox.lock().push(verification_mail("a@agentmail.to"));
+    // Claiming another site than the one the wait started on verifies nothing.
+    let wrong = t
+        .call(
+            &ctx(BOT_A, "r-site-a"),
+            json!({"site": "https://other-site.test", "wait_id": wait_id, "block_seconds": 30}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(data(&wrong)["found"], true);
+    assert_eq!(data(&wrong)["followable_links"], json!([]));
+}
+
+/// The walkthrough's bug: the tool says "do other useful work", the bot opens site B, and site
+/// A's mail then found `followable_links: []` because the page was read when the mail came.
+/// Collected by id after the bot left, the links still belong to the site the form was
+/// submitted on.
+#[tokio::test]
+async fn collecting_by_id_after_moving_on_keeps_the_start_origin() {
+    let (mail, inbox) = live_inbox("a@agentmail.to").await;
+    let page = MovingPage::on("https://app.example.com:443");
+    let t = EmailWaitFor::new(
+        Arc::clone(&mail),
+        Arc::clone(&page) as Arc<dyn PageOrigin>,
+        Some(WaitPlan {
+            timeout: Duration::from_secs(600),
+            ..quick()
+        }),
+    );
+    let out = t
+        .call(
+            &ctx(BOT_A, "r-moves-on"),
+            json!({"site": "https://example.com", "block_seconds": 1}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(data(&out)["pending"], true);
+    let wait_id = data(&out)["wait_id"].as_str().unwrap().to_owned();
+    page.go("https://other-site.test:443");
+    inbox.lock().push(verification_mail("a@agentmail.to"));
+    let out = t
+        .call(
+            &ctx(BOT_A, "r-moves-on"),
+            json!({"site": "https://example.com", "wait_id": wait_id, "block_seconds": 30}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(data(&out)["found"], true, "{}", data(&out));
+    assert_eq!(
+        data(&out)["followable_links"],
+        json!(["https://app.example.com/verify?token=abc"])
+    );
+}
+
+/// The same, across a session boundary: the first run ends with the wait still pending, the next
+/// run (a new run id) collects it by id and gets the start origin and the mail.
+#[tokio::test]
+async fn a_wait_collected_by_the_next_run_still_knows_where_it_started() {
+    let (mail, inbox) = live_inbox("a@agentmail.to").await;
+    let page = MovingPage::on("https://app.example.com:443");
+    let t = EmailWaitFor::new(
+        Arc::clone(&mail),
+        Arc::clone(&page) as Arc<dyn PageOrigin>,
+        Some(WaitPlan {
+            timeout: Duration::from_secs(600),
+            ..quick()
+        }),
+    );
+    let out = t
+        .call(
+            &ctx(BOT_A, "session-1"),
+            json!({"site": "https://example.com", "block_seconds": 1}),
+        )
+        .await
+        .unwrap();
+    let wait_id = data(&out)["wait_id"].as_str().unwrap().to_owned();
+    // Session one hits its step limit; the browser tab is gone in the next one.
+    crate::wait::end_run_mail_waits("session-1");
+    *page.0.lock() = None;
+    inbox.lock().push(verification_mail("a@agentmail.to"));
+    let out = t
+        .call(
+            &ctx(BOT_A, "session-2"),
+            json!({"site": "https://example.com", "wait_id": wait_id, "block_seconds": 30}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(data(&out)["found"], true, "{}", data(&out));
+    assert_eq!(
+        data(&out)["followable_links"],
+        json!(["https://app.example.com/verify?token=abc"]),
+        "judged against the page session one started on"
+    );
 }
 
 /// A hop that never answers must not hold the call when the run is stopped.

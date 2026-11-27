@@ -194,6 +194,16 @@ pub(crate) fn cli_session_interrupted(history: &[RunStep]) -> bool {
     })
 }
 
+/// `email_wait_for` asked about an existing wait (`wait_id` given).
+fn is_wait_poll(name: &str, arguments: &str) -> bool {
+    name == builtin_tools::mail_wait::EMAIL_WAIT_FOR
+        && serde_json::from_str::<Value>(arguments).is_ok_and(|v| {
+            v.get("wait_id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.is_empty())
+        })
+}
+
 fn call_key(name: &str, args: &str) -> (String, Value) {
     let v = serde_json::from_str(args).unwrap_or_else(|_| Value::String(args.to_owned()));
     (name.to_owned(), v)
@@ -805,7 +815,14 @@ impl TurnExecutor {
         for c in &remaining[..take] {
             let key = call_key(&c.name, &c.arguments);
             let streak = 1 + seq.iter().rev().take_while(|k| **k == key).count();
-            let repeat = u32::try_from(streak).unwrap_or(u32::MAX);
+            // Collecting a background mail wait by its id is waiting, not looping: the same
+            // call is the right one until the mail comes (the wait itself ends after ten
+            // minutes, a run's total waiting is capped and the step limit still holds).
+            let repeat = if is_wait_poll(&c.name, &c.arguments) {
+                1
+            } else {
+                u32::try_from(streak).unwrap_or(u32::MAX)
+            };
             if repeat >= g.repeat_stop {
                 return Err(format!(
                     "repeat detected: tool {} called {repeat} times in a row with identical arguments",
@@ -2458,7 +2475,7 @@ impl TurnExecutor {
         if tool.spec().name == builtin_tools::mail_wait::EMAIL_WAIT_FOR
             && let Ok(Ok(out)) = &outcome
         {
-            note_mail_links(ctx, out);
+            note_mail_links(ctx, self.sh.storage.data_dir(), out);
         }
         let exposure = match &outcome {
             Ok(Ok(out)) => out.exposure.clone(),
@@ -2638,13 +2655,16 @@ fn fact_note(ctx: &RunCtx, fact: &taint::ExecFact) {
     fact.apply(&mut ctx.taint.lock());
 }
 
-/// Most followable links remembered per run.
-const MAX_MAIL_LINKS: usize = 20;
+/// Most followable links remembered per run (and kept per bot in the data directory).
+const MAX_MAIL_LINKS: usize = builtin_tools::connector_email::wait_store::MAX_LINKS_PER_BOT;
 
 /// Remember the links `email_wait_for` itself judged followable, from its own
 /// structured result (a JSON part the tool built; mail text only ever sits in
-/// string values below other keys). Only https links are kept.
-fn note_mail_links(ctx: &RunCtx, out: &ToolOutput) {
+/// string values below other keys). Only https links are kept. They are also
+/// written to the data directory under the bot, so the next session of a mission
+/// (a new run) can still open them.
+fn note_mail_links(ctx: &RunCtx, data_dir: &std::path::Path, out: &ToolOutput) {
+    let mut fresh = Vec::new();
     for part in &out.content {
         let ContentPart::Json { data } = part else {
             continue;
@@ -2654,10 +2674,16 @@ fn note_mail_links(ctx: &RunCtx, out: &ToolOutput) {
         };
         let mut known = ctx.mail_links.lock();
         for link in links.iter().filter_map(Value::as_str) {
-            if link.starts_with("https://") && known.len() < MAX_MAIL_LINKS {
-                known.insert(link.to_owned());
+            if link.starts_with("https://")
+                && known.len() < MAX_MAIL_LINKS
+                && known.insert(link.to_owned())
+            {
+                fresh.push(link.to_owned());
             }
         }
+    }
+    if let Some(bot) = ctx.bot_id_for_links() {
+        builtin_tools::connector_email::WaitStore::shared(data_dir).put_links(Some(&bot), &fresh);
     }
 }
 

@@ -935,10 +935,12 @@ pub(crate) struct RunCtx {
     /// browser itself; `None`: unknown, so the action stays once-only). Set by the loop right
     /// before the decision and handed to the tool as `expected_origin`.
     pub page_origin: Mutex<Option<String>>,
-    /// Links `email_wait_for` returned as followable in this run (https, on the
-    /// sign-up site or an owner-listed domain). Written only by the loop from
-    /// that tool's own structured result, never from model text. In memory, per
-    /// run; not copied to a sub-agent.
+    /// Links `email_wait_for` returned as followable (https, on the sign-up site
+    /// or an owner-listed domain). Written only by the loop from that tool's own
+    /// structured result, never from model text. A root run starts with the ones
+    /// its bot was given in the last day (they are kept in the data directory:
+    /// a mission's next session still holds the link of the mail the last one
+    /// read); a sub-agent starts with none.
     pub mail_links: Mutex<HashSet<String>>,
     /// Approval calls (tool + card summary) of this mission session whose card expired and
     /// parked the item: the same call is refused without a new card. In memory, per run.
@@ -988,6 +990,13 @@ pub(crate) fn control_kind_of(name: &str) -> Option<tool_registry::ControlKind> 
 }
 
 impl RunCtx {
+    /// The bot id its followable mail links are kept under; a sub-agent keeps none.
+    pub(crate) fn bot_id_for_links(&self) -> Option<String> {
+        self.parent_run_id
+            .is_none()
+            .then(|| self.bot_id.to_string())
+    }
+
     /// Own per-run state key for tools that keep any (the browser tab): a subagent
     /// run is its own lane, a top-level run shares the bot's default.
     pub(crate) fn lane(&self) -> Option<String> {
@@ -2005,6 +2014,19 @@ impl Shared {
         }
     }
 
+    /// The followable mail links this bot was given recently (a root run only): what
+    /// an earlier session of the same bot read from a verification mail.
+    fn remembered_mail_links(&self, run: &Run) -> HashSet<String> {
+        if run.parent_run_id.is_some() {
+            return HashSet::new();
+        }
+        builtin_tools::connector_email::WaitStore::shared(self.storage.data_dir())
+            .links(Some(&run.bot_id.to_string()))
+            .into_iter()
+            .filter(|l| l.starts_with("https://"))
+            .collect()
+    }
+
     /// Exposure a run starts with: the parent's (subagents), what its own
     /// history already holds, and the provenance of the chat messages that
     /// enter its context.
@@ -2238,7 +2260,7 @@ impl Shared {
             control_grants: Mutex::new(Vec::new()),
             tool_grants: Mutex::new(Vec::new()),
             page_origin: Mutex::new(None),
-            mail_links: Mutex::new(HashSet::new()),
+            mail_links: Mutex::new(self.remembered_mail_links(run)),
             parked_calls: Mutex::new(HashSet::new()),
         });
         Ok(Arc::clone(self.runs.lock().entry(run.id).or_insert(ctx)))

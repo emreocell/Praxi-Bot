@@ -410,6 +410,7 @@ pub fn build_builtin_tools(cfg: BuiltinConfig, registry: &ToolRegistry) -> Vec<A
         Arc::clone(&mail),
         page_origin,
         cfg.web.as_ref().map(|w| Arc::clone(&w.policy)),
+        Some(&cfg.data_dir),
     ));
     if let Some(web) = cfg.web.clone() {
         match web_tools::tools(web) {

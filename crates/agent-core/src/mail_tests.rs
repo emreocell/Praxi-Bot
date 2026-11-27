@@ -71,9 +71,14 @@ struct WaitFake {
 }
 
 fn wait_fake() -> Arc<WaitFake> {
+    mail_fake(builtin_tools::mail_wait::EMAIL_WAIT_FOR)
+}
+
+/// A mail tool of the bot's own inbox named `name` that answers with structured JSON.
+fn mail_fake(name: &str) -> Arc<WaitFake> {
     Arc::new(WaitFake {
         spec: ToolSpec {
-            name: builtin_tools::mail_wait::EMAIL_WAIT_FOR.into(),
+            name: name.into(),
             description: "wait for mail".into(),
             input_schema: json!({"type": "object"}),
             effect: Effect::Read,
@@ -336,6 +341,7 @@ fn mail_wait_tool(bot: BotId) -> Arc<dyn Tool> {
         handle,
         Arc::new(builtin_tools::connector_email::PageOriginSlot::new()),
         None,
+        None,
     )
 }
 
@@ -358,9 +364,11 @@ async fn collect_in_run(
 }
 
 /// A run that ends leaves nobody to collect its background waits: their polling stops and their
-/// slots are free again. (The wait here keeps polling for several seconds if nothing ends it.)
+/// slots are free again, but the wait itself is kept, so the bot's NEXT run (the next mission
+/// session) takes it over with the same id. (The wait here keeps polling for several seconds
+/// if nothing ends it.)
 #[tokio::test]
-async fn a_background_mail_wait_ends_with_its_run() {
+async fn a_background_mail_wait_outlives_its_run_for_the_bots_next_run() {
     let env = setup();
     let wait = mail_wait_tool(env.bot);
     let fake = Fake::new(vec![
@@ -380,14 +388,48 @@ async fn a_background_mail_wait_ends_with_its_run() {
     assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
 
     let id = wait_id_in(&crate::tests::tool_messages(&fake.request(1))[0]);
-    let e = collect_in_run(&wait, env.bot, run, &id).await.unwrap_err();
+    // The next session is a run of its own: it finds the wait by the id the last one noted.
+    let next = protocol::RunId::new();
+    let again = collect_in_run(&wait, env.bot, next, &id).await.unwrap();
+    assert!(format!("{again:?}").contains("pending"), "{again:?}");
+    assert!(format!("{again:?}").contains(&id), "{again:?}");
+    // Another bot has no such wait.
+    assert!(
+        collect_in_run(&wait, BotId::new(), next, &id)
+            .await
+            .is_err()
+    );
+}
+
+/// Only the owner's Stop forgets a wait for good: nothing is left for a later run.
+#[tokio::test]
+async fn stopping_a_run_forgets_its_mail_waits_for_good() {
+    let env = setup();
+    let wait = mail_wait_tool(env.bot);
+    let run = protocol::RunId::new();
+    let out = wait
+        .call(
+            &ToolContext {
+                bot_id: Some(env.bot.to_string()),
+                run_id: run.to_string(),
+                ..ToolContext::default()
+            },
+            json!({"block_seconds": 1}),
+        )
+        .await
+        .unwrap();
+    let id = wait_id_in(&format!("{out:?}"));
+    builtin_tools::wait::cancel_run_waits(&run.to_string());
+    let e = collect_in_run(&wait, env.bot, protocol::RunId::new(), &id)
+        .await
+        .unwrap_err();
     assert!(e.to_string().contains("no such wait"), "{e}");
 }
 
-/// A run parked for an approval when the daemon shuts down is paused; its waits go with it
-/// (no polling task outlives the loop).
+/// A run parked for an approval when the daemon shuts down is paused; its polling goes with it
+/// (no polling task outlives the loop) and the wait waits for the bot's next run.
 #[tokio::test]
-async fn shutdown_ends_the_background_mail_waits_of_the_runs_it_pauses() {
+async fn shutdown_ends_the_polling_of_the_runs_it_pauses_and_keeps_their_waits() {
     let env = setup();
     let wait = mail_wait_tool(env.bot);
     let write = Arc::new(crate::tests::tool("t.write", Effect::Write, "w"));
@@ -414,6 +456,134 @@ async fn shutdown_ends_the_background_mail_waits_of_the_runs_it_pauses() {
 
     let paused = lp.shutdown(std::time::Duration::from_secs(30)).await;
     assert_eq!(paused, vec![run]);
-    let e = collect_in_run(&wait, env.bot, run, &id).await.unwrap_err();
-    assert!(e.to_string().contains("no such wait"), "{e}");
+    // The old run's task is gone; its wait is carried on by whichever run asks next.
+    let after = collect_in_run(&wait, env.bot, protocol::RunId::new(), &id)
+        .await
+        .unwrap();
+    assert!(format!("{after:?}").contains("pending"), "{after:?}");
+}
+
+// ---- Many sites: polling is not looping, and links outlive a session --------------------------
+
+/// Asking for the same wait again and again with its id is waiting. A stand-in tool with the
+/// real name answers at once, so only the loop guard decides.
+#[tokio::test]
+async fn polling_a_mail_wait_by_id_is_not_a_repeat_loop() {
+    let polls = |args: Value, n: usize| {
+        let mut script: Vec<_> = (0..n)
+            .map(|i| calls(&[(&format!("c{i}"), "email_wait_for", args.clone())]))
+            .collect();
+        script.push(text("done"));
+        script
+    };
+    // With a wait id: seven identical calls in a row all run (repeat_stop is 5).
+    let env = setup();
+    let poll = Arc::new(crate::tests::tool(
+        "email_wait_for",
+        Effect::Read,
+        "pending",
+    ));
+    let fake = Fake::new(polls(json!({"wait_id": "mw-abc", "block_seconds": 1}), 7));
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&poll)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "wait for the mail").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(!lp.stopped_by_guard(run).unwrap());
+    assert_eq!(poll.count.load(Ordering::SeqCst), 7);
+    // Without one it is an ordinary repeat and stops as before.
+    let env = setup();
+    let poll = Arc::new(crate::tests::tool(
+        "email_wait_for",
+        Effect::Read,
+        "pending",
+    ));
+    let fake = Fake::new(polls(json!({"block_seconds": 1}), 7));
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&poll)],
+        profile(""),
+        cfg(Policy::full()),
+    );
+    let run = lp.run_turn(env.chat, "wait for the mail").unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert!(lp.stopped_by_guard(run).unwrap());
+    assert_eq!(poll.count.load(Ordering::SeqCst), 4);
+}
+
+/// The first thing that asks in a SECOND session: read a page, open the link the first
+/// session's mail gave, open another link. With the first session's wait noted, only the
+/// other link asks.
+async fn second_session_first_ask(first_session_read_the_mail: bool) -> Value {
+    let env = setup();
+    let bot = env.bot.to_string();
+    let conn = connector(vec![account(
+        "bot-mail",
+        Some(bot),
+        "me@agentmail.to",
+        SendMode::Ask,
+    )]);
+    // What the bot reads before it opens anything: a page, and its own mail as structured
+    // data (a run that holds private data and read untrusted text is the one whose link opens
+    // would ask).
+    let page = page_tool();
+    let inbox = mail_fake("email_read");
+    let (open, wait) = (open_tool(), wait_fake());
+    let mut script = Vec::new();
+    if first_session_read_the_mail {
+        script.push(calls(&[("a1", "fs_read", json!({"path": "page.html"}))]));
+        script.push(calls(&[("a2", "email_wait_for", json!({}))]));
+        script.push(text("noted"));
+    }
+    script.push(calls(&[("c1", "fs_read", json!({"path": "page.html"}))]));
+    script.push(calls(&[("c1b", "email_read", json!({}))]));
+    script.push(calls(&[("c2", "browser_open", json!({"url": GOOD}))]));
+    script.push(calls(&[("c3", "browser_open", json!({"url": EVIL}))]));
+    script.push(text("done"));
+    let fake = Fake::new(script);
+    let lp = make_loop(
+        &env.storage,
+        env.bot,
+        &fake,
+        &[t(&page), t(&open)],
+        profile(FULL),
+        cfg(Policy::full()),
+    );
+    lp.tool_registry()
+        .register(Arc::clone(&wait) as Arc<dyn Tool>);
+    lp.tool_registry()
+        .register(Arc::clone(&inbox) as Arc<dyn Tool>);
+    lp.mail_handle().set(conn);
+    if first_session_read_the_mail {
+        let mut rx = lp.subscribe();
+        lp.send_user_message_from(env.chat, "sign up", crate::MessageMode::Steer, "owner")
+            .unwrap();
+        until(&mut rx, |e| matches!(e, Event::RunFinished(_))).await;
+    }
+    let mut rx = lp.subscribe();
+    lp.send_user_message_from(env.chat, "go on", crate::MessageMode::Steer, "owner")
+        .unwrap();
+    match until(&mut rx, |e| {
+        matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+    })
+    .await
+    {
+        Event::ApprovalNeeded(a) => a.input,
+        other => panic!("expected a card, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn the_link_a_mail_gave_stays_followable_in_the_bots_next_session() {
+    // Control: no earlier session read a mail, so the very first link asks.
+    assert_eq!(second_session_first_ask(false).await["url"], GOOD);
+    // After a session that did, that link opens without a card; the other one still asks.
+    assert_eq!(second_session_first_ask(true).await["url"], EVIL);
 }

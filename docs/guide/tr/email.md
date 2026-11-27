@@ -235,9 +235,14 @@ bot böyle bir blok almaz ve başka bir botun adresini asla görmez.
    Durdur anında iptal eder). Botun verdiği süzgeçler (gönderen alan adı, konu, anahtar sözcük),
    gelen kutusunun döndürdüğü şeye uygulamanın içinde uygulanır: botun yazdığı hiçbir şey posta
    sunucusuna gönderilmez. Yanıt kısadır ve güvenilmeyen diye etiketlenir: gönderen, konu, zaman,
-   tek kullanımlık kodlar ve bağlantılar.
-3. Bir bağlantı, yalnızca `https` ise, içinde kullanıcı adı ya da IP adresi yoksa ve tarayıcının
-   gerçekten bulunduğu sayfayla aynı kayıtlı alan adındaysa (tarayıcıdan sorulur, sayfadan ya da
+   tek kullanımlık kodlar ve bağlantılar. Bekleme, başladığı anda tarayıcının bulunduğu sayfaya
+   bağlıdır; bu yüzden bot beklerken bir sonraki siteye geçebilir. Çalışma bitse bile bekleme saklanır
+   (uzun bir iş oturumlara bölünür) ve botun sonraki oturumu onu yeniden alır. Yalnızca bekleme
+   başlamadan kısa süre öncesinden gelen postalar sayılır; bir sitenin beklemesine verilmiş posta
+   başka bir sitenin beklemesine verilmez, böylece tek gelen kutusuyla çok sayıda kayıt yapan bot
+   postaları karıştırmaz.
+3. Bir bağlantı, yalnızca `https` ise, içinde kullanıcı adı ya da IP adresi yoksa ve bekleme
+   başladığında tarayıcının gerçekten bulunduğu sayfayla aynı kayıtlı alan adındaysa (tarayıcıdan sorulur, sayfadan ya da
    modelden değil) ya da Ayarlar > Posta ve web > Güvenli gönderim bölümünde listelediğin bir alan
    adındaysa (“Doğrulama e-postasının bağlantı verebileceği ek siteler”) **izlenebilir** olarak
    döndürülür. Diğer her bağlantı yalnızca ana makine adıyla “dış bağlantı, izlenmedi” diye listelenir.

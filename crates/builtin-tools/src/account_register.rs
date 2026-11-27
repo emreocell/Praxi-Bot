@@ -41,7 +41,10 @@ pub const ACCOUNT_LIST: &str = "account_list";
 pub const ACCOUNT_DISCARD: &str = "account_discard";
 
 const SHOWN_CAP: usize = 80;
-const LIST_CAP: usize = 50;
+/// Accounts `account_list` shows by default.
+const LIST_DEFAULT: usize = 50;
+/// Most accounts one `account_list` call shows; more are reached with `offset`.
+const LIST_MAX: usize = 200;
 
 /// Owner-changeable defaults of `account_register`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -330,14 +333,41 @@ struct AccountList {
     secrets: Arc<FillSecrets>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListIn {
+    #[serde(default)]
+    domain: Option<String>,
+    #[serde(default)]
+    offset: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+/// Registrable domain of a user-typed site or domain (`example.com`,
+/// `www.example.com`, `https://example.com/x`).
+fn filter_domain(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let url = if raw.contains("://") {
+        raw.to_owned()
+    } else {
+        format!("https://{raw}")
+    };
+    connector_email::verify::site_domain(&url)
+}
+
 /// The `account_list` tool: this bot's site accounts, never a password.
 #[must_use]
 pub fn account_list_tool(secrets: Arc<FillSecrets>) -> Arc<dyn Tool> {
     Arc::new(AccountList {
         spec: spec(
             ACCOUNT_LIST,
-            "List the website accounts you have: site, login, the secret name to pass to browser_fill `secret`, and whether you or the owner created it. You never see a password. Example: {}",
-            json!({"type":"object","properties":{}}),
+            "List your website accounts: site, login, secret name for browser_fill, who made it. You never see a password. `domain` (example.com) shows whether you already signed up on a site; long lists are paged with `offset`.",
+            json!({"type":"object","additionalProperties":false,"properties":{
+                "domain":{"type":"string","description":"Only this site (subdomains count)."},
+                "offset":{"type":"integer","minimum":0},
+                "limit":{"type":"integer","minimum":1,"maximum":LIST_MAX,"description":"Default 50."}
+            }}),
             Effect::Read,
             PermissionCategory::Meta,
         ),
@@ -351,12 +381,13 @@ impl Tool for AccountList {
         &self.spec
     }
 
-    async fn call(&self, ctx: &ToolContext, _input: Value) -> Result<ToolOutput, ToolError> {
+    async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        let i: ListIn = parse(input)?;
         // No bot id: show nothing rather than every bot's accounts.
         let Some(bot) = ctx.bot_id.as_deref() else {
             return Ok(ToolOutput::text("You have no website accounts."));
         };
-        let list = self
+        let mut list = self
             .secrets
             .accounts(Some(bot))
             .map_err(|e| ToolError::Execution(e.to_string()))?;
@@ -365,8 +396,52 @@ impl Tool for AccountList {
                 "You have no website accounts yet. `account_register` can create one.",
             ));
         }
-        let mut out = String::from("Your website accounts (passwords are never shown):\n");
-        for a in list.iter().take(LIST_CAP) {
+        let limit = i.limit.unwrap_or(LIST_DEFAULT);
+        if !(1..=LIST_MAX).contains(&limit) {
+            return Err(ToolError::InvalidInput(format!(
+                "`limit` must be between 1 and {LIST_MAX}"
+            )));
+        }
+        let wanted = match i.domain.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+            Some(d) => Some(filter_domain(d).ok_or_else(|| {
+                ToolError::InvalidInput(
+                    "`domain` must be a site like example.com (a name with at least two labels)"
+                        .into(),
+                )
+            })?),
+            None => None,
+        };
+        if let Some(domain) = &wanted {
+            list.retain(|a| filter_domain(&a.site).as_deref() == Some(domain));
+            if list.is_empty() {
+                return Ok(ToolOutput::text(format!(
+                    "You have no website account on {} yet.",
+                    plain(domain, SHOWN_CAP)
+                )));
+            }
+        }
+        let total = list.len();
+        let offset = i.offset.unwrap_or(0);
+        if offset >= total {
+            return Ok(ToolOutput::text(format!(
+                "No accounts at offset {offset}: you have {total}."
+            )));
+        }
+        let end = total.min(offset.saturating_add(limit));
+        let mut out = match &wanted {
+            Some(d) => format!(
+                "Your website accounts on {} (passwords are never shown), {}-{} of {total}:\n",
+                plain(d, SHOWN_CAP),
+                offset + 1,
+                end
+            ),
+            None => format!(
+                "Your website accounts (passwords are never shown), {}-{} of {total}:\n",
+                offset + 1,
+                end
+            ),
+        };
+        for a in &list[offset..end] {
             let _ = writeln!(
                 out,
                 "- {}: site {}, login {}, created by {}{}{}",
@@ -387,8 +462,8 @@ impl Tool for AccountList {
                 },
             );
         }
-        if list.len() > LIST_CAP {
-            let _ = writeln!(out, "... and {} more", list.len() - LIST_CAP);
+        if end < total {
+            let _ = writeln!(out, "... {} more; next offset: {end}", total - end);
         }
         Ok(ToolOutput::text(out))
     }
@@ -656,6 +731,88 @@ mod tests {
         // Typing it once marks it used (the discard card then warns).
         secrets.mark_used(name).unwrap();
         assert!(!secrets.accounts(None).unwrap()[0].unused);
+    }
+
+    fn text_of(out: &ToolOutput) -> String {
+        format!("{out:?}")
+    }
+
+    /// With hundreds of sign-ups the list is paged past its first screen, and a
+    /// domain filter answers "did I already register on this site?" at once.
+    #[tokio::test]
+    async fn the_account_list_pages_past_fifty_and_filters_by_domain() {
+        let (secrets, _) = rig();
+        let reg = account_register_tool(Arc::clone(&secrets), AccountRegisterConfig::default());
+        let c = ctx(Some("bot-aaaa-1111"));
+        for n in 0..120 {
+            let site = format!("https://site{n}.example{}.com", n % 7);
+            reg.call(&c, json!({"site": site, "login_id": "me@example.org"}))
+                .await
+                .unwrap();
+        }
+        reg.call(
+            &c,
+            json!({"site": "https://www.backlinks.net", "login_id": "me@example.org"}),
+        )
+        .await
+        .unwrap();
+        let list = account_list_tool(Arc::clone(&secrets));
+        // The first screen says how much there is and where to continue.
+        let first = text_of(&list.call(&c, json!({})).await.unwrap());
+        assert!(first.contains("1-50 of 121"), "{first}");
+        assert!(first.contains("next offset: 50"), "{first}");
+        // The last page is reachable and has no continuation.
+        let tail_page = text_of(&list.call(&c, json!({"offset": 100})).await.unwrap());
+        assert!(tail_page.contains("101-121 of 121"), "{tail_page}");
+        assert!(!tail_page.contains("next offset"), "{tail_page}");
+        assert!(
+            text_of(&list.call(&c, json!({"offset": 500})).await.unwrap()).contains("you have 121")
+        );
+        // A page larger than the default, and one that is refused.
+        let big = text_of(&list.call(&c, json!({"limit": 200})).await.unwrap());
+        assert!(big.contains("1-121 of 121"), "{big}");
+        assert!(list.call(&c, json!({"limit": 201})).await.is_err());
+        // Domain filter: subdomains count, a full URL works, an unknown site is said so.
+        let by_domain = text_of(
+            &list
+                .call(&c, json!({"domain": "https://www.BACKLINKS.net/path"}))
+                .await
+                .unwrap(),
+        );
+        assert!(by_domain.contains("1-1 of 1"), "{by_domain}");
+        assert!(
+            by_domain.contains("https://www.backlinks.net"),
+            "{by_domain}"
+        );
+        let seven = text_of(
+            &list
+                .call(&c, json!({"domain": "example3.com"}))
+                .await
+                .unwrap(),
+        );
+        assert!(seven.contains("of 17"), "{seven}");
+        assert!(seven.contains("site3.example3.com"), "{seven}");
+        assert!(!seven.contains("backlinks.net"), "{seven}");
+        let none = text_of(
+            &list
+                .call(&c, json!({"domain": "nowhere.org"}))
+                .await
+                .unwrap(),
+        );
+        assert!(none.contains("no website account on nowhere.org"), "{none}");
+        assert!(list.call(&c, json!({"domain": "nodots"})).await.is_err());
+        // Another bot still sees nothing of this.
+        let other = text_of(
+            &list
+                .call(
+                    &ctx(Some("bot-bbbb-2222")),
+                    json!({"domain": "backlinks.net"}),
+                )
+                .await
+                .unwrap(),
+        );
+        assert!(!other.contains("backlinks.net/"), "{other}");
+        assert!(!other.contains("www.backlinks.net"), "{other}");
     }
 
     #[test]

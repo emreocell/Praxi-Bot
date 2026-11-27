@@ -142,6 +142,9 @@ pub struct SearchQuery {
     /// API mailboxes hide spam and unauthenticated mail unless asked; `true`
     /// includes it. IMAP accounts have the spam folder to name instead.
     pub include_junk: Option<bool>,
+    /// API mailboxes: the `next_page_token` of an earlier search, for the page after
+    /// it (a search returns at most 100 messages). IMAP accounts have no pages.
+    pub page_token: Option<String>,
 }
 
 /// Quote a string as an IMAP quoted string.

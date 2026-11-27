@@ -245,7 +245,8 @@ fn specs() -> Vec<(Kind, ToolSpec)> {
             spec(
                 SEARCH,
                 "Search a folder by sender, subject, body text, date range and read state; newest first. \
-                 Returns uid (or message id), subject, from, date and unread flag per message. \
+                 Returns uid (or message id), subject, from, date and unread flag per message; \
+                 API mailboxes list received mail only and give a `next_page_token` while more pages exist. \
                  A verification mail from an unknown site is often filed as junk: search the junk folder \
                  (see email_list_folders) or pass include_junk for API mailboxes. \
                  Example: {\"folder\":\"INBOX\",\"from\":\"boss@example.com\",\"unread\":true,\"since\":\"2026-11-01\"}",
@@ -259,6 +260,7 @@ fn specs() -> Vec<(Kind, ToolSpec)> {
                     "since":{"type":"string","description":"YYYY-MM-DD, inclusive."},
                     "before":{"type":"string","description":"YYYY-MM-DD, exclusive."},
                     "unread":{"type":"boolean","description":"true = unread only, false = read only."},
+                    "page_token":{"type":"string","description":"API mailboxes: the `next_page_token` of the previous answer, for the next page (a page is at most 100 messages; mail you sent is not listed)."},
                     "limit":{"type":"integer","minimum":1,"maximum":MAX_LIMIT,"description":"Default 20."}
                 }}),
                 Effect::Read,
@@ -1014,6 +1016,7 @@ impl Tool for EmailTool {
                         "own_addresses": c.identities().into_iter().map(|(a,_)|a.address).collect::<Vec<_>>(),
                         "total_matches": r.total,
                         "returned": r.messages.len(),
+                        "next_page_token": r.next_page_token,
                         "messages": r.messages,
                     }),
                 ))

@@ -15,7 +15,7 @@ use crate::fake_imap::{
 };
 use crate::testutil::{Protocol, server};
 use crate::wait::{
-    TrackingResolver, WaitEnd, WaitFilter, WaitOwner, WaitPlan, WaitProgress, Waiters,
+    TrackingResolver, WaitBinding, WaitEnd, WaitFilter, WaitOwner, WaitPlan, WaitProgress, Waiters,
     expand_tracking_links, found_json, junk_folders, link_basis, wait_for_mail,
 };
 use crate::{EmailConnector, FolderInfo};
@@ -62,6 +62,7 @@ fn quick() -> WaitPlan {
     WaitPlan {
         timeout: Duration::from_secs(4),
         max_age: Duration::from_secs(900),
+        since: None,
         first_pause: Duration::from_millis(40),
         max_pause: Duration::from_millis(80),
     }
@@ -430,9 +431,16 @@ async fn a_background_wait_is_pending_then_collected_once_and_never_blocks_long(
     let waiters = Waiters::new();
     let filter = WaitFilter::new(Some("site.test"), None, None).unwrap();
     let mine = owner("run-1", "own");
-    let id = waiters.start(&conn, mine, &filter, &patient()).unwrap();
+    let id = waiters
+        .start(&conn, mine, &filter, &patient(), WaitBinding::default())
+        .unwrap();
     // The same wait started again by the same run joins the one still polling.
-    assert_eq!(waiters.start(&conn, mine, &filter, &patient()).unwrap(), id);
+    assert_eq!(
+        waiters
+            .start(&conn, mine, &filter, &patient(), WaitBinding::default())
+            .unwrap(),
+        id
+    );
     // Another bot cannot collect it.
     let other_bot = WaitOwner {
         bot: Some("someone-else"),
@@ -486,7 +494,9 @@ async fn stopping_a_run_ends_its_background_waits() {
     let waiters = Waiters::new();
     let filter = WaitFilter::new(Some("site.test"), None, None).unwrap();
     let mine = owner("run-9", "own");
-    let id = waiters.start(&conn, mine, &filter, &quick()).unwrap();
+    let id = waiters
+        .start(&conn, mine, &filter, &quick(), WaitBinding::default())
+        .unwrap();
     waiters.cancel_tagged("run-9");
     assert!(matches!(
         waiters
@@ -504,10 +514,18 @@ async fn a_wait_belongs_to_the_run_that_started_it() {
     let waiters = Waiters::new();
     let filter = WaitFilter::new(Some("site.test"), None, None).unwrap();
     let (chat, scheduled) = (owner("run-chat", "own"), owner("run-sched", "own"));
-    let first = waiters.start(&conn, chat, &filter, &patient()).unwrap();
+    let first = waiters
+        .start(&conn, chat, &filter, &patient(), WaitBinding::default())
+        .unwrap();
     // The identical ask from another run is a wait of its own, not a join.
     let second = waiters
-        .start(&conn, scheduled, &filter, &patient())
+        .start(
+            &conn,
+            scheduled,
+            &filter,
+            &patient(),
+            WaitBinding::default(),
+        )
         .unwrap();
     assert_ne!(first, second);
     // It cannot read the other run's id...
@@ -555,7 +573,13 @@ async fn a_wait_is_collected_only_for_its_own_account() {
     let waiters = Waiters::new();
     let filter = WaitFilter::new(Some("site.test"), None, None).unwrap();
     let id = waiters
-        .start(&conn, owner("run-1", "own"), &filter, &patient())
+        .start(
+            &conn,
+            owner("run-1", "own"),
+            &filter,
+            &patient(),
+            WaitBinding::default(),
+        )
         .unwrap();
     assert!(matches!(
         waiters
@@ -592,7 +616,9 @@ async fn a_finished_wait_is_not_joined_by_a_new_ask() {
     );
     let filter = WaitFilter::new(Some("site.test"), None, None).unwrap();
     let mine = owner("run-1", "own");
-    let old = waiters.start(&conn, mine, &filter, &patient()).unwrap();
+    let old = waiters
+        .start(&conn, mine, &filter, &patient(), WaitBinding::default())
+        .unwrap();
     // Let it find the mail already there, and leave the answer uncollected.
     tokio::time::timeout(Duration::from_secs(60), async {
         while !waiters.is_finished(&old) {
@@ -601,7 +627,9 @@ async fn a_finished_wait_is_not_joined_by_a_new_ask() {
     })
     .await
     .expect("the wait finishes");
-    let fresh = waiters.start(&conn, mine, &filter, &patient()).unwrap();
+    let fresh = waiters
+        .start(&conn, mine, &filter, &patient(), WaitBinding::default())
+        .unwrap();
     assert_ne!(old, fresh, "a finished wait is never reused");
 }
 
@@ -616,6 +644,7 @@ async fn wait_ids_cannot_be_guessed() {
             owner("run-1", "own"),
             &WaitFilter::new(Some("a.test"), None, None).unwrap(),
             &quick(),
+            WaitBinding::default(),
         )
         .unwrap();
     let b = waiters
@@ -624,6 +653,7 @@ async fn wait_ids_cannot_be_guessed() {
             owner("run-1", "own"),
             &WaitFilter::new(Some("b.test"), None, None).unwrap(),
             &quick(),
+            WaitBinding::default(),
         )
         .unwrap();
     assert_ne!(a, b);
@@ -1209,4 +1239,309 @@ async fn an_unreadable_secret_never_forwards_the_stores_own_words() {
         "the reference must not be echoed: {text}"
     );
     assert!(text.contains("Settings"), "the fix hint stays: {text}");
+}
+
+// ---- Verification mails across many sites -----------------------------------------------------
+
+fn now_unix() -> i64 {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )
+    .unwrap()
+}
+
+/// The start watermark: mail that arrived long before the wait is an earlier sign-up's, even
+/// when it is younger than `max_age`; mail from just before the call (the form was submitted a
+/// moment ago) still counts.
+#[tokio::test]
+async fn a_wait_ignores_mail_from_before_it_started() {
+    let (imap, conn) = rig().await;
+    imap.deliver(
+        "INBOX",
+        html_mail(
+            "Site <no-reply@site.test>",
+            "Verify site A",
+            "old@site.test",
+            &date_ago(600),
+            "<p>Your code is 111111.</p>",
+        ),
+    );
+    let scoped = conn.scoped(Some(BOT));
+    let filter = WaitFilter::new(Some("site.test"), None, None).unwrap();
+    let plan = WaitPlan {
+        timeout: Duration::from_millis(300),
+        since: Some(now_unix() - 180),
+        ..quick()
+    };
+    let end = wait_for_mail(&scoped, Some("own"), &filter, &plan, std::future::pending())
+        .await
+        .unwrap();
+    assert!(
+        matches!(end, WaitEnd::TimedOut { .. }),
+        "ten minutes old is not this wait's mail: {end:?}"
+    );
+    // Without the watermark (the caller named a max_age) the same mail counts.
+    let end = wait_for_mail(
+        &scoped,
+        Some("own"),
+        &filter,
+        &WaitPlan {
+            since: None,
+            ..plan
+        },
+        std::future::pending(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(end, WaitEnd::Found(_)), "{end:?}");
+    // Mail from a minute before the call is inside the grace.
+    imap.deliver(
+        "INBOX",
+        html_mail(
+            "Site <no-reply@site.test>",
+            "Verify site B",
+            "recent@site.test",
+            &date_ago(60),
+            "<p>Your code is 222222.</p>",
+        ),
+    );
+    let end = wait_for_mail(&scoped, Some("own"), &filter, &plan, std::future::pending())
+        .await
+        .unwrap();
+    let WaitEnd::Found(d) = end else {
+        panic!("the recent mail counts")
+    };
+    assert_eq!(d.summary.subject, "Verify site B");
+}
+
+/// One bot, one inbox, two sites, a filter that cannot tell them apart: the mail one site's
+/// wait was handed is not handed to the other's, and the first may still ask for it again.
+#[tokio::test]
+async fn mail_handed_to_one_sites_wait_is_not_handed_to_the_next_sites() {
+    let (imap, conn) = rig().await;
+    let waiters = Waiters::new();
+    imap.deliver(
+        "INBOX",
+        verification("Site <no-reply@site-a.test>", "a@site-a.test"),
+    );
+    let none = WaitFilter::default();
+    let on = |origin| WaitBinding {
+        origin: Some(origin),
+        site: None,
+    };
+    let mine = owner("run-1", "own");
+    let a = waiters
+        .start(
+            &conn,
+            mine,
+            &none,
+            &patient(),
+            on("https://site-a.test:443"),
+        )
+        .unwrap();
+    assert!(matches!(
+        collect(&waiters, &a, mine).await,
+        WaitProgress::Finished(WaitEnd::Found(_))
+    ));
+    // Site B signs up next. Its own mail comes a moment later; A's mail is still in the inbox.
+    let b = waiters
+        .start(
+            &conn,
+            mine,
+            &none,
+            &patient(),
+            on("https://site-b.test:443"),
+        )
+        .unwrap();
+    assert_ne!(a, b);
+    // B has looked at the inbox once (A's mail was the only thing in it) and is still waiting.
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            match waiters
+                .progress(&b, mine, Duration::from_millis(100), std::future::pending())
+                .await
+            {
+                WaitProgress::Pending { polls, .. } if polls >= 2 => break,
+                WaitProgress::Pending { .. } => {}
+                other => panic!("A's mail must not end B's wait: {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("B polls");
+    imap.deliver(
+        "INBOX",
+        verification("Site <no-reply@site-b.test>", "b@site-b.test"),
+    );
+    let WaitProgress::Finished(WaitEnd::Found(d)) = collect(&waiters, &b, mine).await else {
+        panic!("B's mail is found")
+    };
+    assert_eq!(d.summary.from_addr, "no-reply@site-b.test");
+    // A asks again (the model lost the answer): its own mail is still its own.
+    let again = waiters
+        .start(
+            &conn,
+            mine,
+            &none,
+            &patient(),
+            on("https://site-a.test:443"),
+        )
+        .unwrap();
+    let WaitProgress::Finished(WaitEnd::Found(d)) = collect(&waiters, &again, mine).await else {
+        panic!("A may ask for its mail again")
+    };
+    assert_eq!(d.summary.from_addr, "no-reply@site-a.test");
+}
+
+/// The wait remembers the page it started on, not where the browser is later.
+#[tokio::test]
+async fn a_wait_keeps_the_origin_it_started_on() {
+    let (_imap, conn) = rig().await;
+    let waiters = Waiters::new();
+    let mine = owner("run-1", "own");
+    let filter = WaitFilter::new(Some("site.test"), None, None).unwrap();
+    let id = waiters
+        .start(
+            &conn,
+            mine,
+            &filter,
+            &patient(),
+            WaitBinding {
+                origin: Some("https://site-a.test:443"),
+                site: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        waiters.origin_of(&id, mine),
+        Some(Some("https://site-a.test:443".to_owned()))
+    );
+    // Not for anyone else.
+    let other = WaitOwner {
+        bot: Some("someone-else"),
+        ..mine
+    };
+    assert_eq!(waiters.origin_of(&id, other), None);
+    assert_eq!(waiters.origin_of("mw-nope", mine), None);
+}
+
+/// A wait outlives the session that started it: the next run takes it over by the same ask for
+/// the same site, or by its id, with the start watermark and origin it began with, and mail that
+/// arrived in between is found. A different site, bot or an owner Stop gets nothing.
+#[tokio::test]
+async fn a_wait_survives_the_end_of_its_run() {
+    let (imap, conn) = rig().await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = crate::WaitStore::shared(dir.path());
+    let first_session = Waiters::with_store(Arc::clone(&store));
+    let filter = WaitFilter::new(Some("site.test"), None, None).unwrap();
+    let plan = WaitPlan {
+        since: Some(now_unix() - 180),
+        ..patient()
+    };
+    let started_on = WaitBinding {
+        origin: Some("https://app.site.test:443"),
+        site: None,
+    };
+    let id = first_session
+        .start(&conn, owner("run-1", "own"), &filter, &plan, started_on)
+        .unwrap();
+    // The 40-step session ends; its polling stops.
+    first_session.cancel_tagged("run-1");
+    drop(first_session);
+    // The mail arrives while nobody is polling.
+    imap.deliver(
+        "INBOX",
+        verification("Site <no-reply@site.test>", "between@site.test"),
+    );
+
+    // A second process-like instance over the same file: the next mission session.
+    let second_session = Waiters::with_store(crate::WaitStore::shared(dir.path()));
+    let next = owner("run-2", "own");
+    // Another site's ask is not this wait.
+    let elsewhere = second_session
+        .start(
+            &conn,
+            next,
+            &filter,
+            &plan,
+            WaitBinding {
+                origin: Some("https://other.test:443"),
+                site: None,
+            },
+        )
+        .unwrap();
+    assert_ne!(elsewhere, id);
+    second_session.cancel_tagged("run-2");
+    // The same ask for the same site, the new session's browser being on no page: taken over.
+    let resumed = second_session
+        .start(
+            &conn,
+            next,
+            &filter,
+            &plan,
+            WaitBinding {
+                origin: None,
+                site: Some("https://site.test"),
+            },
+        )
+        .unwrap();
+    assert_eq!(resumed, id, "the same wait carries on");
+    assert_eq!(
+        second_session.origin_of(&id, next),
+        Some(Some("https://app.site.test:443".to_owned())),
+        "it keeps the page it started on"
+    );
+    assert!(matches!(
+        collect(&second_session, &id, next).await,
+        WaitProgress::Finished(WaitEnd::Found(_))
+    ));
+    // Collected: gone for good.
+    let third = Waiters::with_store(crate::WaitStore::shared(dir.path()));
+    third.resume(&conn, owner("run-3", "own"), &id);
+    assert_eq!(third.origin_of(&id, owner("run-3", "own")), None);
+}
+
+#[tokio::test]
+async fn a_wait_is_taken_over_by_its_id_only_for_its_own_bot_and_account_until_stopped() {
+    let (_imap, conn) = rig().await;
+    let dir = tempfile::tempdir().unwrap();
+    let first = Waiters::with_store(crate::WaitStore::shared(dir.path()));
+    let filter = WaitFilter::new(Some("site.test"), None, None).unwrap();
+    let id = first
+        .start(
+            &conn,
+            owner("run-1", "own"),
+            &filter,
+            &patient(),
+            WaitBinding::default(),
+        )
+        .unwrap();
+    first.cancel_tagged("run-1");
+    let next = Waiters::with_store(crate::WaitStore::shared(dir.path()));
+    // Another bot, or another account, cannot take it.
+    for stranger in [
+        WaitOwner {
+            bot: Some("someone-else"),
+            run: "run-2",
+            account: "own",
+        },
+        WaitOwner {
+            account: "other-account",
+            ..owner("run-2", "own")
+        },
+    ] {
+        next.resume(&conn, stranger, &id);
+        assert_eq!(next.origin_of(&id, stranger), None);
+    }
+    // Its bot can, and a Stop of that run forgets it for the run after.
+    next.resume(&conn, owner("run-2", "own"), &id);
+    assert!(next.origin_of(&id, owner("run-2", "own")).is_some());
+    next.stop_tagged("run-2");
+    let last = Waiters::with_store(crate::WaitStore::shared(dir.path()));
+    last.resume(&conn, owner("run-3", "own"), &id);
+    assert_eq!(last.origin_of(&id, owner("run-3", "own")), None);
 }
