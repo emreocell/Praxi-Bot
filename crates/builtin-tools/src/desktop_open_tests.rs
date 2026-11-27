@@ -125,7 +125,9 @@ async fn a_page_of_the_workspace_opens_in_the_system_opener_or_in_the_named_brow
         said.starts_with("opened kralinho.html with the default application"),
         "{said}"
     );
+    // The tool hands the opener the plain path: no verbatim prefix on Windows.
     let full = rig.ws.join("kralinho.html").to_string_lossy().into_owned();
+    let full = full.strip_prefix(r"\\?\").unwrap_or(&full).to_owned();
     assert_eq!(rig.started(), [("xdg-open".to_owned(), vec![full.clone()])]);
     let said = rig
         .call(json!({"path": "kralinho.html", "with": "firefox"}))

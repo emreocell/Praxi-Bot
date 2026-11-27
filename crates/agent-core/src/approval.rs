@@ -524,14 +524,15 @@ impl Shared {
             && Self::opens_in_owners_browser(name, input)
             && !self.owner_typed_url(ctx, name, input)
         {
-            return (
-                if decision == Decision::Allow {
+            return Decided {
+                decision: if decision == Decision::Allow {
                     Decision::ask()
                 } else {
                     decision
                 },
-                None,
-            );
+                reason: None,
+                grant: None,
+            };
         }
         // The Full level: the one place a plain ask becomes an allow for every call except the
         // ones that spend money. It sits after every deny, floor and workflow taint above.
