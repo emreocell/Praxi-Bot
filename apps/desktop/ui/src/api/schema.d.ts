@@ -1619,7 +1619,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Write a finished voice conversation into a chat as ordinary text messages (no run starts). */
+        /**
+         * Write a finished voice conversation into a chat as ordinary text messages (no run starts).
+         * @description `user` lines are what the owner said into their own microphone in their own session
+         *     (speech-to-text), so they stay the owner's words. `assistant` lines are the voice model's
+         *     output, which can repeat what the bot fetched from the web or an e-mail, so they are stored as
+         *     untrusted content (source `gemini-live`): a later run that reads this chat is treated as having
+         *     seen untrusted text and asks before it acts on it.
+         */
         post: operations["save_transcript"];
         delete?: never;
         options?: never;

@@ -7319,6 +7319,7 @@
           "chats"
         ],
         "summary": "Write a finished voice conversation into a chat as ordinary text messages (no run starts).",
+        "description": "`user` lines are what the owner said into their own microphone in their own session\n(speech-to-text), so they stay the owner's words. `assistant` lines are the voice model's\noutput, which can repeat what the bot fetched from the web or an e-mail, so they are stored as\nuntrusted content (source `gemini-live`): a later run that reads this chat is treated as having\nseen untrusted text and asks before it acts on it.",
         "operationId": "save_transcript",
         "parameters": [
           {
