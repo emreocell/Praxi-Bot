@@ -396,6 +396,8 @@ struct Inner {
     mission_store: OnceLock<Arc<missions::MissionStore>>,
     /// The running mission supervisor (leader components only).
     missions: parking_lot::Mutex<Option<mission_host::MissionRuntime>>,
+    /// Clock and pacing of missions when the embedder replaced the real ones (the evals).
+    mission_timing: OnceLock<mission_host::MissionTiming>,
     leader: OnceLock<host::LeaderControl>,
     /// Embedder additions to `/v1/doctor` (see [`AppState::set_doctor_host`]).
     doctor_host: OnceLock<Arc<dyn DoctorHost>>,
@@ -596,6 +598,7 @@ impl AppState {
             scheduler: parking_lot::Mutex::new(None),
             mission_store: OnceLock::new(),
             missions: parking_lot::Mutex::new(None),
+            mission_timing: OnceLock::new(),
             leader: OnceLock::new(),
             doctor_host: OnceLock::new(),
             doctor_runs: Arc::new(tokio::sync::Semaphore::new(1)),

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use agent_core::{AgentLoop, LoopError};
 use async_trait::async_trait;
 use missions::supervisor::{
-    SessionEnd, SessionRequest, SessionResult, SessionRunner, Supervisor, SupervisorConfig,
+    Clock, SessionEnd, SessionRequest, SessionResult, SessionRunner, Supervisor, SupervisorConfig,
     SystemClock,
 };
 use missions::{DB_FILE, Mission, MissionStore};
@@ -187,6 +187,12 @@ impl SessionRunner for AgentSessionRunner {
     }
 }
 
+/// A clock and a pacing that replace the real ones (see [`AppState::set_mission_timing`]).
+pub(crate) struct MissionTiming {
+    clock: Arc<dyn Clock>,
+    pacing: SupervisorConfig,
+}
+
 /// The running supervisor of this daemon.
 pub(crate) struct MissionRuntime {
     pub(crate) supervisor: Arc<Supervisor>,
@@ -202,6 +208,20 @@ impl MissionRuntime {
 }
 
 impl AppState {
+    /// Run missions on `clock` and at `pacing` instead of the wall clock and the default pauses.
+    /// Only for an embedder that must not wait in real time (the evals drive the whole daemon on a
+    /// manual clock); call it before [`Self::enable_missions`]. The first call wins.
+    pub fn set_mission_timing(&self, clock: Arc<dyn Clock>, pacing: SupervisorConfig) {
+        let _ = self.0.mission_timing.set(MissionTiming { clock, pacing });
+    }
+
+    fn mission_clock(&self) -> Arc<dyn Clock> {
+        self.0.mission_timing.get().map_or_else(
+            || Arc::new(SystemClock) as Arc<dyn Clock>,
+            |t| Arc::clone(&t.clock),
+        )
+    }
+
     /// Open `<data dir>/missions.db`, give the agent loop the `mission_*` tools and keep the
     /// store for the routes and the supervisor. [`serve`](crate::serve)'s embedder calls this
     /// once after [`AppState::new`]; without it `/v1/missions` answers `503`.
@@ -210,7 +230,7 @@ impl AppState {
     /// The ledger cannot be opened.
     pub fn enable_missions(&self) -> Result<usize, missions::MissionError> {
         let store = Arc::new(MissionStore::open(self.data_dir().join(DB_FILE))?);
-        let clock: Arc<dyn missions::supervisor::Clock> = Arc::new(SystemClock);
+        let clock = self.mission_clock();
         let checks: Arc<dyn missions::wake::WakeChecks> = Arc::new(DaemonWakeChecks {
             storage: self.storage_arc(),
             mail: self.0.agent.mail_handle(),
@@ -254,13 +274,16 @@ impl AppState {
             AgentSessionRunner::new(self.0.agent.clone(), self.storage_arc())
                 .with_notices(self.downgrade()),
         );
-        let supervisor = Arc::new(Supervisor::new(
-            store,
-            runner,
-            Arc::new(SystemClock),
-            SupervisorConfig::default(),
-            token.clone(),
-        ));
+        let (clock, pacing) = self.0.mission_timing.get().map_or_else(
+            || {
+                (
+                    Arc::new(SystemClock) as Arc<dyn Clock>,
+                    SupervisorConfig::default(),
+                )
+            },
+            |t| (Arc::clone(&t.clock), t.pacing.clone()),
+        );
+        let supervisor = Arc::new(Supervisor::new(store, runner, clock, pacing, token.clone()));
         supervisor.set_mail_probe(Arc::new(OwnInboxProbe {
             mail: self.0.agent.mail_handle(),
         }));
