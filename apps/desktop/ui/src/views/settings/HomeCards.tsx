@@ -1,18 +1,22 @@
 import { Check, Copy, Info, Server } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { AdminCliEngine, AdminCliInstall, AdminState } from "../../api/types";
+import type { AdminCliEngine, AdminCliEnvironment, AdminCliInstall, AdminState } from "../../api/types";
 import { humanError } from "../../lib/humanError";
 import { useDaemon } from "../../state/DaemonContext";
 import { useActiveHost } from "../../state/useActiveHost";
 import { RunOnServer } from "../../components/RunOnServer";
-import { engineStatus } from "../../lib/serverSignIn";
+import { engineStatus, stepCommand } from "../../lib/serverSignIn";
 import { ServerSignInModal } from "../../components/ServerSignInModal";
 import { DetectedAccountsBlock } from "./DetectedAccountsBlock";
 import styles from "./AiPage.module.css";
 
-/** A command to run on the server, one click to copy. */
-export function CopyBlock({ text }: { text: string }) {
+/**
+ * A command to run on the server, one click to copy. `inApp` is what the in-app terminal gets
+ * when it differs: that terminal already runs as the service user, so it must not receive the
+ * `sudo ...` form a person logged in over SSH needs.
+ */
+export function CopyBlock({ text, inApp }: { text: string; inApp?: string }) {
   const { t } = useTranslation();
   const [done, setDone] = useState(false);
   return (
@@ -34,7 +38,7 @@ export function CopyBlock({ text }: { text: string }) {
         {done ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
         {done ? t("errors.copied") : t("home.copy")}
       </button>
-      <RunOnServer command={text} className={styles.textBtn} />
+      <RunOnServer command={inApp ?? text} className={styles.textBtn} />
     </span>
   );
 }
@@ -45,6 +49,8 @@ function useHostAdmin() {
   const onHome = active.isHost;
   const [state, setState] = useState<AdminState | null>(null);
   const [engines, setEngines] = useState<AdminCliEngine[] | null>(null);
+  // Older hosts have no such answer: the lines that name the user are then simply left out.
+  const [environment, setEnvironment] = useState<AdminCliEnvironment | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((n) => n + 1), []);
@@ -61,11 +67,15 @@ function useHostAdmin() {
       (s) => live && setEngines(s),
       () => live && setEngines([])
     );
+    client.adminCliEnvironment().then(
+      (e) => live && setEnvironment(e),
+      () => live && setEnvironment(null)
+    );
     return () => {
       live = false;
     };
   }, [onHome, client, tick]);
-  return { onHome, name: active.name, state, engines, problem, reload };
+  return { onHome, name: active.name, state, engines, environment, problem, reload };
 }
 
 /**
@@ -110,7 +120,15 @@ export function HostAdminNote() {
  * for copying; where the owner's desktop may administer the server a button runs it THERE. A row
  * never shows an empty command: without a verified installer it points to the official page.
  */
-export function EngineSetup({ engine, onChanged }: { engine: AdminCliEngine; onChanged?: () => void }) {
+export function EngineSetup({
+  engine,
+  environment,
+  onChanged
+}: {
+  engine: AdminCliEngine;
+  environment?: AdminCliEnvironment | null;
+  onChanged?: () => void;
+}) {
   const { t } = useTranslation();
   const { client } = useDaemon();
   const serverName = useActiveHost().name || t("computerPicker.host");
@@ -153,8 +171,10 @@ export function EngineSetup({ engine, onChanged }: { engine: AdminCliEngine; onC
         <>
           {engine.install_command ? (
             <>
-              <span className={styles.sub}>{t("home.engines.runOnServer")}</span>
-              <CopyBlock text={engine.install_command} />
+              <span className={styles.sub}>
+                {environment?.user ? t("home.engines.runAsUser", { user: environment.user }) : t("home.engines.runOnServer")}
+              </span>
+              <CopyBlock text={stepCommand(environment, "install", engine)} inApp={engine.install_command} />
             </>
           ) : (
             <a className={styles.sub} href={engine.docs_url} target="_blank" rel="noreferrer" data-testid={`engine-docs-${engine.id}`}>
@@ -208,8 +228,10 @@ export function EngineSetup({ engine, onChanged }: { engine: AdminCliEngine; onC
               {installing ? t("home.engines.installing") : t("home.engines.reinstall")}
             </button>
           ) : null}
-          <span className={styles.sub}>{t("home.engines.signIn")}</span>
-          <CopyBlock text={engine.login} />
+          <span className={styles.sub}>
+            {environment?.user ? t("home.engines.signInAsUser", { user: environment.user }) : t("home.engines.signIn")}
+          </span>
+          <CopyBlock text={stepCommand(environment, "login", engine)} inApp={engine.login} />
           <span className={styles.sub}>{t("home.engines.signInNote")}</span>
           <ServerSignInModal
             open={signingIn}
@@ -230,7 +252,7 @@ export function EngineSetup({ engine, onChanged }: { engine: AdminCliEngine; onC
 /** The server's coding CLIs, as installed THERE, with install and sign-in steps for each. */
 function HostEnginesBlock() {
   const { t } = useTranslation();
-  const { name, engines, reload } = useHostAdmin();
+  const { name, engines, environment, reload } = useHostAdmin();
   const who = name || t("computerPicker.host");
   return (
     <section className={styles.sec} aria-labelledby="home-engines-h" data-testid="host-engines">
@@ -238,6 +260,16 @@ function HostEnginesBlock() {
         <h3 id="home-engines-h">{t("home.engines.title", { name: who })}</h3>
       </div>
       <div className={styles.card}>
+        {environment?.user ? (
+          <p className={styles.hint} data-testid="host-engines-user">
+            <Info size={12} aria-hidden="true" />{" "}
+            {t(environment.is_root ? "home.engines.runsAsRoot" : "home.engines.runsAs", {
+              name: who,
+              user: environment.user,
+              home: environment.home ?? "?"
+            })}
+          </p>
+        ) : null}
         {engines === null ? (
           <p className={styles.hint}>{t("home.engines.loading")}</p>
         ) : engines.length === 0 ? (
@@ -252,7 +284,12 @@ function HostEnginesBlock() {
                     {t(engineStatus(e).key, engineStatus(e).values)}
                     {e.installed && e.signed_in !== false && e.version ? ` · ${e.version}` : ""}
                   </span>
-                  <EngineSetup engine={e} onChanged={reload} />
+                  {e.installed && e.path ? (
+                    <span className={styles.sub} data-testid={`engine-path-${e.id}`}>
+                      {t("home.engines.foundAt", { path: e.path })}
+                    </span>
+                  ) : null}
+                  <EngineSetup engine={e} environment={environment} onChanged={reload} />
                 </div>
               </li>
             ))}

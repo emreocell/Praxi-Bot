@@ -89,6 +89,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/cli-environment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["admin_cli_environment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/default-provider": {
         parameters: {
             query?: never;
@@ -5679,9 +5695,30 @@ export interface components {
             /** @description How the app can drive that sign-in: `device_code`, `paste_code`, `browser` or `manual`. */
             login_flow: string;
             name: string;
+            /** @description Where the CLI was found on the host (the program the app would run), when it is installed. */
+            path?: string | null;
             /** @description `None` when the CLI offers no safe way to check. */
             signed_in?: boolean | null;
             version?: string | null;
+        };
+        /**
+         * @description Who the host's coding CLIs run as, and where they live. Installs, sign-ins and checks all
+         *     happen as this account, whoever opened the terminal.
+         */
+        AdminCliEnvironmentDto: {
+            /** @description Its home folder, where CLIs keep their installs and sign-in files. */
+            home?: string | null;
+            /** @description That account is the administrator: a CLI installed or signed in by anyone else is invisible. */
+            is_root: boolean;
+            /** @description Folders searched for coding CLIs that exist right now, in order. */
+            search_dirs: string[];
+            /**
+             * @description Start of a terminal command that runs one CLI step as that account
+             *     (`sudo praxi cli`), for a person who is logged in over SSH as somebody else.
+             */
+            terminal_command: string;
+            /** @description Account the service (and every CLI it starts) runs as; `null` when the system did not say. */
+            user?: string | null;
         };
         /** @description `GET/POST /v1/admin/cli-engines/{id}/install`: where the install stands. */
         AdminCliInstallDto: {
@@ -13150,6 +13187,33 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    admin_cli_environment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCliEnvironmentDto"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -3279,6 +3279,8 @@
     },
     "lead": "Botların, model anahtarları ve ayarlarıyla sunucuya taşınır; bu bilgisayar kapalıyken de çalışmaya devam ederler. Aynı uygulamada kalırsın.",
     "nameTaken": "{{server}} üzerinde {{name}} adında bir bot zaten var.",
+    "nothingToMove": "Taşınacak bir şey yok: bu bilgisayarda sunucuda olmayan bir bot, plan ya da ayar yok.",
+    "pickFirst": "“Sunucuya taşı” düğmesini açmak için yukarıdan en az bir öğe seç.",
     "result": {
       "admin_rate_limit": "Sunucu beklemeni istedi; devam etmek için yeniden çalıştır",
       "bot_not_moved": "Botu sunucuda yok",
@@ -4624,6 +4626,7 @@
     },
     "copy": "Kopyala",
     "engines": {
+      "foundAt": "Şurada bulundu: {{path}}",
       "installFailed": "Kurulum tamamlanamadı ({{code}}). Çıktıya bak ya da komutu elle çalıştır.",
       "installOnServer": "Sunucuya kur",
       "installedUnknown": "Kurulu · giriş durumu bilinmiyor",
@@ -4638,8 +4641,12 @@
       "ready": "Hazır",
       "readyAs": "Hazır · {{account}}",
       "reinstall": "Sunucuda yeniden kur",
+      "runAsUser": "Sunucuda “{{user}}” kullanıcısı olarak şunu çalıştır:",
       "runOnServer": "Sunucuda şunu çalıştır:",
+      "runsAs": "{{name}} üzerindeki kodlama CLI'ları, Praxi'nin çalıştığı kullanıcı olan “{{user}}” (ev klasörü {{home}}) olarak kurulur, denetlenir ve giriş yapılır. SSH ile başka bir kullanıcıyla bağlanırsan aşağıdaki komutları kullan: “{{user}}” kullanıcısına geçerler.",
+      "runsAsRoot": "{{name}} üzerindeki Praxi yönetici hesabıyla (“{{user}}”, ev klasörü {{home}}) çalışıyor. Kodlama CLI'ları bu hesapla kurulur ve giriş yapılır.",
       "signIn": "Giriş için sunucuda şunu çalıştır:",
+      "signInAsUser": "Elle giriş yapmak için, buradaki terminalde ya da SSH ile, “{{user}}” kullanıcısı olarak:",
       "signInNote": "Giriş sunucuda bir web adresi (çoğu zaman bir kodla) gösterir. Adresi bu bilgisayarda aç, orada giriş yap ve istenirse kodu sunucudaki terminale yapıştır. Bu bilgisayardaki oturumlar sunucuya kopyalanmaz.",
       "signInOnServer": "{{server}} üzerinde giriş yap",
       "title": "{{name}} üzerindeki kodlama CLI'ları"
@@ -5819,8 +5826,8 @@
     "detail": "Model servislerine ulaşılamıyor. Praxi bağlantıyı kendiliğinden yeniden kontrol eder.",
     "full": "Kuyruk dolu (20 mesaj veya 32.000 karakter). Sıradaki bir mesajı iptal et ya da bu taslağı sakla.",
     "held": "Göndermeni bekliyor",
-    "host": "Seçili bilgisayarına ulaşılamıyor.",
-    "hostDetail": "Praxi bağlantıyı kendiliğinden yeniden kontrol edecek.",
+    "host": "“{{name}}” yanıt vermiyor.",
+    "hostDetail": "Çalışan bir sunucu, bu bilgisayar ona ulaşamasa bile botlarını çalıştırmaya devam eder. Praxi bağlantıyı 20 saniyede bir yeniden dener. Böyle kalırsa sunucunun açık ve internete bağlı olduğunu kontrol et, sonra Sunucular'ı açıp “Bu sunucuya geç”i seç.",
     "keepDraft": "Bu taslağı sakla ve bağlantı gelince gönder. Dosyalar ve komutlar çevrimdışıyken sıraya alınmaz.",
     "localAnswer": "Yerel model yanıtladı",
     "memory": "Sıradaki mesajlar gönderilene veya iptal edilene kadar bu uygulamada tutulur. Uygulama kapanınca silinir.",
@@ -6563,6 +6570,7 @@
   },
   "servers": {
     "add": "Sunucu ekle",
+    "alreadyHere": "Zaten {{name}} üzerindesin.",
     "checkNow": "Bu sunucuya geç",
     "empty": "Henüz sunucu yok. Sorun değil: botların bu bilgisayarda çalışıyor.",
     "lead": "Sunucular, bu bilgisayar kapalıyken botlarını çalışır tutar.",
@@ -6579,6 +6587,7 @@
       "offline": "Çevrimdışı",
       "unreachable": "Ulaşılamıyor"
     },
+    "switched": "Şimdi {{name}} gösteriliyor. Botları ve ayarları ekranda.",
     "title": "Sunucuların",
     "updateHelp": "Uygulamayla eklenen sunucular burada güncellenebilir. Diğer sunucular için Sunucuyu güncelle, üzerinde çalıştıracağın komutları gösterir."
   },
@@ -8147,7 +8156,7 @@
     "unknown": "Sürüm bilinmiyor (sunucu kapalı olabilir).",
     "upToDate": "Güncel",
     "versionLine": "Sunucu sürümü {{server}} · bu uygulama {{app}}",
-    "versionUnknown": "Tam sürüm bilinmiyor (eski bir sunucu)",
+    "versionUnknown": "Tam sürüm bilinmiyor: sunucu bir sürüm etiketi bildirmiyor. Bu uygulamayla eşleşmesi için güncelle.",
     "whatHappens": "Neler olacak"
   },
   "usage": {

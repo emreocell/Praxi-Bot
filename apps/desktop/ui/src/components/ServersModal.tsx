@@ -34,7 +34,7 @@ export function ServersModal({ open, onClose, onAdd }: { open: boolean; onClose:
 function Content({ onClose, onAdd }: { onClose: () => void; onAdd: () => void }) {
   const { t } = useTranslation();
   const toast = useToast();
-  const { client, localApi, hostList, refreshHosts, selectComputer } = useDaemon();
+  const { client, localApi, hostList, refreshHosts, selectComputer, activeComputerId } = useDaemon();
   const api = isMockMode() ? client : localApi;
   const [asking, setAsking] = useState<HostLinkInfo | null>(null);
   const [busy, setBusy] = useState(false);
@@ -95,7 +95,12 @@ function Content({ onClose, onAdd }: { onClose: () => void; onAdd: () => void })
                 <Button
                   variant="ghost"
                   onClick={() => {
-                    void selectComputer(h.id);
+                    // The dialog closing is no answer: say what happened.
+                    if (h.id === activeComputerId) {
+                      toast.show(t("servers.alreadyHere", { name: h.name }), "info");
+                    } else {
+                      void selectComputer(h.id).then(() => toast.show(t("servers.switched", { name: h.name }), "success"));
+                    }
                     onClose();
                   }}
                 >

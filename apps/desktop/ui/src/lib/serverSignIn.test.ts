@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { apiKeyProvider, engineStatus, needsManualFallback, pageAddress, signInPhase, waitingFor } from "./serverSignIn.ts";
+import { apiKeyProvider, engineStatus, needsManualFallback, pageAddress, signInPhase, stepCommand, waitingFor } from "./serverSignIn.ts";
 
 test("the sign-in phase follows the server's state and unknown states are idle", () => {
   for (const s of ["starting", "needs_browser", "needs_code", "verifying", "done", "failed", "timed_out", "cancelled"]) {
@@ -70,4 +70,16 @@ test("a page that is not https, or not a page, is not offered", () => {
   for (const bad of ["http://claude.com/x", "javascript:alert(1)", "file:///etc/passwd", "claude.com/x", "", "https://", null, undefined]) {
     assert.equal(pageAddress(bad), null, String(bad));
   }
+});
+
+test("a sign-in or install is copied as the command that runs as the service user", () => {
+  const env = { terminal_command: "sudo praxi cli" };
+  const engine = { id: "agy", login: "agy", install_command: "sh -c 'curl ...'", can_install: true };
+  assert.equal(stepCommand(env, "login", engine), "sudo praxi cli login agy");
+  assert.equal(stepCommand(env, "install", engine), "sudo praxi cli install agy");
+  // Copy-only installers (no verified fixed command) stay the vendor's own command.
+  assert.equal(stepCommand(env, "install", { ...engine, id: "vibe", can_install: false, install_command: "uv tool install mistral-vibe" }), "uv tool install mistral-vibe");
+  // An older host does not answer: the registry's plain command, as before.
+  assert.equal(stepCommand(null, "login", engine), "agy");
+  assert.equal(stepCommand(undefined, "install", engine), "sh -c 'curl ...'");
 });

@@ -3215,6 +3215,8 @@
     },
     "lead": "Deine Bots, ihre Modellschlüssel und Einstellungen ziehen auf den Server um, damit sie weiterarbeiten, wenn dieser Computer aus ist. Du bleibst in derselben App.",
     "nameTaken": "Auf {{server}} existiert bereits ein Bot namens {{name}}.",
+    "nothingToMove": "There is nothing to move: this computer has no bot, schedule or setting that the server lacks.",
+    "pickFirst": "Tick at least one item above to enable “Move to the server”.",
     "result": {
       "admin_rate_limit": "Server bat zu warten; führe es erneut aus, um fortzufahren",
       "bot_not_moved": "Sein Bot ist nicht auf dem Server",
@@ -4560,6 +4562,7 @@
     },
     "copy": "Kopieren",
     "engines": {
+      "foundAt": "Found at {{path}}",
       "installFailed": "Die Installation wurde nicht abgeschlossen ({{code}}). Prüfe die Ausgabe oder führe den Befehl von Hand aus.",
       "installOnServer": "Auf Server installieren",
       "installedUnknown": "Installiert · Anmeldestatus unbekannt",
@@ -4574,8 +4577,12 @@
       "ready": "Bereit",
       "readyAs": "Ready · {{account}}",
       "reinstall": "Auf Server neu installieren",
+      "runAsUser": "As “{{user}}” on the server run:",
       "runOnServer": "Führe auf dem Server aus:",
+      "runsAs": "Coding CLIs on {{name}} are installed, checked and signed in as the user “{{user}}” (home folder {{home}}), the same user Praxi runs as. Over SSH as another user, use the commands below: they switch to “{{user}}”.",
+      "runsAsRoot": "Praxi on {{name}} runs as the administrator account (“{{user}}”, home folder {{home}}). Coding CLIs are installed and signed in as that account.",
       "signIn": "Zum Anmelden führe auf dem Server aus:",
+      "signInAsUser": "To sign in by hand, in the terminal here or over SSH, as “{{user}}”:",
       "signInNote": "Beim Anmelden wird auf dem Server eine Webadresse angezeigt (oft mit einem Code). Öffne die Adresse auf diesem Computer, melde dich dort an und füge den Code bei Aufforderung in das Terminal des Servers ein. Anmeldungen auf diesem Computer werden nie auf den Server kopiert.",
       "signInOnServer": "Auf {{server}} anmelden",
       "title": "Coding-CLIs auf {{name}}"
@@ -5755,8 +5762,8 @@
     "detail": "Deine Modelldienste sind nicht erreichbar. Praxi prüft die Verbindung automatisch erneut.",
     "full": "Die Warteschlange ist voll (20 Nachrichten oder 32.000 Zeichen). Brich eine wartende Nachricht ab oder behalte diesen Entwurf.",
     "held": "Wartet darauf, dass du die Nachricht sendest",
-    "host": "Dein ausgewählter Computer ist nicht erreichbar.",
-    "hostDetail": "Praxi prüft die Verbindung automatisch erneut.",
+    "host": "“{{name}}” is not answering.",
+    "hostDetail": "A server that is running keeps its bots working even when this computer cannot reach it. Praxi checks again every 20 seconds. If it stays this way, check that the server is switched on and online, then open Servers and choose “Switch to it”.",
     "keepDraft": "Behalte diesen Entwurf und sende ihn, sobald die Verbindung wieder da ist. Dateien und Befehle werden offline nicht eingereiht.",
     "localAnswer": "Vom lokalen Modell beantwortet",
     "memory": "Wartende Nachrichten bleiben bis zum Senden oder Abbrechen in dieser App. Beim Schließen der App werden sie gelöscht.",
@@ -6483,6 +6490,7 @@
   },
   "servers": {
     "add": "Server hinzufügen",
+    "alreadyHere": "You are already on {{name}}.",
     "checkNow": "Zu diesem Server wechseln",
     "empty": "Noch kein Server. Das ist in Ordnung: Deine Bots laufen auf diesem Computer.",
     "lead": "Server halten deine Bots am Laufen, wenn dieser Computer aus ist.",
@@ -6499,6 +6507,7 @@
       "offline": "Offline",
       "unreachable": "Nicht erreichbar"
     },
+    "switched": "Now showing {{name}}. Its bots and settings are on screen.",
     "title": "Deine Server",
     "updateHelp": "Mit der App hinzugefügte Server lassen sich hier aktualisieren. Für jeden anderen Server zeigt Server aktualisieren die genauen Befehle für den Server."
   },
@@ -8067,7 +8076,7 @@
     "unknown": "Version unbekannt (der Server ist vielleicht aus).",
     "upToDate": "Aktuell",
     "versionLine": "Server-Version {{server}} · diese App {{app}}",
-    "versionUnknown": "Genaue Version unbekannt (älterer Server)",
+    "versionUnknown": "Exact version unknown: the server reports no release tag. Update it to match this app.",
     "whatHappens": "Was passiert"
   },
   "usage": {

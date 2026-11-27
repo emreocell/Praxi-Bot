@@ -4806,8 +4806,6 @@
     "detail": "Layanan model Anda tidak dapat dijangkau. Praxi memeriksa lagi secara otomatis.",
     "full": "Antrean penuh (20 pesan atau 32.000 karakter). Batalkan pesan dalam antrean atau simpan draf ini.",
     "held": "Menunggu Anda mengirim",
-    "host": "Komputer yang dipilih tidak dapat dijangkau.",
-    "hostDetail": "Praxi akan memeriksa koneksi lagi secara otomatis.",
     "keepDraft": "Simpan draf ini dan kirim saat koneksi kembali. File dan perintah tidak diantrekan saat offline.",
     "localAnswer": "Dijawab oleh model lokal",
     "memory": "Pesan dalam antrean tetap di aplikasi ini sampai dikirim atau dibatalkan. Menutup aplikasi akan menghapusnya.",

@@ -3279,6 +3279,8 @@
     },
     "lead": "Your bots, their model keys and settings move to the server, so they keep working when this computer is off. You stay in the same app.",
     "nameTaken": "A bot named {{name}} already exists on {{server}}.",
+    "nothingToMove": "There is nothing to move: this computer has no bot, schedule or setting that the server lacks.",
+    "pickFirst": "Tick at least one item above to enable “Move to the server”.",
     "result": {
       "admin_rate_limit": "Server asked to wait; run it again to continue",
       "bot_not_moved": "Its bot is not on the server",
@@ -4624,6 +4626,7 @@
     },
     "copy": "Copy",
     "engines": {
+      "foundAt": "Found at {{path}}",
       "installFailed": "The install did not finish ({{code}}). Check the output or run the command by hand.",
       "installOnServer": "Install on server",
       "installedUnknown": "Installed · sign-in state unknown",
@@ -4638,8 +4641,12 @@
       "ready": "Ready",
       "readyAs": "Ready · {{account}}",
       "reinstall": "Reinstall on server",
+      "runAsUser": "As “{{user}}” on the server run:",
       "runOnServer": "On the server run:",
+      "runsAs": "Coding CLIs on {{name}} are installed, checked and signed in as the user “{{user}}” (home folder {{home}}), the same user Praxi runs as. Over SSH as another user, use the commands below: they switch to “{{user}}”.",
+      "runsAsRoot": "Praxi on {{name}} runs as the administrator account (“{{user}}”, home folder {{home}}). Coding CLIs are installed and signed in as that account.",
       "signIn": "To sign in, run on the server:",
+      "signInAsUser": "To sign in by hand, in the terminal here or over SSH, as “{{user}}”:",
       "signInNote": "Signing in shows a web address on the server (often with a code). Open the address on this computer, sign in there and, if asked, paste the code into the server's terminal. Sign-ins on this computer are never copied to the server.",
       "signInOnServer": "Sign in on {{server}}",
       "title": "Coding CLIs on {{name}}"
@@ -5819,8 +5826,8 @@
     "detail": "Your model services are not reachable. Praxi checks again automatically.",
     "full": "The queue is full (20 messages or 32,000 characters). Cancel a queued message or keep this draft.",
     "held": "Waiting for you to send",
-    "host": "Your selected computer cannot be reached.",
-    "hostDetail": "Praxi will check the connection again automatically.",
+    "host": "“{{name}}” is not answering.",
+    "hostDetail": "A server that is running keeps its bots working even when this computer cannot reach it. Praxi checks again every 20 seconds. If it stays this way, check that the server is switched on and online, then open Servers and choose “Switch to it”.",
     "keepDraft": "Keep this draft and send it when the connection returns. Files and commands are not queued offline.",
     "localAnswer": "Answered by local model",
     "memory": "Queued messages stay in this app until sent or cancelled. Closing the app clears them.",
@@ -6563,6 +6570,7 @@
   },
   "servers": {
     "add": "Add a server",
+    "alreadyHere": "You are already on {{name}}.",
     "checkNow": "Switch to it",
     "empty": "No server yet. This is fine: your bots run on this computer.",
     "lead": "Servers keep your bots running when this computer is off.",
@@ -6579,6 +6587,7 @@
       "offline": "Offline",
       "unreachable": "Cannot be reached"
     },
+    "switched": "Now showing {{name}}. Its bots and settings are on screen.",
     "title": "Your servers",
     "updateHelp": "Servers added with the app can be updated here. For any other server, Update server shows the exact commands to run on it."
   },
@@ -8147,7 +8156,7 @@
     "unknown": "Version unknown (the server may be off).",
     "upToDate": "Up to date",
     "versionLine": "Server version {{server}} · this app {{app}}",
-    "versionUnknown": "Exact version unknown (an older server)",
+    "versionUnknown": "Exact version unknown: the server reports no release tag. Update it to match this app.",
     "whatHappens": "What will happen"
   },
   "usage": {

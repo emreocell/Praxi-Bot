@@ -50,6 +50,7 @@ import type {
   AuditVerify,
   AcceptedResponse,
   AdminCliEngine,
+  AdminCliEnvironment,
   AdminCliInstall,
   AdminCliLogin,
   AdminProvider,
@@ -753,6 +754,10 @@ export class ApiClient {
   }
   adminCliEngines(): Promise<AdminCliEngine[]> {
     return this.request("GET", "/admin/cli-engines");
+  }
+  /** Which user the host's coding CLIs run as, and where (older hosts answer 404). */
+  adminCliEnvironment(): Promise<AdminCliEnvironment> {
+    return this.request("GET", "/admin/cli-environment");
   }
   /** Install one CLI engine ON THE HOST (admin desktop only; the host runs its registry command). */
   adminCliEngineInstall(id: string): Promise<AdminCliInstall> {

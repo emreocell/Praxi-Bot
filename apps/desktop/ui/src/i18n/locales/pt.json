@@ -4832,8 +4832,6 @@
     "detail": "Seus serviços de modelo estão inacessíveis. O Praxi verifica de novo automaticamente.",
     "full": "A fila está cheia (20 mensagens ou 32.000 caracteres). Cancele uma mensagem na fila ou mantenha este rascunho.",
     "held": "Aguardando você enviar",
-    "host": "O computador selecionado está inacessível.",
-    "hostDetail": "O Praxi verificará a conexão de novo automaticamente.",
     "keepDraft": "Mantenha este rascunho e envie quando a conexão voltar. Arquivos e comandos não entram na fila offline.",
     "localAnswer": "Respondido pelo modelo local",
     "memory": "As mensagens na fila ficam neste app até serem enviadas ou canceladas. Fechar o app as apaga.",

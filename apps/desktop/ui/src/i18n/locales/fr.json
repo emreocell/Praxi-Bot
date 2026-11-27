@@ -4907,8 +4907,6 @@
     "detail": "Vos services de modèle sont inaccessibles. Praxi revérifie automatiquement.",
     "full": "La file d’attente est pleine (20 messages ou 32 000 caractères). Annulez un message en attente ou gardez ce brouillon.",
     "held": "En attente de votre envoi",
-    "host": "L’ordinateur sélectionné est inaccessible.",
-    "hostDetail": "Praxi revérifiera la connexion automatiquement.",
     "keepDraft": "Gardez ce brouillon et envoyez-le quand la connexion reviendra. Les fichiers et les commandes ne sont pas mis en file d’attente hors ligne.",
     "localAnswer": "Réponse du modèle local",
     "memory": "Les messages en attente restent dans cette application jusqu’à leur envoi ou leur annulation. Fermer l’application les efface.",

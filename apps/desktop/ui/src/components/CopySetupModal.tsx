@@ -224,6 +224,12 @@ function Content({ hostId, onClose }: { hostId: string; onClose: () => void }) {
       {!report && pending.length > 0 ? (
         <p className={styles.note} role="status">{t("copySetup.answerFirst")}</p>
       ) : null}
+      {/* A disabled button says why: nothing ticked, or nothing there to tick. */}
+      {!report && !refused && !busy && pending.length === 0 && checked.size === 0 && plan ? (
+        <p className={styles.note} role="status" data-testid="copy-setup-why">
+          {t(items.length === 0 ? "copySetup.nothingToMove" : "copySetup.pickFirst")}
+        </p>
+      ) : null}
       <p className={styles.note}>{t("copySetup.cannotMove")}</p>
       <p className={styles.note}>{t("copySetup.keepLocal")}</p>
       <div className={styles.actions}>

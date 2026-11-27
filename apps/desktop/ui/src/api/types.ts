@@ -136,6 +136,7 @@ export type AdminState = S["AdminStateDto"];
 export type AdminProviderInput = S["AdminProviderInput"];
 export type AdminProvider = S["AdminProviderDto"];
 export type AdminCliEngine = S["AdminCliEngineDto"];
+export type AdminCliEnvironment = S["AdminCliEnvironmentDto"];
 export type AdminCliInstall = S["AdminCliInstallDto"];
 export type AdminCliLogin = S["AdminCliLoginDto"];
 export type HomeInfo = S["HomeDto"];

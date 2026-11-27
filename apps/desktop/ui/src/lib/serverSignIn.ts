@@ -1,4 +1,4 @@
-import type { AdminCliEngine, AdminCliLogin } from "../api/types.ts";
+import type { AdminCliEngine, AdminCliEnvironment, AdminCliLogin } from "../api/types.ts";
 
 /** What the sign-in modal shows. `idle` = nothing started yet (or the engine cannot be driven). */
 export type SignInPhase =
@@ -87,4 +87,23 @@ export function pageAddress(url: string | null | undefined): { host: string; sho
   } catch {
     return null;
   }
+}
+
+/**
+ * The command to copy for an install or a sign-in. A person logged in over SSH is usually NOT the
+ * user Praxi runs as, so with the host's answer it is the `sudo praxi cli ...` form that runs the
+ * step as the right user; an older host (no answer) gets the registry's plain command.
+ */
+export function stepCommand(
+  environment: Pick<AdminCliEnvironment, "terminal_command"> | null | undefined,
+  step: "install" | "login",
+  engine: Pick<AdminCliEngine, "id" | "install_command" | "login" | "can_install">
+): string {
+  if (step === "login") {
+    return environment?.terminal_command ? `${environment.terminal_command} login ${engine.id}` : engine.login;
+  }
+  // Only a verified installer is one `bot cli install` can run; the rest stay the vendor's own command.
+  return environment?.terminal_command && engine.can_install
+    ? `${environment.terminal_command} install ${engine.id}`
+    : (engine.install_command ?? "");
 }
