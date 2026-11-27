@@ -20,6 +20,8 @@ thiserror.workspace = true
 tokio.workspace = true
 tool-registry = { path = "../tool-registry", version = "0.1.0" }
 url = "2"
+web-tools = { path = "../web-tools", version = "0.1.0" }
 
 [dev-dependencies]
+toml.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }

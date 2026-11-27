@@ -11,7 +11,8 @@ use tool_registry::{
     ToolOutput, ToolSpec,
 };
 
-use crate::client::{HaError, HomeAssistantClient};
+use crate::HomeAssistantConnector;
+use crate::client::HaError;
 
 /// `ha_list_entities`.
 pub const LIST: &str = "ha_list_entities";
@@ -35,7 +36,7 @@ enum Kind {
 struct HaTool {
     spec: ToolSpec,
     kind: Kind,
-    client: Option<Arc<HomeAssistantClient>>,
+    conn: Arc<HomeAssistantConnector>,
 }
 
 fn spec(name: &str, description: &str, schema: Value, effect: Effect) -> ToolSpec {
@@ -54,9 +55,9 @@ fn spec(name: &str, description: &str, schema: Value, effect: Effect) -> ToolSpe
     }
 }
 
-/// Build the tools; without a client they are registered but hidden.
+/// Build the tools; while the connector has no hub (or not for this bot) they are hidden.
 #[must_use]
-pub fn tools(client: Option<&Arc<HomeAssistantClient>>) -> Vec<Arc<dyn Tool>> {
+pub fn tools(conn: &Arc<HomeAssistantConnector>) -> Vec<Arc<dyn Tool>> {
     let specs = [
         (
             Kind::List,
@@ -85,8 +86,9 @@ pub fn tools(client: Option<&Arc<HomeAssistantClient>>) -> Vec<Arc<dyn Tool>> {
             Kind::Call,
             spec(
                 CALL,
-                "Call a Home Assistant service, for example turn a light on. It changes the real world, so it \
-                 requires user approval. Services that run code or stop the hub are blocked. \
+                "Call a Home Assistant service, for example turn a light on. It changes the real world and may \
+                 need user approval; anything that is not a plain device (locks, alarms, garage doors, covers, \
+                 scripts, scenes) always does unless the owner allowed it. Services that run code or stop the hub are blocked. \
                  Example: {\"domain\":\"light\",\"service\":\"turn_on\",\"entity_id\":\"light.kitchen\",\"data\":{\"brightness_pct\":40}}",
                 json!({"type":"object","properties":{
                     "domain":{"type":"string"},
@@ -94,7 +96,7 @@ pub fn tools(client: Option<&Arc<HomeAssistantClient>>) -> Vec<Arc<dyn Tool>> {
                     "entity_id":{"type":"string"},
                     "data":{"type":"object","description":"Service data."}
                 },"required":["domain","service"]}),
-                Effect::Destructive,
+                Effect::Write,
             ),
         ),
     ];
@@ -104,7 +106,7 @@ pub fn tools(client: Option<&Arc<HomeAssistantClient>>) -> Vec<Arc<dyn Tool>> {
             Arc::new(HaTool {
                 spec,
                 kind,
-                client: client.cloned(),
+                conn: Arc::clone(conn),
             }) as Arc<dyn Tool>
         })
         .collect()
@@ -166,15 +168,28 @@ impl Tool for HaTool {
         &self.spec
     }
 
-    /// Hidden while no usable hub is configured. Not a security boundary.
-    fn visible_to(&self, _bot_id: Option<&str>) -> bool {
-        self.client.is_some()
+    /// Hidden while no usable hub is configured, and from bots the owner did not allow.
+    fn visible_to(&self, bot_id: Option<&str>) -> bool {
+        self.conn.client_for(bot_id).is_some()
     }
 
-    async fn call(&self, _ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
-        let Some(c) = &self.client else {
+    /// Opening, unlocking or disarming asks on every call at every level, Full included,
+    /// unless the owner listed the service (see `HomeAssistantClient::needs_confirmation`).
+    /// With no hub the call fails anyway; it asks.
+    fn always_ask_for(&self, input: &Value) -> bool {
+        match self.kind {
+            Kind::Call => self
+                .conn
+                .client()
+                .is_none_or(|c| c.needs_confirmation(input)),
+            Kind::List | Kind::State => false,
+        }
+    }
+
+    async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
+        let Some(c) = self.conn.client_for(ctx.bot_id.as_deref()) else {
             return Err(ToolError::InvalidInput(
-                "Home Assistant is not configured".into(),
+                "Home Assistant is not set up, or this bot may not use it".into(),
             ));
         };
         match self.kind {
