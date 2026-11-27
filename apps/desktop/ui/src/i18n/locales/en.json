@@ -1096,8 +1096,6 @@
       "workingFolder": "Starts in folder",
       "yes": "Yes"
     },
-    "loading": "Loading catalog…",
-    "localSection": "On this computer",
     "manage": "Manage",
     "missingSecret": "Enter every required secret.",
     "reconnect": "Reconnect",

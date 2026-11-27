@@ -11,13 +11,13 @@ Regenerate with `python scripts/license_report.py` and verify in CI with
 
 ## Summary
 
-- Rust external crates: **933**
+- Rust external crates: **935**
 - Desktop UI production npm packages: **24**
 
 | Licence expression | Packages |
 | --- | ---: |
 | `MIT OR Apache-2.0` | 442 |
-| `MIT` | 223 |
+| `MIT` | 225 |
 | `Apache-2.0 OR MIT` | 98 |
 | `MIT/Apache-2.0` | 43 |
 | `Zlib OR Apache-2.0 OR MIT` | 23 |
@@ -494,6 +494,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `mio` | `1.2.4` | `MIT` | [https://github.com/tokio-rs/mio](https://github.com/tokio-rs/mio) |
 | `moxcms` | `0.8.1` | `BSD-3-Clause OR Apache-2.0` | [https://github.com/awxkee/moxcms.git](https://github.com/awxkee/moxcms.git) |
 | `muda` | `0.19.3` | `Apache-2.0 OR MIT` | [https://github.com/tauri-apps/muda](https://github.com/tauri-apps/muda) |
+| `multer` | `3.1.0` | `MIT` | [https://github.com/rwf2/multer](https://github.com/rwf2/multer) |
 | `multiversion_no_op` | `1.0.0` | `Apache-2.0 OR MIT` | [https://github.com/hsivonen/multiversion_no_op](https://github.com/hsivonen/multiversion_no_op) |
 | `n0-dns-resolver` | `0.1.0` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/iroh](https://github.com/n0-computer/iroh) |
 | `n0-error` | `1.0.1` | `MIT OR Apache-2.0` | [https://github.com/n0-computer/n0-error](https://github.com/n0-computer/n0-error) |
@@ -766,6 +767,7 @@ Packages whose effective licence requires an entry in `THIRD_PARTY_NOTICES.md`:
 | `soup3-sys` | `0.5.0` | `MIT` | [https://gitlab.gnome.org/World/Rust/soup3-rs](https://gitlab.gnome.org/World/Rust/soup3-rs) |
 | `spez` | `0.1.2` | `BSD-2-Clause` | [https://github.com/m-ou-se/spez](https://github.com/m-ou-se/spez) |
 | `spin` | `0.10.1` | `MIT` | [https://github.com/mvdnes/spin-rs.git](https://github.com/mvdnes/spin-rs.git) |
+| `spin` | `0.9.9` | `MIT` | [https://github.com/mvdnes/spin-rs.git](https://github.com/mvdnes/spin-rs.git) |
 | `spki` | `0.8.1` | `Apache-2.0 OR MIT` | [https://github.com/RustCrypto/formats](https://github.com/RustCrypto/formats) |
 | `sqlite-vec` | `0.1.9` | `MIT/Apache-2.0` | [https://github.com/asg017/sqlite-vec](https://github.com/asg017/sqlite-vec) |
 | `sse-stream` | `0.2.6` | `MIT OR Apache-2.0` | [https://github.com/4t145/sse-stream/](https://github.com/4t145/sse-stream/) |
