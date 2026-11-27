@@ -544,7 +544,7 @@ async fn vault_bot_scope_ask_toggle_and_confirmed_owner_reveal() {
 /// token is refused before anything is written or audited), and what it creates belongs to NO bot
 /// until the owner scopes it: not the bot of the chat the value was pasted in, not another bot.
 #[tokio::test]
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::assert_is_empty)]
 async fn a_pasted_value_is_stored_by_the_owner_only_and_belongs_to_no_bot_until_scoped() {
     use secret_store::FillError;
 
