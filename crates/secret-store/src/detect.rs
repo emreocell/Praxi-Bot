@@ -11,6 +11,9 @@
 //!   more documented ones listed in [`EXTRA_SHAPES`].
 //! * **Labelled context** ([`Confidence::Medium`]): a random-looking value
 //!   right after a label such as `api key`, `token`, `password`, `şifre`.
+//! * **Card numbers** ([`Confidence::Medium`]): a Luhn-valid number with a
+//!   real card-network prefix, either written in the usual groups or
+//!   contiguous right after a word such as `card` / `kart`.
 //!
 //! Entropy and character mix only ever *support* a labelled match. Text with
 //! no known shape and no label is never reported.
@@ -59,6 +62,8 @@ pub enum SecretKind {
     DigitalOceanToken,
     /// A PEM private key block.
     PrivateKey,
+    /// A payment card number (Luhn-valid, known network prefix).
+    PaymentCard,
     /// Random-looking value labelled "api key" / "anahtar".
     LabelledApiKey,
     /// Random-looking value labelled "token" / "bearer" / "jeton".
@@ -89,6 +94,7 @@ impl SecretKind {
             Self::GroqKey => "groq_key",
             Self::DigitalOceanToken => "digitalocean_token",
             Self::PrivateKey => "private_key",
+            Self::PaymentCard => "payment_card",
             Self::LabelledApiKey => "labelled_api_key",
             Self::LabelledToken => "labelled_token",
             Self::LabelledSecret => "labelled_secret",
@@ -228,6 +234,7 @@ pub fn detect_secrets(text: &str) -> Vec<SecretCandidate> {
     let mut out: Vec<SecretCandidate> = Vec::new();
     detect_known_shapes(text, &mut out);
     detect_private_keys(text, &mut out);
+    detect_cards(text, &mut out);
     let known = out.clone();
     for c in detect_labelled(text) {
         if !known.iter().any(|k| c.start < k.end && k.start < c.end) {
@@ -245,6 +252,66 @@ pub fn detect_secrets(text: &str) -> Vec<SecretCandidate> {
         keep
     });
     out
+}
+
+/// `text` with every candidate's span replaced by [`crate::REDACTED`], for
+/// callers that must not pass the value on (a message from a channel that
+/// cannot show the offer). `candidates` must come from [`detect_secrets`] on
+/// the same `text`.
+#[must_use]
+pub fn redact_candidates(text: &str, candidates: &[SecretCandidate]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for c in candidates {
+        if c.start < at || c.end > text.len() {
+            continue;
+        }
+        out.push_str(&text[at..c.start]);
+        out.push_str(crate::REDACTED);
+        at = c.end;
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
+/// An inbound message with its suspected secrets cut out; see [`screen_inbound`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenedMessage {
+    /// The message with each secret replaced by [`crate::REDACTED`].
+    pub text: String,
+    /// What was found, each kind once, in order of appearance. Never the values.
+    pub kinds: Vec<SecretKind>,
+    /// Nothing but secrets was in the message: there is nothing left to pass on.
+    pub only_secrets: bool,
+}
+
+/// The daemon-side second check for a channel that cannot show the owner the
+/// "keep it out of the chat" card (Telegram, Discord): `None` when `text` has
+/// no suspected secret, otherwise the message with the values cut out. The
+/// caller passes on `text` (or nothing, when `only_secrets`), tells the owner
+/// what happened and never logs the original.
+#[must_use]
+pub fn screen_inbound(text: &str) -> Option<ScreenedMessage> {
+    let found = detect_secrets(text);
+    if found.is_empty() {
+        return None;
+    }
+    let mut kinds: Vec<SecretKind> = Vec::new();
+    for c in &found {
+        if !kinds.contains(&c.kind) {
+            kinds.push(c.kind);
+        }
+    }
+    let redacted = redact_candidates(text, &found);
+    let only_secrets = !redacted
+        .replace(crate::REDACTED, "")
+        .chars()
+        .any(char::is_alphanumeric);
+    Some(ScreenedMessage {
+        text: redacted,
+        kinds,
+        only_secrets,
+    })
 }
 
 fn prev_is_alnum(text: &str, start: usize) -> bool {
@@ -303,6 +370,165 @@ fn detect_private_keys(text: &str, out: &mut Vec<SecretCandidate>) {
             start: m.start(),
             end,
         });
+    }
+}
+
+// ----------------------------------------------------------------- cards ---
+
+/// Words (folded) that make a contiguous digit run a card number.
+const CARD_LABELS: &[&str] = &[
+    "card",
+    "cc",
+    "ccn",
+    "visa",
+    "mastercard",
+    "amex",
+    "kart",
+    "kredi",
+    "banka",
+];
+
+/// Digit group sizes people write a card number in.
+const CARD_LAYOUTS: &[&[usize]] = &[&[4, 4, 4, 4], &[4, 4, 4, 4, 3], &[4, 6, 5], &[4, 6, 4]];
+
+fn luhn_ok(digits: &[u8]) -> bool {
+    let sum: u32 = digits
+        .iter()
+        .rev()
+        .enumerate()
+        .map(|(i, &d)| {
+            let d = u32::from(d);
+            if i % 2 == 1 {
+                let x = d * 2;
+                if x > 9 { x - 9 } else { x }
+            } else {
+                d
+            }
+        })
+        .sum();
+    sum.is_multiple_of(10)
+}
+
+/// A real card network prefix with the matching length (Visa, Mastercard,
+/// Amex, Discover, Diners, JCB, `UnionPay`, Troy).
+fn card_network_ok(d: &[u8]) -> bool {
+    let n = d.len();
+    let p = |k: usize| d[..k].iter().fold(0u32, |a, &x| a * 10 + u32::from(x));
+    match d[0] {
+        4 => matches!(n, 13 | 16 | 19),
+        5 => n == 16 && (51..=55).contains(&p(2)),
+        2 => n == 16 && (2221..=2720).contains(&p(4)),
+        3 => match p(2) {
+            34 | 37 => n == 15,
+            36 | 38 | 39 => (14..=16).contains(&n),
+            30 => n == 14 && (300..=305).contains(&p(3)),
+            35 => (16..=19).contains(&n) && (3528..=3589).contains(&p(4)),
+            _ => false,
+        },
+        6 => {
+            (16..=19).contains(&n)
+                && (p(4) == 6011 || p(2) == 65 || (644..=649).contains(&p(3)) || p(2) == 62)
+        }
+        9 => n == 16 && p(4) == 9792,
+        _ => false,
+    }
+}
+
+/// True when one of the last few words before `start` is a card label.
+fn card_label_before(text: &str, start: usize) -> bool {
+    let tail: String = text[..start]
+        .chars()
+        .rev()
+        .take(32)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(fold)
+        .collect();
+    tail.split(|c: char| !c.is_ascii_alphanumeric())
+        .rev()
+        .filter(|w| !w.is_empty())
+        .take(4)
+        .any(|w| CARD_LABELS.contains(&w) || w.starts_with("kart") || w.starts_with("kredi"))
+}
+
+fn detect_cards(text: &str, out: &mut Vec<SecretCandidate>) {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        // A maximal chain of digit groups joined by one space or dash.
+        let start = i;
+        let mut groups: Vec<usize> = Vec::new();
+        let mut sep: Option<u8> = None;
+        let mut mixed = false;
+        let end = loop {
+            let g0 = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            groups.push(i - g0);
+            if i + 1 < bytes.len()
+                && matches!(bytes[i], b' ' | b'-')
+                && bytes[i + 1].is_ascii_digit()
+            {
+                if sep.is_some_and(|s| s != bytes[i]) {
+                    mixed = true;
+                }
+                sep = Some(bytes[i]);
+                i += 1;
+            } else {
+                break i;
+            }
+        };
+        if mixed || prev_blocks_card(text, start) || next_blocks_card(text, end) {
+            continue;
+        }
+        let digits: Vec<u8> = bytes[start..end]
+            .iter()
+            .filter(|b| b.is_ascii_digit())
+            .map(|b| b - b'0')
+            .collect();
+        if !(13..=19).contains(&digits.len()) {
+            continue;
+        }
+        let layout_ok = if groups.len() == 1 {
+            card_label_before(text, start)
+        } else {
+            CARD_LAYOUTS.contains(&groups.as_slice())
+        };
+        let same = digits.iter().all(|&d| d == digits[0]);
+        if layout_ok && !same && card_network_ok(&digits) && luhn_ok(&digits) {
+            out.push(SecretCandidate {
+                kind: SecretKind::PaymentCard,
+                confidence: Confidence::Medium,
+                start,
+                end,
+            });
+        }
+    }
+}
+
+/// A digit run glued to a letter, `+`, `#` or a decimal point is a phone
+/// number, an id or an amount, not a card.
+fn prev_blocks_card(text: &str, start: usize) -> bool {
+    let mut back = text[..start].chars().rev();
+    match back.next() {
+        Some(c) if c.is_alphanumeric() || matches!(c, '+' | '#' | '_') => true,
+        Some('.' | ',') => back.next().is_some_and(|c| c.is_ascii_digit()),
+        _ => false,
+    }
+}
+
+fn next_blocks_card(text: &str, end: usize) -> bool {
+    let mut fwd = text[end..].chars();
+    match fwd.next() {
+        Some(c) if c.is_alphanumeric() || c == '_' => true,
+        Some('.' | ',') => fwd.next().is_some_and(|c| c.is_ascii_digit()),
+        _ => false,
     }
 }
 

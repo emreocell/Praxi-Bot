@@ -6,7 +6,9 @@
 //! with the expected kind and exact span, and nothing in the negative corpus
 //! is reported.
 
-use secret_store::{Confidence, SecretKind, detect_secrets};
+use secret_store::{
+    Confidence, REDACTED, SecretKind, detect_secrets, redact_candidates, screen_inbound,
+};
 
 fn join(prefix: &str, body: &str) -> String {
     format!("{prefix}{body}")
@@ -128,54 +130,49 @@ fn private_key_block_is_detected_whole_and_when_truncated() {
     assert_eq!(found[0].end, cut.len());
 }
 
-/// (kind, text, value) labelled context in English and Turkish.
-fn labelled() -> Vec<(SecretKind, String, &'static str)> {
-    let api = "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0";
-    let hex = "9f86d081884c7d659a2feaa0c55ad015";
-    let pw = "Tr0ub4dor&3";
-    let cases: Vec<(SecretKind, &str, &'static str)> = vec![
-        (SecretKind::LabelledApiKey, "my api key is {}", api),
-        (SecretKind::LabelledApiKey, "API_KEY={}", api),
-        (SecretKind::LabelledApiKey, "OPENAI_API_KEY=\"{}\"", api),
-        (SecretKind::LabelledApiKey, "api-key: {}", api),
-        (SecretKind::LabelledApiKey, "apikey = {}", api),
-        (SecretKind::LabelledApiKey, "api anahtarım: {}", api),
-        (SecretKind::LabelledSecret, "gizli anahtar şu: {}", api),
-        (SecretKind::LabelledApiKey, "Anahtar: {}", api),
-        (SecretKind::LabelledApiKey, "erişim anahtarı {}", api),
-        (SecretKind::LabelledToken, "token: {}", api),
-        (SecretKind::LabelledToken, "GITHUB_TOKEN={}", api),
-        (SecretKind::LabelledToken, "Authorization: Bearer {}", api),
-        (SecretKind::LabelledToken, "bot token is {}", hex),
-        (SecretKind::LabelledToken, "jeton: {}", api),
-        (SecretKind::LabelledSecret, "client secret = {}", api),
-        (SecretKind::LabelledSecret, "{\"secret\": \"{}\"}", api),
-        (SecretKind::LabelledPassword, "password: {}", pw),
-        (SecretKind::LabelledPassword, "my password is {}", pw),
-        (SecretKind::LabelledPassword, "DB_PASSWORD={}", pw),
-        (SecretKind::LabelledPassword, "Şifre: {}", pw),
-        (SecretKind::LabelledPassword, "ŞİFRE: {}", pw),
-        (SecretKind::LabelledPassword, "sifre {}", pw),
-        (SecretKind::LabelledPassword, "şifrem {}", pw),
-        (SecretKind::LabelledPassword, "parola: {}", pw),
-        (SecretKind::LabelledPassword, "parolam şu: {}", pw),
-        (SecretKind::LabelledPassword, "passphrase = {}", pw),
-    ];
-    cases
-        .into_iter()
-        .map(|(k, t, v)| (k, t.replacen("{}", v, 1), v))
+/// The labelled, card and negative corpora live in one JSON file that the
+/// desktop UI's TypeScript port of the detector reads too, so the two cannot
+/// drift apart.
+fn corpus() -> serde_json::Value {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/detect-corpus.json"
+    );
+    serde_json::from_str(&std::fs::read_to_string(path).expect("corpus fixture"))
+        .expect("corpus fixture is valid JSON")
+}
+
+fn strings(v: &serde_json::Value, key: &str) -> Vec<String> {
+    v[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("{key} is an array"))
+        .iter()
+        .map(|s| s.as_str().expect("string").to_owned())
+        .collect()
+}
+
+/// (text, value[, kind]) rows of a positive corpus.
+fn rows(v: &serde_json::Value, key: &str) -> Vec<(String, String, Option<String>)> {
+    v[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("{key} is an array"))
+        .iter()
+        .map(|r| {
+            let f = |k: &str| r[k].as_str().map(str::to_owned);
+            (f("text").unwrap(), f("value").unwrap(), f("kind"))
+        })
         .collect()
 }
 
 #[test]
 fn labelled_values_are_detected_as_medium_with_exact_span() {
-    for (kind, text, value) in labelled() {
+    for (text, value, kind) in rows(&corpus(), "labelled") {
         let found = detect_secrets(&text);
         assert_eq!(found.len(), 1, "{text:?}: {found:?}");
         let c = found[0];
-        assert_eq!(c.kind, kind, "{text:?}");
+        assert_eq!(Some(c.kind.as_str()), kind.as_deref(), "{text:?}");
         assert_eq!(c.confidence, Confidence::Medium, "{text:?}");
-        assert_eq!(c.slice(&text), Some(value), "{text:?}");
+        assert_eq!(c.slice(&text), Some(value.as_str()), "{text:?}");
     }
 }
 
@@ -190,108 +187,39 @@ fn several_secrets_in_one_message_are_all_found_in_order() {
     assert!(found[0].end <= found[1].start);
 }
 
+#[test]
+fn card_numbers_are_detected_with_exact_span() {
+    for (text, value, _) in rows(&corpus(), "cards") {
+        let found = detect_secrets(&text);
+        assert_eq!(found.len(), 1, "{text:?}: {found:?}");
+        assert_eq!(found[0].kind, SecretKind::PaymentCard, "{text:?}");
+        assert_eq!(found[0].confidence, Confidence::Medium);
+        assert_eq!(found[0].slice(&text), Some(value.as_str()), "{text:?}");
+    }
+}
+
+#[test]
+fn redact_candidates_removes_every_value_and_keeps_the_rest() {
+    let key = join("sk-", "proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34");
+    let text = format!("a {key} b sifre: Tr0ub4dor&3 c");
+    let found = detect_secrets(&text);
+    assert_eq!(found.len(), 2);
+    let out = redact_candidates(&text, &found);
+    assert_eq!(out, format!("a {REDACTED} b sifre: {REDACTED} c"));
+    assert!(!out.contains("Ab12Cd34") && !out.contains("Tr0ub4dor"));
+    assert_eq!(redact_candidates("nothing here", &[]), "nothing here");
+}
+
 /// Everything here must produce ZERO candidates.
-fn negatives() -> Vec<&'static str> {
-    vec![
-        // Laughs and keyboard mashes (en/tr).
-        "ahahahah",
-        "ahahahahahahahahah",
-        "hahahahaha",
-        "asdfghjkl",
-        "qwertyuiop",
-        "Ajzashkjdgasda",
-        "sjdhfjksdh",
-        "AJzkdhfksjdhfkjsdhfk",
-        "lolololol",
-        "kkkkkkkkkkkk",
-        "slkdjfhslkdjfhsldkjfh",
-        "token: asdfghjklqwertyuiop",
-        "password: asdfghjkl",
-        // Plain words and names.
-        "Merhaba nasılsın bugün hava çok güzel",
-        "Constantinople internationalization Muhammadovich",
-        "Anahtar teslim proje için teklif hazırla",
-        "Çok gizli bir toplantı var yarın",
-        // IDs and hashes.
-        "123e4567-e89b-12d3-a456-426614174000",
-        "9f86d081884c7d659a2feaa0c55ad01525a4f4be",
-        "commit 3f786850e387550fdab836ed7e6dc881de23001b fixes it",
-        "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        // Paths and URLs.
-        "C:\\Users\\emre\\Documents\\notlar\\sifre-listesi-2024.txt",
-        "/home/emre/projects/praxi/crates/secret-store/src/lib.rs",
-        "https://github.com/emreocell/Praxi-Bot/issues/421",
-        "https://example.com/api/v1/users/12345/tokens?page=2&limit=50",
-        "see https://docs.example.com/guide/authentication-and-api-keys-overview#tokens",
-        "token: https://example.com/path/to/resource/abc123def456",
-        "api key: /usr/local/share/applications/praxi123456789",
-        // Versions.
-        "v1.2.3",
-        "praxi-bot 0.14.2-beta.4",
-        "api key: 10.20.30.40.50.60.70.80",
-        "node 22.11.0 and rustc 1.91.0-nightly",
-        // Base64 image data (no label).
-        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg",
-        // Code snippets.
-        "let token = tokenizer.next_token().unwrap();",
-        "const apiKey = process.env.OPENAI_API_KEY;",
-        "if (password.length < 8) { return false; }",
-        "fn check_password(password: &str) -> bool {",
-        "password = getpass.getpass('Password: ')",
-        "headers = {'Authorization': f'Bearer {token}'}",
-        "curl -H \"Authorization: Bearer $TOKEN\" https://api.example.com",
-        "export OPENAI_API_KEY=$OPENAI_API_KEY",
-        "const sk = skills.filter(s => s.enabled);",
-        "git clone https://github.com/ask-ai/task-runner.git",
-        "pip install sk-learn-is-a-fine-library-for-ml",
-        "disk-encryption-key-management-service-v2",
-        "task-abcdefghijklmnopqrstuvwxyz0123456",
-        // Labels with prose or placeholders, no secret value.
-        "password is required",
-        "what is a good password manager?",
-        "I forgot my password again",
-        "şifremi unuttum, ne yapmalıyım?",
-        "şifre: ********",
-        "password: <your-password>",
-        "password: ${DB_PASSWORD}",
-        "token: [REDACTED]",
-        "api key: your_api_key_here",
-        "api key: xxxxxxxxxxxxxxxxxxxxxxxx",
-        "secret: [secret: login/openai]",
-        "token limit is 4096 per request",
-        "the token budget was exceeded at 12345 tokens",
-        "password: 12345678",
-        "parola: kedi",
-        "password: hunter2",
-        "client secret rotation policy: quarterly review of everything",
-        "api key: my-long-token-name-for-the-prod-environment-2024",
-        "token: internationalization2024",
-        // Realistic chat messages.
-        "Hey, can you summarise the PDF in my Downloads folder and email it to Ali?",
-        "Yarın saat 14:30'da toplantı var, hatırlat lütfen. Not: Zoom linki mailde.",
-        "The deployment failed at step 3/7 with exit code 137, any idea why?",
-        "Siparişim 2024-11-18 tarihinde verildi, takip no: TR1234567890 ile sorgulayabilirsin.",
-        "Please rotate the API key every 90 days and never share a password in chat.",
-        "API anahtarını nereden bulabilirim? Ayarlar sayfasında göremedim.",
-        "My phone is +90 532 123 45 67 and IBAN TR33 0006 1005 1978 6457 8413 26",
-        "Meeting ID: 123 4567 8901, passcode is on the invite",
-        "ahahahah çok güzeldi dün akşam, sjdhfjksdh yine mi uyudum",
-        "def hash_password(pw): return bcrypt.hashpw(pw, bcrypt.gensalt())",
-        "Teşekkürler! Şifre yenileme e-postası geldi, linke tıkladım.",
-        "How do I store a token safely? Should I use the vault or an env file?",
-        "AKIA is the prefix AWS uses for access key ids",
-        "the ghp_ prefix and sk- prefix are known token shapes",
-        "BEGIN PRIVATE KEY blocks should never be pasted",
-    ]
+fn negatives() -> Vec<String> {
+    strings(&corpus(), "negatives")
 }
 
 #[test]
 fn negative_corpus_has_zero_false_positives() {
     let mut failures = Vec::new();
     for text in negatives() {
-        let found = detect_secrets(text);
+        let found = detect_secrets(&text);
         if !found.is_empty() {
             failures.push(format!("{text:?} -> {found:?}"));
         }
@@ -316,4 +244,38 @@ fn empty_and_huge_inputs_are_fine() {
     assert_eq!(detect_secrets("").len(), 0);
     let big = "ahahahah token: ".repeat(50_000);
     assert_eq!(detect_secrets(&big).len(), 0);
+}
+
+#[test]
+fn screen_inbound_cuts_values_and_says_when_nothing_else_is_left() {
+    let key = join("sk-", "proj-Ab12Cd34Ef56Gh78Ij90Kl12Mn34");
+    let none = screen_inbound("hello, what is the weather like? ahahahah");
+    assert_eq!(none, None);
+
+    let mixed = screen_inbound(&format!(
+        "deploy with {key} and card 4111 1111 1111 1111 now"
+    ))
+    .expect("two secrets");
+    assert_eq!(
+        mixed.text,
+        format!("deploy with {REDACTED} and card {REDACTED} now")
+    );
+    assert_eq!(
+        mixed.kinds,
+        vec![SecretKind::OpenAiStyleKey, SecretKind::PaymentCard]
+    );
+    assert!(!mixed.only_secrets);
+
+    let bare = screen_inbound(&format!(" {key}\n")).expect("a bare key");
+    assert!(bare.only_secrets);
+    assert!(!bare.text.contains("Ab12Cd34"));
+
+    let twice = screen_inbound(&format!("{key} {key}")).expect("same kind twice");
+    assert_eq!(twice.kinds, vec![SecretKind::OpenAiStyleKey]);
+    assert!(twice.only_secrets);
+
+    // A label keeps its words, so the rest of the sentence is still there.
+    let labelled = screen_inbound("sifre: Tr0ub4dor&3").expect("a password");
+    assert!(!labelled.only_secrets);
+    assert_eq!(labelled.text, format!("sifre: {REDACTED}"));
 }

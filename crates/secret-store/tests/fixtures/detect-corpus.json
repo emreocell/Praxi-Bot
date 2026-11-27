@@ -1,0 +1,382 @@
+{
+ "_comment": "Shared by crates/secret-store/tests/secret_detection_corpus.rs and apps/desktop/ui/src/lib/secretDetect.test.ts so the Rust detector and its TypeScript port cannot drift. Values are fake. Provider-key shapes are assembled at run time in each test (no secret-shaped literal here).",
+ "labelled": [
+  {
+   "kind": "labelled_api_key",
+   "text": "my api key is Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_api_key",
+   "text": "API_KEY=Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_api_key",
+   "text": "OPENAI_API_KEY=\"Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0\"",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_api_key",
+   "text": "api-key: Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_api_key",
+   "text": "apikey = Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_api_key",
+   "text": "api anahtarım: Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_secret",
+   "text": "gizli anahtar şu: Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_api_key",
+   "text": "Anahtar: Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_api_key",
+   "text": "erişim anahtarı Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_token",
+   "text": "token: Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_token",
+   "text": "GITHUB_TOKEN=Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_token",
+   "text": "Authorization: Bearer Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_token",
+   "text": "bot token is 9f86d081884c7d659a2feaa0c55ad015",
+   "value": "9f86d081884c7d659a2feaa0c55ad015"
+  },
+  {
+   "kind": "labelled_token",
+   "text": "jeton: Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_secret",
+   "text": "client secret = Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_secret",
+   "text": "{\"secret\": \"Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0\"}",
+   "value": "Zk3fQ9xLm2Pv7RtYb4Wn8HsJc6Ud1Ae0"
+  },
+  {
+   "kind": "labelled_password",
+   "text": "password: Tr0ub4dor&3",
+   "value": "Tr0ub4dor&3"
+  },
+  {
+   "kind": "labelled_password",
+   "text": "my password is Tr0ub4dor&3",
+   "value": "Tr0ub4dor&3"
+  },
+  {
+   "kind": "labelled_password",
+   "text": "DB_PASSWORD=Tr0ub4dor&3",
+   "value": "Tr0ub4dor&3"
+  },
+  {
+   "kind": "labelled_password",
+   "text": "Şifre: Tr0ub4dor&3",
+   "value": "Tr0ub4dor&3"
+  },
+  {
+   "kind": "labelled_password",
+   "text": "ŞİFRE: Tr0ub4dor&3",
+   "value": "Tr0ub4dor&3"
+  },
+  {
+   "kind": "labelled_password",
+   "text": "sifre Tr0ub4dor&3",
+   "value": "Tr0ub4dor&3"
+  },
+  {
+   "kind": "labelled_password",
+   "text": "şifrem Tr0ub4dor&3",
+   "value": "Tr0ub4dor&3"
+  },
+  {
+   "kind": "labelled_password",
+   "text": "parola: Tr0ub4dor&3",
+   "value": "Tr0ub4dor&3"
+  },
+  {
+   "kind": "labelled_password",
+   "text": "parolam şu: Tr0ub4dor&3",
+   "value": "Tr0ub4dor&3"
+  },
+  {
+   "kind": "labelled_password",
+   "text": "passphrase = Tr0ub4dor&3",
+   "value": "Tr0ub4dor&3"
+  }
+ ],
+ "cards": [
+  {
+   "text": "4111 1111 1111 1111",
+   "value": "4111 1111 1111 1111"
+  },
+  {
+   "text": "kartım 4111 1111 1111 1111 son kullanma 12/29",
+   "value": "4111 1111 1111 1111"
+  },
+  {
+   "text": "my card: 4111 1111 1111 1111, cvv 123",
+   "value": "4111 1111 1111 1111"
+  },
+  {
+   "text": "4012-8888-8888-1881",
+   "value": "4012-8888-8888-1881"
+  },
+  {
+   "text": "kartım 4012-8888-8888-1881 son kullanma 12/29",
+   "value": "4012-8888-8888-1881"
+  },
+  {
+   "text": "my card: 4012-8888-8888-1881, cvv 123",
+   "value": "4012-8888-8888-1881"
+  },
+  {
+   "text": "5555 5555 5555 4444",
+   "value": "5555 5555 5555 4444"
+  },
+  {
+   "text": "kartım 5555 5555 5555 4444 son kullanma 12/29",
+   "value": "5555 5555 5555 4444"
+  },
+  {
+   "text": "my card: 5555 5555 5555 4444, cvv 123",
+   "value": "5555 5555 5555 4444"
+  },
+  {
+   "text": "2223 0031 2200 3222",
+   "value": "2223 0031 2200 3222"
+  },
+  {
+   "text": "kartım 2223 0031 2200 3222 son kullanma 12/29",
+   "value": "2223 0031 2200 3222"
+  },
+  {
+   "text": "my card: 2223 0031 2200 3222, cvv 123",
+   "value": "2223 0031 2200 3222"
+  },
+  {
+   "text": "3782 822463 10005",
+   "value": "3782 822463 10005"
+  },
+  {
+   "text": "kartım 3782 822463 10005 son kullanma 12/29",
+   "value": "3782 822463 10005"
+  },
+  {
+   "text": "my card: 3782 822463 10005, cvv 123",
+   "value": "3782 822463 10005"
+  },
+  {
+   "text": "6011 1111 1111 1117",
+   "value": "6011 1111 1111 1117"
+  },
+  {
+   "text": "kartım 6011 1111 1111 1117 son kullanma 12/29",
+   "value": "6011 1111 1111 1117"
+  },
+  {
+   "text": "my card: 6011 1111 1111 1117, cvv 123",
+   "value": "6011 1111 1111 1117"
+  },
+  {
+   "text": "3530 1113 3330 0000",
+   "value": "3530 1113 3330 0000"
+  },
+  {
+   "text": "kartım 3530 1113 3330 0000 son kullanma 12/29",
+   "value": "3530 1113 3330 0000"
+  },
+  {
+   "text": "my card: 3530 1113 3330 0000, cvv 123",
+   "value": "3530 1113 3330 0000"
+  },
+  {
+   "text": "3056 930902 5904",
+   "value": "3056 930902 5904"
+  },
+  {
+   "text": "kartım 3056 930902 5904 son kullanma 12/29",
+   "value": "3056 930902 5904"
+  },
+  {
+   "text": "my card: 3056 930902 5904, cvv 123",
+   "value": "3056 930902 5904"
+  },
+  {
+   "text": "9792 0100 0000 0002",
+   "value": "9792 0100 0000 0002"
+  },
+  {
+   "text": "kartım 9792 0100 0000 0002 son kullanma 12/29",
+   "value": "9792 0100 0000 0002"
+  },
+  {
+   "text": "my card: 9792 0100 0000 0002, cvv 123",
+   "value": "9792 0100 0000 0002"
+  },
+  {
+   "text": "kredi kartı numaram 4111111111111111 bu",
+   "value": "4111111111111111"
+  },
+  {
+   "text": "card number 4111111111111111",
+   "value": "4111111111111111"
+  },
+  {
+   "text": "Kart No: 4111111111111111",
+   "value": "4111111111111111"
+  },
+  {
+   "text": "kredi kartı numaram 5555555555554444 bu",
+   "value": "5555555555554444"
+  },
+  {
+   "text": "card number 5555555555554444",
+   "value": "5555555555554444"
+  },
+  {
+   "text": "Kart No: 5555555555554444",
+   "value": "5555555555554444"
+  },
+  {
+   "text": "kredi kartı numaram 378282246310005 bu",
+   "value": "378282246310005"
+  },
+  {
+   "text": "card number 378282246310005",
+   "value": "378282246310005"
+  },
+  {
+   "text": "Kart No: 378282246310005",
+   "value": "378282246310005"
+  }
+ ],
+ "negatives": [
+  "ahahahah",
+  "ahahahahahahahahah",
+  "hahahahaha",
+  "asdfghjkl",
+  "qwertyuiop",
+  "Ajzashkjdgasda",
+  "sjdhfjksdh",
+  "AJzkdhfksjdhfkjsdhfk",
+  "lolololol",
+  "kkkkkkkkkkkk",
+  "slkdjfhslkdjfhsldkjfh",
+  "token: asdfghjklqwertyuiop",
+  "password: asdfghjkl",
+  "Merhaba nasılsın bugün hava çok güzel",
+  "Constantinople internationalization Muhammadovich",
+  "Anahtar teslim proje için teklif hazırla",
+  "Çok gizli bir toplantı var yarın",
+  "123e4567-e89b-12d3-a456-426614174000",
+  "9f86d081884c7d659a2feaa0c55ad01525a4f4be",
+  "commit 3f786850e387550fdab836ed7e6dc881de23001b fixes it",
+  "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "C:\\Users\\emre\\Documents\\notlar\\sifre-listesi-2024.txt",
+  "/home/emre/projects/praxi/crates/secret-store/src/lib.rs",
+  "https://github.com/emreocell/Praxi-Bot/issues/421",
+  "https://example.com/api/v1/users/12345/tokens?page=2&limit=50",
+  "see https://docs.example.com/guide/authentication-and-api-keys-overview#tokens",
+  "token: https://example.com/path/to/resource/abc123def456",
+  "api key: /usr/local/share/applications/praxi123456789",
+  "v1.2.3",
+  "praxi-bot 0.14.2-beta.4",
+  "api key: 10.20.30.40.50.60.70.80",
+  "node 22.11.0 and rustc 1.91.0-nightly",
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg",
+  "let token = tokenizer.next_token().unwrap();",
+  "const apiKey = process.env.OPENAI_API_KEY;",
+  "if (password.length < 8) { return false; }",
+  "fn check_password(password: &str) -> bool {",
+  "password = getpass.getpass('Password: ')",
+  "headers = {'Authorization': f'Bearer {token}'}",
+  "curl -H \"Authorization: Bearer $TOKEN\" https://api.example.com",
+  "export OPENAI_API_KEY=$OPENAI_API_KEY",
+  "const sk = skills.filter(s => s.enabled);",
+  "git clone https://github.com/ask-ai/task-runner.git",
+  "pip install sk-learn-is-a-fine-library-for-ml",
+  "disk-encryption-key-management-service-v2",
+  "task-abcdefghijklmnopqrstuvwxyz0123456",
+  "password is required",
+  "what is a good password manager?",
+  "I forgot my password again",
+  "şifremi unuttum, ne yapmalıyım?",
+  "şifre: ********",
+  "password: <your-password>",
+  "password: ${DB_PASSWORD}",
+  "token: [REDACTED]",
+  "api key: your_api_key_here",
+  "api key: xxxxxxxxxxxxxxxxxxxxxxxx",
+  "secret: [secret: login/openai]",
+  "token limit is 4096 per request",
+  "the token budget was exceeded at 12345 tokens",
+  "password: 12345678",
+  "parola: kedi",
+  "password: hunter2",
+  "client secret rotation policy: quarterly review of everything",
+  "api key: my-long-token-name-for-the-prod-environment-2024",
+  "token: internationalization2024",
+  "order 4111111111111111 shipped",
+  "tracking 1234 5678 9012 3456",
+  "4111 1111 1111 1112",
+  "card 4111 1111 1111 1112",
+  "kart no 1234567890123456",
+  "5555 5555 5555 4443",
+  "ref 4111-1111-1111-1111-1111",
+  "date 2024-11-18 4111 1111 1111 1111 x",
+  "TR33 0006 1005 1978 6457 8413 26",
+  "+4111111111111111",
+  "id#4111111111111111",
+  "amount 4111111111111111.50",
+  "1111 1111 1111 1111",
+  "TC kimlik no 10000000146",
+  "isbn 978-3-16-148410-0",
+  "discard 4111111111111111",
+  "unix time 1700000000000",
+  "Hey, can you summarise the PDF in my Downloads folder and email it to Ali?",
+  "Yarın saat 14:30'da toplantı var, hatırlat lütfen. Not: Zoom linki mailde.",
+  "The deployment failed at step 3/7 with exit code 137, any idea why?",
+  "Siparişim 2024-11-18 tarihinde verildi, takip no: TR1234567890 ile sorgulayabilirsin.",
+  "Please rotate the API key every 90 days and never share a password in chat.",
+  "API anahtarını nereden bulabilirim? Ayarlar sayfasında göremedim.",
+  "My phone is +90 532 123 45 67 and IBAN TR33 0006 1005 1978 6457 8413 26",
+  "Meeting ID: 123 4567 8901, passcode is on the invite",
+  "ahahahah çok güzeldi dün akşam, sjdhfjksdh yine mi uyudum",
+  "def hash_password(pw): return bcrypt.hashpw(pw, bcrypt.gensalt())",
+  "Teşekkürler! Şifre yenileme e-postası geldi, linke tıkladım.",
+  "How do I store a token safely? Should I use the vault or an env file?",
+  "AKIA is the prefix AWS uses for access key ids",
+  "the ghp_ prefix and sk- prefix are known token shapes",
+  "BEGIN PRIVATE KEY blocks should never be pasted"
+ ]
+}

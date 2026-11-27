@@ -32,7 +32,10 @@ mod totp;
 mod transaction;
 mod wipe;
 
-pub use detect::{Confidence, SecretCandidate, SecretKind, detect_secrets, placeholder};
+pub use detect::{
+    Confidence, ScreenedMessage, SecretCandidate, SecretKind, detect_secrets, placeholder,
+    redact_candidates, screen_inbound,
+};
 pub use error::SecretError;
 pub use file::{EncryptedFileStore, KdfParams};
 pub use fill::{
