@@ -223,13 +223,15 @@ async fn kimi_questions_reach_the_host_with_the_real_options_and_are_never_answe
 
 #[tokio::test]
 async fn kimi_gets_the_answer_the_owner_chose() {
-    let (dir, host) = kimi_questions(ApprovalLevel::Ask, false, Some(1)).await;
+    // Kimi cannot be held at Ask on Linux and macOS: use the level the picker starts on.
+    let level = level_picker_starts_on(Driver::Kimi);
+    let (dir, host) = kimi_questions(level, false, Some(1)).await;
     assert!(host.permissions.lock().is_empty());
     // The second option of each question, not the first.
     assert!(log(&dir, "question_answer").contains("\"optionId\":\"q0_opt_1\""));
     assert!(log(&dir, "question_answer_2").contains("\"optionId\":\"q0_opt_1\""));
     // An index the CLI did not offer is a skip, not a wrapped or clamped answer.
-    let (dir, _host) = kimi_questions(ApprovalLevel::Ask, true, Some(7)).await;
+    let (dir, _host) = kimi_questions(level, true, Some(7)).await;
     assert!(log(&dir, "question_answer").contains("q0_skip"));
 }
 
