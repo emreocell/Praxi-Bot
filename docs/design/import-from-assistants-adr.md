@@ -35,6 +35,19 @@ written by software we do not control, and some of it runs code.
   apply). Agent and prompt files become skills (name, description and text only; tools and
   model settings are not copied).
 - API keys, channels, notes and other config are listed as skipped, never copied.
+- **The preview shows what the owner needs to decide, and no more.** An MCP server's line is its
+  whole command line (command and every argument) or its whole URL, cut by characters with a
+  visible `…` (a cut line is not ticked by default). An instruction file shows its size and line
+  count only; its text comes back from `run`, after the owner ticked it.
+- **A chosen folder** is the owner's choice and may be anywhere on the machine (the route is owner
+  only), so it is not limited to the home folder. It is made canonical (`..` and links in the path
+  are resolved), `/proc`, `/sys`, `/dev` and Windows device paths are refused, links inside the
+  folder are never followed, and each file read must still resolve inside the canonical folder.
+- **Reads are bounded:** 1 MiB per settings file, 256 KiB per markdown file, 16 MiB in all per
+  scan, 200 markdown files or skill folders per folder and 2,000 directory entries looked at, all
+  counted while walking. A skill folder of more than 200 files or 1 MiB is listed, not read.
+- **A confirmed secret name** must be a valid secret name (at most 128 bytes) and one that a
+  server of the same scan has; any other name makes the run fail with 400 before it writes.
 - **Chat exports** go through the owner-only `POST /v1/chats/import`: only
   `user` and `assistant` roles, hard size and count limits, new ids, and every
   message is marked untrusted (`exposure_untrusted`, source `imported`). Steps

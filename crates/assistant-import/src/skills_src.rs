@@ -6,8 +6,9 @@ use skills::hub::{InstallSource, RiskLevel};
 use skills::{MAX_DESCRIPTION_LEN, MAX_NAME_LEN, MAX_SKILL_BYTES, validate_name};
 
 use crate::{
-    App, Ctx, InstructionsImport, Item, Kind, MAX_FOLDER_FILES, MAX_INSTRUCTION_CHARS, Reason,
-    SkillImport, read_text,
+    App, Ctx, InstructionsImport, Item, Kind, MAX_DIR_ENTRIES, MAX_FOLDER_FILES,
+    MAX_INSTRUCTION_CHARS, MAX_MARKDOWN_BYTES, MAX_SKILL_DIR_BYTES, MAX_SKILL_FILES, Reason,
+    SkillImport, is_link, real_entry,
 };
 
 /// What a markdown file is made into.
@@ -21,36 +22,68 @@ pub(crate) enum MdKind {
     Loose,
 }
 
-/// Skill folders under `dir`: `dir/<name>/SKILL.md`, and one level deeper
-/// (`dir/<category>/<name>/SKILL.md`, how Hermes groups them).
-fn skill_dirs(dir: &Path) -> Vec<PathBuf> {
+/// Real entries of `dir`, by name. Links are skipped (they could point anywhere) and, with a
+/// `jail`, so is whatever resolves outside it. `left` is how many entries the whole walk may
+/// still look at: it is spent while iterating, so a folder of millions of files costs
+/// [`MAX_DIR_ENTRIES`] lookups, not a full listing.
+fn children(
+    dir: &Path,
+    jail: Option<&Path>,
+    left: &mut usize,
+) -> Vec<(PathBuf, std::fs::FileType)> {
     let mut found = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return found;
     };
     for entry in entries.flatten() {
+        if *left == 0 {
+            break;
+        }
+        *left -= 1;
         let path = entry.path();
-        // A link could point anywhere: only real folders are followed.
-        if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+        if let Some(meta) = real_entry(&path, jail) {
+            found.push((path, meta.file_type()));
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    found
+}
+
+fn is_real_file(path: &Path, jail: Option<&Path>) -> bool {
+    real_entry(path, jail).is_some_and(|m| m.is_file())
+}
+
+/// Skill folders under `dir`: `dir/<name>/SKILL.md`, and one level deeper
+/// (`dir/<category>/<name>/SKILL.md`, how Hermes groups them). At most [`MAX_FOLDER_FILES`].
+fn skill_dirs(dir: &Path, jail: Option<&Path>) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut left = MAX_DIR_ENTRIES;
+    for (path, kind) in children(dir, jail, &mut left) {
+        if found.len() >= MAX_FOLDER_FILES {
+            break;
+        }
+        if !kind.is_dir() {
             continue;
         }
-        if path.join("SKILL.md").is_file() {
+        if is_real_file(&path.join("SKILL.md"), jail) {
             found.push(path);
-        } else if let Ok(inner) = std::fs::read_dir(&path) {
-            for e in inner.flatten() {
-                let p = e.path();
-                if e.file_type().is_ok_and(|t| t.is_dir()) && p.join("SKILL.md").is_file() {
+        } else {
+            for (p, kind) in children(&path, jail, &mut left) {
+                if found.len() >= MAX_FOLDER_FILES {
+                    break;
+                }
+                if kind.is_dir() && is_real_file(&p.join("SKILL.md"), jail) {
                     found.push(p);
                 }
             }
         }
     }
-    found.sort();
     found
 }
 
-/// Markdown files directly in `dir` and one folder level below (real files only).
-fn markdown_files(dir: &Path, deep: bool) -> Vec<PathBuf> {
+/// Markdown files directly in `dir` and one folder level below (real files only). At most
+/// [`MAX_FOLDER_FILES`], counted while walking.
+fn markdown_files(dir: &Path, deep: bool, jail: Option<&Path>) -> Vec<PathBuf> {
     fn is_md(p: &Path) -> bool {
         p.extension()
             .and_then(|e| e.to_str())
@@ -58,37 +91,78 @@ fn markdown_files(dir: &Path, deep: bool) -> Vec<PathBuf> {
     }
     let mut found = Vec::new();
     let mut folders = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return found;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(kind) = entry.file_type() else {
-            continue;
-        };
+    let mut left = MAX_DIR_ENTRIES;
+    for (path, kind) in children(dir, jail, &mut left) {
         if kind.is_file() && is_md(&path) {
-            found.push(path);
+            if found.len() < MAX_FOLDER_FILES {
+                found.push(path);
+            }
         } else if deep && kind.is_dir() {
-            let hidden = entry.file_name().to_string_lossy().starts_with('.');
-            if !hidden && entry.file_name() != "node_modules" {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            if !name.starts_with('.') && name != "node_modules" {
                 folders.push(path);
             }
         }
     }
-    folders.sort();
     for folder in folders {
-        if let Ok(inner) = std::fs::read_dir(&folder) {
-            for e in inner.flatten() {
-                let p = e.path();
-                if e.file_type().is_ok_and(|t| t.is_file()) && is_md(&p) {
-                    found.push(p);
-                }
+        if found.len() >= MAX_FOLDER_FILES {
+            break;
+        }
+        for (p, kind) in children(&folder, jail, &mut left) {
+            if found.len() >= MAX_FOLDER_FILES {
+                break;
+            }
+            if kind.is_file() && is_md(&p) {
+                found.push(p);
             }
         }
     }
     found.sort();
-    found.truncate(MAX_FOLDER_FILES);
     found
+}
+
+/// Whether the skill folder `dir` is small enough to be handed to the skill hub, which reads
+/// every file in it: no link anywhere, at most [`MAX_SKILL_FILES`] files and
+/// [`MAX_SKILL_DIR_BYTES`] bytes, shallow. Returns the bytes in it.
+fn skill_dir_bytes(dir: &Path, jail: Option<&Path>) -> Result<u64, &'static str> {
+    let mut files = 0;
+    let mut bytes = 0u64;
+    let mut left = MAX_DIR_ENTRIES;
+    let mut pending = vec![(dir.to_path_buf(), 0usize)];
+    while let Some((folder, depth)) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            return Err("cannot be read");
+        };
+        for entry in entries.flatten() {
+            if left == 0 {
+                return Err("has too many entries");
+            }
+            left -= 1;
+            let path = entry.path();
+            let meta = std::fs::symlink_metadata(&path).map_err(|_| "cannot be read")?;
+            if is_link(&meta) {
+                return Err("contains a link");
+            }
+            if jail.is_some() && real_entry(&path, jail).is_none() {
+                return Err("reaches outside the folder");
+            }
+            if meta.is_dir() {
+                if depth >= 4 {
+                    return Err("is nested too deeply");
+                }
+                pending.push((path, depth + 1));
+            } else if meta.is_file() {
+                files += 1;
+                bytes = bytes.saturating_add(meta.len());
+                if files > MAX_SKILL_FILES || bytes > MAX_SKILL_DIR_BYTES {
+                    return Err("is too large (too many files or bytes)");
+                }
+            } else {
+                return Err("contains a special file");
+            }
+        }
+    }
+    Ok(bytes)
 }
 
 /// `name` / `description` of a leading `---` block, and the text after it.
@@ -143,6 +217,19 @@ fn skill_name(raw: &str) -> Option<String> {
     validate_name(&out).ok().map(|()| out)
 }
 
+/// `1.2 KB, 24 lines`: how big a file is, without a word of it.
+fn size_text(text: &str) -> String {
+    let lines = text.lines().count();
+    let bytes = text.len();
+    if bytes < 1024 {
+        format!("{bytes} bytes, {lines} lines")
+    } else {
+        // One decimal, in integers (a file here is at most 256 KiB).
+        let tenths = bytes * 10 / 1024;
+        format!("{}.{} KB, {lines} lines", tenths / 10, tenths % 10)
+    }
+}
+
 fn short(text: &str, max: usize) -> String {
     let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
     one_line.chars().take(max).collect()
@@ -161,15 +248,34 @@ pub(crate) fn has_hidden(text: &str) -> bool {
 impl Ctx<'_> {
     /// Every `SKILL.md` folder under `dirs`.
     pub(crate) fn skill_folders(&mut self, app: App, dirs: &[PathBuf]) {
-        for dir in dirs.iter().flat_map(|d| skill_dirs(d)) {
+        let jail = self.jail.clone();
+        let found: Vec<PathBuf> = dirs
+            .iter()
+            .flat_map(|d| skill_dirs(d, jail.as_deref()))
+            .collect();
+        for dir in found {
             let source = self.roots.show(&dir);
+            // The hub reads the whole folder: look at how big it is before it does.
+            let fits = skill_dir_bytes(&dir, jail.as_deref()).and_then(|bytes| {
+                self.charge(bytes)
+                    .then_some(())
+                    .ok_or("was not read: this scan reached its size limit")
+            });
+            if let Err(why) = fits {
+                let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("skill");
+                let item = Item::new(app, Kind::Skill, name, &source)
+                    .skipped(Reason::Invalid, format!("not imported: the folder {why}"));
+                self.push(item);
+                continue;
+            }
             self.skill_item(app, &source, &dir, true);
         }
     }
 
     /// Markdown files made into skills.
     pub(crate) fn md_skills(&mut self, app: App, dir: &Path, kind: MdKind) {
-        for file in markdown_files(dir, kind == MdKind::Loose) {
+        let jail = self.jail.clone();
+        for file in markdown_files(dir, kind == MdKind::Loose, jail.as_deref()) {
             let stem = file
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -186,7 +292,7 @@ impl Ctx<'_> {
                 continue;
             }
             let source = self.roots.show(&file);
-            let text = match read_text(&file) {
+            let text = match self.read_capped(&file, MAX_MARKDOWN_BYTES) {
                 Ok(t) => t,
                 Err(why) => {
                     self.other(
@@ -348,7 +454,7 @@ impl Ctx<'_> {
         }
         let source = self.roots.show(file);
         let item = Item::new(app, Kind::Instructions, name, &source);
-        let text = match read_text(file) {
+        let text = match self.read_capped(file, MAX_MARKDOWN_BYTES) {
             Ok(t) => t.replace("\r\n", "\n").trim().to_owned(),
             Err(why) => {
                 let item = item.skipped(Reason::Unreadable, format!("the file {why}"));
@@ -394,7 +500,9 @@ impl Ctx<'_> {
                 );
                 // Instructions change how a bot behaves: never ticked without the owner reading them.
                 item.default_on = false;
-                item.detail = Some(short(&text, 240));
+                // Size only: the text itself is not shown (it may hold anything, keys included)
+                // until the owner ticks the item and the import returns it.
+                item.detail = Some(size_text(&text));
                 self.plan.instructions.push(InstructionsImport {
                     item_id: item.id.clone(),
                     text,
@@ -418,5 +526,24 @@ impl Ctx<'_> {
         std::fs::write(dir.join("SKILL.md"), format!("{front}{text}\n")).ok()?;
         let preview = self.hub.preview(&InstallSource::Local(dir)).ok()?;
         Some(preview.report.risk())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_walk_looks_at_no_more_than_the_entry_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..MAX_DIR_ENTRIES + 100 {
+            std::fs::write(dir.path().join(format!("f{i}.dat")), "").unwrap();
+        }
+        let mut left = MAX_DIR_ENTRIES;
+        let found = children(dir.path(), None, &mut left);
+        assert_eq!(found.len(), MAX_DIR_ENTRIES);
+        assert_eq!(left, 0, "the budget is spent while iterating");
+        // The budget is shared by the whole walk: nothing is left for a second folder.
+        assert_eq!(children(dir.path(), None, &mut left).len(), 0);
     }
 }

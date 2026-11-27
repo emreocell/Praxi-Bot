@@ -251,7 +251,10 @@ ya da `--move-secrets`) ve hiçbir zaman düz metin olarak bir yapılandırmaya 
 riskli bulduğu beceriler içe aktarılır, diğerleri `bot skills install` için bırakılır. `CLAUDE.md` / `AGENTS.md`
 yalnızca `--bot` ile bir botun yönergelerine eklenir. Sohbetler, notlar, API anahtarları ve oturum açma bilgileri
 hiçbir zaman kopyalanmaz. Masaüstü uygulamasında aynı akış Ayarlar altındadır. `run` işini daemon yapar;
-`--server` ile sunucunun kendi dosyalarından içe aktarılır.
+`--server` ile sunucunun kendi dosyalarından içe aktarılır. Önizleme bir sunucunun komut satırının ya da
+adresinin tamamını gösterir (çok uzunsa `…` ile kesilir); yönerge dosyasında yalnızca boyutunu gösterir.
+`--folder` o makinenin herhangi bir klasörü olabilir, ama `/proc`, `/sys`, `/dev` ya da bir aygıt yolu olamaz;
+klasörün içindeki bağlantılar izlenmez ve çok büyük dosyalar okunmaz.
 
 | Alt komut | Anlamı |
 | --- | --- |

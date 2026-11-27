@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::mcp::Shape;
 use crate::skills_src::MdKind;
-use crate::{App, Ctx, Reason};
+use crate::{App, Ctx, Reason, real_entry, resolve_folder};
 
 fn file(p: PathBuf) -> Option<PathBuf> {
     p.is_file().then_some(p)
@@ -161,27 +161,33 @@ impl Ctx<'_> {
         }
     }
 
-    /// A folder of skills and prompt markdown the owner chose.
-    pub(crate) fn folder(&mut self, folder: &Path) {
-        let source = self.roots.show(folder);
-        if !folder.is_dir() {
-            self.other(
-                App::Folder,
-                &source,
-                &source,
-                Reason::Unreadable,
-                "the folder cannot be read",
-            );
-            return;
-        }
-        self.skill_folders(App::Folder, &[folder.to_path_buf()]);
-        self.md_skills(App::Folder, folder, MdKind::Loose);
+    /// A folder of skills and prompt markdown the owner chose. The path is made canonical first
+    /// (no links in it, no system pseudo-filesystem); every read below stays inside it.
+    pub(crate) fn folder(&mut self, chosen: &Path) {
+        let source = self.roots.show(chosen);
+        let folder = match resolve_folder(chosen) {
+            Ok(real) => real,
+            Err(why) => {
+                self.other(
+                    App::Folder,
+                    &source,
+                    &source,
+                    Reason::Unreadable,
+                    &why.to_string(),
+                );
+                return;
+            }
+        };
+        self.jail = Some(folder.clone());
+        self.skill_folders(App::Folder, std::slice::from_ref(&folder));
+        self.md_skills(App::Folder, &folder, MdKind::Loose);
         for name in ["AGENTS.md", "CLAUDE.md"] {
             let file = folder.join(name);
             // A link in a folder of someone else's could point at any file of this machine.
-            if std::fs::symlink_metadata(&file).is_ok_and(|m| m.is_file()) {
+            if real_entry(&file, Some(&folder)).is_some_and(|m| m.is_file()) {
                 self.instructions(App::Folder, &file, name);
             }
         }
+        self.jail = None;
     }
 }

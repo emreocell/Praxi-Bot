@@ -5,7 +5,9 @@ use std::path::Path;
 use mcp_bridge::McpTransport;
 use serde_json::{Map, Value};
 
-use crate::{App, Ctx, Item, Kind, Reason, SecretSlot, ServerImport, read_text};
+use crate::{
+    App, Ctx, Item, Kind, MAX_CONFIG_BYTES, MAX_SERVERS_PER_FILE, Reason, SecretSlot, ServerImport,
+};
 
 /// Where the server map sits in a settings file.
 #[derive(Clone, Copy)]
@@ -22,7 +24,7 @@ impl Ctx<'_> {
     /// Add every server of a JSON settings file.
     pub(crate) fn json_servers(&mut self, app: App, file: &Path, shape: Shape) {
         let source = self.roots.show(file);
-        let text = match read_text(file) {
+        let text = match self.read_capped(file, MAX_CONFIG_BYTES) {
             Ok(t) => t,
             Err(why) => {
                 self.unreadable(app, &source, &format!("the file {why}"));
@@ -48,15 +50,16 @@ impl Ctx<'_> {
         let Some(map) = servers.and_then(Value::as_object) else {
             return;
         };
-        for (name, entry) in map {
+        for (name, entry) in map.iter().take(MAX_SERVERS_PER_FILE) {
             self.server(app, &source, name, entry.clone(), Vec::new());
         }
+        self.too_many(app, &source, map.len());
     }
 
     /// Add every `[mcp_servers.<name>]` table of a Codex `config.toml`.
     pub(crate) fn codex_servers(&mut self, file: &Path) {
         let source = self.roots.show(file);
-        let text = match read_text(file) {
+        let text = match self.read_capped(file, MAX_CONFIG_BYTES) {
             Ok(t) => t,
             Err(why) => {
                 self.unreadable(App::Codex, &source, &format!("the file {why}"));
@@ -70,12 +73,22 @@ impl Ctx<'_> {
         let Some(servers) = doc.get("mcp_servers").and_then(toml::Value::as_table) else {
             return;
         };
-        for (name, table) in servers {
+        self.too_many(App::Codex, &source, servers.len());
+        for (name, table) in servers.iter().take(MAX_SERVERS_PER_FILE) {
             let Some(table) = table.as_table() else {
                 continue;
             };
             let (entry, dropped) = codex_entry(table);
             self.server(App::Codex, &source, name, entry, dropped);
+        }
+    }
+
+    /// A note when a file holds more servers than are looked at.
+    fn too_many(&mut self, app: App, source: &str, count: usize) {
+        if count > MAX_SERVERS_PER_FILE {
+            let note =
+                format!("only the first {MAX_SERVERS_PER_FILE} of {count} servers are listed");
+            self.other(app, source, source, Reason::NotImported, &note);
         }
     }
 
@@ -151,7 +164,8 @@ impl Ctx<'_> {
         }
         parsed.config.enabled = false;
         item.secrets = slots(&parsed);
-        item.detail = Some(summary(&parsed));
+        let (line, cut) = summary(&parsed);
+        item.detail = Some(line);
         let n = item.secrets.len();
         let item = if n == 0 {
             item.ready(Reason::Ready, "arrives switched off")
@@ -161,6 +175,13 @@ impl Ctx<'_> {
                 format!("arrives switched off; {n} secret value(s) go to the secret store"),
             )
         };
+        let mut item = item;
+        if cut {
+            // The owner cannot read all of it here, so it is not ticked for them.
+            item.default_on = false;
+            item.note
+                .push_str("; the command line is longer than shown: read the file first");
+        }
         let item_id = item.id.clone();
         self.push(item);
         self.plan.servers.push(ServerImport { item_id, parsed });
@@ -194,36 +215,41 @@ fn slots(parsed: &mcp_bridge::paste::Parsed) -> Vec<SecretSlot> {
     env.chain(headers).collect()
 }
 
-/// A one-line summary that never shows a value: the launcher and its package, or the host.
-fn summary(parsed: &mcp_bridge::paste::Parsed) -> String {
-    match &parsed.config.transport {
-        McpTransport::Stdio { command, args, .. } => {
-            let package = args
-                .iter()
-                .find(|a| !a.starts_with('-') && (!a.contains('=') || is_pinned_package(a)))
-                .map_or("", String::as_str);
-            format!("{command} {package}").trim().to_owned()
-        }
-        McpTransport::Http { url, .. } => url::Url::parse(url)
-            .ok()
-            .and_then(|u| u.host_str().map(str::to_owned))
-            .unwrap_or_default(),
+/// Longest command line or URL shown, in characters.
+const MAX_COMMAND_CHARS: usize = 1_000;
+
+/// The command line (command and every argument) or the URL exactly as the file has it, cut
+/// after [`MAX_COMMAND_CHARS`] characters with a visible `…`. The second value says it was cut.
+/// What the owner switches on is this text, so no flag or argument is left out; an argument that
+/// holds a space or a control character is quoted so it cannot pass for two. Values of `env` and
+/// `headers` are not part of it. The command line was already checked for keys and `${...}`.
+fn summary(parsed: &mcp_bridge::paste::Parsed) -> (String, bool) {
+    let line = match &parsed.config.transport {
+        McpTransport::Stdio { command, args, .. } => std::iter::once(command)
+            .chain(args)
+            .map(|part| quote(part))
+            .collect::<Vec<_>>()
+            .join(" "),
+        McpTransport::Http { url, .. } => url.clone(),
+    };
+    match line.char_indices().nth(MAX_COMMAND_CHARS) {
+        Some((end, _)) => (format!("{}…", &line[..end]), true),
+        None => (line, false),
     }
 }
 
-/// `name==1.2.3` (a pinned `uvx` package), not `KEY=value` or a base64 tail.
-fn is_pinned_package(arg: &str) -> bool {
-    let Some((name, version)) = arg.split_once("==") else {
-        return false;
-    };
-    !name.is_empty()
-        && name
+/// `part` as it is, or in JSON quotes when it is empty or has whitespace, quotes or control
+/// characters.
+fn quote(part: &str) -> String {
+    let plain = !part.is_empty()
+        && !part
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '@' | '/' | '-'))
-        && version.starts_with(|c: char| c.is_ascii_digit())
-        && version
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'))
+            .any(|c| c.is_whitespace() || c.is_control() || c == '"' || c == '\'');
+    if plain {
+        part.to_owned()
+    } else {
+        serde_json::Value::from(part).to_string()
+    }
 }
 
 /// The command, arguments and URL of an entry as one text (to look for variables and keys in).

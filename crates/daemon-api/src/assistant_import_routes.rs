@@ -35,6 +35,8 @@ use crate::{AppState, PeerIdentity};
 const MAX_IDS: usize = 500;
 /// Longest folder path accepted.
 const MAX_FOLDER_LEN: usize = 1024;
+/// Longest secret name in `confirmed_secrets` (the store itself takes 128).
+const MAX_SECRET_NAME_LEN: usize = 256;
 
 /// What to look at.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -138,7 +140,11 @@ pub struct ImportRunDto {
     pub results: Vec<ImportResultDto>,
 }
 
-fn options(only: Option<String>, folder: Option<String>) -> Result<ScanOptions, ApiError> {
+/// The scan options. A folder is the owner's choice and may be anywhere on this machine, so it
+/// is not tied to the home folder; it is made canonical (no `..`, no links in the path) and a
+/// system pseudo-filesystem (`/proc`, `/sys`, `/dev`, Windows device paths) is refused. The
+/// scan then keeps every read inside that canonical folder.
+async fn options(only: Option<String>, folder: Option<String>) -> Result<ScanOptions, ApiError> {
     if let Some(only) = &only
         && assistant_import::App::from_key(only).is_none()
     {
@@ -153,13 +159,30 @@ fn options(only: Option<String>, folder: Option<String>) -> Result<ScanOptions, 
                     "`folder` must be a full path on the machine of this daemon",
                 ));
             }
-            Some(path)
+            let real = tokio::task::spawn_blocking(move || assistant_import::resolve_folder(&path))
+                .await
+                .map_err(|_| ApiError::internal("import worker failed"))?
+                .map_err(|e| ApiError::bad_request(e.to_string()))?;
+            Some(real)
         }
     };
     if only.as_deref() == Some("folder") && folder.is_none() {
         return Err(ApiError::bad_request("`folder` is needed to scan a folder"));
     }
     Ok(ScanOptions { only, folder })
+}
+
+/// Each name the owner confirmed must be a well-formed secret name of the store (so nothing
+/// odd is matched, stored or logged), however many there are.
+fn check_secret_names(names: &[String]) -> Result<(), ApiError> {
+    for name in names {
+        if name.len() > MAX_SECRET_NAME_LEN || secret_store::validate_name(name).is_err() {
+            return Err(ApiError::bad_request(
+                "`confirmed_secrets` holds a name that is not a valid secret name",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn roots(s: &AppState) -> Result<Roots, ApiError> {
@@ -242,7 +265,7 @@ pub(crate) async fn scan(
     ApiJson(input): ApiJson<ImportScanInput>,
 ) -> Result<Json<ImportScanDto>, ApiError> {
     local_owner(&s, peer.as_ref())?;
-    let opts = options(input.only, input.folder)?;
+    let opts = options(input.only, input.folder).await?;
     let plan = plan_of(&s, opts).await?;
     Ok(Json(ImportScanDto {
         items: plan.items.iter().map(|i| item_dto(&s, i)).collect(),
@@ -281,9 +304,21 @@ pub(crate) async fn run(
     if input.ids.len() > MAX_IDS || input.confirmed_secrets.len() > MAX_IDS * 8 {
         return Err(ApiError::bad_request("too many items"));
     }
-    let opts = options(input.only, input.folder)?;
+    check_secret_names(&input.confirmed_secrets)?;
+    let opts = options(input.only, input.folder).await?;
     let plan = plan_of(&s, opts).await?;
     let confirmed: BTreeSet<&str> = input.confirmed_secrets.iter().map(String::as_str).collect();
+    // A name that is no secret slot of any server in this scan is refused, not ignored.
+    let known: BTreeSet<&str> = plan
+        .items
+        .iter()
+        .flat_map(|i| i.secrets.iter().map(|slot| slot.name.as_str()))
+        .collect();
+    if confirmed.iter().any(|name| !known.contains(name)) {
+        return Err(ApiError::bad_request(
+            "`confirmed_secrets` names a secret that no server in this scan has: look again",
+        ));
+    }
     let mut seen = BTreeSet::new();
     let mut results = Vec::new();
     for id in &input.ids {

@@ -32,6 +32,7 @@ mod mcp;
 mod skills_src;
 
 use std::collections::BTreeSet;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use mcp_bridge::paste::Parsed;
@@ -40,12 +41,24 @@ use serde::Serialize;
 use skills::hub::{HubPaths, SkillHub};
 use tempfile::TempDir;
 
-/// Largest config or instruction file read from another app.
-pub const MAX_CONFIG_BYTES: u64 = 16 * 1024 * 1024;
+/// Largest settings file (JSON / TOML) read from another app.
+pub const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+/// Largest markdown file (skill, agent, prompt, instruction file) read from another app.
+pub const MAX_MARKDOWN_BYTES: u64 = 256 * 1024;
+/// Most bytes one scan reads in all (the sizes of what it opens, counted before reading).
+pub const MAX_TOTAL_BYTES: u64 = 16 * 1024 * 1024;
+/// Most files and bytes a skill folder may hold to be looked at (the skill hub allows more).
+pub const MAX_SKILL_FILES: usize = 200;
+/// See [`MAX_SKILL_FILES`].
+pub const MAX_SKILL_DIR_BYTES: u64 = 1024 * 1024;
+/// Most directory entries looked at in one folder walk, whatever they are.
+pub const MAX_DIR_ENTRIES: usize = 2_000;
+/// Most servers taken from one settings file.
+pub const MAX_SERVERS_PER_FILE: usize = 500;
 /// Longest instruction file that is offered for a bot's instructions (a bot holds 8,000
 /// characters in total, so this leaves room for what is already there).
 pub const MAX_INSTRUCTION_CHARS: usize = 6_000;
-/// Most markdown files read from one folder.
+/// Most markdown files (and skill folders) read from one folder.
 pub const MAX_FOLDER_FILES: usize = 200;
 
 /// Which app an item was found in.
@@ -389,6 +402,10 @@ pub(crate) struct Ctx<'a> {
     pub existing_skills: BTreeSet<String>,
     pub taken_servers: &'a BTreeSet<String>,
     pub plan: Plan,
+    /// Bytes opened so far, against [`MAX_TOTAL_BYTES`].
+    pub bytes_read: u64,
+    /// While a chosen folder is scanned: its canonical path. Everything read must stay inside.
+    pub jail: Option<PathBuf>,
 }
 
 impl Ctx<'_> {
@@ -402,13 +419,159 @@ impl Ctx<'_> {
     }
 }
 
-/// Read a text file bounded by [`MAX_CONFIG_BYTES`].
-pub(crate) fn read_text(path: &Path) -> Result<String, &'static str> {
-    let len = std::fs::metadata(path).map_err(|_| "cannot be read")?.len();
-    if len > MAX_CONFIG_BYTES {
-        return Err("is too large to be a settings file");
+/// Whether `meta` is a link (a symlink, or a reparse point on Windows).
+pub(crate) fn is_link(meta: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        meta.file_type().is_symlink() || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
     }
-    std::fs::read_to_string(path).map_err(|_| "cannot be read")
+    #[cfg(not(windows))]
+    {
+        meta.file_type().is_symlink()
+    }
+}
+
+/// The metadata of `path` itself when it is a real file or folder (no link) and, with a `jail`,
+/// its canonical path is inside it.
+pub(crate) fn real_entry(path: &Path, jail: Option<&Path>) -> Option<std::fs::Metadata> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    if is_link(&meta) {
+        return None;
+    }
+    if let Some(jail) = jail
+        && !path.canonicalize().ok()?.starts_with(jail)
+    {
+        return None;
+    }
+    Some(meta)
+}
+
+impl Ctx<'_> {
+    /// Read a text file of at most `limit` bytes. Only a regular file is read (a pipe would block),
+    /// the size counts against [`MAX_TOTAL_BYTES`], and the read itself stops at `limit`, so a
+    /// file that grows meanwhile cannot get past it. In a chosen folder a link is refused.
+    pub(crate) fn read_capped(&mut self, path: &Path, limit: u64) -> Result<String, &'static str> {
+        let meta = match &self.jail {
+            Some(jail) => real_entry(path, Some(jail)).ok_or("cannot be read")?,
+            None => std::fs::metadata(path).map_err(|_| "cannot be read")?,
+        };
+        if !meta.is_file() {
+            return Err("is not a regular file");
+        }
+        if meta.len() > limit {
+            return Err("is too large to import");
+        }
+        if !self.charge(meta.len()) {
+            return Err("was not read: this scan reached its size limit");
+        }
+        let file = std::fs::File::open(path).map_err(|_| "cannot be read")?;
+        let mut bytes = Vec::new();
+        file.take(limit + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| "cannot be read")?;
+        if bytes.len() as u64 > limit {
+            return Err("is too large to import");
+        }
+        String::from_utf8(bytes).map_err(|_| "is not text")
+    }
+
+    /// Count `bytes` against the scan's total; `false` when that is more than it may read.
+    pub(crate) fn charge(&mut self, bytes: u64) -> bool {
+        match self.bytes_read.checked_add(bytes) {
+            Some(total) if total <= MAX_TOTAL_BYTES => {
+                self.bytes_read = total;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Why a folder the owner chose is not read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FolderError {
+    /// Not a full path, too long, or holds a NUL.
+    NotAPath,
+    /// Missing, not a folder, or cannot be opened.
+    Unreadable,
+    /// `/proc`, `/sys`, `/dev` or a Windows device path.
+    SystemFolder,
+}
+
+impl std::fmt::Display for FolderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::NotAPath => "the folder must be a full path on this machine",
+            Self::Unreadable => "the folder cannot be read",
+            Self::SystemFolder => "system folders (/proc, /sys, /dev, device paths) are not read",
+        })
+    }
+}
+
+/// The folder as everything below it is checked against: absolute, no `..`, no links in the
+/// path (`canonicalize`), and not a system pseudo-filesystem. The folder is the owner's choice,
+/// so it is not limited to the home folder.
+///
+/// # Errors
+/// [`FolderError`] says which rule it broke.
+pub fn resolve_folder(path: &Path) -> Result<PathBuf, FolderError> {
+    let text = path.to_string_lossy();
+    if !path.is_absolute() || text.len() > 4096 || text.contains('\0') {
+        return Err(FolderError::NotAPath);
+    }
+    // Looked at before and after `canonicalize`: a link to /proc is caught by the second look,
+    // and a path Windows would open as a device never gets as far as the disk.
+    if is_system_path(path, cfg!(windows)) {
+        return Err(FolderError::SystemFolder);
+    }
+    let real = path.canonicalize().map_err(|_| FolderError::Unreadable)?;
+    if is_system_path(&real, cfg!(windows)) {
+        return Err(FolderError::SystemFolder);
+    }
+    if !real.is_dir() {
+        return Err(FolderError::Unreadable);
+    }
+    Ok(real)
+}
+
+/// A pseudo-filesystem of the OS. `windows` says to apply the Windows rules too (device
+/// namespaces, `CON`, `NUL`, `COM1`, ...); on other systems those are ordinary names.
+fn is_system_path(path: &Path, windows: bool) -> bool {
+    let mut lower = path.to_string_lossy().to_ascii_lowercase();
+    if windows {
+        lower = lower.replace('\\', "/");
+    }
+    if ["/proc", "/sys", "/dev"]
+        .iter()
+        .any(|p| lower == *p || lower.starts_with(&format!("{p}/")))
+    {
+        return true;
+    }
+    if !windows {
+        return false;
+    }
+    // `\\.\` is the device namespace, `\??\` the NT one; `\\?\GLOBALROOT`, `\\?\Device`, `\\?\pipe` reach it too.
+    if lower.starts_with("//./") || lower.starts_with("/??/") {
+        return true;
+    }
+    let verbatim = lower.strip_prefix("//?/").unwrap_or(&lower);
+    if ["globalroot", "device", "pipe", "harddiskvolume"]
+        .iter()
+        .any(|p| verbatim == *p || verbatim.starts_with(&format!("{p}/")))
+    {
+        return true;
+    }
+    lower.split('/').any(|part| {
+        let stem = part.split('.').next().unwrap_or_default().trim_end();
+        matches!(stem, "con" | "prn" | "aux" | "nul" | "conin$" | "conout$")
+            || ["com", "lpt"].iter().any(|p| {
+                stem.strip_prefix(p).is_some_and(|n| {
+                    n.len() == 1 && n.starts_with(|c: char| ('1'..='9').contains(&c))
+                })
+            })
+    })
 }
 
 /// Build the preview. Reads files; writes nothing.
@@ -439,6 +602,8 @@ pub fn build_plan(
         existing_skills: existing,
         taken_servers,
         plan: Plan::default(),
+        bytes_read: 0,
+        jail: None,
     };
     let want = |app: App| {
         options.only.as_deref().is_none_or(|o| o == app.key())
@@ -469,4 +634,77 @@ pub fn build_plan(
         ctx.folder(folder);
     }
     ctx.plan
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pseudo_filesystems_and_windows_devices_are_system_paths() {
+        for p in [
+            "/proc",
+            "/proc/1/root",
+            "/sys/kernel",
+            "/dev",
+            "/dev/shm",
+            "/DEV/null",
+        ] {
+            assert!(is_system_path(Path::new(p), false), "{p}");
+        }
+        for p in [
+            "/home/me/proc",
+            "/process",
+            "/devices",
+            "/srv/dev",
+            "/home/me/con",
+            "/tmp/nul",
+        ] {
+            assert!(!is_system_path(Path::new(p), false), "{p}");
+        }
+        for p in [
+            r"\\.\C:",
+            r"\\.\pipe\x",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1",
+            r"\\?\Device\Null",
+            r"\??\C:\x",
+            r"C:\work\CON",
+            r"C:\work\nul.md",
+            r"C:\work\COM1",
+            r"D:\LPT9.txt",
+        ] {
+            assert!(is_system_path(Path::new(p), true), "{p}");
+        }
+        for p in [
+            r"C:\Users\me\skills",
+            r"\\?\C:\Users\me",
+            r"\\?\UNC\server\share",
+            r"C:\work\COM10",
+            r"C:\work\console",
+            r"C:\work\devices",
+        ] {
+            assert!(!is_system_path(Path::new(p), true), "{p}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_entry_refuses_a_link_and_a_path_that_resolves_outside_the_jail() {
+        let jail = tempfile::tempdir().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        std::fs::write(out.path().join("secret.md"), "x").unwrap();
+        std::os::unix::fs::symlink(out.path(), jail.path().join("door")).unwrap();
+        let jail = jail.path().canonicalize().unwrap();
+        // lstat of the file sees a regular file, but one component of the path is a link.
+        let through = jail.join("door/secret.md");
+        assert!(real_entry(&through, None).is_some());
+        assert!(real_entry(&through, Some(&jail)).is_none());
+        assert!(
+            real_entry(&jail.join("door"), None).is_none(),
+            "a link itself"
+        );
+        std::fs::write(jail.join("own.md"), "x").unwrap();
+        assert!(real_entry(&jail.join("own.md"), Some(&jail)).is_some());
+        assert!(real_entry(&jail.join("own.md"), Some(&jail.join("elsewhere"))).is_none());
+    }
 }

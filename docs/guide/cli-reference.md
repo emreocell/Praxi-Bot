@@ -256,7 +256,10 @@ secret store only after you confirm that one value (asked per value on a termina
 low-risk are imported; others are left for `bot skills install`. `CLAUDE.md` / `AGENTS.md` are
 added to a bot's instructions only with `--bot`. Chats, notes, API keys and sign-ins are never
 copied. The desktop app has the same flow under Settings. `run` is done by the daemon, so with
-`--server` it imports from the server's own files.
+`--server` it imports from the server's own files. The preview shows a server's whole command
+line or URL (cut with `…` when very long) and only the size of an instruction file. `--folder`
+may be any folder of that machine, but not `/proc`, `/sys`, `/dev` or a device path; links
+inside it are not followed and very large files are not read.
 
 | Subcommand | Meaning |
 | --- | --- |

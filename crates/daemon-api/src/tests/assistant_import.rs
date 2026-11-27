@@ -114,6 +114,7 @@ async fn bad_input_is_refused() {
         json!({"only": "nope"}),
         json!({"only": "folder"}),
         json!({"folder": "relative/dir"}),
+        json!({"folder": "/proc"}),
         json!({"surprise": 1}),
     ] {
         let r = call(&t, Method::POST, "/v1/import/scan", Some(body.clone())).await;
@@ -338,4 +339,205 @@ async fn a_folder_is_read_only_when_named() {
             .iter()
             .any(|i| i["app"] == "folder" && i["kind"] == "skill")
     );
+}
+
+#[tokio::test]
+async fn a_system_folder_is_refused_on_scan_and_run() {
+    let (t, _, _) = setup();
+    let base = tempfile::tempdir().unwrap();
+    let mut folders = vec![
+        "/proc".to_owned(),
+        "/proc/self".to_owned(),
+        "/sys".to_owned(),
+        "/dev".to_owned(),
+    ];
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("/proc", base.path().join("to-proc")).unwrap();
+        folders.push(base.path().join("to-proc").display().to_string());
+    }
+    for folder in &folders {
+        for (path, body) in [
+            (
+                "/v1/import/scan",
+                json!({"only": "folder", "folder": folder}),
+            ),
+            (
+                "/v1/import/run",
+                json!({"only": "folder", "folder": folder, "ids": []}),
+            ),
+        ] {
+            let r = call(&t, Method::POST, path, Some(body)).await;
+            assert_eq!(r.status, StatusCode::BAD_REQUEST, "{path} {folder}");
+            assert!(String::from_utf8_lossy(&r.body).contains("system folders"));
+        }
+    }
+    // Neither a missing path, a file nor a path with `..` into nothing is read.
+    for folder in [
+        base.path().join("nope"),
+        PathBuf::from("/etc/hostname"),
+        base.path().join("a/../../../../nope"),
+    ] {
+        let r = call(
+            &t,
+            Method::POST,
+            "/v1/import/scan",
+            Some(json!({"only": "folder", "folder": folder})),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{folder:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_folder_outside_the_home_folder_is_the_owners_choice() {
+    let (t, _, _) = setup();
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(
+        folder.path().join("prompt.md"),
+        "# Prompt\nWrite a short summary.",
+    )
+    .unwrap();
+    let dotted = folder.path().join("sub/..");
+    std::fs::create_dir_all(folder.path().join("sub")).unwrap();
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/import/scan",
+        Some(json!({"only": "folder", "folder": dotted})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let items = r.json()["items"].as_array().unwrap().clone();
+    assert!(
+        items
+            .iter()
+            .any(|i| i["name"] == "prompt" && i["import"] == true)
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn nothing_outside_the_chosen_folder_is_read() {
+    let (t, _, _) = setup();
+    let folder = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(
+        outside.path().join("secret.md"),
+        "# S\nCANARY-route-outside-77ab",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(outside.path().join("secret.md"), folder.path().join("a.md"))
+        .unwrap();
+    std::os::unix::fs::symlink(
+        outside.path().join("secret.md"),
+        folder.path().join("AGENTS.md"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(outside.path(), folder.path().join("dir")).unwrap();
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/import/scan",
+        Some(json!({"only": "folder", "folder": folder.path()})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["items"], json!([]));
+    assert!(!String::from_utf8_lossy(&r.body).contains("CANARY-route-outside"));
+}
+
+#[tokio::test]
+async fn the_scan_shows_the_size_of_instructions_never_their_text() {
+    let (t, _, _) = setup();
+    let notes = std::fs::read_to_string(home().join(".claude/CLAUDE.md")).unwrap();
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/import/scan",
+        Some(json!({"only": "claude"})),
+    )
+    .await;
+    let body = String::from_utf8(r.body.clone()).unwrap();
+    for line in notes.lines().filter(|l| l.trim().len() > 8) {
+        assert!(!body.contains(line.trim()), "{line:?} is in the scan");
+    }
+    let items = r.json()["items"].as_array().unwrap().clone();
+    let item = items.iter().find(|i| i["kind"] == "instructions").unwrap();
+    assert!(item["detail"].as_str().unwrap().contains("lines"), "{item}");
+    // The text comes back from the run, after the owner ticked it.
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/import/run",
+        Some(json!({"only": "claude", "ids": [item["id"]]})),
+    )
+    .await;
+    assert!(
+        r.json()["results"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Answer briefly")
+    );
+}
+
+#[tokio::test]
+async fn the_scan_shows_the_whole_command_line_and_url() {
+    let (t, _, _) = setup();
+    let items = scan(&t, "claude").await;
+    let detail = |name: &str| {
+        items
+            .iter()
+            .find(|i| i["kind"] == "mcp_server" && i["name"] == name)
+            .unwrap()["detail"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(detail("fetch"), "uvx mcp-server-fetch==0.6.2");
+    assert_eq!(detail("remote"), "https://mcp.example.com/mcp");
+}
+
+#[tokio::test]
+async fn a_confirmed_secret_name_is_checked_and_an_unknown_one_refused() {
+    let (t, fake, store) = setup();
+    let items = scan(&t, "claude").await;
+    let fetch = id_of(&items, "mcp_server", "fetch");
+    let long = format!("mcp/fetch/env/{}", "A".repeat(300));
+    for bad in [
+        String::new(),
+        "has space".to_owned(),
+        "__reserved".to_owned(),
+        "mcp/fetch/env/API_KEY\n".to_owned(),
+        "ünï".to_owned(),
+        long,
+        // Well formed, but no server of this scan has it.
+        "mcp/other/env/TOKEN".to_owned(),
+        "email/account/password".to_owned(),
+    ] {
+        let r = call(
+            &t,
+            Method::POST,
+            "/v1/import/run",
+            Some(json!({
+                "only": "claude",
+                "ids": [fetch],
+                "confirmed_secrets": ["mcp/fetch/env/API_KEY", bad],
+            })),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad:?}: {:?}", r.json());
+    }
+    // Refused before anything was written.
+    assert_eq!(fake.list().len(), 0);
+    assert!(store.get("mcp/fetch/env/API_KEY").unwrap().is_none());
+    // The known name still works.
+    let r = call(
+        &t,
+        Method::POST,
+        "/v1/import/run",
+        Some(json!({"only": "claude", "ids": [fetch], "confirmed_secrets": ["mcp/fetch/env/API_KEY"]})),
+    )
+    .await;
+    assert_eq!(r.json()["results"][0]["status"], "imported");
 }
