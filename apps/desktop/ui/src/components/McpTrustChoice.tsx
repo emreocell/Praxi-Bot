@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { openExternal } from "../lib/externalLink";
+import { LearnMore } from "./LearnMore";
 import formStyles from "./Form.module.css";
 import styles from "./McpTrustChoice.module.css";
 
@@ -17,13 +18,16 @@ export function McpTrustChoice({
   value,
   onChange,
   id,
-  disabled = false
+  disabled = false,
+  compact = false
 }: {
   value: boolean;
   onChange: (trusted: boolean) => void;
   /** Distinguishes several choices on one screen (names, test ids). */
   id: string;
   disabled?: boolean;
+  /** The explanation sits behind a "?" next to the question instead of under the answers. */
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const option = (trusted: boolean, label: string) => (
@@ -41,15 +45,20 @@ export function McpTrustChoice({
   );
   return (
     <fieldset className={`${formStyles.field} ${styles.options}`} data-testid={`mcp-trust-${id}`}>
-      <legend className={formStyles.label}>{t("apps.trust.question")}</legend>
+      <legend className={`${formStyles.label} ${styles.legend}`}>
+        {t("apps.trust.question")}
+        {compact ? <LearnMore term="mcpTrust" /> : null}
+      </legend>
       {option(false, t("apps.trust.no"))}
       {option(true, t("apps.trust.yes"))}
+      {compact ? null : (
       <p className={formStyles.hint}>
         {t("apps.trust.explain")}{" "}
         <button type="button" className={styles.link} onClick={() => void openExternal(TRUST_DOCS_URL)}>
           {t("apps.trust.learn")}
         </button>
       </p>
+      )}
     </fieldset>
   );
 }

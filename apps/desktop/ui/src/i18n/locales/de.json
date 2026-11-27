@@ -802,18 +802,7 @@
     "connectedToast": "{{name}} verbunden",
     "custom": {
       "add": "Server hinzufügen",
-      "command": "Befehl",
-      "env": "Umgebung",
-      "envHint": "Ein SCHLÜSSEL=Wert pro Zeile.",
-      "errCommand": "Gib den auszuführenden Befehl ein.",
-      "errName": "Gib einen Namen ein.",
-      "errUrl": "Gib eine gültige HTTP-URL ein.",
-      "http": "HTTP",
-      "intro": "Füge von Hand einen Stdio- oder HTTP-MCP-Server hinzu.",
-      "name": "Servername",
-      "stdio": "Stdio",
-      "transport": "Übertragung",
-      "url": "Server-URL"
+      "command": "Befehl"
     },
     "disconnect": "Trennen",
     "disconnectConfirm": "Diesen Server trennen?",

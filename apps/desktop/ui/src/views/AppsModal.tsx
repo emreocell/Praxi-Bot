@@ -15,7 +15,6 @@ import formStyles from "../components/Form.module.css";
 import { BotAccessPicker } from "../components/BotAccessPicker";
 import { McpTrustChoice } from "../components/McpTrustChoice";
 import { Modal } from "../components/Modal";
-import { Segmented } from "../components/SettingsUi";
 import { useToast } from "../components/Toast";
 import { oauthRelay, openExternal, openSignInLink } from "../lib/externalLink";
 import type { AppsStart } from "../lib/settingsLink";
@@ -35,7 +34,6 @@ import {
   botSelection,
   saveServerScope,
   connectCatalogEntry,
-  customServerConfig,
   filterCatalog,
   filterServers,
   isConnected,
@@ -56,6 +54,8 @@ import { HomeAssistantCard } from "./HomeAssistantCard";
 import { MissingComponent, componentFor } from "./MissingComponent";
 import { OpenApiApps } from "./OpenApiApps";
 import { useComposio } from "../state/useComposio";
+import { catalogSections } from "../lib/catalogOrder";
+import { CustomMcpForm } from "./CustomMcpForm";
 import { directEntries, filterDirect, isRemoteServer } from "../lib/appTiles";
 import { openComposioLink } from "../lib/externalLink";
 import type { McpServer as McpServerT } from "../api/types";
@@ -249,7 +249,8 @@ function ConnectedCell({
   onSaveBots,
   onSaveTools,
   onSaveTrust,
-  onChooseFolder
+  onChooseFolder,
+  onEnable
 }: {
   server: McpServer;
   title?: string;
@@ -273,6 +274,8 @@ function ConnectedCell({
   onSaveBots: (from: BotScope, to: BotScope) => void;
   onSaveTools: (exclude: string[]) => void;
   onSaveTrust: (trusted: boolean) => void;
+  /** Turn on a server that was added switched off. */
+  onEnable: () => void;
 }) {
   const { t } = useTranslation();
   const { bots, client } = useDaemon();
@@ -308,12 +311,16 @@ function ConnectedCell({
   const [baseline, setBaseline] = useState<BotScope>(() => botScope(server));
   const access = botAccessLabels(server, bots, t("apps.access.deletedBot"));
   const tone = statusTone(server.status);
-  const needsReconnect = server.enabled && (
-    needsSignIn ||
+  // Added switched off (a custom server): nothing runs until the owner turns it on.
+  const off = server.enabled === false;
+  const needsReconnect =
+    !off &&
+    (needsSignIn ||
     server.status === "error" ||
     server.status === "disconnected" ||
     server.status === "quarantined");
-  const users = bots.filter((b) => access.all || server.bots?.includes(b.id));
+  // A switched-off server is used by no bot yet: no faces next to it.
+  const users = off ? [] : bots.filter((b) => access.all || server.bots?.includes(b.id));
   const usedBy = access.all
     ? t("apps.botsAll")
     : access.names.length === 0
@@ -321,7 +328,7 @@ function ConnectedCell({
       : t("apps.botsSome", { names: access.names.join(", ") });
   const known = brandIcon(server.name);
   const panelId = `mcp-manage-${server.name}`;
-  const broken = Boolean(server.error) && !signingIn && !needsSignIn;
+  const broken = !off && Boolean(server.error) && !signingIn && !needsSignIn;
   return (
     <li
       className={`${styles.cell} ${open ? styles.cellOpen : ""}`}
@@ -360,7 +367,23 @@ function ConnectedCell({
           </small>
           )}
         </div>
-        {broken ? null : (
+        {off ? (
+          <>
+            <span className={`${styles.state} ${styles.tone_muted}`} data-testid={`mcp-off-${server.name}`}>
+              <span className={styles.dot} aria-hidden="true" />
+              {t("apps.mcpForm.off")}
+            </span>
+            <button
+              type="button"
+              className={styles.connect}
+              disabled={busy}
+              data-testid={`mcp-enable-${server.name}`}
+              onClick={onEnable}
+            >
+              {t("apps.mcpForm.turnOn")}
+            </button>
+          </>
+        ) : broken ? null : (
           <span className={`${styles.state} ${styles[signingIn ? "tone_busy" : `tone_${tone}`]}`}>
             {tone === "ok" && !signingIn ? <Check aria-hidden="true" /> : <span className={styles.dot} aria-hidden="true" />}
             {signingIn ? t("apps.composio.waiting") : !server.enabled ? t("apps.imports.disabled") : t(`apps.status.${server.status}`)}
@@ -676,133 +699,6 @@ function DiscoverCell({
   );
 }
 
-function CustomServerForm({
-  existing,
-  onSubmit,
-  onCancel
-}: {
-  existing: string[];
-  onSubmit: (cfg: ReturnType<typeof customServerConfig>) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const { t } = useTranslation();
-  const [form, setForm] = useState({
-    name: "",
-    transport: "stdio" as "stdio" | "http",
-    command: "",
-    url: "",
-    env: ""
-  });
-  const [error, setError] = useState<"name" | "command" | "url" | null>(null);
-  const [busy, setBusy] = useState(false);
-  const { bots } = useDaemon();
-  const [scope, setScope] = useState<BotScope>({ mode: "all" });
-  const [trust, setTrust] = useState(false);
-  const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
-
-  return (
-    <form
-      className={styles.custom}
-      onSubmit={(e) => {
-        e.preventDefault();
-        const result = customServerConfig(form, existing, botSelection(scope, bots), trust);
-        setError(result.ok ? null : result.error);
-        if (result.ok) {
-          setBusy(true);
-          void onSubmit(result).finally(() => setBusy(false));
-        }
-      }}
-    >
-      <p className={formStyles.hint}>{t("apps.custom.intro")}</p>
-      <div className={formStyles.field}>
-        <label className={formStyles.label} htmlFor="mcp-name">
-          {t("apps.custom.name")}
-        </label>
-        <input
-          id="mcp-name"
-          className={formStyles.input}
-          value={form.name}
-          placeholder="my-server"
-          onChange={(e) => set({ name: e.target.value })}
-        />
-        {error === "name" ? (
-          <p className={formStyles.error} role="alert">{t("apps.custom.errName")}</p>
-        ) : null}
-      </div>
-      <Segmented
-        label={t("apps.custom.transport")}
-        value={form.transport}
-        onChange={(transport) => set({ transport })}
-        options={[
-          { value: "stdio", label: t("apps.custom.stdio") },
-          { value: "http", label: t("apps.custom.http") }
-        ]}
-      />
-      {form.transport === "stdio" ? (
-        <>
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor="mcp-cmd">
-              {t("apps.custom.command")}
-            </label>
-            <input
-              id="mcp-cmd"
-              className={formStyles.input}
-              value={form.command}
-              placeholder="npx -y @scope/server"
-              onChange={(e) => set({ command: e.target.value })}
-            />
-            {error === "command" ? (
-              <p className={formStyles.error} role="alert">{t("apps.custom.errCommand")}</p>
-            ) : null}
-          </div>
-          <div className={formStyles.field}>
-            <label className={formStyles.label} htmlFor="mcp-env">
-              {t("apps.custom.env")}
-            </label>
-            <textarea
-              id="mcp-env"
-              className={formStyles.textarea}
-              value={form.env}
-              placeholder="KEY=value"
-              onChange={(e) => set({ env: e.target.value })}
-            />
-            <p className={formStyles.hint}>{t("apps.custom.envHint")}</p>
-          </div>
-        </>
-      ) : (
-        <div className={formStyles.field}>
-          <label className={formStyles.label} htmlFor="mcp-url">
-            {t("apps.custom.url")}
-          </label>
-          <input
-            id="mcp-url"
-            className={formStyles.input}
-            value={form.url}
-            placeholder="https://"
-            onChange={(e) => set({ url: e.target.value })}
-          />
-          {error === "url" ? (
-            <p className={formStyles.error} role="alert">{t("apps.custom.errUrl")}</p>
-          ) : null}
-        </div>
-      )}
-      <div className={formStyles.field}>
-        <span className={formStyles.label}>{t("apps.access.label")}</span>
-        <BotAccessPicker scope={scope} bots={bots} onChange={setScope} />
-      </div>
-      <McpTrustChoice id="custom" value={trust} onChange={setTrust} disabled={busy} />
-      <div className={styles.formActions}>
-        <Button type="submit" variant="primary" size="sm" disabled={busy}>
-          {t("apps.custom.add")}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          {t("common.cancel")}
-        </Button>
-      </div>
-    </form>
-  );
-}
-
 type AppsModalProps = {
   open: boolean;
   onClose: () => void;
@@ -827,13 +723,14 @@ function AppsDialog({
   const [query, setQuery] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [restApis, setRestApis] = useState(false);
+  const [formRun, setFormRun] = useState(0);
   const [group, setGroup] = useState("all");
   const [busy, setBusy] = useState<string | null>(null);
   const c = useComposio(open, query, group);
   const [selected, setSelected] = useState<{ slug: string; name: string; toolkit?: ComposioToolkit } | null>(null);
   const [linking, setLinking] = useState<string | null>(null);
   const findInput = useRef<HTMLInputElement>(null);
-  const accountSection = useRef<HTMLDivElement>(null);
+  const accountSection = useRef<HTMLLIElement>(null);
   const linked = c.status?.configured === true && !c.status.login_expired;
   const selectedApp = c.apps.find((app) => app.slug === selected?.slug);
   // A hosted app consent request, separate from sign-in to the hub.
@@ -1025,6 +922,11 @@ function AppsDialog({
     : [];
   const appBySlug = new Map(c.apps.map((app) => [app.slug, app]));
   const toolkits = withoutConnected(c.items, featured);
+  // Composio is an entry of the list: under "Your apps" once signed in, first in the catalogue before.
+  // A sign-in in progress, a failed one or a status error stays in view whatever is searched.
+  const composioBusy = c.login !== "idle" || c.statusError !== null;
+  const showComposio = composioBusy || (query.trim() === "" ? group === "all" : /compos/i.test(query));
+  const sections = firstCatalogPage ? catalogSections(toolkits) : [];
   const summary = (toolkit?: ComposioToolkit) => toolkit
     ? t(`apps.composioHub.summaries.${toolkit.slug}`, { defaultValue: toolkit.description })
     : undefined;
@@ -1038,6 +940,8 @@ function AppsDialog({
     setFlow(null);
     setAdvanced(false);
     setRestApis(false);
+    setQuery("");
+    setGroup("all");
     requestAnimationFrame(() => accountSection.current?.focus());
   };
   const entryOf = (name: string) => catalog.find((e) => e.id === name);
@@ -1207,7 +1111,9 @@ function AppsDialog({
       }
       onEnable={() =>
         void run(s.name, async () => {
-          await client?.updateMcpServer(s.name, { enabled: true });
+          if (!client) return;
+          await client.updateMcpServer(s.name, { enabled: true });
+          toast.show(t("apps.mcpForm.turnedOn", { name: s.name }), "success");
           await reload();
         })
       }
@@ -1272,6 +1178,36 @@ function AppsDialog({
   );
 
   const firstLoad = c.items.length === 0 && c.loading && !c.error;
+  const composioLeads = !linked && showComposio;
+  const composioRow = (
+    <ComposioAccount
+      key="composio-account"
+      rowRef={accountSection}
+      status={c.status}
+      login={c.login}
+      startLogin={c.startLogin}
+      cancelLogin={c.cancelLogin}
+      disabled={linking !== null || busy !== null || (linked && c.apps.some((app) => app.state === "pending"))}
+      onChanged={async () => {
+        await Promise.all([c.reloadStatus(), c.reloadApps()]);
+        await c.retryCatalog();
+      }}
+    >
+      {c.statusError ? (
+        <div className={styles.panel}>
+          <p className={formStyles.error} role="alert">{c.statusError}</p>
+          <Button size="sm" variant="secondary" onClick={() => void c.reloadStatus()}>
+            {t("apps.composio.retry")}
+          </Button>
+        </div>
+      ) : null}
+    </ComposioAccount>
+  );
+  const tile = (toolkit: ComposioToolkit) => (
+    <ComposioCard key={toolkit.slug} name={toolkit.name} slug={toolkit.slug}
+      app={linked ? appBySlug.get(toolkit.slug) : undefined} description={summary(toolkit)}
+      onOpen={() => setSelected({ name: toolkit.name, slug: toolkit.slug, toolkit })} />
+  );
   const catalogError = c.meta?.error ?? null;
 
   return (
@@ -1411,23 +1347,22 @@ function AppsDialog({
               toast.show(t("apps.imports.installed", { name: server.name }), "success");
               void reload();
             }} /> : null}
-            <h3 className={styles.sectionLabel}>{t("apps.advanced.title")}</h3>
-            <CustomServerForm
+            <CustomMcpForm
               existing={servers.map((s) => s.name)}
-              onCancel={() => setAdvanced(false)}
-              onSubmit={async (result) => {
-                if (!client || !result.ok) {
-                  return;
-                }
-                await run("custom", async () => {
-                  await client.createMcpServer(result.config);
-                  toast.show(
-                    t("apps.connectedToast", { name: result.config.name }),
-                    "success"
-                  );
-                  await reload();
-                  setAdvanced(false);
-                });
+              onCancel={() => {
+                setAdvanced(false);
+                void reload();
+              }}
+              onSignIn={(name) => void signIn(name)}
+              key={formRun}
+              onDone={async (name, on) => {
+                toast.show(t(on ? "apps.mcpForm.addedOn" : "apps.mcpForm.addedOff", { name }), "success");
+                await reload();
+                // A fresh form, and the new server's row (with its Turn on) in view.
+                setFormRun((n) => n + 1);
+                requestAnimationFrame(() =>
+                  document.querySelector(`[data-testid="mcp-server-${CSS.escape(name)}"]`)?.scrollIntoView({ block: "center" })
+                );
               }}
             />
             {ownClient.length > 0 ? (
@@ -1512,34 +1447,14 @@ function AppsDialog({
             </>
           ) : (
             <>
-              <div ref={accountSection} tabIndex={-1}>
-                <ComposioAccount
-                  status={c.status}
-                  login={c.login}
-                  startLogin={c.startLogin}
-                  cancelLogin={c.cancelLogin}
-                  disabled={linking !== null || busy !== null || (linked && c.apps.some((app) => app.state === "pending"))}
-                  onChanged={async () => {
-                    await Promise.all([c.reloadStatus(), c.reloadApps()]);
-                    await c.retryCatalog();
-                  }}
-                />
-                {c.statusError ? (
-                  <div className={styles.actions}>
-                    <p className={formStyles.error} role="alert">{c.statusError}</p>
-                    <Button size="sm" variant="secondary" onClick={() => void c.reloadStatus()}>
-                      {t("apps.composio.retry")}
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
               {/home\s?assistant|smart\s?home|hass/i.test(query) || query.trim() === "" ? (
                 <HomeAssistantCard />
               ) : null}
-              {featured.length > 0 ? (
+              {(linked && showComposio) || featured.length > 0 ? (
                 <section className={styles.section} aria-labelledby="apps-connected-h">
                   <h3 className={styles.sectionLabel} id="apps-connected-h">{t("apps.composioHub.yourApps")}</h3>
                   <ul className={styles.grid}>
+                    {linked && showComposio ? composioRow : null}
                     {featured.map((app) => {
                       const toolkit = c.items.find((item) => item.slug === app.slug);
                       return (
@@ -1554,24 +1469,41 @@ function AppsDialog({
               <section className={styles.section} aria-labelledby="apps-all-h">
                 <h3 className={styles.sectionLabel} id="apps-all-h">{t("apps.catalogSection")}</h3>
                 <GroupChips value={group} onChange={setGroup} />
-                {firstLoad ? (
-                  <SkeletonTiles />
-                ) : c.error && c.items.length === 0 ? (
-                  <p className={own.quiet} role="alert">
-                    {t("apps.composio.loadFailed")}
-                    <Button size="sm" variant="secondary" onClick={() => void c.retryCatalog()}>
-                      {t("apps.composio.retry")}
-                    </Button>
-                  </p>
-                ) : toolkits.length === 0 && featured.length === 0 ? (
-                  <p className={styles.empty}><Search aria-hidden="true" />{t("apps.composio.noResults")}</p>
+                {firstLoad || (c.error && c.items.length === 0) || (toolkits.length === 0 && featured.length === 0) ? (
+                  <>
+                    {composioLeads ? <ul className={styles.grid}>{composioRow}</ul> : null}
+                    {firstLoad ? (
+                      <SkeletonTiles />
+                    ) : c.error && c.items.length === 0 ? (
+                      <p className={own.quiet} role="alert">
+                        {t("apps.composio.loadFailed")}
+                        <Button size="sm" variant="secondary" onClick={() => void c.retryCatalog()}>
+                          {t("apps.composio.retry")}
+                        </Button>
+                      </p>
+                    ) : composioLeads ? null : (
+                      <p className={styles.empty}><Search aria-hidden="true" />{t("apps.composio.noResults")}</p>
+                    )}
+                  </>
+                ) : firstCatalogPage ? (
+                  <div className={own.sections} data-testid="apps-grid">
+                    {composioLeads && sections.length === 0 ? <ul className={styles.grid}>{composioRow}</ul> : null}
+                    {sections.map((section, i) => (
+                      <section key={section.id} aria-labelledby={`apps-sec-${section.id}`} data-testid={`apps-section-${section.id}`}>
+                        <h4 className={own.subLabel} id={`apps-sec-${section.id}`}>
+                          {section.id === "popular" ? t("apps.catalogOrder.popular") : t(`apps.group.${section.id}`)}
+                        </h4>
+                        <ul className={styles.grid}>
+                          {i === 0 && composioLeads ? composioRow : null}
+                          {section.items.map(tile)}
+                        </ul>
+                      </section>
+                    ))}
+                  </div>
                 ) : (
                   <ul className={styles.grid} data-testid="apps-grid">
-                    {toolkits.map((toolkit) => (
-                      <ComposioCard key={toolkit.slug} name={toolkit.name} slug={toolkit.slug}
-                        app={linked ? appBySlug.get(toolkit.slug) : undefined} description={summary(toolkit)}
-                        onOpen={() => setSelected({ name: toolkit.name, slug: toolkit.slug, toolkit })} />
-                    ))}
+                    {composioLeads ? composioRow : null}
+                    {toolkits.map(tile)}
                   </ul>
                 )}
                 {catalogError && (catalogError !== "unauthorized" || linked) ? (

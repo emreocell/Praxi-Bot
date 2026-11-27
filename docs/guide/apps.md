@@ -8,15 +8,19 @@ settings for direct, local and custom MCP connections.
 
 ## Connect Composio once
 
-At the top of **Apps**, choose **Connect Composio** to sign in in your system
-browser, or choose **Use a project API key**. The daemon validates the key and
-stores it in its secret store. When Composio supplies the organization or
-project name, the account card shows **Connected as** followed by that name.
+Composio is an entry of the app list, with its own logo. Before you sign in it
+is the first entry under **Discover**: choose **Sign in** to sign in in your
+system browser, or **Use a key** to paste a project API key. The daemon
+validates the key and stores it in its secret store. Once signed in, Composio
+moves to **Your apps**, and when Composio supplies the organization or project
+name its entry shows **Connected as** followed by that name.
 
 ## Connect and manage an app
 
-1. Find an app in **Discover**. Popular apps appear first. Use search, the
-   category filters and **Show more** to browse the catalog.
+1. Find an app in **Discover**. **Popular** comes first (Gmail, Google
+   Calendar, Google Drive, Outlook, Slack, WhatsApp, Telegram, Notion, GitHub
+   and a few more), then the other apps by category. Use search, the category
+   filters and **Show more** to browse the catalog.
 2. Open the app's page to see its actions and select **Connect**.
 3. Finish authorization in your browser. Praxi checks the authorization with
    Composio until it succeeds or expires.
@@ -62,8 +66,8 @@ as **Changes things**; only a plain `list` or `search` over a `GET` (`list
 members`) stays **Read only**. A name that mixes a lookup with a payment
 verb, such as `get and pay`, counts as **Moves money**.
 
-Use **Sign out of Composio** on the account card to suspend access to all
-Composio apps. Praxi keeps your app settings, including bot access.
+Use **Sign out** on the Composio entry under **Your apps** to suspend access
+to all Composio apps. Praxi keeps your app settings, including bot access.
 
 ## Home Assistant
 
@@ -89,10 +93,20 @@ Choose **MCP servers** in the top bar for direct and self-managed connections:
   servers (Gmail, Drive, Calendar) with a client you create yourself. See
   [Google Workspace](google-workspace.md). The Gmail, Drive and Calendar apps in
   the main list use Composio and need no setup.
-- **Custom MCP server:** Add a `Stdio` (local command plus optional `KEY=value`
-  environment lines) or `HTTP` (server URL) MCP server by hand, and pick which
-  bots may use it. See [MCP servers](mcp-servers.md) for the underlying
-  `mcp.toml` format and security flags.
+- **Add your own MCP server:** give the **Server URL (HTTP)**; the name is
+  suggested from it. Under **Sign-in** choose **None**, **Access key** (a
+  header, `Authorization` by default; the key goes to the secret store, never
+  to `mcp.toml`) or **Sign in with the browser**. **Run a local command
+  instead (stdio)** folds out the command and its `NAME=value` settings;
+  values whose name contains KEY, SECRET, PASSWORD or similar go to the secret
+  store too. Pick which bots may use it and whether to trust its read-only
+  labels (the **?** explains). **Add server** saves it switched off, with an
+  **Off** state and **Turn on** in the list; **Test connection** saves it,
+  turns it on, lists its tools without running any, and turns it off again if
+  that fails. Mistakes are named under the field as you type (a password in
+  the address, a name in use, a line that is not `NAME=value`). See
+  [MCP servers](mcp-servers.md) for the underlying `mcp.toml` format and
+  security flags.
 - **Local developer servers:** Local stdio servers from the built-in catalog
   that need no API key (such as **Filesystem**, **Playwright**, **Fetch**,
   **Context7**, **SQLite**, and **Google Drive**), along with any local servers
@@ -220,7 +234,7 @@ A few important rules:
 - **"The app list could not be refreshed: showing the saved one":** you are
   offline, Composio is rate-limiting requests, or your Composio sign-in expired.
   Click **Try again** once you are back online. If sign-in expired, link again
-  from the Composio account card.
+  from the Composio entry in the list.
 
 ### "The page for an app could not be prepared"
 

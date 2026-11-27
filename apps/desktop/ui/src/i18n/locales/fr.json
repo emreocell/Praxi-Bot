@@ -731,18 +731,7 @@
     "connectedToast": "{{name}} connecté",
     "custom": {
       "add": "Ajouter un serveur",
-      "command": "Commande",
-      "env": "Environnement",
-      "envHint": "Un KEY=value par ligne.",
-      "errCommand": "Saisissez la commande à exécuter.",
-      "errName": "Saisissez un nom.",
-      "errUrl": "Saisissez une URL HTTP valide.",
-      "http": "HTTP",
-      "intro": "Ajoutez à la main un serveur MCP stdio ou HTTP.",
-      "name": "Nom du serveur",
-      "stdio": "Stdio",
-      "transport": "Transport",
-      "url": "URL du serveur"
+      "command": "Commande"
     },
     "disconnect": "Déconnecter",
     "disconnectConfirm": "Déconnecter ce serveur ?",

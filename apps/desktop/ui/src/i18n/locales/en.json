@@ -723,6 +723,9 @@
     "botsAll": "All bots",
     "botsNone": "No bots",
     "botsSome": "Bots: {{names}}",
+    "catalogOrder": {
+      "popular": "Popular"
+    },
     "catalogSection": "Discover",
     "changed": {
       "advice": "Only turn it back on if you trust this app and the new wording looks right.",
@@ -867,6 +870,13 @@
       "useKey": "Use a project API key",
       "yourApps": "Your apps"
     },
+    "composioRow": {
+      "hint": "One sign-in connects the apps below.",
+      "signIn": "Sign in",
+      "signInAgain": "Sign in again",
+      "signOut": "Sign out",
+      "useKey": "Use a key"
+    },
     "connect": "Connect",
     "connectApp": "Connect {{name}}",
     "connectNow": "Connect",
@@ -874,18 +884,7 @@
     "connectedToast": "{{name}} connected",
     "custom": {
       "add": "Add server",
-      "command": "Command",
-      "env": "Environment",
-      "envHint": "One KEY=value per line.",
-      "errCommand": "Enter the command to run.",
-      "errName": "Enter a name.",
-      "errUrl": "Enter a valid HTTP URL.",
-      "http": "HTTP",
-      "intro": "Add a stdio or HTTP MCP server by hand.",
-      "name": "Server name",
-      "stdio": "Stdio",
-      "transport": "Transport",
-      "url": "Server URL"
+      "command": "Command"
     },
     "disconnect": "Disconnect",
     "disconnectConfirm": "Disconnect this server?",
@@ -1097,6 +1096,63 @@
       "yes": "Yes"
     },
     "manage": "Manage",
+    "mcpForm": {
+      "addedOff": "{{name}} added. Turn it on in the list when you are ready.",
+      "addedOn": "{{name}} is on and ready",
+      "auth": {
+        "header": "Access key",
+        "headerHint": "Sent with every request, in a header.",
+        "none": "None",
+        "noneHint": "The server is open, or on your own network.",
+        "oauth": "Sign in with the browser",
+        "oauthHint": "Your browser opens to sign in when you test the connection."
+      },
+      "authSection": "Sign-in",
+      "commandHint": "Runs on this computer with your permissions. Only use programs you trust.",
+      "commandSection": "Local command",
+      "done": "Done",
+      "env": "Settings for the program",
+      "envHint": "One NAME=value per line. Values whose name has KEY, SECRET or PASSWORD in it go to the secret store.",
+      "err": {
+        "commandMissing": "Enter the command to run.",
+        "envLine": "Each line must look like NAME=value.",
+        "headerName": "Enter a header name without spaces, for example Authorization.",
+        "headerValue": "Enter the access key.",
+        "nameFormat": "Use only letters, numbers, - and _ (up to 48), starting with a letter or number.",
+        "nameMissing": "Enter a name.",
+        "nameTaken": "Another app already uses this name.",
+        "urlCredentials": "Do not put a password in the address. Choose Access key below instead.",
+        "urlInvalid": "This is not a web address. It must start with https:// (or http://).",
+        "urlMissing": "Enter the server's address."
+      },
+      "fixFirst": "Fix the marked fields first.",
+      "headerHint": "Kept in the secret store on this computer, never in the server settings.",
+      "headerName": "Header name",
+      "headerValue": "Access key",
+      "intro": "Connect a server you trust by its address. It is added switched off, so no bot can use it until you turn it on.",
+      "name": "Name",
+      "nameHint": "How it shows in your apps. Letters, numbers, - and _.",
+      "nameLocked": "The test saved it, so the name is fixed now. Press Cancel to start over.",
+      "off": "Off",
+      "offFailed": "{{name}} could not be switched off again. Turn it off in the list below.",
+      "offNote": "Add server saves it switched off. Test connection turns it on, checks that it answers and lists its tools without running any.",
+      "onNote": "The test passed and the server is on. Press Done to keep it.",
+      "signInNote": "Finish signing in in your browser. The server stays on for that; press Done when you are finished.",
+      "test": "Test connection",
+      "testNeeds": "Fill in the fields above to test the connection or add the server.",
+      "title": "Add your own MCP server",
+      "turnOn": "Turn on",
+      "turnedOn": "{{name}} is on",
+      "url": "Server URL (HTTP)",
+      "urlHint": "The address from the server's instructions, often ending in /mcp.",
+      "urlSection": "Server address",
+      "useCommand": "Run a local command instead (stdio)",
+      "useUrl": "Use a server URL instead",
+      "warn": {
+        "urlKey": "This address seems to hold a key, and the address is saved in plain text. Prefer Access key below.",
+        "urlPlain": "This address is not encrypted. Use https unless the server is on your own network."
+      }
+    },
     "missingSecret": "Enter every required secret.",
     "reconnect": "Reconnect",
     "restApis": {
@@ -7805,6 +7861,10 @@
         "folders": {
           "body": "Folders on your computer that bots may work in without asking each time. Everything outside them still needs your OK.",
           "title": "Trusted folders"
+        },
+        "mcpTrust": {
+          "body": "A server labels each of its tools as read-only or not, and it can get that wrong. No, the safe default: every action asks you first. Yes: only tools labelled read-only run without asking; anything that changes or deletes still asks. You can change this later in the app's settings.",
+          "title": "Trusting a server"
         },
         "memory": {
           "body": "Facts and files a bot keeps so you do not have to repeat yourself. You can look at them and remove them.",

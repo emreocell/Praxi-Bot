@@ -145,6 +145,15 @@ trademark artwork, not CC0, shown only to identify the integration; no
 endorsement is implied. Terms and the licence status of each are in
 `docs/design/brand-icons.md`.
 
+The Composio logomark comes from Composio's brand hub
+([brand.composio.dev](https://brand.composio.dev/logo), `Logomark-Black.svg`,
+checked 2026-11-27), whose guidelines say "Use the provided SVGs and scale
+freely". Its outline stroke is expanded to a filled shape and the mark is
+rescaled from 100 to 24 units, drawn black on light themes and white on dark
+ones like the kit's two files; the shape is unchanged. It identifies the
+Composio integration only; Composio is a trademark of its owner. File:
+`apps/desktop/ui/src/assets/brands/composio.svg`.
+
 Neutral initials for Groq, Together AI and Playwright and the neutral glyph for
 Goose contain no vendor artwork. Groq is a trademark of Groq LLC and/or its
 affiliates. Praxi-Bot is not affiliated with or endorsed by Groq LLC.

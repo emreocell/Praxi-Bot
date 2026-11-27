@@ -154,6 +154,25 @@ Every app of `crates/composio/src/curated.json` was looked up in Simple Icons 16
 `brandIcons.test.ts` names these five, so a new pinned app without a mark fails the test and
 has to be added to this audit. Catalog apps that are not pinned follow the same rule.
 
+### Composio account row (checked 2026-11-27)
+
+The Apps page shows the Composio account as a normal entry of the list. Composio is not in
+Simple Icons 16.36.0 (no `composio.svg`). Its [brand hub](https://brand.composio.dev/logo) offers
+`Logomark-Black.svg` and `Logomark-White.svg`; the [guidelines](https://brand.composio.dev/guidelines)
+say "Use the provided SVGs and scale freely" and forbid recolouring, rotating, skewing or
+distorting the logo, and keep the logomark (icon only) "for tight spaces". There is no licence
+text, and the [terms](https://composio.dev/terms) say nothing about third-party logo use, so this
+is the same nominative reading as Firecrawl and Context7: the mark sits next to the name to
+identify the integration, implies no endorsement, and the owner should confirm it.
+
+The file has one filled path and one round-capped stroke (width 2.8556) that joins the left
+edges. The stroke is expanded to a filled outline and appended to the path, and all coordinates
+are scaled by 0.24 (100 to 24). Rendered at 480 px against the original, 84 of 85 283 inked
+pixels differ (rounding at the edges). The mark is drawn in the theme text colour, which is the
+black file on light themes and the white file on dark ones: no other colour. Provenance file
+`src/assets/brands/composio.svg`. If Composio objects, delete the `composio` line in
+`lib/brandIcons.ts` and the file: the row falls back to neutral initials.
+
 ## Licence register
 
 Every artwork that is not a Simple Icons CC0 path, and every brand kept on a neutral
@@ -174,6 +193,7 @@ the test reads it). **Result** is `logo` (artwork bundled) or `initial` / `glyph
 | Firecrawl | `firecrawl` | logo | `firecrawl.svg` | [firecrawl.dev/brand](https://www.firecrawl.dev/brand) | Vendor brand kit, no licence text; do not stretch, recolour or modify | 2026-11-27 |
 | Context7 | `context7` | logo | `context7.svg` | [context7.com/brand](https://context7.com/brand) | Vendor brand kit "for using Context7 in your own work", no licence text | 2026-11-27 |
 | Exa | `exa` | logo | `exa.svg` | [exa.ai/brand](https://exa.ai/brand) | Guidelines for anyone building with Exa, no licence text; co-branding needs approval | 2026-11-27 |
+| Composio | `composio` | logo | `composio.svg` | [brand.composio.dev/logo](https://brand.composio.dev/logo) | Vendor brand hub: "Use the provided SVGs and scale freely"; no recolouring or distortion (black and white variants); no licence text | 2026-11-27 |
 | Slack | `slack` | logo | inline in `BrandIcon.tsx` / `BrandMark.tsx` | [Slack media kit](https://slack.com/media-kit) | Identification of the integration, see `THIRD_PARTY_NOTICES.md` | 2026-11-23 |
 | Goose | `goose` | glyph | none | [LF Projects trademark policy](https://lfprojects.org/policies/trademark-policy/) | Logos need written permission; the glyph is original project artwork | 2026-11-27 |
 | Groq | `groq` | initial | none | [groq.com/trademark-policy](https://groq.com/trademark-policy) | Logos in a UI need a licence from Groq | 2026-11-27 |
@@ -185,7 +205,7 @@ the test reads it). **Result** is `logo` (artwork bundled) or `initial` / `glyph
 
 Obtain written permission or a published brand grant for Groq (trademark-legal@groq.com),
 Together AI, Meta (the Meta Model API stays on a neutral initial), Playwright (Microsoft) and Goose (LF Projects) before replacing their initials
-or neutral glyph. Kiro, Qoder, Firecrawl, Context7 and Exa rely on vendor-published marks
+or neutral glyph. Kiro, Qoder, Firecrawl, Context7, Exa and Composio rely on vendor-published marks
 without licence text (see "Vendor-published icons" and the apps table): the owner should confirm that reading.
 Tavily and llama.cpp have express grants. Keep this note open until each mark has a source
 and licence.

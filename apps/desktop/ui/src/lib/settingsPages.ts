@@ -69,7 +69,7 @@ export function groupTextKey(group: SettingsGroupId): string {
 }
 
 /** Words that get a short plain-language "What is this?" popover (and a docs link). */
-export type LearnTerm = "apiKey" | "permissions" | "folders" | "memory" | "provider" | "safeMode";
+export type LearnTerm = "apiKey" | "permissions" | "folders" | "memory" | "provider" | "safeMode" | "mcpTrust";
 
 export interface CardMeta {
   page: SettingsPageId;

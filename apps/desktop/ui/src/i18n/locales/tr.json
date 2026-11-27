@@ -723,6 +723,9 @@
     "botsAll": "Tüm botlar",
     "botsNone": "Hiçbir bot",
     "botsSome": "Botlar: {{names}}",
+    "catalogOrder": {
+      "popular": "Popüler"
+    },
     "catalogSection": "Keşfet",
     "changed": {
       "advice": "Yalnızca bu uygulamaya güveniyorsanız ve yeni metin doğru görünüyorsa tekrar açın.",
@@ -867,6 +870,13 @@
       "useKey": "Proje API anahtarı kullan",
       "yourApps": "Uygulamaların"
     },
+    "composioRow": {
+      "hint": "Tek girişle aşağıdaki uygulamaları bağlarsın.",
+      "signIn": "Giriş yap",
+      "signInAgain": "Yeniden giriş yap",
+      "signOut": "Çıkış yap",
+      "useKey": "Anahtar kullan"
+    },
     "connect": "Bağlan",
     "connectApp": "{{name}} uygulamasını bağla",
     "connectNow": "Bağlan",
@@ -874,18 +884,7 @@
     "connectedToast": "{{name}} bağlandı",
     "custom": {
       "add": "Sunucu ekle",
-      "command": "Komut",
-      "env": "Ortam değişkenleri",
-      "envHint": "Her satıra bir KEY=değer.",
-      "errCommand": "Çalıştırılacak komutu gir.",
-      "errName": "Bir ad gir.",
-      "errUrl": "Geçerli bir HTTP URL'si gir.",
-      "http": "HTTP",
-      "intro": "Stdio veya HTTP MCP sunucusunu elle ekle.",
-      "name": "Sunucu adı",
-      "stdio": "Stdio",
-      "transport": "Taşıma",
-      "url": "Sunucu URL'si"
+      "command": "Komut"
     },
     "disconnect": "Bağlantıyı kes",
     "disconnectConfirm": "Bu sunucunun bağlantısı kesilsin mi?",
@@ -1097,6 +1096,63 @@
       "yes": "Evet"
     },
     "manage": "Yönet",
+    "mcpForm": {
+      "addedOff": "{{name}} eklendi. Hazır olduğunda listeden aç.",
+      "addedOn": "{{name}} açık ve hazır",
+      "auth": {
+        "header": "Erişim anahtarı",
+        "headerHint": "Her istekle birlikte bir başlıkta gönderilir.",
+        "none": "Yok",
+        "noneHint": "Sunucu herkese açık ya da kendi ağında.",
+        "oauth": "Tarayıcıyla giriş yap",
+        "oauthHint": "Bağlantıyı test ettiğinde giriş için tarayıcın açılır."
+      },
+      "authSection": "Giriş",
+      "commandHint": "Bu bilgisayarda senin izinlerinle çalışır. Yalnızca güvendiğin programları kullan.",
+      "commandSection": "Yerel komut",
+      "done": "Bitti",
+      "env": "Program ayarları",
+      "envHint": "Her satıra bir AD=değer. Adında KEY, SECRET ya da PASSWORD geçenlerin değeri gizli kasaya gider.",
+      "err": {
+        "commandMissing": "Çalıştırılacak komutu gir.",
+        "envLine": "Her satır AD=değer biçiminde olmalı.",
+        "headerName": "Boşluksuz bir başlık adı gir, örneğin Authorization.",
+        "headerValue": "Erişim anahtarını gir.",
+        "nameFormat": "Yalnızca harf, rakam, - ve _ kullan (en çok 48); harf ya da rakamla başlasın.",
+        "nameMissing": "Bir ad gir.",
+        "nameTaken": "Bu adı başka bir uygulama kullanıyor.",
+        "urlCredentials": "Adrese parola yazma. Bunun yerine aşağıdan Erişim anahtarı'nı seç.",
+        "urlInvalid": "Bu bir web adresi değil. https:// (ya da http://) ile başlamalı.",
+        "urlMissing": "Sunucunun adresini gir."
+      },
+      "fixFirst": "Önce işaretli alanları düzelt.",
+      "headerHint": "Bu bilgisayardaki gizli kasada saklanır, sunucu ayarlarına asla yazılmaz.",
+      "headerName": "Başlık adı",
+      "headerValue": "Erişim anahtarı",
+      "intro": "Güvendiğin bir sunucuyu adresiyle bağla. Kapalı olarak eklenir; sen açana kadar hiçbir bot onu kullanamaz.",
+      "name": "Ad",
+      "nameHint": "Uygulamalarında böyle görünür. Harf, rakam, - ve _ kullanabilirsin.",
+      "nameLocked": "Test onu kaydetti, bu yüzden ad artık değişmez. Baştan başlamak için İptal'e bas.",
+      "off": "Kapalı",
+      "offFailed": "{{name}} yeniden kapatılamadı. Aşağıdaki listeden kapat.",
+      "offNote": "Sunucu ekle onu kapalı olarak kaydeder. Bağlantıyı test et onu açar, yanıt verdiğine bakar ve araçlarını hiçbirini çalıştırmadan listeler.",
+      "onNote": "Test başarılı, sunucu açık. Saklamak için Bitti'ye bas.",
+      "signInNote": "Girişi tarayıcında tamamla. Bunun için sunucu açık kalır; bitince Bitti'ye bas.",
+      "test": "Bağlantıyı test et",
+      "testNeeds": "Bağlantıyı test etmek ya da sunucuyu eklemek için yukarıdaki alanları doldur.",
+      "title": "Kendi MCP sunucunu ekle",
+      "turnOn": "Aç",
+      "turnedOn": "{{name}} açıldı",
+      "url": "Sunucu URL'si (HTTP)",
+      "urlHint": "Sunucunun talimatlarındaki adres; çoğu zaman /mcp ile biter.",
+      "urlSection": "Sunucu adresi",
+      "useCommand": "Bunun yerine yerel bir komut çalıştır (stdio)",
+      "useUrl": "Bunun yerine sunucu URL'si kullan",
+      "warn": {
+        "urlKey": "Bu adreste bir anahtar var gibi görünüyor ve adres düz metin olarak saklanır. Aşağıdaki Erişim anahtarı'nı tercih et.",
+        "urlPlain": "Bu adres şifreli değil. Sunucu kendi ağında değilse https kullan."
+      }
+    },
     "missingSecret": "Gerekli tüm gizli anahtarları gir.",
     "reconnect": "Yeniden bağlan",
     "restApis": {
@@ -7805,6 +7861,10 @@
         "folders": {
           "body": "Botların her seferinde sormadan çalışabildiği klasörler. Bunların dışındaki her şey için yine onayın gerekir.",
           "title": "Güvenilen klasörler"
+        },
+        "mcpTrust": {
+          "body": "Sunucu her aracını salt okunur olarak işaretler ya da işaretlemez ve bunda yanılabilir. Hayır, güvenli varsayılan: her işlem önce sana sorar. Evet: yalnızca salt okunur işaretli araçlar sormadan çalışır; bir şeyi değiştiren ya da silen her işlem yine sorar. Bunu sonra uygulamanın ayarlarından değiştirebilirsin.",
+          "title": "Sunucuya güvenmek"
         },
         "memory": {
           "body": "Bir botun, kendini tekrar etmek zorunda kalmaman için sakladığı bilgiler ve dosyalar. Bunlara bakabilir ve silebilirsin.",
