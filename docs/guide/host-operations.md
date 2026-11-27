@@ -335,12 +335,13 @@ setup, open a terminal on the server and use the same account and executable pat
 
 ```sh
 sudo -Hu praxi env HOME=/var/lib/praxi NPM_CONFIG_PREFIX=/var/lib/praxi/.npm-global \
-  PATH=/var/lib/praxi/.local/bin:/var/lib/praxi/.npm-global/bin:/usr/local/bin:/usr/bin:/bin \
+  PATH=/var/lib/praxi/.local/bin:/var/lib/praxi/.npm-global/bin:/opt/praxi-nodejs/bin:/usr/local/bin:/usr/bin:/bin \
   /bin/bash --noprofile --norc
 ```
 
 | What you see | What to do |
 | --- | --- |
+| `npm: command not found`, `EACCES` on `npm install -g`, or `are you root?` in the server terminal | Node.js and npm come from the installer (`/opt/praxi-nodejs`) and install globally into `/var/lib/praxi/.npm-global`, no root needed. On an older install run the installer with `--update`; `sudo praxi doctor` shows the **node / npm** row. Commands that really need root (`apt`, `systemctl`) are for the server admin or `sudo` over SSH. See [Node.js and npm for the coding CLIs](remote-host.md#nodejs-and-npm-for-the-coding-clis-no-root-needed). |
 | Host offline (app or `bot status` cannot see it) | On the server, `systemctl is-active praxi.service`. If it is inactive, read `journalctl -u praxi -n 200 --no-pager` and start it as in [Start, stop, and restart](#start-stop-and-restart). Then `curl` loopback `/v1/health`. From outside, check SSH, not port 47821. A paired desktop also needs its own daemon running. |
 | Slow start | Follow the last `startup:` line in `journalctl -u praxi`. Time is milliseconds since `startup: begin`. The API is up at `startup: listening`. Components stay closed until `startup: leader components started in background`. A host with paired devices waits up to ten seconds for peer heartbeats before that line. See [Host leadership](host-leadership.md). |
 | Peer cannot connect | Confirm the host unit is `bot serve --host` and `praxi.service` is active. The desktop daemon must be running. A pasted ticket works once and expires after two minutes. Create another with `sudo praxi host invite --role desktop`. Outbound traffic to the peer relays must be allowed. `bot host repair` reports `Paired channel` failed when the local daemon cannot reach the host, and says to try again in a minute. An SSH host-key mismatch stops `add` / `repair` / `upgrade` before they change the server. |

@@ -137,7 +137,7 @@ olarak çalıştırılırsa komut bunu söyler (*Sen ubuntu'sun ama Praxi praxi 
 | Komut | Anlamı |
 | --- | --- |
 | `bot cli status` | Baktığı kullanıcı ve ev klasörü, sonra her CLI: kurulu mu, sürüm, nerede bulundu, girişli mi, girişsiz mi ya da "giriş dosyası bulundu (denetlenmedi)". `--json` aynısını JSON olarak yazar. Giriş dosyasını asla okumaz, yalnızca var olup olmadığına bakar |
-| `bot cli install <ENGINE>` | Motorun sabit kurucusunu bu kullanıcı olarak çalıştırır (uygulamadaki **Sunucuya kur**'un çalıştırdığı aynı kurucu). Bir npm paketi gerekiyor ve npm yoksa önce Node.js'i veri klasörüne indirir. Yalnızca kopyala-çalıştır komutu olan motorlar bunu söyler |
+| `bot cli install <ENGINE>` | Motorun sabit kurucusunu bu kullanıcı olarak çalıştırır (uygulamadaki **Sunucuya kur**'un çalıştırdığı aynı kurucu). Bir npm paketi `PATH`'teki npm ile kurulur (kurucuyla hazırlanmış sunucuda: `/opt/praxi-nodejs` içindeki Node.js, genel önek `/var/lib/praxi/.npm-global`, root gerekmez); yalnızca hiç npm yoksa önce Node.js veri klasörüne indirilir. Yalnızca kopyala-çalıştır komutu olan motorlar bunu söyler |
 | `bot cli login <ENGINE>` | CLI'ın kendi girişini bu terminalde başlatır (`claude auth login`, `codex login`, `agy`, `vibe --setup`, ...); yanıtları ve yazdığı bağlantı dahil, bu kullanıcı olarak |
 
 `<ENGINE>`, `bot cli status`'un gösterdiği kimliktir (`claude`, `codex`, `cursor`, `opencode`, `agy`, `qwen`,

@@ -272,7 +272,7 @@ lands in `ubuntu`'s home, and Praxi will list it as not installed. `/var/lib/pra
 
   ```sh
   sudo praxi cli status          # which CLIs, where, signed in or not; names the user it checked as
-  sudo praxi cli install agy     # the same fixed installer the app runs (Node.js is fetched if missing)
+  sudo praxi cli install agy     # the same fixed installer the app runs (needs no root; npm CLIs use the server's Node.js)
   sudo praxi cli login agy       # the CLI's own sign-in, in this terminal, as praxi
   ```
 
@@ -286,7 +286,55 @@ praxi*) instead of printing a result that looks healthy. Which CLIs the app can 
 
 A server installed before this release may still start the daemon with its home as working
 directory and without `~/.local/bin` on `PATH`. Praxi now finds the CLIs there anyway; running the
-installer again with `--update` (step 2 above) also fixes the unit itself.
+installer again with `--update` (step 2 above) also fixes the unit itself, and installs the Node.js
+runtime described next.
+
+### Node.js and npm for the coding CLIs (no root needed)
+
+Claude Code, Codex and OpenCode install with `npm install -g`. The `praxi` user is not an administrator,
+so a server must give it an `npm` that writes somewhere `praxi` owns. The installer does this:
+
+- **Node.js 22 LTS** (npm included), an official build from nodejs.org for `x86_64` or `aarch64`. The
+  version and one SHA-256 per CPU are pinned inside `install-linux.sh` (which is itself covered by the
+  release's provenance check); a download that does not match is refused and nothing is unpacked. It is
+  installed into **`/opt/praxi-nodejs`**, owned by root. It is deliberately not inside `/opt/praxi`:
+  that folder is replaced on every release, and Praxi refuses to run a program that lives inside its own
+  working directory.
+- **A global prefix `praxi` can write:** `/var/lib/praxi/.npm-global`. It is set three ways, so every
+  way in agrees: `NPM_CONFIG_PREFIX` in the service unit and in the `praxi` command, and `prefix=` in
+  `/var/lib/praxi/.npmrc` for the in-app terminal (which starts its shell with a cleaned environment).
+  An existing `prefix=` line in that file is kept.
+- **`PATH`** of the daemon, the in-app terminal and the `praxi` command, in this order:
+  `~/.local/bin`, `/var/lib/praxi/.npm-global/bin`, `/opt/praxi-nodejs/bin`, then the system folders.
+  Praxi's pinned Node.js is therefore the one `praxi` gets, even when the distribution ships an older one.
+
+So the following work as `praxi` without root, in the in-app terminal or with `sudo praxi cli ...`:
+
+```sh
+npm install -g opencode-ai     # lands in /var/lib/praxi/.npm-global/bin
+sudo praxi cli install claude  # the app's Install button does exactly this
+node --version && npm --version
+```
+
+`apt install npm` is not needed and cannot work as `praxi` (installing system packages needs root).
+When a command in the terminal fails because it needs root (`apt`, `dnf`, `systemctl`, a system-wide
+`npm install -g`), the terminal shows one line under the screen: *ask the server admin, or run
+`sudo praxi ...` over SSH*. It is only a hint; it changes nothing.
+
+Keeping it current: re-running the installer with `--update` moves Node.js to the version pinned in that
+release (`/opt/praxi-nodejs` is replaced in one step; the global prefix and the CLIs in it stay). A
+re-run with the same pin downloads nothing. The in-app *Update server* button (the managed updater) replaces the Praxi program files only;
+the installer's `--update`, which is also what the SSH upgrade runs, moves Node.js. If the server cannot reach nodejs.org, the installer
+warns, finishes the rest, and the app's Install button still fetches a Node.js of its own into the data
+folder. `--skip-packages` skips the Node.js download too (you then provide Node.js 18 or newer on the
+service's `PATH`); `--uninstall` removes `/opt/praxi-nodejs`, and `--purge` also removes
+`/var/lib/praxi/.npm-global` with the data folder.
+
+`sudo praxi doctor` has a **node / npm** row: which `node` and `npm` it found, their versions, and where
+`npm install -g` writes. It warns when Node.js is missing on a server, is older than 18, or when
+npm's global folder is one `praxi` cannot write (the `EACCES` failure); the hint says how to fix it.
+Preview all of this with `install-linux.sh --dry-run`: it prints the Node.js version and CPU, the
+global prefix and the `PATH`, and changes nothing.
 
 ### What is a "desktop peer", and does a server need one?
 

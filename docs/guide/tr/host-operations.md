@@ -321,12 +321,13 @@ istiyorsa sunucuda bir terminal açıp aynı hesap ve yolları kullan.
 
 ```sh
 sudo -Hu praxi env HOME=/var/lib/praxi NPM_CONFIG_PREFIX=/var/lib/praxi/.npm-global \
-  PATH=/var/lib/praxi/.local/bin:/var/lib/praxi/.npm-global/bin:/usr/local/bin:/usr/bin:/bin \
+  PATH=/var/lib/praxi/.local/bin:/var/lib/praxi/.npm-global/bin:/opt/praxi-nodejs/bin:/usr/local/bin:/usr/bin:/bin \
   /bin/bash --noprofile --norc
 ```
 
 | Ne görüyorsun | Ne yapmalı |
 | --- | --- |
+| Sunucu terminalinde `npm: command not found`, `npm install -g` sırasında `EACCES` ya da `are you root?` | Node.js ve npm kurucudan gelir (`/opt/praxi-nodejs`) ve root gerekmeden `/var/lib/praxi/.npm-global` içine genel kurulum yapar. Eski bir kurulumda kurucuyu `--update` ile çalıştır; `sudo praxi doctor` **node / npm** satırını gösterir. Gerçekten root isteyen komutlar (`apt`, `systemctl`) sunucu yöneticisine ya da SSH üzerinden `sudo`'ya aittir. Bkz. [Kodlama CLI'ları için Node.js ve npm](remote-host.md#kodlama-clilar%C4%B1-i%C3%A7in-nodejs-ve-npm-root-gerekmez). |
 | Sunucu çevrimdışı (uygulama ya da `bot status` onu göremiyor) | Sunucuda `systemctl is-active praxi.service` çalıştır. Etkin değilse `journalctl -u praxi -n 200 --no-pager` çıktısını oku ve yukarıdaki Başlatma, durdurma ve yeniden başlatma bölümündeki gibi başlat. Sonra loopback `/v1/health` adresine `curl` at. Dışarıdan 47821 portuna değil, SSH'e bak. Eşleştirilmiş bir masaüstünün de kendi daemon'unun çalışıyor olması gerekir. |
 | Yavaş açılış | `journalctl -u praxi` içindeki son `startup:` satırını izle. Süre, `startup: begin` satırından beri geçen milisaniyedir. API `startup: listening` satırında ayaktadır. Bileşenler `startup: leader components started in background` satırına kadar kapalı kalır. Eşleştirilmiş cihazı olan bir sunucu, o satırdan önce eş kalp atışları için on saniyeye kadar bekler. Bak: [Sunucu liderliği](host-leadership.md). |
 | Eş bağlanamıyor | Sunucu biriminin `bot serve --host` olduğunu ve `praxi.service` biriminin etkin olduğunu doğrula. Masaüstü daemon'u çalışıyor olmalı. Yapıştırılan bilet bir kez işe yarar ve iki dakika sonra geçersiz olur. `sudo praxi host invite --role desktop` ile başka bir tane oluştur. Eş rölelerine giden trafiğe izin verilmeli. Yerel daemon sunucuya ulaşamadığında `bot host repair` `Paired channel` başarısız diye bildirir ve bir dakika sonra yeniden denemeni söyler. SSH sunucu anahtarı uyuşmazlığı `add` / `repair` / `upgrade` komutlarını sunucuyu değiştirmeden durdurur. |

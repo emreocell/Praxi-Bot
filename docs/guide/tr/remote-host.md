@@ -254,7 +254,7 @@ gerektiğini belirler: **Praxi bir CLI'ı ancak `praxi` olarak kurulmuş ve giri
 
   ```sh
   sudo praxi cli status          # hangi CLI'lar, nerede, girişli mi; hangi kullanıcı olarak baktığını söyler
-  sudo praxi cli install agy     # uygulamanın çalıştırdığı aynı sabit kurucu (Node.js yoksa indirilir)
+  sudo praxi cli install agy     # uygulamanın çalıştırdığı aynı sabit kurucu (root gerekmez; npm CLI'ları sunucunun Node.js'ini kullanır)
   sudo praxi cli login agy       # CLI'ın kendi girişi, bu terminalde, praxi olarak
   ```
 
@@ -268,7 +268,54 @@ kendisinin giriş yaptırabildiği (pencerede bağlantı ve kod) ve hangilerinin
 
 Bu sürümden önce kurulmuş bir sunucu servisi hâlâ ev klasörünü çalışma klasörü olarak ve `~/.local/bin`
 `PATH`'te olmadan başlatıyor olabilir. Praxi CLI'ları yine de orada bulur; kurucuyu `--update` ile yeniden
-çalıştırmak (yukarıdaki 2. adım) servis tanımının kendisini de düzeltir.
+çalıştırmak (yukarıdaki 2. adım) servis tanımının kendisini de düzeltir ve bundan sonra anlatılan Node.js
+çalışma ortamını kurar.
+
+### Kodlama CLI'ları için Node.js ve npm (root gerekmez)
+
+Claude Code, Codex ve OpenCode `npm install -g` ile kurulur. `praxi` kullanıcısı yönetici değildir; bu
+yüzden sunucunun ona, `praxi`'nin sahip olduğu bir yere yazan bir `npm` vermesi gerekir. Kurucu bunu yapar:
+
+- **Node.js 22 LTS** (npm dahil), `x86_64` ya da `aarch64` için nodejs.org'un resmî derlemesi. Sürüm ve her
+  işlemci için bir SHA-256 `install-linux.sh` içinde sabitlenmiştir (betiğin kendisi de sürümün kaynak
+  doğrulamasıyla korunur); eşleşmeyen bir indirme reddedilir ve hiçbir şey açılmaz. Kurulum yeri,
+  root'a ait **`/opt/praxi-nodejs`** klasörüdür. Bilerek `/opt/praxi` içinde değildir: o klasör her
+  sürümde değiştirilir ve Praxi kendi çalışma klasörünün içindeki bir programı çalıştırmayı reddeder.
+- **`praxi`'nin yazabildiği bir genel önek:** `/var/lib/praxi/.npm-global`. Üç yerde birden ayarlanır ki
+  her giriş yolu aynı şeyi görsün: servis tanımında ve `praxi` komutunda `NPM_CONFIG_PREFIX`, uygulamadaki
+  terminal için (kabuğunu temizlenmiş bir ortamla başlatır) `/var/lib/praxi/.npmrc` içinde `prefix=`.
+  O dosyada önceden bir `prefix=` satırı varsa korunur.
+- **`PATH`**: servisin, uygulamadaki terminalin ve `praxi` komutunun `PATH`'i şu sırada: `~/.local/bin`,
+  `/var/lib/praxi/.npm-global/bin`, `/opt/praxi-nodejs/bin`, sonra sistem klasörleri. Dağıtım daha eski bir
+  Node.js getirse bile `praxi`'nin kullandığı, Praxi'nin sabitlediği Node.js olur.
+
+Yani aşağıdakiler `praxi` olarak, root olmadan, uygulamadaki terminalde ya da `sudo praxi cli ...` ile çalışır:
+
+```sh
+npm install -g opencode-ai     # /var/lib/praxi/.npm-global/bin içine kurulur
+sudo praxi cli install claude  # uygulamadaki Kur düğmesi tam olarak bunu yapar
+node --version && npm --version
+```
+
+`apt install npm` gerekmez ve `praxi` olarak çalışamaz (sistem paketi kurmak root ister). Terminaldeki bir
+komut root gerektirdiği için başarısız olursa (`apt`, `dnf`, `systemctl`, sistem genelinde `npm install -g`),
+terminal ekranın altında tek satır gösterir: *sunucu yöneticisinden isteyin ya da SSH üzerinden
+`sudo praxi ...` çalıştırın*. Bu yalnızca bir ipucudur, hiçbir şeyi değiştirmez.
+
+Güncel tutma: kurucuyu `--update` ile yeniden çalıştırmak Node.js'i o sürümde sabitlenen sürüme taşır
+(`/opt/praxi-nodejs` tek adımda değiştirilir; genel önek ve içindeki CLI'lar kalır). Aynı sürümle yeniden
+çalıştırmak hiçbir şey indirmez. Uygulamadaki *Sunucuyu güncelle* düğmesi (yönetilen güncelleyici) yalnızca Praxi program dosyalarını
+değiştirir; Node.js'i, SSH ile yükseltmenin de çalıştırdığı kurucunun `--update`'i taşır. Sunucu nodejs.org'a ulaşamıyorsa kurucu
+uyarır, geri kalanını bitirir ve uygulamadaki Kur düğmesi yine de veri klasörüne kendi Node.js'ini indirir.
+`--skip-packages` Node.js indirmesini de atlar (o zaman servisin `PATH`'inde Node.js 18 ya da daha yenisini
+sen sağlarsın); `--uninstall` `/opt/praxi-nodejs`'yi kaldırır, `--purge` ise veri klasörüyle birlikte
+`/var/lib/praxi/.npm-global`'i de siler.
+
+`sudo praxi doctor` çıktısında bir **node / npm** satırı vardır: hangi `node` ve `npm`'i bulduğu, sürümleri
+ve `npm install -g`'nin nereye yazdığı. Sunucuda Node.js yoksa, 18'den eskiyse ya da npm'in genel klasörü
+`praxi`'nin yazamadığı bir klasörse (`EACCES` hatası) uyarır; ipucu nasıl düzelteceğini söyler. Hepsini önce
+`install-linux.sh --dry-run` ile görebilirsin: Node.js sürümünü ve işlemciyi, genel öneki ve `PATH`'i
+yazar, hiçbir şeyi değiştirmez.
 
 ### "Masaüstü eşi" nedir, sunucunun buna ihtiyacı var mı?
 

@@ -138,7 +138,7 @@ but Praxi runs as praxi*) and shows the form to use.
 | Command | Meaning |
 | --- | --- |
 | `bot cli status` | The user and home folder it looked up, then each CLI: installed or not, version, where it was found, signed in, not signed in, or "sign-in file found (not checked)". `--json` prints the same as JSON. It never reads a sign-in file, only whether it exists |
-| `bot cli install <ENGINE>` | Run the engine's fixed installer as this user (the one the app's **Install on server** runs). Fetches Node.js into the data folder first when an npm package is needed and there is no npm. Engines with only a copy-and-run command say so |
+| `bot cli install <ENGINE>` | Run the engine's fixed installer as this user (the one the app's **Install on server** runs). An npm package installs with the npm on `PATH` (on a server set up by the installer: its Node.js in `/opt/praxi-nodejs`, global prefix `/var/lib/praxi/.npm-global`, no root); only when there is no npm at all, Node.js is fetched into the data folder first. Engines with only a copy-and-run command say so |
 | `bot cli login <ENGINE>` | Start the CLI's own sign-in in this terminal (`claude auth login`, `codex login`, `agy`, `vibe --setup`, ...), with its answers and the link it prints, as this user |
 
 `<ENGINE>` is the id shown by `bot cli status` (`claude`, `codex`, `cursor`, `opencode`, `agy`,
