@@ -6837,8 +6837,10 @@
       "description": "API-Schlüssel werden im Schlüsselbund deines Betriebssystems gespeichert. Änderungen übernimmt der Hintergrunddienst ohne Neustart.",
       "disabled": "Deaktiviert",
       "keyHelp": {
+        "meta": "Meta braucht einen API-Schlüssel aus dem Meta-Model-API-Dashboard (dev.meta.ai). Schlüssel beginnen mit LLM_. Der Modellname ist muse-spark-1.3 oder muse-wonder-1.0.",
         "mistral": "Mistral braucht einen API-Schlüssel von La Plateforme (console.mistral.ai). Ein Le-Chat-Abo ist kein API-Schlüssel und funktioniert hier nicht.",
-        "open": "Mistral-Schlüssel erstellen"
+        "open": "Mistral-Schlüssel erstellen",
+        "openMeta": "Meta-Schlüssel erstellen"
       },
       "keyHint": "Der Schlüssel wird an den Schlüsselbund des Betriebssystems gesendet und nie wieder angezeigt.",
       "keyStored": "Schlüssel gespeichert",

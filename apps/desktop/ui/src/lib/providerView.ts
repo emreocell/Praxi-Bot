@@ -206,12 +206,20 @@ export interface ProviderKeyHelp {
   url: string;
   /** i18n key of the note (`settings.providers.keyHelp.<id>`). */
   noteKey: string;
+  /** i18n key of the button that opens `url`. */
+  openKey: string;
 }
 
 const KEY_HELP: Record<string, ProviderKeyHelp> = {
   mistral: {
     url: "https://console.mistral.ai/api-keys",
-    noteKey: "settings.providers.keyHelp.mistral"
+    noteKey: "settings.providers.keyHelp.mistral",
+    openKey: "settings.providers.keyHelp.open"
+  },
+  meta: {
+    url: "https://dev.meta.ai/",
+    noteKey: "settings.providers.keyHelp.meta",
+    openKey: "settings.providers.keyHelp.openMeta"
   }
 };
 

@@ -6837,8 +6837,10 @@
       "description": "Las claves de API se guardan en el llavero de tu sistema. El servicio en segundo plano recoge los cambios sin reiniciarse.",
       "disabled": "Desactivado",
       "keyHelp": {
+        "meta": "Meta necesita una clave de API del panel de Meta Model API (dev.meta.ai). Las claves empiezan por LLM_. El modelo se llama muse-spark-1.3 o muse-wonder-1.0.",
         "mistral": "Mistral necesita una clave de API de La Plateforme (console.mistral.ai). Una suscripción de chat de Le Chat no es una clave de API y aquí no funciona.",
-        "open": "Crear una clave de Mistral"
+        "open": "Crear una clave de Mistral",
+        "openMeta": "Crear una clave de Meta"
       },
       "keyHint": "La clave se envía al llavero del sistema y no vuelve a mostrarse.",
       "keyStored": "clave guardada",

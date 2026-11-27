@@ -85,6 +85,7 @@ Last reviewed on 2026-11-15:
 | `groq` | — | 2026-11-15 | GPT-OSS 120B (`openai/gpt-oss-120b`), GPT-OSS 20B (`openai/gpt-oss-20b`) | <https://console.groq.com/docs/models>, <https://console.groq.com/docs/rate-limits> |
 | `mistral` | — | 2026-11-15 | Mistral Large (`mistral-large-latest`), Mistral Medium (`mistral-medium-latest`), Mistral Small (`mistral-small-latest`), Codestral (`codestral-latest`) | <https://docs.mistral.ai/models> |
 | `together` | — | 2026-11-15 | DeepSeek V4.1 Flash (`deepseek-ai/DeepSeek-V4.1-Flash`), Llama 3.3 70B Instruct Turbo (`meta-llama/Llama-3.3-70B-Instruct-Turbo`), GPT-OSS 120B (`openai/gpt-oss-120b`) | <https://docs.together.ai/docs/serverless/models>, <https://docs.together.ai/docs/serverless/rate-limits> |
+| `meta` | — | 2026-11-27 | Muse Spark 1.3 (`muse-spark-1.3`), Muse Wonder 1.0 (`muse-wonder-1.0`) | <https://dev.meta.ai/docs/models>, <https://dev.meta.ai/docs/pricing-rate-limits> |
 <!-- END:model-catalog-table -->
 
 ### Freshness tooling and staleness reminders

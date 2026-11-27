@@ -183,6 +183,19 @@ test("providersView excludes cli catalog entries from add-provider catalog while
   );
 });
 
+test("Meta key help points at the Model API dashboard and has its own button label", () => {
+  const help = providerKeyHelp("meta");
+  assert.equal(help?.url, "https://dev.meta.ai/");
+  assert.equal(providerKeyHelp("mistral")?.openKey, "settings.providers.keyHelp.open");
+  for (const locale of ["en", "tr", "de", "es"]) {
+    const json = JSON.parse(
+      readFileSync(new URL(`../i18n/locales/${locale}.json`, import.meta.url), "utf8")
+    );
+    assert.match(json.settings.providers.keyHelp.meta, /dev\.meta\.ai/);
+    assert.match(json.settings.providers.keyHelp.openMeta, /Meta/);
+  }
+});
+
 test("Mistral key help points at the API key page and says Le Chat is not a key", () => {
   const help = providerKeyHelp("mistral");
   assert.equal(help?.url, "https://console.mistral.ai/api-keys");

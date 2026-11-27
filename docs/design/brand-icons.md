@@ -59,6 +59,7 @@ not trademark ownership.
 | Mistral: `mistral`, `mistralai` | Raw provider fell back; maker prefix had real mark | SI `mistralai.svg`; alias fixed | CC0 1.0 |
 | Groq: `groq` | Generic two-letter fallback | Neutral **G**; [trademark policy](https://groq.com/trademark-policy) (effective 2025-10-24, re-read 2026-11-27) | Nominative use is "limited to word marks (no logos)"; "Use Groq logos in ads, packaging, UI, or signage without a license from Groq" is prohibited. Brand guidelines only on request to trademark-legal@groq.com |
 | Together AI: `together`, `Together AI` | Generic two-letter fallback | Neutral **T**; [brand](https://www.together.ai/brand), [terms](https://www.together.ai/terms-of-service) (re-read 2026-11-27) | The brand page offers a logo package with no usage terms; the terms say "You may not use Company name, logo, or trademarks without the Company's prior written consent" |
+| Meta Model API: `meta`, `Meta` | Generic two-letter fallback | Neutral **M**; no Meta brand artwork is bundled | No redistribution grant for Meta marks verified |
 | llama.cpp: `llamacpp` (detected local server) | Generic two-letter fallback | Official llama.cpp icon from [ggml-org/llama-brand](https://github.com/ggml-org/llama-brand) (`logo/svg/icon/icon-light.svg`, commit `9e91eb16`, retrieved 2026-11-27), one monochrome path in a 24-box (rescaled from 600, geometry unchanged), drawn in the theme text colour. Provenance file `src/assets/brands/llamacpp.svg` | Marks: CC BY-NC 4.0 plus the written grant in [BRAND-USAGE.md](https://github.com/ggml-org/llama-brand/blob/master/BRAND-USAGE.md): everyone may reproduce and redistribute them, commercially and in software, to identify or refer to llama.cpp, including rescaling and monochrome rendering. Attribution: this document and `THIRD_PARTY_NOTICES.md` name the repository |
 
 Antigravity is absent from the installed SI release. Google's
@@ -182,7 +183,7 @@ the test reads it). **Result** is `logo` (artwork bundled) or `initial` / `glyph
 ## Open maintainer note
 
 Obtain written permission or a published brand grant for Groq (trademark-legal@groq.com),
-Together AI, Playwright (Microsoft) and Goose (LF Projects) before replacing their initials
+Together AI, Meta (the Meta Model API stays on a neutral initial), Playwright (Microsoft) and Goose (LF Projects) before replacing their initials
 or neutral glyph. Kiro, Qoder, Firecrawl, Context7 and Exa rely on vendor-published marks
 without licence text (see "Vendor-published icons" and the apps table): the owner should confirm that reading.
 Tavily and llama.cpp have express grants. Keep this note open until each mark has a source

@@ -1207,3 +1207,135 @@ fn short_tool_call_ids_keep_already_valid_ids() {
     let b = body(&entry("http://x"), &r);
     assert_eq!(b["messages"][1]["tool_call_id"], "call_long_id");
 }
+
+/// The shipped Meta preset, pointed at a fake server.
+fn meta_entry(base_url: &str) -> ProviderEntry {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../providers/catalog");
+    let text = std::fs::read_to_string(dir.join("meta.toml")).unwrap();
+    let mut e: ProviderEntry = toml::from_str(&text).unwrap();
+    e.base_url = base_url.into();
+    e.models_endpoint = Some(format!("{base_url}/models"));
+    e
+}
+
+#[test]
+fn meta_preset_declares_what_was_verified_and_nothing_more() {
+    let e = meta_entry("http://x");
+    assert_eq!(e.id, "meta");
+    assert_eq!(e.auth, Auth::ApiKeyEnv("META_API_KEY".into()));
+    // Tools, vision, streaming and JSON mode were all confirmed against the live API.
+    for model in ["muse-spark-1.3", "muse-wonder-1.0"] {
+        let caps = e.caps_for(model);
+        assert!(
+            caps.tools && caps.vision && caps.streaming && caps.json_mode,
+            "{model}"
+        );
+        assert_eq!(
+            e.model(model).unwrap().context_window,
+            Some(1_048_576),
+            "{model}"
+        );
+    }
+    // The bare `muse-wonder` id does not exist at Meta; the contributor variants train on prompts.
+    assert!(e.model("muse-wonder").is_none());
+    assert!(e.models.iter().all(|m| !m.id.contains("contributor")));
+}
+
+#[tokio::test]
+async fn meta_preset_lists_models_and_sends_vision_and_tool_requests_in_metas_shape() {
+    let server = MockServer::start().await;
+    // Meta lists every API-hosted model, also image, voice and segmentation ones.
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .and(header("authorization", "Bearer LLM_test_key"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"object":"list","data":[
+                {"id":"muse-wonder-1.0","object":"model"},
+                {"id":"muse-spark-1.3","object":"model"},
+                {"id":"muse-image-1.0","object":"model"},
+                {"id":"sam-3.1","object":"model"}
+            ]})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(header("authorization", "Bearer LLM_test_key"))
+        .and(body_partial_json(json!({
+            "model": "muse-spark-1.3",
+            "stream": true,
+            "max_completion_tokens": 64,
+            "stream_options": {"include_usage": true}
+        })))
+        .respond_with(sse(&[
+            r#"{"choices":[{"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"t","arguments":"{\"a\":"}}]}}]}"#,
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"1}"}}]},"finish_reason":"tool_calls"}]}"#,
+            r#"{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}"#,
+            "[DONE]",
+        ]))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let p = OpenAiCompatProvider::with_api_key(
+        meta_entry(&server.uri()),
+        fast(),
+        Some("LLM_test_key".into()),
+    )
+    .unwrap();
+
+    let ids = p.list_models().await.unwrap();
+    assert_eq!(ids.len(), 4);
+    let shown = crate::model_metadata::model_metadata("meta", &ids, true);
+    let shown: Vec<_> = shown.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(shown, ["muse-spark-1.3", "muse-wonder-1.0"]);
+
+    let image = json!({"type":"image_url","image_url":{"url":"data:image/png;base64,AA"}});
+    let mut r = ChatRequest::new(
+        ModelRef("meta/muse-spark-1.3".into()),
+        vec![
+            Message::text(MessageRole::System, "be brief"),
+            Message {
+                content: json!([{"type":"text","text":"what is this?"}, image.clone()]),
+                ..Message::text(MessageRole::User, "")
+            },
+        ],
+    );
+    r.tools = vec![tool()];
+    r.max_tokens = Some(64);
+    assert!(p.supports_vision("muse-spark-1.3"));
+    let chunks = collect(&p, r).await.unwrap();
+    assert!(chunks.iter().any(
+        |c| matches!(c, ChatChunk::ToolCall(t) if t.name == "t" && t.arguments == r#"{"a":1}"#)
+    ));
+    assert!(
+        chunks
+            .iter()
+            .any(|c| matches!(c, ChatChunk::Usage(u) if u.prompt_tokens == 11))
+    );
+
+    let sent: Value = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .find(|q| q.method.as_str() == "POST")
+        .unwrap()
+        .body_json()
+        .unwrap();
+    assert_eq!(sent["messages"][1]["content"][1], image);
+    // Meta rejects these on its reasoning models, and the deprecated max_tokens alias is avoided.
+    for field in [
+        "max_tokens",
+        "stop",
+        "n",
+        "logprobs",
+        "tool_choice",
+        "frequency_penalty",
+    ] {
+        assert!(
+            sent.get(field).is_none(),
+            "{field} must not be sent to Meta"
+        );
+    }
+}

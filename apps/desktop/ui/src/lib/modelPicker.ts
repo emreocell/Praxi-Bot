@@ -207,7 +207,7 @@ export function modelHint(model: string): ModelHint {
   if (/(flash|haiku|lite|(^|[-/:])mini|nano|small|luna|:[1-8]b\b)/.test(id)) {
     return "fast";
   }
-  if (/(opus|fable|-pro|carbon|sol\b|:(30|32|70)b)/.test(id)) {
+  if (/(opus|fable|-pro|carbon|sol\b|wonder|:(30|32|70)b)/.test(id)) {
     return "strongest";
   }
   return "balanced";

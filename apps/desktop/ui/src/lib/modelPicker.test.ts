@@ -246,6 +246,8 @@ test("modelUse gives every model a one-line 'good at' from its source, id and hi
   assert.equal(modelUse(m("anthropic", "claude-opus-5-5")), "hard");
   assert.equal(modelUse(m("anthropic", "claude-sonnet-5-5")), "everyday");
   assert.equal(modelUse(m("anthropic", "claude-haiku-5")), "quick");
+  assert.equal(modelUse(m("meta", "muse-wonder-1.0")), "hard");
+  assert.equal(modelUse(m("meta", "muse-spark-1.3")), "everyday");
   assert.equal(modelUse(m("cli:codex", "gpt-6.1-codex")), "code");
   assert.equal(modelUse(m("openrouter", "deepseek/deepseek-v4:free")), "free");
   assert.equal(modelUse(m("gemini", "gemini-3-flash"), "quota"), "quota");

@@ -17,6 +17,7 @@ written `provider/model`, for example `gemini/gemini-2.5-flash-lite`.
 | `groq` | Groq (OpenAI-compatible, low-latency open models) | `GROQ_API_KEY` |
 | `mistral` | Mistral AI: Large, Medium, Small, Codestral, Pixtral (OpenAI-compatible) | `MISTRAL_API_KEY` |
 | `together` | Together AI (OpenAI-compatible serverless open models) | `TOGETHER_API_KEY` |
+| `meta` | Meta Model API: Muse Spark and Muse Wonder (OpenAI-compatible) | `META_API_KEY` |
 | `ollama` | Local models via Ollama at `http://localhost:11434/v1` | none |
 | `lmstudio` | Local models via LM Studio at `http://localhost:1234/v1` | none |
 
@@ -27,6 +28,20 @@ nine letters/digits, so Praxi-Bot rewrites other ids (for example after you
 switch a conversation from another provider) to a stable nine-character id.
 Mistral's Voxtral speech-to-text is not wired in as a dictation backend: see
 the dictation notes.
+
+**Meta (Muse models):** you need an API key from the Meta Model API dashboard
+(<https://dev.meta.ai/>); keys start with `LLM_`. The preset points at
+`https://api.meta.ai/v1` and lists `muse-spark-1.3` (the everyday model) and
+`muse-wonder-1.0` (the most capable one, still in preview at Meta). Use the full
+`muse-wonder-1.0`: the short name `muse-wonder` does not exist. Both models read
+images, stream, call tools and can return JSON; Meta's limits per team are 3,000
+requests and 4 million tokens per minute and model. Meta accepts only automatic
+tool choice (it rejects "must call a tool"), which Praxi-Bot never asks for. The
+`-contributor` variants Meta also offers are cheaper but let Meta train on your
+prompts and answers, so they are not in the catalog; pick them by hand only if
+that is acceptable. Availability depends on your country (see Meta's Geographic
+Use Policy). Muse Image, Muse Voice and Segment Anything show up in the key's
+model list but are not chat models, so the picker hides them.
 
 Any other OpenAI-compatible server can be added as a **custom provider** with a
 base URL (see below). The catalog also carries a list of models with USD prices

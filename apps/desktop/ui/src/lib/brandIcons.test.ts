@@ -121,7 +121,7 @@ test('Kiro and Qoder use their own marks, not the generic terminal glyph', () =>
 });
 
 test('brands whose terms do not allow their logo use an explicit neutral initial and stay offline', () => {
-  for (const [id, initial] of Object.entries({ groq: 'G', together: 'T', playwright: 'P' })) {
+  for (const [id, initial] of Object.entries({ groq: 'G', together: 'T', meta: 'M', playwright: 'P' })) {
     const b = brandIcon(id);
     assert.equal(b.known, true, `${id}: must not trigger AppLogo remote lookup`);
     assert.equal(b.path, '', id);

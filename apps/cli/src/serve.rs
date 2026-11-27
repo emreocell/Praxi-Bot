@@ -86,6 +86,7 @@ const BUILTIN_CATALOG_SOURCES: &[&str] = &[
     include_str!("../../../providers/catalog/gemini.toml"),
     include_str!("../../../providers/catalog/groq.toml"),
     include_str!("../../../providers/catalog/lmstudio.toml"),
+    include_str!("../../../providers/catalog/meta.toml"),
     include_str!("../../../providers/catalog/mistral.toml"),
     include_str!("../../../providers/catalog/ollama.toml"),
     include_str!("../../../providers/catalog/openrouter.toml"),

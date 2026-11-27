@@ -7,6 +7,8 @@ test("model ids become human names", () => {
     ["gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite"],
     ["gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview"],
     ["claude-sonnet-5-5", "Claude Sonnet 5.5"],
+    ["muse-spark-1.3", "Muse Spark 1.3"],
+    ["muse-wonder-1.0", "Muse Wonder 1.0"],
     ["claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet"],
     ["claude-opus-4-1-2025-08-05", "Claude Opus 4.1"],
     ["claude-haiku-5-5-latest", "Claude Haiku 5.5"],

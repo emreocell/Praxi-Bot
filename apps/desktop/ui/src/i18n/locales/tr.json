@@ -6990,8 +6990,10 @@
       "description": "API anahtarları işletim sistemi anahtarlığında saklanır. Değişiklikleri arka plan servisi yeniden başlatmadan alır.",
       "disabled": "Devre dışı",
       "keyHelp": {
+        "meta": "Meta, Meta Model API panelinden (dev.meta.ai) alınan bir API anahtarı ister. Anahtarlar LLM_ ile başlar. Model adı muse-spark-1.3 ya da muse-wonder-1.0 olmalıdır.",
         "mistral": "Mistral, La Plateforme'dan (console.mistral.ai) alınan bir API anahtarı ister. Le Chat sohbet aboneliği bir API anahtarı değildir ve burada çalışmaz.",
-        "open": "Mistral anahtarı oluştur"
+        "open": "Mistral anahtarı oluştur",
+        "openMeta": "Meta anahtarı oluştur"
       },
       "keyHint": "Anahtar sistem anahtarlığına gönderilir ve bir daha gösterilmez.",
       "keyStored": "anahtar kayıtlı",

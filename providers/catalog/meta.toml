@@ -1,0 +1,76 @@
+# Meta Model API — Muse models (OpenAI-compatible Chat Completions).
+# Sources (Meta's official developer documentation, read 2026-11-27):
+#   https://dev.meta.ai/docs/models
+#   https://dev.meta.ai/docs/authentication
+#   https://dev.meta.ai/docs/protocols/chat-completions
+#   https://dev.meta.ai/docs/tool-calling
+#   https://dev.meta.ai/docs/media-understanding
+#   https://dev.meta.ai/docs/pricing-rate-limits
+# Base URL: https://api.meta.ai/v1 (`POST /chat/completions`, `GET /models`).
+# Auth: HTTP Bearer token (`Authorization: Bearer <key>`). Keys start with
+#   `LLM_` and are created in the Model API dashboard (https://dev.meta.ai/).
+#   Praxi reads it from META_API_KEY (Meta's own samples call it MODEL_API_KEY;
+#   no SDK reads either name by itself).
+# Model ids: `muse-spark-1.3` (recommended for new work) and `muse-wonder-1.0`
+#   (in preview). The bare id `muse-wonder` does NOT exist (HTTP 404
+#   model_not_found); always use the versioned id. Both take text, image, video,
+#   audio and PDF input, return text, and have a 1,048,576-token context window.
+#   Muse Spark 1.3's audio input is documented as not fully supported.
+# Not listed on purpose: the `*-contributor` variants (cheaper, but Meta may use
+#   the prompts and answers to train its models) and muse-ember-1.0 (not asked
+#   for; it still shows up in the live model list).
+# Capabilities, all confirmed against the live API on 2026-11-27 for both models:
+#   chat, streaming (SSE ending in `[DONE]`, with `stream_options.include_usage`
+#   usage chunk), function calling (tool_calls out, tool messages back),
+#   vision (`image_url` content parts with a base64 data URL; images only in user
+#   messages, up to 50 per request), `response_format: json_object`.
+# Limits and quirks (documented, tool_choice also confirmed live):
+#   - `tool_choice` only accepts "auto": "required", "none" and a named function
+#     return HTTP 400. Praxi's agent never sends them; callers must not either.
+#   - `stop`, `n` > 1, `logit_bias`, `logprobs`, `frequency_penalty` and
+#     `presence_penalty` are not supported on the reasoning models. Praxi does
+#     not send them.
+#   - The models always reason (`reasoning_effort: "none"` is rejected). Leave
+#     temperature and top_p at their defaults for best results.
+#   - The output limit shares the context window with the input; `max_tokens` is
+#     a deprecated alias of `max_completion_tokens`, so the latter is used.
+#   - A non-streaming request that runs too long returns HTTP 504; streaming
+#     requests are exempt (Praxi streams).
+# Prices: USD per million tokens, Standard mode (prompts are not used for
+#   training), no long-context premium on these two models.
+# Rate limits: per team, not per key (every key of a team shares them), per
+#   model: 3,000 requests/min and 4,000,000 tokens/min for muse-spark-1.3 and
+#   muse-wonder-1.0; HTTP 429 when exceeded.
+# Availability depends on the country (Muse Wonder is not offered in South
+#   Korea); see Meta's Geographic Use Policy.
+id = "meta"
+kind = "open_ai_compatible"
+base_url = "https://api.meta.ai/v1"
+auth = { ApiKeyEnv = "META_API_KEY" }
+models_endpoint = "https://api.meta.ai/v1/models"
+
+[capabilities]
+tools = true
+vision = true
+streaming = true
+json_mode = true
+
+[compat_flags]
+strip_system_role = false
+max_tokens_field = "max_completion_tokens"
+
+[[models]]
+id = "muse-spark-1.3"
+context_window = 1048576
+input_per_mtok = 1.25
+output_per_mtok = 4.25
+cached_per_mtok = 0.15
+prices_as_of = "2026-11-27"
+
+[[models]]
+id = "muse-wonder-1.0"
+context_window = 1048576
+input_per_mtok = 4.0
+output_per_mtok = 20.0
+cached_per_mtok = 0.20
+prices_as_of = "2026-11-27"

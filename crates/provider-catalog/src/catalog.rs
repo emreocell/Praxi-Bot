@@ -184,6 +184,7 @@ mod tests {
             "groq",
             "mistral",
             "together",
+            "meta",
         ] {
             assert!(cat.get(id).is_some(), "{id} missing");
         }
@@ -224,6 +225,13 @@ mod tests {
                 "https://api.together.ai/v1/models",
                 "TOGETHER_API_KEY",
                 "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            ),
+            (
+                "meta",
+                "https://api.meta.ai/v1",
+                "https://api.meta.ai/v1/models",
+                "META_API_KEY",
+                "muse-spark-1.3",
             ),
         ] {
             let entry = cat.get(id).unwrap_or_else(|| panic!("{id} missing"));

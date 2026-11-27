@@ -276,7 +276,7 @@ export function ProvidersSection() {
               <p className={formStyles.hint}>
                 {t(keyHelp.noteKey)}{" "}
                 <Button variant="ghost" onClick={() => openExternal(keyHelp.url)}>
-                  {t("settings.providers.keyHelp.open")}
+                  {t(keyHelp.openKey)}
                 </Button>
               </p>
             ) : null}

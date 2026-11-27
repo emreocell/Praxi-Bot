@@ -6990,8 +6990,10 @@
       "description": "API keys are stored in your OS keychain. Changes are picked up by the background service without a restart.",
       "disabled": "Disabled",
       "keyHelp": {
+        "meta": "Meta needs an API key from the Meta Model API dashboard (dev.meta.ai). Keys start with LLM_. The model name is muse-spark-1.3 or muse-wonder-1.0.",
         "mistral": "Mistral needs an API key from La Plateforme (console.mistral.ai). A Le Chat chat subscription is not an API key and will not work here.",
-        "open": "Create a Mistral key"
+        "open": "Create a Mistral key",
+        "openMeta": "Create a Meta key"
       },
       "keyHint": "The key is sent to the OS keychain and never shown again.",
       "keyStored": "key stored",

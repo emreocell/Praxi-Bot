@@ -17,6 +17,7 @@ model `provider/model` biçiminde yazılır, örneğin `gemini/gemini-2.5-flash-
 | `groq` | Groq (OpenAI uyumlu, düşük gecikmeli açık modeller) | `GROQ_API_KEY` |
 | `mistral` | Mistral AI: Large, Medium, Small, Codestral, Pixtral (OpenAI uyumlu) | `MISTRAL_API_KEY` |
 | `together` | Together AI (OpenAI uyumlu, sunucusuz açık modeller) | `TOGETHER_API_KEY` |
+| `meta` | Meta Model API: Muse Spark ve Muse Wonder (OpenAI uyumlu) | `META_API_KEY` |
 | `ollama` | `http://localhost:11434/v1` adresinde Ollama ile yerel modeller | yok |
 | `lmstudio` | `http://localhost:1234/v1` adresinde LM Studio ile yerel modeller | yok |
 
@@ -26,6 +27,20 @@ ve burada kullanılamaz. Mistral yalnızca tam dokuz harf ya da rakamdan oluşan
 kimliklerini kabul eder. Bu yüzden Praxi-Bot başka kimlikleri (örneğin bir sohbeti başka bir
 sağlayıcıdan Mistral'e geçirdiğinde) sabit, dokuz karakterlik bir kimliğe çevirir. Mistral'in
 Voxtral konuşmadan yazıya özelliği, dikte için bağlı değildir. Ayrıntılar dikte notlarında.
+
+**Meta (Muse modelleri):** Meta Model API panelinden (<https://dev.meta.ai/>) bir API
+anahtarı alman gerekir. Anahtarlar `LLM_` ile başlar. Hazır ayar `https://api.meta.ai/v1`
+adresine bağlanır ve `muse-spark-1.3` (günlük kullanım modeli) ile `muse-wonder-1.0` (en
+güçlü model, Meta'da hâlâ önizleme aşamasında) modellerini listeler. Tam adı olan
+`muse-wonder-1.0` ifadesini kullan: kısa ad olan `muse-wonder` yoktur. İki model de görsel
+okur, akış halinde yanıt verir, araç çağırır ve JSON döndürebilir. Meta'nın sınırları takım
+başına, model başına dakikada 3.000 istek ve 4 milyon token'dır. Meta yalnızca otomatik araç
+seçimini kabul eder ("mutlaka bir araç çağır" isteğini reddeder). Praxi-Bot de böyle bir
+istek hiç göndermez. Meta'nın sunduğu `-contributor` sürümleri daha ucuzdur ama Meta'nın
+istemlerini ve yanıtlarını eğitimde kullanmasına izin verir. Bu yüzden katalogda yoktur.
+Bunu kabul ediyorsan elle seç. Kullanılabilirlik ülkene göre değişir (Meta'nın Coğrafi
+Kullanım Politikası'na bak). Muse Image, Muse Voice ve Segment Anything anahtarın model
+listesinde görünür ama sohbet modeli değildir. Seçici bunları gizler.
 
 OpenAI uyumlu başka herhangi bir sunucuyu da bir temel URL ile **özel sağlayıcı** olarak
 ekleyebilirsin (aşağıya bak). Katalog ayrıca milyon token başına USD fiyatlarıyla bir model

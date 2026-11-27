@@ -430,6 +430,8 @@ fn infer_kind(id: &str) -> ModelKind {
                 "computer_use",
                 "robotics",
                 "aqa",
+                // Meta's Segment Anything Model (`sam-3.1`) lists next to the Muse chat models.
+                "sam-3",
             ],
         ),
         (ModelKind::Reasoning, &["reasoning", "reasoner"]),

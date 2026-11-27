@@ -51,6 +51,7 @@ const aliases: Record<string, string> = {
 const initials: Record<string, string> = {
   groq: 'Groq',
   together: 'Together AI',
+  meta: 'Meta',
   playwright: 'Playwright'
 };
 const monochromeBrands = new Set([
