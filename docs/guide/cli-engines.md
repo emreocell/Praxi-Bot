@@ -86,6 +86,30 @@ executor model picker and choose `default`, `sonnet` or `opus`.
 Model access is determined by the CLI account. CLI engines are excluded
 from classifier/planner selection as before. No new Tauri invocation is used.
 
+## Z.ai GLM Coding Plan
+
+Z.ai documents the Coding Plan for [Claude Code](https://docs.z.ai/devpack/tool/claude)
+and [OpenCode](https://docs.z.ai/devpack/tool/opencode). Its plan key and dedicated
+endpoint are separate from its standard, usage-billed API. Z.ai lists five-hour and
+weekly credit limits and model-dependent consumption in its [plan overview](https://docs.z.ai/devpack/overview);
+check the current terms and your account's limits before use.
+
+In your own terminal, obtain a Coding Plan key from Z.ai and follow its Claude Code
+setup: it uses `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic` and
+`ANTHROPIC_AUTH_TOKEN`. Z.ai also documents selecting **Z.AI Coding Plan** in
+`opencode auth login`, then choosing a GLM model. Treat both the key and the CLI's
+saved credentials as secrets. Avoid placing them in a bot workspace or a prompt.
+
+**This does not configure a Praxi Claude run.** Praxi clears ambient provider
+variables and uses isolated Claude settings; it does not currently offer an
+owner-selected Coding Plan token or forward these variables to Claude. The
+OpenCode server sign-in above selects its console account, not the Z.ai menu;
+Praxi-governed OpenCode remains unavailable. Native-tools OpenCode uses its own
+CLI authentication and configuration, and the Z.ai login path has not been
+verified through Praxi. Do not assume terminal setup or a detected login means a
+Praxi bot is using the plan. The proposed credential boundary and remaining tests
+are recorded in [the design note](../design/glm-coding-plan.md).
+
 ## Security boundary
 
 Claude continues to run with `--tools ""`, strict MCP configuration, isolated
