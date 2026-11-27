@@ -2561,6 +2561,11 @@
         "failed": "No pudo cerrar el aviso de cookies",
         "running": "Cerrando el aviso de cookies de una página"
       },
+      "browser_downloads": {
+        "done": "Checked the files the browser downloaded",
+        "failed": "Couldn't check the downloaded files",
+        "running": "Checking the downloaded files"
+      },
       "browser_eval": {
         "done": "Ejecutó un script en el navegador",
         "failed": "No pudo ejecutar el script en el navegador",
@@ -2596,6 +2601,11 @@
         "failed": "No pudo pulsar una tecla en el navegador",
         "running": "Pulsando una tecla en el navegador"
       },
+      "browser_reload": {
+        "done": "Reloaded a page",
+        "failed": "Couldn't reload a page",
+        "running": "Reloading a page"
+      },
       "browser_select": {
         "done": "Eligió una opción en una página",
         "failed": "No pudo elegir una opción",
@@ -2605,6 +2615,16 @@
         "done": "Seleccionó texto en una página",
         "failed": "No seleccionó texto en una página",
         "running": "Seleccionando texto en una página"
+      },
+      "browser_tabs": {
+        "done": "Worked with browser tabs",
+        "failed": "Couldn't change browser tabs",
+        "running": "Working with browser tabs"
+      },
+      "browser_upload": {
+        "done": "Put a file into a page's form",
+        "failed": "Couldn't upload a file to a page",
+        "running": "Putting a file into a page's form"
       },
       "browser_view": {
         "done": "Vio una página",

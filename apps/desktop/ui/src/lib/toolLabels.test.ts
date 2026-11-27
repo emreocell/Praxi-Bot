@@ -102,6 +102,12 @@ test("writing, scripting and typing tools are not worded as reads or generic use
   assert.equal(describeTool("browser_select_text", {}).key, "chat.step.browser_select_text");
   assert.equal(describeTool("browser_pointer", {}).key, "chat.step.browser_pointer");
   assert.equal(describeTool("browser_attach", {}).key, "chat.step.browser_attach");
+  // Files and tabs have their own wording, not "looked at a page"; forward reads like back.
+  assert.equal(describeTool("browser_upload", {}).key, "chat.step.browser_upload");
+  assert.equal(describeTool("browser_downloads", {}).key, "chat.step.browser_downloads");
+  assert.equal(describeTool("browser_reload", {}).key, "chat.step.browser_reload");
+  assert.equal(describeTool("browser_tabs", {}).key, "chat.step.browser_tabs");
+  assert.equal(describeTool("browser_forward", {}).key, describeTool("browser_back", {}).key);
   assert.equal(describeTool("browser_dismiss_consent", {}).key, "chat.step.browser_dismiss_consent");
   assert.notEqual(describeTool("skill_write", {}).key, describeTool("skill_read", {}).key);
   assert.notEqual(describeTool("memory_save", {}).key, describeTool("memory_search", {}).key);

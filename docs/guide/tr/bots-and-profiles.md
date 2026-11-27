@@ -134,7 +134,7 @@ Araç adları yerleşik adlardır, örneğin `fs_read`, `fs_write`, `shell_run`,
 | --- | --- |
 | Dosyalar | `fs_read`, `fs_list`, `fs_search`, `fs_write`, `fs_edit`, `fs_move`, `fs_delete`, `checkpoint_list`, `checkpoint_restore` |
 | Kabuk | `shell_run` |
-| Tarayıcı | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_tabs`, `browser_screenshot`, `browser_pointer`, `browser_attach`, `browser_eval` |
+| Tarayıcı | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_forward`, `browser_reload`, `browser_tabs`, `browser_screenshot`, `browser_pointer`, `browser_upload`, `browser_downloads`, `browser_attach`, `browser_eval` |
 | Web (salt okunur, tarayıcısız) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata` (bkz. [Web araçları](web.md)) |
 | Zamanlamalar (yalnızca Genel hazır ayar) | `schedule_list`, `schedule_create`, `schedule_update`, `schedule_pause`, `schedule_resume`, `schedule_delete` (bkz. [Zamanlanmış görevler](scheduled-tasks.md)) |
 | Masaüstü (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
@@ -174,6 +174,15 @@ izleyebilirsin ve yalnızca imleç üzerindeyken açılan menüler açılabilir:
 - `desktop_click` ve `desktop_drag`, masaüstü için de aynı şekilde ekran noktaları alır (`desktop_get_state` ile ekran görüntüsü, sonra incelenen pencerenin içindeki noktalar).
 
 Hiçbir CAPTCHA çözülmez. Tek bir "Robot değilim" kutusu, her onay kutusu gibi en çok iki kez tıklanabilir; görsel, kutucuk, kaydırıcı ya da basılı tutma bulmacaları sana devredilir (`browser_handover`); sen başında değilsen çalışmaya, yeniden denemek yerine öğeyi engellenmiş diye bildirmesi ve devam etmesi söylenir.
+
+### Dosyalar ve sekmeler
+
+Kayıt olma ve formlar için asistan dosyaları ve sekmeleri de yönetebilir. Bunların hiçbiri, dosya araçlarının zaten izin verdiğinin ötesinde kendi dosyalarına ya da kendi tarayıcına uzanmaz.
+
+- `browser_upload`, bir sayfanın dosya girişine dosya koyar (görüntüdeki `ref`, dosyanın `path`'i; birden çok dosya alan bir giriş için `paths`). Yol tam olarak `fs_read` gibi değerlendirilir (botun klasörleri; Praxi veri klasörü ya da kimlik bilgisi dosyası asla, başka bir botun çalışma alanı asla), en çok 50 MB'lık düz bir dosya olmalıdır ve gizli bilgiye benziyorsa reddedilir: bir `.env`, bir anahtar ya da sertifika (`id_rsa`, `.pem`, `.key`, `.p12`), bir parola veritabanı, `.ssh` / `.aws` / `.gnupg` içindeki bir dosya ya da özel anahtar gibi başlayan herhangi bir dosya. Dosya yalnızca girişe konur; form ayrı bir `browser_click` ile gönderilir. Her zaman sorar ve Tam seviyenin kart göstermeden geçirdiği tarayıcı çağrıları arasında **değildir**: bilgisayarındaki bir dosyanın bir sayfaya gitmesi bir gönderimdir.
+- İndirmelerin hepsi artık reddedilmez. Çalışma alanı olan bir bot, tarayıcısının indirdiği dosyaları çalışma alanının **tek** bir klasöründe, `browser-downloads` içinde, düz bir adla tutar (sayfanın önerdiği ad, klasör kısmı atılmış olarak; çift tıklamayla çalışabilecek bir tür `.download` eki alır); dosya başına 100 MB ve en çok 100 dosya; daha büyüğü gelirken iptal edilir ve asla saklanmaz. Dosyalar gelirken adlarını tarayıcı kendisi verir, bu yüzden bir sayfa yol seçemez. `browser_downloads`, biten dosyaları (ad, boyut, uzantıdan tahmin edilen tür, tam yol, geldiği site) ve saklanmayanları listeler. Asistan için hiçbir şey açılmaz ve klasör dışarıdan gelen içerik olarak kaydedilir: bir indirmeyi okumak güvenilmeyen metin okumak sayılır. Çalışma alanı olmayan bir bot ve `browser_attach` ile bağlandığın tarayıcı indirmeleri reddetmeye devam eder.
+- `browser_tabs` sekmeleri listeler, `switch_to` ile geçiş yapar, `new: true` ile yeni bir sekme açar (`url` ile, `browser_open` ile aynı herkese açık web adresleri ve aynı site kuralları ve onaylar) ve `close` ile birini kapatır. İlk sekme (canlı görünümün izlediği) ve son sekme açık kalır; senin tarayıcında yalnızca asistanın kendi açtığı bir sekme kapatılabilir.
+- `browser_reload` geçerli sayfayı yeniden yükler, `browser_forward` ise `browser_back`'ten sonra ileri gider. İkisine de, `browser_back` gibi, bir sayfa okunduktan sonra izin verilir.
 
 ### Bir adım başarısız olduğunda
 

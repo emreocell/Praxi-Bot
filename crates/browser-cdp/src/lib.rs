@@ -27,6 +27,7 @@ pub mod client;
 pub mod destination;
 pub mod diff;
 pub mod dom;
+pub mod downloads;
 pub mod error;
 pub mod hidden;
 pub mod host;
@@ -59,6 +60,9 @@ pub use destination::{
     AddrClass, DestinationCheck, ServedNetwork, Verdict, classify_ip, classify_url,
 };
 pub use diff::{SnapshotDiff, diff, diff_text};
+pub use downloads::{
+    Download, DownloadPolicy, DownloadReport, list_folder, mime_of, sanitize_file_name,
+};
 pub use error::{Error, Result};
 pub use human::{Feel, HumanLike};
 pub use launch::{LaunchOptions, find_browser};

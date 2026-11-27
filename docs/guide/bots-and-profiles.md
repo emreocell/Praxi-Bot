@@ -139,7 +139,7 @@ wildcards. The built-in tool groups:
 | --- | --- |
 | Files | `fs_read`, `fs_list`, `fs_search`, `fs_write`, `fs_edit`, `fs_move`, `fs_delete`, `checkpoint_list`, `checkpoint_restore` |
 | Shell | `shell_run`, `shell_interactive` |
-| Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_tabs`, `browser_screenshot`, `browser_pointer`, `browser_attach`, `browser_eval` |
+| Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_forward`, `browser_reload`, `browser_tabs`, `browser_screenshot`, `browser_pointer`, `browser_upload`, `browser_downloads`, `browser_attach`, `browser_eval` |
 | Web (read-only, no browser) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata` (see [Web tools](web.md)) |
 | Schedules (General preset only) | `schedule_list`, `schedule_create`, `schedule_update`, `schedule_pause`, `schedule_resume`, `schedule_delete` (see [Scheduled tasks](scheduled-tasks.md)) |
 | Desktop (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
@@ -168,6 +168,15 @@ Most controls are clicked by the reference the page snapshot gives them (`browse
 - `desktop_click` and `desktop_drag` take screen points for the desktop in the same way (screenshot with `desktop_get_state`, then points inside the observed window).
 
 No CAPTCHA is solved. A single "I'm not a robot" checkbox may be clicked like any checkbox, at most twice; an image, tile, slider or press-and-hold puzzle goes to you (`browser_handover`), and a run that you are not there for is told to report the item as blocked and move on instead of retrying.
+
+### Files and tabs
+
+For sign-ups and forms the assistant can also move files and tabs. None of this reaches your own files or your own browser beyond what the file tools already allow.
+
+- `browser_upload` puts a file into a page's file input (`ref` from the snapshot, `path` of the file; `paths` for an input that takes several). The path is judged exactly like `fs_read` (the bot's folders, never the Praxi data folder or a credential file, never another bot's workspace), must be a plain file of at most 50 MB, and is refused when it looks like a secret: a `.env`, a key or certificate (`id_rsa`, `.pem`, `.key`, `.p12`), a password database, a file in `.ssh` / `.aws` / `.gnupg`, or any file that starts like a private key. The file is only set on the input; the form is submitted with a separate `browser_click`. It always asks, and it is **not** among the browser calls the Full level lets through without a card: a file of your computer going to a page is a send.
+- Downloads are no longer all refused. A bot that has a workspace keeps the files its browser downloads in **one** folder of it, `browser-downloads`, under a plain name (the page's suggested name with any folder part removed; a type that a double click could run gets a `.download` suffix), up to 100 MB per file and 100 files; anything larger is cancelled while it arrives and never kept. The browser names the files itself while they arrive, so a page cannot choose a path. `browser_downloads` lists the finished files (name, size, type guessed from the extension, full path, the site it came from) and what was not kept. Nothing is ever opened for the assistant, and the folder is recorded as outside content: reading a download counts as reading untrusted text. A bot without a workspace, and the browser you attached with `browser_attach`, keep refusing downloads.
+- `browser_tabs` lists the tabs, switches with `switch_to`, opens one with `new: true` (with `url`, the same public web addresses and the same site rules and approvals as `browser_open`) and closes one with `close`. The first tab (the one the live view follows) and the last tab stay open, and in your own browser only a tab the assistant opened itself can be closed.
+- `browser_reload` loads the current page again and `browser_forward` goes forward after `browser_back`. Both are allowed after a page was read like `browser_back` is.
 
 ### When a step fails
 

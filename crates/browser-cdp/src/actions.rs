@@ -1848,11 +1848,45 @@ impl Page {
         self.back_with(&DialogOptions::default()).await
     }
 
-    /// Go forward in history.
-    pub async fn forward(&self) -> Result<ActionResult> {
-        let before = self.baseline().await?;
+    /// Go forward in history with explicit dialog handling options.
+    pub async fn forward_with(&self, opts: &DialogOptions) -> Result<ActionResult> {
+        let before = self.baseline_with(opts).await?;
         let res = self.history_inner(1).await;
         self.finish(before, res).await
+    }
+
+    /// Go forward in history.
+    pub async fn forward(&self) -> Result<ActionResult> {
+        self.forward_with(&DialogOptions::default()).await
+    }
+
+    /// Load the current page again, as a person's reload button does (the cache may answer).
+    /// Whatever was typed on the page is lost, like with any reload. The result is the page as
+    /// it is now, whole (like `browser_open`), not a diff that would read "no changes".
+    pub async fn reload_with(&self, opts: &DialogOptions) -> Result<ActionResult> {
+        if let Ok(mut d) = self.shared.dialogs.lock() {
+            d.clear();
+        }
+        if let Ok(mut p) = self.shared.dialog_policy.lock() {
+            *p = opts.clone();
+        }
+        if let Ok(mut m) = self.shared.action_mark.lock() {
+            *m = Some((Instant::now(), self.shared.nav_gen.load(Ordering::SeqCst)));
+        }
+        let res = self.reload_inner().await;
+        self.finish_navigation(Snapshot::default(), res).await
+    }
+
+    /// [`Page::reload_with`] with the default dialog handling.
+    pub async fn reload(&self) -> Result<ActionResult> {
+        self.reload_with(&DialogOptions::default()).await
+    }
+
+    async fn reload_inner(&self) -> Result<()> {
+        let mut rx = self.client.subscribe();
+        self.cmd("Page.reload", json!({"ignoreCache": false}))
+            .await?;
+        self.wait_load(&mut rx, NAVIGATION_LOAD_DEADLINE).await
     }
 
     /// A typed secret remains visually private until a browser-reported navigation.

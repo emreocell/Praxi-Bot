@@ -46,6 +46,8 @@ pub struct Browser {
     /// Profile directory of a browser we launched: marked as cleanly closed
     /// once the process is gone, so the next start shows no "Restore pages".
     profile_dir: Option<PathBuf>,
+    /// The folder downloads may land in, once [`Browser::allow_downloads`] was called.
+    downloads: std::sync::Mutex<Option<Arc<crate::downloads::Downloads>>>,
 }
 
 /// The `Browser.setWindowBounds` parameters that maximise the window described
@@ -326,6 +328,7 @@ impl Browser {
                     guarded,
                     maximize,
                     profile_dir: Some(profile),
+                    downloads: std::sync::Mutex::default(),
                 })
             }
             Err(e) => {
@@ -366,6 +369,7 @@ impl Browser {
             guarded: None,
             maximize: false,
             profile_dir: None,
+            downloads: std::sync::Mutex::default(),
         })
     }
 
@@ -386,6 +390,7 @@ impl Browser {
             guarded: None,
             maximize: false,
             profile_dir: None,
+            downloads: std::sync::Mutex::default(),
         })
     }
 
@@ -468,6 +473,58 @@ impl Browser {
     /// Attach to an existing tab by target id.
     pub async fn attach(&self, target_id: &str) -> Result<Page> {
         Page::attach(self.client.clone(), target_id).await
+    }
+
+    /// Close the tab `target_id`. Closing the last tab is the caller's call to make (a browser
+    /// with no tab left shows nothing to read).
+    pub async fn close_page(&self, target_id: &str) -> Result<()> {
+        self.client
+            .send("Target.closeTarget", json!({"targetId": target_id}))
+            .await?;
+        if let Some(owned) = &self.guarded {
+            owned_lock(owned).remove(target_id);
+        }
+        Ok(())
+    }
+
+    /// Let this browser keep downloads, in `policy.dir` only (see [`crate::downloads`]). Until
+    /// this is called every download is refused. Calling it again with the same folder changes
+    /// nothing; with another folder the new one replaces the old.
+    ///
+    /// Never call this on a browser the owner started themselves: it changes how THEIR
+    /// browser treats downloads.
+    pub async fn allow_downloads(&self, policy: crate::downloads::DownloadPolicy) -> Result<()> {
+        let existing = self
+            .downloads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if existing
+            .as_ref()
+            .is_some_and(|d| d.policy() == &crate::downloads::resolved(&policy))
+        {
+            return Ok(());
+        }
+        let fresh = crate::downloads::enable(&self.client, policy).await?;
+        let old = self
+            .downloads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .replace(fresh);
+        if let Some(old) = old {
+            old.retire();
+        }
+        Ok(())
+    }
+
+    /// The download folder's content and what this session knows about downloads that did not
+    /// finish; `None` while downloads are refused.
+    pub fn downloads(&self) -> Option<crate::downloads::DownloadReport> {
+        self.downloads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|d| d.report())
     }
 
     /// Attach to the first existing tab, or open one when there is none.

@@ -765,6 +765,7 @@ pub(crate) fn is_page_action(name: &str) -> bool {
             | "browser_dismiss_consent"
             | "browser_act"
             | "browser_pointer"
+            | "browser_upload"
     )
 }
 

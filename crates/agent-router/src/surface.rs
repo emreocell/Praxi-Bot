@@ -35,9 +35,12 @@ pub const TOOL_DESCRIBE: &str = "tool_describe";
 ///
 /// This is the single default for both the surface and the agent loop
 /// (`agent_core::DEFAULT_DIRECT_TOOL_LIMIT` is this value): the built-in set
-/// (with `spawn_subagent`, skill and workflow tools) is just over 25, and the
-/// model should see it directly.
-pub const DEFAULT_DISCOVERY_THRESHOLD: usize = 40;
+/// (with `spawn_subagent`, skill and workflow tools) is about 40 on a computer
+/// with a desktop and a browser, and the model should see it directly. The limit
+/// moves with that set: it was 40 before `browser_upload`, `browser_downloads`,
+/// `browser_reload` and `browser_forward` joined it, so it is 44 now and a bot that saw
+/// every tool directly still does.
+pub const DEFAULT_DISCOVERY_THRESHOLD: usize = 44;
 /// Default number of results of `find_tool`.
 pub const DEFAULT_FIND_K: usize = 6;
 /// Upper bound on `k` accepted by `find_tool`.

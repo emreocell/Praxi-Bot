@@ -60,6 +60,9 @@ pub(crate) const BROWSER_CLASSES: &[(&str, Capability)] = &[
     ("browser_snapshot", Capability::Read),
     ("browser_screenshot", Capability::Read),
     ("browser_back", Capability::Read),
+    ("browser_forward", Capability::Read),
+    ("browser_reload", Capability::Read),
+    ("browser_downloads", Capability::Read),
     ("browser_scroll", Capability::Read),
     ("browser_hover", Capability::Read),
     ("browser_wait", Capability::Read),
@@ -74,6 +77,9 @@ pub(crate) const BROWSER_CLASSES: &[(&str, Capability)] = &[
     ("browser_act", Capability::Submit),
     // A coordinate click can press any button, so it is judged like a key press / batch.
     ("browser_pointer", Capability::Submit),
+    // A file handed to a page can be sent by the page's own script the moment it is set, so it is
+    // judged like a submit.
+    ("browser_upload", Capability::Submit),
     ("browser_attach", Capability::Read),
     ("browser_eval", Capability::Submit),
 ];
@@ -133,6 +139,11 @@ fn subject_of(
 ) -> Option<(Subject, bool)> {
     match tool {
         "browser_open" => {
+            let host = site_of_url(input.get("url")?.as_str()?)?;
+            Some((Subject::Site(host), true))
+        }
+        // A new tab on an address goes where `browser_open` would: judged by the site it opens.
+        "browser_tabs" if input.get("url").is_some_and(Value::is_string) => {
             let host = site_of_url(input.get("url")?.as_str()?)?;
             Some((Subject::Site(host), true))
         }

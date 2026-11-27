@@ -866,6 +866,7 @@ dependencies = [
  "serde_json",
  "similar",
  "sysinfo",
+ "tempfile",
  "tokio",
  "tokio-tungstenite",
  "tracing",

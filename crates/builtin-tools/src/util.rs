@@ -85,6 +85,11 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // attaching to the owner's browser opens every tab and session it holds.
         | "browser_pointer"
         | "browser_attach"
+        // Reload and forward navigate like `browser_back`; an upload hands a file of this
+        // computer to a page, which is both a private read and a send off the machine.
+        | "browser_reload"
+        | "browser_forward"
+        | "browser_upload"
         // `email_wait_for` reads the bot's own inbox: untrusted (a stranger's mail), private
         // (a mailbox) and, like `email_read`, a call to a remote mailbox. No text the model
         // wrote is sent (filters run locally), but the class stays the same as `email_read`
@@ -101,8 +106,9 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         "schedule_create" | "schedule_update" | "schedule_resume" | "bot_create" | "bot_update"
         | "account_register" | "tool_self_check" => ContentClass::egress(),
         // A bot's name and persona are text any bot with `manage_bots` can write, so a
-        // listing brings possibly untrusted text in.
-        "bot_list" => ContentClass::untrusted(),
+        // listing brings possibly untrusted text in. The download list shows file names a web
+        // page chose; it sends nothing and reads no private data.
+        "bot_list" | "browser_downloads" => ContentClass::untrusted(),
         _ => return None,
     })
 }

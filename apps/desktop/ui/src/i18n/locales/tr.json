@@ -2621,6 +2621,11 @@
         "failed": "Çerez bildirimi kapatılamadı",
         "running": "Sayfadaki çerez bildirimi kapatılıyor"
       },
+      "browser_downloads": {
+        "done": "İndirilen dosyalar kontrol edildi",
+        "failed": "İndirilen dosyalar kontrol edilemedi",
+        "running": "İndirilen dosyalar kontrol ediliyor"
+      },
       "browser_eval": {
         "done": "Tarayıcıda betik çalıştırıldı",
         "failed": "Tarayıcıda betik çalıştırılmadı",
@@ -2656,6 +2661,11 @@
         "failed": "Tarayıcıda tuşa basılmadı",
         "running": "Tarayıcıda tuşa basılıyor"
       },
+      "browser_reload": {
+        "done": "Sayfa yeniden yüklendi",
+        "failed": "Sayfa yeniden yüklenemedi",
+        "running": "Sayfa yeniden yükleniyor"
+      },
       "browser_select": {
         "done": "Seçenek seçildi",
         "failed": "Seçenek seçilmedi",
@@ -2665,6 +2675,16 @@
         "done": "Sayfada metin seçildi",
         "failed": "Sayfada metin seçilemedi",
         "running": "Sayfada metin seçiliyor"
+      },
+      "browser_tabs": {
+        "done": "Tarayıcı sekmeleriyle çalışıldı",
+        "failed": "Tarayıcı sekmeleri değiştirilemedi",
+        "running": "Tarayıcı sekmeleriyle çalışılıyor"
+      },
+      "browser_upload": {
+        "done": "Sayfadaki forma dosya eklendi",
+        "failed": "Sayfaya dosya yüklenemedi",
+        "running": "Sayfadaki forma dosya ekleniyor"
       },
       "browser_view": {
         "done": "Sayfaya bakıldı",

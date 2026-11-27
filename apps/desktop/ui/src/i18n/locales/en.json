@@ -2621,6 +2621,11 @@
         "failed": "Couldn't dismiss the cookie banner",
         "running": "Dismissing a cookie banner on a page"
       },
+      "browser_downloads": {
+        "done": "Checked the files the browser downloaded",
+        "failed": "Couldn't check the downloaded files",
+        "running": "Checking the downloaded files"
+      },
       "browser_eval": {
         "done": "Ran a script in the browser",
         "failed": "Didn't run a script in the browser",
@@ -2656,6 +2661,11 @@
         "failed": "Didn't press a key in the browser",
         "running": "Pressing a key in the browser"
       },
+      "browser_reload": {
+        "done": "Reloaded a page",
+        "failed": "Couldn't reload a page",
+        "running": "Reloading a page"
+      },
       "browser_select": {
         "done": "Chose an option on a page",
         "failed": "Didn't choose an option",
@@ -2665,6 +2675,16 @@
         "done": "Selected text on a page",
         "failed": "Didn't select text on a page",
         "running": "Selecting text on a page"
+      },
+      "browser_tabs": {
+        "done": "Worked with browser tabs",
+        "failed": "Couldn't change browser tabs",
+        "running": "Working with browser tabs"
+      },
+      "browser_upload": {
+        "done": "Put a file into a page's form",
+        "failed": "Couldn't upload a file to a page",
+        "running": "Putting a file into a page's form"
       },
       "browser_view": {
         "done": "Looked at a page",

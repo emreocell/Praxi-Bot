@@ -24,6 +24,7 @@ use tool_registry::{
 };
 
 use crate::control::{ActionPermit, ControlRequest, DesktopControlGate};
+use crate::files::FileGate;
 use crate::fill_secret::{Source, names_a_secret, refused, scrub, source};
 use crate::util::{exec_err, finish_text, parse, save_file, spec};
 
@@ -31,6 +32,9 @@ mod act;
 mod attach;
 #[cfg(test)]
 mod attach_tests;
+pub mod files;
+#[cfg(test)]
+mod files_tests;
 mod pointer;
 #[cfg(test)]
 mod pointer_tests;
@@ -39,6 +43,7 @@ mod recover;
 #[cfg(test)]
 mod reopen_tests;
 mod sideband;
+mod tabs;
 pub use act::{can_egress as act_can_egress, summary as act_summary};
 pub use profiles::{BrowserProfiles, ProfileStatus};
 pub use recover::{RECOVERY_CLOSE, RECOVERY_OPEN, split_recovery};
@@ -56,6 +61,16 @@ const NO_POINTER: &str =
     "this browser backend cannot point at coordinates: use refs from browser_snapshot";
 const NO_ATTACH: &str =
     "this browser backend cannot attach to a browser the owner already has open";
+const NO_UPLOAD: &str = "this browser backend cannot put a file into a page's file input";
+const NO_DOWNLOADS: &str = "this browser backend does not keep downloads";
+const NO_TAB_CHANGE: &str = "this browser backend cannot open or close tabs";
+const NO_RELOAD: &str =
+    "this browser backend cannot reload a page: use browser_open with reload:true";
+const NO_FORWARD: &str = "this browser backend cannot go forward in history";
+const HELPER_TAB: &str =
+    "a helper agent works in its own tab: it cannot open or close tabs; use browser_open in it";
+const OWNER_DOWNLOADS: &str = "the assistant is attached to the owner's own browser, whose downloads go where the owner chose: nothing is kept for the assistant. Use browser_attach with detach:true to use the assistant's own browser";
+const NO_DOWNLOAD_FOLDER: &str = "downloads are off for this bot: it has no workspace folder to keep them in, so every download is refused";
 const NO_CONSENT: &str = "this browser backend cannot dismiss a consent dialog by itself: use browser_snapshot and click its reject / necessary-only button";
 
 /// What `browser_scroll` was asked to do. At most one of `dx`/`dy`, `pages`, `to`, `into_view`.
@@ -306,8 +321,46 @@ pub trait BrowserDriver: Send + Sync {
         let _ = dialog;
         self.back().await
     }
+    /// Go forward in history, with dialog options.
+    async fn forward_opts(&self, dialog: Option<&str>) -> Result<String, String> {
+        let _ = dialog;
+        Err(NO_FORWARD.into())
+    }
+    /// Load the current page again (what was typed on it is lost), with dialog options.
+    async fn reload_opts(&self, dialog: Option<&str>) -> Result<String, String> {
+        let _ = dialog;
+        Err(NO_RELOAD.into())
+    }
     /// List tabs; with `switch_to` make that tab (by listed number) current.
     async fn tabs(&self, switch_to: Option<usize>) -> Result<String, String>;
+    /// Open a new tab and make it current. With `url` (a full web address the caller has
+    /// already checked like `browser_open`'s) the tab goes there and the page is returned;
+    /// without, it is blank and the tab list is returned.
+    async fn tab_new(&self, url: Option<&str>) -> Result<String, String> {
+        let _ = url;
+        Err(NO_TAB_CHANGE.into())
+    }
+    /// Close the tab with this listed number; returns the tab list that is left.
+    async fn tab_close(&self, n: usize) -> Result<String, String> {
+        let _ = n;
+        Err(NO_TAB_CHANGE.into())
+    }
+    /// Put `files` into the file input `r`. The caller has vetted every path; the backend
+    /// only hands them to the page's input and refuses anything that is not a file input.
+    async fn upload(&self, r: &str, files: &[PathBuf]) -> Result<String, String> {
+        let _ = (r, files);
+        Err(NO_UPLOAD.into())
+    }
+    /// Where this bot's browser may keep downloads (a folder inside the bot's workspace);
+    /// `None`: every download is refused. Called before a tool call, so the folder is set
+    /// before a page can start a download. The owner's own browser is never touched.
+    fn set_download_dir(&self, dir: Option<PathBuf>) {
+        let _ = dir;
+    }
+    /// What the download folder holds now, and the downloads that did not finish.
+    async fn downloads(&self) -> Result<browser_cdp::DownloadReport, String> {
+        Err(NO_DOWNLOADS.into())
+    }
     /// Screenshot bytes and file extension.
     async fn screenshot(
         &self,
@@ -419,6 +472,23 @@ struct Session {
     profile: Option<String>,
     headless: bool,
     last_work: tokio::time::Instant,
+    extra: SessionExtra,
+}
+
+/// What a session remembers about tabs and downloads.
+#[derive(Default)]
+struct SessionExtra {
+    /// Tabs this session opened itself (`browser_tabs` `new`). In the owner's own browser only
+    /// these may be closed: the owner's tabs are never closed for them.
+    own_tabs: std::collections::HashSet<String>,
+    /// The download folder the browser was last told about (`None`: downloads are refused).
+    downloads_dir: Option<PathBuf>,
+    /// The tab the session started on, which the live view follows: it is never closed.
+    home_tab: Option<String>,
+    /// Tab ids in the order the session first saw them: tab numbers follow this order, so a
+    /// number read from one list means the same tab in the next call (the browser's own order
+    /// changes when a tab is activated).
+    tab_order: Vec<String>,
 }
 
 /// The whole browser start (spawn, debugging endpoint, first tab) gets this long
@@ -497,6 +567,9 @@ pub struct CdpDriver {
     /// a new session connects there and never starts a browser of the assistant's own. It
     /// belongs to ONE run: another run's first browser call, an idle close and `shutdown` end it.
     attach: Arc<parking_lot::Mutex<Option<AttachScope>>>,
+    /// Where this bot's browser may keep downloads (inside the bot's workspace); `None`: every
+    /// download is refused. Set by the tools before a call, see [`BrowserDriver::set_download_dir`].
+    download_dir: Arc<parking_lot::Mutex<Option<PathBuf>>>,
 }
 
 /// An attach to the owner's browser, and the run it was made for.
@@ -626,6 +699,7 @@ impl CdpDriver {
             view: None,
             served: parking_lot::RwLock::new(None),
             attach: Arc::new(parking_lot::Mutex::new(None)),
+            download_dir: Arc::new(parking_lot::Mutex::new(None)),
         }
     }
 
@@ -743,6 +817,7 @@ impl CdpDriver {
                 headless,
                 last_work: tokio::time::Instant::now(),
                 lanes: Vec::new(),
+                extra: SessionExtra::default(),
             });
         }
         let opts = LaunchOptions {
@@ -775,6 +850,7 @@ impl CdpDriver {
             headless,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            extra: SessionExtra::default(),
         })
     }
 
@@ -835,7 +911,35 @@ impl CdpDriver {
         }
         let session = guard.as_mut().expect("session just ensured");
         session.last_work = tokio::time::Instant::now();
+        if session.extra.home_tab.is_none() {
+            session.extra.home_tab = Some(session.page.target_id().to_owned());
+        }
+        self.apply_downloads(session).await;
         Ok(session)
+    }
+
+    /// Let the assistant's own browser keep downloads in the folder set for this bot, and only
+    /// there. The owner's own browser keeps the download settings the owner chose.
+    async fn apply_downloads(&self, sess: &mut Session) {
+        if self.is_attached() {
+            return;
+        }
+        let Some(dir) = self.download_dir.lock().clone() else {
+            return;
+        };
+        if sess.extra.downloads_dir.as_ref() == Some(&dir) {
+            return;
+        }
+        match sess
+            .browser
+            .allow_downloads(browser_cdp::DownloadPolicy::new(dir.clone()))
+            .await
+        {
+            Ok(()) => sess.extra.downloads_dir = Some(dir),
+            Err(e) => {
+                tracing::warn!(error = %e, "downloads stay refused: the folder could not be set up");
+            }
+        }
     }
 
     /// Adapter hook: watching alone must never call this or `ensure`.
@@ -951,6 +1055,62 @@ impl CdpDriver {
                 close_session(alt.view.as_deref(), sess).await;
             }
         }
+    }
+
+    /// The tabs a run sees, in list order: a subagent only its own tab, the top-level run
+    /// everything except the subagents' tabs.
+    async fn tab_pages(
+        &self,
+        sess: &mut Session,
+    ) -> Result<Vec<browser_cdp::TargetInfo>, browser_cdp::Error> {
+        let mut pages = sess.browser.pages().await?;
+        // Stable numbering: first seen, first listed. Tabs that are gone leave the order.
+        let order = &mut sess.extra.tab_order;
+        order.retain(|id| pages.iter().any(|t| &t.target_id == id));
+        for t in &pages {
+            if !order.contains(&t.target_id) {
+                order.push(t.target_id.clone());
+            }
+        }
+        pages.sort_by_key(|t| order.iter().position(|id| *id == t.target_id));
+        if current_lane().is_some() {
+            let own = sess.page.target_id().to_string();
+            pages.retain(|t| t.target_id == own);
+        } else {
+            let hidden: Vec<String> = sess
+                .lanes
+                .iter()
+                .map(|(_, p)| p.target_id().to_string())
+                .collect();
+            pages.retain(|t| !hidden.contains(&t.target_id));
+        }
+        Ok(pages)
+    }
+
+    /// The numbered tab list (the current tab marked `*`).
+    fn tab_lines(&self, sess: &Session, pages: &[browser_cdp::TargetInfo]) -> String {
+        let current = sess.page.target_id().to_string();
+        let trim = self.is_attached();
+        pages
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                format!(
+                    "{}{} \"{}\" {}",
+                    i + 1,
+                    if t.target_id == current { "*" } else { "" },
+                    t.title.replace('"', "'"),
+                    // The owner's other tabs: no query token, fragment or login in the
+                    // address the model reads.
+                    if trim {
+                        without_query(&t.url)
+                    } else {
+                        t.url.clone()
+                    }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// One extra launch after a dead session or a terminal transport error.
@@ -1170,6 +1330,7 @@ impl BrowserDriver for CdpDriver {
                     driver.view.clone_from(&self.view);
                     (*driver.served.write()).clone_from(&self.served.read());
                     driver.attach = Arc::clone(&self.attach);
+                    driver.download_dir = Arc::clone(&self.download_dir);
                     Arc::new(driver)
                 })
                 .clone(),
@@ -1630,20 +1791,7 @@ impl BrowserDriver for CdpDriver {
     async fn tabs(&self, switch_to: Option<usize>) -> Result<String, String> {
         with_session!(self, None, switch_to.is_some(), |sess| {
             let listed: Result<String, browser_cdp::Error> = async {
-                let mut pages = sess.browser.pages().await?;
-                // A run sees only its own tabs: a subagent just its tab, the
-                // top-level run everything except the subagents' tabs.
-                if current_lane().is_some() {
-                    let own = sess.page.target_id().to_string();
-                    pages.retain(|t| t.target_id == own);
-                } else {
-                    let hidden: Vec<String> = sess
-                        .lanes
-                        .iter()
-                        .map(|(_, p)| p.target_id().to_string())
-                        .collect();
-                    pages.retain(|t| !hidden.contains(&t.target_id));
-                }
+                let pages = self.tab_pages(sess).await?;
                 if let Some(n) = switch_to {
                     let t = n
                         .checked_sub(1)
@@ -1652,33 +1800,151 @@ impl BrowserDriver for CdpDriver {
                     sess.page = sess.browser.attach(&t.target_id).await?;
                     sess.page.bring_to_front().await?;
                 }
-                let current = sess.page.target_id().to_string();
-                let trim = self.is_attached();
-                Ok(pages
-                    .iter()
-                    .enumerate()
-                    .map(|(i, t)| {
-                        format!(
-                            "{}{} \"{}\" {}",
-                            i + 1,
-                            if t.target_id == current { "*" } else { "" },
-                            t.title.replace('"', "'"),
-                            // The owner's other tabs: no query token, fragment or login in the
-                            // address the model reads.
-                            if trim {
-                                without_query(&t.url)
-                            } else {
-                                t.url.clone()
-                            }
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n"))
+                Ok(self.tab_lines(sess, &pages))
             }
             .await;
             listed
         })
         .map_err(|err| err.strip_prefix("json error: ").unwrap_or(&err).to_string())
+    }
+
+    async fn tab_new(&self, url: Option<&str>) -> Result<String, String> {
+        if current_lane().is_some() {
+            return Err(HELPER_TAB.into());
+        }
+        let snap = snap_opts(false);
+        with_session!(self, None, |sess| {
+            let opened: Result<String, browser_cdp::Error> = async {
+                let page = sess.browser.new_page("about:blank").await?;
+                sess.extra.own_tabs.insert(page.target_id().to_owned());
+                sess.page = page;
+                sess.page.bring_to_front().await?;
+                let Some(url) = url else {
+                    let pages = self.tab_pages(sess).await?;
+                    return Ok(format!("opened a blank tab\n{}", self.tab_lines(sess, &pages)));
+                };
+                let acted = sess
+                    .page
+                    .navigate_snapshot_with(url, &snap, &DialogOptions::default())
+                    .await;
+                let pages = self.tab_pages(sess).await?;
+                let n = pages
+                    .iter()
+                    .position(|t| t.target_id == sess.page.target_id())
+                    .map_or(0, |i| i + 1);
+                // A page that did not open is an error, but the tab it was opened in exists.
+                let stays = |why: String| {
+                    browser_cdp::Error::Json(format!(
+                        "{why}\n~ the new tab {n} stays open and current: open another address in it with browser_open, or close it with browser_tabs close:{n}"
+                    ))
+                };
+                match acted {
+                    Ok(acted) => match render_action(&acted) {
+                        Ok(page) => Ok(format!("opened tab {n}\n{page}")),
+                        Err(e) => Err(stays(e)),
+                    },
+                    Err(e) if !e.is_fatal() => Err(stays(e.to_string())),
+                    Err(e) => Err(e),
+                }
+            }
+            .await;
+            opened
+        })
+        .map_err(|err| err.strip_prefix("json error: ").unwrap_or(&err).to_string())
+    }
+
+    async fn tab_close(&self, n: usize) -> Result<String, String> {
+        if current_lane().is_some() {
+            return Err(HELPER_TAB.into());
+        }
+        let attached = self.is_attached();
+        with_session!(self, None, false, |sess| {
+            let closed: Result<String, browser_cdp::Error> = async {
+                let pages = self.tab_pages(sess).await?;
+                let say = |m: String| Err(browser_cdp::Error::Json(m));
+                let Some(t) = n.checked_sub(1).and_then(|i| pages.get(i)) else {
+                    return say(format!("no tab number {n}"));
+                };
+                if pages.len() <= 1 || sess.extra.home_tab.as_deref() == Some(t.target_id.as_str()) {
+                    return say(format!(
+                        "tab {n} is the assistant's main tab (the first one, which the live view follows) and stays open: open pages in it with browser_open, or close the other tabs"
+                    ));
+                }
+                if attached && !sess.extra.own_tabs.contains(&t.target_id) {
+                    return say(format!(
+                        "tab {n} belongs to the owner's own browser: only a tab the assistant opened itself (browser_tabs new) is closed"
+                    ));
+                }
+                let was_current = t.target_id == sess.page.target_id();
+                let gone = t.target_id.clone();
+                sess.browser.close_page(&gone).await?;
+                sess.extra.own_tabs.remove(&gone);
+                let rest: Vec<_> = pages.into_iter().filter(|p| p.target_id != gone).collect();
+                if was_current {
+                    // The tab before the closed one, else the first.
+                    let next = &rest[n.saturating_sub(2).min(rest.len() - 1)];
+                    sess.page = sess.browser.attach(&next.target_id).await?;
+                    sess.page.bring_to_front().await?;
+                }
+                Ok(format!("closed tab {n}\n{}", self.tab_lines(sess, &rest)))
+            }
+            .await;
+            closed
+        })
+        .map_err(|err| err.strip_prefix("json error: ").unwrap_or(&err).to_string())
+    }
+
+    async fn forward_opts(&self, dialog: Option<&str>) -> Result<String, String> {
+        let dialog_opts = DialogOptions {
+            action: DialogAction::from_str_opt(dialog),
+            prompt_text: None,
+        };
+        let acted = with_session!(self, None, |sess| {
+            sess.page.forward_with(&dialog_opts).await
+        })?;
+        render_action(&acted)
+    }
+
+    async fn reload_opts(&self, dialog: Option<&str>) -> Result<String, String> {
+        let dialog_opts = DialogOptions {
+            action: DialogAction::from_str_opt(dialog),
+            prompt_text: None,
+        };
+        let acted = with_session!(self, None, |sess| {
+            sess.page.reload_with(&dialog_opts).await
+        })?;
+        render_action(&acted)
+    }
+
+    async fn upload(&self, r: &str, files: &[PathBuf]) -> Result<String, String> {
+        let acted = with_session!(self, None, |sess| { sess.page.upload_file(r, files).await })?;
+        render_action(&acted)
+    }
+
+    fn set_download_dir(&self, dir: Option<PathBuf>) {
+        *self.download_dir.lock() = dir;
+    }
+
+    async fn downloads(&self) -> Result<browser_cdp::DownloadReport, String> {
+        if self.is_attached() {
+            return Err(OWNER_DOWNLOADS.into());
+        }
+        let known = self.download_dir.lock().clone();
+        let Some(dir) = known else {
+            return Err(NO_DOWNLOAD_FOLDER.into());
+        };
+        let live: Result<Option<browser_cdp::DownloadReport>, String> =
+            with_session!(self, None, false, |sess| {
+                Ok::<_, browser_cdp::Error>(sess.browser.downloads())
+            });
+        match live {
+            Ok(Some(report)) => Ok(report),
+            // No browser is running (idle close, or not started yet), or its downloads were
+            // never enabled: the folder itself still says what was kept.
+            Ok(None) => Ok(browser_cdp::list_folder(&dir)),
+            Err(e) if e.starts_with("browser_idle") => Ok(browser_cdp::list_folder(&dir)),
+            Err(e) => Err(e),
+        }
     }
 
     async fn screenshot(
@@ -1756,6 +2022,10 @@ enum Op {
     Handover,
     Pointer,
     Attach,
+    Upload,
+    Downloads,
+    Reload,
+    Forward,
 }
 
 struct Shared {
@@ -1773,6 +2043,9 @@ struct Shared {
     /// [`same_page_key`]. A redirect (`/signup` to `/signup/step-1`) must not make the same
     /// request look like a new page.
     last_open: parking_lot::Mutex<Option<(String, String)>>,
+    /// The file tools' path rules (`browser_upload`) and the bot's workspace (the download
+    /// folder); `None` leaves uploads unavailable and every download refused.
+    files: Option<Arc<FileGate>>,
 }
 
 type ServerEpochs =
@@ -1845,6 +2118,7 @@ impl Shared {
                 server_epochs: ServerEpochs::default(),
                 fill_secrets: self.fill_secrets.clone(),
                 last_open: parking_lot::Mutex::default(),
+                files: self.files.clone(),
             })
         })))
     }
@@ -1907,6 +2181,33 @@ pub fn managed_tools_with_profiles(
     page_origin: Option<Arc<connector_email::PageOriginSlot>>,
     profiles: Option<Arc<BrowserProfiles>>,
 ) -> Vec<Arc<dyn Tool>> {
+    managed_tools_with_files(
+        settings,
+        data_dir,
+        control,
+        views,
+        fill_secrets,
+        page_origin,
+        profiles,
+        None,
+    )
+}
+
+/// [`managed_tools_with_profiles`] whose bots may upload files from, and keep downloads in,
+/// their workspace: `files` carries the file tools' path rules and the workspace lookup. Without
+/// it `browser_upload` is refused and every download stays refused.
+#[must_use]
+#[allow(clippy::too_many_arguments)] // the pool's collaborators, each optional and distinct
+pub fn managed_tools_with_files(
+    settings: BrowserSettings,
+    data_dir: &Path,
+    control: Option<Arc<dyn DesktopControlGate>>,
+    views: Option<Arc<live_view::TargetRegistry>>,
+    fill_secrets: Option<Arc<FillSecrets>>,
+    page_origin: Option<Arc<connector_email::PageOriginSlot>>,
+    profiles: Option<Arc<BrowserProfiles>>,
+    files: Option<Arc<FileGate>>,
+) -> Vec<Arc<dyn Tool>> {
     let driver = Arc::new(CdpDriver::new(settings.clone()));
     let peers = BrowserPeers::default();
     let bots = BotDrivers::default();
@@ -1926,6 +2227,7 @@ pub fn managed_tools_with_profiles(
         fill_secrets,
         page_origin,
         profiles,
+        files,
     )
 }
 
@@ -1961,7 +2263,7 @@ pub fn tools(
     data_dir: &Path,
     control: Option<Arc<dyn DesktopControlGate>>,
 ) -> Vec<Arc<dyn Tool>> {
-    tools_with_pool(driver, data_dir, control, None, None, None, None)
+    tools_with_pool(driver, data_dir, control, None, None, None, None, None)
 }
 
 /// [`tools`] whose `browser_fill` may type the owner's fill secrets.
@@ -1972,7 +2274,16 @@ pub fn tools_with_secrets(
     control: Option<Arc<dyn DesktopControlGate>>,
     fill_secrets: Option<Arc<FillSecrets>>,
 ) -> Vec<Arc<dyn Tool>> {
-    tools_with_pool(driver, data_dir, control, None, fill_secrets, None, None)
+    tools_with_pool(
+        driver,
+        data_dir,
+        control,
+        None,
+        fill_secrets,
+        None,
+        None,
+        None,
+    )
 }
 
 /// [`tools_with_secrets`] that also fills `page_origin` with a probe of the page
@@ -1985,6 +2296,20 @@ pub fn tools_with_origin(
     fill_secrets: Option<Arc<FillSecrets>>,
     page_origin: Option<Arc<connector_email::PageOriginSlot>>,
 ) -> Vec<Arc<dyn Tool>> {
+    tools_with_files(driver, data_dir, control, fill_secrets, page_origin, None)
+}
+
+/// [`tools_with_origin`] whose bots may upload files from, and keep downloads in, their
+/// workspace (see [`managed_tools_with_files`]).
+#[must_use]
+pub fn tools_with_files(
+    driver: Arc<dyn BrowserDriver>,
+    data_dir: &Path,
+    control: Option<Arc<dyn DesktopControlGate>>,
+    fill_secrets: Option<Arc<FillSecrets>>,
+    page_origin: Option<Arc<connector_email::PageOriginSlot>>,
+    files: Option<Arc<FileGate>>,
+) -> Vec<Arc<dyn Tool>> {
     tools_with_pool(
         driver,
         data_dir,
@@ -1993,6 +2318,7 @@ pub fn tools_with_origin(
         fill_secrets,
         page_origin,
         None,
+        files,
     )
 }
 
@@ -2017,6 +2343,7 @@ impl connector_email::PageOrigin for BrowserOriginProbe {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // the pool's collaborators, each optional and distinct
 fn tools_with_pool(
     driver: Arc<dyn BrowserDriver>,
     data_dir: &Path,
@@ -2025,6 +2352,7 @@ fn tools_with_pool(
     fill_secrets: Option<Arc<FillSecrets>>,
     page_origin: Option<Arc<connector_email::PageOriginSlot>>,
     profiles: Option<Arc<BrowserProfiles>>,
+    files: Option<Arc<FileGate>>,
 ) -> Vec<Arc<dyn Tool>> {
     let shared = Arc::new(Shared {
         driver,
@@ -2035,6 +2363,7 @@ fn tools_with_pool(
         server_epochs: ServerEpochs::default(),
         fill_secrets,
         last_open: parking_lot::Mutex::default(),
+        files,
     });
     if let Some(profiles) = profiles {
         let _ = profiles.root.set(Arc::clone(&shared));
@@ -2205,18 +2534,11 @@ fn tools_with_pool(
                 b,
             ),
         ),
-        (
-            Op::Tabs,
-            spec(
-                "browser_tabs",
-                "List open tabs of the bot's managed browser (current is marked *), or switch with switch_to. Not the user's tabs: empty or about:blank here says nothing about their browser. Example: {\"switch_to\":2}",
-                json!({"type":"object","properties":{
-                    "switch_to":{"type":"integer","minimum":1,"description":"Tab number from the list."}
-                }}),
-                Effect::Write,
-                b,
-            ),
-        ),
+        (Op::Tabs, tabs::tabs_spec(b)),
+        (Op::Reload, tabs::reload_spec(b)),
+        (Op::Forward, tabs::forward_spec(b)),
+        (Op::Upload, files::upload_spec(b)),
+        (Op::Downloads, files::downloads_spec(b)),
         (
             Op::Screenshot,
             spec(
@@ -2465,11 +2787,6 @@ struct WaitIn {
 }
 
 #[derive(Deserialize)]
-struct TabsIn {
-    switch_to: Option<usize>,
-}
-
-#[derive(Deserialize)]
 struct ShotIn {
     #[serde(default)]
     full_page: bool,
@@ -2608,6 +2925,7 @@ impl BrowserTool {
                 server_epochs: ServerEpochs::default(),
                 fill_secrets: None,
                 last_open: parking_lot::Mutex::default(),
+                files: None,
             }));
         }
         let mut shared = self.shared.for_bot(ctx.bot_id.as_deref())?;
@@ -2629,6 +2947,7 @@ impl BrowserTool {
                 server_epochs: ServerEpochs::default(),
                 fill_secrets: shared.fill_secrets.clone(),
                 last_open: parking_lot::Mutex::default(),
+                files: shared.files.clone(),
             });
         }
         Ok(shared)
@@ -2800,7 +3119,7 @@ impl BrowserTool {
     ) -> Result<String, ToolError> {
         let observing = match self.op {
             Op::Snapshot | Op::Wait | Op::Screenshot => true,
-            Op::Tabs => input.get("switch_to").is_none_or(Value::is_null),
+            Op::Tabs => tabs::is_listing(&input),
             _ => false,
         };
         let gate = self.shared.control.clone();
@@ -2831,7 +3150,7 @@ impl BrowserTool {
     ) -> Result<String, ToolError> {
         let observing = match self.op {
             Op::Snapshot | Op::Wait | Op::Screenshot => true,
-            Op::Tabs => input.get("switch_to").is_none_or(Value::is_null),
+            Op::Tabs => tabs::is_listing(&input),
             _ => false,
         };
         if observing
@@ -3231,46 +3550,87 @@ impl BrowserTool {
                     .map_err(exec_err)?
             }
             Op::Tabs => {
-                let i: TabsIn = parse(input)?;
+                let act = parse::<tabs::TabsIn>(input)?.act()?;
                 // The tool is `Effect::Write` so a default Ask policy cannot
                 // auto-approve tab activation via `read_tools_skip_ask`.
                 // Listing shares that spec. The control gate still runs only
-                // for activation: a bare list does not take over the desktop.
-                if let Some(n) = i.switch_to {
-                    let permit = self.gate(run_id, "tab", format!("tab {n}")).await?;
-                    if permit.needs_observation()
-                        || self
-                            .shared
-                            .observed_epoch
-                            .load(std::sync::atomic::Ordering::SeqCst)
-                            != self
-                                .shared
-                                .control
-                                .as_ref()
-                                .map_or(0, |g| g.observation_epoch())
-                    {
-                        self.shared.observed_epoch.store(
-                            self.shared
-                                .control
-                                .as_ref()
-                                .map_or(0, |g| g.observation_epoch()),
-                            std::sync::atomic::Ordering::SeqCst,
-                        );
-                        self.refuse_observation_while_latched()?;
-                        let fresh = d.snapshot(false).await.map_err(exec_err)?;
-                        permit.observed();
-                        return Ok(format!(
-                            "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
-                        ));
+                // for a change: a bare list does not take over the desktop.
+                match act {
+                    tabs::TabsAct::List => d.tabs(None).await,
+                    tabs::TabsAct::Switch(n) => {
+                        let permit = self.gate(run_id, "tab", format!("tab {n}")).await?;
+                        if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
+                            return Ok(fresh);
+                        }
+                        permit
+                            .protect(async move { d.tabs(Some(n)).await })
+                            .await
+                            .map_err(exec_err)?
                     }
-                    permit
-                        .protect(async move { d.tabs(i.switch_to).await })
-                        .await
-                        .map_err(exec_err)?
-                } else {
-                    d.tabs(None).await
+                    tabs::TabsAct::Close(n) => {
+                        let permit = self.gate(run_id, "tab", format!("close tab {n}")).await?;
+                        if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
+                            return Ok(fresh);
+                        }
+                        permit
+                            .protect(async move { d.tab_close(n).await })
+                            .await
+                            .map_err(exec_err)?
+                    }
+                    tabs::TabsAct::New(url) => {
+                        // The address is judged exactly like `browser_open`'s.
+                        let served = self
+                            .shared
+                            .control
+                            .as_ref()
+                            .is_some_and(|g| g.remote_browser_for_run(run_id).is_some());
+                        if let Some(url) = &url {
+                            check_open_url(url, served)?;
+                        }
+                        let permit = self
+                            .gate(
+                                run_id,
+                                "open",
+                                url.clone().unwrap_or_else(|| "new tab".into()),
+                            )
+                            .await?;
+                        if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
+                            return Ok(fresh);
+                        }
+                        permit
+                            .protect(async move { d.tab_new(url.as_deref()).await })
+                            .await
+                            .map_err(exec_err)?
+                    }
                 }
             }
+            Op::Reload | Op::Forward => {
+                let i: BackIn = parse(input)?;
+                let (label, forward) = (
+                    if self.op == Op::Reload {
+                        "reload"
+                    } else {
+                        "forward"
+                    },
+                    self.op == Op::Forward,
+                );
+                let permit = self.gate(run_id, "key", label.to_owned()).await?;
+                if let Some(fresh) = self.discard_if_stale(&permit, &d).await? {
+                    return Ok(fresh);
+                }
+                permit
+                    .protect(async move {
+                        if forward {
+                            d.forward_opts(i.dialog.as_deref()).await
+                        } else {
+                            d.reload_opts(i.dialog.as_deref()).await
+                        }
+                    })
+                    .await
+                    .map_err(exec_err)?
+            }
+            Op::Upload => return self.run_upload(run_id, input, bot).await,
+            Op::Downloads => return self.run_downloads().await,
             Op::Screenshot => {
                 let i: ShotIn = parse(input)?;
                 // A plain viewport shot is the picture `browser_pointer` points at: it says its
@@ -3544,6 +3904,9 @@ impl BrowserTool {
             Op::Snapshot
                 | Op::Screenshot
                 | Op::Back
+                | Op::Reload
+                | Op::Forward
+                | Op::Downloads
                 | Op::Hover
                 | Op::Scroll
                 | Op::Wait
@@ -3568,6 +3931,7 @@ impl BrowserTool {
                 | Op::SelectText
                 | Op::DismissConsent
                 | Op::Pointer
+                | Op::Upload
         ) {
             return None;
         }
@@ -3703,6 +4067,7 @@ impl BrowserTool {
                     | Op::SelectText
                     | Op::DismissConsent
                     | Op::Pointer
+                    | Op::Upload
             )
         {
             let now = self.current_origin(ctx, &input).await;
@@ -3722,6 +4087,9 @@ impl BrowserTool {
             op: self.op,
             shared,
         };
+        // Before any call that may load a page (and so start a download): the bot's download
+        // folder is set, or downloads stay refused.
+        selected.prepare_downloads(ctx.bot_id.as_deref());
         // The failing step, as the loop sees repetition: the same tool with the same input.
         let step_key = recover::step_key(self.op, &input);
         let ran = EXPECTED_PAGE_ORIGIN
@@ -3922,6 +4290,10 @@ pub(crate) mod fake {
         pub watched: PMutex<Option<bool>>,
         /// The owner's browser the fake is attached to (`attach` / `detach` / `attached`).
         pub attached: PMutex<Option<String>>,
+        /// The download folder the tools last set (`set_download_dir`).
+        pub download_dir: PMutex<Option<PathBuf>>,
+        /// What `downloads` reports (`None`: this backend keeps none).
+        pub report: PMutex<Option<browser_cdp::DownloadReport>>,
     }
 
     impl FakeBrowser {
@@ -4136,6 +4508,32 @@ pub(crate) mod fake {
         }
         async fn tabs(&self, s: Option<usize>) -> Result<String, String> {
             self.rec(&format!("tabs:{s:?}"))
+        }
+        async fn tab_new(&self, url: Option<&str>) -> Result<String, String> {
+            self.rec(&format!("tab_new:{}", url.unwrap_or("-")))
+        }
+        async fn tab_close(&self, n: usize) -> Result<String, String> {
+            self.rec(&format!("tab_close:{n}"))
+        }
+        async fn forward_opts(&self, dialog: Option<&str>) -> Result<String, String> {
+            self.rec(&format!("forward:{}", dialog.unwrap_or("-")))
+        }
+        async fn reload_opts(&self, dialog: Option<&str>) -> Result<String, String> {
+            self.rec(&format!("reload:{}", dialog.unwrap_or("-")))
+        }
+        async fn upload(&self, r: &str, files: &[PathBuf]) -> Result<String, String> {
+            let names: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+            self.rec(&format!("upload:{r}:{}", names.join("|")))
+        }
+        fn set_download_dir(&self, dir: Option<PathBuf>) {
+            *self.download_dir.lock() = dir;
+        }
+        async fn downloads(&self) -> Result<browser_cdp::DownloadReport, String> {
+            let _ = self.rec("downloads");
+            self.report
+                .lock()
+                .clone()
+                .ok_or_else(|| NO_DOWNLOADS.to_owned())
         }
         async fn screenshot(
             &self,
@@ -4635,6 +5033,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forward_reload_and_every_tab_form_reach_the_driver() {
+        let (_d, fake, t) = build();
+        let ctx = ToolContext::default();
+        for (name, input) in [
+            ("browser_forward", json!({"dialog": "accept"})),
+            ("browser_reload", json!({})),
+            ("browser_tabs", json!({})),
+            ("browser_tabs", json!({"switch_to": 2})),
+            ("browser_tabs", json!({"new": true})),
+            (
+                "browser_tabs",
+                json!({"new": true, "url": "https://example.com/a"}),
+            ),
+            ("browser_tabs", json!({"close": 3})),
+        ] {
+            get(&t, name)
+                .call(&ctx, input.clone())
+                .await
+                .unwrap_or_else(|e| panic!("{name} {input}: {e}"));
+        }
+        let calls: Vec<String> = fake
+            .calls
+            .lock()
+            .iter()
+            .filter(|c| !c.starts_with("snapshot"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                "forward:accept",
+                "reload:-",
+                "tabs:None",
+                "tabs:Some(2)",
+                "tab_new:-",
+                "tab_new:https://example.com/a",
+                "tab_close:3",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_new_tab_follows_the_address_rules_of_browser_open() {
+        let (_d, fake, t) = build();
+        let ctx = ToolContext::default();
+        for url in [
+            "file:///etc/passwd",
+            "http://127.0.0.1:8080/admin",
+            "http://localhost/",
+            "http://192.168.1.1/",
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "chrome://settings",
+            "http://user:pw@example.com/",
+            "example.com",
+        ] {
+            let err = get(&t, "browser_tabs")
+                .call(&ctx, json!({"new": true, "url": url}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ToolError::InvalidInput(_)), "{url}: {err}");
+        }
+        // about:blank is a blank page, as with browser_open.
+        get(&t, "browser_tabs")
+            .call(&ctx, json!({"new": true, "url": "about:blank"}))
+            .await
+            .unwrap();
+        let calls: Vec<String> = fake
+            .calls
+            .lock()
+            .iter()
+            .filter(|c| c.starts_with("tab_new"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            calls,
+            ["tab_new:about:blank"],
+            "nothing else reached the browser"
+        );
+    }
+
+    #[tokio::test]
+    async fn contradictory_tab_forms_never_reach_the_driver() {
+        let (_d, fake, t) = build();
+        let ctx = ToolContext::default();
+        for input in [
+            json!({"url": "https://example.com"}),
+            json!({"new": true, "close": 1}),
+            json!({"close": 0}),
+        ] {
+            assert!(get(&t, "browser_tabs").call(&ctx, input).await.is_err());
+        }
+        assert!(fake.calls.lock().iter().all(|c| c.starts_with("snapshot")));
+    }
+
+    #[tokio::test]
     async fn driver_errors_become_execution_errors() {
         let (_d, _f, t) = build();
         let err = get(&t, "browser_click")
@@ -4716,6 +5210,7 @@ mod tests {
             observed_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             server_epochs: ServerEpochs::default(),
             last_open: parking_lot::Mutex::default(),
+            files: None,
         });
         assert!(
             registry.targets().is_empty(),
@@ -4758,6 +5253,7 @@ mod tests {
             observed_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             server_epochs: ServerEpochs::default(),
             last_open: parking_lot::Mutex::default(),
+            files: None,
             fill_secrets: None,
         });
         let a = shared.for_bot(Some("bot-a")).unwrap();
@@ -4958,6 +5454,7 @@ mod tests {
                 observed_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
                 server_epochs: ServerEpochs::default(),
                 last_open: parking_lot::Mutex::default(),
+                files: None,
                 fill_secrets: None,
             }),
         };
@@ -5465,6 +5962,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            extra: SessionExtra::default(),
         });
         let active = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let probe = Arc::clone(&active);
@@ -5602,6 +6100,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            extra: SessionExtra::default(),
         });
         driver.set_takeover_pin(true);
         driver.start_idle_reaper();
@@ -5649,6 +6148,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            extra: SessionExtra::default(),
         });
         // Connected over real I/O; from here the clock is frozen and advanced by hand.
         tokio::time::pause();
@@ -5706,6 +6206,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            extra: SessionExtra::default(),
         });
         tokio::time::pause();
         let timeout = Duration::from_millis(40);
@@ -5777,6 +6278,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            extra: SessionExtra::default(),
         });
         let tools = tools(drv, dir.path(), None);
         let err = get(&tools, "browser_open")
@@ -5833,6 +6335,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            extra: SessionExtra::default(),
         });
         let tools = tools(
             Arc::clone(&drv) as Arc<dyn BrowserDriver>,
@@ -5913,6 +6416,7 @@ mod tests {
             headless: true,
             last_work: tokio::time::Instant::now(),
             lanes: Vec::new(),
+            extra: SessionExtra::default(),
         }
     }
 
@@ -6070,6 +6574,7 @@ mod tests {
             observed_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             server_epochs: ServerEpochs::default(),
             last_open: parking_lot::Mutex::default(),
+            files: None,
         });
         for n in 0..20u128 {
             let id = uuid::Uuid::from_u128(0x0194_a1c2_0000_7000_8000_0000_0000_0000 + n);
@@ -6091,6 +6596,7 @@ mod tests {
                 headless: true,
                 last_work: tokio::time::Instant::now(),
                 lanes: Vec::new(),
+                extra: SessionExtra::default(),
             });
             // Delete the bot.
             assert_eq!(registry.retire_bot(id), 1);

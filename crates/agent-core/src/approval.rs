@@ -69,12 +69,15 @@ impl Drop for ClosedGuard {
 const FULL_BROWSE_REASON: &str = "mode.full.owner_browse";
 
 /// The managed browser's calls that Full lets an owner-started run make after reading a page:
-/// open, go back, click, type, select, press, select text, tabs and the batch. NOT
-/// `browser_eval` (a page script can send anything anywhere) and not the user's own computer
-/// (`pc_*`).
-pub(crate) const FULL_BROWSER_CALLS: [&str; 11] = [
+/// open, go back and forward, reload, click, type, select, press, select text, tabs (including a
+/// new tab on an address, judged like `browser_open`) and the batch. NOT `browser_eval` (a page
+/// script can send anything anywhere), NOT `browser_upload` (it hands a file of this computer
+/// to a page: it keeps asking) and not the user's own computer (`pc_*`).
+pub(crate) const FULL_BROWSER_CALLS: [&str; 13] = [
     "browser_open",
     "browser_back",
+    "browser_forward",
+    "browser_reload",
     "browser_click",
     "browser_fill",
     "browser_select",
