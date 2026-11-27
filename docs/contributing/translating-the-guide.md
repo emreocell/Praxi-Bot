@@ -20,6 +20,15 @@ A page that has no translation yet simply opens in English, so you can translate
 6. If the English page changed after you translated it, update your page in the same pull request or say so in
    the description. A stale translation is worse than none: it can describe a safety rule that no longer exists.
 
+## How the in-app search uses your page
+
+The Help window searches the title, the headings and the first sentence of each page (the index built in step 5).
+Pick a clear title and headings, in the page's own language: the search ignores case and accents, so "ısı" and
+"ISI" match each other in Turkish, and in German "für" is found by "fur" and "fuer" and "Straße" by "strasse".
+A language that has a folder in `docs/guide/` gets its own index; pages it does not have yet are searched
+(and opened) in English. A new language folder also needs its index registered in `apps/desktop/ui/src/lib/helpFaq.ts`;
+a test fails until it is.
+
 ## Style
 
 - **Plain words.** Many readers are not programmers. Short sentences, everyday words, no jargon where a normal

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
@@ -75,5 +75,66 @@ test("the Help window offers the seven plain-words start pages in order, transla
       assert.ok(existsSync(`${GUIDE}${page.doc}`), `docs/guide/${page.doc} exists`);
       assert.equal(page.doc.startsWith(`${lang}/`), lang !== "en", `${page.doc} is in ${lang}`);
     }
+  }
+});
+
+test("FAQ search is language-aware: Turkish i/ı and German ß/ae/oe/ue", () => {
+  const ids = (items: readonly Item[], q: string, lang: string) => faq.searchFaq(items, q, lang).map((i) => i.id);
+  // "Bir botu hemen nasıl durdururum?" typed with a dotted i, with capitals, and with the dotless one.
+  for (const q of ["nasil", "NASIL", "nasıl", "NASIL durdururum"]) {
+    assert.ok(ids(tr, q, "tr").length > 0, q);
+  }
+  assert.ok(ids(tr, "ucretsiz", "tr").includes("freeKey"));
+  assert.ok(ids(tr, "ÜCRETSİZ", "tr").includes("freeKey"));
+  // "Kann ein Bot meine Dateien löschen?" and "Schlüssel" without umlauts, with ae/oe/ue, and with them.
+  for (const q of ["loschen", "loeschen", "löschen", "LÖSCHEN"]) {
+    assert.ok(ids(de, q, "de-DE").length > 0, q);
+  }
+  assert.ok(ids(de, "schluessel", "de").includes("freeKey"));
+  assert.ok(ids(de, "schlussel", "de").includes("freeKey"));
+  assert.ok(ids(de, "Schlüssel", "de").includes("freeKey"));
+  // Punctuation in the query does not block a match, and an empty query still lists everything.
+  assert.ok(ids(de, "kostet das?", "de").includes("cost"));
+  assert.equal(faq.searchFaq(de, "  ", "de").length, 15);
+});
+
+test("every language folder in docs/guide has a registered index, and nothing else is registered", () => {
+  const folders = readdirSync(GUIDE, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && readdirSync(`${GUIDE}${d.name}`).some((n) => n.endsWith(".md")))
+    .map((d) => d.name)
+    .sort();
+  assert.deepEqual([...faq.GUIDE_LANGUAGES].sort(), folders);
+});
+
+test("a language searches its own pages first and the English page for anything not translated yet", () => {
+  const basename = (doc: string) => doc.slice(doc.lastIndexOf("/") + 1);
+  const english = new Set(faq.GUIDE_INDEX.map((e) => e.doc));
+  for (const lang of faq.GUIDE_LANGUAGES) {
+    const pages = faq.guideFor(lang);
+    // Nothing is lost: every English page is reachable, once, in its own language or in English.
+    assert.deepEqual(pages.map((p) => basename(p.doc)).sort(), [...english].sort(), `${lang} covers the whole guide`);
+    for (const page of pages) {
+      const inLang = page.doc.startsWith(`${lang}/`);
+      assert.ok(existsSync(`${GUIDE}${page.doc}`), `docs/guide/${page.doc} exists`);
+      assert.equal(faq.guideUrl(page), `${faq.DOCS_BASE_URL}${page.doc}`);
+      // A page is the translation when one exists, else the English original.
+      assert.equal(inLang, existsSync(`${GUIDE}${lang}/${basename(page.doc)}`), `${page.doc} is the right language`);
+    }
+  }
+  // A language without an index searches English; a region tag still picks the language.
+  assert.equal(faq.guideFor("fr"), faq.GUIDE_INDEX);
+  assert.equal(faq.guideFor("de-AT"), faq.guideFor("de"));
+});
+
+test("searching the guide in German and Turkish opens the page in that language", () => {
+  const first = (lang: string, q: string) => faq.searchGuide(faq.guideFor(lang), q, 5, lang)[0];
+  assert.equal(first("de", "Einstellungen")?.doc, "de/settings.md");
+  assert.equal(first("tr", "ayarlar")?.doc, "tr/settings.md");
+  assert.match(faq.guideUrl(first("de", "Einstellungen")), /\/docs\/guide\/de\/settings\.md$/);
+  // Not translated in German yet: the English page is returned, so the link still works.
+  // (Once German is complete there is nothing left to fall back to and this check has no subject.)
+  const untranslated = faq.GUIDE_INDEX.find((e) => !existsSync(`${GUIDE}de/${e.doc}`));
+  if (untranslated) {
+    assert.ok(faq.searchGuide(faq.guideFor("de"), untranslated.title, 10, "de").some((e) => e.doc === untranslated.doc));
   }
 });

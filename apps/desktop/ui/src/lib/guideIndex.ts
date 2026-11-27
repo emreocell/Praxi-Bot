@@ -82,32 +82,71 @@ export function guideForLanguage(
   return [...translated, ...english.filter((e) => !done.has(e.doc))];
 }
 
-const foldText = (s: string): string =>
-  s.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "i");
+const stripMarks = (s: string): string => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+/**
+ * The comparable forms of a text for the Help search: case, accents and the language's own letters
+ * folded away, so people can type without the special keys. It never depends on the OS locale.
+ *
+ * - Turkish: `İ`, `I`, `ı` and `i` all become `i`, so "ISI", "ısı" and "isi" are the same word;
+ *   `ç ğ ş ö ü` lose their marks.
+ * - German: `ß` becomes `ss`; a second form writes `ä ö ü` as `ae oe ue`, so "für" is found by
+ *   "fur" (first form) and by "fuer" (second form).
+ *
+ * The result has one entry per form; compare a query word and a text form by form
+ * ({@link containsFolded}). Only German has a second form; every other language has one.
+ */
+export function foldVariants(text: string, language: string = ""): string[] {
+  const base = text.normalize("NFC").toLowerCase().normalize("NFC").replace(/ß/g, "ss").replace(/ı/g, "i");
+  const forms = [stripMarks(base)];
+  if (language.slice(0, 2).toLowerCase() === "de") {
+    forms.push(stripMarks(base.replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue")));
+  }
+  return forms;
+}
+
+/**
+ * The words of a query, each as its folded forms. Words end at anything that is not a letter or a
+ * digit, so "e-mail," and "Wi-Fi?" give the same words as "e mail" and "wi fi".
+ */
+export function queryWords(query: string, language: string = ""): string[][] {
+  return query
+    .normalize("NFC")
+    .split(/[^\p{L}\p{M}\p{N}]+/u)
+    .filter(Boolean)
+    .map((w) => foldVariants(w, language));
+}
+
+/** True when some folded form of the word is inside the same form of the text. */
+export function containsFolded(text: readonly string[], word: readonly string[]): boolean {
+  return word.some((w, i) => text[i]?.includes(w) ?? false);
+}
 
 export const GUIDE_RESULT_LIMIT = 5;
 
 /**
  * Guide pages that match every word of the query, best first: a word in the title beats one in
- * a heading, which beats one only in the summary. An empty query matches nothing.
+ * a heading, which beats one only in the summary. An empty query matches nothing. `language` is the
+ * language of the person typing (see {@link foldVariants}).
  */
 export function searchGuide(
   index: readonly GuideEntry[],
   query: string,
-  limit: number = GUIDE_RESULT_LIMIT
+  limit: number = GUIDE_RESULT_LIMIT,
+  language: string = ""
 ): GuideEntry[] {
-  const words = foldText(query).split(/\s+/).filter(Boolean);
+  const words = queryWords(query, language);
   if (words.length === 0) {
     return [];
   }
   const scored: { entry: GuideEntry; score: number; order: number }[] = [];
   index.forEach((entry, order) => {
-    const title = foldText(entry.title);
-    const headings = foldText(entry.headings.join(" "));
-    const summary = foldText(entry.summary);
+    const title = foldVariants(entry.title, language);
+    const headings = foldVariants(entry.headings.join(" "), language);
+    const summary = foldVariants(entry.summary, language);
     let score = 0;
     for (const w of words) {
-      const s = title.includes(w) ? 3 : headings.includes(w) ? 2 : summary.includes(w) ? 1 : 0;
+      const s = containsFolded(title, w) ? 3 : containsFolded(headings, w) ? 2 : containsFolded(summary, w) ? 1 : 0;
       if (s === 0) {
         return;
       }

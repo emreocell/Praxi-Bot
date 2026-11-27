@@ -17,7 +17,13 @@ const read = (dir, prefix) =>
 
 // English pages in `guideIndex.json`; translated pages (docs/guide/<lang>/) in `guideIndex.<lang>.json`.
 const outputs = [{ target: helpDir + "guideIndex.json", files: read(guideDir, "") }];
-for (const lang of ["tr", "de"]) {
+// Every language folder under docs/guide gets its own index (add a language by adding a folder; the
+// Help window then needs it registered in `src/lib/helpFaq.ts`, which a test checks).
+const languages = readdirSync(guideDir, { withFileTypes: true })
+  .filter((d) => d.isDirectory() && readdirSync(guideDir + d.name).some((n) => n.endsWith(".md")))
+  .map((d) => d.name)
+  .sort();
+for (const lang of languages) {
   outputs.push({ target: `${helpDir}guideIndex.${lang}.json`, files: read(`${guideDir}${lang}/`, `${lang}/`) });
 }
 

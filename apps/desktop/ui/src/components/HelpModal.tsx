@@ -39,10 +39,10 @@ export function HelpModal({
   const { t, i18n } = useTranslation();
   const [query, setQuery] = useState("");
   const ctx = { stopHotkey: stopHotkey || DEFAULT_STOP_HOTKEY, sendWith };
-  const items = useMemo(() => searchFaq(faqFor(i18n.language), query), [i18n.language, query]);
+  const items = useMemo(() => searchFaq(faqFor(i18n.language), query, i18n.language), [i18n.language, query]);
   const searching = query.trim() !== "";
   const guidePages = useMemo(
-    () => (searching ? searchGuide(guideFor(i18n.language), query) : startPages(i18n.language)),
+    () => (searching ? searchGuide(guideFor(i18n.language), query, undefined, i18n.language) : startPages(i18n.language)),
     [i18n.language, query, searching]
   );
   return (

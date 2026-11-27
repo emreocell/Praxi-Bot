@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildGuideIndex, guideForLanguage, indexPage, plainMarkdown } from "./guideIndex.ts";
 import type { GuideEntry } from "./guideIndex.ts";
-import { searchGuide } from "./guideIndex.ts";
+import { containsFolded, foldVariants, queryWords, searchGuide } from "./guideIndex.ts";
 
 const GUIDE_INDEX: GuideEntry[] = JSON.parse(
   readFileSync(new URL("../help/guideIndex.json", import.meta.url), "utf8")
@@ -86,7 +86,17 @@ test("the real index finds the guide pages a beginner would look for", () => {
   assert.ok(searchGuide(GUIDE_INDEX, "telegram").some((e) => e.doc === "telegram.md"));
 });
 
-for (const lang of ["tr", "de"]) {
+const GUIDE_DIR = fileURLToPath(new URL("../../../../../docs/guide/", import.meta.url));
+/** Language folders under docs/guide (the same rule the generator uses). */
+const GUIDE_LANGUAGES = readdirSync(GUIDE_DIR, { withFileTypes: true })
+  .filter((d) => d.isDirectory() && readdirSync(GUIDE_DIR + d.name).some((n) => n.endsWith(".md")))
+  .map((d) => d.name);
+
+test("docs/guide has the translated folders the app knows about", () => {
+  assert.ok(GUIDE_LANGUAGES.includes("tr") && GUIDE_LANGUAGES.includes("de"));
+});
+
+for (const lang of GUIDE_LANGUAGES) {
   test(`the committed ${lang} guide index matches docs/guide/${lang}`, () => {
     const dir = fileURLToPath(new URL(`../../../../../docs/guide/${lang}/`, import.meta.url));
     const files = readdirSync(dir)
@@ -117,4 +127,73 @@ test("guideForLanguage lists translated pages and falls back to English for the 
   );
   assert.deepEqual(searchGuide(merged, "yedekleme").map((e) => e.doc), ["tr/a.md"]);
   assert.deepEqual(searchGuide(merged, "skills").map((e) => e.doc), ["b.md"]);
+});
+
+const find = (index: readonly GuideEntry[], query: string, language: string) =>
+  searchGuide(index, query, 10, language).map((e) => e.doc);
+
+test("foldVariants: Turkish dotted and dotless i fold together, whatever the OS locale", () => {
+  for (const word of ["ISI", "ısı", "isi", "İSİ", "Isı"]) {
+    assert.deepEqual(foldVariants(word, "tr"), ["isi"], word);
+  }
+  assert.deepEqual(foldVariants("Çalışma ĞÜŞÖ", "tr"), ["calisma guso"]);
+  // A decomposed "İ" (I + combining dot) folds the same as the single letter.
+  assert.deepEqual(foldVariants("İndir", "tr"), foldVariants("İndir", "tr"));
+});
+
+test("foldVariants: German ß and umlauts match with or without the special keys", () => {
+  assert.deepEqual(foldVariants("Größe Straße", "de"), ["grosse strasse", "groesse strasse"]);
+  assert.deepEqual(foldVariants("für", "de-DE"), ["fur", "fuer"]);
+  // Other languages keep a single form, so English text is not rewritten.
+  assert.deepEqual(foldVariants("für", "en"), ["fur"]);
+  assert.deepEqual(foldVariants("Größe"), ["grosse"]);
+});
+
+test("queryWords splits on punctuation and keeps decomposed letters together", () => {
+  assert.deepEqual(queryWords("  e-mail, Wi-Fi?  ").map((w) => w[0]), ["e", "mail", "wi", "fi"]);
+  assert.deepEqual(queryWords("über", "de"), [["uber", "ueber"]]);
+  assert.deepEqual(queryWords("???"), []);
+});
+
+test("containsFolded compares form by form", () => {
+  assert.equal(containsFolded(["fur sie", "fuer sie"], ["fuer", "fuer"]), true);
+  assert.equal(containsFolded(["fur sie"], ["fuer", "fuer"]), false);
+  assert.equal(containsFolded([], ["a"]), false);
+});
+
+test("searchGuide in Turkish finds pages however the user types i, ı and the accented letters", () => {
+  const tr: GuideEntry[] = [
+    { doc: "tr/a.md", title: "Işık ve ısı ayarları", headings: ["Çalışma saatleri"], summary: "" },
+    { doc: "tr/b.md", title: "Diğer", headings: [], summary: "İndirme klasörü" }
+  ];
+  for (const q of ["ISIK", "ışık", "isik", "ISI ayarlari"]) {
+    assert.deepEqual(find(tr, q, "tr"), ["tr/a.md"], q);
+  }
+  assert.deepEqual(find(tr, "calisma", "tr-TR"), ["tr/a.md"]);
+  assert.deepEqual(find(tr, "INDIRME", "tr"), ["tr/b.md"]);
+  assert.deepEqual(find(tr, "İNDİRME", "tr"), ["tr/b.md"]);
+  assert.deepEqual(find(tr, "diger", "tr"), ["tr/b.md"]);
+});
+
+test("searchGuide in German finds umlaut and ß pages with ä/ö/ü, a/o/u, ae/oe/ue and ss", () => {
+  const de: GuideEntry[] = [
+    { doc: "de/a.md", title: "Größe der Übersicht", headings: ["Für Anfänger"], summary: "Straße" },
+    { doc: "de/b.md", title: "Backup", headings: [], summary: "Sicherung" }
+  ];
+  for (const q of ["Übersicht", "ubersicht", "uebersicht", "UEBERSICHT", "größe", "grosse", "groesse", "GROSSE"]) {
+    assert.deepEqual(find(de, q, "de"), ["de/a.md"], q);
+  }
+  assert.deepEqual(find(de, "fuer anfaenger", "de"), ["de/a.md"]);
+  assert.deepEqual(find(de, "für anfänger", "de-AT"), ["de/a.md"]);
+  assert.deepEqual(find(de, "strasse", "de"), ["de/a.md"]);
+  // Without a language only the accent-stripped form applies, as before.
+  assert.deepEqual(find(de, "uebersicht", ""), []);
+  assert.deepEqual(find(de, "ubersicht", ""), ["de/a.md"]);
+});
+
+test("searchGuide ignores punctuation in the query and still needs every word", () => {
+  const index = [{ doc: "m.md", title: "E-mail setup", headings: [], summary: "" }];
+  assert.deepEqual(find(index, "e-mail,", "en"), ["m.md"]);
+  assert.deepEqual(find(index, "email", "en"), []);
+  assert.deepEqual(find(index, "mail telegram", "en"), []);
 });
