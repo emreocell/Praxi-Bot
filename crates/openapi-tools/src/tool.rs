@@ -625,6 +625,21 @@ impl Tool for OpenApiTool {
             .and_then(|url| url.host_str().map(str::to_owned))
     }
 
+    /// What the arguments do not show: which endpoint the call hits and whether
+    /// the API's credentials ride along (the model never sees or sets them).
+    fn egress_extra(&self, _ctx: &ToolContext, _input: &Value) -> Option<String> {
+        let mut text = format!(
+            "request: {} {}{}",
+            self.op.method.as_str(),
+            self.shared.base_url.trim_end_matches('/'),
+            self.op.path
+        );
+        if !matches!(self.shared.cfg.auth, Auth::None) {
+            text.push_str("\ncredentials: the API's saved credentials are sent");
+        }
+        Some(text)
+    }
+
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         if !self.shared.allows(&self.spec.name, ctx.bot_id.as_deref()) {
             return Err(ToolError::PermissionDenied(format!(

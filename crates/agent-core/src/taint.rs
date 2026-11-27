@@ -1685,7 +1685,10 @@ paths:
 ";
         let (api, imported) = openapi_tools::import_tools(
             spec,
-            &openapi_tools::ImportOptions::default(),
+            &openapi_tools::ImportOptions {
+                server_host: Some("api.example.com".to_string()),
+                ..openapi_tools::ImportOptions::default()
+            },
             &openapi_tools::OpenApiConfig::new(Arc::clone(secrets)),
         )
         .unwrap();
@@ -1812,6 +1815,8 @@ paths:
             api_tool.egress_host(&json!({})).as_deref(),
             Some("api.example.com")
         );
+        let request = api_tool.egress_extra(&ctx, &json!({"q": "x"})).unwrap();
+        assert_eq!(request, "request: GET https://api.example.com/pets");
         let mut tainted = ContentTaint::default();
         tainted.note(ContentClass::private_read(), "file notes.txt");
         let mut card = super::egress_record(&tainted, "listPets", &json!({"q": "x"})).unwrap();

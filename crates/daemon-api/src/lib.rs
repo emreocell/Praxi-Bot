@@ -2105,6 +2105,7 @@ fn api_routes() -> Router<AppState> {
             axum::routing::put(ha::put_homeassistant_bots),
         )
         .route("/v1/homeassistant/test", post(ha::test_homeassistant))
+        .route(
             "/v1/openapi-apps",
             get(oa::list_openapi_apps).post(oa::add_openapi_app).layer(
                 axum::extract::DefaultBodyLimit::max(

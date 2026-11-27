@@ -1862,7 +1862,10 @@ paths:
 ";
         let (_api, imported) = openapi_tools::import_tools(
             openapi,
-            &openapi_tools::ImportOptions::default(),
+            &openapi_tools::ImportOptions {
+                server_host: Some("api.example.com".to_string()),
+                ..openapi_tools::ImportOptions::default()
+            },
             &openapi_tools::OpenApiConfig::new(secrets),
         )
         .unwrap();
