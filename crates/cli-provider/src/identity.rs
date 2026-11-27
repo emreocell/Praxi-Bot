@@ -283,7 +283,7 @@ mod tests {
             &home.join(".npm-global"),
             &home.join(".npm-global/bin"),
         ]);
-        let system = std::ffi::OsString::from("/usr/bin:/bin");
+        let system = std::env::join_paths(["/usr/bin", "/bin"]).unwrap();
         let joined = path_with_install_dirs(Some(system.as_os_str()), &home).unwrap();
         let dirs: Vec<_> = std::env::split_paths(&joined).collect();
         assert_eq!(
