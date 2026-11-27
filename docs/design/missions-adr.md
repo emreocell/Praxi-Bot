@@ -121,7 +121,7 @@ audited tree.
 | 8 | Mail wake | partial (in flight) | `scheduler/src/watch.rs` (2-minute header polling, `Trigger::Email` at `model.rs:469`), PR #869 (rule registry, quiet hours, limits 10/h 50/day per rule, bounded queue of 100 events / 48 KB, events fenced with `untrusted_data_block_capped`) | Wake starts a one-off prompt run, not a mission continuation. No "wait for this reply" registration. |
 | 9 | Trigger-fed runs are untrusted | exists | `agent-core/src/shared.rs:1384-1396` (`ExternalSchedule` kind), `docs/schedule-triggers-prechecks.md` ("once-only approval floor on **every tool**") | **Blocker for missions**: a run woken by mail or webhook asks for approval on every tool, so it cannot work unattended. A new trust class is needed (section 8). |
 | 10 | Full level is owner-started only | exists | `agent-core/src/approval.rs:1124-1136` (`full_mode_waives`), `:3526-3551` (`owner_started_run`: every user message source must be `owner`/`peer_admin`), `permission-engine/src/modes.rs:21` | A schedule, webhook, mail, channel or subagent run never gets Full. A wake-started mission session would ask for everything. |
-| 11 | Egress/private-data volume caps | exists | `agent-core/src/full_autonomy.rs:38-40` (`SEND_BUDGET` 1500 chars per run, foreign text limit 40) | Per run, not per mission; must stay as is (sized for "dozens of sites"); sessions reset it, which is acceptable because the SeenText/taint rules stay per run. |
+| 11 | Egress/private-data volume caps | exists | `agent-core/src/full_autonomy.rs` (`SITE_SEND_BUDGET` 1500 chars per site, `RUN_SEND_BUDGET` four sites' worth per run, foreign text limit 240) | Scoped per site since the backlink walkthrough (one run-wide total of 1500 ran out after three to five sites of a sign-up task); sessions reset it, which is acceptable because the SeenText/taint rules stay per run. The caps only apply to a run that holds the owner's private data and read untrusted content (see 8.1a). |
 | 12 | Subagents | partial | `agent-core/src/subagent.rs:44-46` (`MAX_DEPTH` 2, `MAX_CHILDREN` 3), `:47` (15 steps default); children never inherit Full (`approval.rs:1126-1129`) | Fine for a research helper; not for a worker that signs up on a site. |
 | 13 | Bot-to-bot delegation | partial | `agent-core/src/delegation.rs:1-26` (depth 1, one helper per root run, 4 KiB payload, 8 steps, 60 s, read-only tools, approval per call) | Designed as "ask a colleague". Missions need a scoped worker bot that can act. |
 | 14 | Spending limits | exists | `agent-core/src/bot_limits.rs`, `bot-spending-limits-adr.md` (per bot, day/week/month, reserve-then-reconcile before every call) | No per-mission limit. A runaway mission can eat the whole bot limit (and then stops everything else the bot does). |
@@ -379,11 +379,30 @@ the next state.
 
 ### 8.1 What stays exactly as is
 
-Egress gate and SEND_BUDGET (`full_autonomy.rs`), private-data and taint rules,
+Egress gate and the send budgets (`full_autonomy.rs`), private-data and taint rules,
 vault binding by origin, always-ask tools, money and the never-list floors,
 `browser_eval` and program starts always ask, named browser profiles ask,
 non-public addresses ask, audit logging, redaction, owner-only routes for
 anything that raises authority. A mission never edits the permission policy.
+
+### 8.1a What a mission session counts as private data
+
+A mission session starts untrusted (its brief is built from a ledger that earlier sessions
+filled from pages and mails, so it is never the owner's words and never an instruction) but
+**not private**. The ledger is the bot's own bookkeeping of what it did and found; treating it as
+the owner's unhashable private text (as the first wave did, through the `mission ledger` source
+label) made every new site ask from step 0, and the mission stalled on its first approval.
+Private data that an earlier session really read (a file, memory, the owner's mailbox) reaches
+the next session through the chat's message provenance with its own labels, exactly as for any
+chat, and still restricts the run (words of it are caught when copied, data shapes, long text and
+the per-site budget still ask).
+
+The bot's **own AgentMail inbox** is treated the same way: mail from strangers (untrusted: egress
+still asks wherever it asked after a page read), not the owner's private data. Its address is the
+bot's own (not foreign text), and `email_wait_for` returns no mail body. An IMAP/SMTP mailbox, an
+account every bot may use and any other bot's account remain private reads. Accepted residual:
+private data the owner e-mails to the bot's own AgentMail inbox is not tracked as private; put it
+in a file or in memory instead.
 
 ### 8.2 The new trust class (the hard part)
 

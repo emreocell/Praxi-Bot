@@ -105,6 +105,32 @@ const MAX_SOURCES: usize = 8;
 /// (`path`, `url`, `query`), so an uncapped label can fill the reason line.
 const MAX_LABEL_CHARS: usize = 120;
 
+/// Label of the brief a mission session starts from (see `Shared::initial_taint`).
+pub(crate) const MISSION_LEDGER_LABEL: &str = "mission ledger";
+
+/// Prefix of the label a read of the bot's OWN AgentMail inbox carries (see
+/// `Shared::own_inbox_call`): `own inbox INBOX`.
+pub(crate) const OWN_INBOX_LABEL_PREFIX: &str = "own inbox ";
+
+/// Whether a source label names the OWNER's private data. Three kinds of label do not:
+///
+/// * a web page (`page ...`), public web content;
+/// * the mission ledger: the bot's own bookkeeping of what it did and found, text the model
+///   wrote from pages and mails, not something the owner keeps private. It is still untrusted
+///   (the run's exposure says so) and never the owner's words; what an earlier session really
+///   read of the owner's private data reaches this one through the chat's message provenance,
+///   not through this label;
+/// * the bot's own AgentMail inbox: an inbox made for the bot, whose mail comes from strangers.
+///   The owner's personal mailboxes keep their `mailbox ...` label.
+///
+/// Only the daemon writes these labels (they are built from fixed prefixes, never from a page,
+/// a mail or the model), so a tool or a page cannot choose one to hide a private read.
+pub(crate) fn names_private_data(label: &str) -> bool {
+    !(label.starts_with("page ")
+        || label == MISSION_LEDGER_LABEL
+        || label.starts_with(OWN_INBOX_LABEL_PREFIX))
+}
+
 /// Exposure bits plus the labels the approval card quotes.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ContentTaint {
@@ -225,8 +251,8 @@ impl ContentTaint {
         self.exposure
             .observe(class.ingests_untrusted, class.reads_private);
         // A page (the browser, a search, a fetch) is public web; everything else that reads
-        // private data is the owner's.
-        if class.reads_private && !label.starts_with("page ") {
+        // private data is the owner's (see `names_private_data`).
+        if class.reads_private && names_private_data(label) {
             self.private_source = true;
             match text {
                 Some(text) => self.seen.observe(text),
@@ -239,11 +265,12 @@ impl ContentTaint {
     /// A label for the card, without changing the bits. Used when a stored
     /// message already carries the bits and we only need the name.
     ///
-    /// A label that does not name a web page (another bot's answer or reply, a file or mailbox
-    /// of an earlier turn) means private data whose text is not at hand: the run counts as
-    /// holding private data it cannot compare against.
+    /// A label that names private data (see [`names_private_data`]: another bot's answer or
+    /// reply, a file or a personal mailbox of an earlier turn, but not a web page, the mission
+    /// ledger or the bot's own inbox) means private data whose text is not at hand: the run
+    /// counts as holding private data it cannot compare against.
     pub(crate) fn note_label(&mut self, label: &str) {
-        if !label.starts_with("page ") {
+        if names_private_data(label) {
             self.mark_private_unhashed();
         }
         self.push_label(label);
@@ -253,7 +280,7 @@ impl ContentTaint {
     /// the model AND that the caller hashes separately (see [`comparable_label`]): the run holds
     /// private data, but it can be compared, so it is not marked unhashed.
     pub(crate) fn note_label_hashed(&mut self, label: &str) {
-        if !label.starts_with("page ") {
+        if names_private_data(label) {
             self.private_source = true;
         }
         self.push_label(label);
@@ -494,6 +521,8 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
         "email_read" | "email_search" | "email_list_folders" | "email_download_attachment" => {
             format!("mailbox {}", str_field("folder").unwrap_or("INBOX"))
         }
+        // `email_wait_for` refuses every mailbox but the bot's own identity.
+        "email_wait_for" => format!("{OWN_INBOX_LABEL_PREFIX}mail"),
         "web_search" => format!("page {}", str_field("query").unwrap_or("a search")),
         "web_extract"
         | "web_scrape"
@@ -543,6 +572,17 @@ pub(crate) fn source_label(name: &str, input: &Value) -> String {
         "shell_run" | "shell_interactive" | "script_run" => "command output".to_owned(),
         other => format!("tool {other}"),
     }
+}
+
+/// The label of a read of the bot's own AgentMail inbox (see `Shared::own_inbox_call`): the
+/// same folder the `mailbox ...` label would name, under the prefix that does not mark the run
+/// as holding the owner's private data.
+pub(crate) fn own_inbox_label(input: &Value) -> String {
+    let folder = input
+        .get("folder")
+        .and_then(Value::as_str)
+        .unwrap_or("INBOX");
+    format!("{OWN_INBOX_LABEL_PREFIX}{folder}")
 }
 
 /// What a call will really send, for the egress checks and card. A mail reply fills in its
@@ -2066,5 +2106,49 @@ mod mail_review_tests {
         assert_eq!(sent["to"], json!(["z@z.test"]));
         assert_eq!(sent["subject"], "s");
         assert_eq!(sent["body"], "y");
+    }
+
+    #[test]
+    fn only_labels_of_the_owners_private_data_make_a_run_private() {
+        for label in [
+            "page https://a.example/",
+            "mission ledger",
+            "own inbox INBOX",
+        ] {
+            let mut taint = ContentTaint::default();
+            taint.note_label(label);
+            assert!(!taint.private_source && !taint.seen.unhashed, "{label}");
+            taint.note_label_hashed(label);
+            assert!(!taint.private_source, "{label}");
+            // Text that reads private by class under such a label is not the owner's either.
+            taint.note_with_text(ContentClass::all(), label, "Some words here");
+            assert!(!taint.private_source, "{label}");
+            assert!(taint.exposure.untrusted, "{label} stays untrusted content");
+        }
+        for label in [
+            "mailbox INBOX",
+            "file customers.csv",
+            "tool email_search",
+            "another bot's reply",
+            // Only the exact names count: a look-alike is a private label.
+            "mission ledger 2",
+            "own inbox",
+        ] {
+            let mut taint = ContentTaint::default();
+            taint.note_label(label);
+            assert!(taint.private_source && taint.seen.unhashed, "{label}");
+        }
+    }
+
+    #[test]
+    fn the_own_inbox_label_names_the_folder_and_the_wait_tool_reads_the_own_inbox() {
+        assert_eq!(
+            own_inbox_label(&json!({"folder": "Junk"})),
+            "own inbox Junk"
+        );
+        assert_eq!(own_inbox_label(&json!({})), "own inbox INBOX");
+        assert_eq!(source_label("email_wait_for", &json!({})), "own inbox mail");
+        // The owner's own mailbox keeps its label.
+        assert_eq!(source_label("email_search", &json!({})), "mailbox INBOX");
     }
 }

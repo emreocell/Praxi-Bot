@@ -1522,11 +1522,28 @@ impl Shared {
             .collect()
     }
 
-    /// Every word the owner typed in this chat (not copied content when it shows up in a URL).
+    /// The bot's OWN mail addresses: the identities bound to it or shared with it (never an
+    /// account every bot may use). The address a sign-up types is the bot's own, set up by the
+    /// owner in its mail settings, not text it copied from anywhere.
+    fn own_addresses(&self, ctx: &RunCtx) -> Vec<String> {
+        self.mail.get().map_or_else(Vec::new, |c| {
+            c.scoped(Some(&ctx.bot_id.to_string()))
+                .own_identities()
+                .into_iter()
+                .map(|(a, _)| a.address)
+                .collect()
+        })
+    }
+
+    /// Every word the owner typed in this chat (not copied content when it shows up in a URL),
+    /// and the words of the bot's own mail addresses.
     fn owner_words(&self, ctx: &RunCtx) -> HashSet<String> {
-        self.storage
+        let mut texts = self
+            .storage
             .owner_message_texts(ctx.chat_id)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        texts.extend(self.own_addresses(ctx));
+        texts
             .iter()
             .flat_map(|m| crate::full_autonomy::words(m))
             .collect()
@@ -1612,6 +1629,13 @@ impl Shared {
             return self.full_upload_waives(ctx, input);
         }
         let (urls, texts) = crate::full_autonomy::split_input(input);
+        // The bot's own mail address is not text that leaves: it is cut out before the text is
+        // judged (and counted), so a sign-up that types it asks no more than one that does not.
+        let own = self.own_addresses(ctx);
+        let texts: Vec<String> = texts
+            .iter()
+            .map(|t| crate::full_autonomy::without_addresses(t, &own))
+            .collect();
         // A key, a card number or an encoded blob is never typed or sent silently.
         if texts
             .iter()
@@ -1630,10 +1654,17 @@ impl Shared {
             return true;
         }
         let named = self.owner_named_hosts(ctx);
-        // What this call would send to places the owner did not name.
+        // What this call would send to places the owner did not name, and to which site.
         let mut checked: Vec<String> = Vec::new();
-        let mut sent = 0usize;
+        let mut spend: Vec<(String, usize)> = Vec::new();
+        let mut spent_on =
+            |site: &str, chars: usize| match spend.iter_mut().find(|(s, _)| s == site) {
+                Some((_, n)) => *n += chars,
+                None => spend.push((site.to_owned(), chars)),
+            };
         for url in &urls {
+            // The host is the one the call really goes to, read from the address as given. Only
+            // its data shape and size are judged with the bot's own address cut out.
             let Some(host) = url::Url::parse(url.trim())
                 .ok()
                 .and_then(|u| u.host_str().map(str::to_owned))
@@ -1643,33 +1674,43 @@ impl Shared {
             if self.trusted_host(ctx, &host, &named) {
                 continue;
             }
-            if crate::full_autonomy::url_carries_data(url) {
+            let url = crate::full_autonomy::without_addresses(url, &own);
+            if crate::full_autonomy::url_carries_data(&url) {
                 return false;
             }
-            sent += crate::full_autonomy::url_sent_chars(url);
-            checked.push(crate::full_autonomy::decoded(url));
+            spent_on(
+                &budget_site(&host),
+                crate::full_autonomy::url_sent_chars(&url),
+            );
+            checked.push(crate::full_autonomy::decoded(&url));
         }
         // Text typed into a page the owner trusts is the owner's business. A search query goes
         // to the search provider whatever page is open, so it is always judged.
+        let page_host = ctx.page_origin.lock().as_deref().and_then(host_of_origin);
         let page_is_owners = !web_read
-            && ctx
-                .page_origin
-                .lock()
+            && page_host
                 .as_deref()
-                .and_then(host_of_origin)
-                .is_some_and(|h| self.trusted_host(ctx, &h, &named));
+                .is_some_and(|h| self.trusted_host(ctx, h, &named));
         if !texts.is_empty() && !page_is_owners {
             let limit = if web_read {
                 WEB_QUERY_LIMIT
             } else {
                 crate::full_autonomy::FOREIGN_TEXT_LIMIT
             };
+            // A query goes to the search provider, text typed into a page goes to that page's site.
+            let site = if web_read {
+                "web search".to_owned()
+            } else {
+                page_host
+                    .as_deref()
+                    .map_or_else(|| "the browser".to_owned(), budget_site)
+            };
             for text in &texts {
                 let len = text.chars().count();
                 if len >= limit {
                     return false;
                 }
-                sent += len;
+                spent_on(&site, len);
                 checked.push(text.clone());
             }
         }
@@ -1679,14 +1720,14 @@ impl Shared {
         let owner_words = self.owner_words(ctx);
         let mut taint = ctx.taint.lock();
         // Private data that could not be hashed (memory without text, an earlier turn), copied
-        // private words, and the run's running total all ask.
+        // private words, and a site's (or the run's) running total all ask.
         if taint.seen.unhashed
-            || taint.seen.sent + sent > crate::full_autonomy::SEND_BUDGET
+            || !taint.seen.within_send_budget(&spend)
             || checked.iter().any(|c| taint.seen.copied(c, &owner_words))
         {
             return false;
         }
-        taint.seen.sent += sent;
+        taint.seen.record_sent(&spend);
         true
     }
 
@@ -1950,10 +1991,11 @@ impl Shared {
         )
     }
 
-    /// The two calls of a sign-up that the egress gate would ask about after the
+    /// The calls of a sign-up that the egress gate would ask about after the
     /// run read a page or a mail, waived for an OWNER-started run of a bot on the
-    /// Full level: reading the bot's OWN inbox (`email_search`, `email_read`,
-    /// `email_list_folders`, `email_wait_for` on an identity bound to or shared
+    /// Full level: reading the bot's OWN inbox and marking what it read as read
+    /// (`email_search`, `email_read`, `email_list_folders`, `email_mark_read`,
+    /// `email_wait_for` on an identity bound to or shared
     /// with it, never an account every bot may use), and opening exactly a link
     /// `email_wait_for` returned as followable in this run (https, on the site the
     /// sign-up started on or an owner-listed domain). A run started by mail, a
@@ -1969,6 +2011,7 @@ impl Shared {
             "email_search"
             | "email_read"
             | "email_list_folders"
+            | "email_mark_read"
             | builtin_tools::mail_wait::EMAIL_WAIT_FOR => self.mail.get().is_some_and(|c| {
                 c.scoped(Some(&ctx.bot_id.to_string()))
                     .owns(input.get("account").and_then(Value::as_str))
@@ -2110,7 +2153,42 @@ impl Shared {
         if tool.egress_for(Some(&ctx.bot_id.to_string())) == Some(true) {
             class.egress = true;
         }
+        if self.own_inbox_call(ctx, name, input) {
+            class.reads_private = false;
+        }
         class
+    }
+
+    /// A read of the bot's OWN AgentMail inbox: `email_search`, `email_read` or
+    /// `email_list_folders` on an identity that is bound to this bot or shared with it and is an
+    /// AgentMail inbox (made through the API, for the bot). (`email_wait_for` needs no check: it
+    /// answers with no mail body and refuses every mailbox but the bot's own, so its class never
+    /// says private.)
+    ///
+    /// What is in such an inbox is mail from strangers: the sign-up confirmations, codes and
+    /// newsletters the bot's own accounts bring. It stays untrusted content (the exposure still
+    /// says so, so egress still asks wherever it asked after a page read), but it is not the
+    /// OWNER's private data, so reading it does not mark the run as holding any. A run that
+    /// did, after the first confirmation mail, would quarantine every later page, hide its
+    /// screenshots and treat every word of a mail as a secret to keep out of the next form.
+    ///
+    /// Not covered, so they still count as private: an IMAP/SMTP mailbox (it can be the
+    /// owner's own mailbox, bound to the bot), an account every bot may use, another bot's.
+    /// The account is resolved the way the tool resolves it (the named one, else the bot's
+    /// default), and fails closed: any doubt is "not own".
+    pub(crate) fn own_inbox_call(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
+        if !matches!(name, "email_search" | "email_read" | "email_list_folders") {
+            return false;
+        }
+        self.mail.get().is_some_and(|c| {
+            let bot = ctx.bot_id.to_string();
+            let scoped = c.scoped(Some(&bot));
+            let account = input.get("account").and_then(Value::as_str);
+            scoped.owns(account)
+                && scoped
+                    .kind(account)
+                    .is_ok_and(|k| k == builtin_tools::connector_email::AccountKind::AgentMail)
+        })
     }
 
     /// A host-status command (`uptime`, `df -h`, ... see
@@ -4744,6 +4822,14 @@ pub(crate) fn always_allowed(
         return origin_scoped;
     }
     effect == Effect::Read && ALWAYS_READ_ONLY_TOOLS.contains(&name)
+}
+
+/// The site a send is counted against: the host without a leading `www.`, so the bare and the
+/// `www.` spelling of one site share a budget.
+fn budget_site(host: &str) -> String {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host.strip_prefix("www.")
+        .map_or(host.clone(), str::to_owned)
 }
 
 fn host_of_origin(origin: &str) -> Option<String> {

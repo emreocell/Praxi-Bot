@@ -647,11 +647,12 @@ async fn opening_an_unknown_site_does_not_make_it_known() {
 
 #[tokio::test]
 async fn chunks_over_the_budget_ask_when_the_run_holds_private_data() {
+    // One site receiving chunk after chunk: its own budget runs out.
     let later: Vec<(&str, Value)> = (0..40)
         .map(|i| {
             (
                 "browser_open",
-                json!({"url": format!("https://site{i}.example/catalog/item{i}?color=red&size=large&sort=price{i}&page={i}")}),
+                json!({"url": format!("https://site.example/catalog/item{i}?color=red&size=large&sort=price{i}&page={i}")}),
             )
         })
         .collect();
@@ -660,6 +661,54 @@ async fn chunks_over_the_budget_ask_when_the_run_holds_private_data() {
     assert!((2..40).contains(&ran), "the budget stopped it after {ran}");
     // the same calls in a run with no private data never ask
     assert_eq!(card_for_clean(&later).await, None);
+}
+
+#[tokio::test]
+async fn the_budget_is_counted_per_site_so_many_sites_each_get_their_own() {
+    // The backlink task in a run that holds private data: thirty different sites, about seventy
+    // characters of address each (the run's 40 steps are used up by thirty-three calls). One
+    // run-wide total of 1500 asked after the twentieth; each site is far below its own budget,
+    // and the run-wide ceiling is above what a run of 40 steps can send.
+    let later: Vec<(&str, Value)> = (0..30)
+        .map(|i| {
+            (
+                "browser_open",
+                json!({"url": format!("https://site{i}.example/catalog/item{i}?color=red&size=large&sort=price{i}&page={i}")}),
+            )
+        })
+        .collect();
+    let (ran, card) = run(private(), &[], &later).await;
+    assert_eq!(card, None, "stopped after {ran} sites");
+    assert_eq!(ran, 30);
+}
+
+#[tokio::test]
+async fn a_profile_description_fits_a_private_run_but_a_paragraph_does_not() {
+    let stranger = || {
+        let mut c = private();
+        c.origin = Some("https://evil.example:443");
+        c
+    };
+    let description = "We build fast and accessible websites for small businesses in Turkey and help them be found online.";
+    assert!(description.chars().count() > 40 && description.chars().count() < 240);
+    assert_eq!(
+        card(
+            stranger(),
+            &[("browser_fill", json!({"ref": "e5", "text": description}))]
+        )
+        .await,
+        None
+    );
+    let paragraph = format!("{description} {description} {description}");
+    assert_eq!(
+        card(
+            stranger(),
+            &[("browser_fill", json!({"ref": "e5", "text": paragraph}))]
+        )
+        .await
+        .as_deref(),
+        Some("browser_fill")
+    );
 }
 
 async fn card_for_clean(later: &[(&str, Value)]) -> Option<String> {
@@ -674,10 +723,8 @@ async fn a_form_on_a_stranger_page_asks_for_private_or_long_text_only_with_priva
         c.origin = Some("https://evil.example:443");
         c
     };
-    for text in [
-        "tail4242",
-        "an ordinary sentence of more than forty characters in a form",
-    ] {
+    let paragraph = "an ordinary sentence in a form that keeps going on and on without ever saying anything about a secret, ".repeat(3);
+    for text in ["tail4242", paragraph.as_str()] {
         assert_eq!(
             card(
                 stranger(true),

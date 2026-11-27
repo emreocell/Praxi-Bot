@@ -95,12 +95,13 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // computer to a page, which is both a private read and a send off the machine.
         | "browser_reload"
         | "browser_forward"
-        | "browser_upload"
-        // `email_wait_for` reads the bot's own inbox: untrusted (a stranger's mail), private
-        // (a mailbox) and, like `email_read`, a call to a remote mailbox. No text the model
-        // wrote is sent (filters run locally), but the class stays the same as `email_read`
-        // so a mail- or webhook-started run keeps being asked.
-        | "email_wait_for" => ContentClass::all(),
+        | "browser_upload" => ContentClass::all(),
+        // `email_wait_for` reads the bot's own inbox: untrusted (a stranger's mail) and, like
+        // `email_read`, a call to a remote mailbox, so a mail- or webhook-started run keeps being
+        // asked. It is not a private read: the tool refuses every mailbox but the bot's own
+        // identity, answers with sender, subject, codes and judged links and no mail body, and the
+        // filters the model passes are applied locally (nothing it wrote is sent).
+        "email_wait_for" => ContentClass::untrusted_egress(),
         // A created or edited bot acts later on a persona written now, like a
         // schedule; the call always asks with the complete resulting profile.
         // `account_register` creates a standing credential and a site identity (login,

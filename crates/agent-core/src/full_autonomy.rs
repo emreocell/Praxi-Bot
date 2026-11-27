@@ -20,7 +20,7 @@
 //! differently shaped string, or private data that never passed through a tool result the run
 //! saw (the model "knows" it), cannot be recognised here.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, RandomState};
 use std::sync::OnceLock;
 
@@ -30,14 +30,22 @@ use serde_json::Value;
 const URL_TOTAL_LIMIT: usize = 120;
 /// Longest single path segment, query key or value (decoded) of such a URL.
 const URL_PART_LIMIT: usize = 40;
-/// What one run may send to places the owner did not name, in decoded characters of URLs
-/// (host included), search queries and form text together. Above it every further call asks,
-/// so a secret cannot leave in many small pieces. Sized for a real research-and-sign-up task
-/// (a few dozen searches, pages and forms on new sites); it bounds the VOLUME that a paraphrase
-/// could carry out, the words themselves are caught by [`SeenText`].
-pub(crate) const SEND_BUDGET: usize = 1500;
-/// Text typed into a page that is not the owner's must be shorter than this.
-pub(crate) const FOREIGN_TEXT_LIMIT: usize = 40;
+/// What one run may send to ONE site the owner did not name, in decoded characters of URLs
+/// (host included), search queries and form text together. Above it every further call to that
+/// site asks, so a secret cannot leave in many small pieces. The scope is the site (the page's
+/// host for text typed into it, the address's host for a URL, "web search" for queries) because
+/// a task that signs up on many sites sends each of them a few hundred characters of its own
+/// details: one run-wide total ran out after the third to fifth site of a research task and then
+/// asked for every call after it. It bounds the VOLUME that a paraphrase could carry out to one
+/// place, the words themselves are caught by [`SeenText`].
+pub(crate) const SITE_SEND_BUDGET: usize = 1500;
+/// What one run may send to all such sites together: four sites' worth. A run of the default
+/// 40 steps cannot reach it by browsing one address per step, so it only bounds a long run (or a
+/// raised step limit) that sprays small pieces over many sites the model chose.
+pub(crate) const RUN_SEND_BUDGET: usize = 4 * SITE_SEND_BUDGET;
+/// Text typed into a page that is not the owner's must be shorter than this: a field value or a
+/// short profile description, not a paragraph.
+pub(crate) const FOREIGN_TEXT_LIMIT: usize = 240;
 /// Most distinct hashes kept for a run; more means "cannot compare", which asks.
 const MAX_SEEN: usize = 400_000;
 /// Most characters of one result read into the set.
@@ -243,6 +251,28 @@ pub(crate) fn url_carries_data(raw: &str) -> bool {
     total > URL_TOTAL_LIMIT
 }
 
+/// `text` with each of `addresses` (and its `%40` spelling in a URL) cut out, any letter case.
+///
+/// For the bot's OWN mail addresses: typing the address its sign-ups use into a form is the
+/// bot's own business, not private text leaving, and a long address with digits in it looks like
+/// a key to [`text_carries_data`]. Only the exact address is removed, never a longer token, so
+/// nothing else can ride along inside it; what is left is judged as usual.
+pub(crate) fn without_addresses(text: &str, addresses: &[String]) -> String {
+    let mut out = text.to_owned();
+    for address in addresses {
+        let plain = address.trim().to_ascii_lowercase();
+        if plain.is_empty() {
+            continue;
+        }
+        for needle in [plain.replace('@', "%40"), plain] {
+            while let Some(at) = out.to_ascii_lowercase().find(&needle) {
+                out.replace_range(at..at + needle.len(), " ");
+            }
+        }
+    }
+    out
+}
+
 /// The URL-like strings (keys `url`, `uri`, `href`) and the free text of a browser call. Keys
 /// of the call are the tool's own schema and are not judged.
 pub(crate) fn split_input(input: &Value) -> (Vec<String>, Vec<String>) {
@@ -309,8 +339,8 @@ pub(crate) struct SeenText {
     /// Private data is in the run that was NOT hashed (memory without text, an earlier turn, a
     /// script's read): nothing can be compared, so the run asks.
     pub(crate) unhashed: bool,
-    /// Decoded characters this run already sent to places the owner did not name.
-    pub(crate) sent: usize,
+    /// Decoded characters this run already sent to places the owner did not name, by site.
+    sent: HashMap<String, usize>,
     /// Shell commands this run started without a card after reading untrusted content.
     pub(crate) shell_waived: usize,
 }
@@ -342,8 +372,29 @@ impl SeenText {
         self.hashes.extend(other.hashes.iter().copied());
         self.overflow |= other.overflow || self.hashes.len() > MAX_SEEN;
         self.unhashed |= other.unhashed;
-        self.sent = self.sent.max(other.sent);
+        for (site, n) in &other.sent {
+            let mine = self.sent.entry(site.clone()).or_default();
+            *mine = (*mine).max(*n);
+        }
         self.shell_waived = self.shell_waived.max(other.shell_waived);
+    }
+
+    /// Whether sending `spend` (characters per site, one entry per site) stays inside both the
+    /// per-site budget and the run-wide one.
+    pub(crate) fn within_send_budget(&self, spend: &[(String, usize)]) -> bool {
+        let total: usize =
+            self.sent.values().sum::<usize>() + spend.iter().map(|(_, n)| n).sum::<usize>();
+        total <= RUN_SEND_BUDGET
+            && spend
+                .iter()
+                .all(|(site, n)| self.sent.get(site).copied().unwrap_or(0) + n <= SITE_SEND_BUDGET)
+    }
+
+    /// Count `spend` against its sites (after [`Self::within_send_budget`] said yes).
+    pub(crate) fn record_sent(&mut self, spend: &[(String, usize)]) {
+        for (site, n) in spend {
+            *self.sent.entry(site.clone()).or_default() += n;
+        }
     }
 
     /// `text` holds a word (6+ characters) or a run of three words the run read. Words the owner
@@ -514,5 +565,80 @@ mod tests {
         );
         assert_eq!(urls, ["https://a.example/"]);
         assert!(texts.contains(&"ali".to_owned()));
+    }
+
+    fn spend(site: &str, n: usize) -> Vec<(String, usize)> {
+        vec![(site.to_owned(), n)]
+    }
+
+    #[test]
+    fn a_site_has_its_own_send_budget() {
+        let mut seen = SeenText::default();
+        assert!(seen.within_send_budget(&spend("a.example", SITE_SEND_BUDGET)));
+        seen.record_sent(&spend("a.example", SITE_SEND_BUDGET));
+        // The same site is used up, the next site starts from zero.
+        assert!(!seen.within_send_budget(&spend("a.example", 1)));
+        assert!(seen.within_send_budget(&spend("b.example", SITE_SEND_BUDGET)));
+        // One call may spend on several sites; each is judged on its own.
+        let both = vec![("b.example".to_owned(), 10), ("a.example".to_owned(), 1)];
+        assert!(!seen.within_send_budget(&both));
+    }
+
+    #[test]
+    fn the_run_has_a_ceiling_over_all_sites() {
+        let mut seen = SeenText::default();
+        for i in 0..4 {
+            let site = format!("s{i}.example");
+            assert!(seen.within_send_budget(&spend(&site, SITE_SEND_BUDGET)));
+            seen.record_sent(&spend(&site, SITE_SEND_BUDGET));
+        }
+        assert!(!seen.within_send_budget(&spend("fresh.example", 1)));
+    }
+
+    #[test]
+    fn a_resumed_run_keeps_the_larger_count_of_each_site() {
+        let mut a = SeenText::default();
+        a.record_sent(&spend("a.example", 100));
+        let mut b = SeenText::default();
+        b.record_sent(&spend("a.example", 700));
+        b.record_sent(&spend("b.example", 5));
+        a.merge(&b);
+        assert!(a.within_send_budget(&spend("a.example", SITE_SEND_BUDGET - 700)));
+        assert!(!a.within_send_budget(&spend("a.example", SITE_SEND_BUDGET - 699)));
+        assert!(a.within_send_budget(&spend("b.example", SITE_SEND_BUDGET - 5)));
+    }
+
+    #[test]
+    fn the_bots_own_address_is_cut_out_and_nothing_else() {
+        let own = vec!["Praxi-8f3a9c1d2e4b@agentmail.to".to_owned()];
+        // As typed, any letter case, and as a URL query value.
+        assert!(text_carries_data("praxi-8f3a9c1d2e4b@agentmail.to"));
+        assert!(!text_carries_data(&without_addresses(
+            "praxi-8f3a9c1d2e4b@agentmail.to",
+            &own
+        )));
+        assert!(!text_carries_data(&without_addresses(
+            "PRAXI-8F3A9C1D2E4B@AGENTMAIL.TO",
+            &own
+        )));
+        let url = without_addresses(
+            "https://x.example/s?email=praxi-8f3a9c1d2e4b%40agentmail.to",
+            &own,
+        );
+        assert!(!url_carries_data(&url), "{url}");
+        // A longer token that merely contains it keeps its other characters; a key beside it stays one.
+        let hidden = without_addresses(
+            "praxi-8f3a9c1d2e4b@agentmail.to sk-live-AbCdEfGhIjKlMnOpQr",
+            &own,
+        );
+        assert!(text_carries_data(&hidden), "{hidden}");
+        // Someone else's address of the same shape is not cut.
+        assert!(text_carries_data(&without_addresses(
+            "praxi-111122223333@agentmail.to",
+            &own
+        )));
+        // No address, no change.
+        assert_eq!(without_addresses("hello", &[]), "hello");
+        assert_eq!(without_addresses("hello", &[String::new()]), "hello");
     }
 }

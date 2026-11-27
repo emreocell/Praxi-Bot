@@ -1561,4 +1561,13 @@ mod tests {
             assert!(err.contains("blocked"), "{p}: {err}");
         }
     }
+
+    #[test]
+    fn email_wait_for_brings_untrusted_text_in_and_reads_nothing_private() {
+        // It refuses every mailbox but the bot's own identity and answers with no mail body.
+        let class = classify("email_wait_for").expect("a built-in tool");
+        assert!(class.ingests_untrusted && class.egress);
+        assert!(!class.reads_private);
+        assert!(!class.executes);
+    }
 }

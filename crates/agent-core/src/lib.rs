@@ -85,6 +85,8 @@ mod mission_session_tests;
 #[cfg(test)]
 mod mission_start_tests;
 #[cfg(test)]
+mod mission_taint_tests;
+#[cfg(test)]
 mod mode_tests;
 #[cfg(test)]
 mod notes_tests;

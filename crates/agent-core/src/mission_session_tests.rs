@@ -63,13 +63,13 @@ fn captcha_tool() -> Arc<CaptchaTool> {
     }))
 }
 
-struct World {
-    env: crate::tests::Env,
-    store: Arc<MissionStore>,
-    mission: String,
+pub(crate) struct World {
+    pub(crate) env: crate::tests::Env,
+    pub(crate) store: Arc<MissionStore>,
+    pub(crate) mission: String,
 }
 
-fn world(items: &[&str]) -> World {
+pub(crate) fn world(items: &[&str]) -> World {
     let env = setup();
     let store = Arc::new(MissionStore::open_in_memory().unwrap());
     let m = store
@@ -184,7 +184,7 @@ async fn a_session_gets_the_mission_tools_the_brief_and_the_mission_rules() {
 }
 
 /// The owner's own message in the chat, tagged as typed in the app.
-fn owner_says(w: &World, text: &str) {
+pub(crate) fn owner_says(w: &World, text: &str) {
     let id = uuid::Uuid::now_v7();
     w.env
         .storage
