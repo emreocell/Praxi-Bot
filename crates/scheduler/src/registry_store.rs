@@ -78,8 +78,8 @@ impl ScheduleStore {
             return Ok(false);
         }
         tx.execute(
-            "UPDATE schedules SET origin='user' WHERE id=?1",
-            [schedule.id.to_string()],
+            "UPDATE schedules SET origin='user', author=?2 WHERE id=?1",
+            params![schedule.id.to_string(), schedule.stored_author().as_str()],
         )?;
         write_trigger_in(&tx, schedule.id, rule.trigger().as_ref())?;
         let mut state = read_rule(&tx, schedule.id)?

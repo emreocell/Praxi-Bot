@@ -3854,7 +3854,7 @@
         "tags": [
           "triggers"
         ],
-        "summary": "Confirm that you wrote this trigger rule (one click for an `unknown` one). From then on it\ncounts as your own automation: on a bot at the Full level its runs go without cards (money\nstill asks) while the event data stays untrusted.",
+        "summary": "Confirm that you wrote this trigger rule (one click for an `unknown` one). From then on it\ncounts as your own automation: on a bot at the Full level its runs go without cards (money\nstill asks) while the event data stays untrusted. The call names the `revision` of the rule\nyou looked at and changes nothing when it was edited since (409).",
         "operationId": "triggers_confirm",
         "parameters": [
           {
@@ -3875,6 +3875,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmAuthorInput"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "",
@@ -17129,7 +17139,7 @@
         "tags": [
           "schedules"
         ],
-        "summary": "Confirm that you wrote this schedule: one click for a schedule whose author the daemon\ncould not prove (made before authorship was recorded, on a paired phone, or moved from\nanother computer). From then on it counts as your own automation, so on a bot at the Full\nlevel it runs without cards (money still asks). A schedule a bot made is not confirmed\nthis way: edit and save it, which takes it over.",
+        "summary": "Confirm that you wrote this schedule: one click for a schedule whose author the daemon\ncould not prove (made before authorship was recorded, on a paired phone, or moved from\nanother computer). From then on it counts as your own automation, so on a bot at the Full\nlevel it runs without cards (money still asks). The call names the `revision` of the\ndefinition you looked at and changes nothing when the schedule was edited since (409): an\nedit from a phone or a bot is never blessed unseen. A schedule a bot made is not confirmed\nthis way: edit and save it, which takes it over.",
         "operationId": "confirm_schedule",
         "parameters": [
           {
@@ -17143,6 +17153,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmAuthorInput"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "",
@@ -17150,6 +17170,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ScheduleDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -17165,7 +17195,7 @@
             }
           },
           "409": {
-            "description": "not an unconfirmed schedule of yours",
+            "description": "changed since you looked, or not an unconfirmed schedule of yours",
             "content": {
               "application/json": {
                 "schema": {
@@ -23734,6 +23764,20 @@
               "null"
             ],
             "description": "Coding CLIs only: where the list came from (`cli`, `local_cache` or `bundled`, the\nlast-resort fallback the UI marks as such)."
+          }
+        }
+      },
+      "ConfirmAuthorInput": {
+        "type": "object",
+        "description": "Body of the confirm calls (`POST /v1/schedules/{id}/confirm`,\n`POST /v1/bots/{bot}/triggers/{trigger}/confirm`).",
+        "required": [
+          "revision"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The `revision` of the definition you looked at; the confirmation applies to that\nversion only."
           }
         }
       },
@@ -35410,7 +35454,8 @@
           "misfire_policy",
           "has_webhook",
           "origin",
-          "author"
+          "author",
+          "revision"
         ],
         "properties": {
           "author": {
@@ -35517,6 +35562,11 @@
           },
           "precheck": {
             "description": "Read-only deterministic condition, including full script source."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Version of the definition (it grows with every change to it). `POST\n/v1/schedules/{id}/confirm` names the one you looked at."
           },
           "skipped_by_precheck": {
             "type": "integer",
@@ -37724,7 +37774,8 @@
           "instruction",
           "config",
           "enabled",
-          "author"
+          "author",
+          "revision"
         ],
         "properties": {
           "author": {
@@ -37780,6 +37831,11 @@
               "null"
             ],
             "minimum": 0
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Version of the rule (it grows with every change). `POST\n/v1/bots/{bot}/triggers/{trigger}/confirm` names the one you looked at."
           }
         }
       },

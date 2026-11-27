@@ -237,7 +237,7 @@ export function BotPanelAutomation({
                           onClick={() =>
                             void act(
                               row.key,
-                              () => (s ? client!.confirmSchedule(s.id) : client!.confirmTrigger(botId, row.trigger!.id)),
+                              () => (s ? client!.confirmSchedule(s.id, s.revision) : client!.confirmTrigger(botId, row.trigger!.id, row.trigger!.revision)),
                               t("automation.confirm.done", { name: row.name })
                             )
                           }

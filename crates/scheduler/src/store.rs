@@ -455,7 +455,7 @@ impl ScheduleStore {
     /// `enabled: None` preserves the current enabled state. An unchanged,
     /// already-consumed one-shot stays consumed even when its cursor is null.
     /// Returns the fresh row and its previous enabled state, or `None` if it
-    /// was deleted. The internal revision is not exposed through the API DTO.
+    /// was deleted. The DTO shows the revision only so a confirm can name it; no edit takes one.
     ///
     /// # Errors
     /// Fails on invalid specifications, a changed bot identity, or SQLite/JSON errors.
@@ -490,6 +490,46 @@ impl ScheduleStore {
         now_ms: i64,
         trigger: Option<Option<&Trigger>>,
     ) -> Result<Option<(Schedule, bool)>> {
+        self.update_config_as(definition, enabled, now_ms, trigger, false)
+    }
+
+    /// [`Self::update_config`] for a write a MODEL makes (the bot's schedule tools). Whatever
+    /// the caller put in `definition`, the stored row ends as `origin = bot, author = bot`
+    /// (a bot's edit never keeps or earns the owner's name on the text), and only a row that
+    /// already is a bot's can be written: a user-made row is refused, whatever the caller's
+    /// revision says. The revision check is always strict.
+    ///
+    /// # Errors
+    /// [`SchedulerError::InvalidSpec`] for a row a bot did not make, plus those of
+    /// [`Self::update_config`].
+    pub fn update_config_by_bot(
+        &self,
+        definition: &Schedule,
+        enabled: Option<bool>,
+        now_ms: i64,
+        trigger: Option<Option<&Trigger>>,
+    ) -> Result<Option<(Schedule, bool)>> {
+        self.update_config_as(definition, enabled, now_ms, trigger, true)
+    }
+
+    #[allow(clippy::option_option)] // omitted keeps the trigger, null removes it
+    fn update_config_as(
+        &self,
+        definition: &Schedule,
+        enabled: Option<bool>,
+        now_ms: i64,
+        trigger: Option<Option<&Trigger>>,
+        by_bot: bool,
+    ) -> Result<Option<(Schedule, bool)>> {
+        let mut forced;
+        let definition = if by_bot {
+            forced = definition.clone();
+            forced.origin = ScheduleOrigin::Bot;
+            forced.author = ScheduleAuthor::Bot;
+            &forced
+        } else {
+            definition
+        };
         definition.spec.validate()?;
         if let Some(p) = &definition.precheck {
             p.validate()?;
@@ -500,6 +540,15 @@ impl ScheduleStore {
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = get_schedule(&tx, definition.id)?;
+        if by_bot
+            && current
+                .as_ref()
+                .is_some_and(|c| c.origin != ScheduleOrigin::Bot)
+        {
+            return Err(SchedulerError::InvalidSpec(
+                "a bot may change only a schedule a bot made".into(),
+            ));
+        }
         let has_source: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM schedule_triggers WHERE schedule_id=?1 AND json_extract(trigger_json,'$.kind') IN ('file_watch','email')) OR EXISTS(SELECT 1 FROM trigger_registry WHERE schedule_id=?1)",
             [definition.id.to_string()],
@@ -507,7 +556,8 @@ impl ScheduleStore {
         )?;
         // Preserve legacy plain-timer concurrent-toggle semantics. Anything
         // with an external source/validated precheck uses the strict revision.
-        let strict = trigger.is_some()
+        let strict = by_bot
+            || trigger.is_some()
             || has_source
             || definition.precheck.is_some()
             || current.as_ref().is_some_and(|s| s.precheck.is_some());
@@ -524,9 +574,14 @@ impl ScheduleStore {
             write_trigger_in(&tx, definition.id, t)?;
         }
         if edited.is_some() && definition.origin == ScheduleOrigin::User {
+            // The owner's takeover of a row: origin and author move together (the database
+            // refuses a bot row that is not bot-authored).
             tx.execute(
-                "UPDATE schedules SET origin='user' WHERE id=?1",
-                [definition.id.to_string()],
+                "UPDATE schedules SET origin='user', author=?2 WHERE id=?1",
+                params![
+                    definition.id.to_string(),
+                    definition.stored_author().as_str()
+                ],
             )?;
         }
         let edited = edited
@@ -647,18 +702,22 @@ impl ScheduleStore {
 
     /// The owner confirms the definition of a user-origin schedule whose author is not proven
     /// (an older row, one a paired phone wrote, an import): from now on it counts as the
-    /// owner's own automation. A definition change: bumps the revision so an approval
-    /// prepared against the old state goes stale. A bot-made row is never confirmed this way
-    /// (the bot could still rewrite it): the owner edits and saves it, which takes it over.
+    /// owner's own automation. It binds to `revision`, the definition the owner was looking at:
+    /// the row changes only while it still is that revision, so an edit that slipped in
+    /// between (a phone, a bot) is never blessed unseen. A definition change: bumps the
+    /// revision so an approval prepared against the old state goes stale. A bot-made row is
+    /// never confirmed this way (the bot could still rewrite it): the owner edits and saves it,
+    /// which takes it over. A schedule that moved to a server is not confirmed either.
     /// Returns whether the row changed.
     ///
     /// # Errors
     /// Fails on SQLite errors.
-    pub fn confirm_author(&self, id: TaskId) -> Result<bool> {
+    pub fn confirm_author(&self, id: TaskId, revision: i64) -> Result<bool> {
         let changed = self.conn().execute(
             "UPDATE schedules SET author = 'owner', revision = revision + 1 \
-             WHERE id = ?1 AND origin = 'user' AND author = 'unknown'",
-            [id.to_string()],
+             WHERE id = ?1 AND revision = ?2 AND origin = 'user' AND author = 'unknown' \
+             AND frozen_for IS NULL",
+            params![id.to_string(), revision],
         )?;
         if changed > 0 {
             self.notify();
@@ -1441,7 +1500,8 @@ fn update_definition_in(conn: &Connection, schedule: &Schedule) -> Result<bool> 
     let changed = conn.execute(
         "UPDATE schedules SET chat_id = ?2, name = ?3, spec_json = ?4, payload_json = ?5, \
          enabled = ?6, misfire_policy = ?7, revision = revision + 1, precheck_json = ?9, \
-         catchup_window_secs = ?10, author = ?11 \
+         catchup_window_secs = ?10, \
+         author = CASE WHEN origin = 'bot' THEN 'bot' ELSE ?11 END \
          WHERE id = ?1 AND revision = ?8",
         params![
             schedule.id.to_string(),

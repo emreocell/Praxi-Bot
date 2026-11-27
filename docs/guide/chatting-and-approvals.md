@@ -363,8 +363,15 @@ edit by anyone else ends the lane at once.
 
 **Confirm in one click.** On a bot at the Full level, the **Automation** tab of the bot panel
 shows **This is mine** under every schedule or rule whose author is unknown. Press it once and
-the entry counts as yours from then on (the daemon writes an audit entry). A schedule that a
-bot made is not confirmed this way: open it, check the text and save it, which takes it over.
+the entry counts as yours from then on (the daemon writes an audit entry). The click confirms
+the version you were looking at: if the text was changed meanwhile (from a phone, by a bot),
+nothing is confirmed and you read it again first. A schedule that a bot made is not confirmed
+this way: open it, check the text and save it, which takes it over. A call that cannot prove it
+is you (only the API token, no owner key) never counts as you: what it saves is `unknown`.
+
+**Mail and webhook channels.** A run that comes from the e-mail channel or a signed incoming
+webhook you set up (not through a rule) is served only while that channel or webhook still
+exists and belongs to the same bot; otherwise it keeps its cards.
 
 **Subagents** of a run the lane serves (a run you typed, or a schedule or trigger you wrote)
 inherit it, within the usual depth limit; a helper bot another bot called never does.

@@ -912,6 +912,19 @@ impl ComputerProvider for FallbackComputerProvider {
 /// Answers "did the owner write this schedule or rule?" from the scheduler's own record.
 pub type ScheduleOwnerCheck = Arc<dyn Fn(TaskId) -> bool + Send + Sync>;
 
+/// A source that starts a run without a schedule behind it, named by the run's `kind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalSource {
+    /// A signed incoming webhook the owner created (its id).
+    Webhook(Uuid),
+    /// The e-mail channel the owner switched on.
+    MailChannel,
+}
+
+/// Answers "is this source still set up by the owner, for this bot?" from the daemon's own
+/// records (the webhook table, the channel settings). Only the owner's routes write those.
+pub type ExternalSourceCheck = Arc<dyn Fn(BotId, ExternalSource) -> bool + Send + Sync>;
+
 pub(crate) struct RunCtx {
     pub computer: Arc<tokio::sync::OnceCell<tokio::sync::OwnedSemaphorePermit>>,
     pub waiting_computer: Arc<AtomicBool>,
@@ -1212,6 +1225,9 @@ pub(crate) struct Shared {
     /// Whether the owner wrote schedule `id` (the scheduler store's recorded author), set by the
     /// daemon. Unset, or a schedule that is gone: no, so the run keeps its once-only cards.
     pub schedule_owner: RwLock<Option<ScheduleOwnerCheck>>,
+    /// Whether the owner set up the webhook or mail channel behind a run that has no schedule
+    /// (see [`ExternalSource`]); set by the daemon. Unset: none counts.
+    pub external_source_owner: RwLock<Option<ExternalSourceCheck>>,
     /// Foreground browser / app source for skill suggestions.
     pub skill_hints: RwLock<Option<SkillHintFn>>,
     /// The K0-K3 decision ladders (one per bot) and the workflow wiring.
@@ -1510,6 +1526,23 @@ pub fn schedule_id_of(kind: &str) -> Option<TaskId> {
         .parse()
         .ok()
         .map(TaskId)
+}
+
+/// The webhook or mail channel behind a run kind written by `run_incoming_webhook` or
+/// `run_incoming_email`; `None` for anything else (including the bare, unnamed kinds).
+pub(crate) fn external_source_of(kind: &str) -> Option<ExternalSource> {
+    if let Some(rest) = kind.strip_prefix("turn:incoming_webhook:") {
+        return rest
+            .split(':')
+            .next()?
+            .parse()
+            .ok()
+            .map(ExternalSource::Webhook);
+    }
+    let rest = kind.strip_prefix("turn:incoming_email:")?;
+    rest.parse::<Uuid>()
+        .ok()
+        .map(|_| ExternalSource::MailChannel)
 }
 
 /// Who started a run, from its `kind` string.

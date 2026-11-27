@@ -278,6 +278,7 @@ impl AgentLoop {
                 fill_secrets: OnceLock::new(),
                 browser_profiles: OnceLock::new(),
                 schedule_owner: RwLock::new(None),
+                external_source_owner: RwLock::new(None),
                 secret_requests: Mutex::new(HashMap::new()),
                 handovers: Mutex::new(HashMap::new()),
                 skill_hints: RwLock::new(None),
@@ -546,6 +547,13 @@ impl AgentLoop {
     /// triggers the owner wrote; without it none counts.
     pub fn set_schedule_owner_check(&self, check: crate::shared::ScheduleOwnerCheck) {
         *self.sh.schedule_owner.write() = Some(check);
+    }
+
+    /// Tell the loop how to ask whether the owner set up the incoming webhook or the mail
+    /// channel behind a run that has no schedule (the daemon wires its own records here). A
+    /// run that came in through a source nobody vouches for keeps its once-only cards.
+    pub fn set_external_source_check(&self, check: crate::shared::ExternalSourceCheck) {
+        *self.sh.external_source_owner.write() = Some(check);
     }
 
     /// Install the mission ledger (`serve` wires the daemon's `missions.db` here).

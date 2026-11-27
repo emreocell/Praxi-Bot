@@ -1,5 +1,5 @@
 //! Local-owner registry over schedules, mailbox header polling and signed hooks.
-use crate::{ApiError, AppState, error::ErrorBody};
+use crate::{ApiError, AppState, dto::ConfirmAuthorInput, error::ErrorBody};
 use axum::{
     Json,
     extract::{Path, State},
@@ -39,6 +39,9 @@ pub struct TriggerDto {
     /// recorded). Only an `owner` rule runs without cards on a bot at the Full level;
     /// `POST /v1/bots/{bot}/triggers/{trigger}/confirm` confirms an `unknown` one.
     pub author: String,
+    /// Version of the rule (it grows with every change). `POST
+    /// /v1/bots/{bot}/triggers/{trigger}/confirm` names the one you looked at.
+    pub revision: i64,
     pub last_fired_at_ms: Option<i64>,
     pub count_today: Option<usize>,
     pub queued: Option<usize>,
@@ -211,6 +214,7 @@ fn dto(s: &AppState, row: &Schedule) -> Result<TriggerDto, ApiError> {
         ),
         enabled: row.enabled && !sender_unusable,
         author: row.stored_author().as_str().to_owned(),
+        revision: row.revision,
         last_fired_at_ms: state.last_fired_at_ms,
         count_today: Some(
             state
@@ -372,6 +376,7 @@ fn existing_dto(
         enabled,
         // An existing schedule or webhook offered for adoption: nothing recorded it as a rule.
         author: "unknown".into(),
+        revision: 0,
         last_fired_at_ms: last,
         count_today: None,
         queued: None,
@@ -384,6 +389,7 @@ pub(crate) async fn create(
     State(s): State<AppState>,
     Path(bot): Path<String>,
     peer: Option<axum::Extension<crate::peer::PeerIdentity>>,
+    headers: axum::http::HeaderMap,
     Json(input): Json<TriggerInput>,
 ) -> Result<(StatusCode, Json<TriggerDto>), ApiError> {
     let bot = bot_of(&s, &bot)?;
@@ -407,7 +413,7 @@ pub(crate) async fn create(
         scheduler::MisfirePolicy::Skip,
         storage::now_ms(),
     )?;
-    row.author = crate::routes::author_of_caller(&s, peer.as_deref());
+    row.author = crate::routes::author_of_caller(&s, peer.as_deref(), &headers);
     // Creation is always off, even if a caller requests on. Enable is a
     // separate owner edit after the saved rule can be inspected.
     row.enabled = false;
@@ -427,6 +433,7 @@ pub(crate) async fn update(
     State(s): State<AppState>,
     Path((bot, id)): Path<(String, Uuid)>,
     peer: Option<axum::Extension<crate::peer::PeerIdentity>>,
+    headers: axum::http::HeaderMap,
     Json(input): Json<TriggerInput>,
 ) -> Result<Json<TriggerDto>, ApiError> {
     let bot = bot_of(&s, &bot)?;
@@ -445,7 +452,7 @@ pub(crate) async fn update(
     // Saving the rule makes it the author's: an edit never keeps an earlier author's name on
     // text someone else wrote (`update_registry` also hands the row to the user).
     row.origin = scheduler::ScheduleOrigin::User;
-    row.author = crate::routes::author_of_caller(&s, peer.as_deref());
+    row.author = crate::routes::author_of_caller(&s, peer.as_deref(), &headers);
     row.enabled = input.enabled && !adopting;
     row.spec = match &rule.source {
         TriggerSource::Time { spec } => spec.clone(),
@@ -486,12 +493,15 @@ pub(crate) async fn delete(
 }
 /// Confirm that you wrote this trigger rule (one click for an `unknown` one). From then on it
 /// counts as your own automation: on a bot at the Full level its runs go without cards (money
-/// still asks) while the event data stays untrusted.
-#[utoipa::path(post,path="/v1/bots/{bot}/triggers/{trigger}/confirm",tag="triggers",operation_id="triggers_confirm",params(("bot"=String,Path),("trigger"=Uuid,Path)),security(("bearer"=[])),responses((status=200,body=TriggerDto),(status=403,body=ErrorBody),(status=404,body=ErrorBody),(status=409,body=ErrorBody)))]
+/// still asks) while the event data stays untrusted. The call names the `revision` of the rule
+/// you looked at and changes nothing when it was edited since (409).
+#[utoipa::path(post,path="/v1/bots/{bot}/triggers/{trigger}/confirm",tag="triggers",operation_id="triggers_confirm",params(("bot"=String,Path),("trigger"=Uuid,Path)),request_body=ConfirmAuthorInput,security(("bearer"=[])),responses((status=200,body=TriggerDto),(status=403,body=ErrorBody),(status=404,body=ErrorBody),(status=409,body=ErrorBody)))]
 pub(crate) async fn confirm(
     State(s): State<AppState>,
     Path((bot, id)): Path<(String, Uuid)>,
     peer: Option<axum::Extension<crate::peer::PeerIdentity>>,
+    headers: axum::http::HeaderMap,
+    Json(input): Json<ConfirmAuthorInput>,
 ) -> Result<Json<TriggerDto>, ApiError> {
     let bot = bot_of(&s, &bot)?;
     let row = schedule(&s, bot, id)?;
@@ -499,9 +509,19 @@ pub(crate) async fn confirm(
     if store.registry(row.id)?.is_none() {
         return Err(ApiError::not_found("trigger"));
     }
-    if crate::routes::author_of_caller(&s, peer.as_deref()) != scheduler::ScheduleAuthor::Owner {
+    if crate::routes::author_of_caller(&s, peer.as_deref(), &headers)
+        != scheduler::ScheduleAuthor::Owner
+    {
         return Err(ApiError::forbidden(
             "confirm a trigger in the desktop app on this computer or your administrator desktop",
+        ));
+    }
+    if store.frozen_for(row.id)?.is_some() {
+        return Err(scheduler::SchedulerError::Frozen(row.id.to_string()).into());
+    }
+    if row.revision != input.revision {
+        return Err(ApiError::conflict(
+            "this trigger changed after you looked at it: read its current text and confirm again",
         ));
     }
     s.storage().append_audit(
@@ -509,11 +529,11 @@ pub(crate) async fn confirm(
         None,
         "user",
         "trigger.confirm_author",
-        &serde_json::json!({"id":id,"bot":bot}),
+        &serde_json::json!({"id":id,"bot":bot,"revision":input.revision}),
     )?;
-    if !store.confirm_author(row.id)? {
+    if !store.confirm_author(row.id, input.revision)? {
         return Err(ApiError::conflict(
-            "this trigger is already confirmed, or a bot made it: edit and save it to take it over",
+            "this trigger changed, is already confirmed, or a bot made it: read it again, or edit and save it to take it over",
         ));
     }
     Ok(Json(dto(

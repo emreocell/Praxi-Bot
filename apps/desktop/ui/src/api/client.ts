@@ -1316,13 +1316,16 @@ export class ApiClient {
   runScheduleNow(id: string): Promise<AcceptedResponse> {
     return this.request("POST", `/schedules/${id}/run-now`);
   }
-  /** Confirm you wrote this schedule: from then on a Full bot runs it without cards (money still asks). */
-  confirmSchedule(id: string): Promise<Schedule> {
-    return this.request("POST", `/schedules/${id}/confirm`);
+  /**
+   * Confirm you wrote this schedule: from then on a Full bot runs it without cards (money still
+   * asks). `revision` is the version you looked at; an edit since then answers 409 and confirms nothing.
+   */
+  confirmSchedule(id: string, revision: number): Promise<Schedule> {
+    return this.request("POST", `/schedules/${id}/confirm`, { body: { revision } });
   }
-  /** Confirm you wrote this event rule (same effect as `confirmSchedule`). */
-  confirmTrigger(bot: string, id: string): Promise<import("../lib/triggers").BotTrigger> {
-    return this.request("POST", `/bots/${bot}/triggers/${id}/confirm`);
+  /** Confirm you wrote this event rule (same effect and revision rule as `confirmSchedule`). */
+  confirmTrigger(bot: string, id: string, revision: number): Promise<import("../lib/triggers").BotTrigger> {
+    return this.request("POST", `/bots/${bot}/triggers/${id}/confirm`, { body: { revision } });
   }
   /**
    * Bring a schedule that moved to a server back to this computer. The server's copy is

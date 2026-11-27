@@ -1052,7 +1052,7 @@ the rounds",
             ));
         }
         self.audit(caller, "schedule.update", label, &next, Some(&cur))?;
-        let applied = self.store.update_config(&next, Some(next.enabled), now, Some(f.trigger.as_ref())).map_err(err).and_then(|ok| {
+        let applied = self.store.update_config_by_bot(&next, Some(next.enabled), now, Some(f.trigger.as_ref())).map_err(err).and_then(|ok| {
             if ok.is_some() {
                 Ok(())
             } else {
@@ -1151,6 +1151,7 @@ impl ScheduleHost for DaemonScheduleHost {
         )
         .map_err(err)?;
         sc.origin = ScheduleOrigin::Bot;
+        sc.author = scheduler::ScheduleAuthor::Bot;
         sc.precheck = f.precheck;
         self.audit(caller, "schedule.create", "created", &sc, None)?;
         if let Err(e) = self

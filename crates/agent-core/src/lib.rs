@@ -133,8 +133,8 @@ pub use profile::{
 };
 pub use scoped_grant::{Scope, ScopeKind};
 pub use shared::{
-    ApprovalScope, CategoryDecision, Delivery, EffectivePolicy, Grant, GrantTarget, HandoverInfo,
-    LoopError, MessageMode, MissionTarget, Providers, QueuedMessage, ScheduleWork,
+    ApprovalScope, CategoryDecision, Delivery, EffectivePolicy, ExternalSource, Grant, GrantTarget,
+    HandoverInfo, LoopError, MessageMode, MissionTarget, Providers, QueuedMessage, ScheduleWork,
     SecretRequestInfo, SkillHintFn, SkillHints, StreamItem, WorkspaceWarningEvent, build_providers,
     embedding_key_resolver, initiator_of, occurrence_kind, schedule_id_of,
 };

@@ -21,6 +21,8 @@ export interface BotTrigger extends TriggerInput {
   origin: "rule" | "schedule" | "webhook";
   /** Who wrote the rule, as the daemon recorded it. Only an `owner` rule runs without cards on a Full bot. */
   author: "owner" | "bot" | "unknown";
+  /** Version of the rule; a confirmation names the one the owner looked at. */
+  revision: number;
   id: string;
   bot_id: string;
   last_fired_at_ms: number | null;

@@ -594,6 +594,7 @@ impl Modify for Security {
         dto::ModelMetadataDto,
         dto::ModelUsage,
         dto::PairCodeDto,
+        dto::ConfirmAuthorInput,
         dto::ParseSchedule,
         dto::ParsedSchedule,
         dto::PolicyDto,

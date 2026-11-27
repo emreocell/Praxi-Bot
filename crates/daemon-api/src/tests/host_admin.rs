@@ -855,6 +855,16 @@ async fn a_bot_that_only_shares_a_name_is_refused_and_schedules_only_follow_the_
             .all(|s| s["bot_id"] == json!(host_bot))
     );
     assert_eq!(on_host.as_array().unwrap().len(), 2);
+    // The sending computer's record is not proof: a moved schedule is nobody's until the
+    // owner confirms it here, so it does not run on the Full lane meanwhile.
+    assert!(
+        on_host
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s["author"] == "unknown"),
+        "{on_host}"
+    );
 }
 
 #[tokio::test]

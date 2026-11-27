@@ -204,7 +204,9 @@ Karar veren şey çalışmayı neyin başlattığı değil, **talimatı kimin ya
 
 Bir zamanlamayı ya da kuralı yeniden kaydetmek **seni** yazarı yapar (kayıt eşleşmiş bir telefondan geldiyse yine `unknown` olur). Böylece daha önce onayladığın bir şeye kimse yeni metin sokamaz. Kendi zamanlamasını düzenleyen bir bot onu `bot` zamanlaması yapar.
 
-**Tek tıkla onayla.** Tam seviyedeki bir botun bot panelindeki **Otomasyon** sekmesi, yazarı bilinmeyen her zamanlamanın ya da kuralın altında **Bu benim** düğmesini gösterir. Bir kez bas, kayıt o andan itibaren senin sayılır (daemon denetim kaydına yazar). Bir botun yaptığı zamanlama böyle onaylanmaz: aç, metni kontrol et ve kaydet, böylece onu devralmış olursun.
+**Tek tıkla onayla.** Tam seviyedeki bir botun bot panelindeki **Otomasyon** sekmesi, yazarı bilinmeyen her zamanlamanın ya da kuralın altında **Bu benim** düğmesini gösterir. Bir kez bas, kayıt o andan itibaren senin sayılır (daemon denetim kaydına yazar). Düğme baktığın sürümü onaylar: metin bu arada değiştiyse (telefondan, bir bottan) hiçbir şey onaylanmaz, önce yeniden okursun. Bir botun yaptığı zamanlama böyle onaylanmaz: aç, metni kontrol et ve kaydet, böylece onu devralmış olursun. Senin olduğunu kanıtlayamayan bir çağrı (yalnızca API anahtarı, sahip anahtarı yok) asla sen sayılmaz: kaydettiği şey `unknown` olur.
+
+**E-posta ve webhook kanalları.** Kurala bağlı olmayan, senin kurduğun e-posta kanalından ya da imzalı gelen webhook'tan başlayan bir koşu, o kanal ya da webhook hâlâ varsa ve aynı bota aitse kartsız çalışır; aksi halde kartları sürer.
 
 **Alt ajanlar.** Şeridin hizmet verdiği bir çalışmanın (senin yazdığın bir çalışma, ya da senin yazdığın bir zamanlama veya tetikleyici) alt ajanları, her zamanki derinlik sınırı içinde onu devralır. Başka bir botun çağırdığı yardımcı bot hiçbir zaman devralmaz.
 

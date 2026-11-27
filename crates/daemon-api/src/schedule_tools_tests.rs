@@ -1795,3 +1795,56 @@ fn c225_event_trigger_approval_and_list_show_poll_cadence_without_timer_promises
         );
     }
 }
+
+/// Whoever wrote the text: a bot's tools leave a bot-authored row (never the owner's), and
+/// once the owner takes the row over, the bot's approved edit cannot touch it, so the Full
+/// lane can never follow text a model rewrote.
+#[test]
+fn a_bot_write_is_bot_authored_and_cannot_reach_the_owners_text() {
+    use scheduler::ScheduleAuthor;
+    let f = fx(limits(20, 300));
+    let v = f.make(&f.caller_a(), &when("mine", "daily")).unwrap();
+    let id = scheduler::TaskId(uuid::Uuid::parse_str(&v.id).unwrap());
+    let row = f.store.get(id).unwrap().unwrap();
+    assert_eq!(
+        (row.origin, row.author),
+        (ScheduleOrigin::Bot, ScheduleAuthor::Bot)
+    );
+    f.edit(&f.caller_a(), &v.id, &req("mine", "bot text"))
+        .unwrap();
+    let row = f.store.get(id).unwrap().unwrap();
+    assert_eq!(
+        (row.origin, row.author),
+        (ScheduleOrigin::Bot, ScheduleAuthor::Bot)
+    );
+    // the owner takes it over and writes their own text
+    let mut owners = row.clone();
+    owners.origin = ScheduleOrigin::User;
+    owners.author = ScheduleAuthor::Owner;
+    owners.payload = scheduler::Payload::AgentPrompt {
+        text: "owner text".into(),
+    };
+    f.store
+        .update_config(&owners, None, now_ms(), Some(None))
+        .unwrap()
+        .unwrap();
+    // an approval prepared earlier, and a fresh attempt: both refused, the text stays
+    let e = f
+        .edit(&f.caller_a(), &v.id, &req("mine", "bot rewrite"))
+        .unwrap_err();
+    assert!(
+        e.contains("created by the user") || e.contains("changed or was deleted"),
+        "{e}"
+    );
+    let row = f.store.get(id).unwrap().unwrap();
+    assert_eq!(
+        (row.origin, row.author),
+        (ScheduleOrigin::User, ScheduleAuthor::Owner)
+    );
+    assert_eq!(
+        row.payload,
+        scheduler::Payload::AgentPrompt {
+            text: "owner text".into()
+        }
+    );
+}

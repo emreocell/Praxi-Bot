@@ -600,7 +600,7 @@ impl Shared {
     ///
     /// * the owner typed it (desktop, admin desktop, paired Telegram chat) and every message of
     ///   the run was theirs: [`Self::full_owner_started`], subagents included;
-    /// * a schedule the owner wrote ([`Self::owner_wrote_root_schedule`]) wrote the only
+    /// * a schedule the owner wrote ([`Self::owner_set_up_root_source`]) wrote the only
     ///   instruction;
     /// * a trigger the owner wrote, or a webhook or inbound mail the owner set up, fed the run.
     ///   Its text stays fenced as untrusted data (see `TurnExecutor`); only the card is gone.
@@ -614,7 +614,7 @@ impl Shared {
         match ctx.initiator {
             InitiatorKind::Human => self.full_owner_started(ctx),
             InitiatorKind::Schedule => {
-                self.owner_wrote_root_schedule(ctx, false)
+                self.owner_set_up_root_source(ctx, false)
                     && self.root_run_id(ctx).is_some_and(|root| {
                         self.storage
                             .run_user_message_sources(root)
@@ -623,36 +623,43 @@ impl Shared {
                             })
                     })
             }
-            InitiatorKind::ExternalSchedule => self.owner_wrote_root_schedule(ctx, true),
+            InitiatorKind::ExternalSchedule => self.owner_set_up_root_source(ctx, true),
             _ => false,
         }
     }
 
-    /// Whether the schedule or rule at the root of this run was written by the OWNER, as the
-    /// scheduler recorded it when the definition was saved (the local app, or the owner's
-    /// administrator desktop). A schedule a bot's tools made, one written from a paired phone,
-    /// an import and every row from before authorship was recorded are not the owner's until the
-    /// owner confirms them in the app. Read live, so a later edit by anyone else ends the lane
-    /// at once; it fails closed (no checker wired, a deleted schedule, an unreadable parent
-    /// chain). A subagent counts through its root run.
+    /// Whether what started this run was set up by the OWNER: the schedule or rule at its root
+    /// was written by them, as the scheduler recorded it when the definition was saved (the
+    /// local app, or the owner's administrator desktop). A schedule a bot's tools made, one
+    /// written from a paired phone, an import and every row from before authorship was recorded
+    /// are not the owner's until the owner confirms them in the app. Read live, so a later edit
+    /// by anyone else ends the lane at once; it fails closed (no checker wired, a deleted
+    /// schedule, an unreadable parent chain). A subagent counts through its root run.
     ///
-    /// `ownerless_ok`: a run kind with no schedule behind it (an incoming webhook or mail
-    /// channel, which the owner configures through owner-only routes) passes.
-    fn owner_wrote_root_schedule(&self, ctx: &RunCtx, ownerless_ok: bool) -> bool {
+    /// `external_ok`: a run with no schedule behind it passes only when its kind names an
+    /// incoming webhook or the mail channel and the daemon vouches that the owner set that one
+    /// up for this bot ([`ExternalSource`]). An unnamed or unknown source never passes.
+    fn owner_set_up_root_source(&self, ctx: &RunCtx, external_ok: bool) -> bool {
         let Some(root) = self.root_run_id(ctx) else {
             return false;
         };
         let Ok(Some(run)) = self.storage.get_run(root) else {
             return false;
         };
-        match crate::shared::schedule_id_of(&run.kind) {
-            Some(id) => self
+        if let Some(id) = crate::shared::schedule_id_of(&run.kind) {
+            return self
                 .schedule_owner
                 .read()
                 .as_ref()
-                .is_some_and(|owner_wrote| owner_wrote(id)),
-            None => ownerless_ok,
+                .is_some_and(|owner_wrote| owner_wrote(id));
         }
+        external_ok
+            && crate::shared::external_source_of(&run.kind).is_some_and(|source| {
+                self.external_source_owner
+                    .read()
+                    .as_ref()
+                    .is_some_and(|owner_set_up| owner_set_up(ctx.bot_id, source))
+            })
     }
 
     /// The top-level run above `ctx`, or `None` when the parent chain cannot
