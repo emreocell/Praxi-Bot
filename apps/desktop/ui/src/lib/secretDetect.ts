@@ -26,7 +26,9 @@ const SHAPES: ReadonlyArray<{ kind: string; re: RegExp; ok?: (m: string) => bool
   { kind: "github_token", re: new RegExp(`${B}(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})(?![A-Za-z0-9_])`, "g") },
   { kind: "slack_token", re: new RegExp(`${B}xox[abprs]-[A-Za-z0-9-]{10,}`, "g") },
   { kind: "nvidia_key", re: new RegExp(`${B}nvapi-[A-Za-z0-9_-]{20,}`, "g") },
-  { kind: "jwt", re: new RegExp(`${B}eyJ[A-Za-z0-9_-]+\\.eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+`, "g") },
+  // Bounded segments (as long as any real token): `eyJ-eyJ-eyJ-...` has no dot to stop a run, and an
+  // unbounded `+` would rescan the rest of the text from every `eyJ`. The Rust shape reads the same minimums.
+  { kind: "jwt", re: new RegExp(`${B}eyJ[A-Za-z0-9_-]{8,512}\\.eyJ[A-Za-z0-9_-]{8,8192}\\.[A-Za-z0-9_-]{8,2048}`, "g") },
   { kind: "aws_access_key_id", re: new RegExp(`${B}(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])`, "g") },
   { kind: "stripe_key", re: new RegExp(`${B}[sr]k_live_[A-Za-z0-9]{20,}`, "g") },
   { kind: "telegram_bot_token", re: new RegExp(`${B}[0-9]{8,10}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])`, "g"), ok: (m) => /[A-Z]/.test(m.split(":")[1] ?? "") },
@@ -34,34 +36,93 @@ const SHAPES: ReadonlyArray<{ kind: string; re: RegExp; ok?: (m: string) => bool
   { kind: "gitlab_token", re: new RegExp(`${B}glpat-[A-Za-z0-9_-]{20,}`, "g") },
   { kind: "huggingface_token", re: new RegExp(`${B}hf_[A-Za-z]{34}(?![A-Za-z])`, "g") },
   { kind: "groq_key", re: new RegExp(`${B}gsk_[A-Za-z0-9]{40,}`, "g") },
-  { kind: "digitalocean_token", re: new RegExp(`${B}dop_v1_[0-9a-f]{64}(?![0-9a-f])`, "g") },
-  {
-    kind: "private_key",
-    re: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g
-  }
+  { kind: "digitalocean_token", re: new RegExp(`${B}dop_v1_[0-9a-f]{64}(?![0-9a-f])`, "g") }
 ];
 
-/** Candidates in text order, without overlaps (an earlier, longer match wins; a shape beats a label). */
+// A private key block runs to its END line, or to the end of the text when it is cut off.
+const PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
+
+/**
+ * A text is scanned in windows of this many UTF-16 units, so one huge paste costs a bounded amount of
+ * work per window and never a quadratic one. Mirrors `SCAN_WINDOW` in `secret_store::detect`.
+ */
+const SCAN_WINDOW = 64 * 1024;
+/** Each window also reads this much on either side, so a value or its label across an edge is seen whole. */
+const SCAN_CONTEXT = 4 * 1024;
+
+/** The nearest index at or before `i` (clamped to the text) that does not split a surrogate pair. */
+function floorBoundary(text: string, i: number): number {
+  const at = Math.min(Math.max(i, 0), text.length);
+  const low = text.charCodeAt(at);
+  const high = text.charCodeAt(at - 1);
+  return at > 0 && at < text.length && low >= 0xdc00 && low <= 0xdfff && high >= 0xd800 && high <= 0xdbff ? at - 1 : at;
+}
+
+/**
+ * Candidates in text order, without overlaps (an earlier, longer match wins; a shape beats a label).
+ * A candidate belongs to the window that holds its first unit; a shape longer than `SCAN_CONTEXT` that
+ * crosses a window edge is cut at the window's far edge (no real credential is that long).
+ */
 export function detectSecrets(text: string): SecretCandidate[] {
+  // A private key block can be long, so it is found over the whole text.
   const known: SecretCandidate[] = [];
-  for (const { kind, re, ok } of SHAPES) {
-    re.lastIndex = 0;
-    for (const m of text.matchAll(re)) {
-      if (ok && !ok(m[0])) continue;
-      known.push({ kind, start: m.index ?? 0, end: (m.index ?? 0) + m[0].length });
-    }
+  PRIVATE_KEY.lastIndex = 0;
+  for (const m of text.matchAll(PRIVATE_KEY)) {
+    known.push({ kind: "private_key", start: m.index ?? 0, end: (m.index ?? 0) + m[0].length });
   }
-  known.push(...detectCards(text));
-  const found = [...known];
-  for (const c of detectLabelled(text)) {
-    if (!known.some((k) => c.start < k.end && k.start < c.end)) found.push(c);
+  const labelled: SecretCandidate[] = [];
+  for (let ownStart = 0; ; ) {
+    const ownEnd = floorBoundary(text, ownStart + SCAN_WINDOW);
+    const from = floorBoundary(text, ownStart - SCAN_CONTEXT);
+    const to = floorBoundary(text, ownEnd + SCAN_CONTEXT);
+    const window = from === 0 && to === text.length ? text : text.slice(from, to);
+    const owned = (c: SecretCandidate): SecretCandidate[] => {
+      const start = c.start + from;
+      return start >= ownStart && start < ownEnd ? [{ kind: c.kind, start, end: c.end + from }] : [];
+    };
+    known.push(...[...detectShapes(window), ...detectCards(window)].flatMap(owned));
+    labelled.push(...detectLabelled(window).flatMap(owned));
+    if (ownEnd >= text.length) break;
+    ownStart = ownEnd;
   }
+  const found = [...dropOverlapping(known, labelled), ...known];
   found.sort((a, b) => a.start - b.start || b.end - a.end);
   const out: SecretCandidate[] = [];
   for (const c of found) {
     if (out.length === 0 || c.start >= out[out.length - 1].end) out.push(c);
   }
   return out;
+}
+
+function detectShapes(text: string): SecretCandidate[] {
+  const out: SecretCandidate[] = [];
+  for (const { kind, re, ok } of SHAPES) {
+    re.lastIndex = 0;
+    for (const m of text.matchAll(re)) {
+      if (ok && !ok(m[0])) continue;
+      out.push({ kind, start: m.index ?? 0, end: (m.index ?? 0) + m[0].length });
+    }
+  }
+  return out;
+}
+
+/** `later` without the candidates that share a unit with one of `first`, in `O((n + m) log n)`. */
+function dropOverlapping(first: readonly SecretCandidate[], later: readonly SecretCandidate[]): SecretCandidate[] {
+  const sorted = first.map((c) => [c.start, c.end] as const).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  // reach[i] is the furthest end among the first i + 1 spans.
+  const reach: number[] = [];
+  for (const [, end] of sorted) reach.push(Math.max(end, reach.length > 0 ? reach[reach.length - 1] : 0));
+  return later.filter((c) => {
+    // Spans that start before `c` ends; one of them must reach past `c.start`.
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid][0] < c.end) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo === 0 || reach[lo - 1] <= c.start;
+  });
 }
 
 /** `[secret: name]`, the plain-text stand-in for a stored value (it carries a name, never a value). */
@@ -202,7 +263,8 @@ function charAt(text: string, i: number): string {
 
 /** True when one of the last few words before `start` is a card label. */
 function cardLabelBefore(text: string, start: number): boolean {
-  const tail = Array.from(text.slice(0, start)).slice(-32).map(fold).join("");
+  // Only the last 32 code points count, and a code point is at most 2 units: never copy the whole prefix.
+  const tail = Array.from(text.slice(Math.max(0, start - 64), start)).slice(-32).map(fold).join("");
   const words = tail.split(/[^A-Za-z0-9]+/).filter((w) => w !== "");
   return words.slice(-4).some((w) => CARD_LABELS.has(w) || w.startsWith("kart") || w.startsWith("kredi"));
 }
@@ -309,6 +371,9 @@ interface Word {
 }
 
 const MAX_GAP_CHARS = 24;
+/** Chars of a labelled value that are read before giving up on it: the longest value (512) plus trailing punctuation. */
+const MAX_VALUE_SCAN = 520;
+const WHITESPACE = /\s/u;
 
 function detectLabelled(text: string): SecretCandidate[] {
   // Code points with their UTF-16 offset (plus the end), so spans index the original string.
@@ -385,7 +450,7 @@ function valueAfterLabel(
   let nw = nextWord;
   const gapStart = p;
   for (;;) {
-    while (p < chars.length && isGap(chars[p])) p++;
+    while (p < chars.length && p - gapStart <= MAX_GAP_CHARS && isGap(chars[p])) p++;
     // Skip one glue word ("is", "olarak", "şu"...), then more gap chars.
     const w = words[nw];
     if (w && w.first === p && GLUE.has(w.folded)) {
@@ -397,7 +462,11 @@ function valueAfterLabel(
   }
   if (p === gapStart || p - gapStart > MAX_GAP_CHARS || p >= chars.length) return null;
   const startChar = p;
-  while (p < chars.length && !/\s/u.test(chars[p]) && !VALUE_END.has(chars[p])) p++;
+  // Look at no more than MAX_VALUE_SCAN chars: a longer run is no value (the checks below allow 512 at most),
+  // and `token:token:token:...` must not make every label rescan the rest of the text.
+  const scanTo = Math.min(chars.length, startChar + MAX_VALUE_SCAN);
+  while (p < scanTo && !WHITESPACE.test(chars[p]) && !VALUE_END.has(chars[p])) p++;
+  if (p === scanTo && scanTo < chars.length) return null;
   // Trailing sentence punctuation is not part of the value.
   while (p > startChar && (chars[p - 1] === "." || chars[p - 1] === ":" || chars[p - 1] === "?")) p--;
   if (p <= startChar) return null;

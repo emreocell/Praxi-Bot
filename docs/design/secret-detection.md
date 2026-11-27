@@ -166,19 +166,46 @@ name, never a value, and the detector never reports one as a secret.
 
 Telegram and Discord cannot show the card, and a message from there reaches the daemon without the
 owner having seen a choice. So the adapters (`channel-telegram`, `channel-discord`) run the same
-detector once more, on the daemon side, with `secret_store::screen_inbound`, **before** the message
-is handed to the daemon (so before the model, the chat history, the event log and the run log):
+detector once more, on the daemon side, with `secret_store::screen_inbound`, at the single point where
+a text enters the adapter, **before** anything else holds it: before the inbox file, the daemon (so
+the model, the chat history, the event log and the run log), a command argument or a log line:
 
+* Telegram: `handle_updates`, ahead of `Inbox::enqueue` (the durable inbox writes each update to
+  disk, and keeps completed payloads). The text in the stored update *is* the redacted text, and a
+  flag on the update (`secret_cut`, set only there, never trusted from the wire) carries "tell the
+  owner" through retries and restarts. A voice transcript is cut before it is echoed back.
+* Discord: `dispatch`, before `on_text` (which also runs `!answer` and `!use`). The original string is
+  consumed there; only the redacted one is passed on.
 * each suspected value is replaced by `[REDACTED]` and the rest of the message goes on;
-* when nothing but secrets was in the message (a bare key), nothing is passed on;
+* when nothing but secrets was in the message (a bare key), nothing is passed on. "Nothing but" is
+  decided from the text outside the detected spans (no letter or digit there), not from the
+  redacted string, so a `[REDACTED]` the sender typed counts as a word;
 * the owner gets a reply in the chat, in their language (English or Turkish; Discord also German),
   saying a secret was cut out and pointing at the vault in the desktop app. The reply names no kind
-  and never repeats the value.
+  and never repeats the value. A retried Telegram update does not repeat it.
 
 What this cannot do: the original message stays in the Telegram or Discord chat (and with that
-service), so the reply asks the owner to delete it. The Telegram adapter's durable inbox also keeps
-the raw update on disk (completed payloads are retained), as it did before this feature. A message a paired device
-sends through the daemon API is not screened by this second check.
+service), so the reply asks the owner to delete it. A message a paired device sends through the daemon
+API is not screened by this second check.
+
+## Limits
+
+The detector runs on text a person pasted, so it must stay cheap on hostile input:
+
+* **Windows.** `detect_secrets` reads a text in windows of 64 KiB (`SCAN_WINDOW`), each with 4 KiB of
+  the neighbouring text on both sides (`SCAN_CONTEXT`) so a value or its label across an edge is seen
+  whole; a candidate belongs to the window that holds its first byte. No part of a long text goes
+  unscanned. The TypeScript port does the same in UTF-16 units. A private-key block is found over the
+  whole text because it can be long.
+* **Labelled values.** A value is read for at most 520 characters and the gap after a label for at
+  most 24, so `token:token:token:...` does not make every label rescan the text.
+* **Regexes.** Rust uses the `regex` crate (automata, linear time, no backtracking). The TypeScript
+  shapes are the ones a backtracking engine could be made to rescan: the JWT segments are bounded
+  (`{8,512}`, `{8,8192}`, `{8,2048}`); the others are a literal prefix, one character class run and a
+  one-character lookahead, which cannot backtrack across a run. There is no nested quantifier.
+* **Overlaps** between known shapes and labelled values are found by binary search, not by comparing
+  every pair.
+* **Callers.** `redact_candidates` never slices on a stale or mid-character span (it skips it).
 
 ## Out of scope
 
@@ -205,7 +232,7 @@ or removed without a click.
 ## Tests
 
 `crates/secret-store/tests/secret_detection_corpus.rs` holds a positive corpus and a negative one.
-The labelled, card and negative rows live in `crates/secret-store/tests/fixtures/detect-corpus.json`,
+The provider-shape, labelled, card, negative and stress rows live in `crates/secret-store/tests/fixtures/detect-corpus.json`,
 which `apps/desktop/ui/src/lib/secretDetect.test.ts` reads too: a row added there is checked against
 the Rust detector and its TypeScript port.
 
@@ -218,7 +245,11 @@ the Rust detector and its TypeScript port.
   are not cards (order and tracking numbers, IBAN, ID numbers, timestamps, Luhn-invalid numbers), and
   realistic Turkish and English chat messages, also wrapped in longer unicode text.
 * Channels: Telegram and Discord tests send a message with a key and a card number and check what
-  reaches the daemon fake and what the owner is told.
+  reaches the daemon fake, what is on disk (the whole inbox file), what a raw `receive` consumer gets,
+  what a retry sends and what the owner is told.
+* Stress: the `stress` rows of the corpus are long hostile inputs (`unit` repeated `times` times:
+  `token:token:...`, `eyJ-eyJ-...`, a million digits, a wall of emoji, many private-key headers). Both
+  test suites run them with a time limit and, where the row says so, an exact candidate count.
 
 The target is zero false positives on the negatives and every positive found. Add a message to the
 negative corpus whenever someone reports a false alarm.

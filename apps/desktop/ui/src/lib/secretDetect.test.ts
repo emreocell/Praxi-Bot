@@ -39,9 +39,25 @@ test("prose, hashes, uuids and look-alike words are not reported", () => {
 
 // The Rust detector's corpus (crates/secret-store/tests): the same rows must give the same answer here.
 interface Row { text: string; value: string; kind?: string }
+interface Stress { name: string; unit: string; times: number; found?: number }
+interface Shape { kind: string; prefix: string; body: string }
 const CORPUS = JSON.parse(
   readFileSync(new URL("../../../../../crates/secret-store/tests/fixtures/detect-corpus.json", import.meta.url), "utf8")
-) as { labelled: Row[]; cards: Row[]; negatives: string[] };
+) as { shapes: Shape[]; labelled: Row[]; cards: Row[]; negatives: string[]; stress: Stress[] };
+
+test("every provider shape is found with its kind and exact span, in every template (shared corpus)", () => {
+  assert.ok(CORPUS.shapes.length >= 17);
+  for (const { kind, prefix, body } of CORPUS.shapes) {
+    const value = prefix + body;
+    for (const template of ["{}", "here is my key: {} thanks", "export FOO={}\n", '("{}")', "anahtarım {} bu"]) {
+      const text = template.replace("{}", () => value);
+      const found = detectSecrets(text);
+      assert.equal(found.length, 1, `${kind} in ${JSON.stringify(template)}: ${JSON.stringify(found)}`);
+      assert.equal(found[0].kind, kind, template);
+      assert.equal(text.slice(found[0].start, found[0].end), value, `${kind} span in ${JSON.stringify(template)}`);
+    }
+  }
+});
 
 test("labelled values are found with the kind and exact span (shared corpus)", () => {
   assert.ok(CORPUS.labelled.length >= 20);
@@ -97,6 +113,61 @@ test("huge input stays fast", () => {
   const t0 = Date.now();
   assert.deepEqual(detectSecrets(big), []);
   assert.ok(Date.now() - t0 < 5000);
+});
+
+test("long pathological inputs from the shared corpus finish fast with the expected count", () => {
+  assert.ok(CORPUS.stress.length >= 10);
+  for (const { name, unit, times, found } of CORPUS.stress) {
+    const text = unit.repeat(times);
+    assert.ok(text.length > 100_000, `${name} is a long input`);
+    const t0 = Date.now();
+    const got = detectSecrets(text);
+    // A quadratic scan needs minutes on these; a linear one well under a second.
+    assert.ok(Date.now() - t0 < 5000, `${name} took ${Date.now() - t0} ms`);
+    if (found !== undefined) assert.equal(got.length, found, name);
+  }
+});
+
+// The window edge (`SCAN_WINDOW` = 64 KiB of UTF-16 units) must be invisible: same answer wherever a secret sits.
+const WINDOW = 64 * 1024;
+
+test("a secret across a scan-window edge is found whole, with exact offsets", () => {
+  for (const lead of [WINDOW - 9, WINDOW - 1, WINDOW, WINDOW + 5, 3 * WINDOW - 7]) {
+    const text = `é${"ab ".repeat(Math.floor(lead / 3))}${CANARY} end`;
+    const found = detectSecrets(text);
+    assert.equal(found.length, 1, `lead ${lead}`);
+    assert.equal(text.slice(found[0].start, found[0].end), CANARY, `lead ${lead}`);
+  }
+  // The edge falls between the two halves of an emoji (a surrogate pair): nothing is split or lost.
+  for (const pad of ["", "x"]) {
+    const text = `${pad}${"🙂".repeat(WINDOW / 2 + 3)}x ${GH} y`;
+    const found = detectSecrets(text);
+    assert.equal(found.length, 1);
+    assert.equal(text.slice(found[0].start, found[0].end), GH);
+  }
+});
+
+test("a label before a window edge still labels its value after it", () => {
+  const text = `${"ab ".repeat(WINDOW / 3 - 3)}password: Tr0ub4dor&3 x`;
+  const found = detectSecrets(text);
+  assert.deepEqual(found.map((c) => text.slice(c.start, c.end)), ["Tr0ub4dor&3"]);
+});
+
+test("secrets deep inside and at the end of a long text are all found", () => {
+  const words = "alpha beta gamma ".repeat(30_000);
+  const text = `${words}${CANARY} ${words}password: Tr0ub4dor&3 and ${GH}`;
+  const found = detectSecrets(text);
+  assert.deepEqual(found.map((c) => c.kind), ["openai_style_key", "labelled_password", "github_token"]);
+  assert.equal(removeSecrets(text, found).length, text.length - CANARY.length - "Tr0ub4dor&3".length - GH.length);
+});
+
+test("a card number glued to a long prefix still needs a card word within the last few", () => {
+  const prefix = "x ".repeat(500_000);
+  assert.deepEqual(detectSecrets(`${prefix}card 4111111111111111`).map((c) => c.kind), ["payment_card"]);
+  assert.deepEqual(detectSecrets(`${prefix}4111111111111111`), []);
+  // The word is just past the 32 code points that count: not a label any more.
+  assert.deepEqual(detectSecrets(`card ${"é".repeat(40)} 4111111111111111`), []);
+  assert.deepEqual(detectSecrets(`🙂 kart 🙂 4111111111111111`).map((c) => c.kind), ["payment_card"]);
 });
 
 test("storing swaps the value for a placeholder: the text keeps the name only", () => {
