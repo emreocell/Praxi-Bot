@@ -3468,7 +3468,8 @@
     "levelLabel": "Sormadan ne kadar yapabilir",
     "notNow": "Şimdi değil",
     "notice": {
-      "folder": "Kendi araçları şu klasörde çalışır: {{folder}}"
+      "folder": "Kendi araçları şu klasörde çalışır: {{folder}}",
+      "rollbackFailed": "{{model}} modeline geçilemedi ({{reason}}) ve bot eski modeline de dönemedi. Bir model daha seç."
     },
     "onlyFull": "{{cli}} değişiklikten önce soramıyor; kendi araçlarıyla çalışmasının tek yolu Tam erişim.",
     "text": "{{cli}} dosyaları kendisi okur, düzenler ve komut çalıştırır; Praxi bu bot için bir klasör açar. Praxi'nin kendi araçları (tarayıcı, uygulamalar, hafıza) Praxi'nin onaylarını korur.",

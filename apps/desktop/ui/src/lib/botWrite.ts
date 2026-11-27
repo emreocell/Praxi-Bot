@@ -33,10 +33,25 @@ export async function writeBotProfile(
   }
 }
 
+/** The engine step failed and so did putting the old model back: the bot stays on the new one. */
+export class RollbackFailedError extends Error {
+  /** Why the engine step failed (the first error). */
+  reason: unknown;
+  /** Why the old model could not be restored. */
+  undoError: unknown;
+  constructor(reason: unknown, undoError: unknown) {
+    super("the engine step failed and the previous model could not be restored");
+    this.name = "RollbackFailedError";
+    this.reason = reason;
+    this.undoError = undoError;
+  }
+}
+
 /**
  * Save a profile, then run the step that has to follow it (the engine's consent). When that step
  * fails, `undo` puts the profile back and the error still reaches the caller: a bot is never left
- * on a model that cannot answer because its second step failed.
+ * on a model that cannot answer because its second step failed. When the undo fails too, a
+ * `RollbackFailedError` carries both reasons, so the caller can say the bot is still on the new model.
  */
 export async function writeThenApply(
   write: () => Promise<Bot>,
@@ -47,7 +62,11 @@ export async function writeThenApply(
   try {
     await apply(saved);
   } catch (e) {
-    await undo(saved).catch(() => undefined);
+    try {
+      await undo(saved);
+    } catch (undoError) {
+      throw new RollbackFailedError(e, undoError);
+    }
     throw e;
   }
   return saved;

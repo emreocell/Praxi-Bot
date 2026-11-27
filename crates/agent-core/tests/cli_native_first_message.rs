@@ -199,61 +199,32 @@ async fn child(id: &str) {
         );
         assert!(events.contains("engine_needs_native"), "{id}: {events}");
     }
-    // A Full bot asks nothing but money: its engine that only works with its own tools gets them
-    // switched on by itself (saved, audited), so the first message is answered, not refused.
+    // A turn never switches the engine on, not even for a Full bot: only the owner's pick (the
+    // owner-authenticated engine route) does. The turn is refused, and nothing is saved or audited.
     if !matches!(driver, Driver::Claude | Driver::Codex) {
-        lp.set_workspaces_root(Some(root.join("workspaces")));
         let full_bot = format!("{governed}[permissions]\npreset='full'\n");
         lp.add_profile(bot, BotProfile::from_toml_str(&full_bot).unwrap());
         let run = lp.run_turn(chat, "hello").unwrap();
-        let state = wait(&lp, &mut rx, user, run).await;
+        assert_eq!(
+            wait(&lp, &mut rx, user, run).await,
+            RunState::Failed,
+            "{id} (full bot, governed engine)"
+        );
         let events = format!(
             "{:?}",
             storage::read_event_log(root.join("store").as_path(), run).unwrap()
         );
-        let offers_full = cli_provider::level_plan(driver, ApprovalLevel::Full).offered;
-        if offers_full {
-            assert_eq!(state, RunState::Succeeded, "{id} (full bot): {events}");
-            let stored = store.get_bot(bot).unwrap().unwrap().config["engine"].clone();
-            assert_eq!(stored["mode"], "native_tools", "{id}: {stored}");
-            assert_eq!(stored["approval_level"], "full", "{id}: {stored}");
-            assert!(stored["consent"]["native_tools_at_ms"].is_number(), "{id}");
-            assert!(stored["consent"]["full_access_at_ms"].is_number(), "{id}");
-            let folder = std::path::PathBuf::from(stored["workspace"].as_str().unwrap());
-            assert!(
-                folder.starts_with(root.join("workspaces")),
-                "{id}: {}",
-                folder.display()
-            );
-            assert!(
-                !folder.starts_with(root.join("store")),
-                "{id}: {}",
-                folder.display()
-            );
-            let audit = store.list_audit(user).unwrap();
-            assert!(
-                audit.iter().any(|a| a.action == "engine.updated"
-                    && a.detail["reason"] == "full_access_bot_needs_its_own_tools"),
-                "{id}: {audit:?}"
-            );
-            // The next message runs on the saved settings without another switch.
-            let again = lp.run_turn(chat, "hello again").unwrap();
-            assert_eq!(
-                wait(&lp, &mut rx, user, again).await,
-                RunState::Succeeded,
-                "{id}: second message"
-            );
-            let switches = store
+        assert!(events.contains("engine_needs_native"), "{id}: {events}");
+        let stored = store.get_bot(bot).unwrap().unwrap().config;
+        assert!(stored.get("engine").is_none(), "{id}: {stored}");
+        assert!(
+            store
                 .list_audit(user)
                 .unwrap()
                 .iter()
-                .filter(|a| a.action == "engine.updated")
-                .count();
-            assert_eq!(switches, 1, "{id}: switched once");
-        } else {
-            assert_eq!(state, RunState::Failed, "{id} (full bot, no Full level)");
-            assert!(events.contains("engine_needs_native"), "{id}: {events}");
-        }
+                .all(|a| a.action != "engine.updated"),
+            "{id}: a turn wrote an engine setting"
+        );
     }
     lp.add_profile(bot, BotProfile::from_toml_str(&native).unwrap());
     let run = lp.run_turn(chat, "hello").unwrap();

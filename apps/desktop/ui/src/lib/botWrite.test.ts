@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ApiError } from "../api/client.ts";
 import type { Bot } from "../api/types.ts";
-import { botWriteMessage, writeBotProfile, writeThenApply } from "./botWrite.ts";
+import { RollbackFailedError, botWriteMessage, writeBotProfile, writeThenApply } from "./botWrite.ts";
 
 const bot = (version: number) => ({ id: "b1", name: "Atlas", version, config: {} }) as unknown as Bot;
 
@@ -48,13 +48,25 @@ test("a model that cannot get its engine step is put back, and the error still r
     /workspace folder/
   );
   assert.deepEqual(calls, ["write", "apply", "undo:5"]);
-  // A failed undo does not hide the original error; a good apply never undoes.
-  await assert.rejects(
-    writeThenApply(async () => saved, async () => { throw new Error("first"); }, async () => { throw new Error("second"); }),
-    /first/
-  );
   calls.length = 0;
   const ok = await writeThenApply(async () => saved, async () => void calls.push("apply"), async () => void calls.push("undo"));
   assert.equal(ok, saved);
   assert.deepEqual(calls, ["apply"]);
+});
+
+test("when the old model cannot be put back either, the failure says so with both reasons", async () => {
+  const saved = bot(5);
+  await assert.rejects(
+    writeThenApply(
+      async () => saved,
+      async () => { throw new Error("first"); },
+      async () => { throw new Error("second"); }
+    ),
+    (e) => {
+      assert.ok(e instanceof RollbackFailedError);
+      assert.match(String((e.reason as Error).message), /first/);
+      assert.match(String((e.undoError as Error).message), /second/);
+      return true;
+    }
+  );
 });

@@ -132,3 +132,19 @@ test("an API model never waits for the engine check, whatever an earlier CLI lef
   assert.equal(needsEngineCheck({}), false);
   assert.equal(needsEngineCheck(undefined), false);
 });
+
+test("Full access never switches on an engine that cannot start: not installed, out of date and signed out stay blocked", () => {
+  const levels = ["ask", "accept_edits", "auto", "full"];
+  const fullBot = { models: { executor: "cli:agy/x" }, permissions: { preset: "full" } };
+  const cases: Array<[string, CliEngineDto, string]> = [
+    ["not installed", engine("agy", { installed: false, levels }), "not_installed"],
+    ["out of date", { ...engine("agy", { levels }), outdated: true } as CliEngineDto, "outdated"],
+    ["signed out", engine("agy", { auth: "signed_out", levels }), "sign_in"]
+  ];
+  for (const [name, cli, reason] of cases) {
+    assert.deepEqual(botEngineStatus(fullBot, [cli]), { kind: "blocked", cliId: "agy", name: "agy", reason }, name);
+    assert.deepEqual(engineStatus("cli:agy/x", DEFAULT_ENGINE, [cli], true), { kind: "blocked", cliId: "agy", name: "agy", reason }, name);
+  }
+  // Only a working engine is switched on.
+  assert.equal(botEngineStatus(fullBot, [engine("agy", { levels })]).kind, "auto");
+});

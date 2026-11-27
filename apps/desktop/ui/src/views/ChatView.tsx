@@ -107,7 +107,7 @@ import {
   showRouteChip
 } from "../lib/chatLogic";
 import { lastTurn, offersRegenerate, supersededGroups, supersededRunIds, type SupersededGroup } from "../lib/resendTurn";
-import { botWriteMessage, writeBotProfile, writeThenApply } from "../lib/botWrite";
+import { RollbackFailedError, botWriteMessage, writeBotProfile, writeThenApply } from "../lib/botWrite";
 import { splitMentions } from "../lib/mentionText";
 import { saveChatExport } from "../lib/chatHistory";
 import { dayHeader, type MessageTimes } from "../lib/messageTime";
@@ -359,6 +359,12 @@ export function ChatView({
       await refreshBots();
       toast.show(t("modelPicker.switched", { model: ref }), "success");
     } catch (e) {
+      if (e instanceof RollbackFailedError) {
+        // The bot is still on the model it could not use: say so, and show what is really saved.
+        await refreshBots().catch(() => {});
+        toast.show(t("engineConsent.notice.rollbackFailed", { model: ref, reason: botWriteMessage(e.reason, t) }), "danger", { durationMs: 15000 });
+        return;
+      }
       toast.show(botWriteMessage(e, t), "danger");
     }
   };

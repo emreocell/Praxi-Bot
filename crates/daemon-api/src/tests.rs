@@ -4064,6 +4064,42 @@ async fn a_native_bot_without_a_chosen_folder_gets_its_own_folder_outside_the_da
     assert!(folder_real.starts_with(&root_real), "{folder:?}");
     assert!(!folder_real.starts_with(&data_real), "{folder:?}");
     assert_eq!(folder_real.parent(), Some(root_real.as_path()));
+    // Not the home folder, not inside it, not a credential or CLI settings folder.
+    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+        let home = std::fs::canonicalize(home).unwrap_or_default();
+        assert!(
+            !home.starts_with(&folder_real),
+            "the home folder is inside {folder:?}"
+        );
+    }
+    assert_eq!(
+        builtin_tools::workspace_refusal(&folder, t.state.storage().data_dir()),
+        None
+    );
+    // Another bot gets its own folder, never the same one or one inside it.
+    let other = cli_bot_without_engine(&t).await;
+    let second = call(
+        &t,
+        Method::PUT,
+        &format!("{other}/engine"),
+        Some(
+            json!({"mode": "native_tools", "approval_level": "ask", "consent_native_tools": true}),
+        ),
+    )
+    .await;
+    assert_eq!(second.status, StatusCode::OK, "{:?}", second.json());
+    let second_real = std::fs::canonicalize(
+        second.json()["config"]["engine"]["workspace"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        second_real != folder_real
+            && !second_real.starts_with(&folder_real)
+            && !folder_real.starts_with(&second_real),
+        "{second_real:?} / {folder_real:?}"
+    );
     // A second save (another level) keeps that folder.
     let again = call(
         &t,
@@ -4122,6 +4158,32 @@ async fn an_api_model_picked_after_a_failing_cli_model_answers_the_next_message(
         last["content"].as_str().unwrap().contains("hello again"),
         "{msgs}"
     );
+}
+
+/// Without a workspaces root there is no default folder: the owner is told to choose one, and
+/// nothing is created inside the data folder (on a host the service home IS the data folder).
+#[tokio::test]
+async fn without_a_workspaces_root_no_folder_is_made_and_the_owner_is_asked_to_choose_one() {
+    let t = setup();
+    let path = cli_bot_without_engine(&t).await;
+    let refused = call(
+        &t,
+        Method::PUT,
+        &format!("{path}/engine"),
+        Some(
+            json!({"mode": "native_tools", "approval_level": "ask", "consent_native_tools": true}),
+        ),
+    )
+    .await;
+    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(refused.json()["error"]["code"], "bad_engine");
+    assert!(
+        refused.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("could not create a work folder")
+    );
+    assert!(!t.state.storage().data_dir().join("Praxi").exists());
 }
 
 /// A folder saved by an older version (inside the data folder, which the rule now refuses) is not

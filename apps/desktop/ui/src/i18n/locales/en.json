@@ -3468,7 +3468,8 @@
     "levelLabel": "How much it may do without asking",
     "notNow": "Not now",
     "notice": {
-      "folder": "Its own tools work in this folder: {{folder}}"
+      "folder": "Its own tools work in this folder: {{folder}}",
+      "rollbackFailed": "Could not switch to {{model}} ({{reason}}), and the bot could not go back to its old model either. Pick a model again."
     },
     "onlyFull": "{{cli}} cannot ask before changes, so Full access is the only way it works with its own tools.",
     "text": "{{cli}} reads, edits and runs commands itself, in a folder Praxi makes for this bot. Praxi's own tools (browser, apps, memory) keep Praxi's approvals.",

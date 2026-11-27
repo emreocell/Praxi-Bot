@@ -243,7 +243,7 @@ pub(crate) fn ensure_bot_dir_in_root(
         // If a file or symlink already sits at a subdir name, leave it alone rather
         // than overwriting user data, unless it is a missing entry.
         if fs::symlink_metadata(&sub_path).is_err() {
-            fs::create_dir(&sub_path)
+            create_private_dir(&sub_path)
                 .map_err(|e| format!("create workspace subfolder {sub}: {e}"))?;
         }
     }
@@ -282,9 +282,23 @@ fn ensure_plain_child_dir(parent: &Path, child: &Path) -> Result<(), String> {
             Ok(())
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir(child).map_err(|err| format!("create {}: {err}", child.display()))
+            create_private_dir(child).map_err(|err| format!("create {}: {err}", child.display()))
         }
         Err(e) => Err(format!("stat {}: {e}", child.display())),
+    }
+}
+
+/// Make one directory that only its creator can use (`0700` on Unix, where a bot's folder and
+/// its standard subfolders are never readable by other accounts, whatever the process umask).
+fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new().mode(0o700).create(path)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir(path)
     }
 }
 
@@ -593,6 +607,31 @@ mod tests {
         for sub in WORKSPACE_SUBDIRS {
             assert!(ensured.join(sub).is_dir(), "missing subfolder {sub}");
         }
+    }
+
+    /// A bot's folder and its standard subfolders are private to the service account (`0700`), a
+    /// symlink in a bot's place is refused, and two bots never get the same or nested folders.
+    #[cfg(unix)]
+    #[test]
+    fn bot_folders_are_private_distinct_and_never_links() {
+        use std::os::unix::fs::{MetadataExt, symlink};
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("praxi-data");
+        fs::create_dir_all(&data).unwrap();
+        let root = tmp.path().join("praxi-work");
+        let a = ensure_bot_workspace_dir(&root, "Ada", &data).unwrap();
+        let b = ensure_bot_workspace_dir(&root, "Bob", &data).unwrap();
+        assert!(!a.starts_with(&b) && !b.starts_with(&a), "{a:?} {b:?}");
+        assert_ne!(a, b);
+        for dir in std::iter::once(a.clone()).chain(WORKSPACE_SUBDIRS.iter().map(|s| a.join(s))) {
+            let mode = fs::metadata(&dir).unwrap().mode() & 0o777;
+            assert_eq!(mode & 0o077, 0, "{dir:?} is {mode:o}");
+        }
+        // A link standing where a bot's folder would be is refused, not followed.
+        let root_real = validate_workspaces_root(&root, &data).unwrap();
+        symlink(&a, root_real.join("Evil")).unwrap();
+        let err = ensure_bot_workspace_dir(&root, "Evil", &data).unwrap_err();
+        assert!(err.contains("not a plain directory"), "{err}");
     }
 
     #[test]

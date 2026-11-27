@@ -160,14 +160,17 @@ Praxi makes the work folder for the bot, so picking a model never asks for one:
 host (outside Praxi's data folder, where the folder rule below accepts it). Choose a
 folder yourself only when you want a specific one.
 
-A bot on **Full access** asks nothing except before spending money, so a CLI that only
-works with its own tools (every one in the table except Claude Code and Codex, which
-can also run confined) is switched to native tools at the Full level without a question, when you
-pick it and again at the next message if the bot was left half set up. The audit log
-records that switch as automatic. The CLI's own tools do not go through Praxi's money
-card; Praxi's tools (browser, apps, memory) still do. If the CLI is not installed,
-signed out or out of date on that computer, the composer says so before sending and
-offers Install (Settings, AI) or another model.
+A bot on **Full access** asks nothing except before spending money, so when you pick a
+CLI that only works with its own tools (every one in the table except Claude Code and
+Codex, which can also run confined) for a Full bot, the app switches native tools on at
+the Full level without a dialog. Your pick of the engine is the consent: it goes through
+the owner-only engine setting and the audit log records it like any other change. A turn,
+the model or another caller never switches it on; a bot left on such a CLI without it is
+refused with a plain message, and the app applies your pick again at the next message you
+send from it. The CLI's own tools do not go through Praxi's money card; Praxi's tools
+(browser, apps, memory) still do. If the CLI is not installed, signed out or out of date
+on that computer, the composer says so before sending and offers Install (Settings, AI)
+or another model, and nothing is switched on for an engine that cannot start.
 
 | CLI | Ask | Accept edits | Auto | Full access |
 | --- | --- | --- | --- | --- |

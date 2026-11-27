@@ -21610,7 +21610,7 @@
               "string",
               "null"
             ],
-            "description": "Absolute workspace folder for `native_tools`; when omitted the bot keeps the folder it\nhas, else the daemon uses the bot's own workspace folder (`<workspaces root>/<bot>`, or\n`<home>/Praxi/<bot>` without a workspaces root)."
+            "description": "Absolute workspace folder for `native_tools`; when omitted the bot keeps the folder it\nhas, else the daemon uses the bot's own workspace folder under the workspaces root."
           }
         },
         "additionalProperties": false
