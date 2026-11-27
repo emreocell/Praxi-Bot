@@ -37,20 +37,49 @@ pub(crate) fn trusted_candidate(path: &Path) -> bool {
     let Ok(cwd) = std::env::current_dir().and_then(std::fs::canonicalize) else {
         return false;
     };
-    !real.starts_with(cwd)
+    let home = std::env::var_os("HOME").and_then(|h| std::fs::canonicalize(h).ok());
+    outside_working_dir(&real, &cwd, home.as_deref())
 }
+
+/// A program inside the working directory is refused (a planted file must never run by
+/// accident). The one exception is a daemon that lives in its own private home: a service
+/// user's `WorkingDirectory` is often its home (installs older than #914 still are), and that
+/// home holds the CLI install tree (`~/.local/bin`, `~/.npm-global`, ...). Every candidate is
+/// already a fixed search directory, so refusing the whole home would hide every CLI the
+/// service user installed. Applies on Unix only, and only when the folder is not writable by
+/// group or others (a shared `/tmp` as home would make it a plant spot again).
+fn outside_working_dir(real: &Path, cwd: &Path, home: Option<&Path>) -> bool {
+    !real.starts_with(cwd) || private_root_or_home(cwd, home)
+}
+
+/// `cwd` is `/` (systemd's default `WorkingDirectory`: it contains everything, so it can exclude
+/// nothing) or the private home folder itself.
+#[cfg(unix)]
+fn private_root_or_home(cwd: &Path, home: Option<&Path>) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    (cwd.parent().is_none() || home.is_some_and(|h| h == cwd))
+        && std::fs::metadata(cwd).is_ok_and(|m| m.is_dir() && m.permissions().mode() & 0o022 == 0)
+}
+
+#[cfg(not(unix))]
+fn private_root_or_home(_cwd: &Path, _home: Option<&Path>) -> bool {
+    false
+}
+
+/// Folders under the home directory where coding CLIs install themselves.
+pub(crate) const HOME_BIN_DIRS: [&str; 7] = [
+    ".local/bin",
+    ".npm-global/bin",
+    ".opencode/bin",
+    ".claude/local",
+    ".volta/bin",
+    ".bun/bin",
+    "bin",
+];
 
 pub(crate) fn augment(env: &mut PathEnv) {
     if let Some(home) = &env.home_dir {
-        for rel in [
-            ".local/bin",
-            ".npm-global/bin",
-            ".opencode/bin",
-            ".claude/local",
-            ".volta/bin",
-            ".bun/bin",
-            "bin",
-        ] {
+        for rel in HOME_BIN_DIRS {
             env.path_dirs.push(home.join(rel));
         }
         // npm's user prefix on Windows, even after a GUI was launched.
@@ -144,6 +173,45 @@ mod tests {
             assert!(crate::detect::find_candidate("hijack", &env).is_none());
         }
     }
+    /// The service user's layout: HOME = the working directory, CLIs under `~/.local/bin`.
+    #[cfg(unix)]
+    #[test]
+    fn a_service_home_that_is_the_working_directory_still_finds_its_own_clis() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = std::fs::canonicalize(tmp.path())
+            .unwrap()
+            .join("var-lib-praxi");
+        let bin = home.join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let agy = bin.join("agy");
+        std::fs::write(&agy, b"fixture").unwrap();
+        let set = |mode| std::fs::set_permissions(&home, std::fs::Permissions::from_mode(mode));
+
+        set(0o750).unwrap();
+        assert!(outside_working_dir(&agy, &home, Some(&home)), "home is cwd");
+        // Without the home exception the same file is refused: the rule itself is unchanged.
+        assert!(!outside_working_dir(&agy, &home, None));
+        // Another folder that merely contains the file stays refused, even beside a home.
+        let project = home.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let planted = project.join("claude");
+        std::fs::write(&planted, b"fixture").unwrap();
+        assert!(!outside_working_dir(&planted, &project, Some(&home)));
+        // A home that others can write to is a plant spot, not a private home.
+        set(0o777).unwrap();
+        assert!(!outside_working_dir(&agy, &home, Some(&home)));
+        set(0o700).unwrap();
+    }
+
+    /// systemd starts a service in `/` when no `WorkingDirectory` is set: nothing is "inside" it.
+    #[cfg(unix)]
+    #[test]
+    fn a_service_started_in_the_root_directory_refuses_nothing() {
+        let real = Path::new("/usr/bin/env");
+        assert!(outside_working_dir(real, Path::new("/"), None));
+    }
+
     #[test]
     fn verbatim_prefix_is_removed_only_for_drive_and_unc_paths() {
         let p = |s: &str| plain_path(PathBuf::from(s));

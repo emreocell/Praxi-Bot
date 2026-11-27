@@ -5,6 +5,8 @@
 
 pub mod adapter;
 pub mod detect;
+pub mod foreground;
+pub mod identity;
 pub mod install;
 pub mod levels;
 pub mod login;

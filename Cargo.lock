@@ -1497,6 +1497,7 @@ dependencies = [
  "pty-session",
  "regex",
  "reqwest 0.12.28",
+ "rustix",
  "secret-store",
  "serde",
  "serde_json",
