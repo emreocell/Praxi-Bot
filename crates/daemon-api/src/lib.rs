@@ -68,6 +68,7 @@ pub mod mission_host;
 mod mission_routes;
 pub mod openapi;
 pub mod owner;
+mod owner_notify;
 pub mod pc_access;
 pub mod peer;
 pub mod policy;
@@ -278,6 +279,10 @@ pub trait ChannelControl: Send + Sync {
 struct Inner {
     /// `schedule_changed` notifications for the daemon-wide event stream.
     schedule_events: tokio::sync::broadcast::Sender<dto::ScheduleChanged>,
+    /// Owner notices (mission and background-run digests) and the push settings.
+    owner_notify: owner_notify::Hub,
+    /// Set once the owner-notice watcher of the daemon-wide event feed runs.
+    notice_watcher: OnceLock<()>,
     /// Channels registered by the embedder.
     channels: parking_lot::Mutex<Vec<Arc<dyn ChannelControl>>>,
     agent: AgentLoop,
@@ -498,6 +503,8 @@ impl AppState {
         ));
         let state = Self(Arc::new(Inner {
             schedule_events: tokio::sync::broadcast::channel(64).0,
+            owner_notify: owner_notify::Hub::load(storage.data_dir()),
+            notice_watcher: OnceLock::new(),
             channels: parking_lot::Mutex::new(Vec::new()),
             agent,
             storage,
@@ -863,6 +870,7 @@ impl AppState {
         }
         self.start_scheduler()?;
         self.start_missions();
+        self.start_notice_watcher();
         for channel in self.0.channels.lock().iter() {
             channel.start();
         }
@@ -1617,6 +1625,23 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/missions/{id}/answers",
             post(mission_routes::answer_mission),
+        )
+        .route("/v1/owner-notices", get(owner_notify::list_notices))
+        .route(
+            "/v1/owner-notices/settings",
+            get(owner_notify::get_notice_settings).put(owner_notify::put_notice_settings),
+        )
+        .route(
+            "/v1/owner-notices/stream",
+            get(owner_notify::stream_notices),
+        )
+        .route(
+            "/v1/owner-notices/{id}/answers",
+            post(owner_notify::answer_notice),
+        )
+        .route(
+            "/v1/owner-notices/{id}/retry",
+            post(owner_notify::retry_notice),
         )
         .route(
             "/v1/bots/{id}/spend-limits",

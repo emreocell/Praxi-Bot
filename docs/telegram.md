@@ -39,7 +39,9 @@ inline buttons. Only Telegram accounts you pair can use it.
 | `bot channels telegram status` | Show configured / enabled / running and the number of paired users |
 | `bot channels telegram disable` | Turn the channel off (the token stays stored); takes effect at the next `bot serve` |
 
-In the chat with your bot: `/bots`, `/use <bot>`, `/stop`, `/status`, and
+In the chat with your bot: `/bots`, `/use <bot>`, `/stop`, `/status`,
+`/answer <text>` (answer the questions of a "needs you" message the daemon sent on its
+own, see [When a bot reports back on its own](guide/telegram.md#when-a-bot-reports-back-on-its-own)), and
 `/lang tr` or `/lang en` to pick the chat's language (see
 [Language](guide/telegram.md#language)). Any other text is sent to the selected
 bot. Voice messages, photos and files are not
@@ -53,6 +55,9 @@ read yet: the bot answers that it only understands text.
   a chat without an entry is English) are kept in `<data dir>/telegram_state.json`;
   the on/off switch is `<data dir>/channels.toml`.
 - Everything the bot sends to Telegram is passed through the secret redactor.
+- The daemon pushes mission and background-run digests to every paired chat from
+  `GET /v1/owner-notices/stream` (owner key required); the push settings and quiet
+  hours are `GET`/`PUT /v1/owner-notices/settings`.
 - The daemon API exposes `GET /v1/channels` and
   `POST /v1/channels/telegram/pair-code` (bearer token required); see
   `docs/api/openapi.json`.

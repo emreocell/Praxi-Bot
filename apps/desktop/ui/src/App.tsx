@@ -120,6 +120,7 @@ import { usePanelReserve } from "./state/usePanelReserve";
 import { useViewportWidth } from "./state/useViewportWidth";
 import { PaletteHost, type PaletteScreen } from "./state/PaletteHost";
 import { DigestNotifier } from "./state/DigestNotifier";
+import { OwnerNoticeSync } from "./state/OwnerNoticeSync";
 import { ShellBridgeHost } from "./state/ShellBridgeHost";
 import { AddSkillModal } from "./components/AddSkillModal";
 import { useToast } from "./components/Toast";
@@ -1518,6 +1519,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
           isPrivate={settings.notifyPrivate}
           onHandled={(day) => updateSettings({ digestLastDay: day })}
         />
+        <OwnerNoticeSync isPrivate={settings.notifyPrivate} />
         <HumanDrivingBanner />
         {runBanner}
         {settings.onboardingSkipped && !settings.onboardingCompleted && route.kind !== "onboarding" ? (

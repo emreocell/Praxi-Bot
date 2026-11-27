@@ -5817,6 +5817,23 @@
     "typingPreview": "Yazılıyor",
     "youAreInControl": "Kontrol sende"
   },
+  "ownerNotice": {
+    "counts": "{{done}} / {{total}} tamam, {{blocked}} seni bekliyor, {{failed}} vazgeçildi.",
+    "inApp": "Uygulamada bekleyen: {{count}}.",
+    "private": {
+      "blocked": "Bir görev senden bir şey bekliyor",
+      "failed": "Bir görev başarısız oldu",
+      "finished": "Bir görev bitti",
+      "progress": "Bir görev ilerledi"
+    },
+    "questions": "Sana sorular: {{count}}.",
+    "title": {
+      "blocked": "{{title}} senden bir şey bekliyor",
+      "failed": "{{title}} başarısız oldu",
+      "finished": "{{title}} tamamlandı",
+      "progress": "{{title}}: {{done}} / {{total}} tamam"
+    }
+  },
   "pageReader": {
     "bot": "Bot",
     "description": "Botun web sayfası ve e-posta gibi başkalarının yazdığı metinleri nasıl okuduğu.",
@@ -6598,6 +6615,22 @@
       },
       "noFile": "Arka plan görseli seçilmedi",
       "title": "Arka plan görseli"
+    },
+    "channelNotify": {
+      "approvalsNote": "Bir şey için ödeme yapmak gibi onaylar her zaman uygulamada verilir, sohbetten asla.",
+      "blocked": "Bir bot bana ihtiyaç duyuyor",
+      "blockedHint": "Tüm soruları tek mesajda. Sohbetten yanıtlayabilirsin.",
+      "description": "Sen yokken botların kendiliğinden neyi haber verecek.",
+      "failed": "Bir şey başarısız oldu",
+      "failedHint": "Nedeni ve yeniden denemek için bir düğme.",
+      "finished": "Bir görev ya da misyon bitti",
+      "finishedHint": "Yapılanların kısa özeti.",
+      "progress": "Yol boyunca ilerleme",
+      "progressHint": "Bir misyonun %25, %50 ve %75'inde kısa bir not. Varsayılan olarak kapalı.",
+      "quietEnabled": "Sessiz saatlerde mesajları beklet",
+      "quietHint": "Sessiz saatler bitince gelir. Hiçbir şey kaybolmaz.",
+      "quietTitle": "Mesajlar için sessiz saatler",
+      "title": "Telegram, Discord ve diğer kanallar"
     },
     "digest": {
       "enabled": "Günlük özet gönder",

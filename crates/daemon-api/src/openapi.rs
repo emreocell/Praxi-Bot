@@ -48,6 +48,7 @@ use crate::mcp_routes;
 use crate::mcp_server;
 use crate::memory;
 use crate::mission_routes;
+use crate::owner_notify;
 use crate::page_reader_routes;
 use crate::peer;
 use crate::profile_share;
@@ -422,6 +423,12 @@ impl Modify for Security {
         mission_routes::resume_mission,
         mission_routes::cancel_mission,
         mission_routes::answer_mission,
+        owner_notify::list_notices,
+        owner_notify::get_notice_settings,
+        owner_notify::put_notice_settings,
+        owner_notify::stream_notices,
+        owner_notify::answer_notice,
+        owner_notify::retry_notice,
         bot_limits_routes::put_bot_spend_limits,
         page_reader_routes::get_page_reader,
         page_reader_routes::put_page_reader,
@@ -855,6 +862,15 @@ impl Modify for Security {
         bot_limits_routes::BotLimitUsageDto,
         mission_routes::MissionAnswerInput,
         mission_routes::MissionAnswersDto,
+        owner_notify::OwnerNotifySettings,
+        owner_notify::QuietWindow,
+        owner_notify::NoticeAnswersInput,
+        owner_notify::NoticeAnswersDto,
+        channel_api::notice::OwnerNotice,
+        channel_api::notice::NoticeItem,
+        channel_api::notice::NoticeKind,
+        channel_api::notice::NoticeSource,
+        channel_api::notice::NoticeProgress,
         mission_routes::MissionAnswersInput,
         mission_routes::MissionBudgetsDto,
         mission_routes::MissionDetailDto,
@@ -941,6 +957,7 @@ impl Modify for Security {
         (name = "runs"),
         (name = "schedules"),
         (name = "missions"),
+        (name = "notifications"),
         (name = "secrets"),
         (name = "skills"),
         (name = "usage"),

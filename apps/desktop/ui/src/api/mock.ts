@@ -13,6 +13,7 @@ import { longChatEvents, longChatMessages } from "./mockLongChat.ts";
 import type {
   BotSpendLimits,
   CreateMission,
+  OwnerNotifySettings,
   MissionAnswer,
   BrowserProfileStatus,
   IncomingWebhook,
@@ -843,6 +844,13 @@ const DOCTOR_CHECKS: DoctorCheck[] = [
  */
 export class MockApiClient extends ApiClient {
   private readonly incomingWebhooks = new Map<string, IncomingWebhook[]>();
+  private ownerNotify: OwnerNotifySettings = {
+    finished: true,
+    failed: true,
+    blocked: true,
+    progress: false,
+    quiet_hours: null
+  };
   private readonly browserProfiles = new Map<string, BrowserProfileStatus>([
     [
       ATLAS,
@@ -1617,6 +1625,13 @@ export class MockApiClient extends ApiClient {
     const seg = path.split("/").filter(Boolean).map(decodeURIComponent);
     if (path === "/connectivity" && method === "GET") return ok({ services: [] });
     if (seg[0] === "bots" && seg[2] === "triggers") return ok(this.triggers.route(method, seg, opts.body));
+    if (seg[0] === "owner-notices") {
+      if (seg[1] === "settings") {
+        if (method === "PUT") this.ownerNotify = opts.body as OwnerNotifySettings;
+        return ok(this.ownerNotify);
+      }
+      return ok([]);
+    }
     if (seg[0] === "missions") {
       const id = seg[1] ?? "";
       if (!id) {

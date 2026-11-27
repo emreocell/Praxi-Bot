@@ -5757,6 +5757,23 @@
     "typingPreview": "Escribiendo",
     "youAreInControl": "Tienes el control"
   },
+  "ownerNotice": {
+    "counts": "{{done}} de {{total}} hechas, {{blocked}} te esperan, {{failed}} abandonadas.",
+    "inApp": "Esperando en la app: {{count}}.",
+    "private": {
+      "blocked": "Una tarea te necesita",
+      "failed": "Una tarea falló",
+      "finished": "Una tarea terminó",
+      "progress": "Una tarea avanzó"
+    },
+    "questions": "Preguntas para ti: {{count}}.",
+    "title": {
+      "blocked": "{{title}} te necesita",
+      "failed": "{{title}} falló",
+      "finished": "{{title}} terminó",
+      "progress": "{{title}}: {{done}} de {{total}} hechas"
+    }
+  },
   "pageReader": {
     "bot": "Bot",
     "description": "Cómo lee un bot las páginas web, los correos y otros textos escritos por desconocidos.",
@@ -6522,6 +6539,22 @@
       },
       "noFile": "No hay ninguna imagen de fondo seleccionada",
       "title": "Imagen de fondo"
+    },
+    "channelNotify": {
+      "approvalsNote": "Las aprobaciones, como pagar algo, siempre se deciden en la app, nunca desde un chat.",
+      "blocked": "Un bot me necesita",
+      "blockedHint": "Todas sus preguntas en un solo mensaje. Puedes responderlas desde el chat.",
+      "description": "Lo que tus bots te cuentan por su cuenta cuando no estás.",
+      "failed": "Algo falló",
+      "failedHint": "El motivo y un botón para volver a intentarlo.",
+      "finished": "Una tarea o misión terminó",
+      "finishedHint": "Un resumen corto de lo que se hizo.",
+      "progress": "Avances por el camino",
+      "progressHint": "Una nota corta al 25 %, 50 % y 75 % de una misión. Desactivado por defecto.",
+      "quietEnabled": "Retener los mensajes en las horas de silencio",
+      "quietHint": "Llegan cuando terminan las horas de silencio. No se pierde nada.",
+      "quietTitle": "Horas de silencio para los mensajes",
+      "title": "Telegram, Discord y otros canales"
     },
     "digest": {
       "enabled": "Enviar un resumen diario",

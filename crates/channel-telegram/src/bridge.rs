@@ -7,6 +7,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use channel_api::notice::{
+    Feedback, NoticeLang, OwnerNotice, feedback, parse_reply, parse_retry_callback, render,
+    reply_error_feedback, retry_callback,
+};
 use futures::FutureExt;
 use futures::stream::{self, BoxStream, StreamExt};
 use parking_lot::Mutex;
@@ -32,6 +36,7 @@ use crate::daemon_client::{
 use crate::error::{Result, TelegramError};
 use crate::inbox::{DeliveryReceipt, Inbox, MAX_ATTEMPTS};
 use crate::messages::{Language, Message};
+use crate::notices::{NoticeBook, follow_notices};
 use crate::pairing::{
     PairAttempt, PairingStore, TELEGRAM_BOT_TOKEN_SECRET, UNPAIRED_REFUSAL_TEXT, load_bot_token,
 };
@@ -396,6 +401,8 @@ struct Inner {
     status: watch::Sender<ChannelStatus>,
     /// Wakes the run loop when a run stream was added.
     wake: Notify,
+    /// The owner notices pushed to this bot's chats (what `/answer` and the retry button name).
+    notices: NoticeBook,
 }
 
 /// Own streams outside the runtime lock. Dropping a cancelled drain restores all
@@ -593,6 +600,7 @@ impl TelegramChannel {
             cancel: CancellationToken::new(),
             status: watch::channel(ChannelStatus::Stopped).0,
             wake: Notify::new(),
+            notices: NoticeBook::default(),
         });
 
         Ok(Self {
@@ -760,7 +768,124 @@ impl TelegramChannel {
             self.inbox_loop(true),
             self.inbox_loop(false),
             self.drain_loop(),
+            self.notice_loop(),
         );
+    }
+
+    /// Follow the daemon's owner notices (a mission or background run that finished, failed or
+    /// needs the owner) and push each to the paired chats.
+    async fn notice_loop(&self) {
+        let this = self.clone();
+        follow_notices(
+            Arc::clone(&self.inner.api_client),
+            self.inner.cancel.clone(),
+            self.inner
+                .config
+                .poll_backoff
+                .max(Duration::from_millis(100)),
+            move |notice| {
+                let this = this.clone();
+                Box::pin(async move { this.push_notice(&notice).await })
+            },
+        )
+        .await;
+    }
+
+    fn notice_lang(&self, chat_id: i64) -> NoticeLang {
+        if self.language(chat_id) == Language::TR {
+            NoticeLang::Tr
+        } else {
+            NoticeLang::En
+        }
+    }
+
+    /// Send one owner notice to every paired chat (a private chat has the user's id). A run
+    /// this bridge already follows reports itself in its own chat, so it is not repeated.
+    pub(crate) async fn push_notice(&self, notice: &OwnerNotice) {
+        let followed = notice
+            .run_id
+            .as_deref()
+            .and_then(|r| uuid::Uuid::parse_str(r).ok())
+            .is_some_and(|r| self.inner.runtime.lock().attached_runs.contains(&RunId(r)));
+        if followed {
+            return;
+        }
+        self.inner.notices.remember(notice);
+        for chat_id in self.inner.pairing.paired_users() {
+            let lang = self.notice_lang(chat_id);
+            let markup = notice
+                .can_retry
+                .then(|| {
+                    InlineKeyboardMarkup::from_rows(vec![vec![InlineButton::new(
+                        feedback(lang, Feedback::TryAgainLabel),
+                        retry_callback(&notice.id),
+                    )]])
+                })
+                .flatten();
+            if let Err(e) = self
+                .send_redacted(chat_id, &render(notice, lang), markup.as_ref())
+                .await
+            {
+                self.report_error(&e);
+            }
+        }
+    }
+
+    /// `/answer <text>`: answer the questions of the newest notice that still has some. Only
+    /// questions are answered here; an approval is never decided from a chat.
+    async fn handle_answer_command(&self, chat_id: i64, text: &str) -> Result<()> {
+        let lang = self.notice_lang(chat_id);
+        let say = |f: Feedback| {
+            let text = feedback(lang, f);
+            async move { self.send_redacted(chat_id, &text, None).await.map(|_| ()) }
+        };
+        let Some(notice) = self.inner.notices.open_question() else {
+            return say(Feedback::NothingOpen).await;
+        };
+        let replies = match parse_reply(text, &notice) {
+            Ok(r) => r,
+            Err(e) => return say(reply_error_feedback(e)).await,
+        };
+        match self
+            .inner
+            .api_client
+            .answer_notice(&notice.id, &replies)
+            .await
+        {
+            Ok((answered, skipped)) => {
+                self.inner.notices.mark_answered(&notice.id);
+                say(Feedback::Answered { answered, skipped }).await
+            }
+            Err(e) => {
+                self.report_error(&e);
+                say(Feedback::AnswerFailed).await
+            }
+        }
+    }
+
+    /// The "Try again" button of a notice.
+    async fn handle_retry_callback(
+        &self,
+        chat_id: i64,
+        query_id: &str,
+        notice_id: &str,
+    ) -> Result<()> {
+        let lang = self.notice_lang(chat_id);
+        let ok = self.inner.notices.knows(notice_id)
+            && self.inner.api_client.retry_notice(notice_id).await.is_ok();
+        let text = feedback(
+            lang,
+            if ok {
+                Feedback::Retried
+            } else {
+                Feedback::RetryFailed
+            },
+        );
+        self.inner
+            .bot_api
+            .answer_callback_query(query_id, Some(&self.redact(&text)))
+            .await?;
+        Ok(())
     }
 
     async fn poll_loop(&self) {
@@ -1420,6 +1545,15 @@ impl TelegramChannel {
         if trimmed == "/status" || trimmed.starts_with("/status@") {
             return self.handle_status_command(chat_id).await;
         }
+        if trimmed == "/answer"
+            || trimmed.starts_with("/answer ")
+            || trimmed.starts_with("/answer@")
+        {
+            let arg = trimmed
+                .split_once(char::is_whitespace)
+                .map_or("", |(_, rest)| rest.trim());
+            return self.handle_answer_command(chat_id, arg).await;
+        }
         if trimmed == "/lang" || trimmed.starts_with("/lang ") || trimmed.starts_with("/lang@") {
             let arg = trimmed
                 .split_once(char::is_whitespace)
@@ -2034,6 +2168,12 @@ impl TelegramChannel {
             return Ok(());
         }
 
+        if let Some(notice_id) = parse_retry_callback(data) {
+            return self
+                .handle_retry_callback(chat_id, query_id, notice_id)
+                .await;
+        }
+
         if let Some((call_id, payload)) = parse_question_callback(data) {
             let answer = {
                 let rt = self.inner.runtime.lock();
@@ -2099,6 +2239,12 @@ impl TelegramChannel {
     #[cfg(test)]
     pub(crate) fn active_runs_for_test(&self) -> usize {
         self.inner.runtime.lock().active_runs.len()
+    }
+
+    /// Follow `run_id` in `chat_id` the way a message sent from that chat would.
+    #[cfg(test)]
+    pub(crate) async fn attach_run_for_test(&self, chat_id: i64, run_id: RunId) {
+        self.attach_run(chat_id, run_id, false, None).await.unwrap();
     }
 
     async fn drain_active_runs(&self) -> Result<usize> {

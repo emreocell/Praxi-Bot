@@ -243,6 +243,31 @@ impl DiscordRest {
         Ok(flags & (FLAG_MESSAGE_CONTENT | FLAG_MESSAGE_CONTENT_LIMITED) != 0)
     }
 
+    /// Open (or find) the private channel with `user_id`; Discord answers with the same
+    /// channel every time.
+    ///
+    /// # Errors
+    /// Invalid user id, network or API errors.
+    pub async fn open_dm(&self, user_id: &str) -> Result<String> {
+        if !is_snowflake(user_id) {
+            return Err(DiscordError::Config("invalid Discord user id".into()));
+        }
+        let body = json!({ "recipient_id": user_id });
+        let v = self
+            .call(
+                reqwest::Method::POST,
+                "/users/@me/channels",
+                Some(&body),
+                true,
+            )
+            .await?;
+        v["id"]
+            .as_str()
+            .filter(|id| is_snowflake(id))
+            .map(str::to_owned)
+            .ok_or_else(|| DiscordError::Network("Discord did not return a channel id".into()))
+    }
+
     /// Send a message. `components` are the button rows, if any. Mentions are
     /// always switched off for the request.
     ///

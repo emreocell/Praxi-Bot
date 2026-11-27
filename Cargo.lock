@@ -1250,6 +1250,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.21",
  "tokio",
+ "utoipa",
 ]
 
 [[package]]
@@ -2053,6 +2054,7 @@ dependencies = [
  "browser-cdp",
  "builtin-tools",
  "cap-fs-ext",
+ "channel-api",
  "chrono",
  "chrono-tz",
  "cli-provider",

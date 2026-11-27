@@ -32,6 +32,8 @@ import type {
   MemoryPreview,
   BotMemorySettings,
   BotMemorySettingsInput,
+  OwnerNotice,
+  OwnerNotifySettings,
   PageReader,
   MemoryEmbedding,
   MemoryEmbeddingInput,
@@ -1399,6 +1401,18 @@ export class ApiClient {
   /** Pause, resume or stop a mission (owner only). */
   steerMission(id: string, action: "pause" | "resume" | "cancel"): Promise<MissionDetail> {
     return this.request("POST", `/missions/${id}/${action}`);
+  }
+  /** Mission and background-run digests, oldest first; `after` = only those with a larger `seq`. */
+  ownerNotices(after?: number): Promise<OwnerNotice[]> {
+    return this.request("GET", "/owner-notices", { query: { after } });
+  }
+  /** What the daemon pushes to Telegram, Discord and other channels, and the quiet hours. */
+  ownerNotifySettings(): Promise<OwnerNotifySettings> {
+    return this.request("GET", "/owner-notices/settings");
+  }
+  /** Change that (owner only). */
+  putOwnerNotifySettings(settings: OwnerNotifySettings): Promise<OwnerNotifySettings> {
+    return this.request("PUT", "/owner-notices/settings", { body: settings });
   }
   /** Answer the blocked items in one request (owner only); each needs an answer or `skip`. */
   answerMission(id: string, answers: MissionAnswer[]): Promise<MissionAnswersResult> {

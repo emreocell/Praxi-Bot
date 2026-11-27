@@ -33,13 +33,27 @@ const CHAT_BUSY_POLL: Duration = Duration::from_secs(2);
 pub struct AgentSessionRunner {
     agent: AgentLoop,
     storage: Arc<Storage>,
+    /// Told when a mission ends or blocks, so the owner hears of it on Telegram, Discord and in
+    /// the app (a weak handle: the state owns the supervisor that owns this runner).
+    notify: Option<crate::WeakAppState>,
 }
 
 impl AgentSessionRunner {
     /// A runner over `agent`; sessions run in the missions' own chats.
     #[must_use]
     pub fn new(agent: AgentLoop, storage: Arc<Storage>) -> Self {
-        Self { agent, storage }
+        Self {
+            agent,
+            storage,
+            notify: None,
+        }
+    }
+
+    /// Also push the digest of a mission that ends or blocks to the owner's channels.
+    #[must_use]
+    pub(crate) fn with_notices(mut self, state: crate::WeakAppState) -> Self {
+        self.notify = Some(state);
+        self
     }
 }
 
@@ -148,6 +162,9 @@ impl SessionRunner for AgentSessionRunner {
     }
 
     async fn announce(&self, mission: &Mission, text: &str) {
+        if let Some(state) = self.notify.as_ref().and_then(crate::WeakAppState::upgrade) {
+            state.notify_mission_concluded(mission);
+        }
         let (Some(user), Some(chat)) = (
             parse(&mission.user_id, UserId),
             parse(&mission.chat_id, ChatId),
@@ -227,10 +244,10 @@ impl AppState {
             return;
         }
         let token = self.0.shutdown.child_token();
-        let runner = Arc::new(AgentSessionRunner::new(
-            self.0.agent.clone(),
-            self.storage_arc(),
-        ));
+        let runner = Arc::new(
+            AgentSessionRunner::new(self.0.agent.clone(), self.storage_arc())
+                .with_notices(self.downgrade()),
+        );
         let supervisor = Arc::new(Supervisor::new(
             store,
             runner,
@@ -238,6 +255,12 @@ impl AppState {
             SupervisorConfig::default(),
             token.clone(),
         ));
+        let weak = self.downgrade();
+        supervisor.set_change_hook(Arc::new(move |id| {
+            if let Some(state) = weak.upgrade() {
+                state.notify_mission_changed(id);
+            }
+        }));
         let task = supervisor.spawn();
         *slot = Some(MissionRuntime {
             supervisor,

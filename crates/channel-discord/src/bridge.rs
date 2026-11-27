@@ -18,13 +18,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use channel_api::notice::{
+    Feedback, NoticeLang, OwnerNotice, feedback, parse_reply, parse_retry_callback, render,
+    reply_error_feedback, retry_callback,
+};
 use channel_api::{
     Channel, ChatRef, IncomingKind, IncomingMessage, InlineButton, OutgoingMessage,
     approval::approval_row,
 };
 use channel_telegram::{
-    ApprovalDecision, ApprovalScope, DaemonClient, DeliveryKind, format_approval_callback,
-    format_question_callback, parse_approval_callback, parse_question_callback,
+    ApprovalDecision, ApprovalScope, DaemonClient, DeliveryKind, NoticeBook, follow_notices,
+    format_approval_callback, format_question_callback, parse_approval_callback,
+    parse_question_callback,
 };
 use futures_util::StreamExt;
 use parking_lot::Mutex;
@@ -199,6 +204,8 @@ struct Mem {
     flood: VecDeque<Instant>,
     flood_told: bool,
     tasks: Vec<JoinHandle<()>>,
+    /// The owner's private chat, opened the first time a notice is pushed.
+    owner_dm: Option<(String, ChatRef)>,
 }
 
 struct Inner {
@@ -209,6 +216,11 @@ struct Inner {
     cancel: CancellationToken,
     mem: Mutex<Mem>,
     runs: AtomicUsize,
+    /// The owner notices pushed from this bot (what `/answer` and the retry button name).
+    notices: NoticeBook,
+    /// The notice follower. It outlives a re-pairing (which aborts the run tasks), so it is
+    /// not kept with them.
+    notice_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 /// A running Discord channel.
@@ -291,6 +303,8 @@ impl DiscordChannel {
                 cancel,
                 mem: Mutex::new(Mem::default()),
                 runs: AtomicUsize::new(0),
+                notices: NoticeBook::default(),
+                notice_task: Mutex::new(None),
             }),
             main: Arc::new(Mutex::new(None)),
         })
@@ -358,6 +372,10 @@ impl DiscordChannel {
         if let Some(h) = main {
             let _ = h.await;
         }
+        let notices = self.inner.notice_task.lock().take();
+        if let Some(h) = notices {
+            let _ = h.await;
+        }
         let tasks = std::mem::take(&mut self.inner.mem.lock().tasks);
         for t in tasks {
             let _ = t.await;
@@ -399,7 +417,112 @@ impl Inner {
         mem.tasks.push(h);
     }
 
+    /// Follow the daemon's owner notices and push each to the owner's private chat.
+    fn start_notices(self: &Arc<Self>) {
+        let this = Arc::clone(self);
+        let retry = self.cfg.queue_poll.max(Duration::from_millis(100));
+        let cancel = self.cancel.clone();
+        let daemon = Arc::clone(&self.daemon);
+        let handle = tokio::spawn(async move {
+            follow_notices(daemon, cancel, retry, move |notice| {
+                let this = Arc::clone(&this);
+                Box::pin(async move { this.push_notice(&notice).await })
+            })
+            .await;
+        });
+        *self.notice_task.lock() = Some(handle);
+    }
+
+    fn notice_lang(&self) -> NoticeLang {
+        match self.lang() {
+            Lang::Tr => NoticeLang::Tr,
+            _ => NoticeLang::En,
+        }
+    }
+
+    /// The private chat with the paired owner (`None` when nobody is paired or Discord refuses).
+    async fn owner_chat(&self) -> Option<ChatRef> {
+        let owner = self.state.owner()?;
+        if let Some((o, chat)) = &self.mem.lock().owner_dm
+            && *o == owner
+        {
+            return Some(chat.clone());
+        }
+        match self.transport.open_dm(&owner).await {
+            Ok(chat) => {
+                self.mem.lock().owner_dm = Some((owner, chat.clone()));
+                Some(chat)
+            }
+            Err(e) => {
+                Self::log("could not open the owner's private chat", &e);
+                None
+            }
+        }
+    }
+
+    /// Send one owner notice to the paired owner. A run this bridge already follows reports
+    /// itself in its own chat, so it is not repeated.
+    pub(crate) async fn push_notice(&self, notice: &OwnerNotice) {
+        let followed = notice
+            .run_id
+            .as_deref()
+            .and_then(|r| uuid::Uuid::parse_str(r).ok())
+            .is_some_and(|r| self.mem.lock().attached.contains(&RunId(r)));
+        if followed {
+            return;
+        }
+        let Some(chat) = self.owner_chat().await else {
+            return;
+        };
+        self.notices.remember(notice);
+        let lang = self.notice_lang();
+        let mut msg = OutgoingMessage::text(render(notice, lang));
+        if notice.can_retry {
+            msg = msg.with_buttons(vec![vec![InlineButton::new(
+                feedback(lang, Feedback::TryAgainLabel),
+                retry_callback(&notice.id),
+            )]]);
+        }
+        if let Err(e) = self.transport.send(chat, msg).await {
+            Self::log("could not send a notice", &e);
+        }
+    }
+
+    /// `/answer <text>`: answer the questions of the newest notice that still has some. Only
+    /// questions are answered here; an approval is never decided from a chat.
+    async fn cmd_answer(&self, chat: &ChatRef, text: &str) {
+        let lang = self.notice_lang();
+        let Some(notice) = self.notices.open_question() else {
+            self.say(chat, &feedback(lang, Feedback::NothingOpen)).await;
+            return;
+        };
+        let replies = match parse_reply(text, &notice) {
+            Ok(r) => r,
+            Err(e) => {
+                self.say(chat, &feedback(lang, reply_error_feedback(e)))
+                    .await;
+                return;
+            }
+        };
+        match self.daemon.answer_notice(&notice.id, &replies).await {
+            Ok((answered, skipped)) => {
+                self.notices.mark_answered(&notice.id);
+                self.say(
+                    chat,
+                    &feedback(lang, Feedback::Answered { answered, skipped }),
+                )
+                .await;
+            }
+            Err(e) => {
+                Self::log("could not pass an answer on", &e);
+                self.say(chat, &feedback(lang, Feedback::AnswerFailed))
+                    .await;
+            }
+        }
+    }
+
     async fn run_loop(self: Arc<Self>) {
+        self.start_notices();
         let stream = match self.transport.receive().await {
             Ok(s) => s,
             Err(e) => {
@@ -598,6 +721,7 @@ impl Inner {
                     self.say(chat, &Msg::Help.render(lang)).await;
                     return;
                 }
+                "answer" => return self.cmd_answer(chat, arg).await,
                 "bots" => return self.cmd_bots(chat, parts.channel_id).await,
                 "use" => return self.cmd_use(chat, parts.channel_id, arg).await,
                 "status" => return self.cmd_status(chat).await,
@@ -662,6 +786,9 @@ impl Inner {
                     mem.cards.clear();
                     mem.questions.clear();
                     mem.attached.clear();
+                    // The old owner's private chat and open questions are not the new owner's.
+                    mem.owner_dm = None;
+                    self.notices.clear();
                     for task in mem.tasks.drain(..) {
                         task.abort();
                     }
@@ -1203,6 +1330,18 @@ impl Inner {
                     Self::log("could not update the approval card", &e);
                 }
             }
+            return Ok(());
+        }
+        if let Some(notice_id) = parse_retry_callback(data) {
+            let nl = self.notice_lang();
+            let ok =
+                self.notices.knows(notice_id) && self.daemon.retry_notice(notice_id).await.is_ok();
+            let f = if ok {
+                Feedback::Retried
+            } else {
+                Feedback::RetryFailed
+            };
+            self.answer(query_id, &feedback(nl, f)).await;
             return Ok(());
         }
         if let Some((call_id, payload)) = parse_question_callback(data) {

@@ -5817,6 +5817,23 @@
     "typingPreview": "Typing",
     "youAreInControl": "You are in control"
   },
+  "ownerNotice": {
+    "counts": "{{done}} of {{total}} done, {{blocked}} waiting for you, {{failed}} given up.",
+    "inApp": "Waiting in the app: {{count}}.",
+    "private": {
+      "blocked": "A task needs you",
+      "failed": "A task failed",
+      "finished": "A task finished",
+      "progress": "A task made progress"
+    },
+    "questions": "Questions for you: {{count}}.",
+    "title": {
+      "blocked": "{{title}} needs you",
+      "failed": "{{title}} failed",
+      "finished": "{{title}} finished",
+      "progress": "{{title}}: {{done}} of {{total}} done"
+    }
+  },
   "pageReader": {
     "bot": "Bot",
     "description": "How your bot reads text written by others, like web pages and mail.",
@@ -6598,6 +6615,22 @@
       },
       "noFile": "No background image selected",
       "title": "Background image"
+    },
+    "channelNotify": {
+      "approvalsNote": "Approvals, such as paying for something, are always decided in the app, never from a chat.",
+      "blocked": "A bot needs me",
+      "blockedHint": "All its questions in one message. You can answer them from the chat.",
+      "description": "What your bots tell you on their own when you are away.",
+      "failed": "Something failed",
+      "failedHint": "The reason, and a button to try again.",
+      "finished": "A task or mission finished",
+      "finishedHint": "A short summary of what was done.",
+      "progress": "Progress along the way",
+      "progressHint": "A short note at 25%, 50% and 75% of a mission. Off by default.",
+      "quietEnabled": "Hold messages during quiet hours",
+      "quietHint": "They arrive when the quiet hours end. Nothing is lost.",
+      "quietTitle": "Quiet hours for messages",
+      "title": "Telegram, Discord and other channels"
     },
     "digest": {
       "enabled": "Send a daily summary",

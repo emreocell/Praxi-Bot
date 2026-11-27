@@ -5757,6 +5757,23 @@
     "typingPreview": "Tippen",
     "youAreInControl": "Du hast die Kontrolle"
   },
+  "ownerNotice": {
+    "counts": "{{done}} von {{total}} erledigt, {{blocked}} warten auf dich, {{failed}} aufgegeben.",
+    "inApp": "In der App wartet: {{count}}.",
+    "private": {
+      "blocked": "Eine Aufgabe braucht dich",
+      "failed": "Eine Aufgabe ist fehlgeschlagen",
+      "finished": "Eine Aufgabe ist fertig",
+      "progress": "Eine Aufgabe ist vorangekommen"
+    },
+    "questions": "Fragen an dich: {{count}}.",
+    "title": {
+      "blocked": "{{title}} braucht dich",
+      "failed": "{{title}} ist fehlgeschlagen",
+      "finished": "{{title}} ist fertig",
+      "progress": "{{title}}: {{done}} von {{total}} erledigt"
+    }
+  },
   "pageReader": {
     "bot": "Bot",
     "description": "Wie ein Bot Webseiten, E-Mails und andere Texte von Fremden liest.",
@@ -6522,6 +6539,22 @@
       },
       "noFile": "Kein Hintergrundbild ausgewählt",
       "title": "Hintergrundbild"
+    },
+    "channelNotify": {
+      "approvalsNote": "Freigaben, etwa für eine Zahlung, werden immer in der App erteilt, nie im Chat.",
+      "blocked": "Ein Bot braucht mich",
+      "blockedHint": "Alle Fragen in einer Nachricht. Du kannst sie direkt im Chat beantworten.",
+      "description": "Was deine Bots dir von sich aus melden, wenn du nicht da bist.",
+      "failed": "Etwas ist fehlgeschlagen",
+      "failedHint": "Der Grund und eine Schaltfläche zum erneuten Versuch.",
+      "finished": "Eine Aufgabe oder Mission ist fertig",
+      "finishedHint": "Eine kurze Zusammenfassung dessen, was erledigt wurde.",
+      "progress": "Zwischenstände unterwegs",
+      "progressHint": "Eine kurze Notiz bei 25 %, 50 % und 75 % einer Mission. Standardmäßig aus.",
+      "quietEnabled": "Nachrichten in den Ruhezeiten zurückhalten",
+      "quietHint": "Sie kommen, sobald die Ruhezeit endet. Nichts geht verloren.",
+      "quietTitle": "Ruhezeiten für Nachrichten",
+      "title": "Telegram, Discord und andere Kanäle"
     },
     "digest": {
       "enabled": "Tägliche Zusammenfassung senden",

@@ -151,6 +151,11 @@ async fn mock_rest() -> MockServer {
         .respond_with(ResponseTemplate::new(204))
         .mount(&server)
         .await;
+    Mock::given(method("POST"))
+        .and(path_regex(r"^/users/@me/channels$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "777"})))
+        .mount(&server)
+        .await;
     server
 }
 
@@ -203,11 +208,24 @@ struct FakeDaemon {
     decisions: Mutex<Vec<(ToolCallId, ApprovalDecision, ApprovalScope)>>,
     script: Mutex<VecDeque<Vec<Event>>>,
     hang: bool,
+    /// Owner notices the test pushes (handed to the bridge on its first subscription).
+    notice_tx: mpsc::UnboundedSender<channel_telegram::NoticeEvent>,
+    notice_rx: Mutex<Option<mpsc::UnboundedReceiver<channel_telegram::NoticeEvent>>>,
+    notice_answers: Mutex<Vec<(String, Vec<channel_api::notice::Reply>)>>,
+    notice_retries: Mutex<Vec<String>>,
+    /// Make `answer_notice` and `retry_notice` fail.
+    notice_fail: Mutex<bool>,
 }
 
 impl FakeDaemon {
     fn new(script: Vec<Vec<Event>>, hang: bool) -> Arc<Self> {
+        let (notice_tx, notice_rx) = mpsc::unbounded_channel();
         Arc::new(Self {
+            notice_tx,
+            notice_rx: Mutex::new(Some(notice_rx)),
+            notice_answers: Mutex::new(Vec::new()),
+            notice_retries: Mutex::new(Vec::new()),
+            notice_fail: Mutex::new(false),
             bots: vec![BotSummary {
                 id: BotId::new(),
                 name: "Helper".into(),
@@ -270,6 +288,43 @@ impl DaemonClient for FakeDaemon {
             uptime_secs: 1,
             pending_approvals: 0,
         })
+    }
+    async fn subscribe_notices(
+        &self,
+        _after: Option<u64>,
+    ) -> DResult<BoxStream<'static, channel_telegram::NoticeEvent>> {
+        let rx = self.notice_rx.lock().take();
+        Ok(match rx {
+            Some(rx) => {
+                futures::stream::unfold(
+                    rx,
+                    |mut rx| async move { rx.recv().await.map(|e| (e, rx)) },
+                )
+                .boxed()
+            }
+            None => futures::stream::pending().boxed(),
+        })
+    }
+    async fn answer_notice(
+        &self,
+        notice_id: &str,
+        answers: &[channel_api::notice::Reply],
+    ) -> DResult<(u32, u32)> {
+        if *self.notice_fail.lock() {
+            return Err(TelegramError::Daemon("refused".into()));
+        }
+        self.notice_answers
+            .lock()
+            .push((notice_id.to_owned(), answers.to_vec()));
+        let skipped = u32::try_from(answers.iter().filter(|a| a.answer.is_none()).count()).unwrap();
+        Ok((u32::try_from(answers.len()).unwrap() - skipped, skipped))
+    }
+    async fn retry_notice(&self, notice_id: &str) -> DResult<()> {
+        if *self.notice_fail.lock() {
+            return Err(TelegramError::Daemon("refused".into()));
+        }
+        self.notice_retries.lock().push(notice_id.to_owned());
+        Ok(())
     }
     async fn subscribe_run(&self, _run_id: RunId) -> DResult<BoxStream<'static, Envelope>> {
         let events = self.script.lock().pop_front().unwrap_or_default();
@@ -857,4 +912,248 @@ async fn owner_messages_are_limited_but_stop_still_works() {
     wait_sent(&h.rest, 5).await;
     assert_eq!(h.daemon.sent.lock().as_slice(), ["first", "/stop"]);
     h.channel.shutdown().await;
+}
+
+// ------------------------------------------- owner notices (daemon-wide push)
+
+mod owner_notices {
+    use super::*;
+    use channel_api::notice::{
+        NoticeItem, NoticeKind, NoticeProgress, NoticeSource, OwnerNotice, Reply,
+    };
+    use channel_telegram::NoticeEvent;
+
+    const NOTICE_ID: &str = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
+
+    fn blocked(questions: &[&str]) -> OwnerNotice {
+        OwnerNotice {
+            seq: 7,
+            id: NOTICE_ID.into(),
+            at_ms: 1,
+            kind: NoticeKind::Blocked,
+            source: NoticeSource::Mission,
+            title: "Backlinks".into(),
+            bot_name: "Scout".into(),
+            bot_id: None,
+            mission_id: Some("m1".into()),
+            run_id: None,
+            chat_id: None,
+            reason: None,
+            progress: Some(NoticeProgress {
+                total: 10,
+                done: 6,
+                blocked: u32::try_from(questions.len()).unwrap(),
+                failed: 0,
+                skipped: 0,
+            }),
+            done: vec![],
+            failed: vec![],
+            questions: questions
+                .iter()
+                .map(|k| NoticeItem {
+                    key: (*k).into(),
+                    title: format!("site {k}"),
+                    text: Some(format!("Which name for {k}?")),
+                })
+                .collect(),
+            app_only: vec!["Pay $9 for the premium listing".into()],
+            can_retry: false,
+            late: false,
+        }
+    }
+
+    fn failed() -> OwnerNotice {
+        OwnerNotice {
+            kind: NoticeKind::Failed,
+            seq: 8,
+            id: "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5c".into(),
+            reason: Some("provider unreachable".into()),
+            questions: vec![],
+            app_only: vec![],
+            can_retry: true,
+            ..blocked(&[])
+        }
+    }
+
+    fn push(h: &Harness, n: OwnerNotice) {
+        h.daemon
+            .notice_tx
+            .send(NoticeEvent::Notice(Box::new(n)))
+            .unwrap();
+    }
+
+    fn say(h: &Harness, id: &str, text: &str) {
+        h.gw.message(id, OWNER, (None, "777"), text);
+    }
+
+    #[tokio::test]
+    async fn the_paired_owner_gets_a_notice_in_their_private_chat_and_nobody_else_does() {
+        let h = harness(FakeDaemon::new(vec![], false)).await;
+        // Nobody is paired yet: there is nobody to tell, and no private chat is opened.
+        push(&h, blocked(&["a.com"]));
+        settle().await;
+        assert_eq!(sent(&h.rest).await, Vec::<Value>::new());
+
+        pair_owner(&h).await;
+        push(&h, blocked(&["a.com", "b.com"]));
+        let s = wait_sent(&h.rest, 2).await;
+        let text = s[1]["content"].as_str().unwrap();
+        assert!(
+            text.starts_with("✋ Needs you: Backlinks (Scout)"),
+            "{text}"
+        );
+        assert!(text.contains("1. site a.com") && text.contains("2. site b.com"));
+        assert!(text.contains("Waiting in the app (not from here)"));
+        // No buttons: an approval is never decided from a notice.
+        assert_eq!(s[1]["components"], json!([]));
+        let reqs = h.rest.received_requests().await.unwrap();
+        let dm_opens: Vec<Value> = reqs
+            .iter()
+            .filter(|r| r.url.path() == "/users/@me/channels")
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect();
+        assert_eq!(dm_opens, vec![json!({"recipient_id": OWNER})]);
+        h.channel.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_failed_notice_in_turkish_has_a_retry_button_the_owner_can_press() {
+        let h = harness(FakeDaemon::new(vec![], false)).await;
+        pair_owner(&h).await;
+        say(&h, "2", "!lang tr");
+        wait_sent(&h.rest, 2).await;
+        push(&h, failed());
+        let s = wait_sent(&h.rest, 3).await;
+        let text = s[2]["content"].as_str().unwrap();
+        assert!(text.starts_with("⚠️ Başarısız oldu: Backlinks"), "{text}");
+        assert!(text.contains("provider unreachable"));
+        let button = &s[2]["components"][0]["components"][0];
+        assert_eq!(button["label"], "Tekrar dene");
+        let id = button["custom_id"].as_str().unwrap().to_owned();
+        assert_eq!(id, format!("nr:{}", failed().id));
+
+        // Someone else pressing it changes nothing; the owner's press retries once through the
+        // daemon.
+        h.gw.push
+            .send(press_json("601", "99", (None, "777"), &id))
+            .unwrap();
+        h.gw.push
+            .send(press_json("602", OWNER, (None, "777"), &id))
+            .unwrap();
+        for _ in 0..300 {
+            if !callbacks(&h.rest).await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(*h.daemon.notice_retries.lock(), vec![failed().id]);
+        let cb = callbacks(&h.rest).await;
+        assert_eq!(cb[0]["data"]["content"], "Yeniden deniyorum.");
+
+        // A button for a notice this bot never sent is not forwarded.
+        h.gw.push
+            .send(press_json(
+                "603",
+                OWNER,
+                (None, "777"),
+                &format!("nr:{}", uuid::Uuid::now_v7()),
+            ))
+            .unwrap();
+        for _ in 0..300 {
+            if callbacks(&h.rest).await.len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(h.daemon.notice_retries.lock().len(), 1);
+        h.channel.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn answer_reads_numbered_lines_and_tells_the_owner_what_the_daemon_took() {
+        let h = harness(FakeDaemon::new(vec![], false)).await;
+        pair_owner(&h).await;
+        say(&h, "2", "!answer yes");
+        let s = wait_sent(&h.rest, 2).await;
+        assert_eq!(
+            s[1]["content"],
+            "No question is waiting for an answer here."
+        );
+
+        push(&h, blocked(&["a.com", "b.com"]));
+        wait_sent(&h.rest, 3).await;
+        // Several questions need numbers.
+        say(&h, "3", "/answer yes");
+        let s = wait_sent(&h.rest, 4).await;
+        assert!(
+            s[3]["content"]
+                .as_str()
+                .unwrap()
+                .contains("one answer per line")
+        );
+        assert!(h.daemon.notice_answers.lock().is_empty());
+
+        say(&h, "4", "/answer 1: Webioo Ltd\n2: skip");
+        let s = wait_sent(&h.rest, 5).await;
+        assert_eq!(
+            s[4]["content"],
+            "Got it: 1 answered, 1 skipped. Back to work."
+        );
+        assert_eq!(
+            *h.daemon.notice_answers.lock(),
+            vec![(
+                NOTICE_ID.to_owned(),
+                vec![
+                    Reply {
+                        key: "a.com".into(),
+                        answer: Some("Webioo Ltd".into())
+                    },
+                    Reply {
+                        key: "b.com".into(),
+                        answer: None
+                    },
+                ]
+            )]
+        );
+        // The questions are closed once taken.
+        say(&h, "5", "/answer again");
+        let s = wait_sent(&h.rest, 6).await;
+        assert_eq!(
+            s[5]["content"],
+            "No question is waiting for an answer here."
+        );
+        h.channel.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_refused_answer_is_reported_and_a_stranger_cannot_answer() {
+        let h = harness(FakeDaemon::new(vec![], false)).await;
+        pair_owner(&h).await;
+        push(&h, blocked(&["a.com"]));
+        wait_sent(&h.rest, 2).await;
+        // A stranger's `!answer` is never served (they get the one polite refusal).
+        h.gw.message("2", "99", (None, "778"), "!answer Webioo");
+        let s = wait_sent(&h.rest, 3).await;
+        assert!(s[2]["content"].as_str().unwrap().contains("private"));
+        assert!(h.daemon.notice_answers.lock().is_empty());
+
+        *h.daemon.notice_fail.lock() = true;
+        say(&h, "3", "!answer Webioo");
+        let s = wait_sent(&h.rest, 4).await;
+        assert!(
+            s[3]["content"]
+                .as_str()
+                .unwrap()
+                .contains("could not pass that on")
+        );
+        *h.daemon.notice_fail.lock() = false;
+        say(&h, "4", "!answer Webioo");
+        wait_sent(&h.rest, 5).await;
+        assert_eq!(
+            h.daemon.notice_answers.lock().len(),
+            1,
+            "the question stayed open after the refusal"
+        );
+        h.channel.shutdown().await;
+    }
 }
