@@ -267,6 +267,11 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          # PRs restore main's cache and never save their own: every PR-only copy (hundreds of MB
+          # each, for the smoke and browser lanes) pushes the repository over GitHub's 10 GB cache
+          # limit, and the eviction then removes main's cache and makes later runs start cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Same pin and checksums as scripts/install-linux.sh (install_cft).
       - name: Install pinned Chrome for Testing
@@ -302,6 +307,11 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          # PRs restore main's cache and never save their own: every PR-only copy (hundreds of MB
+          # each, for the smoke and browser lanes) pushes the repository over GitHub's 10 GB cache
+          # limit, and the eviction then removes main's cache and makes later runs start cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check licenses
         uses: EmbarkStudios/cargo-deny-action@v2
@@ -444,6 +454,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: desktop-smoke
+          # PRs restore main's cache and never save their own: every PR-only copy (hundreds of MB
+          # each, for the smoke and browser lanes) pushes the repository over GitHub's 10 GB cache
+          # limit, and the eviction then removes main's cache and makes later runs start cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
