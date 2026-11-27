@@ -4700,18 +4700,6 @@
   },
   "newBot": {
     "advanced": "Advanced settings",
-    "autonomy": "How much it may do alone",
-    "autonomyCustom": "Using the {{preset}} permission preset.",
-    "autonomyHints": {
-      "ask": "Reads files, checks the screen, and searches the web without asking; asks before any change, send, page fetch, click, or command.",
-      "auto": "Runs without asking, even for deletes, commands and sends. Still asks for Money, schedule activation and catastrophic commands, and after reading untrusted content, before sending data out or running a program. Actions inside a connected browser (Playwright) only ask once the task also read something private; code outside the page and file transfers always ask.",
-      "balanced": "Reads, browses, edits workspace files and works on the bot's own computer without asking; asks before deleting files, sending, spending money, or touching your PC."
-    },
-    "autonomyLevels": {
-      "ask": "Ask",
-      "auto": "Free",
-      "balanced": "Balanced"
-    },
     "brain": "IA",
     "brainAuto": "Automático",
     "brainHint": "Você pode mudar isso depois no chat",

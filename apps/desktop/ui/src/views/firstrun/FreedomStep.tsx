@@ -1,7 +1,8 @@
 import { Hand, Scale, ShieldCheck, Zap } from "lucide-react";
 import { type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { AUTONOMY_LEVELS, type AutonomyLevel } from "../../lib/botProfile";
+import { accessLevelKey } from "../../lib/accessLevels";
+import { AUTONOMY_LEVELS, type AutonomyLevel, autonomyToPreset } from "../../lib/botProfile";
 import styles from "./FirstRun.module.css";
 
 const ICONS = { ask: Hand, balanced: Scale, auto: Zap } as const;
@@ -57,7 +58,7 @@ export function FreedomStep({
             >
               <span className={styles.levelHead}>
                 <Icon className={styles.levelIcon} aria-hidden="true" />
-                <span className={styles.cardTitle}>{t(`newBot.autonomyLevels.${id}`)}</span>
+                <span className={styles.cardTitle}>{t(`${accessLevelKey(autonomyToPreset(id))}.name`)}</span>
                 {id === "balanced" ? <span className={styles.badge}>{t("firstRun.freedom.recommended")}</span> : null}
               </span>
               <span className={styles.levelPitch}>{t(`firstRun.freedom.levels.${id}.pitch`)}</span>

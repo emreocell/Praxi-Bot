@@ -4787,18 +4787,6 @@
   },
   "newBot": {
     "advanced": "Réglages avancés",
-    "autonomy": "Ce qu'il peut faire seul",
-    "autonomyCustom": "Utilise le préréglage de permissions {{preset}}.",
-    "autonomyHints": {
-      "ask": "Lit les fichiers, consulte l'écran et cherche sur le web sans demander ; demande avant toute modification, tout envoi, toute récupération de page, tout clic ou toute commande.",
-      "auto": "S'exécute sans demander, même pour les suppressions, les commandes et les envois. Demande toujours pour l'argent, l'activation de planifications et les commandes catastrophiques, et, après lecture d'un contenu non fiable, avant d'envoyer des données ou d'exécuter un programme. Les actions dans un navigateur connecté (Playwright) ne demandent que lorsque la tâche a aussi lu quelque chose de privé ; le code hors de la page et les transferts de fichiers demandent toujours.",
-      "balanced": "Lit, navigue, modifie les fichiers de l'espace de travail et travaille sur l'ordinateur propre au bot sans demander ; demande avant de supprimer des fichiers, d'envoyer, de dépenser de l'argent ou de toucher à votre PC."
-    },
-    "autonomyLevels": {
-      "ask": "Demander",
-      "auto": "Libre",
-      "balanced": "Équilibré"
-    },
     "brain": "IA",
     "brainAuto": "Automatique",
     "brainHint": "Vous pourrez le changer plus tard dans la conversation",

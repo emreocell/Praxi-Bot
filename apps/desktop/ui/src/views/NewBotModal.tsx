@@ -21,10 +21,11 @@ import { Callout, DialogBody, DialogFooter, DialogHeader } from "../components/D
 import formStyles from "../components/Form.module.css";
 import { Modal } from "../components/Modal";
 import { ModelPicker } from "../components/ModelPicker";
-import { Segmented, SettingGroup, SettingRow } from "../components/SettingsUi";
+import { SettingGroup, SettingRow } from "../components/SettingsUi";
+import { AccessLevelPicker } from "../components/AccessLevelPicker";
+import { accessLevelKey } from "../lib/accessLevels";
+import { RECOMMENDED_SAFETY_PRESET } from "../lib/settingsPages";
 import {
-  AUTONOMY_LEVELS,
-  type AutonomyLevel,
   autonomyToPreset,
   BOT_TEMPLATES,
   type BotDraft,
@@ -34,7 +35,6 @@ import {
   DEFAULT_NEW_BOT_COLOR,
   draftFromBot,
   formatModelRef,
-  presetToAutonomy,
   resolveAutoExecutorRef
 } from "../lib/botProfile";
 import { invalidCustomRoles } from "../lib/botEditor";
@@ -134,7 +134,6 @@ function NewBotDialogContent({
     });
   };
 
-  const activeAutonomy = presetToAutonomy(draft.preset);
   const nameMissing = draft.name.trim() === "";
   const executorMissing = effectiveExecutor.model.trim() === "";
   // An unusable hand-typed id blocks creating the bot, as it blocks saving an edit.
@@ -253,9 +252,7 @@ function NewBotDialogContent({
   const levelLabel = (preset: string | undefined) => {
     const level = galleryLevel(preset);
     if (!level) return null;
-    return level.kind === "autonomy"
-      ? t(`newBot.autonomyLevels.${level.level}`)
-      : t(`botForm.preset.${level.preset}.name`);
+    return t(`${accessLevelKey(level.kind === "autonomy" ? autonomyToPreset(level.level) : level.preset)}.name`);
   };
 
   return (
@@ -479,30 +476,25 @@ function NewBotDialogContent({
                     }}
                   />
                 </SettingRow>
-                <SettingRow
-                  stacked
-                  title={t("newBot.autonomy")}
-                  description={
-                    activeAutonomy
-                      ? t(`newBot.autonomyHints.${activeAutonomy}`)
-                      : t("newBot.autonomyCustom", {
-                          preset: t(`botForm.preset.${draft.preset}.name`)
-                        })
-                  }
-                >
-                  <Segmented
-                    label={t("newBot.autonomy")}
-                    value={activeAutonomy ?? ("" as AutonomyLevel)}
-                    options={AUTONOMY_LEVELS.map((level) => ({
-                      value: level,
-                      label: t(`newBot.autonomyLevels.${level}`),
-                      testId: `autonomy-${level}`
-                    }))}
-                    onChange={(level) => patch({ preset: autonomyToPreset(level) })}
-                  />
-                </SettingRow>
               </SettingGroup>
             </div>
+
+            <section className={styles.access} aria-labelledby="new-bot-access-title">
+              <div>
+                <h3 id="new-bot-access-title" className={styles.accessTitle}>
+                  {t("accessLevel.title")}
+                </h3>
+                <p className={styles.accessLead}>{t("accessLevel.lead")}</p>
+              </div>
+              <AccessLevelPicker
+                value={draft.preset}
+                label={t("accessLevel.title")}
+                allowCustom={draft.preset === "custom"}
+                recommended={RECOMMENDED_SAFETY_PRESET}
+                testIdPrefix="new-bot-access"
+                onChange={(preset) => patch({ preset })}
+              />
+            </section>
 
             <button
               type="button"

@@ -20,6 +20,7 @@ import { BotAvatar, type BotAvatarState, type BotIdentity } from "ui";
 import type { UpdateChatInput } from "../api/types";
 import { activitySections, librarySections, subagentRows } from "../lib/activityPanel";
 import { isSlowStep } from "../lib/stepStuck";
+import { accessLevelKey } from "../lib/accessLevels";
 import { type PermissionTone, permissionTone } from "../lib/botEditor";
 import { chatActivity, chatDateLabel } from "../lib/botLanding";
 import { CHAT_SEARCH_MIN_CHATS, filterChats } from "../lib/chatSearch";
@@ -66,12 +67,15 @@ const TONE_ICONS: Record<PermissionTone, typeof Lock> = {
 };
 
 /** The permission mode as a small tinted chip (shared with the profile dialog). */
-export function PermissionChip({ preset, short = false }: { preset: PresetChoice; short?: boolean }) {
+export function PermissionChip({ preset }: { preset: PresetChoice; /** The panel passes it; every level's name is already one word, so it changes nothing. */ short?: boolean }) {
   const { t } = useTranslation();
   const tone = permissionTone(preset);
   const Icon = TONE_ICONS[tone];
-  // "Permission level: Full access. <what it allows>": the chip's one word alone says nothing.
-  const label = `${t("botPanel.permissionLabel", { level: t(`botForm.preset.${preset}.name`) })}. ${t(`botForm.preset.${preset}.hint`)}`;
+  // "Access: Full access. Asks only before spending money; ...": the name alone says too little.
+  const label = t("accessLevel.badge", {
+    level: t(`${accessLevelKey(preset)}.name`),
+    line: t(`${accessLevelKey(preset)}.line`)
+  });
   return (
     <span
       className={styles.chip}
@@ -82,8 +86,8 @@ export function PermissionChip({ preset, short = false }: { preset: PresetChoice
       data-testid="bot-permission-chip"
     >
       <Icon aria-hidden="true" />
-      {/* The panel shows the level's one word ("Balanced"); the full name stays in the tooltip. */}
-      <span>{short ? t(`botPanel.access.${preset}`) : t(`botForm.preset.${preset}.name`)}</span>
+      {/* One short name per level ("Balanced"); the full line stays in the tooltip. */}
+      <span>{t(`${accessLevelKey(preset)}.name`)}</span>
     </span>
   );
 }

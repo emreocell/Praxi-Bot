@@ -10,13 +10,10 @@ import {
   canReset,
   highlightParts,
   isCardShown,
-  levelOfPreset,
   metaOfCard,
   PAGE_ALIASES,
   parsePage,
-  RECOMMENDED_SAFETY_PRESET,
   resetPatch,
-  SAFETY_LEVELS,
   SETTINGS_PAGE_GROUPS,
   SETTINGS_GROUPS,
   SETTINGS_PAGES,
@@ -212,18 +209,6 @@ test("search forgives Turkish and German word endings, accents and case, but sti
   assert.ok(keys < dictation, `${keys} < ${dictation}`);
   assert.equal(settingsSearchRank("tema", "Tema", "Renkler"), 1);
   assert.equal(settingsSearchRank("tema", "Tema", "Tema rengi"), 0);
-});
-
-test("the three safety levels map to daemon presets, balanced is the recommended default", () => {
-  assert.deepEqual(
-    SAFETY_LEVELS.map((l) => l.preset),
-    ["read-and-draft", "approve-destructive", "full"]
-  );
-  assert.equal(SAFETY_LEVELS.filter((l) => l.recommended).length, 1);
-  assert.equal(SAFETY_LEVELS.find((l) => l.recommended)?.preset, RECOMMENDED_SAFETY_PRESET);
-  assert.equal(levelOfPreset("approve-destructive"), "balanced");
-  assert.equal(levelOfPreset("read-only"), null);
-  assert.equal(levelOfPreset(null), null);
 });
 
 const DEFAULTS = {

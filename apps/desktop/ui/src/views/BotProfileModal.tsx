@@ -9,6 +9,7 @@ import { DialogFooter, DialogHeader, dialogStyles } from "../components/DialogPa
 import { Modal } from "../components/Modal";
 import { SkeletonLines, SkeletonRegion } from "../components/Skeleton";
 import { SettingGroup, SettingRow } from "../components/SettingsUi";
+import { accessLevelKey } from "../lib/accessLevels";
 import { fallbackList } from "../lib/botEditor";
 import { botChats } from "../lib/botLanding";
 import { botView, draftFromBot, formatModelRef } from "../lib/botProfile";
@@ -170,8 +171,8 @@ function ProfileDialog({
           <h3 className={dialogStyles.blockTitle}>{t("botForm.permissions")}</h3>
           <SettingGroup>
             <SettingRow
-              title={t(`botForm.preset.${draft.preset}.name`)}
-              description={t(`botForm.preset.${draft.preset}.hint`)}
+              title={t(`${accessLevelKey(draft.preset)}.name`)}
+              description={t(`${accessLevelKey(draft.preset)}.line`)}
             />
             {draft.preset === "custom"
               ? PERMISSION_CATEGORIES.map((c) => (

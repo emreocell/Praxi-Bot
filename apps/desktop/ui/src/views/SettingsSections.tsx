@@ -23,6 +23,7 @@ import {
 import { useDaemon } from "../state/DaemonContext";
 import { notifyProvidersChanged, useProviders } from "../state/useProviders";
 import styles from "./SettingsSections.module.css";
+import { accessLevelKey } from "../lib/accessLevels";
 import { humanLine } from "../lib/humanError";
 import { openExternal } from "../lib/externalLink";
 import { useBotsHome } from "../state/useBotsHome";
@@ -534,12 +535,12 @@ function WorkspacePolicy() {
         >
           {PRESETS.map((p) => (
             <option key={p} value={p}>
-              {t(`botForm.preset.${p}.name`)}
+              {t(`${accessLevelKey(p)}.name`)}
             </option>
           ))}
           {policy.preset === null ? (
             <option value="custom" disabled>
-              {t("botForm.preset.custom.name")}
+              {t("accessLevel.custom.name")}
             </option>
           ) : null}
         </select>

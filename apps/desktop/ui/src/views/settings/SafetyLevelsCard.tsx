@@ -1,18 +1,18 @@
-import { Check, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PolicyDto } from "../../api/types";
-import { MoreInfo } from "../../components/ChoiceList";
+import { AccessLevelPicker } from "../../components/AccessLevelPicker";
 import formStyles from "../../components/Form.module.css";
+import { accessLevelOf } from "../../lib/accessLevels";
 import { humanLine } from "../../lib/humanError";
-import { levelOfPreset, SAFETY_LEVELS } from "../../lib/settingsPages";
+import { RECOMMENDED_SAFETY_PRESET } from "../../lib/settingsPages";
 import { useDaemon } from "../../state/DaemonContext";
 import styles from "./SafetyLevelsCard.module.css";
 
 /** Fired after the settings page puts the safety level back to the recommended one. */
 export const POLICY_CHANGED_EVENT = "praxi:policy-changed";
 
-/** Three understandable levels for what bots may do on their own; the daemon presets behind them stay. */
+/** The level every bot follows unless it has its own: the same list the bot editor and the new-bot dialog use. */
 export function SafetyLevelsCard() {
   const { t } = useTranslation();
   const { client } = useDaemon();
@@ -46,57 +46,17 @@ export function SafetyLevelsCard() {
     }
   };
 
-  const current = levelOfPreset(policy?.preset);
+  const current = accessLevelOf(policy?.preset);
   return (
     <div className={styles.root} data-testid="safety-levels">
-      <div className={styles.grid} role="radiogroup" aria-label={t("settingsModal.safety.title")}>
-        {SAFETY_LEVELS.map((l) => {
-          const active = current === l.id;
-          return (
-            <button
-              key={l.id}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              disabled={busy || !policy}
-              data-testid={`safety-level-${l.id}`}
-              className={[styles.level, active ? styles.active : ""].filter(Boolean).join(" ")}
-              onClick={() => void choose(l.preset)}
-            >
-              <span className={styles.head}>
-                <span className={styles.name}>{t(`settingsModal.safety.levels.${l.id}.name`)}</span>
-                {l.recommended ? (
-                  <span className={styles.badge}>
-                    <ShieldCheck aria-hidden="true" />
-                    {t("settingsModal.safety.recommended")}
-                  </span>
-                ) : null}
-                {active ? <Check className={styles.check} aria-hidden="true" /> : null}
-              </span>
-              <span className={styles.summary}>{t(`settingsModal.safety.levels.${l.id}.summary`)}</span>
-            </button>
-          );
-        })}
-      </div>
-      <MoreInfo label={t("settingsModal.safety.compare")} testId="safety-levels-more">
-        <p>{t("settingsModal.safety.lead")}</p>
-        <dl className={styles.compare}>
-          {SAFETY_LEVELS.map((l) => (
-            <div key={l.id}>
-              <dt className={styles.name}>{t(`settingsModal.safety.levels.${l.id}.name`)}</dt>
-              <dd>
-                <span className={styles.group}>{t("settingsModal.safety.onItsOwn")}</span>{" "}
-                {t(`settingsModal.safety.levels.${l.id}.own`)}
-              </dd>
-              <dd>
-                <span className={styles.group}>{t("settingsModal.safety.willAsk")}</span>{" "}
-                {t(`settingsModal.safety.levels.${l.id}.ask`)}
-              </dd>
-            </div>
-          ))}
-        </dl>
-        <p>{t("settingsModal.safety.samePresets")}</p>
-      </MoreInfo>
+      <AccessLevelPicker
+        value={current}
+        label={t("settingsModal.safety.title")}
+        recommended={RECOMMENDED_SAFETY_PRESET}
+        disabled={busy || !policy}
+        testIdPrefix="safety-level"
+        onChange={(preset) => void choose(preset)}
+      />
       {policy && current === null ? (
         <p className={formStyles.hint}>{t("settingsModal.safety.custom")}</p>
       ) : null}

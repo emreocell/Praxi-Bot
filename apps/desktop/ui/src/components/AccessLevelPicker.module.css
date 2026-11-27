@@ -1,0 +1,210 @@
+/* The access-level list: one row per level (name + one line), then a short disclosure of what
+   the chosen level can do and what still stops it.  Used by the bot editor, the new-bot dialog
+   and Settings → Security. */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-card);
+  cursor: pointer;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-easing-standard),
+    background-color var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.row:hover {
+  border-color: var(--color-border-strong);
+  background-color: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+.row:has(input:focus-visible) {
+  box-shadow: var(--shadow-focus);
+}
+
+.row:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.active,
+.active:hover {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent-subtle);
+}
+
+/* "Custom" is the escape hatch, not a level: quieter than the four levels. */
+.custom {
+  border-style: dashed;
+}
+
+.radio {
+  position: absolute;
+  width: var(--size-border);
+  height: var(--size-border);
+  margin: var(--space-0);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--space-8);
+  height: var(--space-8);
+  border-radius: var(--radius-md);
+  background-color: color-mix(in srgb, var(--color-text) 6%, transparent);
+  color: var(--color-text-secondary);
+}
+
+.active .icon {
+  background-color: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  color: var(--color-accent-text);
+}
+
+.icon > svg {
+  width: var(--size-icon);
+  height: var(--size-icon);
+}
+
+.text {
+  flex: 1;
+  min-width: var(--space-0);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-half);
+}
+
+.name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.tag {
+  padding: var(--space-0) var(--space-2);
+  border-radius: var(--radius-pill);
+  background-color: color-mix(in srgb, var(--color-text) 8%, transparent);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.line {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-muted);
+}
+
+.dot {
+  flex: none;
+  width: var(--space-4);
+  height: var(--space-4);
+  border: var(--size-border-thick) solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+}
+
+.active .dot {
+  border-width: calc(var(--space-1) + var(--size-border));
+  border-color: var(--color-accent-text);
+}
+
+.more {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-secondary);
+}
+
+.more summary {
+  width: fit-content;
+  border-radius: var(--radius-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.more summary:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(var(--space-0), 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background-color: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+.columnTitle {
+  margin: var(--space-0) var(--space-0) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-0);
+  padding: var(--space-0);
+  list-style: none;
+}
+
+.items li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.items svg {
+  flex: none;
+  width: var(--space-4);
+  height: var(--space-4);
+  margin-top: var(--space-half);
+}
+
+.can {
+  color: var(--color-success);
+}
+
+.stops {
+  color: var(--color-warning);
+}
+
+/* stylelint-disable-next-line unit-disallowed-list -- desktop window resize boundary */
+@media (width <= 40em) {
+  .columns { grid-template-columns: minmax(var(--space-0), 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row {
+    transition: none;
+  }
+}

@@ -276,25 +276,6 @@ export function canReset(page: SettingsPageId): boolean {
   return page === "safety" || RESET_KEYS[page] !== undefined;
 }
 
-// ---------------------------------------------------------------- safety levels
-
-export interface SafetyLevel {
-  id: "careful" | "balanced" | "handsOff";
-  /** The daemon preset this level stands for. */
-  preset: "read-and-draft" | "approve-destructive" | "full";
-  recommended?: boolean;
-}
-
-export const SAFETY_LEVELS: readonly SafetyLevel[] = [
-  { id: "careful", preset: "read-and-draft" },
-  { id: "balanced", preset: "approve-destructive", recommended: true },
-  { id: "handsOff", preset: "full" }
-];
-
-export function levelOfPreset(preset: string | null | undefined): SafetyLevel["id"] | null {
-  return SAFETY_LEVELS.find((l) => l.preset === preset)?.id ?? null;
-}
-
 // ---------------------------------------------------------------- search highlighting
 
 /**

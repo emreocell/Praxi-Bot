@@ -323,7 +323,7 @@ export async function flows(ctx) {
     await page.getByTestId('new-bot-start-blank').click();
     await page.getByTestId('new-bot-name').fill('Nova');
     await page.getByTestId('new-bot-next').click();
-    await page.getByTestId('autonomy-ask').click();
+    await page.getByTestId('new-bot-access-read-and-draft').click();
     await page.getByTestId('new-bot-submit').click();
     await page.getByTestId('bot-empty-state').waitFor(T);
   });
@@ -334,7 +334,7 @@ export async function flows(ctx) {
     await page.getByTestId('new-bot-start-blank').click();
     await page.getByTestId('new-bot-name').fill('Fulla');
     await page.getByTestId('new-bot-next').click();
-    await page.getByTestId('autonomy-auto').click();
+    await page.getByTestId('new-bot-access-full').click();
     await page.getByTestId('new-bot-submit').click();
     await page.getByTestId('bot-empty-state').waitFor(T);
     const bots = await (await fetch(`${ctx.base}/v1/bots`, { headers: { authorization: `Bearer ${ctx.token}` } })).json();

@@ -6,6 +6,7 @@ import type { BotShapeId } from "ui";
 import { isMockMode } from "../api/mockMode";
 import type { Bot } from "../api/types";
 import { demoData } from "../demo/demoData";
+import { accessLevelKey } from "../lib/accessLevels";
 import { saveBotAndApps } from "../lib/mcpApps";
 import { DEFAULT_STOP_HOTKEY } from "../config/product";
 import type { SupportedLanguage } from "../i18n";
@@ -97,7 +98,7 @@ export function OnboardingView({ settings, onLanguageChange, onSkip, onHelp, onD
   const at = FIRST_RUN_STEPS.indexOf(state.step);
   const last = at === FIRST_RUN_STEPS.length - 1;
   const serviceDown = phase === "error";
-  const levelName = t(`newBot.autonomyLevels.${state.level}`);
+  const levelName = t(`${accessLevelKey(autonomyToPreset(state.level))}.name`);
 
   const start = async () => {
     if (!client) {

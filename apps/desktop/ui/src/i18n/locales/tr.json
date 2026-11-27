@@ -1,4 +1,74 @@
 {
+  "accessLevel": {
+    "approve-destructive": {
+      "can": [
+        "Okur, web’de gezer ve arama yapar",
+        "Çalışma alanındaki dosyaları düzenler",
+        "Kendi bilgisayarında çalışır"
+      ],
+      "line": "Günlük işi kendi yapar; silmeden, göndermeden ve para harcamadan önce sorar.",
+      "name": "Dengeli",
+      "stops": [
+        "Dosya silmeden önce sorar",
+        "E-posta ya da mesaj göndermeden önce sorar",
+        "Para harcamadan önce sorar",
+        "Senin bilgisayarına dokunmadan önce sorar"
+      ]
+    },
+    "badge": "Erişim: {{level}}. {{line}}",
+    "canTitle": "Kendi başına",
+    "custom": {
+      "line": "Her işlem türü için kendi kuralın, aşağıda ayarlanır.",
+      "name": "Özel"
+    },
+    "full": {
+      "can": [
+        "Komut çalıştırır, program kurar, dosya düzenler ve siler",
+        "Web’de gezer, kayıt olur, form doldurur, e-posta ve mesaj gönderir",
+        "İş bitene kadar devam eder, zamanlanmış çalışmalarda da"
+      ],
+      "line": "Yalnızca para harcamadan önce sorar; işleri kendi başına bitirir.",
+      "name": "Tam erişim",
+      "stops": [
+        "Para harcamadan önce her seferinde sorar",
+        "Bilgisayarı bozabilecek komutları asla çalıştırmaz",
+        "Engellediğin sitelere ve uygulamalara dokunmaz",
+        "Güvenilmeyen bir sayfa okuduktan sonra zamanlama kurmadan ya da bot değiştirmeden önce sorar"
+      ]
+    },
+    "lead": "Sana sormadan ne kadarını yapabilir. Sonra değiştirebilirsin.",
+    "more": "{{level}} neler yapabilir, onu ne durdurur",
+    "read-and-draft": {
+      "can": [
+        "Dosya okur ve ekrana bakar",
+        "Web’de arama yapar",
+        "Kontrol etmen için taslak yazar"
+      ],
+      "line": "Okur ve taslak hazırlar; her değişiklikten önce sorar.",
+      "name": "Dikkatli",
+      "stops": [
+        "Dosya düzenlemeden ya da kaydetmeden önce sorar",
+        "Sayfa açmadan, tıklamadan ya da komut çalıştırmadan önce sorar",
+        "Bir şey göndermeden önce sorar",
+        "Para harcamadan önce sorar"
+      ]
+    },
+    "read-only": {
+      "can": [
+        "Soruları yanıtlar, açıklar",
+        "Sohbette paylaştığın şeylere bakar"
+      ],
+      "line": "Yalnızca bakar ve yanıtlar; hiçbir şeyi değiştirmez.",
+      "name": "Salt okunur",
+      "stops": [
+        "Hiçbir şeyi düzenleyemez, kaydedemez, silemez, gönderemez",
+        "Komut çalıştıramaz, para harcayamaz"
+      ]
+    },
+    "recommended": "Önerilen",
+    "stopsTitle": "Onu hâlâ durduran",
+    "title": "Erişim düzeyi"
+  },
   "account": {
     "ai": "Yapay zekâ",
     "appearance": "Görünüm",
@@ -5186,18 +5256,6 @@
   "newBot": {
     "advanced": "Gelişmiş ayarlar",
     "advancedHint": "Talimatlar, resim, modeller, ayrıntılı izinler, uygulamalar",
-    "autonomy": "Kendi başına ne kadar yapabilir",
-    "autonomyCustom": "{{preset}} izin profili kullanılıyor.",
-    "autonomyHints": {
-      "ask": "Dosya okuma, ekran görüntüsü ve web aramasını sormadan yapar; her değişiklik, gönderim, sayfa açma, tıklama ve komuttan önce sorar.",
-      "auto": "Silme, komut ve gönderim dahil sormadan çalışır. Para, zamanlanmış görev etkinleştirme ve yıkıcı komutlarda, ayrıca güvenilmeyen içerik okuduktan sonra veri göndermeden veya program çalıştırmadan önce yine sorar. Bağlı bir tarayıcının (Playwright) içindeki işlemler yalnızca görev özel bir şey de okuduysa sorar; sayfa dışında kod ve dosya aktarımı her zaman sorar.",
-      "balanced": "Okur, gezinir, çalışma alanındaki dosyaları düzenler ve botun kendi bilgisayarında sormadan çalışır; dosya silmeden, göndermeden, para harcamadan ve senin bilgisayarına dokunmadan önce sorar."
-    },
-    "autonomyLevels": {
-      "ask": "Sorar",
-      "auto": "Serbest",
-      "balanced": "Dengeli"
-    },
     "blankHint": "Sıfırdan başla: adını, görünümünü ve neler yapabileceğini sen seçersin.",
     "blankTitle": "Boş bot",
     "brain": "Yapay zekâ",

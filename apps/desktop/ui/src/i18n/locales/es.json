@@ -1,4 +1,74 @@
 {
+  "accessLevel": {
+    "approve-destructive": {
+      "can": [
+        "Reads, browses the web and searches",
+        "Edits files in its work area",
+        "Works on its own computer"
+      ],
+      "line": "Does everyday work alone; asks before deleting, sending or spending.",
+      "name": "Balanced",
+      "stops": [
+        "Asks before deleting files",
+        "Asks before sending mail or messages",
+        "Asks before spending money",
+        "Asks before touching your own computer"
+      ]
+    },
+    "badge": "Access: {{level}}. {{line}}",
+    "canTitle": "On its own",
+    "custom": {
+      "line": "Your own rule for each kind of action, set below.",
+      "name": "Custom"
+    },
+    "full": {
+      "can": [
+        "Runs commands, installs programs, edits and deletes files",
+        "Browses, signs up, fills in forms, sends mail and messages",
+        "Keeps going until the task is done, also in scheduled runs"
+      ],
+      "line": "Asks only before spending money; finishes tasks on its own.",
+      "name": "Full access",
+      "stops": [
+        "Asks before spending money, every time",
+        "Never runs commands that could wreck the computer",
+        "Leaves sites and apps you blocked alone",
+        "After reading an untrusted page, asks before creating schedules or changing bots"
+      ]
+    },
+    "lead": "How much it may do without asking you. You can change it later.",
+    "more": "What {{level}} can do, and what still stops it",
+    "read-and-draft": {
+      "can": [
+        "Reads files and looks at the screen",
+        "Searches the web",
+        "Writes drafts for you to check"
+      ],
+      "line": "Reads and drafts on its own; asks before every change.",
+      "name": "Careful",
+      "stops": [
+        "Asks before editing or saving a file",
+        "Asks before opening a page, clicking or running a command",
+        "Asks before sending anything",
+        "Asks before spending money"
+      ]
+    },
+    "read-only": {
+      "can": [
+        "Answers questions and explains",
+        "Looks at what you share in the chat"
+      ],
+      "line": "Only looks and answers; never changes anything.",
+      "name": "Read only",
+      "stops": [
+        "Cannot edit, save, delete or send anything",
+        "Cannot run commands or spend money"
+      ]
+    },
+    "recommended": "Recommended",
+    "stopsTitle": "What still stops it",
+    "title": "Access level"
+  },
   "account": {
     "ai": "IA",
     "appearance": "Apariencia",
@@ -5186,18 +5256,6 @@
   "newBot": {
     "advanced": "Ajustes avanzados",
     "advancedHint": "Instrucciones, imagen, modelos, permisos en detalle, apps",
-    "autonomy": "Qué puede hacer por su cuenta",
-    "autonomyCustom": "Se usa el perfil de permisos «{{preset}}».",
-    "autonomyHints": {
-      "ask": "Lee archivos, consulta la pantalla y busca en internet sin preguntar. Pide permiso antes de cada cambio, envío, carga de una página, clic o ejecución de un comando.",
-      "auto": "Actúa sin preguntar, incluso al borrar, ejecutar comandos o enviar contenido. Sigue pidiendo permiso para enviar correo, gastar dinero, activar tareas programadas o ejecutar comandos catastróficos. Tras leer contenido no confiable, también pide permiso antes de enviar datos fuera del equipo o iniciar un programa. Las acciones dentro de un navegador conectado (Playwright) solo requieren aprobación si la tarea también leyó contenido privado. Ejecutar código fuera de la página y transferir archivos siempre requiere aprobación.",
-      "balanced": "Puede leer, navegar, editar archivos del espacio de trabajo y usar su propio equipo sin preguntar. Pide permiso antes de borrar archivos, enviar contenido, gastar dinero o usar tu equipo."
-    },
-    "autonomyLevels": {
-      "ask": "Preguntar",
-      "auto": "Libre",
-      "balanced": "Equilibrado"
-    },
     "blankHint": "Empieza desde cero: tú eliges el nombre, el aspecto y lo que puede hacer.",
     "blankTitle": "Bot en blanco",
     "brain": "IA",

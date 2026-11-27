@@ -245,55 +245,46 @@ function loadLocale(name: "en" | "tr") {
   return JSON.parse(
     readFileSync(new URL(`../i18n/locales/${name}.json`, import.meta.url), "utf8")
   ) as {
-    botForm: { preset: Record<string, { name: string; hint: string }> };
-    newBot: {
-      autonomyLevels: Record<string, string>;
-      autonomyHints: Record<string, string>;
-    };
+    accessLevel: Record<string, { name: string; line: string; can: string[]; stops: string[] }>;
   };
 }
 
-test("autonomy hints in both locales accurately describe the stored permission presets", () => {
+test("access level texts in both locales accurately describe the stored permission presets", () => {
   for (const level of AUTONOMY_LEVELS) {
     assert.equal(presetToAutonomy(autonomyToPreset(level)), level);
   }
 
-  const en = loadLocale("en");
-  const tr = loadLocale("tr");
+  const en = loadLocale("en").accessLevel;
+  const tr = loadLocale("tr").accessLevel;
+  const all = (l: { line: string; can: string[]; stops: string[] }) => [l.line, ...l.can, ...l.stops].join(" ");
 
-  // Ask (`read-and-draft`) asks before every change; Balanced (`approve-destructive`)
-  // runs workspace edits, browsing and the bot's own computer freely and asks for
-  // deletes, sends, money and the user's PC. They are no longer "the same policy".
-  assert.doesNotMatch(en.newBot.autonomyHints.ask, /same effective policy/i);
-  assert.match(en.newBot.autonomyHints.ask, /change/i);
-  assert.match(en.newBot.autonomyHints.ask, /send/i);
-  assert.doesNotMatch(tr.newBot.autonomyHints.ask, /aynı etkili politika/i);
-  assert.match(tr.newBot.autonomyHints.ask, /değişiklik/i);
-  assert.match(tr.newBot.autonomyHints.ask, /gönderim/i);
+  // Careful (`read-and-draft`) asks before every change and send; it never claims drafts are
+  // sent or changes are denied.
+  assert.match(all(en["read-and-draft"]), /change/i);
+  assert.match(all(en["read-and-draft"]), /send/i);
+  assert.doesNotMatch(all(en["read-and-draft"]), /never sends or changes/i);
+  assert.match(all(tr["read-and-draft"]), /değişiklik/i);
+  assert.match(all(tr["read-and-draft"]), /gönder/i);
 
-  assert.doesNotMatch(en.newBot.autonomyHints.balanced, /same effective policy/i);
-  assert.match(en.newBot.autonomyHints.balanced, /workspace/i);
-  assert.match(en.newBot.autonomyHints.balanced, /own computer/i);
-  assert.match(en.newBot.autonomyHints.balanced, /delet/i);
-  assert.doesNotMatch(tr.newBot.autonomyHints.balanced, /aynı etkili politika/i);
-  assert.match(tr.newBot.autonomyHints.balanced, /çalışma alanı/i);
-  assert.match(tr.newBot.autonomyHints.balanced, /kendi bilgisayarında/i);
-  assert.match(tr.newBot.autonomyHints.balanced, /silme/i);
+  // Balanced (`approve-destructive`) runs workspace edits, browsing and its own computer, and
+  // asks for deletes, sends, money and the user's PC.
+  assert.match(all(en["approve-destructive"]), /work area/i);
+  assert.match(all(en["approve-destructive"]), /own computer/i);
+  assert.match(all(en["approve-destructive"]), /delet/i);
+  assert.match(all(tr["approve-destructive"]), /çalışma alanı/i);
+  assert.match(all(tr["approve-destructive"]), /kendi bilgisayarında/i);
+  assert.match(all(tr["approve-destructive"]), /silme/i);
 
-  // `auto` (`full`) runs deletes, commands and sends without asking, but still asks for
-  // Money, schedule activation, catastrophic commands and, after untrusted content, egress.
-  assert.match(en.newBot.autonomyHints.auto, /delet/i);
-  assert.match(en.newBot.autonomyHints.auto, /send/i);
-  assert.match(en.newBot.autonomyHints.auto, /Money/);
-  assert.match(en.newBot.autonomyHints.auto, /untrusted/i);
-  assert.match(tr.newBot.autonomyHints.auto, /silme/i);
-  assert.match(tr.newBot.autonomyHints.auto, /gönderim/i);
-  assert.match(tr.newBot.autonomyHints.auto, /Para/);
-  assert.match(tr.newBot.autonomyHints.auto, /güvenilmeyen/i);
-
-  // `botForm.preset.read-and-draft` must not claim drafts run free or changes are denied.
-  assert.doesNotMatch(en.botForm.preset["read-and-draft"].hint, /never sends or changes/i);
-  assert.doesNotMatch(tr.botForm.preset["read-and-draft"].hint, /asla göndermez/i);
+  // Full (`full`) deletes and sends without asking; money still asks, the never-list and the
+  // owner's blocks still hold, and authority-minting asks after untrusted content.
+  assert.match(all(en.full), /delet/i);
+  assert.match(all(en.full), /send/i);
+  assert.match(all(en.full), /money/i);
+  assert.match(all(en.full), /untrusted/i);
+  assert.match(all(tr.full), /siler/i);
+  assert.match(all(tr.full), /gönderir/i);
+  assert.match(all(tr.full), /para/i);
+  assert.match(all(tr.full), /güvenilmeyen/i);
 });
 
 test("botView preserves stored shape when it differs from fallbackBotShape(id)", () => {

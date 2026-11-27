@@ -1,13 +1,4 @@
-import {
-  Eye,
-  MonitorSmartphone,
-  PenLine,
-  ShieldCheck,
-  SlidersHorizontal,
-  Trash2,
-  X,
-  Zap
-} from "lucide-react";
+import { MonitorSmartphone, Trash2, X } from "lucide-react";
 import { useId, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button } from "ui";
@@ -27,13 +18,7 @@ import {
   parseFallbackInput,
   removeFallback
 } from "../lib/botEditor";
-import {
-  type BotDraft,
-  formatModelRef,
-  parseModelRef,
-  PRESET_CHOICES,
-  type PresetChoice
-} from "../lib/botProfile";
+import { type BotDraft, formatModelRef, parseModelRef } from "../lib/botProfile";
 import { brandIcon } from "../lib/brandIcons";
 import { modelGroups } from "../lib/modelPicker";
 import { modelLine } from "../lib/modelName";
@@ -45,19 +30,12 @@ import { CharacterColorRow, CharacterShapeGrid } from "./CharacterPicker";
 import { Callout, dialogStyles, Field } from "./DialogParts";
 import { ModelPicker } from "./ModelPicker";
 import { Segmented, SettingGroup, SettingRow, Switch } from "./SettingsUi";
+import { AccessLevelPicker } from "./AccessLevelPicker";
+import { RECOMMENDED_SAFETY_PRESET } from "../lib/settingsPages";
 
 type Patch = (p: Partial<BotDraft>) => void;
 
 const LEVELS: readonly PermissionLevel[] = ["deny", "ask", "allow"] as const;
-
-const PRESET_ICONS: Record<PresetChoice, typeof Eye> = {
-  "read-only": Eye,
-  "approve-destructive": ShieldCheck,
-  full: Zap,
-  "read-and-draft": PenLine,
-  custom: SlidersHorizontal
-};
-
 
 /** Identity: the face, the name and how the bot behaves. */
 export function IdentityFields({
@@ -265,48 +243,19 @@ export function ModelFields({
   );
 }
 
-/** Permissions: the daemon's presets as cards, and the per-category matrix for "Custom". */
+/** Access: the shared level list (with "Custom"), and the per-category matrix for "Custom". */
 export function PermissionFields({ draft, patch }: { draft: BotDraft; patch: Patch }) {
   const { t } = useTranslation();
-  const group = useId();
   return (
     <>
-      <div className={styles.presets} role="radiogroup" aria-label={t("botForm.permissions")}>
-        {PRESET_CHOICES.map((p) => {
-          const Icon = PRESET_ICONS[p];
-          const active = draft.preset === p;
-          return (
-            <label
-              key={p}
-              className={[styles.preset, active ? styles.presetActive : ""].filter(Boolean).join(" ")}
-              data-testid={`bot-edit-preset-${p}`}
-            >
-              <input
-                type="radio"
-                className={dialogStyles.visuallyHidden}
-                name={group}
-                value={p}
-                checked={active}
-                onChange={() => patch({ preset: p })}
-              />
-              <span className={styles.presetIcon}>
-                <Icon aria-hidden="true" />
-              </span>
-              <span className={styles.presetText}>
-                <span className={styles.presetName}>{t(`botForm.preset.${p}.name`)}</span>
-                <span className={styles.presetHint}>{t(`botForm.preset.${p}.hint`)}</span>
-              </span>
-              <span className={styles.presetDot} aria-hidden="true" />
-            </label>
-          );
-        })}
-      </div>
-      {draft.preset === "full" ? (
-        <details className={styles.exceptions} data-testid="bot-edit-full-exceptions">
-          <summary>{t("botForm.preset.full.exceptionsTitle")}</summary>
-          <p>{t("botForm.preset.full.exceptions")}</p>
-        </details>
-      ) : null}
+      <AccessLevelPicker
+        value={draft.preset}
+        label={t("accessLevel.title")}
+        allowCustom
+        recommended={RECOMMENDED_SAFETY_PRESET}
+        testIdPrefix="bot-edit-preset"
+        onChange={(preset) => patch({ preset })}
+      />
       {draft.preset === "custom" ? (
         <section className={dialogStyles.block}>
           <div className={dialogStyles.blockHead}>
