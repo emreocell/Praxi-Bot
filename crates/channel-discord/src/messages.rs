@@ -351,6 +351,8 @@ mod tests {
             Msg::LangUsage,
             Msg::Help,
             Msg::TooLong,
+            Msg::SecretRemoved { whole: false },
+            Msg::SecretRemoved { whole: true },
             Msg::TooFast,
             Msg::Queued,
             Msg::RunStopped,
@@ -408,6 +410,7 @@ mod tests {
             | Msg::LangUsage
             | Msg::Help
             | Msg::TooLong
+            | Msg::SecretRemoved { .. }
             | Msg::TooFast
             | Msg::Queued
             | Msg::RunStopped
