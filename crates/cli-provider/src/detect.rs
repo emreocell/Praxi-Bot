@@ -164,8 +164,11 @@ impl PathEnv {
             sealed_fixture: false,
         };
         crate::search::augment(&mut env);
+        // Praxi's own runtime in the data folder is the fallback for a machine with no npm. The
+        // installer's Node.js (or the admin's) on the search path wins, so every CLI lands in the
+        // one prefix the terminal and the `praxi` command also use.
         if let Some(data) = crate::node_runtime::registered_data_dir() {
-            env = env.with_node_runtime(data);
+            env = env.with_node_runtime_fallback(data);
         }
         env
     }
@@ -194,6 +197,17 @@ impl PathEnv {
             env_vars: HashMap::new(),
             sealed_fixture: true,
         }
+    }
+
+    /// [`Self::with_node_runtime`] only when no `npm` is on the search path yet: Praxi's own runtime
+    /// is the fallback for a machine without one, never a replacement for the installer's or the
+    /// admin's Node.js (two npm prefixes would split the installed CLIs between them).
+    #[must_use]
+    pub fn with_node_runtime_fallback(self, data: &std::path::Path) -> Self {
+        if find_candidate("npm", &self).is_some() {
+            return self;
+        }
+        self.with_node_runtime(data)
     }
 
     /// Put Praxi's own Node.js runtime (and its npm prefix) in front of the search path, when one

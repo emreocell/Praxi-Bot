@@ -133,12 +133,19 @@ fn plain_account(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
 
+/// This machine was set up by the Linux installer (it wrote the `praxi` command): a server where
+/// the coding CLIs belong to the service user.
+#[must_use]
+pub fn installed_as_service() -> bool {
+    cfg!(unix) && Path::new("/usr/local/bin/praxi").is_file()
+}
+
 /// The start of a terminal command that runs `bot cli ...` as `who`, for a person logged in
 /// as somebody else (the SSH user). The installer's `praxi` command already does that; without
 /// it, `sudo -u <user>` does.
 #[must_use]
 pub fn terminal_command(who: &RunAs) -> String {
-    if cfg!(unix) && Path::new("/usr/local/bin/praxi").is_file() {
+    if installed_as_service() {
         return "sudo praxi cli".to_owned();
     }
     match who.user.as_deref() {

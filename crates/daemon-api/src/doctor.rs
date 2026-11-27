@@ -963,6 +963,75 @@ pub fn check_cli_accounts(
     Check::warn(ID, N, detail, hint)
 }
 
+/// Oldest Node.js the npm-based coding CLIs (Claude Code, Codex, `OpenCode`) run on.
+const MIN_NODE_MAJOR: u32 = 18;
+
+/// `node / npm`: the runtime that installs the npm-based coding CLIs as the service user. Missing
+/// is only a problem on a server set up by the installer (`server`), where nobody can install one
+/// without root; elsewhere the CLIs are optional and a missing Node.js is neutral.
+#[must_use]
+pub fn check_node_runtime(tc: &cli_provider::node_runtime::Toolchain, server: bool) -> Check {
+    const ID: &str = "node_runtime";
+    const N: &str = "node / npm";
+    let show = |p: &Option<std::path::PathBuf>| {
+        p.as_ref()
+            .map_or_else(|| "not found".to_owned(), |p| p.display().to_string())
+    };
+    let (Some(node), Some(npm)) = (&tc.node, &tc.npm) else {
+        let detail = format!(
+            "node: {}; npm: {}. The coding CLIs that install with npm (Claude Code, Codex, OpenCode) cannot be installed for this user",
+            show(&tc.node),
+            show(&tc.npm)
+        );
+        return if server {
+            Check::warn(
+                ID,
+                N,
+                detail,
+                "re-run the Praxi installer with --update (it installs a pinned Node.js into /opt/praxi-nodejs and sets npm up for the service user), or use the Install button next to the CLI in Settings > AI, which fetches a Node.js of its own",
+            )
+        } else {
+            Check::skipped(ID, N, format!("{detail} (optional)"))
+        };
+    };
+    let version = tc.node_version.as_deref().unwrap_or("unknown version");
+    if tc.node_major().is_some_and(|m| m < MIN_NODE_MAJOR) {
+        return Check::warn(
+            ID,
+            N,
+            format!("node {version} at {} is too old", node.display()),
+            format!(
+                "the coding CLIs need Node.js {MIN_NODE_MAJOR} or newer; re-run the Praxi installer with --update to get a current one, or install one yourself"
+            ),
+        );
+    }
+    let prefix = tc.prefix.as_ref().map_or_else(
+        || "an unknown folder".to_owned(),
+        |p| p.display().to_string(),
+    );
+    if tc.prefix_writable == Some(false) {
+        return Check::warn(
+            ID,
+            N,
+            format!(
+                "node {version} at {}, npm at {}; but `npm install -g` writes to {prefix}, which this user cannot write",
+                node.display(),
+                npm.display()
+            ),
+            "give npm a folder this user owns, so no root is needed: `npm config set prefix ~/.npm-global` (the Praxi installer does this for the service user; re-run it with --update)",
+        );
+    }
+    Check::ok(
+        ID,
+        N,
+        format!(
+            "node {version} at {}, npm at {}; global installs go to {prefix}",
+            node.display(),
+            npm.display()
+        ),
+    )
+}
+
 /// `model catalog`: the catalog loads and knows the default model.
 #[must_use]
 pub fn check_catalog(data_dir: &Path, catalog: &Result<&Catalog, String>) -> Check {

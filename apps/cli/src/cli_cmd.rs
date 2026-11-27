@@ -166,7 +166,7 @@ fn explain(code: &str, id: &str) -> String {
             "Praxi has no verified installer for {id}. Use the vendor's own instructions (see the guide, \"Coding CLI engines\")."
         ),
         "npm_missing" | "node_missing" => {
-            "This machine has no Node.js (npm). Install Node.js 22 LTS, then try again.".to_owned()
+            "This machine has no Node.js (npm). Install Node.js 22 LTS (on a Praxi server, run the installer again with --update: it installs one for the praxi user), then try again.".to_owned()
         }
         "timeout" => "The installer took too long and was stopped. Try again.".to_owned(),
         "shim_refused" | "npm_shim_refused" => {

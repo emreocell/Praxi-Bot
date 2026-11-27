@@ -99,6 +99,133 @@ pub fn path_dirs(data: &Path) -> Vec<PathBuf> {
     node_bin_dir(data).map_or_else(Vec::new, |bin| vec![bin, npm_prefix(data).join("bin")])
 }
 
+/// What this machine offers for installing npm-based coding CLIs as the current user: the `node`
+/// and `npm` the search path finds, and the folder `npm install -g` would write to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Toolchain {
+    /// The `node` program found on the search path.
+    pub node: Option<PathBuf>,
+    /// Its version as `node --version` prints it (`v22.23.5`).
+    pub node_version: Option<String>,
+    /// The `npm` program found on the search path.
+    pub npm: Option<PathBuf>,
+    /// Where `npm install -g` puts packages: `NPM_CONFIG_PREFIX`, else `prefix=` of `~/.npmrc`,
+    /// else npm's default, the folder above the one holding `node` (read, not asked of npm).
+    pub prefix: Option<PathBuf>,
+    /// The current user can write there (or into the nearest folder that exists above it);
+    /// `None` when that cannot be told (no prefix, or not a Unix system).
+    pub prefix_writable: Option<bool>,
+}
+
+impl Toolchain {
+    /// The major version of `node_version` (`22` for `v22.23.5`).
+    #[must_use]
+    pub fn node_major(&self) -> Option<u32> {
+        self.node_version
+            .as_deref()?
+            .trim_start_matches('v')
+            .split('.')
+            .next()?
+            .parse()
+            .ok()
+    }
+}
+
+/// Look for `node` and `npm` the way installs do (the same search path), run `node --version`
+/// (three seconds at most) and work out where `npm install -g` would write. Writes nothing.
+#[must_use]
+pub fn probe(env: &crate::PathEnv) -> Toolchain {
+    let node = crate::detect::find_candidate("node", env);
+    let npm = crate::detect::find_candidate("npm", env);
+    let node_version = node.as_deref().and_then(|n| node_version(n, env));
+    let prefix = env
+        .env_vars
+        .get("NPM_CONFIG_PREFIX")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            env.home_dir
+                .as_deref()
+                .and_then(|home| npmrc_prefix(&std::fs::read_to_string(home.join(".npmrc")).ok()?))
+        })
+        .or_else(|| {
+            // npm's own default: `<prefix>/bin/node`, so the prefix is two folders up (never `/`).
+            let real = std::fs::canonicalize(node.as_deref()?).ok()?;
+            let prefix = real.ancestors().nth(2)?;
+            prefix.parent().is_some().then(|| prefix.to_path_buf())
+        })
+        .filter(|p| p.is_absolute());
+    let prefix_writable = prefix.as_deref().and_then(writable_or_creatable);
+    Toolchain {
+        node,
+        node_version,
+        npm,
+        prefix,
+        prefix_writable,
+    }
+}
+
+/// The absolute `prefix=` value of an `.npmrc`'s text (the last one wins, as in npm).
+fn npmrc_prefix(text: &str) -> Option<PathBuf> {
+    text.lines()
+        .filter_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key.trim() == "prefix").then(|| value.trim().trim_matches(['"', '\'']))
+        })
+        .next_back()
+        .filter(|v| Path::new(v).is_absolute())
+        .map(PathBuf::from)
+}
+
+fn node_version(node: &Path, env: &crate::PathEnv) -> Option<String> {
+    let path = std::env::join_paths(env.path_dirs.iter()).ok()?;
+    let mut child = std::process::Command::new(node)
+        .arg("--version")
+        .env_clear()
+        .env("PATH", path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            _ => return None,
+        }
+    }
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut text).ok()?;
+    let version = text.trim();
+    (version.starts_with('v') && version.len() < 32 && !version.contains(char::is_whitespace))
+        .then(|| version.to_owned())
+}
+
+/// Whether the current user can write `dir`, or the nearest folder above it that exists (npm creates
+/// the rest). `None` off Unix, where this check is not made.
+#[cfg(unix)]
+fn writable_or_creatable(dir: &Path) -> Option<bool> {
+    let existing = dir.ancestors().find(|p| p.exists())?;
+    Some(
+        rustix::fs::access(existing, rustix::fs::Access::WRITE_OK).is_ok()
+            && existing.metadata().ok()?.is_dir(),
+    )
+}
+
+#[cfg(not(unix))]
+fn writable_or_creatable(_dir: &Path) -> Option<bool> {
+    None
+}
+
 fn sha256_hex(digest: impl AsRef<[u8]>) -> String {
     digest.as_ref().iter().fold(String::new(), |mut s, b| {
         use std::fmt::Write as _;
@@ -333,6 +460,126 @@ pub async fn verify_runs(data: &Path, version: &str) -> Result<(), &'static str>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `<root>/bin/{node,npm}` as tiny scripts; `node --version` prints `version`.
+    #[cfg(unix)]
+    fn fake_toolchain(root: &Path, version: &str, with_npm: bool) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let mut programs = vec![("node", format!("#!/bin/sh\necho {version}\n"))];
+        if with_npm {
+            programs.push(("npm", "#!/bin/sh\necho 10.9.0\n".to_owned()));
+        }
+        for (name, text) in programs {
+            let file = bin.join(name);
+            std::fs::write(&file, text).unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        bin
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_npm_already_on_the_path_beats_the_runtime_in_the_data_folder() {
+        let data = tempfile::tempdir().unwrap();
+        let runtimes = data.path().join("runtimes");
+        let ours = fake_toolchain(&runtimes.join("node-v22.1.0"), "v22.1.0", true);
+        std::fs::write(runtimes.join(MARKER), "node-v22.1.0").unwrap();
+        // No npm on the search path: the fallback applies (as the app's own installer relies on).
+        let none = tempfile::tempdir().unwrap();
+        let env = crate::PathEnv::for_test(none.path().to_path_buf())
+            .with_node_runtime_fallback(data.path());
+        assert_eq!(env.path_dirs[0], ours);
+        assert!(env.env_vars.contains_key("NPM_CONFIG_PREFIX"));
+        // The installer's Node.js is there: nothing is added, and its prefix is not overridden.
+        let theirs = fake_toolchain(&data.path().join("opt-node"), "v22.23.5", true);
+        let prefix = data.path().join("home/.npm-global");
+        let env = crate::PathEnv::for_test(theirs.clone())
+            .with_env_var("NPM_CONFIG_PREFIX", prefix.to_string_lossy())
+            .with_node_runtime_fallback(data.path());
+        assert_eq!(env.path_dirs, vec![theirs]);
+        assert_eq!(
+            env.env_vars.get("NPM_CONFIG_PREFIX").map(String::as_str),
+            prefix.to_str()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_toolchain_names_node_npm_and_the_users_global_prefix() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = fake_toolchain(&root.path().join("opt/node"), "v22.23.5", true);
+        let prefix = root.path().join("home/.npm-global");
+        let env = crate::PathEnv::for_test(bin.clone())
+            .with_env_var("NPM_CONFIG_PREFIX", prefix.to_string_lossy());
+        let tc = probe(&env);
+        assert_eq!(tc.node.as_deref(), Some(bin.join("node").as_path()));
+        assert_eq!(tc.npm.as_deref(), Some(bin.join("npm").as_path()));
+        assert_eq!(tc.node_version.as_deref(), Some("v22.23.5"));
+        assert_eq!(tc.node_major(), Some(22));
+        assert_eq!(tc.prefix.as_deref(), Some(prefix.as_path()));
+        // Not created yet: the nearest folder that exists (the tempdir) decides, and it is writable.
+        assert_eq!(tc.prefix_writable, Some(true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_prefix_the_user_cannot_write_is_reported() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        // The owner's failure: npm's default prefix is the folder above `node`, a system folder.
+        let runtime = root.path().join("opt/praxi-nodejs");
+        let bin = fake_toolchain(&runtime, "v22.23.5", true);
+        std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let tc = probe(&crate::PathEnv::for_test(bin));
+        std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            tc.prefix.as_deref().map(|p| p.canonicalize().unwrap()),
+            Some(runtime.canonicalize().unwrap()),
+            "npm's default prefix is the folder above bin/node"
+        );
+        if !rustix::process::geteuid().is_root() {
+            assert_eq!(tc.prefix_writable, Some(false));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_prefix_comes_from_npmrc_when_the_environment_has_none() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = fake_toolchain(&root.path().join("opt/node"), "v20.1.0", true);
+        let home = root.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join(".npmrc"),
+            "registry=https://registry.example.test/\nprefix=relative/dir\nprefix = /srv/mine\n",
+        )
+        .unwrap();
+        let env = crate::PathEnv::for_test(bin).with_home(home);
+        assert_eq!(probe(&env).prefix, Some(PathBuf::from("/srv/mine")));
+        assert_eq!(npmrc_prefix("prefix=relative\n"), None);
+        assert_eq!(
+            npmrc_prefix("prefix=\"/a b\"\n"),
+            Some(PathBuf::from("/a b"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_pieces_are_reported_as_missing() {
+        let empty = tempfile::tempdir().unwrap();
+        let none = probe(&crate::PathEnv::for_test(empty.path().to_path_buf()));
+        assert_eq!(none, Toolchain::default());
+        // node without npm: both facts are kept apart.
+        let bin = fake_toolchain(&empty.path().join("n"), "v18.0.0", false);
+        let tc = probe(&crate::PathEnv::for_test(bin));
+        assert!(tc.node.is_some() && tc.npm.is_none());
+        assert_eq!(tc.node_major(), Some(18));
+        // A node that prints no version leaves the version out instead of guessing.
+        let odd = fake_toolchain(&empty.path().join("o"), "not-a-version", true);
+        assert_eq!(probe(&crate::PathEnv::for_test(odd)).node_version, None);
+    }
 
     #[test]
     fn shasums_pick_the_pinned_major_and_target_only() {

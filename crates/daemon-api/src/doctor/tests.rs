@@ -652,6 +652,89 @@ fn a_doctor_run_as_the_wrong_user_says_so_instead_of_reporting_for_that_user() {
     assert!(c.hint.unwrap().contains("sudo praxi doctor"));
 }
 
+fn toolchain(
+    version: &str,
+    prefix: &str,
+    writable: Option<bool>,
+) -> cli_provider::node_runtime::Toolchain {
+    cli_provider::node_runtime::Toolchain {
+        node: Some("/opt/praxi-nodejs/bin/node".into()),
+        node_version: Some(version.into()),
+        npm: Some("/opt/praxi-nodejs/bin/npm".into()),
+        prefix: Some(prefix.into()),
+        prefix_writable: writable,
+    }
+}
+
+#[test]
+fn node_runtime_check_names_where_global_installs_go() {
+    let c = check_node_runtime(
+        &toolchain("v22.23.5", "/var/lib/praxi/.npm-global", Some(true)),
+        true,
+    );
+    assert_eq!(c.status, Status::Ok);
+    assert_eq!(c.id, "node_runtime");
+    assert!(
+        c.detail
+            .contains("node v22.23.5 at /opt/praxi-nodejs/bin/node"),
+        "{}",
+        c.detail
+    );
+    assert!(
+        c.detail
+            .contains("global installs go to /var/lib/praxi/.npm-global"),
+        "{}",
+        c.detail
+    );
+    // Writability is unknown (not Unix): not a finding.
+    assert_eq!(
+        check_node_runtime(&toolchain("v22.23.5", "/x", None), true).status,
+        Status::Ok
+    );
+}
+
+#[test]
+fn node_runtime_check_catches_the_prefix_that_needs_root() {
+    // The owner's second failure: npm's default prefix is a system folder the service user cannot write.
+    let c = check_node_runtime(
+        &toolchain("v22.23.5", "/opt/praxi-nodejs", Some(false)),
+        true,
+    );
+    assert_eq!(c.status, Status::Warn);
+    assert!(
+        c.detail
+            .contains("writes to /opt/praxi-nodejs, which this user cannot write"),
+        "{}",
+        c.detail
+    );
+    assert!(c.hint.unwrap().contains("npm config set prefix"));
+}
+
+#[test]
+fn node_runtime_check_is_only_a_warning_for_what_is_actually_missing_on_a_server() {
+    let missing = cli_provider::node_runtime::Toolchain::default();
+    let c = check_node_runtime(&missing, true);
+    assert_eq!(c.status, Status::Warn);
+    assert!(
+        c.detail.contains("node: not found; npm: not found"),
+        "{}",
+        c.detail
+    );
+    assert!(c.hint.unwrap().contains("--update"));
+    // A desktop computer does not need it: neutral.
+    assert_eq!(check_node_runtime(&missing, false).status, Status::Skipped);
+    // node without npm is just as unusable for installs.
+    let mut half = toolchain("v22.23.5", "/x", Some(true));
+    half.npm = None;
+    let c = check_node_runtime(&half, true);
+    assert_eq!(c.status, Status::Warn);
+    assert!(c.detail.contains("npm: not found"), "{}", c.detail);
+    // Too old for the CLIs.
+    let c = check_node_runtime(&toolchain("v16.20.2", "/x", Some(true)), false);
+    assert_eq!(c.status, Status::Warn);
+    assert!(c.detail.contains("too old"), "{}", c.detail);
+}
+
 fn write_providers(dir: &Path, settings: Vec<ProviderSettings>) {
     let mut cfg = ProviderConfig::default();
     for s in settings {

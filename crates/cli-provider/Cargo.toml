@@ -35,7 +35,7 @@ flate2 = "1"
 tar = "0.4"
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", default-features = false, features = ["process", "std"] }
+rustix = { version = "1", default-features = false, features = ["fs", "process", "std"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [

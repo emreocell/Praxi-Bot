@@ -367,6 +367,20 @@ mod tests {
         ));
     }
 
+    /// The installer's Node.js lives beside the release tree, not inside it: the daemon's
+    /// `WorkingDirectory` is `/opt/praxi`, and a program below it is refused as a planted file, so
+    /// `/opt/praxi/node/bin/npm` could never be run for a CLI install.
+    #[cfg(unix)]
+    #[test]
+    fn the_installers_node_runtime_is_not_inside_the_daemons_working_directory() {
+        let cwd = Path::new("/opt/praxi");
+        let outside = Path::new("/opt/praxi-nodejs/lib/node_modules/npm/bin/npm-cli.js");
+        let inside = Path::new("/opt/praxi/node/lib/node_modules/npm/bin/npm-cli.js");
+        let home = Some(Path::new("/var/lib/praxi"));
+        assert!(outside_working_dir(outside, outside, cwd, home));
+        assert!(!outside_working_dir(inside, inside, cwd, home));
+    }
+
     /// Only the known per-user CLI folders are exempt: not the home as a whole, not the data
     /// folder that sits in it (the service user's home IS its data folder), not any other tree.
     #[cfg(unix)]
