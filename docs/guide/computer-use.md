@@ -12,6 +12,7 @@ a **Turn on computer use** card with one button.
 | --- | --- |
 | `desktop_list_apps` | List visible windows (id, title, process). |
 | `desktop_launch` | Start a program, document or URI. Packaged apps (for example WhatsApp) use `appx:<AppUserModelID>`. |
+| `desktop_open` | Open a web address, or a file of the bot's own folders (an HTML page it wrote, a PDF, a picture), in the computer's default application or in a browser it names (Chrome, Chromium, Firefox, Edge). Only documents, pages, pictures, sound and video open, never a program or script, and files open only on the computer the daemon runs on. |
 | `desktop_focus` | Bring an open window to the front and read it. |
 | `desktop_window` | Minimise, maximise, restore, move, resize or close a window, by `window_id` or by part of its title. |
 | `desktop_get_state` | Read a window's accessibility (UI Automation) tree: names, roles, screen bounds. Optional window-scoped screenshot. |

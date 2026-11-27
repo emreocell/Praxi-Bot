@@ -444,7 +444,12 @@ async fn deleting_a_bot_with_chats_says_why() {
 #[tokio::test]
 async fn a_bot_without_the_switch_gets_nothing() {
     let t = setup();
-    let b = add_bot(&t, "Plain", caller_config("full", &["fs_read"], false));
+    // Below the Full level: no switch, nothing (a Full bot is visible, see the test further down).
+    let b = add_bot(
+        &t,
+        "Plain",
+        caller_config("approve-destructive", &["fs_read"], false),
+    );
     let host = DaemonBotHost::new(&t.state);
     let c = who(&b);
     assert!(!host.may_manage_bots(&b.id.to_string()));
@@ -457,7 +462,7 @@ async fn a_bot_without_the_switch_gets_nothing() {
         )
         .await
         .unwrap_err();
-    assert!(e.contains("not enabled"), "{e}");
+    assert!(e.contains("owner's own chat"), "{e}");
 }
 
 #[tokio::test]
@@ -786,4 +791,84 @@ async fn a_child_with_wider_folders_or_a_caller_without_files_is_read_only_to_it
         let e = touch(&host2, &c2, &k2.id).await.unwrap_err();
         assert!(e.contains("files"), "{files}: {e}");
     }
+}
+
+/// A bot at the Full level sees the bot tools without the "Can create bots" switch, but the host
+/// serves them only while the agent loop says the run is the owner's own chat turn (a run id the
+/// loop does not know, an empty one included, is not).
+#[tokio::test]
+async fn a_full_bot_without_the_switch_may_use_the_tools_only_in_the_owners_own_chat() {
+    let t = setup();
+    let full = add_bot(&t, "Full", caller_config("full", &[], false));
+    let below = add_bot(
+        &t,
+        "Below",
+        caller_config("approve-destructive", &[], false),
+    );
+    let host = DaemonBotHost::new(&t.state);
+    assert!(
+        host.may_manage_bots(&full.id.to_string()),
+        "visible on Full"
+    );
+    assert!(!host.may_manage_bots(&below.id.to_string()));
+    for run_id in ["", "not-a-run", &uuid::Uuid::new_v4().to_string()] {
+        let c = BotCaller {
+            run_id: run_id.into(),
+            ..who(&full)
+        };
+        let e = host
+            .preview(
+                &c,
+                &BotChange::Create(req(json!({"name":"N","persona":"p"}))),
+            )
+            .await
+            .unwrap_err();
+        assert!(e.contains("owner's own chat"), "{run_id}: {e}");
+        assert!(host.list(&c).await.is_err(), "{run_id}");
+    }
+    assert_eq!(
+        t.state
+            .storage()
+            .list_bots(t.state.user_id())
+            .unwrap()
+            .len(),
+        2,
+        "nothing was created"
+    );
+}
+
+#[tokio::test]
+async fn the_colour_and_shape_of_a_new_bot_are_set_checked_and_editable() {
+    let t = setup();
+    let (b, host) = boss(&t, "approve-destructive");
+    let c = who(&b);
+    let v = make(
+        &host,
+        &c,
+        json!({"name":"Kralinho","persona":"A witty chat companion.","color":"#7C3AED","shape":"Star"}),
+    )
+    .await
+    .unwrap();
+    let made = stored(&t, &v.id);
+    assert_eq!(made.config["bot"]["shape"], "star");
+    assert_eq!(made.config["bot"]["color"], "#7c3aed");
+    assert_eq!(v.color.as_deref(), Some("#7c3aed"));
+    for bad in ["square", "", "../star", "star; drop"] {
+        let e = host
+            .preview(
+                &c,
+                &BotChange::Create(req(json!({"name":"N","persona":"p","shape":bad}))),
+            )
+            .await
+            .unwrap_err();
+        assert!(e.contains("`shape` must be one of"), "{bad}: {e}");
+    }
+    let r = req(json!({"shape":"ghost"}));
+    let change = BotChange::Update {
+        id: v.id.clone(),
+        req: r.clone(),
+    };
+    host.preview(&c, &change).await.unwrap();
+    host.update(&c, &v.id, &r).await.unwrap();
+    assert_eq!(stored(&t, &v.id).config["bot"]["shape"], "ghost");
 }

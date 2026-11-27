@@ -128,14 +128,20 @@ const FULL_UPLOAD_REASON: &str = "mode.full.owner_upload";
 /// rule ([`Shared::full_upload_waives`]) and is not in [`FULL_BROWSER_CALLS`].
 pub(crate) const FULL_UPLOAD_CALL: &str = "browser_upload";
 
+/// `desktop_open`: an address or a file of the bot's own folders opened in the computer's default
+/// application or a named browser. It follows the rule of `browser_open` (an address is judged
+/// the same way), see [`FULL_BROWSER_CALLS`].
+pub(crate) const FULL_OPEN_CALL: &str = "desktop_open";
+
 /// The managed browser's calls that Full lets an owner-started run make after reading a page:
 /// open, go back and forward, reload, click, type, select, press, select text, tabs (including a
 /// new tab on an address, judged like `browser_open`) and the batch. NOT `browser_eval` (a page
 /// script can send anything anywhere), NOT `browser_upload` (it hands a file of this computer
 /// to a page: it has the narrower rule of [`FULL_UPLOAD_CALL`]) and not the user's own computer
 /// (`pc_*`).
-pub(crate) const FULL_BROWSER_CALLS: [&str; 13] = [
+pub(crate) const FULL_BROWSER_CALLS: [&str; 14] = [
     "browser_open",
+    FULL_OPEN_CALL,
     "browser_back",
     "browser_forward",
     "browser_reload",
@@ -481,9 +487,9 @@ impl Shared {
         // the owner's accounts: what the run reads from then on is private and cannot be compared.
         // The same for an address on this computer or its network (file:, localhost, LAN): a
         // page there is private machine data, whatever the owner's card said.
-        if name.starts_with("browser_")
-            && (self.browser_may_hold_logins(ctx, input)
-                || crate::browser_url::opens_non_public(name, input))
+        if (name.starts_with("browser_") && self.browser_may_hold_logins(ctx, input))
+            || ((name.starts_with("browser_") || name == FULL_OPEN_CALL)
+                && crate::browser_url::opens_non_public(name, input))
         {
             ctx.taint.lock().mark_private_unhashed();
         }
@@ -675,6 +681,20 @@ impl Shared {
             && (self.full_lane_run(ctx)
                 || self.full_owner_started(ctx)
                 || self.mission_full_started(ctx))
+            && !Self::bot_asks_explicitly(ctx, req)
+    }
+
+    /// A bot change (`bot_create`, `bot_update`, `bot_delete`) in the owner's own chat on a bot at
+    /// the Full level, while the run holds no untrusted content: it waives the always-ask test,
+    /// as on that level nothing asks but money. A bot is standing authority a later run holds,
+    /// so a run that read a page, a mail or another bot's answer (a text the owner did not
+    /// write could have steered the call) keeps the card. An `Ask` the owner wrote for the
+    /// category, a deny, the money floor and the host's ceiling (never broader than the caller,
+    /// never `full`, only bots it made) all still apply.
+    fn full_bots_waive(&self, ctx: &RunCtx, name: &str, req: &ActionRequest) -> bool {
+        crate::bot_offer::is_bot_tool(name)
+            && self.bot_tools_offered(ctx)
+            && !ctx.taint.lock().exposure.untrusted
             && !Self::bot_asks_explicitly(ctx, req)
     }
 
@@ -963,6 +983,9 @@ impl Shared {
         // browser re-checks the account's site at the read). Every other level keeps the card.
         let own_totp_on_full =
             category != PermissionCategory::Money && self.full_totp_waives(ctx, name, input, &req);
+        // Creating, changing or deleting a bot the owner asked for in their own Full chat: the
+        // owner's request is the confirmation (see `crate::bot_offer`).
+        let own_bots_on_full = self.full_bots_waive(ctx, name, &req);
         // A tool that delegates future authority is confirmed every time:
         // an allow becomes a plain ask, and no grant waives it (a deny stays).
         // The same holds for a call that types an owner-stored secret
@@ -985,7 +1008,7 @@ impl Shared {
         {
             return (Decision::Allow, Some(FULL_SIGNUP_REASON));
         }
-        if (self.must_ask(name, input) && !own_totp_on_full)
+        if (self.must_ask(name, input) && !own_totp_on_full && !own_bots_on_full)
             || matches!(
                 ctx.initiator,
                 InitiatorKind::ExternalAgent | InitiatorKind::ExternalSchedule
@@ -1805,7 +1828,9 @@ impl Shared {
         // A profile that may be signed in (a named one, or the default one after the owner
         // signed in there) keeps asking, like the Balanced lane does: signing in once is not a
         // per-call waiver. The public-web read tools never touch a browser profile.
-        if !web_read && self.browser_may_hold_logins(ctx, input) {
+        // `desktop_open` shows a page in the system's own application, never in the bot's
+        // managed browser profile, so its sign-ins are not at stake.
+        if !web_read && name != FULL_OPEN_CALL && self.browser_may_hold_logins(ctx, input) {
             return false;
         }
         if !self.full_input_is_plain(ctx, name, input) {

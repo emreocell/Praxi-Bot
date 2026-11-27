@@ -12,6 +12,7 @@ botlar Windows bilgisayarındaki uygulamalarda çalışabilir. Kapalıysa sohbet
 | --- | --- |
 | `desktop_list_apps` | Görünen pencereleri listeler (kimlik, başlık, işlem). |
 | `desktop_launch` | Bir program, belge ya da URI başlatır. Paketlenmiş uygulamalar (örneğin WhatsApp) `appx:<AppUserModelID>` kullanır. |
+| `desktop_open` | Bir web adresini ya da botun kendi klasörlerindeki bir dosyayı (yazdığı bir HTML sayfası, PDF, resim) bilgisayarın varsayılan uygulamasında ya da adını verdiği tarayıcıda (Chrome, Chromium, Firefox, Edge) açar. Yalnızca belge, sayfa, resim, ses ve video açılır; program ya da betik asla açılmaz. Dosyalar yalnızca daemon'un çalıştığı bilgisayarda açılır. |
 | `desktop_focus` | Açık bir pencereyi öne getirir ve okur. |
 | `desktop_window` | Bir pencereyi `window_id` ile ya da başlığının bir parçasıyla küçültür, büyütür, eski haline getirir, taşır, boyutlandırır ya da kapatır. |
 | `desktop_get_state` | Bir pencerenin erişilebilirlik (UI Automation) ağacını okur: adlar, roller, ekran sınırları. İsteğe bağlı olarak pencereye özel ekran görüntüsü. |

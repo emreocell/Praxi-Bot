@@ -2475,15 +2475,10 @@ impl Shared {
         let Ok(id) = run_id.parse::<Uuid>() else {
             return false;
         };
-        let Some((profile, bot)) = self
-            .runs
-            .lock()
-            .get(&RunId(id))
-            .map(|c| (Arc::clone(&c.profile), c.bot_id))
-        else {
+        let Some(ctx) = self.runs.lock().get(&RunId(id)).cloned() else {
             return false;
         };
-        self.spec_visible(&profile, bot, spec)
+        self.bot_tool_allowed(&ctx, &spec.name) && self.spec_visible(&ctx.profile, ctx.bot_id, spec)
     }
 
     /// Profile allow / exclude lists, platform and the tool's own per-bot
@@ -2687,6 +2682,16 @@ impl Shared {
         hints: &[String],
         offered: Option<&[String]>,
     ) -> Option<Resolved> {
+        // The bot management tools belong to the runs `bot_tool_allowed` names, also when the
+        // model reaches one through `use_tool`.
+        let target = if name == agent_router::USE_TOOL {
+            input.get("name").and_then(Value::as_str).unwrap_or(name)
+        } else {
+            name
+        };
+        if !self.bot_tool_allowed(ctx, target) {
+            return None;
+        }
         let Some(offered) = offered else {
             return self.resolve_call(&ctx.profile, ctx.bot_id, name, input, hints);
         };

@@ -700,6 +700,22 @@ impl AgentLoop {
         self.sh.router.reset();
     }
 
+    /// Whether run `run_id` is the owner's own chat turn on a Full bot: the runs that get the bot
+    /// management tools without the "Can create bots" switch. The daemon asks again on every
+    /// call; an unknown run is `false`.
+    #[must_use]
+    pub fn bot_tools_offered_to_run(&self, run_id: &str) -> bool {
+        let Ok(id) = run_id.parse::<uuid::Uuid>() else {
+            return false;
+        };
+        self.sh
+            .runs
+            .lock()
+            .get(&protocol::RunId(id))
+            .cloned()
+            .is_some_and(|ctx| self.sh.bot_tools_offered(&ctx))
+    }
+
     /// The workspace-wide default permission policy.
     #[must_use]
     pub fn global_policy(&self) -> Policy {

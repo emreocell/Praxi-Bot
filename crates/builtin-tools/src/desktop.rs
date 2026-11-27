@@ -316,6 +316,18 @@ impl ObsFilter {
     }
 }
 
+/// One program start of `desktop_launch` / `desktop_open`.
+struct Launch {
+    /// What a card and the control overlay show.
+    label: String,
+    /// The programs to try, in order.
+    apps: Vec<AppSpec>,
+    /// What a `desktop_open` showed, for the report.
+    opened: Option<String>,
+    /// The file a `desktop_open` vetted (as the model wrote it), checked again before it opens.
+    vetted: Option<(String, crate::files::VettedFile)>,
+}
+
 struct Shared {
     default_backend: Option<Arc<dyn DesktopBackend>>,
     ocr: Option<SharedOcr>,
@@ -325,6 +337,8 @@ struct Shared {
     control: Option<Arc<dyn DesktopControlGate>>,
     /// Owner-stored secrets the type tools may type; `None` refuses `secret`.
     fill_secrets: Option<Arc<FillSecrets>>,
+    /// The file tools' path rules, for `desktop_open` of a file; `None` opens addresses only.
+    files: Option<crate::files::FileGate>,
     /// The bot cursor of each desktop backend (keyed by the backend's address: every run that
     /// drives one desktop shares one pointer), made on the first pointer action.
     cursors: Mutex<HashMap<usize, Arc<CursorOverlay>>>,
@@ -416,6 +430,7 @@ fn touches(action: &Action) -> Vec<Touch> {
 enum Op {
     ListApps,
     Launch,
+    Open,
     Focus,
     GetState,
     Wait,
@@ -855,6 +870,81 @@ impl Shared {
     fn observed_scope(&self, run_id: &str) -> Result<u64, ToolError> {
         self.scope(run_id)
             .ok_or_else(|| exec_err(NO_OBSERVATION_MSG))
+    }
+
+    /// Start one of `apps` (the first the system can start) on this run's desktop and report what
+    /// appeared on the display. The permit is held through the start and the wait, like any
+    /// desktop action. `opened` names what a `desktop_open` showed, for the report.
+    async fn launch_flow(
+        &self,
+        run_id: &str,
+        bot: Option<&str>,
+        launch: Launch,
+    ) -> Result<String, ToolError> {
+        let Launch {
+            label,
+            apps,
+            opened,
+            vetted,
+        } = launch;
+        let permit = self.gate(run_id, "launch", label, None).await?;
+        if permit.needs_observation()
+            || self.state.lock().get(run_id).is_some_and(|s| {
+                s.observation_epoch != self.control.as_ref().map_or(0, |g| g.observation_epoch())
+            })
+        {
+            self.state.lock().map.remove(run_id);
+            self.refuse_observation_while_latched()?;
+            let fresh = self.refresh(run_id, None, &ObsFilter::default()).await?;
+            permit.observed();
+            return Ok(format!(
+                "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
+            ));
+        }
+        // A card can wait for minutes: the file must still be the one that was vetted.
+        if let (Some((raw, before)), Some(files)) = (&vetted, &self.files) {
+            files.recheck(
+                bot,
+                run_id,
+                raw,
+                before,
+                crate::desktop_open::MAX_OPEN_BYTES,
+            )?;
+        }
+        let backend = self.backend(run_id)?;
+        let before: HashSet<u64> = backend
+            .windows()
+            .await
+            .map_err(|e| derr(&e))?
+            .into_iter()
+            .map(|w| w.id)
+            .collect();
+        // Deadline starts before `launch` so `WaitForInputIdle` shares the
+        // `launch_settle` budget. Zero settle makes the deadline "now":
+        // one sample, no sleep.
+        let deadline = tokio::time::Instant::now() + self.settings.launch_settle;
+        let pid = permit
+            .protect(async move {
+                let mut last = None;
+                for app in apps {
+                    match backend.launch(app).await {
+                        Ok(pid) => return Ok(pid),
+                        Err(e) => last = Some(e),
+                    }
+                }
+                Err(last.unwrap_or_else(|| DesktopError::Internal("nothing to start".into())))
+            })
+            .await
+            .map_err(exec_err)?
+            .map_err(|e| derr(&e))?;
+        let wins = self
+            .poll_launched_windows(run_id, &before, pid, deadline)
+            .await?;
+        let report = launch_report(pid, &wins);
+        Ok(match opened {
+            Some(what) => format!("opened {what}\n{report}"),
+            None => report,
+        })
     }
 
     fn backend(&self, run_id: &str) -> Result<Arc<dyn DesktopBackend>, ToolError> {
@@ -1522,6 +1612,29 @@ pub fn tools_dynamic_with_secrets(
     control: Option<Arc<dyn DesktopControlGate>>,
     fill_secrets: Option<Arc<FillSecrets>>,
 ) -> Vec<Arc<dyn Tool>> {
+    tools_dynamic_with_files(
+        default_backend,
+        ocr,
+        data_dir,
+        settings,
+        control,
+        fill_secrets,
+        None,
+    )
+}
+
+/// [`tools_dynamic_with_secrets`] whose `desktop_open` may also open a file of the bot's own
+/// folders, judged by `files` exactly like an `fs_read` of it. Without it only addresses open.
+#[must_use]
+pub(crate) fn tools_dynamic_with_files(
+    default_backend: Option<Arc<dyn DesktopBackend>>,
+    ocr: Option<SharedOcr>,
+    data_dir: &Path,
+    settings: DesktopSettings,
+    control: Option<Arc<dyn DesktopControlGate>>,
+    fill_secrets: Option<Arc<FillSecrets>>,
+    files: Option<crate::files::FileGate>,
+) -> Vec<Arc<dyn Tool>> {
     let shared = Arc::new(Shared {
         default_backend,
         ocr,
@@ -1530,6 +1643,7 @@ pub fn tools_dynamic_with_secrets(
         settings,
         control,
         fill_secrets,
+        files,
         cursors: Mutex::new(HashMap::new()),
     });
     let d = PermissionCategory::Desktop;
@@ -1570,6 +1684,20 @@ pub fn tools_dynamic_with_secrets(
                     "executable":{"type":"string","description":"Program name, file path or URI such as ms-settings:display."},
                     "args":{"type":"array","items":{"type":"string"},"description":"Arguments."}
                 },"required":["executable"]}),
+                Effect::Write,
+                d,
+            ),
+        ),
+        (
+            Op::Open,
+            spec(
+                "desktop_open",
+                "Open a web address, or a file of yours (your workspace or a folder you may use), in the computer's default application or in a browser you name. Use it to show the user something you made: an HTML page, a PDF, a picture. Give `url` or `path`, and optionally `with`: default, chrome, chromium, firefox or edge. Only documents, pages, pictures, sound and video open (never a program or script). Files open only on the computer you run on. To work inside a page use the browser tools instead. Example: {\"path\":\"kralinho.html\",\"with\":\"chrome\"} or {\"url\":\"https://example.com\"}",
+                json!({"type":"object","properties":{
+                    "url":{"type":"string","description":"A http(s) address."},
+                    "path":{"type":"string","description":"A file path, relative to your workspace or absolute inside a folder you may use."},
+                    "with":{"type":"string","enum":["default","chrome","chromium","firefox","edge"],"description":"Which program opens it (default: the system's)."}
+                }}),
                 Effect::Write,
                 d,
             ),
@@ -2420,6 +2548,56 @@ fn card_title(title: &str) -> String {
 }
 
 impl DesktopTool {
+    /// What `desktop_open` would start for this call, judged before anything asks or runs: the
+    /// address or file is checked, a file is vetted like an `fs_read` of it, and the program is
+    /// a fixed one (see [`crate::desktop_open`]).
+    fn open_plan(
+        &self,
+        run_id: &str,
+        bot: Option<&str>,
+        input: &Value,
+    ) -> Result<Launch, ToolError> {
+        use crate::desktop_open::{Target, With};
+        let sh = &self.shared;
+        let backend = sh.backend(run_id)?;
+        let (target, with) = crate::desktop_open::parse(input)?;
+        let (arg, label, vetted) = match target {
+            Target::Url(url) => (url.clone(), url, None),
+            Target::File(raw) => {
+                let Some(files) = &sh.files else {
+                    return Err(exec_err(
+                        "opening a file is not available here; give a `url` instead",
+                    ));
+                };
+                if !backend.is_local_screen() {
+                    return Err(exec_err(
+                        "a file is opened only on the computer this daemon runs on, and this desktop is another computer; give a `url` instead",
+                    ));
+                }
+                let file =
+                    files.vet_file(bot, run_id, &raw, crate::desktop_open::MAX_OPEN_BYTES)?;
+                if !crate::desktop_open::extension_ok(&file.path) {
+                    return Err(crate::desktop_open::not_openable(&raw));
+                }
+                let shown = crate::desktop_open::display_path(&file.path)
+                    .to_string_lossy()
+                    .into_owned();
+                (shown, raw.clone(), Some((raw, file)))
+            }
+        };
+        let apps = crate::desktop_open::candidates(&backend.capabilities().platform, &arg, with)?;
+        let how = match with {
+            With::Default => "the default application".to_owned(),
+            With::Browser(name) => name.to_owned(),
+        };
+        Ok(Launch {
+            opened: Some(format!("{label} with {how}")),
+            label,
+            apps,
+            vetted,
+        })
+    }
+
     /// The kind of input this tool sends, for the three tools a run-scoped
     /// control grant can ever cover. Click, scroll and drag have no target:
     /// a drag always asks.
@@ -2559,51 +2737,26 @@ impl DesktopTool {
                 ) {
                     return Err(exec_err(reason));
                 }
-                let permit = sh
-                    .gate(run_id, "launch", i.executable.clone(), None)
-                    .await?;
-                if permit.needs_observation()
-                    || sh.state.lock().get(run_id).is_some_and(|s| {
-                        s.observation_epoch
-                            != sh.control.as_ref().map_or(0, |g| g.observation_epoch())
-                    })
-                {
-                    sh.state.lock().map.remove(run_id);
-                    sh.refuse_observation_while_latched()?;
-                    let fresh = sh.refresh(run_id, None, &ObsFilter::default()).await?;
-                    permit.observed();
-                    return Ok(format!(
-                        "Human intervention completed; previous action discarded. Fresh observation:\n{fresh}"
-                    ));
-                }
-                let backend = sh.backend(run_id)?;
-                let before: HashSet<u64> = backend
-                    .windows()
-                    .await
-                    .map_err(|e| derr(&e))?
-                    .into_iter()
-                    .map(|w| w.id)
-                    .collect();
-                // Deadline starts before `launch` so `WaitForInputIdle` shares the
-                // `launch_settle` budget. Zero settle makes the deadline "now":
-                // one sample, no sleep.
-                let deadline = tokio::time::Instant::now() + sh.settings.launch_settle;
-                let pid = permit
-                    .protect(async move {
-                        backend
-                            .launch(AppSpec {
-                                executable: i.executable,
-                                args: i.args,
-                            })
-                            .await
-                    })
-                    .await
-                    .map_err(exec_err)?
-                    .map_err(|e| derr(&e))?;
-                let wins = sh
-                    .poll_launched_windows(run_id, &before, pid, deadline)
-                    .await?;
-                Ok(launch_report(pid, &wins))
+                let label = i.executable.clone();
+                let app = AppSpec {
+                    executable: i.executable,
+                    args: i.args,
+                };
+                sh.launch_flow(
+                    run_id,
+                    bot,
+                    Launch {
+                        label,
+                        apps: vec![app],
+                        opened: None,
+                        vetted: None,
+                    },
+                )
+                .await
+            }
+            Op::Open => {
+                let launch = self.open_plan(run_id, bot, &input)?;
+                sh.launch_flow(run_id, bot, launch).await
             }
             Op::Focus => {
                 let FocusIn { window_id } = parse(input)?;
@@ -3398,6 +3551,11 @@ impl Tool for DesktopTool {
         ctx: &ToolContext,
         input: &Value,
     ) -> Result<Option<Value>, ToolError> {
+        if matches!(self.op, Op::Open) {
+            // Refused here, BEFORE any card, when the call cannot work or must never run.
+            self.open_plan(&ctx.run_id, ctx.bot_id.as_deref(), input)?;
+            return Ok(None);
+        }
         if matches!(self.op, Op::Launch) {
             // A program of another operating system (a Linux path on a Windows PC)
             // is refused here, BEFORE any approval card: the user is never asked
@@ -3560,6 +3718,16 @@ pub(crate) mod fake {
         pub clipboard: Mutex<Option<String>>,
         /// The clipboard works (otherwise the backend says it is unavailable).
         pub clipboard_works: bool,
+        /// The platform it reports (`fake`: no opener is known for it).
+        pub platform: Mutex<&'static str>,
+        /// Every program `launch` was asked to start, in order; one named in `launch_fails`
+        /// is recorded and refused.
+        pub launched: Mutex<Vec<AppSpec>>,
+        /// Executables whose start fails (a program that is not installed).
+        pub launch_fails: Mutex<Vec<&'static str>>,
+        /// Whether this is the screen of the machine the daemon runs on (a paired computer
+        /// reached over a link is not).
+        pub local_screen: bool,
     }
 
     impl FakeDesktop {
@@ -3593,6 +3761,10 @@ pub(crate) mod fake {
                 window_ops: Mutex::new(Vec::new()),
                 clipboard: Mutex::new(None),
                 clipboard_works: true,
+                platform: Mutex::new("fake"),
+                launched: Mutex::new(Vec::new()),
+                launch_fails: Mutex::new(Vec::new()),
+                local_screen: true,
             }
         }
 
@@ -3847,7 +4019,16 @@ pub(crate) mod fake {
             Ok(())
         }
 
-        async fn launch(&self, _app: AppSpec) -> Result<Pid, DesktopError> {
+        async fn launch(&self, app: AppSpec) -> Result<Pid, DesktopError> {
+            let fails = self
+                .launch_fails
+                .lock()
+                .iter()
+                .any(|f| *f == app.executable);
+            self.launched.lock().push(app);
+            if fails {
+                return Err(DesktopError::Internal("not installed".into()));
+            }
             *self.launched_at.lock() = Some(tokio::time::Instant::now());
             Ok(self.launch_pid)
         }
@@ -3861,7 +4042,7 @@ pub(crate) mod fake {
         }
 
         fn is_local_screen(&self) -> bool {
-            true
+            self.local_screen
         }
 
         fn cursor_surface(&self) -> Option<Arc<dyn desktop_api::CursorSurface>> {
@@ -3870,7 +4051,7 @@ pub(crate) mod fake {
 
         fn capabilities(&self) -> Capabilities {
             Capabilities {
-                platform: "fake".into(),
+                platform: (*self.platform.lock()).into(),
                 accessibility_tree: true,
                 screenshot: true,
                 app_launch: true,

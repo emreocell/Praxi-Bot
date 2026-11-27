@@ -94,10 +94,17 @@ impl Shared {
         } else {
             &[]
         };
+        // The owner's own Full chat is told "create a bot" means the bot tools, not a web page.
+        let bots: &[&str] = if self.bot_tools_offered(ctx) {
+            &crate::bot_offer::DIRECT_BOT_TOOLS
+        } else {
+            &[]
+        };
         let mut specs: Vec<_> = CORE
             .iter()
             .chain(DIRECT_EXTRAS.iter().filter(|_| direct_only))
             .chain(mission)
+            .chain(bots)
             .filter_map(|name| self.visible_definition(ctx, name))
             .collect();
         if !direct_only {
@@ -122,7 +129,10 @@ impl Shared {
     fn visible_definition(&self, ctx: &RunCtx, name: &str) -> Option<ToolSpec> {
         let tool = self.tools.get(name)?;
         let mut spec = tool.spec().clone();
-        if !discovery_name(name) || !self.spec_visible(&ctx.profile, ctx.bot_id, &spec) {
+        if !discovery_name(name)
+            || !self.bot_tool_allowed(ctx, name)
+            || !self.spec_visible(&ctx.profile, ctx.bot_id, &spec)
+        {
             return None;
         }
         if spec.content.has_external_metadata() {
@@ -145,6 +155,7 @@ impl Shared {
             || active.contains(&name)
             || (ctx.mission.is_some() && missions::tools::is_mission_tool(name))
             || (name == crate::mission_start::MISSION_CREATE && self.mission_create_offered(ctx))
+            || (crate::bot_offer::DIRECT_BOT_TOOLS.contains(&name) && self.bot_tools_offered(ctx))
         {
             return Ok(false);
         }

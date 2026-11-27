@@ -946,7 +946,8 @@ impl TurnExecutor {
                 if s.name == crate::mission_start::MISSION_CREATE {
                     return offer_create;
                 }
-                ctx.mission.is_some() || !missions::tools::is_mission_tool(&s.name)
+                self.sh.bot_tool_allowed(&ctx, &s.name)
+                    && (ctx.mission.is_some() || !missions::tools::is_mission_tool(&s.name))
             });
             if !self.sh.cfg.legacy_tool_surface {
                 crate::discovery::bound_legacy(&mut specs);

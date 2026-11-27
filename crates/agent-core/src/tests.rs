@@ -3135,7 +3135,7 @@ async fn many_tools_switch_to_discovery_and_use_tool_is_gated_by_the_target() {
     assert_eq!(tool_messages(&fake.request(1)), vec!["read ok".to_owned()]);
 }
 
-fn system_text(req: &ChatRequest) -> String {
+pub(crate) fn system_text(req: &ChatRequest) -> String {
     req.messages[0].content.as_str().unwrap().to_owned()
 }
 

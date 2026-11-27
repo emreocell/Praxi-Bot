@@ -152,7 +152,7 @@ wildcards. The built-in tool groups:
 | Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_select`, `browser_press`, `browser_scroll`, `browser_hover`, `browser_select_text`, `browser_dismiss_consent`, `browser_wait`, `browser_back`, `browser_forward`, `browser_reload`, `browser_tabs`, `browser_screenshot`, `browser_pointer`, `browser_upload`, `browser_downloads`, `browser_attach`, `browser_eval` |
 | Web (read-only, no browser) | `web_search`, `web_extract`, `web_feed`, `web_sitemap`, `web_metadata` (see [Web tools](web.md)) |
 | Schedules (General preset only) | `schedule_list`, `schedule_create`, `schedule_update`, `schedule_pause`, `schedule_resume`, `schedule_delete` (see [Scheduled tasks](scheduled-tasks.md)) |
-| Desktop (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
+| Desktop (Windows) | `desktop_list_apps`, `desktop_launch`, `desktop_open`, `desktop_get_state`, `desktop_click`, `desktop_type`, `desktop_set_value`, `desktop_key`, `desktop_scroll`, `desktop_drag` |
 | Scripts | `script_run` |
 | Agent-internal | `ask_user`, `todo_write`, `spawn_subagent` |
 | Skills and workflows | `skill_list`, `skill_read`, `skill_write`, `skill_hint`, `workflow_list`, `workflow_run` |

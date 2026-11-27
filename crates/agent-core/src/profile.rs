@@ -77,6 +77,10 @@ pub struct ToolFilter {
     /// Always removed, even if allowed.
     #[serde(default)]
     pub exclude: Vec<String>,
+    /// The "Can create bots" switch: the bot tools (`bot_create` ...) are offered to every run
+    /// of this bot, with a card for each change. Not a filter: it is read next to the lists.
+    #[serde(default)]
+    pub manage_bots: bool,
 }
 
 /// `[router]` table: the K0-K3 decision ladder (ADR-0005) of this bot.
@@ -720,6 +724,7 @@ executor = "fake/echo"
         ToolFilter {
             allow: allow.iter().map(|s| (*s).to_owned()).collect(),
             exclude: exclude.iter().map(|s| (*s).to_owned()).collect(),
+            ..ToolFilter::default()
         }
     }
 

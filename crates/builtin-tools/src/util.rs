@@ -117,7 +117,11 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // after the loop's gate allowed it unattended, and returns constant sentences,
         // never a tool's own text: it can reach the network and brings nothing in.
         "schedule_create" | "schedule_update" | "schedule_resume" | "bot_create" | "bot_update"
-        | "account_register" | "tool_self_check" => ContentClass::egress(),
+        // `desktop_open` opens an address or a document of the bot's own folders in the system's
+        // opener or a named browser (never a program or script). A page opened can send
+        // anything, so it is egress like `browser_open`; nothing comes back into the context
+        // (a window list at most), so it neither taints nor reads private data.
+        | "account_register" | "tool_self_check" | "desktop_open" => ContentClass::egress(),
         // A bot's name and persona are text any bot with `manage_bots` can write, so a
         // listing brings possibly untrusted text in. The download list shows file names a web
         // page chose; it sends nothing and reads no private data. The site ledger is the bot's
@@ -125,6 +129,7 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // were written after reading pages and mails: a listing brings possibly untrusted text
         // in, like `bot_list`.
         "bot_list" | "browser_downloads" | "site_ledger" => ContentClass::untrusted(),
+
         _ => return None,
     })
 }

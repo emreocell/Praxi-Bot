@@ -15,6 +15,7 @@ mod approval;
 pub mod attachments;
 mod auto_continue;
 pub mod bot_limits;
+mod bot_offer;
 pub mod browser_profile;
 mod browser_url;
 mod cli;
@@ -67,6 +68,8 @@ mod auto_continue_tests;
 mod automation_author_tests;
 #[cfg(test)]
 mod bot_limit_tests;
+#[cfg(test)]
+mod bot_offer_tests;
 #[cfg(test)]
 mod browser_mcp_tests;
 #[cfg(test)]

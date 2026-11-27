@@ -10,9 +10,14 @@
 //!   only manages bots it created;
 //! * `bot_create`, `bot_update` and `bot_delete` are [`Tool::always_ask`]: the
 //!   user sees the complete resulting profile first, and no standing grant
-//!   ("always allow", "this chat") waives it;
+//!   ("always allow", "this chat") waives it. The one exception is decided by the loop, not
+//!   here: on the owner's own Full-level chat nothing asks but money, so the call arrives with
+//!   [`ToolContext::unattended_mail`] set and the tool freezes the preview itself before it
+//!   applies it (the host's rules are the same);
 //! * the tools are visible only to bots whose profile enables them
-//!   (`tools.manage_bots`, the "Can create bots" switch); no preset does.
+//!   (`tools.manage_bots`, the "Can create bots" switch) and to bots at the Full level, where
+//!   the loop offers them to the owner's own chat turns only (never to a schedule, a
+//!   mission, a channel, a subagent or a helper bot).
 //!
 //! The tools use category `System` with effect `Write` (create / update) or
 //! `Destructive` (delete); never `Meta`, which the resolver always allows.
@@ -33,6 +38,12 @@ pub const BOT_TOOL_NAMES: [&str; 4] = ["bot_list", "bot_create", "bot_update", "
 
 /// Permission presets a bot may hand out (never `full`).
 pub const BOT_PRESETS: [&str; 3] = ["read-only", "read-and-draft", "approve-destructive"];
+
+/// The character shapes of the app (`packages/ui/src/botShape.ts`; a test keeps the lists equal).
+pub const BOT_SHAPES: [&str; 16] = [
+    "pebble", "cube", "diamond", "cloud", "tri", "flower", "gem", "drop", "star", "ghost",
+    "capsule", "ears", "gumdrop", "heart", "clover", "boulder",
+];
 
 /// Who is calling: the bot whose authority is the ceiling and the run it is in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +76,8 @@ pub struct BotRequest {
     pub tools: Option<Vec<String>>,
     /// Colour as `#rrggbb`.
     pub color: Option<String>,
+    /// Character shape, one of [`BOT_SHAPES`].
+    pub shape: Option<String>,
     /// Avatar as an image data URL.
     pub avatar: Option<String>,
 }
@@ -145,7 +158,9 @@ pub struct BotPreview {
 /// model.
 #[async_trait]
 pub trait BotHost: Send + Sync {
-    /// Whether `bot_id`'s profile enables the bot tools. Fails closed.
+    /// Whether `bot_id`'s profile may see the bot tools: the "Can create bots" switch or the
+    /// Full level (where the loop then offers them to the owner's own chat turns only; the
+    /// host checks the run again on every call). Fails closed.
     fn may_manage_bots(&self, bot_id: &str) -> bool;
 
     /// The bots the caller can see.
@@ -231,6 +246,7 @@ pub fn tools(host: &Arc<dyn BotHost>) -> Vec<Arc<dyn Tool>> {
         "permission_preset": {"type":"string","enum":BOT_PRESETS,"description":"Permission level. Default and maximum: approve-destructive, and never more than you have yourself. Raising it later is only possible in the app."},
         "tools": {"type":"array","items":{"type":"string"},"description":"Tool allow list: exact tool names you have yourself (globs only when identical to one of yours). Default: your own list."},
         "color": {"type":"string","description":"Colour as #rrggbb."},
+        "shape": {"type":"string","enum":BOT_SHAPES,"description":"Character shape in the app."},
         "avatar": {"type":"string","description":"Avatar image as a data:image/png|jpeg|gif|webp;base64 URL (at most 200 KB)."}
     });
     let mut update_props = props.clone();
@@ -260,21 +276,21 @@ pub fn tools(host: &Arc<dyn BotHost>) -> Vec<Arc<dyn Tool>> {
         ),
         mk(
             "bot_create",
-            "Create a new bot. The new bot can never have more permissions, tools or model access than you, and never more than approve-destructive. The user must approve the complete profile first. Example: {\"name\":\"Inbox\",\"persona\":\"Summarise my inbox every morning.\"}",
+            "Create a real Praxi bot (it appears in the user's bot list). It can never have more permissions, tools or model access than you, and never more than approve-destructive. Unless the user is on the Full level, they approve the complete profile first. Example: {\"name\":\"Kralinho\",\"persona\":\"A witty chat companion.\",\"color\":\"#7c3aed\",\"shape\":\"star\"}",
             json!({"type":"object","properties":props,"required":["name","persona"],"additionalProperties":false}),
             Effect::Write,
             Op::Create,
         ),
         mk(
             "bot_update",
-            "Change a bot you created (name, persona, models, tools, colour, avatar, or lower its permission preset). It can never become broader. You cannot update yourself. The user must approve the change.",
+            "Change a bot you created (name, persona, models, tools, colour, shape, avatar, or lower its permission preset). It can never become broader. You cannot update yourself. Unless the user is on the Full level, they approve the change.",
             json!({"type":"object","properties":update_props,"required":["id"],"additionalProperties":false}),
             Effect::Write,
             Op::Update,
         ),
         mk(
             "bot_delete",
-            "Delete a bot you created. Refused when it already has chats or runs. The user must approve.",
+            "Delete a bot you created. Refused when it already has chats or runs. Unless the user is on the Full level, they approve it.",
             id_schema,
             Effect::Destructive,
             Op::Delete,
@@ -365,6 +381,13 @@ impl Tool for BotTool {
             ));
         }
         let h = &self.host;
+        // The Full level admitted this call without a card, so nothing froze the preview the
+        // host applies: freeze it now. The host refuses what its ceiling forbids, as for a card.
+        if ctx.unattended_mail
+            && let Some(change) = self.change(&input)?
+        {
+            h.preview(&who, &change).await.map_err(exec_err)?;
+        }
         match self.op {
             Op::List => {
                 let all = h.list(&who).await.map_err(exec_err)?;
@@ -564,6 +587,64 @@ mod tests {
             .unwrap_err();
         assert!(e.to_string().contains("not enabled"), "{e}");
         assert!(host.calls.lock().is_empty());
+    }
+
+    /// A call the Full level admitted without a card freezes its own preview first; a call
+    /// that went through a card (the loop froze it) does not.
+    #[tokio::test]
+    async fn a_call_admitted_without_a_card_previews_before_it_applies() {
+        let host = on();
+        let c = ToolContext {
+            unattended_mail: true,
+            ..ctx(Some("bot-a"))
+        };
+        tool(&host, "bot_create")
+            .call(&c, json!({"name":"Kralinho","persona":"p","shape":"star"}))
+            .await
+            .unwrap();
+        tool(&host, "bot_update")
+            .call(&c, json!({"id":"x","name":"m"}))
+            .await
+            .unwrap();
+        tool(&host, "bot_list").call(&c, json!({})).await.unwrap();
+        let calls = host.calls.lock().clone();
+        assert_eq!(calls.len(), 5, "{calls:?}");
+        assert!(calls[0].starts_with("preview bot-a Create"), "{calls:?}");
+        assert_eq!(calls[1], "create bot-a");
+        assert!(calls[2].starts_with("preview bot-a Update"), "{calls:?}");
+        assert_eq!(calls[3], "update bot-a x");
+        assert_eq!(calls[4], "list bot-a");
+        // a preview the host refuses (its ceiling) stops the call before anything is applied
+        let strict = Arc::new(Fake {
+            enabled: true,
+            fail_preview: true,
+            ..Fake::default()
+        });
+        let e = tool(&strict, "bot_create")
+            .call(&c, json!({"name":"n","persona":"p"}))
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("ceiling"), "{e}");
+        assert!(!strict.calls.lock().iter().any(|l| l.starts_with("create")));
+    }
+
+    #[test]
+    fn the_shape_is_one_of_the_apps_sixteen_and_the_lists_stay_equal() {
+        let host = on();
+        let props = tool(&host, "bot_create").spec().input_schema["properties"].clone();
+        assert_eq!(props["shape"]["enum"], json!(BOT_SHAPES));
+        // the app's own list is the source: ids in order
+        let ts = include_str!("../../../packages/ui/src/botShape.ts");
+        let ids: Vec<&str> = ts
+            .split("const SHAPE_IDS = [")
+            .nth(1)
+            .and_then(|rest| rest.split("] as const").next())
+            .unwrap()
+            .split("{ id: '")
+            .skip(1)
+            .map(|chunk| chunk.split('\'').next().unwrap())
+            .collect();
+        assert_eq!(ids, BOT_SHAPES);
     }
 
     #[tokio::test]
