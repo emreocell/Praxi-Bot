@@ -709,6 +709,8 @@ mod links {
     }
 }
 
+// `/proc`, `/sys` and `/dev` are system folders on Unix; on Windows they are not absolute paths.
+#[cfg(unix)]
 #[test]
 fn a_system_folder_is_refused() {
     use assistant_import::FolderError;
