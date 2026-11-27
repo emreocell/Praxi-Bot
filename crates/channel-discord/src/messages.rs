@@ -133,8 +133,9 @@ impl Msg<'_> {
     pub fn render(self, lang: Lang) -> String {
         use Lang::{De, En, Tr};
         match (self, lang) {
-            (Msg::SecretRequestNotice, En | De) => "A credential request is waiting. Open Praxi on your computer to answer. Keep credentials out of this chat.".into(),
+            (Msg::SecretRequestNotice, En) => "A credential request is waiting. Open Praxi on your computer to answer. Keep credentials out of this chat.".into(),
             (Msg::SecretRequestNotice, Tr) => "Yanıtınızı bekleyen bir gizli bilgi isteği var. Yanıtlamak için bilgisayarınızda Praxi’yi açın. Gizli bilgilerinizi bu sohbette paylaşmayın.".into(),
+            (Msg::SecretRequestNotice, De) => "Eine Anfrage nach Zugangsdaten wartet. Öffnen Sie Praxi am Computer, um zu antworten. Teilen Sie Zugangsdaten nicht in diesem Chat.".into(),
             (Msg::NotPaired, En) => "This bot is private. If it is yours, create a pairing code on your computer and send `!pair 123456` here in a private message.".into(),
             (Msg::NotPaired, Tr) => "Bu bot özeldir. Sizinse, bilgisayarınızda bir eşleştirme kodu oluşturun ve burada özel mesajla `!pair 123456` yazın.".into(),
             (Msg::NotPaired, De) => "Dieser Bot ist privat. Wenn es Ihrer ist, erzeugen Sie am Computer einen Kopplungscode und senden Sie hier privat `!pair 123456`.".into(),
@@ -313,6 +314,7 @@ mod tests {
     /// [`arguments`] has no wildcard, so a new variant must be added to both.
     fn every_message() -> Vec<Msg<'static>> {
         vec![
+            Msg::SecretRequestNotice,
             Msg::NotPaired,
             Msg::Paired,
             Msg::PairInvalid,
@@ -375,7 +377,8 @@ mod tests {
             | Msg::ApprovalTooLarge(a) => vec![a.to_owned()],
             Msg::Status { running, pending } => vec![running.to_string(), pending.to_string()],
             Msg::NotPaired => vec!["!pair 123456".into()],
-            Msg::PairInDm
+            Msg::SecretRequestNotice
+            | Msg::PairInDm
             | Msg::Paired
             | Msg::PairInvalid
             | Msg::PairExpired
