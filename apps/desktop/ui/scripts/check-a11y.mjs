@@ -38,6 +38,8 @@ const screens = [
   { name: 'chat-mission', expect: '[data-testid=mission-chat-header]', query: 'screen=mission&panel=1' },
   { name: 'chat-mission-answers', expect: '[data-testid=mission-needs-you]', query: 'screen=mission', act: [{ click: '[data-testid=mission-header-answer]' }] },
   { name: 'chat-mission-done', expect: '[data-testid=mission-digest]', query: 'screen=mission-done', act: [{ click: '[data-testid=mission-header-report]' }] },
+  { name: 'live-viewer', expect: '[data-testid=live-viewer]', query: 'screen=chat&panel=1', act: [{ click: '[data-testid=bot-computer-show]' }, { click: '[data-testid=bot-computer-big]' }] },
+  { name: 'live-viewer-menu', expect: '[data-testid=live-viewer-tools]', query: 'screen=chat&panel=1', act: [{ click: '[data-testid=bot-computer-show]' }, { click: '[data-testid=bot-computer-big]' }, { click: '[data-testid=live-viewer-view]' }] },
   { name: 'chat-approval', query: 'screen=approval' },
   { name: 'schedules', query: 'screen=schedules' },
   { name: 'needs', query: 'screen=needs' },

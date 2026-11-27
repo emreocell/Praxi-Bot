@@ -164,6 +164,29 @@
   color: var(--color-text);
 }
 
+/* The link quality inside the status pill, after a thin divider. */
+.linkPart {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+}
+
+.linkPart::before {
+  content: "";
+  width: var(--size-border);
+  height: var(--space-3);
+  background-color: var(--color-border-strong);
+}
+
+.linkPart:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-focus);
+}
+
 .stateDot {
   width: var(--space-2);
   height: var(--space-2);

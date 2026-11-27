@@ -4347,9 +4347,14 @@
     "close": "Ansicht schließen",
     "connectionLost": "Verbindung zum Bildschirm verloren. Verbindung wird wiederhergestellt …",
     "dismissKeepsControl": "Das Schließen blendet nur die Ansicht aus: Die Kontrolle bleibt bei dir. Verwende „Ich bin fertig“ oder „Erneut versuchen“ im Panel.",
+    "dock": {
+      "inControl": "You are in control, the bots wait",
+      "watching": "You are only watching"
+    },
     "doneAction": "Ich bin fertig",
     "doneLabel": "Ich bin fertig",
     "emergencyStop": "Bots stoppen",
+    "emergencyStopHint": "Every bot stops what it is doing right now.",
     "errors": {
       "generic": "Die Anfrage ist fehlgeschlagen. Prüfe die Verbindung und versuche es erneut.",
       "network": "Die Bildschirmverbindung wurde unterbrochen. Prüfe dein Netzwerk und versuche es erneut.",
@@ -4483,6 +4488,7 @@
       "closed": "Geschlossen",
       "disconnected": "Verbindung verloren",
       "finishing": "Wird zurückgegeben …",
+      "live": "Live",
       "noScreen": "Noch kein Bildschirm",
       "paused": "Pausiert",
       "queryFailed": "Bildschirme konnten nicht geladen werden",

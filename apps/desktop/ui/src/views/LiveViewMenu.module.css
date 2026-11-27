@@ -123,3 +123,52 @@
   background-color: transparent;
   color: var(--color-text-muted);
 }
+
+/* Two groups of rows (the size, then the window and list actions) share one divider. */
+.rows + .rows {
+  border-top: none;
+}
+
+/* "Keyboard shortcuts": folded under its title so the menu opens short. */
+.shortcuts {
+  padding: var(--space-0) var(--space-2) var(--space-2);
+}
+
+.shortcuts > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  list-style: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.shortcuts > summary::-webkit-details-marker {
+  display: none;
+}
+
+.shortcuts > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.shortcuts > summary > svg {
+  flex: none;
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+  transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.shortcuts[open] > summary > svg {
+  transform: rotate(90deg);
+}
+
+.shortcuts[open] > summary {
+  margin-bottom: var(--space-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shortcuts > summary > svg {
+    transition: none;
+  }
+}

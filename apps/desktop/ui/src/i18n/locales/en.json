@@ -4328,7 +4328,7 @@
       "stalled": "The picture has stopped updating."
     },
     "approvalsWaiting": "{{count}} item(s) are waiting for your decision. Decide below or in the chat.",
-    "backToChat": "Back",
+    "backToChat": "Back to chat",
     "captureTab": "Tab key capture",
     "chat": {
       "approve": "Approve",
@@ -4347,9 +4347,14 @@
     "close": "Close viewer",
     "connectionLost": "Connection to the screen lost. Reconnecting…",
     "dismissKeepsControl": "Closing only hides the viewer: control stays with you. Use “I'm done” or Retry in the panel.",
+    "dock": {
+      "inControl": "You are in control, the bots wait",
+      "watching": "You are only watching"
+    },
     "doneAction": "I'm done",
     "doneLabel": "I'm done",
-    "emergencyStop": "Stop bots",
+    "emergencyStop": "Stop all bots",
+    "emergencyStopHint": "Every bot stops what it is doing right now.",
     "errors": {
       "generic": "The request failed. Check the connection and try again.",
       "network": "The connection to the screen was interrupted. Check your network and try again.",
@@ -4368,7 +4373,7 @@
     "expand": "Open large viewer",
     "focusTrapHint": "Keyboard goes to the screen. Shift+Esc to leave.",
     "globalPauseNotice": "Taking control or pausing applies globally across all bots.",
-    "handBackAction": "Hand back",
+    "handBackAction": "Hand back to the bot",
     "hostLabel": "Host: {{host}}",
     "infoPanel": "Bot info",
     "interactive": "Interactive",
@@ -4413,7 +4418,7 @@
     "outcomes": {
       "application_opened": "Opened app",
       "login_completed": "Logged in",
-      "none": "Just finished",
+      "none": "What did you do? (optional)",
       "other": "Other step"
     },
     "panelSummary": {
@@ -4467,7 +4472,7 @@
     },
     "reconnecting": "Reconnecting to the screen stream…",
     "recoverAction": "Clear pause (the bot can run again)",
-    "refresh": "Refresh targets",
+    "refresh": "Refresh the screen list",
     "releaseFocus": "Leave keyboard",
     "releaseOnClose": "Closing hands control back to the bot first.",
     "retryDone": "Retry hand-back",
@@ -4483,6 +4488,7 @@
       "closed": "Closed",
       "disconnected": "Connection lost",
       "finishing": "Handing back…",
+      "live": "Live",
       "noScreen": "No screen yet",
       "paused": "Paused",
       "queryFailed": "Could not load screens",

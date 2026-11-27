@@ -1,4 +1,4 @@
-import { Check, Maximize2, Minimize2, PanelRight, RefreshCw, SlidersHorizontal, ZoomIn, ZoomOut } from "lucide-react";
+import { Check, ChevronRight, ExternalLink, Maximize2, Minimize2, PanelRight, RefreshCw, SlidersHorizontal, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "ui";
@@ -11,8 +11,9 @@ import styles from "./LiveViewMenu.module.css";
 
 /**
  * "View": everything about how the screen is shown, behind one button so the top bar keeps only
- * Back, the screen picker, this button and Stop.  Picture quality, fill the window, the screen's size
- * (fit / 1:1 / zoom), refresh the list of screens, the bot info panel and the keyboard shortcuts.
+ * Back, the screen picker, the status, full screen, this button and Stop.  Picture quality, the
+ * screen's size (fill / fit / 1:1 / zoom), its own window, refresh the list of screens, the bot info
+ * panel, and the keyboard shortcuts folded at the bottom.
  */
 export function LiveViewMenu({
   quality,
@@ -24,7 +25,8 @@ export function LiveViewMenu({
   zoom,
   onRefresh,
   refreshing,
-  infoPanel
+  infoPanel,
+  onPopOut
 }: {
   quality: QualityMode;
   onQuality: (mode: QualityMode) => void;
@@ -39,6 +41,8 @@ export function LiveViewMenu({
   refreshing: boolean;
   /** The bot panel beside the viewer; absent when the viewer has none. */
   infoPanel?: { open: boolean; onToggle: () => void };
+  /** Open the screen in its own window; absent where there is no window to open (a pop-out). */
+  onPopOut?: () => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -136,6 +140,22 @@ export function LiveViewMenu({
               <span className={styles.rowText}>{t("liveView.toolbar.zoomOut")}</span>
               <kbd className={styles.key}>-</kbd>
             </button>
+          </div>
+          <div className={styles.rows}>
+            {onPopOut ? (
+              <button
+                type="button"
+                className={styles.row}
+                data-testid="live-viewer-popout"
+                onClick={() => {
+                  close();
+                  onPopOut();
+                }}
+              >
+                <ExternalLink aria-hidden="true" />
+                <span className={styles.rowText}>{t("popout.openLive")}</span>
+              </button>
+            ) : null}
             <button type="button" className={styles.row} disabled={refreshing} data-testid="live-viewer-refresh" onClick={onRefresh}>
               <RefreshCw aria-hidden="true" />
               <span className={styles.rowText}>{t("liveView.refresh")}</span>
@@ -154,8 +174,12 @@ export function LiveViewMenu({
               </button>
             ) : null}
           </div>
-          <section className={styles.section} aria-label={t("liveView.toolbar.shortcuts")} data-testid="live-viewer-shortcuts">
-            <p className={styles.label}>{t("liveView.toolbar.shortcuts")}</p>
+          {/* The shortcuts are a reference, not a control: folded so the menu stays short. */}
+          <details className={styles.shortcuts} data-testid="live-viewer-shortcuts">
+            <summary className={styles.label}>
+              <ChevronRight aria-hidden="true" />
+              {t("liveView.toolbar.shortcuts")}
+            </summary>
             <dl className={styles.keys}>
               {VIEWER_SHORTCUTS.map((item) => (
                 <div key={item.id} className={styles.keyRow}>
@@ -166,7 +190,7 @@ export function LiveViewMenu({
                 </div>
               ))}
             </dl>
-          </section>
+          </details>
         </div>
       </Popover>
     </>

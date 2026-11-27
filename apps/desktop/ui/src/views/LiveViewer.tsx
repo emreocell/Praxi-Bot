@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink, Globe, Info, Maximize, Minimize, Monitor, OctagonX, RefreshCw } from "lucide-react";
+import { ArrowLeft, Globe, Info, Maximize, Minimize, Monitor, OctagonX, RefreshCw } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -546,7 +546,9 @@ export function LiveViewer({
       ? t("liveView.states.disconnected")
       : state.streamStale
         ? t("liveView.states.stale")
-        : t(`liveView.states.${state.viewState}`);
+        : state.viewState === "watch"
+          ? t("liveView.states.live")
+          : t(`liveView.states.${state.viewState}`);
 
   const contained =
     state.latestFrame && stageBox.w > 0 && stageBox.h > 0
@@ -623,6 +625,8 @@ export function LiveViewer({
   });
 
   const KindIcon = selectedTarget?.kind === "browser" ? Globe : Monitor;
+  // "Desktop · This computer", not the internal id "local".
+  const hostLabel = (hostId: string) => (hostId === "local" ? t("computerCard.thisComputer") : hostId);
 
   const dpr = window.devicePixelRatio || 1;
   const geometry = stageGeometry(scale, area, content, dpr);
@@ -667,7 +671,7 @@ export function LiveViewer({
           <TargetPicker
             options={targets.map((trg) => ({
               id: trg.target_id,
-              label: `${t(`liveView.kind.${trg.kind}`)} · ${trg.host_id}`,
+              label: `${t(`liveView.kind.${trg.kind}`)} · ${hostLabel(trg.host_id)}`,
               hint: targetOptionHint(
                 trg,
                 trg.bot_id ? botNames.get(trg.bot_id) ?? null : null,
@@ -687,7 +691,7 @@ export function LiveViewer({
         </div>
 
         <div className={styles.headerRight}>
-          <PeerLinkBadge enabled={source === "home" && !isLocalClient} className={styles.stateBadge} />
+          {/* One pill: is the picture live, and over which link ("Live · Direct · 52 ms"). */}
           <span
             className={styles.stateBadge}
             data-tone={tone}
@@ -695,19 +699,8 @@ export function LiveViewer({
           >
             <i className={styles.stateDot} aria-hidden="true" />
             <span>{badgeLabel}</span>
+            <PeerLinkBadge enabled={source === "home" && !isLocalClient} className={styles.linkPart} />
           </span>
-          {onPopOut ? (
-            <button
-              type="button"
-              className={styles.iconBtn}
-              title={t("popout.openLive")}
-              aria-label={t("popout.openLive")}
-              data-testid="live-viewer-popout"
-              onClick={() => onPopOut({ targetId: selectedTarget?.target_id })}
-            >
-              <ExternalLink aria-hidden="true" />
-            </button>
-          ) : null}
           <button
             type="button"
             className={styles.iconBtn}
@@ -735,6 +728,7 @@ export function LiveViewer({
             onRefresh={() => void refreshTargets()}
             refreshing={loadingTargets}
             infoPanel={infoPanel ? { open: infoPanel.open, onToggle: infoPanel.onToggle } : undefined}
+            onPopOut={onPopOut ? () => onPopOut({ targetId: selectedTarget?.target_id }) : undefined}
           />
           {actions.includes("stop") ? (
             <Button
@@ -745,6 +739,7 @@ export function LiveViewer({
                 else requestStop("viewer");
               }}
               data-testid="live-viewer-stop"
+              title={t("liveView.emergencyStopHint")}
             >
               <OctagonX aria-hidden="true" />
               <span>{t("liveView.emergencyStop")}</span>
@@ -887,7 +882,7 @@ export function LiveViewer({
                   </span>
                   <p className={styles.emptyTitle}>
                     {selectedTarget
-                      ? `${t(`liveView.kind.${selectedTarget.kind}`)} · ${selectedTarget.host_id}`
+                      ? `${t(`liveView.kind.${selectedTarget.kind}`)} · ${hostLabel(selectedTarget.host_id)}`
                       : t("botPanel.computer")}
                   </p>
                   <p className={styles.emptyBody} role={startingScreen ? "status" : undefined}>
@@ -1004,7 +999,7 @@ export function LiveViewer({
                 <span className={styles.dockStatus}>
                   {isReleasing
                     ? t("liveView.retryingDone")
-                    : t("liveView.states.active")}
+                    : t("liveView.dock.inControl")}
                 </span>
                 {!isReleasing ? (
                   <select
@@ -1102,7 +1097,7 @@ export function LiveViewer({
                       : startingScreen
                         ? t("computerCard.hint.starting")
                         : selectedTarget && targetSummary?.available
-                          ? t("liveView.states.watch")
+                          ? t("liveView.dock.watching")
                           : t("liveView.states.unavailable")}
                 </span>
                 {hasStream ? (
