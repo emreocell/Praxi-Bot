@@ -1185,6 +1185,115 @@
     "when": "Ne zaman",
     "who": "Kim"
   },
+  "automation": {
+    "allSchedules": "Tüm zamanlanmış görevler",
+    "builder": {
+      "mailbox": "Posta klasörü ve kontrol sıklığı",
+      "namePlaceholder": "Örneğin: Muhasebeciden gelen faturalar",
+      "noHooks": "Bu botun henüz imzalı adresi yok. Aşağıdaki “İmzalı adresler”den bir tane oluştur, sonra burada seç.",
+      "shouldPlaceholder": "Örneğin: özetle, yalnızca bugün yanıtlamam gerekiyorsa haber ver.",
+      "title": {
+        "mail": "Bir e-posta geldiğinde",
+        "time": "Belirli bir saatte",
+        "webhook": "Bir uygulama haber verdiğinde"
+      }
+    },
+    "day": {
+      "today": "bugün {{time}}",
+      "tomorrow": "yarın {{time}}",
+      "yesterday": "dün {{time}}"
+    },
+    "empty": "Henüz kendiliğinden çalışan bir şey yok. Yukarıya ne zaman ve ne yapacağını yaz; örneğin “Her pazartesi 8:00'de haftamı planla”.",
+    "events": {
+      "file": {
+        "line": "Bir klasöre dosya eklenince ya da dosya değişince. Sohbette iste (“İndirilenler'e yeni fatura gelince klasörüne taşı”); bot önce klasör iznini sorar.",
+        "title": "Bir dosya geldiğinde"
+      },
+      "intro": "Belirli bir saat yerine bir şey olunca başlasın:",
+      "mail": {
+        "line": "Bir kişiden, bir alan adından ya da bir konuyla gelen posta. Bot yalnızca başlıkları okur, gövdeyi okumaz.",
+        "title": "Bir e-posta geldiğinde"
+      },
+      "title": "Bir şey olduğunda",
+      "webhook": {
+        "line": "Bir form, bir ödeme ya da GitHub bu botun imzalı adresine haber gönderir.",
+        "title": "Bir uygulama haber verdiğinde"
+      }
+    },
+    "explain": {
+      "events": "Bir e-posta ya da webhook gelince başlasın istersen: botun Otomasyon sekmesi.",
+      "missions": "Bitene kadar süren uzun bir iş için: görev başlat.",
+      "schedule": "Her çalışma kısa bir iştir: bir sohbet açar, işi yapar ve biter."
+    },
+    "form": {
+      "deleteAsk": "Bu zamanlama silinsin mi?",
+      "fill": "Doldur",
+      "noWhen": "“Ne zaman” bulunamadı. İş dolduruldu; sıklığı aşağıdan seç.",
+      "sentenceHint": "Ne zaman ve ne yapacağını tek satırda yaz. Sonra her alanı değiştirebilirsin.",
+      "sentenceLabel": "Kendi cümlenle",
+      "understood": "Anlaşılan: {{when}}. Aşağıdaki alanlara bak, sonra oluştur."
+    },
+    "historyToggle": "Geçmiş ({{count}})",
+    "historyToggle_one": "Geçmiş ({{count}})",
+    "historyToggle_other": "Geçmiş ({{count}})",
+    "hooksLine": "Başka uygulamaların bu botu uyandırmak için çağırdığı adresler. Her birinin kendi gizli anahtarı var.",
+    "intro": "{{name}} sen sormadan bunları yapar.",
+    "last": {
+      "failed": "Son çalışma başarısız · {{when}}",
+      "missed": "Kaçırıldı · {{when}}",
+      "never": "Henüz çalışmadı",
+      "ok": "Son çalışma başarılı · {{when}}",
+      "running": "Şu an çalışıyor"
+    },
+    "listTitle": "Kendiliğinden çalışanlar",
+    "loading": "Yükleniyor…",
+    "missedCount": "Kapalıyken {{count}} kez kaçırıldı",
+    "missedCount_one": "Kapalıyken {{count}} kez kaçırıldı",
+    "missedCount_other": "Kapalıyken {{count}} kez kaçırıldı",
+    "missions": {
+      "action": "Görev başlat",
+      "line": "Zamanlanmış görev kısa bir işi yapıp biter. Saatler süren bir iş, örneğin 15 siteye kayıt, bir görevdir: bot iş bitene kadar devam eder ve sana rapor verir.",
+      "title": "Uzun bir iş mi?"
+    },
+    "openRule": "Bu kuralı düzenle",
+    "openSchedule": "Zamanlanmış görevlerde aç",
+    "quick": {
+      "create": "Oluştur",
+      "created": "Kaydedildi: {{name}}",
+      "details": "Daha fazla seçenek",
+      "help": "Önce ne zaman, sonra ne yapacağını yaz. 9:00, 18.30 ya da 9'da gibi saatler olur.",
+      "label": "Ne zaman, ne yapsın?",
+      "noTask": "Şimdi botun ne yapacağını yaz.",
+      "noWhen": "Ne sıklıkla olacağıyla başla; örneğin “Her gün 8:00'de” ya da “Hafta içi her gün 9:00'da”.",
+      "placeholder": "Hafta içi her gün 9:00'da gelen kutumu kontrol et ve özetle",
+      "what": "Ne yapar",
+      "when": "Ne zaman"
+    },
+    "retry": "Yeniden dene",
+    "runMissed": "Kaçırılanı çalıştır",
+    "state": {
+      "attention": "İlgilenmen gerekiyor: aç",
+      "done": "Bitti, başka çalışma yok",
+      "failed": "Son çalışma başarısız · {{when}}",
+      "lastFired": "Son çalışma {{when}}",
+      "missed": "Kaçırıldı · {{when}}",
+      "moved": "{{name}} üzerinde çalışıyor",
+      "next": "Sonraki: {{when}}",
+      "off": "Kapalı",
+      "running": "Şu an çalışıyor",
+      "setUp": "Önceden kuruldu: sınır eklemek için aç",
+      "waiting": "Bir sonraki olayı bekliyor"
+    },
+    "toggle": "{{name}} açılsın ya da kapansın",
+    "what": {
+      "anyone": "herkes",
+      "file": "{{path}} içinde bir dosya değişince",
+      "fileShort": "Bir dosya değişince",
+      "mail": "E-posta · gönderen: {{from}}",
+      "mailShort": "Bir e-posta gelince",
+      "webhook": "Bir uygulama imzalı adresini çağırınca"
+    }
+  },
   "backdrop": {
     "names": {
       "aurora": "Aurora",
@@ -1622,10 +1731,6 @@
     "profile": "Bot profili",
     "runsOnHost": "{{name}} sunucusunda çalışır",
     "runsOnLocal": "Bu bilgisayarda çalışır",
-    "schedulesLink": {
-      "hint": "Her sabah, her hafta ya da bir kez: buradan oluşturup yönetin.",
-      "title": "Zamanlanmış görevler"
-    },
     "screenListFailed": "{{name}} ekran listesi yüklenemedi. Birazdan yeniden denenecek.",
     "searchChats": "Sohbetlerde ara…",
     "serverIssue": {
@@ -1680,9 +1785,6 @@
       "chooseHook": "Webhook seçin",
       "close": "Düzenleyiciyi kapat",
       "contains": "Şunu içeren",
-      "count": "Bugün {{count}} çalıştırma (UTC)",
-      "count_one": "Bugün {{count}} çalıştırma (UTC)",
-      "count_other": "Bugün {{count}} çalıştırma (UTC)",
       "customSchedule": "Özel zamanlama",
       "dailyAt": "Her gün şu saatte",
       "digest": "Sonrasında tek özet için sakla",
@@ -1690,7 +1792,6 @@
       "drop": "Bu olayları atla",
       "duringQuiet": "Sessiz saatlerde",
       "edit": "Kuralı düzenle",
-      "empty": "Bu botu henüz bir olay uyandırmıyor. Gerektiğinde kural ekleyin.",
       "end": "Bitiş",
       "equals": "Adresi şu olan",
       "exampleDraft": "İncelemem için bir yanıt taslağı hazırla.",
@@ -1700,8 +1801,6 @@
       "folder": "Klasör / etiket",
       "hook": "İmzalı webhook",
       "hookHint": "Aşağıda imzalı bir adres oluşturup buraya bağlayın. Bağlanan çağrılar önceki talimat yerine bu kurala uyar.",
-      "intro": "Bu botu uyandıran küçük kurallar. Kontrol sizde.",
-      "lastFired": "Son çalıştırma:",
       "limitSummary": "{{hour}} / saat · {{day}} / gün",
       "limits": "Sınırlar",
       "limitsHint": "Peş peşe olaylar tek çalıştırmada birleşir. Fazlası bekler. Botun en düşük sınırı tüm kurallarına uygulanır. Kuyruk: 100 olay, 48 KB; dolarsa kural duraklar.",
@@ -1710,17 +1809,12 @@
       "manageHooks": "İmzalı adresler",
       "name": "Ad",
       "off": "Kapalı",
-      "on": "Açık",
-      "paused": "İlgilenmeniz gerekiyor",
       "per_day": "Günlük çalıştırma",
       "per_hour": "Saatlik çalıştırma",
       "poll": "Kontrol aralığı (saniye)",
       "preview": "Botun alacağı metni göster",
       "previewHint": "Boyutu sınırlanmış, tam talimat ve korumalı olay metni. Çalıştırma başlamaz, araç kullanılmaz.",
       "queueError": "Çok fazla olay bekliyor. Filtreleri daraltıp bu kuralı yeniden açın.",
-      "queued": "{{count}} bekliyor",
-      "queued_one": "{{count}} bekliyor",
-      "queued_other": "{{count}} bekliyor",
       "quietHours": "Sessiz saatler",
       "remove": "Kuralı kaldır",
       "runError": "Son çalıştırma tamamlanmadı veya kuyruk dolu. Etkinliği ve filtreleri kontrol edip yeniden açın.",
@@ -1744,7 +1838,6 @@
       "time": "Belirli bir zamanda",
       "timezone": "Saat dilimi",
       "title": "Bir şey olduğunda",
-      "toggle": "{{name}} kuralını aç veya kapat",
       "useQuiet": "Bu bot geceleri sessiz kalsın",
       "webhook": "Bir webhook çağrıldığında",
       "when": "Ne zaman"
@@ -5807,7 +5900,6 @@
     "confirmDelete": "Evet, sil",
     "delete": "Sil",
     "deletedBot": "Silinmiş bot",
-    "does": "Ne yapar",
     "dueAt": "Planlanan {{when}}",
     "durationHours": "{{hours}} sa {{minutes}} dk",
     "durationMinutes": "{{minutes}} dk {{seconds}} sn",
@@ -5917,15 +6009,11 @@
     "history": "Çalışma geçmişi",
     "historyEmpty": "Henüz kaydedilmiş çalışma veya kaçırılan tetikleme yok.",
     "historyEmptyFiltered": "Başarısız veya kaçırılan çalışma yok.",
-    "lastRun": "Son çalışma",
     "loading": "Zamanlamalar yükleniyor…",
-    "missed": "Kapalıyken kaçırılan",
     "missedWhy": "O sırada bilgisayar kapalıydı veya uygulama kapalıydı.",
     "movedTo": "{{name}} sunucusuna taşındı: orada çalışır, bu bilgisayarda dondurulmuştur.",
-    "never": "Hiç",
     "new": "Yeni zamanlama",
     "newNeedsBot": "Önce bir bot oluştur, sonra onun için bir şey zamanlayabilirsin.",
-    "nextRun": "Sonraki çalışma",
     "nextRuns": "Sonraki 5 çalışma",
     "nextRunsEmpty": "Yaklaşan çalışma yok.",
     "noRuns": "Henüz çalışma görülmedi.",
@@ -5981,17 +6069,11 @@
       },
       "unknown": "Özel zamanlama"
     },
-    "status": {
-      "disabled": "Duraklatıldı",
-      "enabled": "Etkin",
-      "finished": "Bitti"
-    },
     "subtitle": "Botlarının zamanlayıcıyla yaptığı işler: her sabah, her saat ya da bir kez.",
     "title": "Zamanlanmış görevler",
     "viewCalendar": "Takvim",
     "viewLabel": "Görünüm",
-    "viewList": "Liste",
-    "when": "Ne zaman"
+    "viewList": "Liste"
   },
   "secretRequest": {
     "allowHint": "İkisini de boş bırakırsanız, Ayarlar'dan bir yer ekleyene kadar bot bunu hiçbir yerde kullanamaz.",

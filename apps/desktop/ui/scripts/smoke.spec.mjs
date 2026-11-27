@@ -280,7 +280,8 @@ export async function flows(ctx) {
       await openFirstChat(page);
       if (!(await page.getByTestId('bot-panel').isVisible())) await page.getByTestId('bot-chip').click();
       await page.getByTestId('bot-panel-tab-automation').click();
-      await page.getByTestId('bot-triggers').getByRole('button', { name:'Morning review', exact:true }).click();
+      // The row's button reads "<name> <when> <state>": the rule is the one whose name comes first.
+      await page.getByTestId('bot-automation').getByRole('button', { name:/^Morning review\b/ }).click();
       await page.getByTestId('trigger-builder').waitFor(T);
       if (!(await page.getByTestId('trigger-instruction').inputValue()).includes('Summarize')) throw new Error('saved instruction missing');
       await page.getByTestId('trigger-builder').evaluate(async (editor) => {

@@ -1,7 +1,6 @@
 import {
   Bell,
   BellOff,
-  CalendarClock,
   ChevronRight,
   Lightbulb,
   Lock,
@@ -38,8 +37,7 @@ import { StopStatusNotice } from "./StopStatusNotice";
 import styles from "./BotPanel.module.css";
 import { BotPanelMail } from "./BotPanelMail";
 import { BotBrowserProfile } from "./BotBrowserProfile";
-import { BotPanelTriggers } from "./BotPanelTriggers";
-import { BotPanelWebhooks } from "./BotPanelWebhooks";
+import { BotPanelAutomation } from "./BotPanelAutomation";
 import { BotPanelSkills } from "./BotPanelSkills";
 import { BotPanelWorkspace } from "./BotPanelWorkspace";
 import { BrandMark } from "./BrandMark";
@@ -404,23 +402,7 @@ export function BotPanel({
             })}
           </>
         ) : tab === "automation" ? (
-          <>{onOpenSchedules ? (
-            <button type="button" className={styles.scheduleLink} data-testid="bot-panel-schedules" onClick={onOpenSchedules}>
-              <CalendarClock aria-hidden="true" />
-              <span className={styles.scheduleLinkText}>
-                <b>{t("botPanel.schedulesLink.title")}</b>
-                <span>{t("botPanel.schedulesLink.hint")}</span>
-              </span>
-              <ChevronRight aria-hidden="true" />
-            </button>
-          ) : null}<BotPanelTriggers botId={bot.id} />
-          <details className={styles.more}>
-            <summary>
-              <ChevronRight aria-hidden="true" />
-              {t("botPanel.triggers.manageHooks")}
-            </summary>
-            <BotPanelWebhooks botId={bot.id} />
-          </details></>
+          <BotPanelAutomation key={bot.id} botId={bot.id} botName={bot.name} visible={visible} onOpenSchedules={onOpenSchedules} onOpenMissions={() => setTab("activity")} />
         ) : tab === "tools" ? (
           <BotBrowserProfile key={bot.id} botId={bot.id} />
         ) : (

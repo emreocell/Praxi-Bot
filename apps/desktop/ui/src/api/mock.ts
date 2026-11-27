@@ -7,6 +7,7 @@ import { MOCK_MCP_CATALOG } from "./mockCatalog.ts";
 import { MockHostSetup } from "./mockHostSetup.ts";
 import { MockLiveViewService } from "./mockLiveView.ts";
 import { MockMissions } from "./mockMissions.ts";
+import { MockTriggers } from "./mockTriggers.ts";
 import { longChatEvents, longChatMessages } from "./mockLongChat.ts";
 import type {
   BotSpendLimits,
@@ -234,6 +235,39 @@ const SCHEDULES = [
     misfire_policy: "skip",
     spec: { cron: "30 22 * * * Europe/Istanbul" },
     payload: { kind: "workflow", name: "backup-check", params: {} }
+  },
+  {
+    id: "sch-4",
+    origin: "user",
+    bot_id: ATLAS,
+    name: "Gelen kutusu özeti",
+    enabled: true,
+    has_webhook: false,
+    created_at_ms: NOW,
+    last_run_at_ms: MOCK_NOW - 3 * 3_600_000,
+    next_run_at_ms: MOCK_NOW + 21 * 3_600_000,
+    next_runs_ms: [21, 45, 69].map((h) => MOCK_NOW + h * 3_600_000),
+    missed_occurrences: 0,
+    misfire_policy: "skip",
+    spec: { cron: "0 9 * * 1-5 Europe/Istanbul" },
+    payload: { kind: "agent_prompt", text: "Gelen kutumu kontrol et ve yanıt bekleyenleri özetle." }
+  },
+  {
+    id: "sch-5",
+    origin: "bot",
+    bot_id: ATLAS,
+    name: "Yeni faturaları dosyala",
+    enabled: true,
+    has_webhook: false,
+    created_at_ms: NOW,
+    last_run_at_ms: MOCK_NOW - DAY_MS,
+    next_run_at_ms: null,
+    next_runs_ms: [],
+    missed_occurrences: 0,
+    misfire_policy: "skip",
+    spec: { every: { seconds: 300 } },
+    trigger: { kind: "file_watch", path: "~/Downloads", glob: "*.pdf", events: ["created"], debounce_ms: 1000 },
+    payload: { kind: "agent_prompt", text: "Yeni fatura PDF'ini Faturalar klasörüne taşı." }
   }
 ] as unknown as import("./types").Schedule[];
 const CHAT_ID = "33333333-3333-4333-8333-333333333333";
@@ -846,6 +880,7 @@ export class MockApiClient extends ApiClient {
   };
   private nextJournalId = 3;
   readonly schedules: import("./types").Schedule[] = structuredClone(SCHEDULES);
+  private readonly triggers = new MockTriggers(ATLAS);
   private readonly scheduleHistory = new Map<
     string,
     import("./types").ScheduleHistoryEntry[]
@@ -887,6 +922,21 @@ export class MockApiClient extends ApiClient {
           finished_at_ms: MOCK_NOW - 3_600_000 + 8_000,
           error: "timeout fetching feed",
           retryable: true
+        }
+      ]
+    ],
+    [
+      "sch-4",
+      [
+        {
+          due_ms: MOCK_NOW - 3 * 3_600_000,
+          run_id: "mock-sch-run-4",
+          chat_id: CHAT_ID,
+          status: "succeeded",
+          started_at_ms: MOCK_NOW - 3 * 3_600_000,
+          finished_at_ms: MOCK_NOW - 3 * 3_600_000 + 41_000,
+          error: null,
+          retryable: false
         }
       ]
     ]
@@ -1515,6 +1565,7 @@ export class MockApiClient extends ApiClient {
     const ok = (v: unknown) => v as T;
     const seg = path.split("/").filter(Boolean).map(decodeURIComponent);
     if (path === "/connectivity" && method === "GET") return ok({ services: [] });
+    if (seg[0] === "bots" && seg[2] === "triggers") return ok(this.triggers.route(method, seg, opts.body));
     if (seg[0] === "missions") {
       const id = seg[1] ?? "";
       if (!id) {
@@ -1528,8 +1579,6 @@ export class MockApiClient extends ApiClient {
     if (seg[0] === "bots" && seg[2] === "incoming-webhooks") {
       return ok(this.incomingWebhookRoute(method, seg, opts.body));
     }
-    // The Automation tab's triggers: none in mock mode (an unmatched route crashed the tab).
-    if (seg[0] === "bots" && seg[2] === "triggers" && method === "GET" && !seg[3]) return ok([]);
     if (seg[0] === "hosts" && seg[1] === "setup") {
       const body = opts.body as { host: string; accept: boolean };
       if (!seg[2] && method === "POST") return ok(this.hostSetup.start(opts.body as never));

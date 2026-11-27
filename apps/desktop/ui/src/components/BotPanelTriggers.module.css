@@ -35,3 +35,10 @@
 .preview { box-sizing: border-box; width: 100%; min-width: 0; margin: var(--space-0); white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(var(--space-8) * 8); overflow: auto; font-family: var(--font-mono); font-size: var(--font-size-xs); padding: var(--space-2); border-radius: var(--radius-sm); background: var(--color-surface-elevated); }
 @keyframes arrive { from { opacity: 0; transform: translateY(var(--space-1)); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .form { animation: none; } .section button, .section input, .section select, .section textarea { transition: none; } }
+/* The builder stands alone in the Automation tab (the list moved to BotPanelAutomation). */
+.formTitle { flex: 1; margin: var(--space-0); font-size: var(--font-size-ui-sm); font-weight: var(--font-weight-medium); outline: none; }
+.form svg { width: var(--space-4); height: var(--space-4); flex-shrink: 0; }
+.form button, .form input, .form select, .form textarea { transition: background-color 180ms ease, box-shadow 180ms ease; }
+.form :focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+.form button:disabled { opacity: 0.6; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .form button, .form input, .form select, .form textarea { transition: none; } }

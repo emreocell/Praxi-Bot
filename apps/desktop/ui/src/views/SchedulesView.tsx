@@ -1,4 +1,4 @@
-import { formatWhen } from "../lib/dateFormat";
+import { formatTimeOfDay, formatWhen } from "../lib/dateFormat";
 import { formatInScheduleZone, formatRunPreview, specTimeZone } from "../lib/scheduleTime";
 import {
   ArrowUpRight,
@@ -6,7 +6,9 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Clock3,
   HardDrive,
+  History,
   Inbox,
   LayoutList,
   type LucideIcon,
@@ -14,10 +16,13 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Rocket,
   RotateCcw,
+  Sparkles,
   Sun,
   Trash2,
-  TrendingDown
+  TrendingDown,
+  Zap
 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -29,10 +34,14 @@ import type {
   ScheduleHistoryEntry
 } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
+import { Switch } from "../components/SettingsUi";
 import formStyles from "../components/Form.module.css";
 import { botView } from "../lib/botProfile";
 import scheduleTemplateFile from "../data/scheduleTemplates.json";
 import { humanLine } from "../lib/humanError";
+import { dayWord, lastOutcome, localSpecLabel, primaryAction, scheduleKind } from "../lib/automations";
+import { nameFromTask, parseAutomationSentence } from "../lib/automationSentence";
+import { clearScheduleIntent, readScheduleIntent } from "../lib/scheduleIntent";
 import {
   FREQUENCIES,
   type Frequency,
@@ -68,7 +77,6 @@ import {
   placeScheduleCalendarEvents,
   runsOfSchedule,
   type ScheduleDraft,
-  scheduleStatus,
   sortSchedules,
   specLabel,
   toggleInput,
@@ -173,18 +181,23 @@ export function SchedulesView({
   const [historyById, setHistoryById] = useState<
     Record<string, ScheduleHistoryEntry[]>
   >({});
-  const [historyFilterById, setHistoryFilterById] = useState<
-    Record<string, HistoryFilter>
-  >({});
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   // A moved schedule whose server could not be asked: waiting for the owner to confirm.
   const [confirmReclaimId, setConfirmReclaimId] = useState<string | null>(null);
+  // A note from the bot panel: open the form with a sentence, or show one schedule.
+  const [intent] = useState(readScheduleIntent);
+  useEffect(() => clearScheduleIntent(), []);
   /** `null` = no form; `"new"` or a schedule id being edited. */
-  const [editing, setEditing] = useState<string | null>(initialBotId ? "new" : null);
+  const [editing, setEditing] = useState<string | null>(
+    initialBotId || intent?.kind === "draft" ? "new" : null
+  );
+  /** The schedule whose next runs and history are open. */
+  const [expandedId, setExpandedId] = useState<string | null>(
+    intent?.kind === "focus" ? intent.scheduleId : null
+  );
 
   const fmt = useCallback(
     (ms: number, zone?: string) =>
@@ -266,6 +279,15 @@ export function SchedulesView({
   };
 
   const list = sortSchedules(schedules ?? []);
+  // Opened from the bot panel on one schedule: bring it into view once the list is there.
+  const focusId = intent?.kind === "focus" ? intent.scheduleId : null;
+  const loaded = schedules !== null;
+  useEffect(() => {
+    if (!focusId || !loaded) return;
+    document
+      .querySelector(`[data-schedule-id="${CSS.escape(focusId)}"]`)
+      ?.scrollIntoView?.({ block: "center" });
+  }, [focusId, loaded]);
   const editingSchedule =
     editing && editing !== "new"
       ? (schedules ?? []).find((s) => s.id === editing)
@@ -278,6 +300,20 @@ export function SchedulesView({
           <div className={styles.headerText}>
             <h1 className={styles.title}>{t("schedules.title")}</h1>
             <p className={styles.subtitle}>{t("schedules.subtitle")}</p>
+            <ul className={styles.explain} data-testid="schedules-explain">
+              <li>
+                <Clock3 aria-hidden="true" />
+                {t("automation.explain.schedule")}
+              </li>
+              <li>
+                <Zap aria-hidden="true" />
+                {t("automation.explain.events")}
+              </li>
+              <li>
+                <Rocket aria-hidden="true" />
+                {t("automation.explain.missions")}
+              </li>
+            </ul>
           </div>
           <div className={styles.headerActions}>
             <div
@@ -338,7 +374,17 @@ export function SchedulesView({
           <ScheduleForm
             key={editing}
             editing={editingSchedule}
-            initialBotId={initialBotId}
+            initialBotId={intent?.kind === "draft" ? intent.botId : initialBotId}
+            initialText={intent?.kind === "draft" ? intent.text : undefined}
+            onDelete={
+              editingSchedule
+                ? async () => {
+                    await client!.deleteSchedule(editingSchedule.id);
+                    setEditing(null);
+                    await load();
+                  }
+                : undefined
+            }
             onCancel={() => setEditing(null)}
             onSaved={async () => {
               setEditing(null);
@@ -388,421 +434,301 @@ export function SchedulesView({
           />
         ) : (
           <ul className={styles.list} aria-label={t("schedules.title")}>
-            {list.map((s) => {
-              const bot = bots.find((b) => b.id === s.bot_id);
-              const view = bot ? botView(bot) : null;
-              const status = scheduleStatus(s);
-              const label = specLabel(s.spec, fmt, i18n.language);
-              const payload = parsePayload(s.payload);
-              const liveRuns = runsOfSchedule(events.runs, s.id, 20);
-              const mergedHistory = mergeLiveRunsIntoHistory(
-                historyById[s.id] ?? [],
-                liveRuns
-              );
-              const filter = historyFilterById[s.id] ?? "all";
-              const visibleHistory = filterScheduleHistory(
-                mergedHistory,
-                filter
-              );
-              const nextRuns = s.next_runs_ms ?? [];
-              const busy = busyId === s.id;
-              return (
-                <li key={s.id} data-testid="schedule-row">
-                  <Card padding="md" className={styles.item}>
-                    <div className={styles.itemHead}>
-                      <div className={styles.itemTitle}>
-                        <h2 className={styles.name}>{s.name}</h2>
-                        <span
-                          className={`${styles.badge} ${styles[status]}`}
-                          data-testid="schedule-status"
-                        >
-                          {t(`schedules.status.${status}`)}
-                        </span>
-                        {s.origin === "bot" ? (
-                          <span
-                            className={styles.badge}
-                            data-testid="schedule-origin-bot"
-                            title={t("schedules.originBotHint")}
-                          >
-                            {t("schedules.originBot")}
-                          </span>
-                        ) : null}
-                      </div>
-                      <label className={styles.toggle}>
-                        <input
-                          type="checkbox"
-                          checked={s.enabled}
-                          disabled={busy}
-                          onChange={() =>
-                            void act(s.id, () =>
-                              client!.updateSchedule(s.id, toggleInput(s))
-                            )
-                          }
-                        />
-                        <span>{t("schedules.enabled")}</span>
-                      </label>
-                    </div>
-
-                    <dl className={styles.meta}>
-                      <div>
-                        <dt>{t("schedules.bot")}</dt>
-                        <dd className={styles.botCell}>
-                          {view ? (
-                            <BotAvatar bot={view} size="xs" decorative />
-                          ) : null}
-                          {view?.name ?? t("schedules.deletedBot")}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>{t("schedules.when")}</dt>
-                        <dd>{t(label.i18nKey, label.values)}</dd>
-                      </div>
-                      <div>
-                        <dt>{t("schedules.does")}</dt>
-                        <dd className={styles.clamp}>
-                          {payload.kind === "agent_prompt"
-                            ? payload.text
-                            : payload.kind === "unknown"
-                              ? t("schedules.payload.unknown")
-                              : t(`schedules.payload.${payload.kind}`, {
-                                  name: payload.name
-                                })}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>{t("schedules.nextRun")}</dt>
-                        <dd>
-                          {s.next_run_at_ms !== null &&
-                          s.next_run_at_ms !== undefined
-                            ? fmt(s.next_run_at_ms, specTimeZone(s.spec))
-                            : "—"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>{t("schedules.lastRun")}</dt>
-                        <dd>
-                          {s.last_run_at_ms !== null &&
-                          s.last_run_at_ms !== undefined
-                            ? fmt(s.last_run_at_ms, specTimeZone(s.spec))
-                            : t("schedules.never")}
-                        </dd>
-                      </div>
-                      {(s.missed_occurrences ?? 0) > 0 ? (
-                        <div data-testid="schedule-missed">
-                          <dt>{t("schedules.missed")}</dt>
-                          <dd>{s.missed_occurrences}</dd>
-                        </div>
-                      ) : null}
-                    </dl>
-
-                    {nextRuns.length > 0 ? (
-                      <div
-                        className={styles.upcomingSection}
-                        data-testid="schedule-next-runs"
-                      >
-                        <h3 className={styles.runsTitle}>
-                          {t("schedules.nextRuns")}
-                        </h3>
-                        <p className={styles.upcomingLine}>
-                          {nextRuns
-                            .slice(0, 3)
-                            .map((ts) => fmt(ts, specTimeZone(s.spec)))
-                            .join(" · ")}
-                          {nextRuns.length > 3 ? (
-                            <span className={styles.upcomingMore}>
-                              {` +${Math.min(nextRuns.length, 5) - 3}`}
-                            </span>
-                          ) : null}
-                        </p>
-                      </div>
-                    ) : null}
-
-                    {s.moved_to ? (
-                      <div
-                        className={styles.actions}
-                        data-testid="schedule-moved"
-                      >
-                        <p className={formStyles.hint}>
-                          {t("schedules.movedTo", {
-                            name: s.moved_to
-                          })}
-                        </p>
-                        {confirmReclaimId === s.id ? (
-                          <p className={formStyles.error} role="alert">
-                            {t("schedules.reclaimUnreachable", {
-                              name: s.moved_to
-                            })}
-                          </p>
-                        ) : null}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={busy}
-                          data-testid="schedule-reclaim"
-                          onClick={() => {
-                            const confirmed = confirmReclaimId === s.id;
-                            setConfirmReclaimId(null);
-                            void act(
-                              s.id,
-                              async () => {
-                                try {
-                                  await client!.reclaimSchedule(
-                                    s.id,
-                                    confirmed
-                                  );
-                                } catch (e) {
-                                  if (
-                                    e instanceof ApiError &&
-                                    e.code === "host_unreachable"
-                                  ) {
-                                    setConfirmReclaimId(s.id);
-                                  }
-                                  throw e;
-                                }
-                              },
-                              t("schedules.reclaimed", {
-                                name: s.name
-                              })
-                            );
-                          }}
-                        >
-                          {confirmReclaimId === s.id
-                            ? t("schedules.reclaimAnyway")
-                            : t("schedules.reclaim")}
-                        </Button>
-                      </div>
-                    ) : null}
-                    <div className={styles.actions}>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={busy || Boolean(s.moved_to)}
-                        onClick={() =>
-                          void act(
-                            s.id,
-                            () => client!.runScheduleNow(s.id),
-                            t("schedules.runNowStarted", { name: s.name })
-                          )
+            {list.map((s) => (
+              <ScheduleRow
+                key={s.id}
+                schedule={s}
+                history={mergeLiveRunsIntoHistory(historyById[s.id] ?? [], runsOfSchedule(events.runs, s.id, 20))}
+                busy={busyId === s.id}
+                expanded={expandedId === s.id}
+                confirmReclaim={confirmReclaimId === s.id}
+                fmt={fmt}
+                onToggleExpanded={() => setExpandedId((cur) => (cur === s.id ? null : s.id))}
+                onEdit={() => setEditing(s.id)}
+                onOpenChat={onOpenChat}
+                onAct={(fn, ok) => void act(s.id, fn, ok)}
+                onReclaim={() => {
+                  const confirmed = confirmReclaimId === s.id;
+                  setConfirmReclaimId(null);
+                  void act(
+                    s.id,
+                    async () => {
+                      try {
+                        await client!.reclaimSchedule(s.id, confirmed);
+                      } catch (e) {
+                        if (e instanceof ApiError && e.code === "host_unreachable") {
+                          setConfirmReclaimId(s.id);
                         }
-                      >
-                        <Play />
-                        {t("schedules.runNow")}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={busy || Boolean(s.moved_to)}
-                        onClick={() => setEditing(s.id)}
-                      >
-                        <PenLine />
-                        {t("schedules.edit")}
-                      </Button>
-                      {confirmDeleteId === s.id ? (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            disabled={busy}
-                            onClick={() => {
-                              setConfirmDeleteId(null);
-                              void act(s.id, () =>
-                                client!.deleteSchedule(s.id)
-                              );
-                            }}
-                          >
-                            {t("schedules.confirmDelete")}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setConfirmDeleteId(null)}
-                          >
-                            {t("schedules.cancel")}
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => setConfirmDeleteId(s.id)}
-                        >
-                          <Trash2 />
-                          {t("schedules.delete")}
-                        </Button>
-                      )}
-                    </div>
-
-                    <div className={styles.runs} data-testid="schedule-history">
-                      <div className={styles.runsHead}>
-                        <h3 className={styles.runsTitle}>
-                          {t("schedules.history")}
-                        </h3>
-                        <div className={styles.filterGroup} role="group">
-                          <button
-                            type="button"
-                            className={`${styles.filterChip} ${
-                              filter === "all" ? styles.filterChipActive : ""
-                            }`}
-                            aria-pressed={filter === "all"}
-                            onClick={() =>
-                              setHistoryFilterById((prev) => ({
-                                ...prev,
-                                [s.id]: "all"
-                              }))
-                            }
-                          >
-                            {t("schedules.filterAll")}
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.filterChip} ${
-                              filter === "issues" ? styles.filterChipActive : ""
-                            }`}
-                            aria-pressed={filter === "issues"}
-                            onClick={() =>
-                              setHistoryFilterById((prev) => ({
-                                ...prev,
-                                [s.id]: "issues"
-                              }))
-                            }
-                          >
-                            {t("schedules.filterIssues")}
-                          </button>
-                        </div>
-                      </div>
-                      {visibleHistory.length === 0 ? (
-                        <p className={formStyles.hint}>
-                          {filter === "issues"
-                            ? t("schedules.historyEmptyFiltered")
-                            : t("schedules.historyEmpty")}
-                        </p>
-                      ) : (
-                        <ul className={styles.runList}>
-                          {visibleHistory.slice(0, 10).map((entry) => {
-                            const key = `${entry.due_ms ?? "direct"}-${entry.run_id ?? entry.status}`;
-                            const duration = formatDurationParts(
-                              entry.started_at_ms,
-                              entry.finished_at_ms
-                            );
-                            const when = entry.started_at_ms ?? entry.due_ms;
-                            const canRunAgain =
-                              !entry.retryable &&
-                              entry.due_ms == null &&
-                              (entry.status === "failed" ||
-                                entry.status === "cancelled");
-                            return (
-                              <li
-                                key={key}
-                                className={styles.run}
-                                data-testid="schedule-history-row"
-                              >
-                                <span
-                                  className={`${styles.badge} ${historyToneClass(entry.status)}`}
-                                >
-                                  {t(`schedules.run.${entry.status}`, {
-                                    defaultValue: entry.status
-                                  })}
-                                </span>
-                                {when !== null && when !== undefined ? (
-                                  <span className={formStyles.hint}>
-                                    {entry.started_at_ms != null
-                                      ? fmt(entry.started_at_ms)
-                                      : t("schedules.dueAt", {
-                                          when: fmt(when)
-                                        })}
-                                  </span>
-                                ) : null}
-                                {duration ? (
-                                  <span className={formStyles.hint}>
-                                    {t(duration.i18nKey, duration.values)}
-                                  </span>
-                                ) : null}
-                                {entry.status === "missed" ? (
-                                  <span className={formStyles.hint}>
-                                    {t("schedules.missedWhy")}
-                                  </span>
-                                ) : null}
-                                {entry.error ? (
-                                  <span className={styles.runError}>
-                                    {entry.error.startsWith("The model service cannot be reached.")
-                                      ? t("offline.scheduleSkipped")
-                                      : entry.error.startsWith("The model service cannot be reached after bounded retries.")
-                                        ? t("offline.scheduleRetry")
-                                        : entry.error.startsWith("Waiting for a connection to the model service.")
-                                          ? t("offline.scheduleWaiting") : entry.error}
-                                  </span>
-                                ) : null}
-                                {entry.chat_id ? (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => onOpenChat(entry.chat_id!)}
-                                  >
-                                    <ArrowUpRight />
-                                    {t("schedules.openRun")}
-                                  </Button>
-                                ) : null}
-                                {entry.retryable &&
-                                entry.due_ms !== null &&
-                                entry.due_ms !== undefined ? (
-                                  <Button
-                                    size="sm"
-                                    variant="secondary"
-                                    disabled={busy || Boolean(s.moved_to)}
-                                    data-testid="schedule-retry"
-                                    onClick={() =>
-                                      void act(
-                                        s.id,
-                                        () =>
-                                          client!.retryScheduleOccurrence(
-                                            s.id,
-                                            entry.due_ms!
-                                          ),
-                                        t("schedules.retryStarted", {
-                                          name: s.name
-                                        })
-                                      )
-                                    }
-                                  >
-                                    <RotateCcw />
-                                    {entry.status === "missed"
-                                      ? t("schedules.runNow")
-                                      : t("schedules.retry")}
-                                  </Button>
-                                ) : canRunAgain ? (
-                                  <Button
-                                    size="sm"
-                                    variant="secondary"
-                                    disabled={busy || Boolean(s.moved_to)}
-                                    onClick={() =>
-                                      void act(
-                                        s.id,
-                                        () => client!.runScheduleNow(s.id),
-                                        t("schedules.runNowStarted", {
-                                          name: s.name
-                                        })
-                                      )
-                                    }
-                                  >
-                                    <RotateCcw />
-                                    {t("schedules.runAgain")}
-                                  </Button>
-                                ) : null}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-                    </div>
-                  </Card>
-                </li>
-              );
-            })}
+                        throw e;
+                      }
+                    },
+                    t("schedules.reclaimed", { name: s.name })
+                  );
+                }}
+              />
+            ))}
           </ul>
         )}
       </div>
     </div>
+  );
+}
+
+/** One schedule: what and when at a glance, its last result, one primary button; history folds. */
+function ScheduleRow({
+  schedule: s,
+  history,
+  busy,
+  expanded,
+  confirmReclaim,
+  fmt,
+  onToggleExpanded,
+  onEdit,
+  onOpenChat,
+  onAct,
+  onReclaim
+}: {
+  schedule: Schedule;
+  history: ScheduleHistoryEntry[];
+  busy: boolean;
+  expanded: boolean;
+  confirmReclaim: boolean;
+  fmt: (ms: number, zone?: string) => string;
+  onToggleExpanded: () => void;
+  onEdit: () => void;
+  onOpenChat: (chatId: string) => void;
+  onAct: (fn: () => Promise<unknown>, ok?: string) => void;
+  onReclaim: () => void;
+}) {
+  const { t, i18n } = useTranslation();
+  const { client, bots } = useDaemon();
+  const [filter, setFilter] = useState<HistoryFilter>("all");
+  const bot = bots.find((b) => b.id === s.bot_id);
+  const view = bot ? botView(bot) : null;
+  const zone = specTimeZone(s.spec);
+  const label = localSpecLabel(s.spec, (ms) => fmt(ms, zone), i18n.language, LOCAL_TZ);
+  const payload = parsePayload(s.payload);
+  const last = lastOutcome(history);
+  const primary = primaryAction(s, last);
+  const nextRuns = s.next_runs_ms ?? [];
+  const visibleHistory = filterScheduleHistory(history, filter);
+  const detailsId = `schedule-details-${s.id}`;
+  const near = (ms: number) => {
+    const word = dayWord(ms);
+    return word ? t(`automation.day.${word}`, { time: formatTimeOfDay(ms, i18n.language) }) : fmt(ms, zone);
+  };
+  const kind = scheduleKind(s);
+  const when =
+    kind === "file" ? t("automation.what.fileShort") : kind === "mail" ? t("automation.what.mailShort") : t(label.i18nKey, label.values);
+  const next = s.moved_to
+    ? t("automation.state.moved", { name: s.moved_to })
+    : !s.enabled
+      ? t("automation.state.off")
+      : s.next_run_at_ms !== null && s.next_run_at_ms !== undefined
+        ? t("automation.state.next", { when: near(s.next_run_at_ms) })
+        : kind === "time"
+          ? t("automation.state.done")
+          : t("automation.state.waiting");
+  const lastLine = last
+    ? t(`automation.last.${last.tone}`, { when: last.atMs !== null ? near(last.atMs) : "" })
+    : t("automation.last.never");
+  return (
+    <li data-testid="schedule-row" data-schedule-id={s.id}>
+      <Card padding="md" className={styles.item}>
+        <div className={styles.rowMain}>
+          {view ? <BotAvatar bot={view} size="sm" decorative /> : <span className={styles.rowAvatar} aria-hidden="true" />}
+          <div className={styles.rowText}>
+            <div className={styles.itemTitle}>
+              <h2 className={styles.name}>{s.name}</h2>
+              {s.origin === "bot" ? (
+                <span className={styles.badge} data-testid="schedule-origin-bot" title={t("schedules.originBotHint")}>
+                  {t("schedules.originBot")}
+                </span>
+              ) : null}
+            </div>
+            <p className={styles.rowWhen}>
+              {when} · {view?.name ?? t("schedules.deletedBot")}
+            </p>
+            <p className={styles.rowFacts}>
+              <span data-testid="schedule-status">{next}</span>
+              <span className={styles.lastResult} data-tone={last?.tone ?? "none"} data-testid="schedule-last">
+                <i aria-hidden="true" />
+                {lastLine}
+              </span>
+              {(s.missed_occurrences ?? 0) > 0 ? (
+                <span data-testid="schedule-missed">{t("automation.missedCount", { count: s.missed_occurrences ?? 0 })}</span>
+              ) : null}
+            </p>
+            <p className={`${styles.rowDoes} ${styles.clamp}`}>
+              {payload.kind === "agent_prompt"
+                ? payload.text
+                : payload.kind === "unknown"
+                  ? t("schedules.payload.unknown")
+                  : t(`schedules.payload.${payload.kind}`, { name: payload.name })}
+            </p>
+          </div>
+          <div className={styles.rowControls}>
+            {s.moved_to ? null : (
+              <Switch
+                checked={s.enabled}
+                disabled={busy}
+                label={t("automation.toggle", { name: s.name })}
+                onChange={() => onAct(() => client!.updateSchedule(s.id, toggleInput(s)))}
+              />
+            )}
+          </div>
+        </div>
+        {s.moved_to ? (
+          <p className={formStyles.hint} data-testid="schedule-moved">
+            {t("schedules.movedTo", { name: s.moved_to })}
+          </p>
+        ) : null}
+        {confirmReclaim && s.moved_to ? (
+          <p className={formStyles.error} role="alert">
+            {t("schedules.reclaimUnreachable", { name: s.moved_to })}
+          </p>
+        ) : null}
+        <div className={styles.actions}>
+          {primary.kind === "reclaim" ? (
+            <Button size="sm" variant="secondary" disabled={busy} data-testid="schedule-reclaim" onClick={onReclaim}>
+              <RotateCcw />
+              {confirmReclaim ? t("schedules.reclaimAnyway") : t("schedules.reclaim")}
+            </Button>
+          ) : primary.kind === "retry" ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              data-testid="schedule-primary-retry"
+              onClick={() =>
+                onAct(() => client!.retryScheduleOccurrence(s.id, primary.dueMs), t("schedules.retryStarted", { name: s.name }))
+              }
+            >
+              <RotateCcw />
+              {last?.tone === "missed" ? t("automation.runMissed") : t("schedules.retry")}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              data-testid="schedule-run-now"
+              onClick={() => onAct(() => client!.runScheduleNow(s.id), t("schedules.runNowStarted", { name: s.name }))}
+            >
+              <Play />
+              {t("schedules.runNow")}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" disabled={busy || Boolean(s.moved_to)} data-testid="schedule-edit" onClick={onEdit}>
+            <PenLine />
+            {t("schedules.edit")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            data-testid="schedule-history-toggle"
+            onClick={onToggleExpanded}
+          >
+            <History />
+            {t("automation.historyToggle", { count: history.length })}
+          </Button>
+        </div>
+
+        {expanded ? (
+          <div className={styles.details} id={detailsId}>
+            {nextRuns.length > 0 ? (
+              <div className={styles.upcomingSection} data-testid="schedule-next-runs">
+                <h3 className={styles.runsTitle}>{t("schedules.nextRuns")}</h3>
+                <p className={styles.upcomingLine}>
+                  {nextRuns
+                    .slice(0, 5)
+                    .map((ts) => fmt(ts, zone))
+                    .join(" · ")}
+                </p>
+              </div>
+            ) : null}
+            <div className={styles.runs} data-testid="schedule-history">
+              <div className={styles.runsHead}>
+                <h3 className={styles.runsTitle}>{t("schedules.history")}</h3>
+                <div className={styles.filterGroup} role="group">
+                  {(["all", "issues"] as const).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      className={`${styles.filterChip} ${filter === f ? styles.filterChipActive : ""}`}
+                      aria-pressed={filter === f}
+                      onClick={() => setFilter(f)}
+                    >
+                      {f === "all" ? t("schedules.filterAll") : t("schedules.filterIssues")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {visibleHistory.length === 0 ? (
+                <p className={formStyles.hint}>
+                  {filter === "issues" ? t("schedules.historyEmptyFiltered") : t("schedules.historyEmpty")}
+                </p>
+              ) : (
+                <ul className={styles.runList}>
+                  {visibleHistory.slice(0, 10).map((entry) => {
+                    const key = `${entry.due_ms ?? "direct"}-${entry.run_id ?? entry.status}`;
+                    const duration = formatDurationParts(entry.started_at_ms, entry.finished_at_ms);
+                    const at = entry.started_at_ms ?? entry.due_ms;
+                    return (
+                      <li key={key} className={styles.run} data-testid="schedule-history-row">
+                        <span className={`${styles.badge} ${historyToneClass(entry.status)}`}>
+                          {t(`schedules.run.${entry.status}`, { defaultValue: entry.status })}
+                        </span>
+                        {at !== null && at !== undefined ? (
+                          <span className={formStyles.hint}>
+                            {entry.started_at_ms != null ? fmt(entry.started_at_ms) : t("schedules.dueAt", { when: fmt(at) })}
+                          </span>
+                        ) : null}
+                        {duration ? <span className={formStyles.hint}>{t(duration.i18nKey, duration.values)}</span> : null}
+                        {entry.status === "missed" ? <span className={formStyles.hint}>{t("schedules.missedWhy")}</span> : null}
+                        {entry.error ? (
+                          <span className={styles.runError}>
+                            {entry.error.startsWith("The model service cannot be reached.")
+                              ? t("offline.scheduleSkipped")
+                              : entry.error.startsWith("The model service cannot be reached after bounded retries.")
+                                ? t("offline.scheduleRetry")
+                                : entry.error.startsWith("Waiting for a connection to the model service.")
+                                  ? t("offline.scheduleWaiting")
+                                  : entry.error}
+                          </span>
+                        ) : null}
+                        {entry.chat_id ? (
+                          <Button size="sm" variant="ghost" onClick={() => onOpenChat(entry.chat_id!)}>
+                            <ArrowUpRight />
+                            {t("schedules.openRun")}
+                          </Button>
+                        ) : null}
+                        {entry.retryable && entry.due_ms !== null && entry.due_ms !== undefined && entry !== last?.entry ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy || Boolean(s.moved_to)}
+                            data-testid="schedule-retry"
+                            onClick={() =>
+                              onAct(() => client!.retryScheduleOccurrence(s.id, entry.due_ms!), t("schedules.retryStarted", { name: s.name }))
+                            }
+                          >
+                            <RotateCcw />
+                            {entry.status === "missed" ? t("automation.runMissed") : t("schedules.retry")}
+                          </Button>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </Card>
+    </li>
   );
 }
 
@@ -1141,13 +1067,19 @@ function ScheduleCalendar({
 function ScheduleForm({
   editing,
   initialBotId,
+  initialText,
   onCancel,
-  onSaved
+  onSaved,
+  onDelete
 }: {
   editing?: Schedule;
   initialBotId?: string;
+  /** A sentence from the bot panel ("Every weekday at 9:00, check my inbox"), read on open. */
+  initialText?: string;
   onCancel: () => void;
   onSaved: () => Promise<void>;
+  /** Editing only: removes the schedule (asks once, inline). */
+  onDelete?: () => Promise<void>;
 }) {
   const { t, i18n } = useTranslation();
   const { client, bots } = useDaemon();
@@ -1210,6 +1142,38 @@ function ScheduleForm({
   };
   const patch = (p: Partial<ScheduleDraft>) =>
     setDraft((d) => ({ ...d, ...p }));
+  // "In your own words": one sentence fills how often, the time, the task and a name.
+  const [sentence, setSentence] = useState(initialText ?? "");
+  const [sentenceNote, setSentenceNote] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const applySentence = (text: string) => {
+    const read = parseAutomationSentence(text);
+    if (!read.task && !read.simple) {
+      return;
+    }
+    setDraft((d) => ({
+      ...d,
+      ...(read.simple ? { kind: "simple" as const, simple: read.simple } : {}),
+      prompt: read.task || d.prompt,
+      name: d.name.trim() ? d.name : nameFromTask(read.task, i18n.language)
+    }));
+    setProblem(null);
+    if (read.simple) {
+      const spec = simpleSpec(read.simple, draft.tz ?? LOCAL_TZ);
+      const l = spec ? localSpecLabel(spec, (ms) => formatRunPreview(ms, i18n.language), i18n.language, LOCAL_TZ) : null;
+      setSentenceNote(l ? t("automation.form.understood", { when: t(l.i18nKey, l.values) }) : null);
+    } else {
+      setSentenceNote(t("automation.form.noWhen"));
+    }
+  };
+  const appliedInitial = useRef(false);
+  useEffect(() => {
+    if (initialText && !appliedInitial.current) {
+      appliedInitial.current = true;
+      applySentence(initialText);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const keepsPayload =
     editing !== undefined &&
     parsePayload(editing.payload).kind !== "agent_prompt";
@@ -1348,6 +1312,7 @@ function ScheduleForm({
 
   // The form opens above the list: bring it into view and put the keyboard on its title.
   const titleRef = useRef<HTMLHeadingElement | null>(null);
+  const sentenceId = useId();
   useEffect(() => {
     const el = titleRef.current;
     el?.scrollIntoView?.({ block: "nearest" });
@@ -1369,6 +1334,43 @@ function ScheduleForm({
         <h2 className={styles.formTitle} ref={titleRef} tabIndex={-1}>
           {heading}
         </h2>
+
+        {!editing ? (
+          <div className={formStyles.field}>
+            <label className={formStyles.label} htmlFor={`${sentenceId}-text`}>
+              {t("automation.form.sentenceLabel")}
+            </label>
+            <div className={formStyles.row}>
+              <input
+                id={`${sentenceId}-text`}
+                className={`${formStyles.input} ${formStyles.grow}`}
+                value={sentence}
+                placeholder={t("automation.quick.placeholder")}
+                data-testid="schedule-sentence"
+                onChange={(e) => setSentence(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    applySentence(sentence);
+                  }
+                }}
+              />
+              <Button
+                size="md"
+                variant="secondary"
+                disabled={sentence.trim() === ""}
+                data-testid="schedule-sentence-apply"
+                onClick={() => applySentence(sentence)}
+              >
+                <Sparkles />
+                {t("automation.form.fill")}
+              </Button>
+            </div>
+            <span className={formStyles.hint} role="status" data-testid="schedule-sentence-note">
+              {sentenceNote ?? t("automation.form.sentenceHint")}
+            </span>
+          </div>
+        ) : null}
 
         {!editing ? (
           <div className={formStyles.field}>
@@ -1840,6 +1842,43 @@ function ScheduleForm({
           <Button variant="ghost" disabled={busy} onClick={onCancel}>
             {t("schedules.cancel")}
           </Button>
+          {onDelete ? (
+            <span className={styles.deleteArea}>
+              {confirmDelete ? (
+                <>
+                  <span className={formStyles.hint}>{t("automation.form.deleteAsk")}</span>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={busy}
+                    data-testid="schedule-delete-confirm"
+                    onClick={() => {
+                      setBusy(true);
+                      void onDelete()
+                        .catch((e) => setProblem(errorText(e)))
+                        .finally(() => setBusy(false));
+                    }}
+                  >
+                    {t("schedules.confirmDelete")}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+                    {t("schedules.cancel")}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  data-testid="schedule-delete"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  <Trash2 />
+                  {t("schedules.delete")}
+                </Button>
+              )}
+            </span>
+          ) : null}
         </div>
       </form>
     </Card>

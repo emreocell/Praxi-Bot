@@ -1185,6 +1185,115 @@
     "when": "Cuándo",
     "who": "Quién"
   },
+  "automation": {
+    "allSchedules": "All scheduled tasks",
+    "builder": {
+      "mailbox": "Mailbox folder and how often to check",
+      "namePlaceholder": "For example: Invoices from the accountant",
+      "noHooks": "This bot has no signed address yet. Create one under “Signed addresses” below, then pick it here.",
+      "shouldPlaceholder": "For example: summarise it and tell me only if I must reply today.",
+      "title": {
+        "mail": "When an email arrives",
+        "time": "At a set time",
+        "webhook": "When an app calls in"
+      }
+    },
+    "day": {
+      "today": "today {{time}}",
+      "tomorrow": "tomorrow {{time}}",
+      "yesterday": "yesterday {{time}}"
+    },
+    "empty": "Nothing runs on its own yet. Write above when and what, for example “Every Monday at 8:00, plan my week”.",
+    "events": {
+      "file": {
+        "line": "A file is added to or changed in a folder. Ask in the chat (“when a new invoice lands in Downloads, file it”); the bot asks for the folder first.",
+        "title": "When a file arrives"
+      },
+      "intro": "Instead of a time, start when something happens:",
+      "mail": {
+        "line": "Mail from a person or domain, or with a subject. The bot reads the headers, never the body.",
+        "title": "When an email arrives"
+      },
+      "title": "When something happens",
+      "webhook": {
+        "line": "A form, a payment or GitHub calls this bot’s signed address.",
+        "title": "When an app calls in"
+      }
+    },
+    "explain": {
+      "events": "To start on an email or a webhook instead: the bot’s Automation tab.",
+      "missions": "For a long job that runs until it is done: start a mission.",
+      "schedule": "Each run is one short job: it opens a chat, does the task and ends."
+    },
+    "form": {
+      "deleteAsk": "Delete this schedule?",
+      "fill": "Fill in",
+      "noWhen": "No “when” found. The task is filled in; pick how often below.",
+      "sentenceHint": "Say when and what in one line. You can change every field afterwards.",
+      "sentenceLabel": "In your own words",
+      "understood": "Understood: {{when}}. Check the fields below, then create."
+    },
+    "historyToggle": "History ({{count}})",
+    "historyToggle_one": "History ({{count}})",
+    "historyToggle_other": "History ({{count}})",
+    "hooksLine": "Addresses other apps call to wake this bot. Each has its own secret.",
+    "intro": "What {{name}} does without being asked.",
+    "last": {
+      "failed": "Last run failed · {{when}}",
+      "missed": "Missed · {{when}}",
+      "never": "Not run yet",
+      "ok": "Last run worked · {{when}}",
+      "running": "Running now"
+    },
+    "listTitle": "Runs on its own",
+    "loading": "Loading…",
+    "missedCount": "{{count}} missed while off",
+    "missedCount_one": "{{count}} missed while off",
+    "missedCount_other": "{{count}} missed while off",
+    "missions": {
+      "action": "Start a mission",
+      "line": "A scheduled task runs a short job and ends. Something that takes hours, like signing up on 15 websites, is a mission: the bot keeps going until it is done and reports back.",
+      "title": "A long job?"
+    },
+    "openRule": "Edit this rule",
+    "openSchedule": "Open in scheduled tasks",
+    "quick": {
+      "create": "Create",
+      "created": "Saved: {{name}}",
+      "details": "More options",
+      "help": "Start with when, then what. Times like 9:00, 18:30 or 7am work.",
+      "label": "When, and what should it do?",
+      "noTask": "Now say what the bot should do.",
+      "noWhen": "Start with how often, for example “Every day at 8:00” or “Every weekday at 9:00”.",
+      "placeholder": "Every weekday at 9:00, check my inbox and summarise",
+      "what": "Does",
+      "when": "When"
+    },
+    "retry": "Retry",
+    "runMissed": "Run the missed one",
+    "state": {
+      "attention": "Needs attention: open it",
+      "done": "Done, no more runs",
+      "failed": "Last run failed · {{when}}",
+      "lastFired": "Last ran {{when}}",
+      "missed": "Missed · {{when}}",
+      "moved": "Runs on {{name}}",
+      "next": "Next: {{when}}",
+      "off": "Off",
+      "running": "Running now",
+      "setUp": "Set up earlier: open it to add limits",
+      "waiting": "Waiting for the next event"
+    },
+    "toggle": "Turn {{name}} on or off",
+    "what": {
+      "anyone": "anyone",
+      "file": "A file changes in {{path}}",
+      "fileShort": "When a file changes",
+      "mail": "An email from {{from}}",
+      "mailShort": "When an email arrives",
+      "webhook": "An app calls its signed address"
+    }
+  },
   "backdrop": {
     "names": {
       "aurora": "Aurora",
@@ -1622,10 +1731,6 @@
     "profile": "Perfil del bot",
     "runsOnHost": "Se ejecuta en {{name}} (equipo anfitrión)",
     "runsOnLocal": "Se ejecuta en este equipo",
-    "schedulesLink": {
-      "hint": "Cada mañana, cada semana o una sola vez: créalas y gestiónalas aquí.",
-      "title": "Tareas programadas"
-    },
     "screenListFailed": "No se pudo cargar la lista de pantallas de {{name}}. Se volverá a intentar en un momento.",
     "searchChats": "Buscar chats…",
     "serverIssue": {
@@ -1680,9 +1785,6 @@
       "chooseHook": "Elige un webhook",
       "close": "Cerrar editor",
       "contains": "Contiene",
-      "count": "{{count}} ejecuciones hoy (UTC)",
-      "count_one": "{{count}} ejecución hoy (UTC)",
-      "count_other": "{{count}} ejecuciones hoy (UTC)",
       "customSchedule": "Horario personalizado",
       "dailyAt": "Cada día a las",
       "digest": "Guardar para un resumen conjunto después",
@@ -1690,7 +1792,6 @@
       "drop": "Omitir estos eventos",
       "duringQuiet": "Durante las horas de silencio",
       "edit": "Editar regla",
-      "empty": "Todavía ningún evento despierta a este bot. Añade una regla cuando la necesites.",
       "end": "Hasta",
       "equals": "La dirección es",
       "exampleDraft": "Prepara una respuesta para que la revise.",
@@ -1700,8 +1801,6 @@
       "folder": "Carpeta / etiqueta",
       "hook": "Webhook firmado",
       "hookHint": "Crea una dirección firmada abajo y vincúlala aquí. Las llamadas vinculadas usan esta regla en lugar de la instrucción anterior.",
-      "intro": "Pequeñas reglas que despiertan a este bot. Tú mantienes el control.",
-      "lastFired": "Última ejecución:",
       "limitSummary": "{{hour}} / hora · {{day}} / día",
       "limits": "Límites",
       "limitsHint": "Los eventos seguidos se agrupan en una ejecución. Los demás esperan. El menor límite del bot se aplica a todas sus reglas. Cola: 100 eventos, 48 KB; si se llena, la regla se pausa.",
@@ -1710,17 +1809,12 @@
       "manageHooks": "Direcciones firmadas",
       "name": "Nombre",
       "off": "Desactivada",
-      "on": "Activada",
-      "paused": "Requiere atención",
       "per_day": "Ejecuciones por día",
       "per_hour": "Ejecuciones por hora",
       "poll": "Consultar cada (segundos)",
       "preview": "Mostrar lo que recibe el bot",
       "previewHint": "La instrucción exacta y el texto del evento protegido, con límite de tamaño. No inicia ejecuciones ni usa herramientas.",
       "queueError": "Hay demasiados eventos pendientes. Ajusta los filtros y vuelve a activar la regla.",
-      "queued": "{{count}} en espera",
-      "queued_one": "{{count}} en espera",
-      "queued_other": "{{count}} en espera",
       "quietHours": "Horas de silencio",
       "remove": "Eliminar regla",
       "runError": "La última ejecución no terminó o la cola está llena. Revisa la actividad y los filtros antes de reactivarla.",
@@ -1744,7 +1838,6 @@
       "time": "Según un horario",
       "timezone": "Zona horaria",
       "title": "Cuando pasa algo",
-      "toggle": "Activar o desactivar {{name}}",
       "useQuiet": "Mantener este bot en silencio por la noche",
       "webhook": "Se llama a un webhook",
       "when": "Cuando"
@@ -5807,7 +5900,6 @@
     "confirmDelete": "Sí, eliminar",
     "delete": "Eliminar",
     "deletedBot": "Bot eliminado",
-    "does": "Qué hace",
     "dueAt": "Programada: {{when}}",
     "durationHours": "{{hours}} h {{minutes}} min",
     "durationMinutes": "{{minutes}} min {{seconds}} s",
@@ -5917,15 +6009,11 @@
     "history": "Historial de ejecuciones",
     "historyEmpty": "Aún no hay registros de ejecuciones ni de tareas que se hayan perdido.",
     "historyEmptyFiltered": "No hay ejecuciones fallidas ni perdidas.",
-    "lastRun": "Última ejecución",
     "loading": "Cargando tareas programadas…",
-    "missed": "Perdida con el equipo apagado",
     "missedWhy": "El equipo estaba apagado o la app estaba cerrada en ese momento.",
     "movedTo": "Trasladada a {{name}}. Se ejecuta allí y queda suspendida en este equipo.",
-    "never": "Nunca",
     "new": "Nueva tarea programada",
     "newNeedsBot": "Crea un bot antes de programarle una tarea.",
-    "nextRun": "Próxima ejecución",
     "nextRuns": "Próximas 5 ejecuciones",
     "nextRunsEmpty": "No hay próximas ejecuciones.",
     "noRuns": "Aún no hay ejecuciones.",
@@ -5981,17 +6069,11 @@
       },
       "unknown": "Horario personalizado"
     },
-    "status": {
-      "disabled": "En pausa",
-      "enabled": "Activa",
-      "finished": "Finalizada"
-    },
     "subtitle": "Tareas que tus bots hacen a una hora programada, por ejemplo cada mañana, cada hora o una sola vez.",
     "title": "Tareas programadas",
     "viewCalendar": "Calendario",
     "viewLabel": "Mostrar como",
-    "viewList": "Lista",
-    "when": "Cuándo"
+    "viewList": "Lista"
   },
   "secretRequest": {
     "allowHint": "Si dejas ambos campos vacíos, el bot no podrá usar el dato hasta que indiques dónde se permite en Ajustes.",

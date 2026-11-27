@@ -1365,10 +1365,6 @@
     "profile": "Bot profile",
     "runsOnHost": "Runs on {{name}} (host)",
     "runsOnLocal": "Runs on this computer",
-    "schedulesLink": {
-      "hint": "Every morning, every week or once: create and manage them here.",
-      "title": "Scheduled tasks"
-    },
     "screenListFailed": "{{name}}'s screen list could not be loaded. It will be tried again in a moment.",
     "searchChats": "Search chats…",
     "serverIssue": {
@@ -5183,7 +5179,6 @@
     "confirmDelete": "Yes, delete",
     "delete": "Delete",
     "deletedBot": "Deleted bot",
-    "does": "What it does",
     "dueAt": "Scheduled {{when}}",
     "durationHours": "{{hours}}h {{minutes}}m",
     "durationMinutes": "{{minutes}}m {{seconds}}s",
@@ -5293,15 +5288,11 @@
     "history": "Run history",
     "historyEmpty": "No runs or missed occurrences recorded yet.",
     "historyEmptyFiltered": "No failed or missed runs.",
-    "lastRun": "Last run",
     "loading": "Loading schedules…",
-    "missed": "Missed while off",
     "missedWhy": "The computer was off or the app was closed at that time.",
     "movedTo": "Moved to {{name}}: it runs there and is frozen on this computer.",
-    "never": "Never",
     "new": "New schedule",
     "newNeedsBot": "Create a bot first, then you can schedule something for it.",
-    "nextRun": "Next run",
     "nextRuns": "Next 5 runs",
     "nextRunsEmpty": "No upcoming runs.",
     "noRuns": "No runs seen yet.",
@@ -5357,17 +5348,11 @@
       },
       "unknown": "Custom schedule"
     },
-    "status": {
-      "disabled": "Paused",
-      "enabled": "Active",
-      "finished": "Finished"
-    },
     "subtitle": "Things your bots do on a timer: every morning, every hour, or once.",
     "title": "Scheduled tasks",
     "viewCalendar": "Calendar",
     "viewLabel": "Show as",
-    "viewList": "List",
-    "when": "When"
+    "viewList": "List"
   },
   "secretRequest": {
     "allowHint": "Leave both empty and the bot cannot use it anywhere until you add a place in Settings.",
