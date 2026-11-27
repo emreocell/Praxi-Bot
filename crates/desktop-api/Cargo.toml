@@ -22,5 +22,6 @@ tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 tempfile.workspace = true

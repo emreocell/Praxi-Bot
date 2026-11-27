@@ -2738,6 +2738,16 @@
         "failed": "Couldn't calculate",
         "running": "Calculating"
       },
+      "desktop_clipboard": {
+        "done": "Used the clipboard",
+        "failed": "Couldn't use the clipboard",
+        "running": "Using the clipboard"
+      },
+      "desktop_element": {
+        "done": "Used a control on the computer",
+        "failed": "Couldn't use a control",
+        "running": "Using a control on the computer"
+      },
       "desktop_key": {
         "done": "Pressed keys on the computer",
         "failed": "Didn't press keys",
@@ -2767,6 +2777,11 @@
         "done": "Typed on the computer",
         "failed": "Didn't type on the computer",
         "running": "Typing on the computer"
+      },
+      "desktop_window": {
+        "done": "Managed a window",
+        "failed": "Couldn't manage a window",
+        "running": "Managing a window"
       },
       "doc_edit": {
         "done": "Updated a document",

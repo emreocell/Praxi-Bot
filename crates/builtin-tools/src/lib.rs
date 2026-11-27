@@ -618,6 +618,10 @@ mod tests {
             "desktop_key",
             "desktop_scroll",
             "desktop_drag",
+            "desktop_element",
+            "desktop_window",
+            "desktop_clipboard_read",
+            "desktop_clipboard_write",
         ] {
             assert!(
                 crate::util::classify(name).is_some_and(tool_registry::ContentClass::is_declared),
@@ -631,6 +635,7 @@ mod tests {
             "desktop_set_value",
             "desktop_key",
             "desktop_drag",
+            "desktop_clipboard_write",
             "browser_tabs",
         ] {
             assert!(
@@ -641,6 +646,9 @@ mod tests {
         for name in [
             "desktop_click",
             "desktop_scroll",
+            "desktop_element",
+            "desktop_window",
+            "desktop_clipboard_read",
             "browser_scroll",
             "browser_hover",
         ] {
@@ -692,6 +700,10 @@ mod tests {
             ("desktop_focus", W, De),
             ("desktop_wait", R, De),
             ("desktop_drag", W, De),
+            ("desktop_element", W, De),
+            ("desktop_window", W, De),
+            ("desktop_clipboard_read", R, De),
+            ("desktop_clipboard_write", W, De),
             ("browser_open", W, B),
             ("browser_snapshot", R, B),
             ("browser_click", W, B),
@@ -1364,7 +1376,7 @@ mod tests {
         cfg.browser = Some(Arc::new(browser::fake::FakeBrowser::default()));
         cfg.email = Some(connector.clone());
         let added = register_builtin_tools(&reg, cfg);
-        assert_eq!(added, 48 + 8 + 2 + 2 + 1 + 1 + 1 + 1);
+        assert_eq!(added, 48 + 4 + 8 + 2 + 2 + 1 + 1 + 1 + 1);
 
         // Verification of email tools and their effects
         let send_tool = reg

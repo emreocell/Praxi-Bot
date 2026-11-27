@@ -48,11 +48,14 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // file or a selection onto an upload. Typing, keys, fill, launch, and
         // `browser_click`'s `prompt_text` can too; the gate treats a click
         // that includes `prompt_text` as egress.
+        // Accessibility actions (invoke, toggle, expand, select), window management and a
+        // clipboard read are the same: an element or window is picked on screen, nothing
+        // is typed. The clipboard text was written by whoever copied it (untrusted) and
+        // may be anything the owner copied (private).
         "browser_snapshot" | "browser_screenshot" | "browser_wait" | "desktop_get_state"
         | "desktop_list_apps" | "desktop_wait" | "desktop_focus" | "desktop_click"
-        | "desktop_scroll" | "browser_scroll" | "browser_hover" => {
-            ContentClass::untrusted_private()
-        }
+        | "desktop_scroll" | "browser_scroll" | "browser_hover" | "desktop_element"
+        | "desktop_window" | "desktop_clipboard_read" => ContentClass::untrusted_private(),
         // The user's own files and the list of their own windows: private, and not untrusted
         // by themselves (nothing in them was written by an outsider). A file that ARRIVED from
         // outside (Downloads, attachments, mail) is marked untrusted per call by the loop
@@ -95,7 +98,10 @@ pub fn classify(name: &str) -> Option<ContentClass> {
         // computer to a page, which is both a private read and a send off the machine.
         | "browser_reload"
         | "browser_forward"
-        | "browser_upload" => ContentClass::all(),
+        | "browser_upload"
+        // Putting model-chosen text on the clipboard hands it to the next paste, which may be
+        // the owner's own into a terminal or a form: a run that read untrusted content asks.
+        | "desktop_clipboard_write" => ContentClass::all(),
         // `email_wait_for` reads the bot's own inbox: untrusted (a stranger's mail) and, like
         // `email_read`, a call to a remote mailbox, so a mail- or webhook-started run keeps being
         // asked. It is not a private read: the tool refuses every mailbox but the bot's own

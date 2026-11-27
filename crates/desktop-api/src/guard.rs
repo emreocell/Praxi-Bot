@@ -449,6 +449,26 @@ pub fn judge(target: &InputTarget) -> Option<Refusal> {
     None
 }
 
+/// Why a window operation (minimise, move, close, ...) on this window is refused
+/// whatever the owner approved. A window operation sends no input, so terminals,
+/// browsers and dialogs may be managed; what stays off limits is a window the
+/// operation could not safely or lawfully touch: an elevated program (the
+/// operation could not be verified, and Windows would not deliver it anyway), a
+/// system shell or credential surface, and a password manager.
+#[must_use]
+pub fn window_op_refusal(target: &InputTarget, _op: crate::window::WindowOp) -> Option<Refusal> {
+    if !target.identity.is_complete() {
+        return Some(Refusal::NoIdentity);
+    }
+    if target.elevated != Some(false) {
+        return Some(Refusal::Elevated);
+    }
+    match program_refusal(&target.identity.image_path) {
+        r @ Some(Refusal::SystemSurface | Refusal::PasswordManager) => r,
+        _ => None,
+    }
+}
+
 /// The recheck a backend runs right before it sends input: the window that
 /// would receive it must be the granted program and must still pass [`judge`].
 ///
@@ -487,6 +507,52 @@ mod tests {
             password_focus: false,
             owned: false,
         }
+    }
+
+    #[test]
+    fn window_operations_skip_input_rules_but_keep_system_and_credential_programs_off_limits() {
+        use crate::window::WindowOp;
+        // A terminal, a browser and a dialog may be minimised, moved or closed: no input is sent.
+        for (path, class) in [
+            ("C:\\Windows\\System32\\cmd.exe", "ConsoleWindowClass"),
+            (
+                "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+                "MozillaWindowClass",
+            ),
+            ("C:\\Windows\\notepad.exe", "#32770"),
+        ] {
+            assert_eq!(
+                window_op_refusal(&target(path, class), WindowOp::Close),
+                None,
+                "{path}"
+            );
+        }
+        let mut elevated = target("C:\\Windows\\notepad.exe", "Notepad");
+        elevated.elevated = None;
+        assert_eq!(
+            window_op_refusal(&elevated, WindowOp::Minimize),
+            Some(Refusal::Elevated)
+        );
+        let mut unnamed = target("C:\\Windows\\notepad.exe", "Notepad");
+        unnamed.identity.start_time = 0;
+        assert_eq!(
+            window_op_refusal(&unnamed, WindowOp::Close),
+            Some(Refusal::NoIdentity)
+        );
+        assert_eq!(
+            window_op_refusal(
+                &target("C:\\Program Files\\KeePass\\KeePass.exe", "WindowsForms10"),
+                WindowOp::Move { x: 0, y: 0 }
+            ),
+            Some(Refusal::PasswordManager)
+        );
+        assert_eq!(
+            window_op_refusal(
+                &target("C:\\Windows\\SystemApps\\SearchHost.exe", "Class"),
+                WindowOp::Close
+            ),
+            Some(Refusal::SystemSurface)
+        );
     }
 
     #[test]

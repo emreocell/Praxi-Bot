@@ -5,7 +5,7 @@ use std::sync::{Arc, mpsc};
 use async_trait::async_trait;
 use desktop_api::{
     ActGuard, Action, ActionResult, Capabilities, CursorSurface, DesktopBackend, DesktopError,
-    Image, InputTarget, LiveViewOptions, Quality, Refusal, Region, Snapshot, WindowInfo,
+    Image, InputTarget, LiveViewOptions, Quality, Refusal, Region, Snapshot, WindowInfo, WindowOp,
     live_view::DesktopViewTarget,
     snapshot::{AppSpec, Pid},
 };
@@ -13,7 +13,8 @@ use futures::channel::oneshot;
 use parking_lot::Mutex as SyncMutex;
 
 use crate::{
-    capture, identity, live_view_win::open_windows_live_view_target, uia::Worker, winlist,
+    capture, clipboard, identity, live_view_win::open_windows_live_view_target, uia::Worker,
+    winlist,
 };
 
 type Job = Box<dyn FnOnce(&mut Worker) + Send>;
@@ -181,6 +182,39 @@ impl DesktopBackend for WindowsBackend {
             .await;
         self.notify_live_view();
         res
+    }
+
+    async fn window_op(
+        &self,
+        window_id: u64,
+        op: WindowOp,
+        guard: Option<ActGuard>,
+    ) -> Result<(), DesktopError> {
+        let res = self
+            .run(move |_| {
+                let hwnd = winlist::hwnd_from_id(window_id);
+                if let Some(guard) = guard
+                    && !identity::top_level_facts(hwnd)
+                        .is_some_and(|target| guard.expect.same_program(&target.identity))
+                {
+                    return Err(DesktopError::GuardRefused(
+                        Refusal::ForegroundChanged.why().into(),
+                    ));
+                }
+                winlist::window_op(hwnd, op)
+            })
+            .await;
+        self.notify_live_view();
+        res
+    }
+
+    async fn clipboard_text(&self) -> Result<Option<String>, DesktopError> {
+        self.run(|_| clipboard::get_text()).await
+    }
+
+    async fn set_clipboard_text(&self, text: &str) -> Result<(), DesktopError> {
+        let text = text.to_owned();
+        self.run(move |_| clipboard::set_text(&text)).await
     }
 
     async fn launch(&self, app: AppSpec) -> Result<Pid, DesktopError> {

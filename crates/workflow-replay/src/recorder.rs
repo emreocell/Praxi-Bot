@@ -908,6 +908,22 @@ fn convert(name: &str, input: &Value, cx: &mut Cx) -> Conv {
                 args,
             }))
         }
+        // The recorder keeps one chord per key step and one typed text per type step; a
+        // sequence, a repeat, or a clear / submit would replay as something else.
+        "desktop_key" if input.get("sequence").is_some() || input.get("repeat").is_some() => {
+            Conv::Dropped("a key sequence or repeat is not supported in workflows yet".into())
+        }
+        "desktop_type"
+            if input.get("clear").and_then(Value::as_bool) == Some(true)
+                || input.get("submit").and_then(Value::as_bool) == Some(true) =>
+        {
+            Conv::Dropped("typing with clear or submit is not supported in workflows yet".into())
+        }
+        // An element action is addressed by an index of one observation: it has no
+        // locator a replay could find again.
+        "desktop_element" => {
+            Conv::Dropped("element actions are not supported in workflows yet".into())
+        }
         "desktop_click" | "desktop_type" | "desktop_set_value" | "desktop_key" => {
             let target = match input.get("index") {
                 Some(i) => Some(tryc!(desktop_index(i).and_then(|i| cx.desktop_locator(i)))),

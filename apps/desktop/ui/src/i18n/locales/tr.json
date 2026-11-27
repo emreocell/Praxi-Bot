@@ -2738,6 +2738,16 @@
         "failed": "Hesaplanamadı",
         "running": "Hesaplanıyor"
       },
+      "desktop_clipboard": {
+        "done": "Pano kullanıldı",
+        "failed": "Pano kullanılamadı",
+        "running": "Pano kullanılıyor"
+      },
+      "desktop_element": {
+        "done": "Bilgisayarda bir denetim kullanıldı",
+        "failed": "Denetim kullanılamadı",
+        "running": "Bilgisayarda bir denetim kullanılıyor"
+      },
       "desktop_key": {
         "done": "Bilgisayarda tuşa basıldı",
         "failed": "Bilgisayarda tuşa basılmadı",
@@ -2767,6 +2777,11 @@
         "done": "Bilgisayarda yazıldı",
         "failed": "Bilgisayarda yazılmadı",
         "running": "Bilgisayarda yazılıyor"
+      },
+      "desktop_window": {
+        "done": "Pencere yönetildi",
+        "failed": "Pencere yönetilemedi",
+        "running": "Pencere yönetiliyor"
       },
       "doc_edit": {
         "done": "Belge güncellendi",

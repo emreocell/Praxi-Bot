@@ -210,6 +210,38 @@ pub fn preferred_action_index(actions: &[String]) -> Option<i32> {
     Some(0)
 }
 
+/// The 0-based AT-SPI action that expands (`want_expanded`) or collapses an
+/// element. Toolkits differ: some name two actions, GTK trees expose one that
+/// flips (`expand or contract`). The caller has already checked the live state,
+/// so a flipping action is only run when a flip is what is needed.
+#[must_use]
+pub fn expand_action_index(actions: &[String], want_expanded: bool) -> Option<i32> {
+    let wanted: &[&str] = if want_expanded {
+        &["expand", "open"]
+    } else {
+        &["collapse", "contract", "close"]
+    };
+    let flipping = ["expand or contract", "toggle expand", "toggle"];
+    let find = |names: &[&str]| {
+        actions.iter().position(|a| {
+            let a = a.trim();
+            names.iter().any(|n| a.eq_ignore_ascii_case(n))
+        })
+    };
+    find(wanted)
+        .or_else(|| find(&flipping))
+        .and_then(|i| i32::try_from(i).ok())
+}
+
+/// The 0-based AT-SPI action that selects an element, if it names one.
+#[must_use]
+pub fn select_action_index(actions: &[String]) -> Option<i32> {
+    actions
+        .iter()
+        .position(|a| a.trim().eq_ignore_ascii_case("select"))
+        .and_then(|i| i32::try_from(i).ok())
+}
+
 /// One element as read from AT-SPI, before filtering.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
@@ -834,6 +866,30 @@ pub fn plan_text_actions(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn expand_and_collapse_pick_the_named_action_or_a_flipping_one() {
+        use super::{expand_action_index, select_action_index};
+        let v = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(expand_action_index(&v(&["click", "expand"]), true), Some(1));
+        assert_eq!(
+            expand_action_index(&v(&["click", "collapse"]), false),
+            Some(1)
+        );
+        assert_eq!(
+            expand_action_index(&v(&["Expand or contract"]), true),
+            Some(0)
+        );
+        assert_eq!(
+            expand_action_index(&v(&["Expand or contract"]), false),
+            Some(0)
+        );
+        // A named expand never collapses: no action for the other direction.
+        assert_eq!(expand_action_index(&v(&["expand"]), false), None);
+        assert_eq!(expand_action_index(&v(&["click"]), true), None);
+        assert_eq!(select_action_index(&v(&["click", "Select"])), Some(1));
+        assert_eq!(select_action_index(&v(&["click"])), None);
+    }
+
     use super::*;
 
     fn raw(role: &'static str, name: &str) -> RawNode {

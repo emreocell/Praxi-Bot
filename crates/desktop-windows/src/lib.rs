@@ -13,6 +13,8 @@ mod backend;
 #[cfg(windows)]
 mod capture;
 #[cfg(windows)]
+mod clipboard;
+#[cfg(windows)]
 mod cursor_win;
 #[cfg(any(windows, test))]
 mod guard_glue;

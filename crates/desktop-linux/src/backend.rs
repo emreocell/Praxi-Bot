@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use desktop_api::{
-    Action, ActionResult, Capabilities, CursorSurface, DesktopBackend, DesktopError, Image,
-    LiveViewOptions, Quality, Region, Snapshot, WindowInfo,
+    ActGuard, Action, ActionResult, Capabilities, CursorSurface, DesktopBackend, DesktopError,
+    Image, LiveViewOptions, Quality, Region, Snapshot, WindowInfo, WindowOp,
     live_view::DesktopViewTarget,
     snapshot::{AppSpec, Pid},
 };
@@ -159,6 +159,44 @@ impl DesktopBackend for LinuxBackend {
             match tokio::task::spawn_blocking(x11::list_windows).await {
                 Ok(result) => result,
                 Err(e) => Err(DesktopError::Internal(format!("windows task: {e}"))),
+            }
+        })
+        .await
+    }
+
+    async fn window_op(
+        &self,
+        window_id: u64,
+        op: WindowOp,
+        _guard: Option<ActGuard>,
+    ) -> Result<(), DesktopError> {
+        bounded("window operation", X11_LIMIT, async move {
+            match tokio::task::spawn_blocking(move || x11::window_op(window_id, op)).await {
+                Ok(result) => result,
+                Err(e) => Err(DesktopError::Internal(format!("window task: {e}"))),
+            }
+        })
+        .await?;
+        self.notify_live_view();
+        Ok(())
+    }
+
+    async fn clipboard_text(&self) -> Result<Option<String>, DesktopError> {
+        bounded("clipboard read", X11_LIMIT, async {
+            match tokio::task::spawn_blocking(x11::clipboard_text).await {
+                Ok(result) => result,
+                Err(e) => Err(DesktopError::Internal(format!("clipboard task: {e}"))),
+            }
+        })
+        .await
+    }
+
+    async fn set_clipboard_text(&self, text: &str) -> Result<(), DesktopError> {
+        let text = text.to_owned();
+        bounded("clipboard write", X11_LIMIT, async move {
+            match tokio::task::spawn_blocking(move || x11::set_clipboard_text(&text)).await {
+                Ok(result) => result,
+                Err(e) => Err(DesktopError::Internal(format!("clipboard task: {e}"))),
             }
         })
         .await

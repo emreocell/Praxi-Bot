@@ -3,21 +3,22 @@
 use std::collections::HashSet;
 
 use atspi::{
-    AccessibilityConnection, CoordType, Interface, InterfaceSet, ObjectRefOwned, Role, State,
-    StateSet,
+    AccessibilityConnection, CoordType, Interface, InterfaceSet, ObjectRefOwned, Role, ScrollType,
+    State, StateSet,
     connection::set_session_accessibility,
     proxy::{
         accessible::{AccessibleProxy, ObjectRefExt as _},
         action::ActionProxy,
         component::ComponentProxy,
         editable_text::EditableTextProxy,
+        selection::SelectionProxy,
         text::TextProxy,
         value::ValueProxy,
     },
     zbus::{self, proxy::CacheProperties},
 };
 use desktop_api::{
-    DesktopError,
+    DesktopError, ElementOp,
     action::{Action, ActionResult, ClickMethod, CoordinateSpace, Target},
     snapshot::{Fingerprint, Rect, Snapshot, TreeQuality, WindowInfo},
 };
@@ -284,9 +285,14 @@ impl AtspiWorker {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // One dispatch over every action kind.
     pub async fn act(&mut self, action: &Action) -> Res<ActionResult> {
         x11::ensure_x11_session()?;
-        self.focus_snapshot_window()?;
+        // An accessibility action is delivered over D-Bus, not to the keyboard focus: it
+        // works on a window that is behind others, so the window is not raised for it.
+        if !matches!(action, Action::Element { .. }) {
+            self.focus_snapshot_window()?;
+        }
 
         match action {
             Action::TypeText { text } => {
@@ -367,6 +373,22 @@ impl AtspiWorker {
                 let b = self.resolve_point(conn, to).await?;
                 x11::drag(a, b)?;
             }
+            Action::Element { target, op } => match target {
+                Target::ByIndex { index, generation } => {
+                    let r = self.resolve_verified(conn, *index, *generation).await?;
+                    let verified = element_action(conn, &r, *op).await?;
+                    return Ok(ActionResult {
+                        dispatched: true,
+                        verified,
+                        new_snapshot: None,
+                    });
+                }
+                Target::ByCoordinate { .. } => {
+                    return Err(DesktopError::Unsupported(
+                        "accessibility actions need an element index".into(),
+                    ));
+                }
+            },
             Action::TypeText { .. } | Action::KeyPress { .. } => unreachable!(),
         }
 
@@ -411,6 +433,199 @@ async fn try_atspi_click(conn: &zbus::Connection, r: &Retained) -> Res<bool> {
         }
     }
     Ok(false)
+}
+
+/// A proxy to one of the element's interfaces.
+macro_rules! proxy_for {
+    ($proxy:ty, $conn:expr, $r:expr) => {{
+        let bus = $r
+            .object_ref
+            .name()
+            .ok_or_else(|| DesktopError::Accessibility("the element has no bus name".into()))?;
+        <$proxy>::builder($conn)
+            .destination(bus.clone())
+            .and_then(|b| b.path($r.object_ref.path().clone()))
+            .map(|b| b.cache_properties(CacheProperties::No))
+            .map_err(a11y_err(stringify!($proxy)))?
+            .build()
+            .await
+            .map_err(a11y_err(stringify!($proxy)))?
+    }};
+}
+
+async fn live_states(conn: &zbus::Connection, r: &Retained) -> Res<StateSet> {
+    let ap = r
+        .object_ref
+        .as_accessible_proxy(conn)
+        .await
+        .map_err(a11y_err("as_accessible_proxy"))?;
+    ap.get_state().await.map_err(a11y_err("get_state"))
+}
+
+async fn action_names(conn: &zbus::Connection, r: &Retained) -> Vec<String> {
+    if !r.actions.is_empty() {
+        return r.actions.clone();
+    }
+    if !r.interfaces.contains(Interface::Action) {
+        return Vec::new();
+    }
+    let Ok(bus) = r.object_ref.name().ok_or(()) else {
+        return Vec::new();
+    };
+    let Ok(builder) = ActionProxy::builder(conn)
+        .destination(bus.clone())
+        .and_then(|b| b.path(r.object_ref.path().clone()))
+    else {
+        return Vec::new();
+    };
+    let Ok(proxy) = builder.cache_properties(CacheProperties::No).build().await else {
+        return Vec::new();
+    };
+    proxy
+        .get_actions()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|a| a.name)
+        .collect()
+}
+
+async fn do_action(conn: &zbus::Connection, r: &Retained, index: i32) -> Res<bool> {
+    let proxy = proxy_for!(ActionProxy, conn, r);
+    proxy.do_action(index).await.map_err(a11y_err("do_action"))
+}
+
+/// Give the toolkit a moment to apply a state change before it is read back.
+async fn settle_state() {
+    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+}
+
+/// One accessibility action on an element through its AT-SPI interfaces
+/// (`Action`, the state set, `Selection`, `Component`). Never a click at a point.
+#[allow(clippy::too_many_lines)] // One flat match over the element operations.
+async fn element_action(conn: &zbus::Connection, r: &Retained, op: ElementOp) -> Res<Option<bool>> {
+    let no = |what: &str| {
+        DesktopError::Unsupported(format!(
+            "this element does not expose {what}; try desktop_click on it"
+        ))
+    };
+    match op {
+        ElementOp::Invoke => {
+            if try_atspi_click(conn, r).await? {
+                Ok(None)
+            } else {
+                Err(no("an action"))
+            }
+        }
+        ElementOp::Toggle { state } => {
+            let before = live_states(conn, r).await?;
+            // GTK 3 check buttons report no `Checkable` state, so the role counts too.
+            let role = r
+                .object_ref
+                .as_accessible_proxy(conn)
+                .await
+                .map_err(a11y_err("as_accessible_proxy"))?
+                .get_role()
+                .await
+                .unwrap_or(Role::Unknown);
+            let toggle_role = matches!(
+                role,
+                Role::CheckBox
+                    | Role::ToggleButton
+                    | Role::CheckMenuItem
+                    | Role::RadioButton
+                    | Role::RadioMenuItem
+            );
+            if !(toggle_role
+                || before.contains(State::Checkable)
+                || before.contains(State::Checked)
+                || before.contains(State::Indeterminate))
+            {
+                return Err(no("a checked state (it is not a check box or toggle)"));
+            }
+            let on = before.contains(State::Checked);
+            if state == Some(on) {
+                return Ok(Some(true));
+            }
+            if !try_atspi_click(conn, r).await? {
+                return Err(no("an action"));
+            }
+            settle_state().await;
+            let now = live_states(conn, r).await?.contains(State::Checked);
+            Ok(Some(now == state.unwrap_or(!on)))
+        }
+        ElementOp::Expand | ElementOp::Collapse => {
+            let want = op == ElementOp::Expand;
+            let before = live_states(conn, r).await?;
+            if !(before.contains(State::Expandable)
+                || before.contains(State::Expanded)
+                || before.contains(State::Collapsed))
+            {
+                return Err(no("an expanded state (it cannot be expanded)"));
+            }
+            if before.contains(State::Expanded) == want {
+                return Ok(Some(true));
+            }
+            let actions = action_names(conn, r).await;
+            let index =
+                pure::expand_action_index(&actions, want).ok_or_else(|| no("an expand action"))?;
+            do_action(conn, r, index).await?;
+            settle_state().await;
+            Ok(Some(
+                live_states(conn, r).await?.contains(State::Expanded) == want,
+            ))
+        }
+        ElementOp::Select => {
+            if live_states(conn, r).await?.contains(State::Selected) {
+                return Ok(Some(true));
+            }
+            let actions = action_names(conn, r).await;
+            if let Some(i) = pure::select_action_index(&actions) {
+                do_action(conn, r, i).await?;
+            } else {
+                // The parent's Selection interface selects its child by position.
+                let ap = r
+                    .object_ref
+                    .as_accessible_proxy(conn)
+                    .await
+                    .map_err(a11y_err("as_accessible_proxy"))?;
+                let child = ap
+                    .get_index_in_parent()
+                    .await
+                    .map_err(a11y_err("index in parent"))?;
+                let parent_ref = ap.parent().await.map_err(a11y_err("parent"))?;
+                let parent = Retained {
+                    object_ref: parent_ref,
+                    ..r.clone()
+                };
+                let sel = proxy_for!(SelectionProxy, conn, parent);
+                if !sel
+                    .select_child(child)
+                    .await
+                    .map_err(a11y_err("select_child"))?
+                {
+                    return Err(no("selection"));
+                }
+            }
+            settle_state().await;
+            Ok(Some(live_states(conn, r).await?.contains(State::Selected)))
+        }
+        ElementOp::ScrollIntoView => {
+            if !r.interfaces.contains(Interface::Component) {
+                return Err(no("a position"));
+            }
+            let comp = proxy_for!(ComponentProxy, conn, r);
+            if comp
+                .scroll_to(ScrollType::Anywhere)
+                .await
+                .map_err(a11y_err("scroll_to"))?
+            {
+                Ok(None)
+            } else {
+                Err(no("scrolling"))
+            }
+        }
+    }
 }
 
 async fn set_element_value(

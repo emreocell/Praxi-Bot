@@ -47,6 +47,44 @@ pub enum Target {
     },
 }
 
+/// An element-level accessibility action that is not a click: a UIA control
+/// pattern on Windows, an AT-SPI action or state on Linux. None of these move
+/// the pointer or type, so they work on a window that is covered or behind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum ElementOp {
+    /// Run the element's default action (press a button, follow a link).
+    Invoke,
+    /// Flip a check box or toggle, or set it: `state: Some(on)` does nothing
+    /// when the element already is in that state.
+    Toggle { state: Option<bool> },
+    /// Expand a tree item, combo box or menu.
+    Expand,
+    /// Collapse a tree item, combo box or menu.
+    Collapse,
+    /// Select a list, tab, tree or radio item.
+    Select,
+    /// Bring an element that is scrolled out of view into view.
+    ScrollIntoView,
+}
+
+impl ElementOp {
+    /// A short name for cards, logs and results.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Invoke => "invoke",
+            Self::Toggle { state: None } => "toggle",
+            Self::Toggle { state: Some(true) } => "switch on",
+            Self::Toggle { state: Some(false) } => "switch off",
+            Self::Expand => "expand",
+            Self::Collapse => "collapse",
+            Self::Select => "select",
+            Self::ScrollIntoView => "scroll into view",
+        }
+    }
+}
+
 /// A single desktop automation action.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -71,6 +109,8 @@ pub enum Action {
         to: Target,
         method: ClickMethod,
     },
+    /// An accessibility action on one element (never a coordinate).
+    Element { target: Target, op: ElementOp },
 }
 
 /// The result of dispatching a [`Action`].

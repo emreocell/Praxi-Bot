@@ -7,6 +7,7 @@ use crate::{
     error::DesktopError,
     guard::{ActGuard, InputTarget, Refusal},
     snapshot::{AppSpec, Image, Pid, Quality, Region, Snapshot, WindowInfo},
+    window::WindowOp,
 };
 
 /// What the backend supports.
@@ -56,6 +57,49 @@ pub trait DesktopBackend: Send + Sync {
     async fn focus(&self, _window_id: u64, _guard: Option<ActGuard>) -> Result<(), DesktopError> {
         Err(DesktopError::Unsupported(
             "window focus is unavailable".into(),
+        ))
+    }
+
+    /// Minimise, maximise, restore, move, resize or close one top-level
+    /// window. `guard` binds the call to the program an approval was shown
+    /// for (the same identity [`Self::focus_target`] reports); a backend that
+    /// receives one must refuse when the window now belongs to another program.
+    ///
+    /// # Errors
+    /// [`DesktopError::Unsupported`] by default; the window is gone, the OS
+    /// refused, or the guard did not match.
+    async fn window_op(
+        &self,
+        _window_id: u64,
+        _op: WindowOp,
+        _guard: Option<ActGuard>,
+    ) -> Result<(), DesktopError> {
+        Err(DesktopError::Unsupported(
+            "window management is unavailable on this computer".into(),
+        ))
+    }
+
+    /// The text on the clipboard. `Ok(None)` when it holds no text (empty, an
+    /// image, files) or the program that put it there asked for it to be kept
+    /// out of clipboard tools (a password manager).
+    ///
+    /// # Errors
+    /// [`DesktopError::Unsupported`] by default, or the clipboard could not
+    /// be opened.
+    async fn clipboard_text(&self) -> Result<Option<String>, DesktopError> {
+        Err(DesktopError::Unsupported(
+            "the clipboard is unavailable on this computer".into(),
+        ))
+    }
+
+    /// Replace the clipboard content with `text`.
+    ///
+    /// # Errors
+    /// [`DesktopError::Unsupported`] by default, or the clipboard could not
+    /// be opened.
+    async fn set_clipboard_text(&self, _text: &str) -> Result<(), DesktopError> {
+        Err(DesktopError::Unsupported(
+            "the clipboard is unavailable on this computer".into(),
         ))
     }
 

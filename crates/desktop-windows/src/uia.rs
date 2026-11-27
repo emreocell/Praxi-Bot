@@ -3,7 +3,7 @@
 #![allow(unsafe_code)]
 
 use desktop_api::{
-    ActGuard, DesktopError, InputTarget, Refusal,
+    ActGuard, DesktopError, ElementOp, InputTarget, Refusal,
     action::{Action, ActionResult, ClickMethod, CoordinateSpace, Target},
     guarded,
     snapshot::{Fingerprint, Rect, Snapshot, TreeQuality, UiNode},
@@ -18,7 +18,7 @@ use windows::{
         UI::Accessibility::{
             CUIAutomation, ExpandCollapseState_Collapsed, IUIAutomation, IUIAutomation2,
             IUIAutomationCacheRequest, IUIAutomationElement, IUIAutomationExpandCollapsePattern,
-            IUIAutomationInvokePattern, IUIAutomationScrollPattern,
+            IUIAutomationInvokePattern, IUIAutomationScrollItemPattern, IUIAutomationScrollPattern,
             IUIAutomationSelectionItemPattern, IUIAutomationTextPattern,
             IUIAutomationTogglePattern, IUIAutomationValuePattern, IUIAutomationWindowPattern,
             ScrollAmount_NoAmount, ScrollAmount_SmallDecrement, ScrollAmount_SmallIncrement,
@@ -27,9 +27,10 @@ use windows::{
             UIA_ExpandCollapseExpandCollapseStatePropertyId, UIA_ExpandCollapsePatternId,
             UIA_HasKeyboardFocusPropertyId, UIA_InvokePatternId, UIA_IsEnabledPropertyId,
             UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId, UIA_NamePropertyId,
-            UIA_ScrollPatternId, UIA_SelectionItemIsSelectedPropertyId, UIA_SelectionItemPatternId,
-            UIA_TextPatternId, UIA_TogglePatternId, UIA_ToggleToggleStatePropertyId,
-            UIA_ValuePatternId, UIA_ValueValuePropertyId, UIA_WindowPatternId,
+            UIA_ScrollItemPatternId, UIA_ScrollPatternId, UIA_SelectionItemIsSelectedPropertyId,
+            UIA_SelectionItemPatternId, UIA_TextPatternId, UIA_TogglePatternId,
+            UIA_ToggleToggleStatePropertyId, UIA_ValuePatternId, UIA_ValueValuePropertyId,
+            UIA_WindowPatternId,
         },
         UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE},
     },
@@ -316,6 +317,84 @@ impl Worker {
             }
         }
         Ok((false, None))
+    }
+
+    /// One accessibility action on an element through its UIA control pattern.
+    /// `Ok(verified)`: `Some(true)` when the state was read back as wanted.
+    fn element_action(el: &IUIAutomationElement, op: ElementOp) -> Res<Option<bool>> {
+        let no_pattern = |what: &str| {
+            DesktopError::Unsupported(format!(
+                "this element has no {what} pattern; try desktop_click on it"
+            ))
+        };
+        // SAFETY: pattern queries and calls on a live element owned by this STA thread.
+        unsafe {
+            match op {
+                ElementOp::Invoke => {
+                    let p = el
+                        .GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
+                        .map_err(|_| no_pattern("invoke"))?;
+                    p.Invoke().map_err(acc("Invoke"))?;
+                    Ok(None)
+                }
+                ElementOp::Toggle { state } => {
+                    let p = el
+                        .GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
+                        .map_err(|_| no_pattern("toggle"))?;
+                    let read = || {
+                        p.CurrentToggleState()
+                            .map(|s| s.0)
+                            .map_err(acc("ToggleState"))
+                    };
+                    let Some(want_on) = state else {
+                        let before = read().ok();
+                        p.Toggle().map_err(acc("Toggle"))?;
+                        return Ok(Some(verify_toggle(before, read().ok())));
+                    };
+                    // A tri-state box cycles off, on, indeterminate: at most three flips.
+                    for _ in 0..3 {
+                        if pure::toggle_reached(read()?, want_on) {
+                            return Ok(Some(true));
+                        }
+                        p.Toggle().map_err(acc("Toggle"))?;
+                    }
+                    Ok(Some(pure::toggle_reached(read()?, want_on)))
+                }
+                ElementOp::Expand | ElementOp::Collapse => {
+                    let want = op == ElementOp::Expand;
+                    let p = el
+                        .GetCurrentPatternAs::<IUIAutomationExpandCollapsePattern>(
+                            UIA_ExpandCollapsePatternId,
+                        )
+                        .map_err(|_| no_pattern("expand/collapse"))?;
+                    if want {
+                        p.Expand().map_err(acc("Expand"))?;
+                    } else {
+                        p.Collapse().map_err(acc("Collapse"))?;
+                    }
+                    let now = p.CurrentExpandCollapseState().map(|s| s.0).ok();
+                    Ok(Some(now.is_some_and(|s| pure::expand_reached(s, want))))
+                }
+                ElementOp::Select => {
+                    let p = el
+                        .GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(
+                            UIA_SelectionItemPatternId,
+                        )
+                        .map_err(|_| no_pattern("selection item"))?;
+                    p.Select().map_err(acc("Select"))?;
+                    Ok(Some(p.CurrentIsSelected().is_ok_and(BOOL::as_bool)))
+                }
+                ElementOp::ScrollIntoView => {
+                    let p = el
+                        .GetCurrentPatternAs::<IUIAutomationScrollItemPattern>(
+                            UIA_ScrollItemPatternId,
+                        )
+                        .map_err(|_| no_pattern("scroll item"))?;
+                    p.ScrollIntoView().map_err(acc("ScrollIntoView"))?;
+                    Ok(None)
+                }
+            }
+        }
     }
 
     fn set_value(el: &IUIAutomationElement, value: &str) -> Res<Option<bool>> {
@@ -693,6 +772,18 @@ impl Worker {
                 let b = self.point(to)?;
                 input::drag(a, b)?;
             }
+            Action::Element { target, op } => match target {
+                Target::ByIndex { index, generation } => {
+                    let el = self.resolve(*index, *generation)?.element.clone();
+                    verified = Self::element_action(&el, *op)?;
+                    self.last_focused = Some(el);
+                }
+                Target::ByCoordinate { .. } => {
+                    return Err(DesktopError::Unsupported(
+                        "accessibility actions need an element index".into(),
+                    ));
+                }
+            },
         }
         Ok(ActionResult {
             dispatched: true,

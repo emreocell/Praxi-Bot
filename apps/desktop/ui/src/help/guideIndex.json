@@ -247,6 +247,12 @@
     "title": "Computer use on your own PC",
     "headings": [
       "What a bot can do",
+      "Window management",
+      "Accessibility actions",
+      "Keyboard",
+      "Clipboard",
+      "Waiting instead of sleeping",
+      "Results that need fewer screenshots",
       "Safety",
       "Not verified"
     ],
