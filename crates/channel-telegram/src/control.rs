@@ -5,14 +5,16 @@
 //! The bridge decides *whether* a message may run a command (the paired owner, in a private chat,
 //! typed by them and not forwarded) and calls [`ControlHub`] only then. The hub never decides who
 //! the owner is; it keeps what must be shared by every command: the rate limit, and the stops the
-//! owner was asked to confirm.
+//! owner was asked to confirm. Both are kept per [`OwnerId`], the account the service
+//! authenticated, so one account can never use up another's window or answer another's question.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use channel_api::control::{
-    Action, ConfirmBook, Control, Fleet, MAX_GOAL_CHARS, MissionBrief, MissionTally, Pick, Rate,
-    RateLimit, Say, pick_mission, say, status_extra,
+    Action, ConfirmBook, Control, Fleet, MAX_GOAL_CHARS, MissionBrief, MissionTally, OwnerId, Pick,
+    Rate, RateLimit, Say, pick_mission, say, status_extra,
 };
 use channel_api::notice::{Flavor, NoticeLang};
 use parking_lot::Mutex;
@@ -45,8 +47,22 @@ impl Answer {
 }
 
 struct State {
-    limit: RateLimit,
+    /// A rate window for each owner (the bridge only calls the hub for the paired owner, so this
+    /// holds one entry, or two after a re-pairing).
+    limits: HashMap<OwnerId, RateLimit>,
     confirm: ConfirmBook,
+}
+
+impl State {
+    /// Count a command of `owner`, or say it is too fast.
+    fn check(&mut self, owner: OwnerId, ctl: &Control, now: Instant) -> Rate {
+        self.limits.entry(owner).or_default().check(ctl, now)
+    }
+
+    /// Count a button press of `owner`.
+    fn check_press(&mut self, owner: OwnerId, now: Instant) -> Rate {
+        self.limits.entry(owner).or_default().check_press(now)
+    }
 }
 
 /// Runs control commands for one bridge.
@@ -78,23 +94,23 @@ impl ControlHub {
         Self {
             client,
             state: Mutex::new(State {
-                limit: RateLimit::default(),
+                limits: HashMap::new(),
                 confirm: ConfirmBook::new(CONFIRM_TTL),
             }),
         }
     }
 
-    /// Run `ctl` for `owner` (the id the service authenticated). `bot` is the bot a new mission
-    /// goes to: the chat's own, else the default; only read for `/mission new`.
+    /// Run `ctl` for `owner` (the account the service authenticated). `bot` is the bot a new
+    /// mission goes to: the chat's own, else the default; only read for `/mission new`.
     pub async fn handle(
         &self,
-        owner: &str,
+        owner: OwnerId,
         ctl: &Control,
         lang: NoticeLang,
         flavor: Flavor,
         bot: Option<BotId>,
     ) -> Answer {
-        match self.state.lock().limit.check(ctl, Instant::now()) {
+        match self.state.lock().check(owner, ctl, Instant::now()) {
             Rate::Allowed => {}
             Rate::Refused => return Answer::text(say(lang, flavor, &Say::TooFast)),
             Rate::Silent => return Answer::text(String::new()),
@@ -144,7 +160,7 @@ impl ControlHub {
 
     async fn change(
         &self,
-        owner: &str,
+        owner: OwnerId,
         action: Action,
         arg: &str,
         lang: NoticeLang,
@@ -224,16 +240,24 @@ impl ControlHub {
     }
 
     /// The owner pressed "Stop it" for mission `id`. Only a question this hub asked this owner,
-    /// a moment ago, and only once.
+    /// a moment ago, and only once. A press counts against the owner's rate window like a
+    /// command; one that is too fast is ignored (empty answer).
     pub async fn confirm_stop(
         &self,
-        owner: &str,
+        owner: OwnerId,
         id: &str,
         lang: NoticeLang,
         flavor: Flavor,
     ) -> Answer {
-        if !self.state.lock().confirm.take(id, owner, Instant::now()) {
-            return Answer::text(say(lang, flavor, &Say::StopExpired));
+        {
+            let mut state = self.state.lock();
+            let now = Instant::now();
+            if state.check_press(owner, now) != Rate::Allowed {
+                return Answer::text(String::new());
+            }
+            if !state.confirm.take(id, owner, now) {
+                return Answer::text(say(lang, flavor, &Say::StopExpired));
+            }
         }
         let brief = match self.client.mission(id).await {
             Ok(v) => v.mission,
@@ -245,9 +269,21 @@ impl ControlHub {
         self.apply(Action::Stop, &brief, lang, flavor).await
     }
 
-    /// The owner pressed "Keep going": the question is closed and nothing changes.
-    pub fn cancel_stop(&self, owner: &str, id: &str, lang: NoticeLang, flavor: Flavor) -> Answer {
-        self.state.lock().confirm.take(id, owner, Instant::now());
+    /// The owner pressed "Keep going": the question is closed and nothing changes. Rate limited
+    /// like [`Self::confirm_stop`].
+    pub fn cancel_stop(
+        &self,
+        owner: OwnerId,
+        id: &str,
+        lang: NoticeLang,
+        flavor: Flavor,
+    ) -> Answer {
+        let mut state = self.state.lock();
+        let now = Instant::now();
+        if state.check_press(owner, now) != Rate::Allowed {
+            return Answer::text(String::new());
+        }
+        state.confirm.take(id, owner, now);
         Answer::text(say(lang, flavor, &Say::StopCancelled))
     }
 

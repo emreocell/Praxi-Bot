@@ -1731,22 +1731,26 @@ fn every_waived_tool_name_is_a_registered_tool() {
 }
 
 #[tokio::test]
-async fn the_owners_paired_telegram_chat_is_the_owner_in_full_but_a_keyless_one_is_not() {
+async fn the_owners_paired_telegram_or_discord_chat_is_the_owner_in_full_but_a_keyless_one_is_not()
+{
     let deep = [(
         "browser_open",
         json!({"url": "https://directory.example/signup"}),
     )];
-    let mut owner = Case::full();
-    owner.source = "telegram_owner";
-    assert_eq!(card(owner, &deep).await, None);
-    let mut shell = Case::full_on_host();
-    shell.source = "telegram_owner";
-    assert_eq!(
-        card(shell, &[("shell_run", json!({"command": "ls -la"}))]).await,
-        None
-    );
+    for source in ["telegram_owner", "discord_owner"] {
+        let mut owner = Case::full();
+        owner.source = source;
+        assert_eq!(card(owner, &deep).await, None, "{source}");
+        let mut shell = Case::full_on_host();
+        shell.source = source;
+        assert_eq!(
+            card(shell, &[("shell_run", json!({"command": "ls -la"}))]).await,
+            None,
+            "{source}"
+        );
+    }
     // the same message without the owner key (or from another channel) asks
-    for source in ["telegram", "api"] {
+    for source in ["telegram", "discord", "api"] {
         let mut other = Case::full();
         other.source = source;
         assert!(card(other, &deep).await.is_some(), "{source}");

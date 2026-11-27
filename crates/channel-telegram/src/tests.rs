@@ -1277,6 +1277,8 @@ async fn start_polls_get_updates_and_channel_trait_works() {
             display_name: Some("tester".into()),
         },
         message_id: Some("100".into()),
+        forwarded: false,
+        edited: false,
         kind: channel_api::IncomingKind::Text("/status".into()),
     };
     channel_api::conformance::assert_transport(
@@ -5680,6 +5682,7 @@ mod owner_notices {
 
 mod mission_control {
     use super::*;
+    use crate::ControlHub;
     use channel_api::control::{Action, MissionBrief, MissionCounts};
 
     const OTHER_CHAT: i64 = -100_200;
@@ -5993,6 +5996,105 @@ mod mission_control {
         v["message"]["forward_date"] = json!(1);
         channel.handle_update(update(v)).await.unwrap();
         assert!(daemon.mission_calls.lock().is_empty());
+    }
+
+    /// How many of the paired user's replies say the stop question had lapsed.
+    async fn expired_replies(server: &MockServer) -> usize {
+        replies_to(server, PAIRED_USER_ID)
+            .await
+            .iter()
+            .filter(|r| r.contains("expired"))
+            .count()
+    }
+
+    #[tokio::test]
+    async fn pressing_the_stop_buttons_over_and_over_is_rate_limited_and_then_silent() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        say(&channel, 1, "/stop aaaa1234").await;
+        let (yes, no) = stop_buttons(&server).await;
+        // The command used one of the 20 a minute; the buttons share the same window.
+        for n in 0..40 {
+            let data = if n % 2 == 0 { &yes } else { &no };
+            press(&channel, 100 + n, &format!("q{n}"), data).await;
+        }
+        let replies = replies_to(&server, PAIRED_USER_ID).await;
+        // 1 question + 19 answered presses; the other 21 said nothing at all.
+        assert_eq!(replies.len(), 20, "{replies:?}");
+        assert!(
+            !replies.iter().any(|r| r.contains("Too many")),
+            "{replies:?}"
+        );
+        // The pressed-too-fast buttons were acknowledged (no spinner) but did nothing more.
+        assert_eq!(
+            daemon.mission_calls.lock().len(),
+            1,
+            "stopped once, at most"
+        );
+        let reqs = server.received_requests().await.unwrap();
+        assert_eq!(callback_answers(&reqs).len(), 40);
+    }
+
+    #[tokio::test]
+    async fn a_press_after_the_window_is_spent_does_not_stop_the_mission() {
+        let server = MockServer::start().await;
+        mount_telegram_mocks(&server).await;
+        let (daemon, channel) = setup(&server);
+        say(&channel, 1, "/stop aaaa1234").await;
+        let (yes, _) = stop_buttons(&server).await;
+        for n in 0..19 {
+            say(&channel, 10 + n, "/missions").await;
+        }
+        // 20 commands used the window: the confirm is ignored, and the question stays open.
+        press(&channel, 50, "q1", &yes).await;
+        assert!(daemon.mission_calls.lock().is_empty());
+        assert_eq!(expired_replies(&server).await, 0);
+    }
+
+    #[tokio::test]
+    async fn the_hub_keeps_a_rate_window_and_stop_questions_for_each_owner() {
+        use channel_api::control::{Control, OwnerId};
+
+        let hub = ControlHub::new(one_bot_daemon());
+        let (en, plain) = (
+            channel_api::notice::NoticeLang::En,
+            channel_api::notice::Flavor::Plain,
+        );
+        let a = OwnerId::telegram(11).unwrap();
+        let b = OwnerId::telegram(22).unwrap();
+        for _ in 0..20 {
+            let said = hub.handle(a, &Control::Help, en, plain, None).await.text;
+            assert_ne!(said, "");
+        }
+        let refused = hub.handle(a, &Control::Help, en, plain, None).await;
+        assert!(refused.text.contains("Too many"), "{}", refused.text);
+        // `a` used up its window; `b` has its own.
+        let said = hub.handle(b, &Control::Help, en, plain, None).await.text;
+        assert_ne!(said, "");
+
+        // `b` cannot answer the question `c` was asked, even naming the same mission.
+        let daemon = one_bot_daemon();
+        *daemon.missions.lock() = vec![mission(ID_A, "running", "Backlinks")];
+        let hub = ControlHub::new(daemon.clone());
+        let c = OwnerId::telegram(33).unwrap();
+        let asked = hub
+            .handle(c, &Control::Stop("aaaa1234".into()), en, plain, None)
+            .await;
+        assert_eq!(asked.confirm.as_deref(), Some(ID_A));
+        assert!(
+            hub.confirm_stop(b, ID_A, en, plain)
+                .await
+                .text
+                .contains("expired")
+        );
+        assert!(daemon.mission_calls.lock().is_empty());
+        assert!(
+            hub.confirm_stop(c, ID_A, en, plain)
+                .await
+                .text
+                .starts_with("⏹ Stopped")
+        );
     }
 
     #[tokio::test]

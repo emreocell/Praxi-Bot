@@ -19,8 +19,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use channel_api::control::{
-    Control, Say, StopPress, canonical, keep_label, parse_stop_callback, say as control_say,
-    stop_cancel_callback, stop_confirm_callback, stop_label,
+    Control, OwnerId, Say, StopPress, canonical, keep_label, parse_stop_callback,
+    say as control_say, stop_cancel_callback, stop_confirm_callback, stop_label,
 };
 use channel_api::notice::{
     Feedback, Flavor, NoticeLang, OwnerNotice, feedback, parse_reply, parse_retry_callback, render,
@@ -625,6 +625,12 @@ impl Inner {
                 // daemon, the history, a log). The original is consumed here: only the redacted
                 // text goes on, and the owner is told in `on_text`.
                 let (text, cut) = cut_secrets(t);
+                if ev.forwarded || ev.edited {
+                    // Someone else's words, or words that were not typed as they now stand:
+                    // never a command, never a message to the bot.
+                    self.on_untyped_text(&ev.chat, &ev.sender.id, &text).await;
+                    return;
+                }
                 self.on_text(&ev.chat, &ev.sender.id, &text, cut, &ev.event_id)
                     .await;
             }
@@ -787,7 +793,7 @@ impl Inner {
                         sender,
                         parts.guild_id.is_some(),
                         parts.channel_id,
-                        &ctl,
+                        Some(&ctl),
                     )
                     .await;
             }
@@ -911,23 +917,60 @@ impl Inner {
         }
     }
 
-    /// A mission command. Only the owner (the caller checked) in their private chat: a server
-    /// channel they allowed is for talking to the bot, not for steering unattended work.
-    /// (Discord drops forwarded messages before they get here.)
+    /// A forwarded or edited message. It is not read as anything the owner typed, so nothing
+    /// runs; the owner who sends a mission command this way is told to type it themselves, and
+    /// everything else is dropped without a word.
+    async fn on_untyped_text(&self, chat: &ChatRef, sender: &str, text: &str) {
+        let Some(parts) = parse_chat(chat) else {
+            return;
+        };
+        if !self.authorized(chat, sender) {
+            return;
+        }
+        let is_control = parse_command(text)
+            .and_then(|(cmd, arg)| Control::parse(&cmd, arg))
+            .is_some();
+        if is_control {
+            self.cmd_control(
+                chat,
+                sender,
+                parts.guild_id.is_some(),
+                parts.channel_id,
+                None,
+            )
+            .await;
+        }
+    }
+
+    /// The owner behind `sender`, the author id the gateway authenticated for the event
+    /// (`SenderIdentity::id`; a display name never reaches this far). `None` for anyone else, and
+    /// for an id that is not a plain snowflake.
+    fn owner_id(&self, sender: &str) -> Option<OwnerId> {
+        OwnerId::snowflake(sender).filter(|id| self.state.is_owner_id(*id))
+    }
+
+    /// A mission command. Only the owner, in their private chat: a server channel they allowed is
+    /// for talking to the bot, not for steering unattended work. `ctl` is `None` for a message
+    /// that was forwarded or edited: the owner is told to type it, and nothing runs.
     async fn cmd_control(
         &self,
         chat: &ChatRef,
         sender: &str,
         in_server: bool,
         channel_id: &str,
-        ctl: &Control,
+        ctl: Option<&Control>,
     ) {
         let lang = self.notice_lang();
-        if in_server || !self.state.is_owner(sender) {
+        let Some(owner) = self.owner_id(sender).filter(|_| !in_server) else {
             self.say(chat, &control_say(lang, Flavor::Discord, &Say::OnlyPrivate))
                 .await;
             return;
-        }
+        };
+        let Some(ctl) = ctl else {
+            self.say(chat, &control_say(lang, Flavor::Discord, &Say::Forwarded))
+                .await;
+            return;
+        };
         let bot = if ctl.is_start() {
             self.bot_for_new_mission(channel_id).await
         } else {
@@ -935,7 +978,7 @@ impl Inner {
         };
         let answer = self
             .control
-            .handle(sender, ctl, lang, Flavor::Discord, bot)
+            .handle(owner, ctl, lang, Flavor::Discord, bot)
             .await;
         self.say_answer(chat, lang, answer).await;
     }
@@ -974,21 +1017,21 @@ impl Inner {
     async fn on_stop_press(&self, chat: &ChatRef, sender: &str, query_id: &str, press: &StopPress) {
         let lang = self.notice_lang();
         let private = parse_chat(chat).is_some_and(|p| p.guild_id.is_none());
-        if !private || !self.state.is_owner(sender) {
+        let Some(owner) = self.owner_id(sender).filter(|_| private) else {
             self.answer(
                 query_id,
                 &control_say(lang, Flavor::Discord, &Say::OnlyPrivate),
             )
             .await;
             return;
-        }
+        };
         let answer = match press {
             StopPress::Confirm(id) => {
                 self.control
-                    .confirm_stop(sender, id, lang, Flavor::Discord)
+                    .confirm_stop(owner, id, lang, Flavor::Discord)
                     .await
             }
-            StopPress::Cancel(id) => self.control.cancel_stop(sender, id, lang, Flavor::Discord),
+            StopPress::Cancel(id) => self.control.cancel_stop(owner, id, lang, Flavor::Discord),
         };
         self.answer(query_id, "✔").await;
         self.say_answer(chat, lang, answer).await;

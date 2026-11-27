@@ -8,8 +8,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use channel_api::control::{
-    Control, Say, StopPress, canonical, keep_label, parse_stop_callback, say, stop_cancel_callback,
-    stop_confirm_callback, stop_label,
+    Control, OwnerId, Say, StopPress, canonical, keep_label, parse_stop_callback, say,
+    stop_cancel_callback, stop_confirm_callback, stop_label,
 };
 use channel_api::notice::{
     Feedback, Flavor, NoticeLang, OwnerNotice, feedback, parse_reply, parse_retry_callback, render,
@@ -980,6 +980,9 @@ impl TelegramChannel {
         if !self.owns_chat(chat_id, user_id) {
             return Ok(());
         }
+        let Some(owner) = OwnerId::telegram(user_id) else {
+            return Ok(());
+        };
         let lang = self.notice_lang(chat_id);
         let answer = if forwarded {
             Answer {
@@ -994,7 +997,7 @@ impl TelegramChannel {
             };
             self.inner
                 .control
-                .handle(&user_id.to_string(), ctl, lang, Flavor::Plain, bot)
+                .handle(owner, ctl, lang, Flavor::Plain, bot)
                 .await
         };
         self.send_control_answer(chat_id, lang, answer).await;
@@ -1028,27 +1031,26 @@ impl TelegramChannel {
         query_id: &str,
         press: &StopPress,
     ) -> Result<()> {
-        if !self.owns_chat(chat_id, user_id) {
+        let owner = OwnerId::telegram(user_id).filter(|_| self.owns_chat(chat_id, user_id));
+        let Some(owner) = owner else {
             self.inner
                 .bot_api
                 .answer_callback_query(query_id, None)
                 .await?;
             return Ok(());
-        }
+        };
         let lang = self.notice_lang(chat_id);
-        let owner = user_id.to_string();
         let answer = match press {
             StopPress::Confirm(id) => {
                 self.inner
                     .control
-                    .confirm_stop(&owner, id, lang, Flavor::Plain)
+                    .confirm_stop(owner, id, lang, Flavor::Plain)
                     .await
             }
-            StopPress::Cancel(id) => {
-                self.inner
-                    .control
-                    .cancel_stop(&owner, id, lang, Flavor::Plain)
-            }
+            StopPress::Cancel(id) => self
+                .inner
+                .control
+                .cancel_stop(owner, id, lang, Flavor::Plain),
         };
         self.inner
             .bot_api

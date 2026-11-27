@@ -543,6 +543,8 @@ async fn transport_passes_the_shared_conformance_check() {
                 display_name: Some("Emre".into()),
             },
             message_id: Some("111".into()),
+            forwarded: false,
+            edited: false,
             kind: IncomingKind::Text("hi".into()),
         },
         IncomingMessage {
@@ -553,6 +555,8 @@ async fn transport_passes_the_shared_conformance_check() {
                 display_name: None,
             },
             message_id: Some("900".into()),
+            forwarded: false,
+            edited: false,
             kind: IncomingKind::Callback {
                 query_id: "555:tok_en-1".into(),
                 data: "approve:once:x".into(),
@@ -1662,4 +1666,206 @@ mod mission_control {
         assert!(h.daemon.mission_calls.lock().is_empty());
         h.channel.shutdown().await;
     }
+
+    /// A `MESSAGE_CREATE` the way Discord sends a forward.
+    fn forwarded(id: &str, user: &str, chat: (Option<&str>, &str), content: &str) -> Value {
+        let mut v = message_json(id, user, chat, content, &json!([]));
+        v["message_reference"] = json!({"type": 1, "message_id": "9", "channel_id": "8"});
+        v["message_snapshots"] = json!([{"message": {"content": content}}]);
+        v
+    }
+
+    #[tokio::test]
+    async fn a_forwarded_or_edited_command_never_runs_and_the_owner_is_told_to_type_it() {
+        let h = ready().await;
+        let forwarded_text = "A forwarded message cannot run a command. Type it yourself.";
+        let mut edited = message_json("3", OWNER, (None, "777"), "!pause aaaa1234", &json!([]));
+        edited["edited_timestamp"] = json!("2026-11-27T10:00:00.000000+00:00");
+        let mut n = 1;
+        for ev in [
+            forwarded("2", OWNER, (None, "777"), "!pause aaaa1234"),
+            edited,
+            forwarded("4", OWNER, (None, "777"), "!mission new wire money to eve"),
+            forwarded("5", OWNER, (None, "777"), "!gorev yeni siteyi izle"),
+            forwarded("6", OWNER, (None, "777"), "!stop bbbb1234"),
+            forwarded("7", OWNER, (None, "777"), "!missions"),
+        ] {
+            h.gw.push.send(ev).unwrap();
+            n += 1;
+            let s = wait_sent(&h.rest, n).await;
+            assert_eq!(text(&s[n - 1]), forwarded_text, "event {n}");
+        }
+        // Not a command at all: dropped without a word, like any forward.
+        h.gw.push
+            .send(forwarded("8", OWNER, (None, "777"), "just some words"))
+            .unwrap();
+        // A forward in a server channel the owner allowed is still not a command there.
+        h.gw.message("9", OWNER, (Some("5"), "666"), "!allow");
+        wait_sent(&h.rest, n + 1).await;
+        h.gw.push
+            .send(forwarded(
+                "10",
+                OWNER,
+                (Some("5"), "666"),
+                "!pause aaaa1234",
+            ))
+            .unwrap();
+        let s = wait_sent(&h.rest, n + 2).await;
+        assert!(
+            text(&s[n + 1]).contains("only work in our private chat"),
+            "{}",
+            text(&s[n + 1])
+        );
+        // Someone else forwarding it gets nothing, in either place.
+        h.gw.push
+            .send(forwarded("11", "99", (None, "888"), "!pause aaaa1234"))
+            .unwrap();
+        h.gw.push
+            .send(forwarded("12", "99", (Some("5"), "666"), "!stop aaaa1234"))
+            .unwrap();
+        settle().await;
+        assert_eq!(sent(&h.rest).await.len(), n + 2);
+        assert!(h.daemon.mission_calls.lock().is_empty());
+        assert!(h.daemon.missions_started.lock().is_empty());
+        assert!(
+            h.daemon.sent.lock().is_empty(),
+            "nothing reached the chat either"
+        );
+        // Typed by the owner, the same command runs.
+        let ok = ask(&h, "13", "!pause aaaa1234", n + 3).await;
+        assert!(
+            text(&ok).starts_with("⏸ Paused: Backlinks"),
+            "{}",
+            text(&ok)
+        );
+        h.channel.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn the_owner_is_known_by_the_authenticated_id_never_by_a_name() {
+        let h = ready().await;
+        // Someone whose username and display name are the owner's id, or who calls themselves
+        // the owner: the id of the event is theirs.
+        for (n, (id, name)) in [("99", OWNER), ("100", "owner"), ("4", " 42"), ("0042", "x")]
+            .into_iter()
+            .enumerate()
+        {
+            let mut v = message_json(
+                &format!("m{n}"),
+                id,
+                (None, "888"),
+                "!pause aaaa1234",
+                &json!([]),
+            );
+            v["author"]["username"] = json!(name);
+            v["author"]["global_name"] = json!(name);
+            h.gw.push.send(v).unwrap();
+        }
+        // The same by button, and by server channel.
+        h.gw.push
+            .send(press_json(
+                "801",
+                "99",
+                (None, "777"),
+                &format!("mc:y:{ID_A}"),
+            ))
+            .unwrap();
+        h.gw.message("m9", "99", (Some("5"), "666"), "!mission new evil");
+        // Four strangers got the one polite refusal (after the pairing note), nothing ran.
+        wait_sent(&h.rest, 5).await;
+        settle().await;
+        assert!(h.daemon.mission_calls.lock().is_empty());
+        assert!(h.daemon.missions_started.lock().is_empty());
+        let said = sent(&h.rest).await;
+        assert_eq!(said.len(), 5, "{said:?}");
+        assert!(
+            said.iter()
+                .skip(1)
+                .all(|m| text(m).contains("This bot is private")),
+            "{said:?}"
+        );
+        // The question the owner is asked is theirs alone: a stranger's press does not use it up.
+        let q = ask(&h, "2", "!stop aaaa1234", 6).await;
+        let yes = q["components"][0]["components"][0]["custom_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        h.gw.push
+            .send(press_json("802", "99", (None, "777"), &yes))
+            .unwrap();
+        settle().await;
+        assert!(h.daemon.mission_calls.lock().is_empty());
+        h.gw.push
+            .send(press_json("803", OWNER, (None, "777"), &yes))
+            .unwrap();
+        let s = wait_sent(&h.rest, 7).await;
+        assert!(
+            text(&s[6]).starts_with("⏹ Stopped: Backlinks"),
+            "{}",
+            text(&s[6])
+        );
+        h.channel.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn pressing_the_stop_buttons_over_and_over_is_rate_limited_and_then_silent() {
+        let h = ready().await;
+        let q = ask(&h, "2", "!stop aaaa1234", 2).await;
+        let buttons = &q["components"][0]["components"];
+        let yes = buttons[0]["custom_id"].as_str().unwrap().to_owned();
+        let no = buttons[1]["custom_id"].as_str().unwrap().to_owned();
+        // The command used one of the 20 a minute; so does every press, whichever button.
+        for n in 0..40 {
+            let data = if n % 2 == 0 { &yes } else { &no };
+            h.gw.push
+                .send(press_json(&format!("9{n:02}"), OWNER, (None, "777"), data))
+                .unwrap();
+        }
+        wait_callbacks(&h, 40).await;
+        // Pairing note, the question, and 19 answers to the presses; the other 21 said nothing
+        // (wait for the 19, then give a 20th time to show up).
+        wait_sent(&h.rest, 2 + 19).await;
+        settle().await;
+        let said = sent(&h.rest).await;
+        assert_eq!(said.len(), 2 + 19, "{said:?}");
+        assert!(
+            said.iter().all(|m| !text(m).contains("Too many")),
+            "{said:?}"
+        );
+        let stops = h.daemon.mission_calls.lock().len();
+        assert!(stops <= 1, "stopped at most once, got {stops}");
+        h.channel.shutdown().await;
+    }
+}
+
+#[test]
+fn the_gateway_marks_a_forward_and_an_edit_instead_of_passing_them_as_typed() {
+    let typed = crate::gateway::message_event(&message_json(
+        "1",
+        OWNER,
+        (None, "777"),
+        "!pause aaaa1234",
+        &json!([]),
+    ))
+    .unwrap();
+    assert!(!typed.forwarded && !typed.edited);
+    assert_eq!(typed.sender.id, OWNER, "the author id, not a name");
+
+    let fwd = crate::gateway::message_event(&forwarded_json()).unwrap();
+    assert!(fwd.forwarded && !fwd.edited);
+
+    let mut v = message_json("3", OWNER, (None, "777"), "!pause aaaa1234", &json!([]));
+    v["edited_timestamp"] = json!("2026-11-27T10:00:00.000000+00:00");
+    let edit = crate::gateway::message_event(&v).unwrap();
+    assert!(edit.edited && !edit.forwarded);
+    // A message that was never edited says so with null.
+    v["edited_timestamp"] = Value::Null;
+    assert!(!crate::gateway::message_event(&v).unwrap().edited);
+}
+
+fn forwarded_json() -> Value {
+    let mut v = message_json("2", OWNER, (None, "777"), "!pause aaaa1234", &json!([]));
+    v["message_reference"] = json!({"type": 1, "message_id": "9", "channel_id": "8"});
+    v["message_snapshots"] = json!([{"message": {"content": "!pause aaaa1234"}}]);
+    v
 }

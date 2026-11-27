@@ -5116,9 +5116,10 @@ pub(crate) fn owner_started_run(
     owner_started_run_from(storage, run_id, parent, false)
 }
 
-/// [`owner_started_run`], optionally also accepting `telegram_owner`: the owner writing to
-/// their own bot from their paired Telegram chat (paired user id AND owner key, see the
-/// daemon's message route). Only the Full-level waivers accept it; reaching the user's own
+/// [`owner_started_run`], optionally also accepting `telegram_owner` and `discord_owner`: the
+/// owner writing to their own bot from their paired Telegram chat (paired user id AND owner key,
+/// see the daemon's message route), or the goal of a mission they started from their paired
+/// Discord account. Only the Full-level waivers accept it; reaching the user's own
 /// computer (`pc_*`) stays desktop / admin-desktop only.
 pub(crate) fn owner_started_run_from(
     storage: &storage::Storage,
@@ -5142,7 +5143,8 @@ pub(crate) fn owner_started_run_from(
             !sources.is_empty()
                 && sources.iter().all(|s| {
                     matches!(s.as_str(), "owner" | "peer_admin")
-                        || (owner_channel && s == "telegram_owner")
+                        || (owner_channel
+                            && matches!(s.as_str(), "telegram_owner" | "discord_owner"))
                 })
         }
         Err(_) => false,

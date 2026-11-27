@@ -363,15 +363,50 @@ pub fn parse_stop_callback(data: &str) -> Option<StopPress> {
     }
 }
 
+/// The authenticated account of the paired owner: a number the service gave (a Telegram user id,
+/// a Discord snowflake), never a username or a display name. A hub keeps its rate windows and its
+/// stop questions per `OwnerId`, so what one account does never counts against another.
+///
+/// The constructors are the only way in; the bridge builds one from the id the service
+/// authenticated, and a name that is not a plain number cannot become one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OwnerId(u64);
+
+impl OwnerId {
+    /// A Telegram user id (positive; negative ids are groups and channels).
+    #[must_use]
+    pub fn telegram(user_id: i64) -> Option<Self> {
+        u64::try_from(user_id).ok().filter(|n| *n > 0).map(Self)
+    }
+
+    /// A Discord snowflake as the gateway sends it: plain decimal digits, no sign, no padding.
+    /// The caller must pass the verified author id of the event, never `display_name`.
+    #[must_use]
+    pub fn snowflake(id: &str) -> Option<Self> {
+        let canonical =
+            !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) && !id.starts_with('0');
+        if !canonical {
+            return None;
+        }
+        id.parse().ok().filter(|n| *n > 0).map(Self)
+    }
+
+    /// The id as the service writes it.
+    #[must_use]
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+
 /// The stops the owner was asked to confirm and has not answered yet. A button only counts when
 /// the bridge offered it to that owner a moment ago, and only once.
 #[derive(Debug)]
 pub struct ConfirmBook {
     ttl: Duration,
-    asked: VecDeque<(String, String, Instant)>,
+    asked: VecDeque<(String, OwnerId, Instant)>,
 }
 
-/// Open questions kept.
+/// Open questions kept for one owner.
 const CONFIRM_MAX: usize = 16;
 
 impl ConfirmBook {
@@ -384,22 +419,25 @@ impl ConfirmBook {
         }
     }
 
-    /// `owner` was asked whether to stop mission `id`.
-    pub fn ask(&mut self, id: &str, owner: &str, now: Instant) {
-        self.asked.retain(|(i, o, _)| !(i == id && o == owner));
-        self.asked.push_back((id.to_owned(), owner.to_owned(), now));
-        while self.asked.len() > CONFIRM_MAX {
-            self.asked.pop_front();
+    /// `owner` was asked whether to stop mission `id`. Only the oldest question of the same owner
+    /// makes room, so one account never pushes another's out.
+    pub fn ask(&mut self, id: &str, owner: OwnerId, now: Instant) {
+        self.asked.retain(|(i, o, _)| !(i == id && *o == owner));
+        self.asked.push_back((id.to_owned(), owner, now));
+        while self.asked.iter().filter(|(_, o, _)| *o == owner).count() > CONFIRM_MAX {
+            if let Some(oldest) = self.asked.iter().position(|(_, o, _)| *o == owner) {
+                self.asked.remove(oldest);
+            }
         }
     }
 
     /// Take the open question for `id` and `owner`: `true` once, and only while it is fresh.
-    pub fn take(&mut self, id: &str, owner: &str, now: Instant) -> bool {
+    pub fn take(&mut self, id: &str, owner: OwnerId, now: Instant) -> bool {
         let ttl = self.ttl;
         self.asked
             .retain(|(_, _, at)| now.saturating_duration_since(*at) < ttl);
         let before = self.asked.len();
-        self.asked.retain(|(i, o, _)| !(i == id && o == owner));
+        self.asked.retain(|(i, o, _)| !(i == id && *o == owner));
         self.asked.len() != before
     }
 }
@@ -473,11 +511,24 @@ impl RateLimit {
 
     /// Count one command at `now`, or refuse it.
     pub fn check(&mut self, ctl: &Control, now: Instant) -> Rate {
+        self.count(ctl.is_start(), now)
+    }
+
+    /// Count one press of a button ("Stop it", "Keep going") against the same window as the
+    /// commands. Never [`Rate::Refused`]: a button that is too fast is ignored, not answered.
+    pub fn check_press(&mut self, now: Instant) -> Rate {
+        match self.count(false, now) {
+            Rate::Allowed => Rate::Allowed,
+            Rate::Refused | Rate::Silent => Rate::Silent,
+        }
+    }
+
+    fn count(&mut self, starts: bool, now: Instant) -> Rate {
         self.any.prune(now);
         self.start.prune(now);
         let blocked = if self.any.full() {
             Some(&mut self.any)
-        } else if ctl.is_start() && self.start.full() {
+        } else if starts && self.start.full() {
             Some(&mut self.start)
         } else {
             None
@@ -490,7 +541,7 @@ impl RateLimit {
             };
         }
         self.any.hits.push_back(now);
-        if ctl.is_start() {
+        if starts {
             self.start.hits.push_back(now);
         }
         Rate::Allowed
@@ -1175,23 +1226,86 @@ mod tests {
         }
     }
 
+    fn owner(n: u64) -> OwnerId {
+        OwnerId::snowflake(&n.to_string()).unwrap()
+    }
+
+    #[test]
+    fn an_owner_id_is_a_plain_number_never_a_name() {
+        assert_eq!(
+            OwnerId::snowflake("1234567890").map(OwnerId::get),
+            Some(1_234_567_890)
+        );
+        assert_eq!(OwnerId::telegram(42).map(OwnerId::get), Some(42));
+        for bad in [
+            "",
+            "0",
+            "007",
+            "-5",
+            "+5",
+            "4 2",
+            "alice",
+            "42a",
+            "１２",
+            "99999999999999999999999",
+        ] {
+            assert_eq!(OwnerId::snowflake(bad), None, "{bad:?}");
+        }
+        for bad in [0, -1, -1_001_234_567_890] {
+            assert_eq!(OwnerId::telegram(bad), None, "{bad}");
+        }
+    }
+
     #[test]
     fn a_stop_question_is_answered_once_by_the_one_asked_while_fresh() {
         let t0 = Instant::now();
         let mut book = ConfirmBook::new(Duration::from_secs(300));
-        book.ask(ID_A, "42", t0);
-        assert!(!book.take(ID_A, "43", t0), "someone else");
-        assert!(!book.take(ID_B, "42", t0), "another mission");
-        assert!(book.take(ID_A, "42", t0 + Duration::from_secs(10)));
+        book.ask(ID_A, owner(42), t0);
+        assert!(!book.take(ID_A, owner(43), t0), "someone else");
+        assert!(!book.take(ID_B, owner(42), t0), "another mission");
+        assert!(book.take(ID_A, owner(42), t0 + Duration::from_secs(10)));
         assert!(
-            !book.take(ID_A, "42", t0 + Duration::from_secs(11)),
+            !book.take(ID_A, owner(42), t0 + Duration::from_secs(11)),
             "only once"
         );
-        book.ask(ID_A, "42", t0);
+        book.ask(ID_A, owner(42), t0);
         assert!(
-            !book.take(ID_A, "42", t0 + Duration::from_secs(301)),
+            !book.take(ID_A, owner(42), t0 + Duration::from_secs(301)),
             "expired"
         );
+    }
+
+    #[test]
+    fn one_owner_cannot_push_another_owners_question_out_of_the_book() {
+        let t0 = Instant::now();
+        let mut book = ConfirmBook::new(Duration::from_secs(300));
+        book.ask(ID_A, owner(1), t0);
+        for n in 0..(CONFIRM_MAX * 2) {
+            book.ask(&format!("mission-{n}"), owner(2), t0);
+        }
+        assert!(
+            book.take(ID_A, owner(1), t0),
+            "the first owner's question stayed"
+        );
+        assert!(
+            !book.take("mission-0", owner(2), t0),
+            "the flooder lost the oldest"
+        );
+        assert!(book.take(&format!("mission-{}", CONFIRM_MAX * 2 - 1), owner(2), t0));
+    }
+
+    #[test]
+    fn button_presses_count_against_the_window_and_are_never_answered() {
+        let t0 = Instant::now();
+        let mut rl = RateLimit::new(3, 1);
+        assert_eq!(rl.check(&Control::Missions, t0), Rate::Allowed);
+        assert_eq!(rl.check_press(t0), Rate::Allowed);
+        assert_eq!(rl.check_press(t0), Rate::Allowed);
+        // Spent: both a press and a command wait, and the press says nothing.
+        assert_eq!(rl.check_press(t0), Rate::Silent);
+        assert_eq!(rl.check_press(t0), Rate::Silent);
+        assert_eq!(rl.check(&Control::Missions, t0), Rate::Silent);
+        assert_eq!(rl.check_press(t0 + Duration::from_secs(61)), Rate::Allowed);
     }
 
     #[test]

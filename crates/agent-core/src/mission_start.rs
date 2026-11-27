@@ -381,8 +381,8 @@ impl Shared {
 }
 
 /// Whether a stored user message may become a mission's goal: recorded as the owner's own
-/// (typed in the app, or from their paired Telegram chat) and not written after untrusted
-/// content. Any other source, including an empty (untagged) one, is refused.
+/// (typed in the app, or from their paired Telegram or Discord chat) and not written after
+/// untrusted content. Any other source, including an empty (untagged) one, is refused.
 pub(crate) fn goal_origin_ok(source: &str, exposure_untrusted: bool) -> bool {
-    !exposure_untrusted && matches!(source, "owner" | "telegram_owner")
+    !exposure_untrusted && matches!(source, "owner" | "telegram_owner" | "discord_owner")
 }

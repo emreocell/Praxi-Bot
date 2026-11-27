@@ -787,10 +787,27 @@ async fn a_goal_typed_in_a_bridge_is_labelled_like_a_chat_message_from_it() {
     // The app (no hint) and an unknown hint keep the goal as the owner's own words.
     assert_eq!(goal_source(&t, &full, None).await, "owner");
     assert_eq!(goal_source(&t, &full, Some("local_ui")).await, "owner");
-    // Telegram: the paired owner writing over their channel; Discord: a lower standing.
+    // The paired owner writing over their own channel.
     assert_eq!(
         goal_source(&t, &full, Some("telegram")).await,
         "telegram_owner"
     );
-    assert_eq!(goal_source(&t, &full, Some("discord")).await, "discord");
+    assert_eq!(
+        goal_source(&t, &full, Some("discord")).await,
+        "discord_owner"
+    );
+    // A hint can name a bridge, never a label: nothing but these three words is ever stored.
+    for forged in [
+        "discord_owner",
+        "telegram_owner",
+        "peer_admin",
+        "mission_brief",
+        "webhook",
+    ] {
+        assert_eq!(
+            goal_source(&t, &full, Some(forged)).await,
+            "owner",
+            "{forged}"
+        );
+    }
 }
