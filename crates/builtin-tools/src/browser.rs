@@ -401,7 +401,6 @@ pub trait BrowserDriver: Send + Sync {
     /// (the CDP target id). `None`: no session, or the driver cannot tell.
     async fn current_tab_id(&self) -> Option<String> {
         None
-        None
     }
     /// The current page visibly contains payment inputs or a payment widget.
     async fn has_payment_form(&self) -> bool {
