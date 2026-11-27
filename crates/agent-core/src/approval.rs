@@ -485,9 +485,10 @@ impl Shared {
     ///
     /// What stays a card, whatever the level: a deny, the money floor (including a recognised
     /// payment surface), the never-list, limits the daemon cannot evaluate, the owner's own
-    /// per-site / per-app ask rules, a replayed workflow of tainted origin, and a call that
+    /// per-site / per-app ask rules, a replayed workflow of tainted origin, a call that
     /// hands a durable permission to a run that read untrusted content (a schedule, a bot
-    /// change, the knowledge root).
+    /// change, the knowledge root), and a call its tool marks with
+    /// [`tool_registry::Tool::full_access_asks_for`] (a lock, a garage door, an alarm).
     ///
     /// Who it applies to: [`Self::full_lane_run`]. The decision is a pure function of daemon
     /// facts (the bot's level, the run's recorded initiator and message sources, the call's own
@@ -504,6 +505,16 @@ impl Shared {
         if category == PermissionCategory::Money
             || decision.unsupported_limits().is_some()
             || !self.full_lane_run(ctx)
+        {
+            return false;
+        }
+        // A call the tool itself says the owner cannot undo from the screen (opening a lock or
+        // a garage door, disarming an alarm): the Full level does not waive that card. Decided
+        // by the tool from this call's own input, never from anything a page or mail said.
+        if self
+            .tools
+            .get(name)
+            .is_some_and(|tool| tool.full_access_asks_for(input))
         {
             return false;
         }

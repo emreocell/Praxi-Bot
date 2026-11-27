@@ -346,6 +346,15 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// `true` when this very call must still be confirmed on the Full access level, which
+    /// otherwise runs everything but money without a card. For a call whose effect the owner
+    /// cannot undo from the screen: it opens a lock or a garage door, or disarms an alarm.
+    /// Decided from the call's own input, like [`Tool::always_ask_for`] (which such a tool
+    /// repeats for the lower levels); nothing but an outright deny is stricter. Default: no.
+    fn full_access_asks_for(&self, _input: &Value) -> bool {
+        false
+    }
+
     /// An owner-created standing authorisation covering exactly this call, if
     /// there is one, checked against the facts the tool itself verifies at this
     /// moment (never against what the model claims). `Some` lets the loop skip
@@ -385,6 +394,9 @@ pub trait ToolWrapper: Send + Sync {
 
     /// Forward [`Tool::always_ask_for`] to the wrapped tool.
     fn always_ask_for(&self, input: &Value) -> bool;
+
+    /// Forward [`Tool::full_access_asks_for`] to the wrapped tool.
+    fn full_access_asks_for(&self, input: &Value) -> bool;
 
     /// Forward [`Tool::standing_grant`] to the wrapped tool.
     async fn standing_grant(&self, ctx: &ToolContext, input: &Value) -> Option<StandingGrant>;
@@ -443,6 +455,10 @@ impl<W: ToolWrapper> Tool for W {
 
     fn always_ask_for(&self, input: &Value) -> bool {
         ToolWrapper::always_ask_for(self, input)
+    }
+
+    fn full_access_asks_for(&self, input: &Value) -> bool {
+        ToolWrapper::full_access_asks_for(self, input)
     }
 
     async fn standing_grant(&self, ctx: &ToolContext, input: &Value) -> Option<StandingGrant> {
@@ -517,6 +533,7 @@ mod delegation_guard {
     const REQUIRED_HOOKS: &[&str] = &[
         "always_ask",
         "always_ask_for",
+        "full_access_asks_for",
         "standing_grant",
         "approval_details",
         "approval_closed",
@@ -915,6 +932,9 @@ impl tool_registry::Tool for Good {
     fn always_ask_for(&self, i: &Value) -> bool {
         self.inner.always_ask_for(i)
     }
+    fn full_access_asks_for(&self, i: &Value) -> bool {
+        self.inner.full_access_asks_for(i)
+    }
     async fn standing_grant(&self, c: &ToolContext, i: &Value) -> Option<StandingGrant> {
         self.inner.standing_grant(c, i).await
     }
@@ -1025,6 +1045,9 @@ impl Tool for W {
             }
             fn always_ask_for(&self, input: &serde_json::Value) -> bool {
                 self.0.always_ask_for(input)
+            }
+            fn full_access_asks_for(&self, input: &serde_json::Value) -> bool {
+                self.0.full_access_asks_for(input)
             }
             async fn standing_grant(
                 &self,

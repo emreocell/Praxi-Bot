@@ -186,6 +186,12 @@ impl Tool for HaTool {
         }
     }
 
+    /// The same rule on the Full access level, which otherwise runs every write without a card:
+    /// a lock, a garage door or an alarm cannot be undone from the screen.
+    fn full_access_asks_for(&self, input: &Value) -> bool {
+        self.always_ask_for(input)
+    }
+
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<ToolOutput, ToolError> {
         let Some(c) = self.conn.client_for(ctx.bot_id.as_deref()) else {
             return Err(ToolError::InvalidInput(

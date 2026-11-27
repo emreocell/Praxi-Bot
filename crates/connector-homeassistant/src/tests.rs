@@ -485,6 +485,16 @@ async fn the_tool_asks_for_what_the_client_says_and_not_for_reads() {
         "ha_call_service",
         &json!({"domain":"light","service":"turn_on","entity_id":"light.kitchen"})
     ));
+    // The Full level, which runs every write without a card, still asks for the same calls.
+    let full = |input: &Value| {
+        reg.get("ha_call_service")
+            .unwrap()
+            .full_access_asks_for(input)
+    };
+    assert!(full(&json!({"domain":"lock","service":"unlock"})));
+    assert!(!full(
+        &json!({"domain":"light","service":"turn_on","entity_id":"light.kitchen"})
+    ));
     // Reads never carry the rule, whatever they name.
     assert!(!ask(
         "ha_get_state",

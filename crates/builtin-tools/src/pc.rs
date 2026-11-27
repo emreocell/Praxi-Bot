@@ -314,6 +314,9 @@ impl ToolWrapper for Renamed {
     fn always_ask_for(&self, input: &Value) -> bool {
         self.inner.always_ask_for(input)
     }
+    fn full_access_asks_for(&self, input: &Value) -> bool {
+        self.inner.full_access_asks_for(input)
+    }
     async fn standing_grant(&self, _ctx: &ToolContext, _input: &Value) -> Option<StandingGrant> {
         // Owner standing grants are written for the bot's own computer.
         None
@@ -748,6 +751,9 @@ impl ToolWrapper for Dispatch {
     }
     fn always_ask_for(&self, input: &Value) -> bool {
         self.proto.always_ask_for(input)
+    }
+    fn full_access_asks_for(&self, input: &Value) -> bool {
+        self.proto.full_access_asks_for(input)
     }
     async fn standing_grant(&self, _ctx: &ToolContext, _input: &Value) -> Option<StandingGrant> {
         None

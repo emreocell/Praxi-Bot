@@ -74,11 +74,33 @@ fn start_run(
 pub(crate) struct Asks {
     pub(crate) spec: tool_registry::ToolSpec,
     count: AtomicUsize,
+    /// `full_access_asks_for` is true for the input `{"open": true}` (a lock, a garage door).
+    physical: bool,
 }
 
 impl Asks {
     pub(crate) fn new(name: &str, category: PermissionCategory, class: ContentClass) -> Arc<Self> {
+        Self::build(name, category, class, false)
+    }
+
+    /// A connector write whose `{"open": true}` calls cannot be undone from the screen.
+    fn physical(name: &str) -> Arc<Self> {
+        Self::build(
+            name,
+            PermissionCategory::Accounts,
+            ContentClass::none(),
+            true,
+        )
+    }
+
+    fn build(
+        name: &str,
+        category: PermissionCategory,
+        class: ContentClass,
+        physical: bool,
+    ) -> Arc<Self> {
         Arc::new(Self {
+            physical,
             spec: tool_registry::ToolSpec {
                 name: name.into(),
                 description: "asks".into(),
@@ -100,6 +122,9 @@ impl tool_registry::Tool for Asks {
     }
     fn always_ask(&self) -> bool {
         true
+    }
+    fn full_access_asks_for(&self, input: &Value) -> bool {
+        self.physical && input["open"] == json!(true)
     }
     async fn approval_details(
         &self,
@@ -217,6 +242,28 @@ async fn full_allows_every_category_but_money_for_each_initiator_kind() {
                 }
             }
         }
+    }
+}
+
+/// A call its tool marks as one the owner cannot undo from the screen (a lock, a garage door)
+/// keeps its card on Full for every trusted initiator, while the same tool's other calls run.
+#[tokio::test]
+async fn full_still_asks_for_a_call_its_tool_marks_as_physical() {
+    let door = Asks::physical("ha_call_service");
+    for start in TRUSTED {
+        let (_env, lp, ctx) = ctx_of(
+            start,
+            FULL,
+            lane_cfg(Policy::full()),
+            std::slice::from_ref(&door),
+        )
+        .await;
+        let (decision, reason) = decide(&lp, &ctx, &door, &json!({"open": true}));
+        assert!(decision.is_ask(), "{start:?}: {decision:?}");
+        assert_eq!(reason, None, "{start:?}");
+        let (decision, reason) = decide(&lp, &ctx, &door, &json!({"open": false}));
+        assert_eq!(decision, Decision::Allow, "{start:?}");
+        assert_eq!(reason, Some("mode.full.policy"), "{start:?}");
     }
 }
 
