@@ -702,3 +702,84 @@ fn a_scheduled_run_never_reads_the_summary() {
     assert!(read(None).is_some());
     assert!(read(Some(protocol::TaskId::new())).is_none());
 }
+
+#[test]
+fn a_round_is_dropped_when_the_chat_changed_while_the_model_worked() {
+    let env = setup();
+    let ids = seed(&env, pairs(5));
+    let h = small();
+    let fold = crate::summary::plan(&env.storage, env.chat, &h, None).unwrap();
+    assert_eq!(fold.len(), 6);
+    let check = |prior: Option<&ChatSummary>| {
+        crate::summary::unchanged(&env.storage, env.chat, prior, &fold)
+    };
+    assert!(check(None));
+    // A folded message was replaced meanwhile.
+    env.storage
+        .set_messages_superseded(&ids[3..4], true)
+        .unwrap();
+    assert!(!check(None));
+    env.storage
+        .set_messages_superseded(&ids[3..4], false)
+        .unwrap();
+    assert!(check(None));
+    // Another round wrote a summary meanwhile.
+    let last = env.storage.get_message(ids[5]).unwrap().unwrap();
+    let other = ChatSummary {
+        chat_id: env.chat,
+        user_id: env.user,
+        content: "other".into(),
+        covered_until_ms: last.created_at_ms,
+        covered_until_id: last.id,
+        covered_messages: 6,
+        rounds: 1,
+        first_message_ms: T0,
+        exposure_untrusted: false,
+        exposure_private: false,
+        exposure_sources: vec![],
+        model: "fake/m".into(),
+        created_at_ms: T0,
+        updated_at_ms: T0,
+    };
+    env.storage.put_chat_summary(&other).unwrap();
+    assert!(!check(None));
+}
+
+#[test]
+fn a_summary_counts_as_a_message_that_carried_what_it_replaced() {
+    let env = setup();
+    let ids = seed(&env, pairs(3));
+    let last = env.storage.get_message(ids[3]).unwrap().unwrap();
+    let mut summary = ChatSummary {
+        chat_id: env.chat,
+        user_id: env.user,
+        content: "- a page said something".into(),
+        covered_until_ms: last.created_at_ms,
+        covered_until_id: last.id,
+        covered_messages: 4,
+        rounds: 1,
+        first_message_ms: T0,
+        exposure_untrusted: true,
+        exposure_private: false,
+        exposure_sources: vec!["page evil.example".into()],
+        model: "fake/m".into(),
+        created_at_ms: T0,
+        updated_at_ms: T0,
+    };
+    // The messages that are still shown are clean: only the summary carries it.
+    let provenance =
+        || crate::history::chat_provenance(&env.storage, env.chat, env.bot, None, None);
+    assert!(!provenance().exposure.untrusted);
+    env.storage.put_chat_summary(&summary).unwrap();
+    let p = provenance();
+    assert!(p.exposure.untrusted);
+    assert!(!p.exposure.private);
+    assert_eq!(p.sources, ["page evil.example"]);
+    // Private data: the summary's own text is what the run can still copy from.
+    summary.exposure_private = true;
+    summary.exposure_sources = vec!["mailbox me@example.org".into()];
+    env.storage.put_chat_summary(&summary).unwrap();
+    let p = provenance();
+    assert!(p.exposure.private);
+    assert_eq!(p.private_texts, ["- a page said something"]);
+}

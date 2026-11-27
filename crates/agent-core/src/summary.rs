@@ -509,8 +509,25 @@ async fn round(sh: &Arc<Shared>, ctx: &RunCtx) -> Round {
     )
 }
 
-/// Write the round's summary, unless the chat changed while the model worked (an edit that
-/// dropped the summary, a folded message that was replaced): then the text no longer matches.
+/// Whether the chat still is what the round planned from: the same summary (an edit drops it)
+/// and the same live messages after its cursor (a folded message may have been replaced).
+pub(crate) fn unchanged(
+    storage: &Storage,
+    chat: ChatId,
+    prior: Option<&ChatSummary>,
+    fold: &[storage::Message],
+) -> bool {
+    let now = storage.get_chat_summary(chat).ok().flatten();
+    now.as_ref().map(ChatSummary::cursor) == prior.map(ChatSummary::cursor)
+        && storage
+            .list_dialogue_after(chat, prior.map(ChatSummary::cursor), fold.len())
+            .is_ok_and(|live| {
+                live.len() == fold.len() && live.iter().zip(fold).all(|(a, b)| a.id == b.id)
+            })
+}
+
+/// Write the round's summary, unless the chat changed while the model worked: then the text no
+/// longer matches it.
 fn store(
     sh: &Shared,
     ctx: &RunCtx,
@@ -521,15 +538,7 @@ fn store(
     model: &str,
 ) -> Round {
     let chat = ctx.chat_id;
-    let now = sh.storage.get_chat_summary(chat).ok().flatten();
-    let same_prior = now.as_ref().map(ChatSummary::cursor) == prior.map(ChatSummary::cursor);
-    let still_live = sh
-        .storage
-        .list_dialogue_after(chat, prior.map(ChatSummary::cursor), fold.len())
-        .is_ok_and(|live| {
-            live.len() == fold.len() && live.iter().zip(fold).all(|(a, b)| a.id == b.id)
-        });
-    if !same_prior || !still_live {
+    if !unchanged(&sh.storage, chat, prior, fold) {
         return Round::Idle;
     }
     let (first, last) = (&fold[0], &fold[fold.len() - 1]);

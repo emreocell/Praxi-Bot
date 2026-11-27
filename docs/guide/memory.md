@@ -19,6 +19,8 @@ Not every note is treated the same:
 
 A bot can also save or forget a note when you ask it to ("remember that my birthday is March 3"). It must quote your own message for that.
 
+Memory is about *you* across chats. What a bot keeps of **one long chat** (the older messages condensed into a note) is a separate thing: see [Long chats](long-chats.md).
+
 ## Where it lives
 
 Everything is stored on your computer in the Praxi data folder (the file `memory.db`), separate from your chats. The same file also holds a searchable copy of your past messages, for the bot's "search earlier chats" tool; a bot whose memory is **Off** stops adding to it. Nothing is sent to anyone to be remembered. Each bot sees your shared notes plus its own; other people's notes are never visible.
