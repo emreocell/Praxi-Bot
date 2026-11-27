@@ -1944,7 +1944,7 @@
         "reviewFull": "Alles lesen, was gesendet wird"
       },
       "input": {
-        "label": "Genau das erhält {{name}}",
+        "label": "Vollständige Eingabe (vor dem Erlauben prüfen)",
         "shortened": "Gekürzt: Es werden nur die ersten {{shown}} Zeichen angezeigt."
       },
       "mail": {

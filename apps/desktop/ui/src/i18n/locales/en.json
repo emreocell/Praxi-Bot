@@ -690,9 +690,9 @@
     "counter": "Approval {{current}} of {{total}}",
     "keyAllow": "Allow once",
     "keyDeny": "Deny",
-    "label": "Waiting for your approval",
-    "next": "Next approval",
-    "previous": "Previous approval"
+    "label": "Needs your OK",
+    "next": "Show next",
+    "previous": "Show previous"
   },
   "apps": {
     "access": {
@@ -1944,13 +1944,13 @@
       "subagents_one": "{{count}} sub-agent",
       "subagents_other": "{{count}} sub-agents",
       "thinking": "Thinking…",
-      "waiting": "Waiting for your approval"
+      "waiting": "Needs your OK"
     },
     "profile": "Bot profile",
     "searchChats": "Search chats…",
     "subagents": {
       "detail": {
-        "approval": "Waiting for your approval. Decide in the chat.",
+        "approval": "Needs your OK. Decide in the chat.",
         "result": "Result",
         "steps": "Steps",
         "task": "Task",
@@ -1970,7 +1970,7 @@
       "stop": "Stop",
       "stopLabel": "Stop sub-agent: {{task}}",
       "title": "Sub-agents",
-      "waitingFor": "Waiting for your approval: {{step}}"
+      "waitingFor": "Needs your OK: {{step}}"
     },
     "switcher": "Which computer to show",
     "tabs": {
@@ -2176,11 +2176,11 @@
         "footer": "Via Composio. Approve only this action with all arguments shown above."
       },
       "batch": {
-        "allowSelected": "Allow selected ({{count}})",
+        "allowSelected": "Allow {{count}} selected",
         "denyAll": "Deny all",
         "repeated": "×{{count}}",
         "select": "Allow: {{name}}",
-        "title": "{{count}} approvals needed"
+        "title": "{{count}} need your OK"
       },
       "bot": {
         "allToolsOfCaller": "all tools this bot can use",
@@ -2204,7 +2204,7 @@
       },
       "commandShortened": "Command shortened: only the first {{shown}} characters are shown.",
       "compact": {
-        "allow": "Allow",
+        "allow": "Allow once",
         "alwaysSite": "Always allow",
         "alwaysTool": "Always allow",
         "controlGrant": "Share screen & keyboard control",
@@ -2260,7 +2260,7 @@
         "reviewFull": "Read everything that will be sent"
       },
       "input": {
-        "label": "Exactly what {{name}} will receive",
+        "label": "Full input (check before you allow)",
         "shortened": "Shortened: only the first {{shown}} characters are shown."
       },
       "mail": {
@@ -2365,7 +2365,7 @@
           "user": "your computer ({{name}})"
         }
       },
-      "reasonPlaceholder": "Reason for denying (optional)",
+      "reasonPlaceholder": "Why you deny (optional)",
       "risk": {
         "allowDelete": "Allow delete",
         "allowSend": "Allow send",
@@ -2412,7 +2412,7 @@
         "wait": "Wait for {{what}}"
       },
       "thisChat": "This chat",
-      "title": "Approval needed",
+      "title": "Needs your OK",
       "why": {
         "always_ask": "This action always asks, whatever the permission level (apps, secrets, code outside a browser page, browser file transfers).",
         "browser_address": "This address is a file, your own computer or your network, not a public web page, so opening it asks first.",
@@ -2652,7 +2652,7 @@
     },
     "openBot": "Open {{name}}",
     "pendingElsewhere": "From another chat of this bot: {{chat}}",
-    "pendingPinned": "Waiting for your decision. The card is above the message box.",
+    "pendingPinned": "Decide in the card above the message box.",
     "placeholder": "Message…  / commands · @ bots",
     "placeholderBusy": "The bot is working. Typing queues your message",
     "placeholderWaiting": "Answer above, or write to change plans",
@@ -2661,8 +2661,8 @@
       "answered": "You answered: {{answer}}",
       "closed": "This question is no longer open.",
       "decidedElsewhere": "This question has already been answered or has expired.",
-      "placeholder": "Type another answer…",
-      "title": "The bot asks"
+      "placeholder": "Type your answer…",
+      "title": "Bot question"
     },
     "remember": {
       "button": "Remember this",
@@ -2702,7 +2702,7 @@
       "stopUnconfirmed": "The service has not confirmed the stop after 5 seconds, so the run may still be working. Press Force stop to end it.",
       "stopUnreachable": "The Stop could not reach the computer this bot runs on. It keeps retrying; check the connection.",
       "stoppingDetail": "Waiting for the run to end…",
-      "waiting": "Waiting for your approval"
+      "waiting": "Needs your OK"
     },
     "runFailed": "The run failed: {{message}}",
     "runStopped": "Stopped by you",
@@ -3211,8 +3211,8 @@
     "empty": "Press “New chat” and write what you need. Your chats are saved here.",
     "emptyTitle": "No chats yet",
     "loading": "Loading chats…",
-    "menuLabel": "Chat options for {{title}}",
-    "menuTooltip": "Chat options",
+    "menuLabel": "Menu for {{title}}",
+    "menuTooltip": "Open chat menu",
     "pin": "Pin",
     "pinnedBadge": "Pinned",
     "rename": "Rename",
@@ -5273,12 +5273,12 @@
     "backToChat": "Back to chat",
     "captureTab": "Tab key capture",
     "chat": {
-      "approve": "Approve",
+      "approve": "Allow",
       "button": "Chat",
       "close": "Close chat",
       "collapse": "Collapse chat",
       "expand": "Expand chat",
-      "reject": "Reject",
+      "reject": "Deny",
       "replying": "Bot is replying…",
       "title": "Chat with bot",
       "working": "Bot is working…"
@@ -5963,7 +5963,7 @@
     },
     "stale": "Updates are disconnected. These are the last known details; reconnect before making changes.",
     "status": {
-      "approval": "Needs your input",
+      "approval": "Needs your OK",
       "idle": "Idle",
       "paused": "Paused",
       "running": "Running"
@@ -5981,7 +5981,7 @@
       "question": "Question"
     },
     "open": "Open chat",
-    "subtitle": "Approvals and questions waiting across all chats.",
+    "subtitle": "Questions and approvals from all chats.",
     "title": "Needs you"
   },
   "newBot": {
@@ -6312,14 +6312,14 @@
     "chatFallbackTitle": "Chat window",
     "connecting": "Connecting...",
     "focusFailed": "Could not show the main window. Open it from the tray.",
-    "focusMain": "Focus main window",
+    "focusMain": "Show main window",
     "openChat": "Open in new window",
     "openChatTooltip": "Open chat in new window",
     "openFailed": "Could not open the new window. Please try again.",
     "openLive": "Open live view in new window",
     "pinFailed": "Could not change whether this window stays on top. Please try again.",
-    "pinOnTop": "Pin window on top",
-    "unpinOnTop": "Unpin window"
+    "pinOnTop": "Keep on top",
+    "unpinOnTop": "Stop keeping on top"
   },
   "profileShare": {
     "back": "Back",
@@ -6603,7 +6603,7 @@
     "stopping": "Stopping…",
     "waitAnswer": "Waiting for your answer: {{question}}",
     "waitLost": "Waiting for an answer that is not available here. Stop the run to continue.",
-    "waiting": "Waiting for your approval: {{step}}",
+    "waiting": "Needs your OK: {{step}}",
     "working": "Working…"
   },
   "safeMode": {
@@ -8286,7 +8286,7 @@
     "notifications": "Notifications",
     "notificationsCount": "{{count}} unread notifications",
     "notificationsCount_one": "{{count}} unread notification",
-    "reorderBot": "Reorder {{name}} (arrow keys move it up or down)",
+    "reorderBot": "Move {{name}} up or down",
     "reorderHint": "Drag the row, or focus this handle and press the up/down arrow",
     "reorderMoved": "{{name}} moved to position {{pos}}",
     "schedules": "Scheduled tasks",
@@ -8655,9 +8655,9 @@
     "stillRunningBody": "It keeps working in the tray, next to the clock. Use the tray icon to open, pause or quit it.",
     "stillRunningTitle": "Praxi-Bot is still running",
     "stopAll": "Stop all",
-    "toggle": "Show / hide window",
+    "toggle": "Show or hide window",
     "tooltip": "Praxi-Bot",
-    "tooltipNeeds": "Praxi-Bot: {n} need you"
+    "tooltipNeeds": "Praxi-Bot — {n} waiting on you"
   },
   "updateServer": {
     "available": "Update available",
@@ -9030,7 +9030,7 @@
       "openSettings": "Open settings",
       "ownerRequired": "Owner authorization is missing. Open Praxi-Bot on this computer and reconnect the local background service, then try again.",
       "phase": {
-        "approval": "Waiting for your approval",
+        "approval": "Needs your OK",
         "failed": "The call ended",
         "hearing": "Listening to you…",
         "listening": "Listening",

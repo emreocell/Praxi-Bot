@@ -109,7 +109,7 @@ test("the card shows how much the call can change: a calm chip to look, a red on
     );
   const site = one("browser_navigate", { url: "https://webioo.com.tr" });
   assert.match(site, /data-risk="read"/);
-  assert.ok(site.includes(">Allow</button>") || site.includes(">Allow<"), "a read keeps the plain Allow");
+  assert.ok(site.includes(">Allow once</button>") || site.includes(">Allow once<"), "a read keeps the once-only Allow label");
   const del = one("fs_delete", { path: "./drafts/old" });
   assert.match(del, /data-risk="delete"/);
   assert.ok(del.includes("Allow delete"), "the delete card names what Allow does");

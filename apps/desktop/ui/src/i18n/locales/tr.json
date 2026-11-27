@@ -690,9 +690,9 @@
     "counter": "Onay {{current}} / {{total}}",
     "keyAllow": "Bir kez izin ver",
     "keyDeny": "Reddet",
-    "label": "Onayını bekliyor",
-    "next": "Sonraki onay",
-    "previous": "Önceki onay"
+    "label": "Onayın gerekli",
+    "next": "Sonrakini göster",
+    "previous": "Öncekini göster"
   },
   "apps": {
     "access": {
@@ -1944,13 +1944,13 @@
       "subagents_one": "{{count}} alt ajan",
       "subagents_other": "{{count}} alt ajan",
       "thinking": "Düşünüyor…",
-      "waiting": "Onayını bekliyor"
+      "waiting": "Onayın gerekli"
     },
     "profile": "Bot profili",
     "searchChats": "Sohbetlerde ara…",
     "subagents": {
       "detail": {
-        "approval": "Onayını bekliyor. Sohbetten karar ver.",
+        "approval": "Onayın gerekli. Sohbette karar ver.",
         "result": "Sonuç",
         "steps": "Adımlar",
         "task": "Görev",
@@ -1970,7 +1970,7 @@
       "stop": "Durdur",
       "stopLabel": "Alt ajanı durdur: {{task}}",
       "title": "Alt ajanlar",
-      "waitingFor": "Onayını bekliyor: {{step}}"
+      "waitingFor": "Onayın gerekli: {{step}}"
     },
     "switcher": "Hangi bilgisayar gösterilsin",
     "tabs": {
@@ -2176,11 +2176,11 @@
         "footer": "Composio üzerinden. Yalnızca bu eylemi yukarıdaki tüm parametrelerle onayla."
       },
       "batch": {
-        "allowSelected": "Seçilenlere izin ver ({{count}})",
+        "allowSelected": "Seçilen {{count}} öğeye izin ver",
         "denyAll": "Hepsini reddet",
         "repeated": "×{{count}}",
         "select": "İzin ver: {{name}}",
-        "title": "{{count}} onay gerekiyor"
+        "title": "{{count}} öğe onayını bekliyor"
       },
       "bot": {
         "allToolsOfCaller": "bu botun kullanabildiği tüm araçlar",
@@ -2204,7 +2204,7 @@
       },
       "commandShortened": "Komut kısaltıldı: yalnızca ilk {{shown}} karakter gösteriliyor.",
       "compact": {
-        "allow": "İzin ver",
+        "allow": "Bir kez izin ver",
         "alwaysSite": "Her zaman izin ver",
         "alwaysTool": "Her zaman izin ver",
         "controlGrant": "Ekran ve klavye kontrolünü paylaş",
@@ -2260,7 +2260,7 @@
         "reviewFull": "Gönderilecek her şeyi oku"
       },
       "input": {
-        "label": "{{name}} aracının alacağı tam veri",
+        "label": "Tam veri (izin vermeden önce kontrol et)",
         "shortened": "Kısaltıldı: yalnızca ilk {{shown}} karakter gösteriliyor."
       },
       "mail": {
@@ -2365,7 +2365,7 @@
           "user": "senin bilgisayarın ({{name}})"
         }
       },
-      "reasonPlaceholder": "Reddetme gerekçesi (isteğe bağlı)",
+      "reasonPlaceholder": "Neden reddettiğin (isteğe bağlı)",
       "risk": {
         "allowDelete": "Silmeye izin ver",
         "allowSend": "Göndermeye izin ver",
@@ -2412,7 +2412,7 @@
         "wait": "Şunu bekle: {{what}}"
       },
       "thisChat": "Bu sohbet",
-      "title": "Onay gerekiyor",
+      "title": "Onayın gerekli",
       "why": {
         "always_ask": "Bu işlem izin düzeyi ne olursa olsun her zaman sorar (uygulamalar, gizli bilgiler, tarayıcı sayfası dışında kod, tarayıcı dosya aktarımları).",
         "browser_address": "Bu adres bir dosya, kendi bilgisayarın veya ağın; herkese açık bir web sayfası değil, bu yüzden açmadan önce sorulur.",
@@ -2652,7 +2652,7 @@
     },
     "openBot": "{{name}} ayrıntılarını aç",
     "pendingElsewhere": "Bu botun başka bir sohbetinden: {{chat}}",
-    "pendingPinned": "Kararın bekleniyor. Kart mesaj kutusunun üstünde.",
+    "pendingPinned": "Kararını üstteki kartta ver.",
     "placeholder": "Mesaj yaz…  / komutlar · @ botlar",
     "placeholderBusy": "Bot çalışıyor. Yazarsan mesaj sıraya girer",
     "placeholderWaiting": "Yukarıdan yanıtla ya da planı değiştirmek için yaz",
@@ -2661,8 +2661,8 @@
       "answered": "Yanıtın: {{answer}}",
       "closed": "Bu soru artık açık değil.",
       "decidedElsewhere": "Bu soru daha önce yanıtlandı veya süresi doldu.",
-      "placeholder": "Başka bir yanıt yaz…",
-      "title": "Bot soruyor"
+      "placeholder": "Yanıtını yaz…",
+      "title": "Bot sorusu"
     },
     "remember": {
       "button": "Bunu hatırla",
@@ -2702,7 +2702,7 @@
       "stopUnconfirmed": "Servis durdurmayı 5 saniyedir onaylamadı, çalışma hâlâ sürüyor olabilir. Bitirmek için Zorla durdur'a bas.",
       "stopUnreachable": "Durdurma, bu botun çalıştığı bilgisayara ulaşamadı. Yeniden deniyor; bağlantıyı kontrol et.",
       "stoppingDetail": "Çalışmanın bitmesi bekleniyor…",
-      "waiting": "Onayını bekliyor"
+      "waiting": "Onayın gerekli"
     },
     "runFailed": "Çalışma başarısız oldu: {{message}}",
     "runStopped": "Senin tarafından durduruldu",
@@ -3211,8 +3211,8 @@
     "empty": "“Yeni sohbet”e bas ve neye ihtiyacın olduğunu yaz. Sohbetlerin burada saklanır.",
     "emptyTitle": "Henüz sohbet yok",
     "loading": "Sohbetler yükleniyor…",
-    "menuLabel": "{{title}} için sohbet seçenekleri",
-    "menuTooltip": "Sohbet seçenekleri",
+    "menuLabel": "{{title}} menüsü",
+    "menuTooltip": "Sohbet menüsünü aç",
     "pin": "Sabitle",
     "pinnedBadge": "Sabitlendi",
     "rename": "Yeniden adlandır",
@@ -5273,7 +5273,7 @@
     "backToChat": "Sohbete dön",
     "captureTab": "Tab tuşunu yakala",
     "chat": {
-      "approve": "Onayla",
+      "approve": "İzin ver",
       "button": "Sohbet",
       "close": "Sohbeti kapat",
       "collapse": "Sohbeti daralt",
@@ -5963,7 +5963,7 @@
     },
     "stale": "Canlı güncellemeler kesildi. Son bilinen bilgiler gösteriliyor; değişiklik yapmadan önce yeniden bağlanın.",
     "status": {
-      "approval": "Yanıtınızı bekliyor",
+      "approval": "Onayın gerekli",
       "idle": "Boşta",
       "paused": "Duraklatıldı",
       "running": "Çalışıyor"
@@ -5981,7 +5981,7 @@
       "question": "Soru"
     },
     "open": "Sohbeti aç",
-    "subtitle": "Tüm sohbetlerde bekleyen onaylar ve sorular.",
+    "subtitle": "Tüm sohbetlerdeki onaylar ve sorular.",
     "title": "Senden bekleyenler"
   },
   "newBot": {
@@ -6312,7 +6312,7 @@
     "chatFallbackTitle": "Sohbet penceresi",
     "connecting": "Bağlanıyor...",
     "focusFailed": "Ana pencere gösterilemedi. Sistem tepsisinden açın.",
-    "focusMain": "Ana pencereye geç",
+    "focusMain": "Ana pencereyi göster",
     "openChat": "Yeni pencerede aç",
     "openChatTooltip": "Sohbeti yeni pencerede aç",
     "openFailed": "Yeni pencere açılamadı. Lütfen yeniden deneyin.",
@@ -6603,7 +6603,7 @@
     "stopping": "Durduruluyor…",
     "waitAnswer": "Yanıtını bekliyor: {{question}}",
     "waitLost": "Burada gösterilemeyen bir yanıt bekleniyor. Devam etmek için çalışmayı durdur.",
-    "waiting": "Onayını bekliyor: {{step}}",
+    "waiting": "Onayın gerekli: {{step}}",
     "working": "Çalışıyor…"
   },
   "safeMode": {
@@ -8286,7 +8286,7 @@
     "notifications": "Bildirimler",
     "notificationsCount": "{{count}} okunmamış bildirim",
     "notificationsCount_one": "{{count}} okunmamış bildirim",
-    "reorderBot": "{{name}} sırasını değiştir (ok tuşları yukarı/aşağı taşır)",
+    "reorderBot": "{{name}} öğesini yukarı veya aşağı taşı",
     "reorderHint": "Satırı sürükle ya da bu tutamaca odaklanıp yukarı/aşağı ok tuşuna bas",
     "reorderMoved": "{{name}} {{pos}}. sıraya taşındı",
     "schedules": "Zamanlanmış görevler",
@@ -8655,9 +8655,9 @@
     "stillRunningBody": "Saatin yanındaki tepside çalışmaya devam ediyor. Açmak, duraklatmak veya kapatmak için tepsi simgesini kullan.",
     "stillRunningTitle": "Praxi-Bot hâlâ çalışıyor",
     "stopAll": "Hepsini durdur",
-    "toggle": "Pencereyi göster / gizle",
+    "toggle": "Pencereyi göster veya gizle",
     "tooltip": "Praxi-Bot",
-    "tooltipNeeds": "Praxi-Bot: {n} öğe seni bekliyor"
+    "tooltipNeeds": "Praxi-Bot — senden bekleyen {n} öğe"
   },
   "updateServer": {
     "available": "Güncelleme var",
@@ -9030,7 +9030,7 @@
       "openSettings": "Ayarları aç",
       "ownerRequired": "Sahip yetkilendirmesi eksik. Bu bilgisayarda Praxi-Bot uygulamasını açıp yerel arka plan hizmetine yeniden bağlanın, ardından tekrar deneyin.",
       "phase": {
-        "approval": "Onayınız bekleniyor",
+        "approval": "Onayın gerekli",
         "failed": "Arama sona erdi",
         "hearing": "Sizi dinliyor…",
         "listening": "Dinliyor",

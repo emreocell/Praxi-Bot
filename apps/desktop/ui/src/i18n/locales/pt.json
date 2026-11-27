@@ -1512,7 +1512,7 @@
         "reviewFull": "Read everything that will be sent"
       },
       "input": {
-        "label": "Exactly what {{name}} will receive",
+        "label": "Full input (check before you allow)",
         "shortened": "Shortened: only the first {{shown}} characters are shown."
       },
       "mail": {

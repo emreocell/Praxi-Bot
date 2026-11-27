@@ -1578,7 +1578,7 @@
         "reviewFull": "Lire tout ce qui sera envoyé"
       },
       "input": {
-        "label": "Exactement ce que {{name}} recevra",
+        "label": "Entrée complète (vérifiez avant d'autoriser)",
         "shortened": "Raccourci : seuls les {{shown}} premiers caractères sont affichés."
       },
       "mail": {
