@@ -188,6 +188,7 @@ pub fn validate_workspaces_root(root: &Path, data_dir: &Path) -> Result<PathBuf,
             "workspaces root resolves inside Praxi's data folder or a credential folder".into(),
         );
     }
+    secure_workspaces_root(&resolved)?;
     crate::files::register_workspaces_root(&resolved);
     Ok(storage::without_verbatim_prefix(resolved))
 }
@@ -288,17 +289,83 @@ fn ensure_plain_child_dir(parent: &Path, child: &Path) -> Result<(), String> {
     }
 }
 
-/// Make one directory that only its creator can use (`0700` on Unix, where a bot's folder and
-/// its standard subfolders are never readable by other accounts, whatever the process umask).
+/// The account this process runs as.
+#[cfg(unix)]
+fn process_uid() -> u32 {
+    rustix::process::geteuid().as_raw()
+}
+
+/// Make one directory that only its creator can use. On Unix the mode is set to exactly `0700`
+/// after the directory exists (the mode given to `mkdir` is masked by the process umask), and the
+/// result must be a plain directory owned by this process's account; anything else is removed
+/// again and refused, so a bot's folder and its standard subfolders are never readable by other
+/// accounts.
 fn create_private_dir(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::DirBuilderExt;
-        fs::DirBuilder::new().mode(0o700).create(path)
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+        fs::DirBuilder::new().mode(0o700).create(path)?;
+        let checked = fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .and_then(|()| fs::symlink_metadata(path))
+            .and_then(|meta| {
+                if !is_link_or_reparse(&meta)
+                    && meta.is_dir()
+                    && meta.uid() == process_uid()
+                    && meta.mode() & 0o777 == 0o700
+                {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::other(
+                        "the new folder is not a private directory owned by this account",
+                    ))
+                }
+            });
+        if checked.is_err() {
+            let _ = fs::remove_dir(path);
+        }
+        checked
     }
     #[cfg(not(unix))]
     {
         fs::create_dir(path)
+    }
+}
+
+/// The workspaces root must be a plain directory owned by this process's account and closed to
+/// every other account (`0700`), or the other accounts could list every bot's folder. A root that
+/// is not ours is refused; one that is ours but open is closed. No-op outside Unix.
+fn secure_workspaces_root(root: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let stat =
+            |p: &Path| fs::symlink_metadata(p).map_err(|e| format!("stat {}: {e}", p.display()));
+        let meta = stat(root)?;
+        if is_link_or_reparse(&meta) || !meta.is_dir() {
+            return Err(format!("{} is not a plain directory", root.display()));
+        }
+        if meta.uid() != process_uid() {
+            return Err(format!(
+                "workspaces root {} is not owned by the account Praxi runs as",
+                root.display()
+            ));
+        }
+        if meta.mode() & 0o777 != 0o700 {
+            fs::set_permissions(root, fs::Permissions::from_mode(0o700))
+                .map_err(|e| format!("close {}: {e}", root.display()))?;
+            if stat(root)?.mode() & 0o777 != 0o700 {
+                return Err(format!(
+                    "workspaces root {} could not be closed to other accounts",
+                    root.display()
+                ));
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = root;
+        Ok(())
     }
 }
 
@@ -627,11 +694,44 @@ mod tests {
             let mode = fs::metadata(&dir).unwrap().mode() & 0o777;
             assert_eq!(mode & 0o077, 0, "{dir:?} is {mode:o}");
         }
+        // Every folder is owned by this account and exactly 0700 (the umask never widens or hides it).
+        let uid = rustix::process::geteuid().as_raw();
+        for dir in [&a, &b] {
+            assert_eq!(fs::metadata(dir).unwrap().uid(), uid);
+            assert_eq!(fs::metadata(dir).unwrap().mode() & 0o777, 0o700, "{dir:?}");
+        }
         // A link standing where a bot's folder would be is refused, not followed.
         let root_real = validate_workspaces_root(&root, &data).unwrap();
         symlink(&a, root_real.join("Evil")).unwrap();
         let err = ensure_bot_workspace_dir(&root, "Evil", &data).unwrap_err();
         assert!(err.contains("not a plain directory"), "{err}");
+    }
+
+    /// An open workspaces root (0755: other accounts could list every bot) is closed to 0700, a
+    /// link is never used as the root, and a root that is a file is refused.
+    #[cfg(unix)]
+    #[test]
+    fn workspaces_root_is_closed_to_other_accounts_and_never_a_link() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("praxi-data");
+        fs::create_dir_all(&data).unwrap();
+        let root = tmp.path().join("praxi-work");
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+        let resolved = validate_workspaces_root(&root, &data).unwrap();
+        let meta = fs::metadata(&resolved).unwrap();
+        assert_eq!(meta.mode() & 0o777, 0o700, "{resolved:?}");
+        assert_eq!(meta.uid(), rustix::process::geteuid().as_raw());
+        // A link as the root is refused (ensure_plain_dir_chain looks at every component).
+        let target = tmp.path().join("elsewhere");
+        fs::create_dir(&target).unwrap();
+        symlink(&target, tmp.path().join("linked-root")).unwrap();
+        assert!(validate_workspaces_root(&tmp.path().join("linked-root"), &data).is_err());
+        // A file in the root's place is refused.
+        let file = tmp.path().join("file-root");
+        fs::write(&file, "x").unwrap();
+        assert!(validate_workspaces_root(&file, &data).is_err());
     }
 
     #[test]

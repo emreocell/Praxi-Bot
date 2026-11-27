@@ -4115,6 +4115,58 @@ async fn a_native_bot_without_a_chosen_folder_gets_its_own_folder_outside_the_da
     );
 }
 
+/// A saved folder that is now a link (swapped after it was chosen) is never kept: the next engine
+/// save without a folder replaces it with the bot's own folder, even when the link target is fine.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_saved_folder_that_became_a_link_is_not_kept() {
+    let t = setup();
+    let root = tempfile::tempdir().unwrap();
+    t.state
+        .set_workspaces_root(Some(root.path().join("praxi-work")));
+    let path = cli_bot_without_engine(&t).await;
+    let bot_id = protocol::BotId(path.rsplit('/').next().unwrap().parse().unwrap());
+    let real = tempfile::tempdir().unwrap();
+    let link = root.path().join("swapped");
+    std::os::unix::fs::symlink(real.path(), &link).unwrap();
+    let (mut bot, version) = t
+        .state
+        .storage()
+        .get_bot_versioned(bot_id)
+        .unwrap()
+        .unwrap();
+    bot.config["engine"] = json!({
+        "mode": "native_tools", "approval_level": "ask", "workspace": link.display().to_string(),
+        "consent": {"native_tools_at_ms": 1}
+    });
+    t.state
+        .storage()
+        .update_bot(bot_id, &bot.name, &bot.config, version)
+        .unwrap();
+    let ok = call(
+        &t,
+        Method::PUT,
+        &format!("{path}/engine"),
+        Some(
+            json!({"mode": "native_tools", "approval_level": "ask", "consent_native_tools": true}),
+        ),
+    )
+    .await;
+    assert_eq!(ok.status, StatusCode::OK, "{:?}", ok.json());
+    let folder = ok.json()["config"]["engine"]["workspace"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(folder, link.display().to_string());
+    let meta = std::fs::symlink_metadata(&folder).unwrap();
+    assert!(meta.is_dir() && !meta.file_type().is_symlink());
+    assert!(
+        std::fs::canonicalize(&folder)
+            .unwrap()
+            .starts_with(std::fs::canonicalize(root.path().join("praxi-work")).unwrap())
+    );
+}
+
 /// A host bot whose coding CLI cannot answer must not stay stuck once the owner picks an API model:
 /// the next message in the same chat runs on the API model, with the engine back to governed.
 #[tokio::test]
@@ -4157,6 +4209,82 @@ async fn an_api_model_picked_after_a_failing_cli_model_answers_the_next_message(
     assert!(
         last["content"].as_str().unwrap().contains("hello again"),
         "{msgs}"
+    );
+}
+
+/// The app applies a Full access bot's engine without a dialog (`full_access_bot`). The daemon
+/// checks the stored permission preset itself, with the runtime's own spelling rule, and the level.
+#[tokio::test]
+async fn the_no_dialog_full_access_switch_needs_a_stored_full_preset() {
+    let t = setup();
+    let root = tempfile::tempdir().unwrap();
+    t.state
+        .set_workspaces_root(Some(root.path().join("praxi-work")));
+    let body = |level: &str| {
+        json!({
+            "mode": "native_tools", "approval_level": level, "consent_native_tools": true,
+            "consent_full_access": level == "full", "full_access_bot": true
+        })
+    };
+    // A bot that is not on Full access: refused with 403, nothing stored, whatever the client claims.
+    let ask = cli_bot_without_engine(&t).await;
+    let refused = call(
+        &t,
+        Method::PUT,
+        &format!("{ask}/engine"),
+        Some(body("full")),
+    )
+    .await;
+    assert_eq!(
+        refused.status,
+        StatusCode::FORBIDDEN,
+        "{:?}",
+        refused.json()
+    );
+    let bot = call(&t, Method::GET, &ask, None).await.json();
+    assert!(
+        bot["config"]["engine"]["mode"].is_null()
+            || bot["config"]["engine"]["mode"] == "praxi_governed"
+    );
+    // A Full bot (the preset is read by the runtime, whose spelling rule is unit-tested in permission-engine).
+    for preset in ["full"] {
+        let profile = format!(
+            "{}\n[permissions]\npreset = \"{preset}\"\n",
+            PROFILE.replace("fake/echo", "cli:claude/sonnet")
+        );
+        let created = call(
+            &t,
+            Method::POST,
+            "/v1/bots",
+            Some(json!({"profile_toml": profile})),
+        )
+        .await;
+        assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.json());
+        let path = format!("/v1/bots/{}", created.json()["id"].as_str().unwrap());
+        // The level must be Full.
+        let wrong = call(
+            &t,
+            Method::PUT,
+            &format!("{path}/engine"),
+            Some(body("ask")),
+        )
+        .await;
+        assert_eq!(wrong.status, StatusCode::UNPROCESSABLE_ENTITY, "{preset:?}");
+        let ok = call(
+            &t,
+            Method::PUT,
+            &format!("{path}/engine"),
+            Some(body("full")),
+        )
+        .await;
+        assert_eq!(ok.status, StatusCode::OK, "{preset:?}: {:?}", ok.json());
+        assert_eq!(ok.json()["config"]["engine"]["approval_level"], "full");
+    }
+    let audit = t.state.storage().list_audit(t.state.user_id()).unwrap();
+    assert!(
+        audit
+            .iter()
+            .any(|a| a.action == "engine.updated" && a.detail["full_access_bot"] == true)
     );
 }
 

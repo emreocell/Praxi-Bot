@@ -3469,6 +3469,7 @@
     "notNow": "Not now",
     "notice": {
       "folder": "Its own tools work in this folder: {{folder}}",
+      "noPreviousModel": "the bot has no current model to go back to",
       "rollbackFailed": "Could not switch to {{model}} ({{reason}}), and the bot could not go back to its old model either. Pick a model again."
     },
     "onlyFull": "{{cli}} cannot ask before changes, so Full access is the only way it works with its own tools.",

@@ -28,6 +28,13 @@ pub enum AutonomyMode {
     Full,
 }
 
+/// The one spelling rule for a stored preset name: edge spaces, case and `_` vs `-` do not matter
+/// (`" Full "` and `approve_destructive` are what the owner meant). The app applies the same rule.
+#[must_use]
+pub fn normalize_preset(preset: &str) -> String {
+    preset.trim().to_ascii_lowercase().replace('_', "-")
+}
+
 impl AutonomyMode {
     /// Mode implied by a stored preset name (`approve-destructive`,
     /// `read-and-draft`, `full`, `read-only`; `_` and `-` are interchangeable).
@@ -35,7 +42,7 @@ impl AutonomyMode {
     /// someone configured by hand never gets a lane it did not choose.
     #[must_use]
     pub fn from_preset(preset: Option<&str>) -> Self {
-        match preset.map(|p| p.replace('_', "-")).as_deref() {
+        match preset.map(normalize_preset).as_deref() {
             Some("full") => Self::Full,
             Some("approve-destructive") => Self::Balanced,
             _ => Self::Ask,
@@ -142,6 +149,23 @@ mod tests {
             AutonomyMode::Balanced
         );
         assert_eq!(AutonomyMode::from_preset(Some("full")), AutonomyMode::Full);
+        // One spelling rule for the daemon and the app: case, edge spaces and `_` do not matter.
+        for spelled in ["Full", " FULL ", "fu_ll"] {
+            let want = if spelled == "fu_ll" {
+                AutonomyMode::Ask
+            } else {
+                AutonomyMode::Full
+            };
+            assert_eq!(
+                AutonomyMode::from_preset(Some(spelled)),
+                want,
+                "{spelled:?}"
+            );
+        }
+        assert_eq!(
+            AutonomyMode::from_preset(Some(" Approve_Destructive\n")),
+            AutonomyMode::Balanced
+        );
         for other in [Some("read-and-draft"), Some("read-only"), Some("x"), None] {
             assert_eq!(AutonomyMode::from_preset(other), AutonomyMode::Ask);
         }

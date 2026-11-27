@@ -913,6 +913,7 @@ dependencies = [
  "process-wrap",
  "protocol",
  "pty-session",
+ "rustix",
  "script-runtime",
  "secret-store",
  "serde",

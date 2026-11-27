@@ -15,10 +15,18 @@ export type EngineStatus =
   | { kind: "auto"; cliId: string; name: string; level: ApprovalLevel }
   | { kind: "consent"; cliId: string; name: string; levels: ApprovalLevel[]; defaultLevel: ApprovalLevel };
 
-/** Whether the bot's permission preset is Full access (`_` and `-` are the same, as in the daemon). */
+/**
+ * One spelling rule for a stored permission preset, the same as the daemon's `normalize_preset`
+ * (`permission-engine`): edge spaces, case and `_` versus `-` do not matter.
+ */
+export function normalizePreset(preset: string): string {
+  return preset.trim().toLowerCase().replace(/_/g, "-");
+}
+
+/** Whether the bot's permission preset is Full access (the daemon decides the same way, and checks it again). */
 export function isFullBot(config: unknown): boolean {
   const preset = (config as { permissions?: { preset?: unknown } } | null | undefined)?.permissions?.preset;
-  return typeof preset === "string" && preset.replace(/_/g, "-") === "full";
+  return typeof preset === "string" && normalizePreset(preset) === "full";
 }
 
 /**
@@ -33,6 +41,8 @@ export function needsEngineCheck(config: unknown): boolean {
 export interface EngineChoice {
   cliId: string;
   level: ApprovalLevel;
+  /** Applied without a dialog because the bot is on Full access; the daemon checks the preset again. */
+  fullAccessBot?: boolean;
 }
 
 /** Why an engine cannot start at all, or `null`. A signed-out CLI is blocked as well: it would fail. */
@@ -105,6 +115,7 @@ export function engineChoiceRequest(choice: EngineChoice) {
     mode: "native_tools",
     approval_level: choice.level,
     consent_native_tools: true,
-    consent_full_access: choice.level === "full"
+    consent_full_access: choice.level === "full",
+    ...(choice.fullAccessBot ? { full_access_bot: true } : {})
   };
 }

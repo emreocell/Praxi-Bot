@@ -51,6 +51,9 @@ uuid.workspace = true
 vision = { path = "../vision", version = "0.1.0" }
 web-tools = { path = "../web-tools", version = "0.1.0" }
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["process", "std"] }
+
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
     "Win32_Foundation",

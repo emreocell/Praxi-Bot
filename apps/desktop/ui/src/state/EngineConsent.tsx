@@ -103,7 +103,7 @@ export function EngineConsentProvider({ children }: { children: ReactNode }) {
       }
       // Full access asks nothing but money: the engine's own tools are allowed at Full, no question.
       if (status.kind === "auto") {
-        return { cliId: status.cliId, level: status.level };
+        return { cliId: status.cliId, level: status.level, fullAccessBot: true };
       }
       return new Promise<EngineAnswer>((resolve) => setPending({ ...status, done: resolve }));
     },

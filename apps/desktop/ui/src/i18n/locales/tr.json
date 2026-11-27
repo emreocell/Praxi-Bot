@@ -3469,6 +3469,7 @@
     "notNow": "Şimdi değil",
     "notice": {
       "folder": "Kendi araçları şu klasörde çalışır: {{folder}}",
+      "noPreviousModel": "botun geri dönebileceği bir modeli yok",
       "rollbackFailed": "{{model}} modeline geçilemedi ({{reason}}) ve bot eski modeline de dönemedi. Bir model daha seç."
     },
     "onlyFull": "{{cli}} değişiklikten önce soramıyor; kendi araçlarıyla çalışmasının tek yolu Tam erişim.",

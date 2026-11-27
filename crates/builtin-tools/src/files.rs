@@ -1653,10 +1653,16 @@ fn cli_home_override(path: &[String]) -> bool {
 /// one), so the engine's own tools cannot reach what Praxi's file tools never may.
 #[must_use]
 pub fn workspace_refusal(dir: &Path, data_dir: &Path) -> Option<&'static str> {
-    let home = std::env::var_os("USERPROFILE")
+    workspace_refusal_with_home(dir, data_dir, service_home().as_deref())
+}
+
+/// The home folder of the account this daemon runs as (`USERPROFILE`, else `HOME`): on the Linux
+/// host that is Praxi's own data folder, on a desktop the person's profile.
+#[must_use]
+pub fn service_home() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from);
-    workspace_refusal_with_home(dir, data_dir, home.as_deref())
+        .map(PathBuf::from)
 }
 
 /// Credential and tool-configuration folders (SSH, cloud, GPG, container, CLI settings).
@@ -1682,7 +1688,9 @@ const CREDENTIAL_DIRS: [&str; 18] = [
     ".docker",
 ];
 
-fn workspace_refusal_with_home(
+/// [`workspace_refusal`] with an explicit home folder (the daemon's real one, or a test layout).
+#[must_use]
+pub fn workspace_refusal_with_home(
     dir: &Path,
     data_dir: &Path,
     home: Option<&Path>,

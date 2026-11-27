@@ -6010,6 +6010,12 @@ export interface components {
             consent_full_access?: boolean;
             /** @description The owner confirms that a CLI runs this bot's file and shell actions. */
             consent_native_tools?: boolean;
+            /**
+             * @description The app applied this engine without a dialog because the bot is on Full access (the owner's
+             *     pick of the engine is the consent). The daemon checks the stored permission preset itself:
+             *     anything but Full is refused (403), and the level must be `full`.
+             */
+            full_access_bot?: boolean;
             /** @description `praxi_governed` (Praxi runs files and shell) or `native_tools` (the CLI does). */
             mode: string;
             /**

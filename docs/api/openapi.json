@@ -21601,6 +21601,10 @@
             "type": "boolean",
             "description": "The owner confirms that a CLI runs this bot's file and shell actions."
           },
+          "full_access_bot": {
+            "type": "boolean",
+            "description": "The app applied this engine without a dialog because the bot is on Full access (the owner's\npick of the engine is the consent). The daemon checks the stored permission preset itself:\nanything but Full is refused (403), and the level must be `full`."
+          },
           "mode": {
             "type": "string",
             "description": "`praxi_governed` (Praxi runs files and shell) or `native_tools` (the CLI does)."

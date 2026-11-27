@@ -107,7 +107,7 @@ import {
   showRouteChip
 } from "../lib/chatLogic";
 import { lastTurn, offersRegenerate, supersededGroups, supersededRunIds, type SupersededGroup } from "../lib/resendTurn";
-import { RollbackFailedError, botWriteMessage, writeBotProfile, writeThenApply } from "../lib/botWrite";
+import { NoPreviousModelError, RollbackFailedError, botWriteMessage, switchExecutor } from "../lib/botWrite";
 import { splitMentions } from "../lib/mentionText";
 import { saveChatExport } from "../lib/chatHistory";
 import { dayHeader, type MessageTimes } from "../lib/messageTime";
@@ -339,8 +339,10 @@ export function ChatView({
       return;
     }
     try {
+      // The bot as the daemon has it now: the consent and the rollback both start from it, never from a stale list entry.
+      const fresh = await client.getBot(bot.id);
       // A CLI that only works with its own tools: the one consent step, here, before saving.
-      const answer = await askEngine(ref, bot.config);
+      const answer = await askEngine(ref, fresh.config);
       if (answer === null) {
         return;
       }
@@ -350,15 +352,15 @@ export function ChatView({
         return { name: current.name, config: configFromDraft(draft, current) };
       };
       // If the engine step fails, the bot goes back to the model it had: never left on one that cannot answer.
-      const previous = view?.executor ?? "";
-      await writeThenApply(
-        () => writeBotProfile(client, bot, setExecutor(ref)),
-        (saved) => applyEngine(saved.id, answer),
-        (saved) => (previous ? writeBotProfile(client, saved, setExecutor(previous)) : Promise.resolve())
-      );
+      await switchExecutor({ client, fresh, ref, setExecutor, apply: (saved) => applyEngine(saved.id, answer) });
       await refreshBots();
       toast.show(t("modelPicker.switched", { model: ref }), "success");
     } catch (e) {
+      if (e instanceof NoPreviousModelError) {
+        // Nothing was changed: without a current model a failed switch could not be put back.
+        toast.show(t("engineConsent.notice.rollbackFailed", { model: ref, reason: t("engineConsent.notice.noPreviousModel") }), "danger", { durationMs: 15000 });
+        return;
+      }
       if (e instanceof RollbackFailedError) {
         // The bot is still on the model it could not use: say so, and show what is really saved.
         await refreshBots().catch(() => {});

@@ -89,8 +89,8 @@ pub use control::{
 };
 pub use desktop::{DesktopSettings, SharedOcr, default_ocr, ocr_from_dir, resolve_input_target};
 pub use files::{
-    FileGate, OptionalTools, VettedFile, try_with_exclusive_file_access, with_checkpoint_access,
-    workspace_refusal,
+    FileGate, OptionalTools, VettedFile, service_home, try_with_exclusive_file_access,
+    with_checkpoint_access, workspace_refusal, workspace_refusal_with_home,
 };
 pub use fill_secret::{SECRETS_LIST, secrets_list_tool};
 pub use handover::{

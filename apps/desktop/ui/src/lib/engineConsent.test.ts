@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { CliEngineDto } from "../api/types.ts";
 import { DEFAULT_ENGINE, type EngineState } from "./botEngine.ts";
 import { configFromDraft, draftFromBot, parseModelRef } from "./botProfile.ts";
-import { botEngineStatus, engineChoiceRequest, engineStatus, isFullBot, needsEngineCheck } from "./engineConsent.ts";
+import { botEngineStatus, engineChoiceRequest, engineStatus, isFullBot, needsEngineCheck, normalizePreset } from "./engineConsent.ts";
 
 function engine(id: string, over: { runnable?: boolean; installed?: boolean; auth?: string; levels?: string[] }): CliEngineDto {
   return {
@@ -147,4 +147,27 @@ test("Full access never switches on an engine that cannot start: not installed, 
   }
   // Only a working engine is switched on.
   assert.equal(botEngineStatus(fullBot, [engine("agy", { levels })]).kind, "auto");
+});
+
+test("the preset spelling rule is the daemon's: case, edge spaces and underscores do not matter", () => {
+  const bot = (preset: string) => ({ permissions: { preset } });
+  for (const spelled of ["full", "Full", " FULL ", "\tfull\n"]) {
+    assert.equal(isFullBot(bot(spelled)), true, JSON.stringify(spelled));
+  }
+  for (const spelled of ["fu_ll", "full access", "approve_destructive", "", "read-only"]) {
+    assert.equal(isFullBot(bot(spelled)), false, JSON.stringify(spelled));
+  }
+  assert.equal(normalizePreset(" Approve_Destructive "), "approve-destructive");
+});
+
+test("only the no-dialog Full access pick tells the daemon so; the dialog's own answer never does", () => {
+  assert.deepEqual(engineChoiceRequest({ cliId: "agy", level: "full", fullAccessBot: true }), {
+    mode: "native_tools",
+    approval_level: "full",
+    consent_native_tools: true,
+    consent_full_access: true,
+    full_access_bot: true
+  });
+  assert.equal("full_access_bot" in engineChoiceRequest({ cliId: "agy", level: "full" }), false);
+  assert.equal("full_access_bot" in engineChoiceRequest({ cliId: "agy", level: "ask" }), false);
 });

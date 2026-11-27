@@ -72,6 +72,45 @@ export async function writeThenApply(
   return saved;
 }
 
+/** The bot has no current model, so a failed switch could not be put back: nothing was changed. */
+export class NoPreviousModelError extends Error {
+  constructor() {
+    super("the bot has no current model to go back to");
+    this.name = "NoPreviousModelError";
+  }
+}
+
+/** The model a bot answers with now (`models.executor`), or `null` when it has none. */
+export function previousExecutor(bot: Pick<Bot, "config">): string | null {
+  const executor = (bot.config as { models?: { executor?: unknown } } | null | undefined)?.models?.executor;
+  return typeof executor === "string" && executor.trim() !== "" ? executor : null;
+}
+
+/**
+ * Switch a bot's model and run the engine step after it. `fresh` is the bot as the daemon has it
+ * now (never a list entry that may be stale). Without a current model nothing is written and
+ * `NoPreviousModelError` is thrown; otherwise a failed engine step puts that model back
+ * (`writeThenApply`), and the old model is never replaced by a no-op undo.
+ */
+export async function switchExecutor(args: {
+  client: Pick<ApiClient, "getBot" | "updateBot">;
+  fresh: Bot;
+  ref: string;
+  setExecutor: (executor: string) => (current: Bot) => BotInput;
+  apply: (saved: Bot) => Promise<void>;
+}): Promise<Bot> {
+  const { client, fresh, ref, setExecutor, apply } = args;
+  const previous = previousExecutor(fresh);
+  if (previous === null) {
+    throw new NoPreviousModelError();
+  }
+  return writeThenApply(
+    () => writeBotProfile(client, fresh, setExecutor(ref)),
+    apply,
+    (saved) => writeBotProfile(client, saved, setExecutor(previous))
+  );
+}
+
 /** Human sentence for a failed bot write: never the daemon's raw version message. */
 export function botWriteMessage(e: unknown, t: (key: string) => string): string {
   if (isVersionError(e)) return t("bots.writeConflict");
