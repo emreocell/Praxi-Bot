@@ -45,12 +45,12 @@ action counts as **Changes things**.
 | **Deletes** | Deletes, removes or revokes something. | Follows the bot's access level, like the row above. |
 | **Moves money** | Pays, charges, buys, subscribes, transfers or refunds. | Always asks, on every level, Full included. No "always allow" covers it. |
 
-On Full, a write or delete runs without a card when you started the run
-yourself (typed in the app, or a Full-level mission). A run started by a
-schedule, a webhook, a channel message or another bot still asks. Before
-Full, a bot that has read untrusted content (a web page, a mail) is also asked
-before a write, delete or payment that would send data out; that check does not
-apply to reads.
+On Full, a write or delete runs without a card, in the same runs the Full
+level covers everywhere else (see "Full access: asks only before spending
+money" in [Chatting and approvals](chatting-and-approvals.md)). Before Full, a
+bot that has read untrusted content (a web page, a mail) is also asked before a
+write, delete or payment that would send data out; that check does not apply to
+reads.
 Names with a charge or payment word that only look something up, such as
 `list charges`, stay **Read only**. A name that mixes a lookup with a payment
 verb, such as `get and pay`, counts as **Moves money**.

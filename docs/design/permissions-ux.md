@@ -135,9 +135,8 @@ any other class itself) and `apps_run_action` (`always_ask_for` is true for mone
 that was never discovered). A call that nobody was asked about is refused when the action is money
 or riskier than the tool was registered for, so a catalogue change cannot turn a read into an
 unasked write. Writes, deletes and money keep the full content class, so the egress gate for runs
-that read untrusted content still asks for them below Full. On Full, `full_mode_waives` lets an
-owner-started run (or a Full mission) run a non-money app action without a card
-(`mode.full.owner_app_action`); a subagent, helper, schedule, webhook or channel run never gets
-that waiver, and money is decided before it (category floor + `always_ask`). A read is declared as not sending data out (it
+that read untrusted content still asks for them below Full. On Full the ordinary Full lane (`full_lane_allows`) lets a non-money app action run without a card,
+because none of these tools is always-ask any more; money is decided before it (category floor +
+`always_ask`, plus the connector payment check in `money.rs`, which can only add money). A read is declared as not sending data out (it
 carries only its arguments to the app the owner connected), so that gate does not ask for it; what
 it returns still taints the run.

@@ -44,10 +44,9 @@ emin olamazsa işlem **Değişiklik yapar** sayılır.
 | **Siler** | Bir şeyi siler, kaldırır ya da iptal eder. | Botun erişim düzeyine bağlıdır, üstteki satır gibi. |
 | **Para hareketi yapar** | Ödeme yapar, çeker, satın alır, abone olur, para aktarır ya da iade eder. | Her düzeyde, Tam erişim dahil, her zaman sorar. Hiçbir "her zaman izin ver" bunu kapsamaz. |
 
-Tam erişimde bir değişiklik ya da silme, çalıştırmayı sen başlattıysan (uygulamada
-yazdıysan ya da Tam erişimli bir görev oturumuysa) kart çıkmadan çalışır.
-Zamanlanmış bir görev, webhook, kanal mesajı ya da başka bir bot başlattıysa
-yine sorar. Tam erişim dışında, güvenilmeyen içerik (bir web sayfası, bir
+Tam erişimde bir değişiklik ya da silme kart çıkmadan çalışır; bu, Tam erişimin
+her yerde kapsadığı çalıştırmalar için geçerlidir (bkz. "Tam erişim" bölümü,
+Sohbet ve onaylar). Tam erişim dışında, güvenilmeyen içerik (bir web sayfası, bir
 e-posta) okumuş bir bot, veri gönderebilecek bir değişiklik, silme ya da
 ödemeden önce ayrıca sorulur; bu denetim okumalar için uygulanmaz.
 Yalnızca bilgi arayan `list charges` gibi adlar **Sadece okur** kalır;

@@ -270,7 +270,7 @@ async fn composio_payment_asks_for_all_policies_grants_and_callers() {
 /// Run one model call of `name` and say whether a card came up first. A card is
 /// approved once; the run must then succeed and send exactly one request.
 /// `owner_full`: the bot is on the Full level and the owner typed the message in the app
-/// (otherwise the run is a plain turn on the given policy).
+/// (otherwise the run is a plain turn on the given policy). The Full lane is on, as in production.
 async fn card_for(policy: Policy, owner_full: bool, name: &str, args: Value) -> bool {
     let env = setup();
     let (registry, server) = connected_registry(&env).await;
@@ -284,7 +284,7 @@ async fn card_for(policy: Policy, owner_full: bool, name: &str, args: Value) -> 
         env.storage.clone(),
         registry,
         Providers::single(fake as Arc<dyn ChatProvider>),
-        cfg(policy),
+        lane_cfg(policy),
     );
     lp.add_profile(
         env.bot,

@@ -73,8 +73,6 @@ const FULL_BROWSE_REASON: &str = "mode.full.owner_browse";
 
 /// Audit reason code of a `browser_upload` the Full level let through.
 const FULL_UPLOAD_REASON: &str = "mode.full.owner_upload";
-/// Audit reason when the Full level lets a connected-app write or delete run.
-const FULL_APP_REASON: &str = "mode.full.owner_app_action";
 
 /// The one call that hands a FILE of this computer to a page. It has its own, narrower Full-level
 /// rule ([`Shared::full_upload_waives`]) and is not in [`FULL_BROWSER_CALLS`].
@@ -118,11 +116,6 @@ pub(crate) const FULL_WEB_READ_CALLS: [&str; 6] = [
     "web_sitemap",
     "web_metadata",
 ];
-
-/// A direct tool or generic tool of a connected app (Composio).
-fn is_app_action(name: &str) -> bool {
-    name.starts_with("app:") || name == "apps_run_action"
-}
 
 /// A shell command of this many characters or more is a payload, not a command: it asks after
 /// a page read.
@@ -855,8 +848,6 @@ impl Shared {
                 if self.full_mode_waives(ctx, name, input) {
                     let reason = if name == FULL_UPLOAD_CALL {
                         FULL_UPLOAD_REASON
-                    } else if is_app_action(name) {
-                        FULL_APP_REASON
                     } else {
                         FULL_BROWSE_REASON
                     };
@@ -1526,15 +1517,6 @@ impl Shared {
     fn full_mode_waives(&self, ctx: &RunCtx, name: &str, input: &Value) -> bool {
         if name == "shell_run" {
             return self.full_shell_waives(ctx, input);
-        }
-        // A connected-app action (Composio): on Full nothing asks but money. Money never gets
-        // here (its category floor and `always_ask` decide before this), and the tool's own
-        // class check refuses a call nobody was asked about when it is riskier than registered.
-        if is_app_action(name) {
-            return ctx.profile.permissions.mode() == AutonomyMode::Full
-                && ctx.parent_run_id.is_none()
-                && ctx.delegation().is_none()
-                && self.full_waivers_apply(ctx);
         }
         // A subagent (and a helper bot another bot called) keeps the old rule: it never inherits
         // the owner's Full autonomy from the run that started it.
