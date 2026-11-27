@@ -682,6 +682,7 @@ pub(crate) enum Verdict {
     },
     /// The owner's submit route stored the value of a `secret_request` (never carries it).
     SecretStored,
+    Elicitation(tool_registry::elicitation::Decision),
     /// The owner finished a `browser_handover` (a code was typed into the page, or
     /// the CAPTCHA was solved and the page moved on). Carries nothing.
     HandoverDone,
@@ -766,6 +767,8 @@ pub(crate) enum PendingKind {
     Question,
     /// A credential request.
     Secret,
+    /// An owner-only MCP form.
+    Elicitation,
     /// A CAPTCHA or one-time-code handover (`browser_handover`).
     Handover,
 }
@@ -856,6 +859,7 @@ pub(crate) struct CtxState {
     pub todos: Vec<TodoItem>,
     /// `secret_request` calls this run has made (asked or refused after the card tests).
     pub secret_requests: u32,
+    pub elicitations: u32,
     /// `browser_handover` calls this run has made (asked or refused).
     pub handovers: u32,
 }
@@ -1184,6 +1188,7 @@ pub(crate) struct Shared {
     pub pending: Mutex<HashMap<ToolCallId, Pending>>,
     /// `secret_request` calls waiting for the owner's form (see `approval.rs`).
     pub secret_requests: Mutex<HashMap<ToolCallId, SecretRequestInfo>>,
+    pub elicitations: Mutex<HashMap<ToolCallId, Vec<protocol::elicitation::ElicitationField>>>,
     /// `browser_handover` calls waiting for the owner (see `approval.rs`).
     pub handovers: Mutex<HashMap<ToolCallId, HandoverInfo>>,
     pub grants: Mutex<Grants>,
@@ -2342,6 +2347,7 @@ impl Shared {
                 seq,
                 todos: Vec::new(),
                 secret_requests: 0,
+                elicitations: 0,
                 handovers: 0,
             }),
             taint: Mutex::new(taint),
@@ -2912,6 +2918,9 @@ fn needs_barrier(event: &Event) -> bool {
             | Event::ToolCallDenied(_)
             | Event::QuestionAsked(_)
             | Event::SecretRequested(_)
+            | Event::ElicitationRequested(_)
+            | Event::ElicitationClosed(_)
+            | Event::ElicitationLink(_)
             | Event::HandoverRequested(_)
             | Event::ControlRequested(_)
             | Event::SubagentStarted(_)

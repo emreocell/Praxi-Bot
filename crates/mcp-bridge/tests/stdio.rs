@@ -1213,3 +1213,76 @@ async fn an_http_server_that_wants_oauth_gives_an_actionable_error_and_is_not_re
     endpoint.abort();
     mgr.shutdown().await;
 }
+
+#[tokio::test]
+async fn elicitation_answers_only_the_server_and_suppresses_its_echo() {
+    use tool_registry::elicitation::{Decision, ElicitationHandler};
+    use tracing::instrument::WithSubscriber as _;
+
+    for mode in ["elicitation-legacy", "elicitation"] {
+        let captured = capture::Capture::default();
+        async {
+            let reg = ToolRegistry::new();
+            let manager = McpManager::with_policy(reg.clone(), fast_policy(3));
+            let mut cfg = config("forms");
+            if let McpTransport::Stdio { env, .. } = &mut cfg.transport {
+                env.insert("MCP_TEST_MODE".into(), mode.into());
+            }
+            manager.add_server(cfg).await.unwrap();
+            let tool = reg.get("mcp:forms/elicit").unwrap();
+            for action in ["decline", "cancel", "accept"] {
+                let handler = ElicitationHandler::new(move |form| async move {
+                    assert_eq!(form.server, "forms");
+                    assert_eq!(form.fields.len(), 2);
+                    assert!(
+                        form.fields
+                            .iter()
+                            .any(|f| f.name == "password" && f.blocked)
+                    );
+                    assert!(!format!("{:?}", form.fields).contains("default-from-server"));
+                    match action {
+                        "accept" => Decision::Accept(
+                            [("region".into(), json!("elicitation-canary-9413"))]
+                                .into_iter()
+                                .collect(),
+                        ),
+                        "decline" => Decision::Decline,
+                        _ => Decision::Cancel,
+                    }
+                });
+                let ctx = ToolContext {
+                    elicitation: Some(handler),
+                    ..ToolContext::default()
+                };
+                let result = tool.call(&ctx, json!({"expect": action})).await.unwrap();
+                let text = text_of(&result.content);
+                assert!(text.contains(match action {
+                    "accept" => "answered",
+                    "decline" => "declined",
+                    _ => "cancelled",
+                }));
+                assert!(
+                    !serde_json::to_string(&result)
+                        .unwrap()
+                        .contains("elicitation-canary-9413")
+                );
+            }
+            assert!(
+                !manager
+                    .stderr_tail("forms")
+                    .join("\n")
+                    .contains("elicitation-canary-9413")
+            );
+            manager.remove_server("forms").await.unwrap();
+        }
+        .with_subscriber(captured.clone())
+        .await;
+        assert!(
+            !captured
+                .0
+                .lock()
+                .unwrap()
+                .contains("elicitation-canary-9413")
+        );
+    }
+}

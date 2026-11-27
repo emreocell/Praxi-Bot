@@ -32,6 +32,7 @@ pub mod control;
 pub mod doctor;
 mod doctor_routes;
 pub mod dto;
+mod elicitation_routes;
 pub mod email;
 mod email_bot_tools;
 pub mod email_channel;
@@ -2104,6 +2105,15 @@ fn api_routes() -> Router<AppState> {
         .route(
             "/v1/secret-requests/{call_id}/cancel",
             post(secret_request_routes::cancel_secret_request),
+        )
+        .route(
+            "/v1/elicitations/{call_id}",
+            post(elicitation_routes::decide_elicitation)
+                .layer(axum::extract::DefaultBodyLimit::max(80 * 1024)),
+        )
+        .route(
+            "/v1/elicitations/{call_id}/cancel",
+            post(elicitation_routes::cancel_elicitation),
         )
         .route(
             "/v1/handovers/{call_id}/code",

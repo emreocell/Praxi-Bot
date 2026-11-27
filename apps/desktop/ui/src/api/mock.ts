@@ -1658,6 +1658,7 @@ export class MockApiClient extends ApiClient {
       return ok(this.missions.get(id));
     }
     if (seg[0] === "knowledge" && seg[1] === "folders" && method === "GET") return ok(mockFolderListing(String(opts.query?.path ?? "")));
+    if (seg[0] === "elicitations" && seg[1] === "mock-elicitation" && method === "POST") return ok(undefined);
     if (seg[0] === "bots" && seg[2] === "knowledge" && seg[3] === "folder-preview" && method === "POST") return ok(mockFolderPreview((opts.body as { path: string }).path));
     if (seg[0] === "bots" && seg[2] === "incoming-webhooks") {
       return ok(this.incomingWebhookRoute(method, seg, opts.body));
@@ -3808,7 +3809,7 @@ function mockMissionChat(ended: boolean, tr: boolean): Message[] {
 function mockLiveRunId(): string | null {
   if (typeof window === "undefined") return null;
   const screen = new URLSearchParams(window.location.search).get("screen");
-  return screen === "working" || screen === "mission" || screen === "approval" || screen === "approval-site" || screen === "subagents" || screen === "notifications" ? "mock-live" : null;
+  return screen === "elicitation" || screen === "needs-elicitation" || screen === "working" || screen === "mission" || screen === "approval" || screen === "approval-site" || screen === "subagents" || screen === "notifications" ? "mock-live" : null;
 }
 
 /** Review-state events for `?mock=1&screen=...` (approval, streaming, default run). */
@@ -3816,6 +3817,37 @@ export function mockReviewEvents(): { ts_ms: number; event: GlobalEnvelope["even
   const out: { ts_ms: number; event: GlobalEnvelope["event"] }[] = [];
   const screen = new URLSearchParams(window.location.search).get("screen");
   if (screen === "long-chat") return longChatEvents();
+  if (screen === "elicitation" || screen === "needs-elicitation") {
+    const tr = new URLSearchParams(window.location.search).get("lang") === "tr";
+    const run_id = "mock-live";
+    const ts_ms = Date.now();
+    const base = {
+      description: null, required: false, blocked: false,
+      min_length: null, max_length: null, minimum: null, maximum: null,
+      format: null, options: []
+    };
+    return [
+      { ts_ms, event: { type: "run_started", run_id, chat_id: CHAT_ID, bot_id: ATLAS } },
+      { ts_ms, event: {
+        type: "elicitation_requested", run_id, call_id: "mock-elicitation", expires_in_secs: 600,
+        server: "calendar",
+        message: tr ? "Takvimi hazırlamak için bu bilgilere ihtiyacım var." : "I need these details to prepare the calendar.",
+        fields: [
+          { ...base, kind: "string", name: "title", label: tr ? "Etkinlik adı" : "Event name", required: true },
+          { ...base, kind: "integer", name: "days", label: tr ? "Kaç gün?" : "Number of days", minimum: 1, maximum: 7 },
+          { ...base, kind: "boolean", name: "reminder", label: tr ? "Hatırlatıcı ekle" : "Add a reminder" },
+          {
+            ...base, kind: "enum", name: "calendar", label: tr ? "Takvim" : "Calendar",
+            options: [
+              { value: "personal", label: tr ? "Kişisel" : "Personal" },
+              { value: "work", label: tr ? "İş" : "Work" }
+            ]
+          },
+          { ...base, kind: "string", name: "blocked", label: tr ? "API anahtarı" : "API key", blocked: true }
+        ]
+      } }
+    ];
+  }
   if (screen === "approval" || screen === "approval-site" || screen?.startsWith("approval-schedule") || screen === "streaming" || screen === "working" || screen === "mission" || screen === "subagents" || screen === "notifications") {
     const bot_id = "11111111-1111-4111-8111-111111111111";
     const chat_id = "33333333-3333-4333-8333-333333333333";

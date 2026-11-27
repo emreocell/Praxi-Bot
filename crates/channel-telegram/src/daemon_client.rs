@@ -628,7 +628,8 @@ impl DaemonClient for HttpDaemonClient {
         let mut rb = self
             .http
             .get(format!("{}/v1/events?run_id={}", self.base_url, run_id.0))
-            .bearer_auth(self.token.expose());
+            .bearer_auth(self.token.expose())
+            .header("x-praxi-message-source", self.message_source);
         // Approval cards need the manager's stream (owner key), see daemon-api sse.
         if let Some(key) = &self.owner_key {
             rb = rb.header("x-praxi-owner-key", key.expose());

@@ -34,6 +34,7 @@ mod composio;
 mod connection_test;
 mod connectivity;
 mod doctor;
+mod elicitation_routes;
 mod email;
 mod email_channel;
 mod embeddings;

@@ -490,7 +490,7 @@ function AppShell({ deepLinks }: { deepLinks: ReturnType<typeof createDeepLinkDi
         if (screen === "bot" || screen === "gone") setRoute({ kind: "bot", botId: screen === "gone" ? "00000000-0000-4000-8000-000000000000" : atlas });
         if (screen === "schedules") setRoute({ kind: "schedules" });
         if (screen === "myBots") setRoute({ kind: "myBots" });
-        if (screen === "needs") setRoute({ kind: "needs" });
+        if (screen === "needs" || screen === "needs-elicitation") setRoute({ kind: "needs" });
         if (screen === "notifications" || screen === "notifications-empty") setRoute({ kind: "notifications" });
         if (screen === "home" || screen === "offline" || screen === "nobots") setRoute({ kind: "home" });
       }

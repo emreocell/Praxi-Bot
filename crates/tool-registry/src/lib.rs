@@ -4,6 +4,7 @@
 //! and exposes a find-tool interface that narrows the visible set for each agent turn.
 
 pub mod browser_mcp;
+pub mod elicitation;
 pub mod error;
 pub mod payment;
 pub mod registry;

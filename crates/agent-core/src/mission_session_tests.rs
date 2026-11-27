@@ -787,6 +787,48 @@ async fn a_mission_form_expires_by_itself_and_leaves_the_item_parked() {
     );
 }
 
+#[tokio::test]
+async fn elicitation_parks_the_active_mission_item_without_opening_a_form() {
+    use crate::tests::elicitation::{NAME, register_form};
+
+    let w = world(&["a.example", "b.example"]);
+    let fake = Fake::new(vec![
+        calls(&[(
+            "c0",
+            "mission_item",
+            json!({"key": "a.example", "status": "doing"}),
+        )]),
+        calls(&[("c1", NAME, json!({}))]),
+        text("I continued with the other item."),
+    ]);
+    let lp = lp_with(&w, &fake, |_| {});
+    let answers = register_form(&lp);
+    let run = lp
+        .run_mission_session(w.env.chat, &w.mission, "brief")
+        .unwrap();
+    assert_eq!(lp.wait(run).await.unwrap(), RunState::Succeeded);
+    assert_eq!(*answers.lock(), ["parked"]);
+    let blocked = w
+        .store
+        .items(&w.mission, Some(ItemStatus::Blocked))
+        .unwrap();
+    assert_eq!(blocked.len(), 1);
+    assert_eq!(blocked[0].key, "a.example");
+    assert!(
+        blocked[0]
+            .blocked_reason
+            .as_deref()
+            .unwrap()
+            .contains("calendar")
+    );
+    let journal = storage::read_event_log(w.env.storage.data_dir(), run).unwrap();
+    assert!(
+        journal
+            .iter()
+            .all(|item| !matches!(item.event, protocol::Event::ElicitationRequested(_)))
+    );
+}
+
 /// A `browser_handover` whose card asks the owner for a 2FA code.
 struct CodeTool(ToolSpec);
 

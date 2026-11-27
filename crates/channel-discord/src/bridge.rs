@@ -335,9 +335,7 @@ impl DiscordChannel {
             let channel = rest.create_dm(&user).await?;
             let language = self.inner.lang();
             let notice = Msg::SecretRequestNotice.render(language);
-            let locale = if language.code() == "tr" { "tr/" } else { "" };
-            let launcher = channel_api::DESKTOP_CHAT_LAUNCHER;
-            let link = format!("{launcher}{locale}open/#{chat}");
+            let link = channel_api::desktop_chat_link(chat, language.code());
             rest.create_message(&channel, &format!("{notice}\n<{link}>"), None)
                 .await
         }
@@ -1111,6 +1109,10 @@ impl Inner {
             match env.event {
                 Event::MessageDelta(d) if !is_child => answer.push_str(&d.text),
                 Event::ApprovalNeeded(a) => self.send_approval(chat, a).await,
+                Event::ElicitationLink(link) => {
+                    let url = channel_api::desktop_chat_link(link.chat_id, lang.code());
+                    self.say(chat, &url).await;
+                }
                 Event::QuestionAsked(q) => self.send_question(chat, q).await,
                 Event::Error(e) if !is_child => {
                     self.say(chat, &Msg::RunError(&e.message).render(lang))

@@ -52,6 +52,7 @@ mod client;
 mod config;
 mod diagnostics;
 mod discovery;
+mod elicitation;
 mod error;
 mod manager;
 pub mod mcpb;

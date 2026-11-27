@@ -569,7 +569,7 @@ function useDaemonData(conn: Connection | null, computerId: string, protocol?: H
     let next = Infinity;
     for (const run of Object.values(events.runs)) {
       for (const i of run.items) {
-        if ((i.kind === "secret" || i.kind === "handover") && i.outcome === undefined && !i.closed && i.expiresMs > now) {
+        if (((i.kind === "secret" || i.kind === "handover") && i.outcome === undefined || i.kind === "elicitation") && !i.closed && i.expiresMs > now) {
           next = Math.min(next, i.expiresMs);
         }
       }

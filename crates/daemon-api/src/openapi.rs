@@ -54,7 +54,6 @@ use crate::peer;
 use crate::profile_share;
 use crate::profile_share_routes;
 use crate::routes;
-use crate::secret_request_routes;
 use crate::site_rule_routes;
 use crate::skill_draft;
 use crate::skill_hub;
@@ -72,6 +71,7 @@ use crate::voice_routes;
 use crate::web;
 use crate::web_routes;
 use crate::workspace_routes;
+use crate::{elicitation_routes, secret_request_routes};
 
 struct Security;
 
@@ -199,6 +199,8 @@ impl Modify for Security {
         handover_routes::submit_handover_code,
         secret_request_routes::cancel_secret_request,
         secret_request_routes::submit_secret_request,
+        elicitation_routes::decide_elicitation,
+        elicitation_routes::cancel_elicitation,
         host::activate,
         host::invite,
         host::revoke,
@@ -664,6 +666,7 @@ impl Modify for Security {
         handover_routes::SubmitHandoverCode,
         secret_request_routes::SecretRequestAnswer,
         secret_request_routes::SubmitSecretRequest,
+        elicitation_routes::ElicitationDecision,
         host::ActivateInput,
         host::HostAdminInput,
         host::HostConfig,

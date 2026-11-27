@@ -2208,6 +2208,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/elicitations/{call_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["decide_elicitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/elicitations/{call_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel_elicitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/email/accounts": {
         parameters: {
             query?: never;
@@ -7446,6 +7478,16 @@ export interface components {
             profile: components["schemas"]["Profile"];
             /** Format: int32 */
             quality: number;
+        };
+        ElicitationDecision: {
+            /** @enum {string} */
+            action: "accept";
+            content: {
+                [key: string]: unknown;
+            };
+        } | {
+            /** @enum {string} */
+            action: "decline";
         };
         /** @description A configured account (`GET /v1/email/accounts`): the non-secret fields only. */
         EmailAccountDto: {
@@ -18723,6 +18765,92 @@ export interface operations {
             };
             /** @description safe redaction unavailable or the report did not finish in time */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    decide_elicitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The MCP form ID */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ElicitationDecision"];
+            };
+        };
+        responses: {
+            /** @description Decision delivered */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    cancel_elicitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The MCP form ID */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Form cancelled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

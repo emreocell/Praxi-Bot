@@ -21,7 +21,7 @@ use rmcp::{
     service::{Peer, ServiceError},
 };
 use secret_store::SecretStore;
-use tool_registry::{Tool, ToolRegistry};
+use tool_registry::{Tool, ToolError, ToolOutput, ToolRegistry, elicitation::ElicitationHandler};
 
 use crate::pins::{MemoryPinStore, PinStore, ToolChange, change_of, new_tool_change, pin_of};
 use crate::{
@@ -29,6 +29,7 @@ use crate::{
     config::{McpServerConfig, McpTransport, ToolFilter},
     diagnostics::StderrLog,
     discovery::discover,
+    elicitation::{Call, Outcome},
     error::{McpError, McpErrorKind, Result},
     roots::{PathGuard, canonicalize_filesystem_args},
     session::Session,
@@ -511,40 +512,68 @@ impl Server {
         }
     }
 
-    /// Call a remote tool by its server-side name.
-    pub(crate) async fn call(
+    pub(crate) async fn call_for_bot(
         &self,
         remote_name: &str,
         arguments: Option<JsonObject>,
-    ) -> Result<CallToolResult> {
-        self.until_retired(self.call_inner(remote_name, arguments))
-            .await
+        handler: Option<ElicitationHandler>,
+    ) -> std::result::Result<ToolOutput, ToolError> {
+        let call = Arc::new(Call::new(handler));
+        let result = self.call(remote_name, arguments, &call).await;
+        // An untrusted server can echo the answer in any content part, tool
+        // error or spill. The model receives only the host's decision summary.
+        if call.requested.load(Ordering::Acquire) {
+            let outcome = call.outcome.lock().take().unwrap_or(Outcome::Cancelled);
+            let message = outcome.message(self.id());
+            return match result {
+                Ok(response) if response.is_error != Some(true) => Ok(ToolOutput::text(message)),
+                _ => Err(ToolError::Execution(format!(
+                    "{message} The MCP tool did not complete successfully."
+                ))),
+            };
+        }
+        crate::tool::into_output(result.map_err(|e| ToolError::Execution(e.to_string()))?)
     }
 
-    async fn call_inner(
+    async fn call(
         &self,
         remote_name: &str,
         arguments: Option<JsonObject>,
+        call: &Arc<Call>,
     ) -> Result<CallToolResult> {
         let mut params = CallToolRequestParams::new(remote_name.to_owned());
         params.arguments = arguments;
-        self.request_inner(|peer| async move { peer.call_tool(params).await })
-            .await
+        self.until_retired(self.request_inner(
+            |session| {
+                let call = Arc::clone(call);
+                async move { session.client.call_tool(session.peer(), params, call).await }
+            },
+            Some(call),
+        ))
+        .await
     }
 
-    /// Run one request on the live session with the call timeout and the
-    /// failure accounting of a tool call.
+    /// Run one request on the live session with tool-call failure accounting.
     pub(crate) async fn request<T, F, Fut>(&self, run: F) -> Result<T>
     where
         F: FnOnce(Peer<RoleClient>) -> Fut + Clone,
         Fut: std::future::Future<Output = std::result::Result<T, ServiceError>>,
     {
-        self.until_retired(self.request_inner(run)).await
+        self.until_retired(self.request_inner(
+            |session| async move {
+                // A concurrent resource or prompt request makes a legacy
+                // server-initiated form ambiguous too.
+                let _lease = session.client.calls.enter(Arc::new(Call::new(None)));
+                run(session.peer().clone()).await
+            },
+            None,
+        ))
+        .await
     }
 
-    async fn request_inner<T, F, Fut>(&self, run: F) -> Result<T>
+    async fn request_inner<T, F, Fut>(&self, run: F, call: Option<&Call>) -> Result<T>
     where
-        F: FnOnce(Peer<RoleClient>) -> Fut + Clone,
+        F: FnOnce(Arc<Session>) -> Fut + Clone,
         Fut: std::future::Future<Output = std::result::Result<T, ServiceError>>,
     {
         let mut retried_auth = false;
@@ -554,25 +583,27 @@ impl Server {
             let id = self.config.id.clone();
             // Dropping the request future (this timeout, or the caller's own
             // cancellation) makes rmcp send `notifications/cancelled` for it.
-            let outcome = tokio::time::timeout(
-                self.policy.call_timeout,
-                run.clone()(session.peer().clone()),
-            )
-            .await;
+            let work = run.clone()(Arc::clone(&session));
+            let outcome = match call {
+                Some(call) => call.timeout(self.policy.call_timeout, work).await,
+                None => tokio::time::timeout(self.policy.call_timeout, work)
+                    .await
+                    .ok(),
+            };
             let failure = match outcome {
-                Ok(Ok(result)) => {
+                Some(Ok(result)) => {
                     self.record_session_success(&session).await;
                     return Ok(result);
                 }
                 // The server answered with a JSON-RPC error: it is alive.
-                Ok(Err(ServiceError::McpError(e))) => {
+                Some(Err(ServiceError::McpError(e))) => {
                     self.record_session_success(&session).await;
                     return Err(session.redactor.error(McpError::Transport {
                         server: id,
                         message: e.to_string(),
                     }));
                 }
-                Ok(Err(ServiceError::TransportSend(ref e))) if authorization_required(e) => {
+                Some(Err(ServiceError::TransportSend(ref e))) if authorization_required(e) => {
                     let error = McpError::AuthRequired(id);
                     let mut slot = self.session.lock().await;
                     // An old response must not drop a newer connection or force
@@ -591,17 +622,17 @@ impl Server {
                         }
                     }
                     drop(slot);
-                    if retried_auth {
+                    if retried_auth || call.is_some_and(|c| c.requested.load(Ordering::Acquire)) {
                         return Err(error);
                     }
                     retried_auth = true;
                     continue;
                 }
-                Ok(Err(e)) => McpError::Transport {
+                Some(Err(e)) => McpError::Transport {
                     server: id,
                     message: e.to_string(),
                 },
-                Err(_) => {
+                None => {
                     let timeout = McpError::Timeout {
                         server: id,
                         seconds: self.policy.call_timeout.as_secs().max(1),
@@ -933,7 +964,8 @@ impl McpServerHandle {
         arguments: Option<serde_json::Map<String, serde_json::Value>>,
         max_bytes: usize,
     ) -> Result<String> {
-        let result = self.0.call(tool, arguments).await?;
+        let call = Arc::new(Call::new(None));
+        let result = self.0.call(tool, arguments, &call).await?;
         let output = crate::tool::into_output(result).map_err(|e| McpError::Transport {
             server: self.0.id().to_owned(),
             message: e.to_string(),

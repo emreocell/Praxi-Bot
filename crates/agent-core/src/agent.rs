@@ -280,6 +280,7 @@ impl AgentLoop {
                 schedule_owner: RwLock::new(None),
                 external_source_owner: RwLock::new(None),
                 secret_requests: Mutex::new(HashMap::new()),
+                elicitations: Mutex::new(HashMap::new()),
                 handovers: Mutex::new(HashMap::new()),
                 skill_hints: RwLock::new(None),
                 router: crate::router::Router::default(),

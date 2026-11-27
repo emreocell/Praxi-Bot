@@ -299,6 +299,23 @@ export type RouteInfo =
 /** Level that decided a route: K0 rules, K1 cache, K2 retrieval, K3 classifier, K4 none. */
 export type RouteLevel = "K0" | "K1" | "K2" | "K3" | "K4";
 
+export interface ElicitationField {
+  name: string;
+  label: string;
+  description: string | null;
+  required: boolean;
+  blocked: boolean;
+  kind: "string" | "number" | "integer" | "boolean" | "enum";
+  min_length: number | null;
+  max_length: number | null;
+  format: "email" | "uri" | "date" | "date_time" | null;
+  minimum: number | null;
+  maximum: number | null;
+  options: { value: string; label: string }[];
+}
+
+export type ElicitationContent = Record<string, string | number | boolean>;
+
 export type DaemonEvent =
   | {
       type: "run_started";
@@ -386,6 +403,17 @@ export type DaemonEvent =
       /** A mission asked: no run waits, the answer releases the parked item. */
       parked?: boolean;
     }
+  | {
+      type: "elicitation_requested";
+      run_id: string;
+      call_id: string;
+      server: string;
+      message: string;
+      fields: ElicitationField[];
+      expires_in_secs: number;
+    }
+  | { type: "elicitation_closed"; run_id: string; call_id: string }
+  | { type: "elicitation_link"; run_id: string; chat_id: string }
   | {
       type: "model_fallback";
       run_id: string;

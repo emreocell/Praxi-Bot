@@ -277,12 +277,9 @@ impl Tool for McpToolAdapter {
                 )));
             }
         };
-        let result = self
-            .server
-            .call(&self.remote_name, arguments)
+        self.server
+            .call_for_bot(&self.remote_name, arguments, ctx.elicitation.clone())
             .await
-            .map_err(|e| ToolError::Execution(e.to_string()))?;
-        into_output(result)
     }
 }
 

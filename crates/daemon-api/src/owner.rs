@@ -315,6 +315,8 @@ pub const OWNER_ROUTES: &[(&str, &str)] = &[
     // a bot's credential request: the value is typed by the owner, never a token holder
     ("POST", "/v1/secret-requests/{}"),
     ("POST", "/v1/secret-requests/{}/cancel"),
+    ("POST", "/v1/elicitations/{}"),
+    ("POST", "/v1/elicitations/{}/cancel"),
     // the e-mail channel: settings, and replies that go out in the owner's name
     ("GET", "/v1/email/channel"),
     ("PUT", "/v1/email/channel"),

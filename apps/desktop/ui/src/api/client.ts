@@ -155,6 +155,7 @@ import type {
   ScheduleHistoryEntry,
   HandoverAnswer,
   SecretRequestAnswer,
+  ElicitationContent,
   FillSecretInfo,
   CreateFillSecretInput,
   UpdateFillSecretInput,
@@ -1242,6 +1243,17 @@ export class ApiClient {
 
   cancelSecretRequest(callId: string): Promise<SecretRequestAnswer> {
     return this.request("POST", `/secret-requests/${encodeURIComponent(callId)}/cancel`, { localOwnerOnly: true });
+  }
+
+  /** Only the server receives form content. The daemon returns a status with no body. */
+  decideElicitation(callId: string, content?: ElicitationContent): Promise<void> {
+    return this.request("POST", `/elicitations/${encodeURIComponent(callId)}`, {
+      body: content === undefined ? { action: "decline" } : { action: "accept", content }
+    });
+  }
+
+  cancelElicitation(callId: string): Promise<void> {
+    return this.request("POST", `/elicitations/${encodeURIComponent(callId)}/cancel`);
   }
 
   /** List Vault / fill secrets (metadata and allow-lists only; never values). */

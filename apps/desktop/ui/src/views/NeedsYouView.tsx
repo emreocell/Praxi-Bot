@@ -1,5 +1,6 @@
 import { ArrowUpRight, CheckCheck } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
+import { PendingCard } from "../components/PendingDecisions";
 import { useTranslation } from "react-i18next";
 import { BotAvatar, Button, Card } from "ui";
 import formStyles from "../components/Form.module.css";
@@ -28,6 +29,16 @@ export function NeedsYouView({
         ) : (
           <ul className={styles.list}>
             {needs.map((n) => {
+              if (n.elicitation) {
+                return (
+                  <li key={n.callId} className={styles.form}>
+                    <PendingCard entry={n} />
+                    <Button size="sm" variant="secondary" disabled={!n.chatId} onClick={() => onOpenChat(n.chatId)}>
+                      <ArrowUpRight aria-hidden="true" />{t("needs.open")}
+                    </Button>
+                  </li>
+                );
+              }
               const bot = bots.find((b) => b.id === n.botId);
               const view = bot ? botView(bot) : null;
               return (

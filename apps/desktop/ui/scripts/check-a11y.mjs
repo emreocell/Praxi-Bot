@@ -41,6 +41,8 @@ const screens = [
   { name: 'chat-mission-answers', expect: '[data-testid=mission-needs-you]', query: 'screen=mission', act: [{ click: '[data-testid=mission-header-answer]' }] },
   { name: 'chat-mission-done', expect: '[data-testid=mission-digest]', query: 'screen=mission-done', act: [{ click: '[data-testid=mission-header-report]' }] },
   { name: 'chat-approval', query: 'screen=approval' },
+  { name: 'chat-elicitation', query: 'screen=elicitation', expect: '[data-testid=elicitation-card]' },
+  { name: 'needs-elicitation', query: 'screen=needs-elicitation', expect: '[data-testid=elicitation-card]' },
   { name: 'schedules', query: 'screen=schedules' },
   { name: 'needs', query: 'screen=needs' },
   { name: 'apps', query: 'screen=apps' },
