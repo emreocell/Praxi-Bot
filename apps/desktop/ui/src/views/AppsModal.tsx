@@ -249,8 +249,7 @@ function ConnectedCell({
   onSaveBots,
   onSaveTools,
   onSaveTrust,
-  onChooseFolder,
-  onEnable
+  onChooseFolder
 }: {
   server: McpServer;
   title?: string;
@@ -274,8 +273,6 @@ function ConnectedCell({
   onSaveBots: (from: BotScope, to: BotScope) => void;
   onSaveTools: (exclude: string[]) => void;
   onSaveTrust: (trusted: boolean) => void;
-  /** Turn on a server that was added switched off. */
-  onEnable: () => void;
 }) {
   const { t } = useTranslation();
   const { bots, client } = useDaemon();
