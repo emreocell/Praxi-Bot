@@ -12,7 +12,7 @@ Every tool call goes through `Shared::decide_with_reason` (`crates/agent-core/sr
    (`deny` / `ask` / `allow`) from the bot's policy, falling back to the global policy, then the
    floors: **Money** is never below ask, a **never-list** command is never below ask.
 3. Always-ask tools (`Tool::always_ask`, `always_ask_for`): a secret fill, every Composio app
-   action, the knowledge brain tool. No preset and no grant waives these.
+   action classed as money, the knowledge brain tool. No preset and no grant waives these.
 4. The **taint gate** (`ContentExposure`, `egress.rs`): once a run read untrusted content, a call
    that can send data out (any fetch, a navigation to another site, a page action with text, a
    send) asks, and so does any call that starts a program (shell, script, desktop launch). Only the
@@ -31,7 +31,9 @@ mapped to `read-and-draft`, `approve-destructive`, `full`.
   page, so afterwards every navigation to a new site, every fetch, and every shell command asks,
   on every call. Grants did not help: a gate card only remembered "this chat" for a tool class and
   one origin, and the shell class asked again in the next chat.
-* **Always-ask tools.** Each Composio action asks every time, whatever the preset or grants.
+* **Always-ask tools.** Each Composio action asked every time, whatever the preset or grants. Now
+  only the money class does; reads run without a card and writes follow the level (see
+  "Composio risk classes" below).
 * **Ask and Balanced were the same thing.** `read-and-draft` and `approve-destructive` both set
   `ask` on every category, so the "Balanced" pill asked before every file edit and every page
   click.
@@ -110,6 +112,32 @@ chips in the chat, not as prompts.
 
 ## Not covered
 
-* Composio actions stay always-ask (their approval token is created by the card; remembering them
-  needs a tool-side change).
+* Composio money actions stay always-ask (their approval token is created by the card; remembering
+  them needs a tool-side change).
 * CLI engines in native-tools mode keep their own approval levels (`cli-provider` `levels.rs`).
+
+## Composio risk classes
+
+Every Composio action has a class decided by the host in `crates/composio/src/risk.rs`, from the
+catalogue entry: the HTTP method and tags Composio returns, then the words of the slug. The model
+never supplies it. Precedence: money > destructive > write > read; unknown is write.
+
+| Class | Tool effect / category | Asks |
+|---|---|---|
+| read | `Read` / `Accounts` | no (read shortcut on every level that allows reads) |
+| write | `Write` / `Accounts` | by the bot's level (none on Full) |
+| destructive | `Destructive` / `Accounts` | by the bot's level (none on Full) |
+| money | `Destructive` / `Money` + `always_ask` | always, on every level; no grant waives it |
+
+Direct tools get the effect and category of their class at registration. For actions beyond the
+direct-tool cap there are two generic tools: `apps_read_action` (registered as a read; it refuses
+any other class itself) and `apps_run_action` (`always_ask_for` is true for money and for an action
+that was never discovered). A call that nobody was asked about is refused when the action is money
+or riskier than the tool was registered for, so a catalogue change cannot turn a read into an
+unasked write. Writes, deletes and money keep the full content class, so the egress gate for runs
+that read untrusted content still asks for them below Full. On Full, `full_mode_waives` lets an
+owner-started run (or a Full mission) run a non-money app action without a card
+(`mode.full.owner_app_action`); a subagent, helper, schedule, webhook or channel run never gets
+that waiver, and money is decided before it (category floor + `always_ask`). A read is declared as not sending data out (it
+carries only its arguments to the app the owner connected), so that gate does not ask for it; what
+it returns still taints the run.

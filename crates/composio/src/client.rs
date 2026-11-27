@@ -117,6 +117,10 @@ pub struct RemoteTool {
     pub description: String,
     /// Sanitized JSON schema of the inputs.
     pub schema: Value,
+    /// Tags Composio attaches (`readOnlyHint`, ...), short and plain.
+    pub tags: Vec<String>,
+    /// HTTP method of the underlying request, upper case, when given.
+    pub method: Option<String>,
 }
 
 /// How the client authenticates.
@@ -1014,6 +1018,26 @@ fn parse_tool(i: &Value) -> Option<RemoteTool> {
             300,
         ),
         schema,
+        tags: i
+            .get("tags")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter(|t| t.len() <= 40 && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+            .take(32)
+            .map(str::to_owned)
+            .collect(),
+        method: ["http_method", "method"]
+            .iter()
+            .find_map(|k| i.get(k).and_then(Value::as_str))
+            .map(str::to_ascii_uppercase)
+            .filter(|m| {
+                matches!(
+                    m.as_str(),
+                    "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
+                )
+            }),
     })
 }
 

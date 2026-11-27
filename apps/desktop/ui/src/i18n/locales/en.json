@@ -843,6 +843,18 @@
     "composioHub": {
       "accountConnected": "Composio account connected",
       "accountHint": "Connect a Composio account once to browse and connect apps.",
+      "actionClass": {
+        "destructive": "Deletes",
+        "money": "Moves money",
+        "read": "Read only",
+        "write": "Changes things"
+      },
+      "actionClassHint": {
+        "destructive": "Deletes or removes things. Asks as your bot’s access level says; on Full it runs without asking.",
+        "money": "Spends or moves money. Always asks you first, on every access level.",
+        "read": "Looks things up. Runs without asking.",
+        "write": "Creates or changes things. Asks as your bot’s access level says; on Full it runs without asking."
+      },
       "actionsEmpty": "There are no actions available for bots in this app.",
       "actionsLoading": "Loading actions…",
       "actionsNeedAccount": "Connect your Composio account to see this app’s actions.",

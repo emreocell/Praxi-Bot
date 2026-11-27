@@ -44,7 +44,7 @@ Güvenli varsayılan: gerekene kadar **veri değiştirir** ve **silebilir veya g
 
 ## Riskli adımları yine sen onaylarsın
 
-Bir uygulamayı bağlamak onayları atlamaz. Bir bot, uygulamayla bir şeyi değiştirmek ya da göndermek istediğinde bir **Onay gerekiyor** kartı görürsün. Composio uygulamalarında kart, tüm bağımsız değişkenlerin yukarıda gösterildiğini belirtir. Karar vermeden önce her şeyi okumak için **Tüm bağımsız değişkenleri göster**'e bas. Bkz. [Botunu güvende tut](keep-your-bot-safe.md).
+Bir uygulamayı bağlamak onayları atlamaz. Bir bot, uygulamayla bir şeyi değiştirmek ya da göndermek istediğinde bir **Onay gerekiyor** kartı görürsün. Composio uygulamalarında kart, tüm bağımsız değişkenlerin yukarıda gösterildiğini belirtir. Karar vermeden önce her şeyi okumak için **Tüm bağımsız değişkenleri göster**'e bas. Okumalar için kart çıkmaz, değişiklikler botun erişim düzeyine bağlıdır, para hareketi yapan her şey her zaman sorar: bkz. [hangi işlem çalışmadan önce sorar](apps.md#hangi-işlem-çalışmadan-önce-sorar). Bkz. ayrıca [Botunu güvende tut](keep-your-bot-safe.md).
 
 ## Veri uygulamanın servisine gider
 

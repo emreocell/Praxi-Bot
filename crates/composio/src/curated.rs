@@ -4,8 +4,9 @@
 //! list do) and never waives an approval.  It only
 //! - names the toolkits Praxi connects natively (`native_first`),
 //! - pins the "popular" row of the catalog,
-//! - marks well-known read-only actions, for display, grouping and for picking
-//!   which actions get a direct tool when a toolkit has more than the cap.
+//! - marks well-known read-only actions, as read evidence for the risk class
+//!   (see `risk`) and for picking which actions get a direct tool when a
+//!   toolkit has more than the cap.
 //!
 //! UNVERIFIED: the popular slugs other than `twitter`, `slack`, `hubspot`,
 //! `salesforce`, `airtable` and the read-only action slugs come from memory,
@@ -190,26 +191,6 @@ impl Curated {
     }
 }
 
-/// Display class of an action: `read` only for the shipped table, the others
-/// are name heuristics for grouping.  No class waives an approval.
-#[must_use]
-pub fn display_class(curated: &Curated, tool_slug: &str) -> &'static str {
-    if curated.is_known_read(tool_slug) {
-        return "read";
-    }
-    let s = format!("_{}_", tool_slug.to_ascii_uppercase());
-    let has = |words: &[&str]| words.iter().any(|w| s.contains(&format!("_{w}_")));
-    if has(&["DELETE", "REMOVE", "DESTROY", "ARCHIVE", "REVOKE"]) {
-        "destructive"
-    } else if has(&[
-        "SEND", "POST", "PUBLISH", "REPLY", "TWEET", "SHARE", "INVITE", "FORWARD",
-    ]) {
-        "send"
-    } else {
-        "other"
-    }
-}
-
 /// Short action name of a Composio tool slug inside its toolkit:
 /// `GITHUB_CREATE_AN_ISSUE` of `github` is `create_an_issue`.
 #[must_use]
@@ -235,13 +216,8 @@ mod tests {
         .unwrap();
         assert!(moved.is_native_first("github"));
         assert_eq!(c.popular_name("twitter"), Some("X"));
-        assert_eq!(display_class(&c, "SLACK_LIST_ALL_CHANNELS"), "read");
-        assert_eq!(display_class(&c, "SLACK_SEND_MESSAGE"), "send");
-        assert_eq!(
-            display_class(&c, "GITHUB_DELETE_A_REPOSITORY"),
-            "destructive"
-        );
-        assert_eq!(display_class(&c, "FOO_DO_THING"), "other");
+        assert!(c.is_known_read("SLACK_LIST_ALL_CHANNELS"));
+        assert!(!c.is_known_read("SLACK_SEND_MESSAGE"));
         assert_eq!(
             short_name("github", "GITHUB_CREATE_AN_ISSUE"),
             "create_an_issue"

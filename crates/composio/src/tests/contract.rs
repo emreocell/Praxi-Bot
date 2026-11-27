@@ -1,6 +1,6 @@
 //! Contract test for every toolkit of `curated.json` (`popular`), generated from
 //! the table. No network and no real key: one fake Composio server on loopback
-//! per toolkit, scripted with one read-style and one mutating action.
+//! per toolkit, scripted with one read, one write and one payment action.
 //!
 //! A new toolkit needs no edit here: it is picked up from the table. A toolkit
 //! that cannot be faked goes into [`CANNOT_FAKE_YET`] with a reason; one that
@@ -76,10 +76,11 @@ async fn mount_toolkit(h: &Harness, slug: &str, status: &str) {
     };
     Mock::given(method("GET"))
         .and(path("/tools"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(json!({"items": [action("LIST_ITEMS"), action("SEND_ITEM")]})),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [
+            action("LIST_ITEMS"),
+            action("SEND_ITEM"),
+            action("PAY_INVOICE")
+        ]})))
         .mount(&h.server)
         .await;
 }
@@ -154,36 +155,60 @@ fn leg_config(f: &mut Failures) {
     }
 }
 
-async fn leg_toolkit(slug: &str, f: &mut Failures) {
-    // Approval: every action tool asks, read-styled or not.
+/// Approval follows the class: a read needs no card, a write follows the
+/// level, money always asks and is its own permission category.
+async fn leg_approval(slug: &str, f: &mut Failures) {
     let h = connected(slug).await;
-    for action in ["list_items", "send_item"] {
+    for (action, effect, category, asks) in [
+        (
+            "list_items",
+            tool_registry::Effect::Read,
+            tool_registry::PermissionCategory::Accounts,
+            false,
+        ),
+        (
+            "send_item",
+            tool_registry::Effect::Write,
+            tool_registry::PermissionCategory::Accounts,
+            false,
+        ),
+        (
+            "pay_invoice",
+            tool_registry::Effect::Destructive,
+            tool_registry::PermissionCategory::Money,
+            true,
+        ),
+    ] {
         let t = h.registry.get(&format!("app:{slug}/{action}")).unwrap();
-        check(f, slug, "approval", t.always_ask(), || {
-            format!("{action} does not always ask")
+        check(f, slug, "approval", t.always_ask() == asks, || {
+            format!("{action}: always_ask is not {asks}")
         });
         check(
             f,
             slug,
             "approval",
-            t.spec().effect == tool_registry::Effect::Destructive,
-            || format!("{action} is not Destructive"),
+            t.spec().effect == effect && t.spec().category == category,
+            || format!("{action}: wrong effect or category"),
         );
         check(f, slug, "taint", t.spec().content.ingests_untrusted, || {
             format!("{action} output not declared untrusted")
         });
     }
-    // A call without a fresh approval never reaches the provider.
+    // A money call without a fresh approval never reaches the provider.
     script_execute(&h, slug, ResponseTemplate::new(200)).await;
-    let t = h.registry.get(&format!("app:{slug}/send_item")).unwrap();
+    let t = h.registry.get(&format!("app:{slug}/pay_invoice")).unwrap();
     let unapproved = t.call(&ctx(), json!({"x": "v"})).await;
     check(
         f,
         slug,
         "approval",
         unapproved.is_err() && execute_posts(&h).await == 0,
-        || "call without approval was sent".into(),
+        || "money call without approval was sent".into(),
     );
+}
+
+async fn leg_toolkit(slug: &str, f: &mut Failures) {
+    leg_approval(slug, f).await;
 
     // Tool error, 403, 429: surfaced once, sent once, for a mutating and a read action.
     let cases: [(&str, ResponseTemplate, &str); 3] = [

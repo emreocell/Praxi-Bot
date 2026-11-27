@@ -53,6 +53,13 @@ function ToolkitActions({ slug }: { slug: string }) {
           return (
             <li className={own.actionItem} key={action.name}>
               <strong>{label.charAt(0).toUpperCase() + label.slice(1)}</strong>
+              <span
+                className={`${own.actionRisk} ${own[`actionRisk_${action.class}`] ?? ""}`}
+                data-risk={action.class}
+                title={t(`apps.composioHub.actionClassHint.${action.class}`)}
+              >
+                {t(`apps.composioHub.actionClass.${action.class}`)}
+              </span>
               {action.description ? <p>{action.description}</p> : null}
             </li>
           );

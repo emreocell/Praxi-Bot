@@ -437,7 +437,7 @@ removes only these asks, and only while every condition in the row holds:
 
 | Still asks in Full, always | Why |
 |---|---|
-| Money, the never-list (`rm -rf`, sign-in stores), mail and message sends, secrets typed with `browser_fill`, Composio actions, bot and schedule creation | floors and always-ask tools are decided before the Full rule |
+| Money (including Composio actions classed as money), the never-list (`rm -rf`, sign-in stores), mail and message sends, secrets typed with `browser_fill`, bot and schedule creation | floors and always-ask tools are decided before the Full rule. Other Composio actions (read, write, delete) follow the bot's level, and on Full they run without a card in a run the owner started: see [Connecting apps](apps.md) |
 | A shell command off the allow-list, a wrapper (`cmd /c`, `powershell`, `sh`), quoting or expansion, a path outside the workspace, 400 characters or more | the page may have chosen the command; fail closed |
 | A script, build or test after the run wrote code-like files after an untrusted read | the file may carry what the command line no longer shows |
 | A private word of the run in a command or a new address, data-shaped text (keys, hashes, card numbers), private data that cannot be compared, over the send budget | the egress gate and the per-run budget stay |

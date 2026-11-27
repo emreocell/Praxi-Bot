@@ -31,6 +31,30 @@ read-only tests that can show a name or up to three samples to the owner.
 Bot access and approval rules apply to the tools exposed by Praxi's existing
 Composio integration. Tool inputs and results pass through Composio.
 
+### What asks before it runs
+
+Each action on an app's page has a class next to it. Praxi decides the class
+from what Composio says about the action (its request method, its tags and the
+words in its name), never from what a bot says. When Praxi cannot tell, the
+action counts as **Changes things**.
+
+| Class | What it does | Does it ask? |
+|---|---|---|
+| **Read only** | Looks things up (list, get, search, fetch). | No card on any level that allows reading. |
+| **Changes things** | Creates, sends or updates something. This is also the default for an unclear name. | Follows the bot's access level: it asks on Ask and Balanced, and runs on Full. |
+| **Deletes** | Deletes, removes or revokes something. | Follows the bot's access level, like the row above. |
+| **Moves money** | Pays, charges, buys, subscribes, transfers or refunds. | Always asks, on every level, Full included. No "always allow" covers it. |
+
+On Full, a write or delete runs without a card when you started the run
+yourself (typed in the app, or a Full-level mission). A run started by a
+schedule, a webhook, a channel message or another bot still asks. Before
+Full, a bot that has read untrusted content (a web page, a mail) is also asked
+before a write, delete or payment that would send data out; that check does not
+apply to reads.
+Names with a charge or payment word that only look something up, such as
+`list charges`, stay **Read only**. A name that mixes a lookup with a payment
+verb, such as `get and pay`, counts as **Moves money**.
+
 Use **Sign out of Composio** on the account card to suspend access to all
 Composio apps. Praxi keeps your app settings, including bot access.
 

@@ -6574,8 +6574,16 @@ export interface components {
          * @enum {string}
          */
         ComponentInstallState: "idle" | "installing" | "done" | "failed";
+        /**
+         * @description How risky an action is. Decided by the host, never by the model. Reads run
+         *     without a card; writes and deletes follow the bot's level; money always asks.
+         * @enum {string}
+         */
+        ComposioActionClass: "read" | "write" | "destructive" | "money";
         /** @description A catalog action available after connecting a toolkit. */
         ComposioActionDto: {
+            /** @description Risk class the host decided from Composio's metadata. */
+            class: components["schemas"]["ComposioActionClass"];
             /** @description Short description from Composio. */
             description: string;
             /** @description Action name, scoped to the toolkit. */

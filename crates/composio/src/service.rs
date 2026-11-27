@@ -16,12 +16,13 @@ use crate::catalog::{self, CATALOG_FILE, CatalogFile, CatalogView};
 use crate::client::{
     Account, Auth, CliPoll, ComposioClient, Link, Redact, ToolkitLookup, ToolkitPage,
 };
-use crate::curated::{Curated, display_class, short_name};
+use crate::curated::{Curated, short_name};
 use crate::error::{ComposioError, Result};
 use crate::keys::{KeySource, LOGIN_URL, Stored};
 use crate::probe::{
     ProbeOutcome, Step, find_string, fit_args, primary_calendar, probe_for, sample_items,
 };
+use crate::risk::{ActionMeta, Risk, classify};
 use crate::state::{AppConfig, FILE_NAME, LoginIds, StateFile};
 use crate::tool::{ActionTool, FindActionTool, RunActionTool};
 
@@ -166,8 +167,8 @@ pub struct ActionInfo {
     pub description: String,
     /// Sanitized input schema.
     pub schema: Value,
-    /// Display class: `read`, `send`, `destructive`, `other`.
-    pub class: &'static str,
+    /// Risk class, decided here from Composio's metadata (never by the model).
+    pub class: Risk,
 }
 
 /// Everything the service needs from its embedder.
@@ -203,6 +204,8 @@ pub struct ActionPreview {
     /// One line of Composio's description: redacted, single-spaced, at most
     /// [`PREVIEW_DESCRIPTION_CHARS`] characters, without control or direction-changing characters.
     pub description: String,
+    /// Risk class the host decided for it.
+    pub class: Risk,
 }
 
 /// Most actions one preview lists.
@@ -323,6 +326,7 @@ impl ComposioService {
         }));
         for t in [
             Arc::new(FindActionTool::new(svc.clone())) as Arc<dyn Tool>,
+            Arc::new(RunActionTool::new_read(svc.clone())) as Arc<dyn Tool>,
             Arc::new(RunActionTool::new(svc.clone())) as Arc<dyn Tool>,
         ] {
             svc.0.registry.register(t);
@@ -1435,8 +1439,40 @@ impl ComposioService {
                     &(self.0.redact)(&a.description),
                     PREVIEW_DESCRIPTION_CHARS,
                 ),
+                class: a.class,
             })
             .collect())
+    }
+
+    /// The class of an action as last discovered, without any request (the
+    /// permission check is synchronous). `None` when it was never discovered
+    /// or the app has no such action; callers treat that as the strictest case.
+    pub(crate) fn cached_class(&self, app: &str, action: &str) -> Option<Risk> {
+        self.0
+            .discovered
+            .lock()
+            .get(app)?
+            .1
+            .iter()
+            .find(|a| a.name == action)
+            .map(|a| a.class)
+    }
+
+    /// Whether a card was prepared for exactly this call (so the owner was shown it).
+    pub(crate) fn is_prepared(
+        &self,
+        app: &str,
+        action: &str,
+        ctx: &tool_registry::ToolContext,
+        args: &Value,
+    ) -> bool {
+        self.0.prepared.lock().contains_key(&approval_key(
+            &ctx.run_id,
+            ctx.bot_id.as_deref(),
+            app,
+            action,
+            args,
+        ))
     }
 
     /// Drop the cached action list of `slug` so the next use re-reads it (tests).
@@ -1449,7 +1485,7 @@ impl ComposioService {
     /// Composio's order, at most `cap_per_toolkit`.
     fn select_direct(&self, actions: &[ActionInfo]) -> Vec<ActionInfo> {
         let (read, rest): (Vec<_>, Vec<_>) =
-            actions.iter().cloned().partition(|a| a.class == "read");
+            actions.iter().cloned().partition(|a| a.class == Risk::Read);
         read.into_iter()
             .chain(rest)
             .take(self.0.curated.cap_per_toolkit)
@@ -1825,7 +1861,15 @@ fn action_from_remote(
         return None;
     }
     Some(ActionInfo {
-        class: display_class(curated, &t.slug),
+        class: classify(
+            slug,
+            &t.slug,
+            ActionMeta {
+                tags: &t.tags,
+                method: t.method.as_deref(),
+            },
+            curated.is_known_read(&t.slug),
+        ),
         name: short_name(slug, &t.slug),
         description: t.description,
         schema: t.schema,
@@ -1853,6 +1897,8 @@ mod tests {
             version: "20260901_00".into(),
             description: String::new(),
             schema: json!({"type":"object"}),
+            tags: Vec::new(),
+            method: None,
         };
         assert!(action_from_remote(&Curated::builtin(), "github", remote).is_none());
     }

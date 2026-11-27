@@ -186,6 +186,23 @@ pub struct ComposioActionDto {
     pub name: String,
     /// Short description from Composio.
     pub description: String,
+    /// Risk class the host decided from Composio's metadata.
+    pub class: ComposioActionClass,
+}
+
+/// How risky an action is. Decided by the host, never by the model. Reads run
+/// without a card; writes and deletes follow the bot's level; money always asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ComposioActionClass {
+    /// Only looks something up.
+    Read,
+    /// Creates or changes something (also the default when unsure).
+    Write,
+    /// Deletes or revokes something.
+    Destructive,
+    /// Spends or moves money.
+    Money,
 }
 
 /// `POST /v1/composio/apps/{slug}/connect`: the one-time consent link.

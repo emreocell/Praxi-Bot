@@ -23101,14 +23101,29 @@
           "failed"
         ]
       },
+      "ComposioActionClass": {
+        "type": "string",
+        "description": "How risky an action is. Decided by the host, never by the model. Reads run\nwithout a card; writes and deletes follow the bot's level; money always asks.",
+        "enum": [
+          "read",
+          "write",
+          "destructive",
+          "money"
+        ]
+      },
       "ComposioActionDto": {
         "type": "object",
         "description": "A catalog action available after connecting a toolkit.",
         "required": [
           "name",
-          "description"
+          "description",
+          "class"
         ],
         "properties": {
+          "class": {
+            "$ref": "#/components/schemas/ComposioActionClass",
+            "description": "Risk class the host decided from Composio's metadata."
+          },
           "description": {
             "type": "string",
             "description": "Short description from Composio."

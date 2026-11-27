@@ -42,7 +42,7 @@ Safe default: keep **changes data** and **can delete or send** tools off until y
 
 ## You still approve risky steps
 
-Connecting an app does not skip approvals. When a bot wants to use an app to change or send something, you see an **Approval needed** card. For apps through Composio it says "Approve only this action with all arguments shown above". Press **Show all arguments** to read everything before you decide. See [Keep your bot safe](keep-your-bot-safe.md).
+Connecting an app does not skip approvals. When a bot wants to use an app to change or send something, you see an **Approval needed** card. For apps through Composio it says "Approve only this action with all arguments shown above". Press **Show all arguments** to read everything before you decide. Reads never show a card, writes follow the bot's access level, and anything that moves money always asks: see [what asks before it runs](apps.md#what-asks-before-it-runs). See also [Keep your bot safe](keep-your-bot-safe.md).
 
 ## Data goes to the app's service
 

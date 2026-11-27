@@ -13,10 +13,10 @@ use tower::ServiceExt;
 
 use super::{call, call_token_only, send, setup};
 use crate::composio::{
-    ComposioActionDto, ComposioAppDto, ComposioCatalogDto, ComposioCatalogQuery, ComposioConnState,
-    ComposioConnectDto, ComposioControl, ComposioControlError, ComposioDisconnectDto,
-    ComposioLinkMode, ComposioLoginDto, ComposioLoginState, ComposioLoginStatusDto,
-    ComposioStatusDto, ComposioTestDto,
+    ComposioActionClass, ComposioActionDto, ComposioAppDto, ComposioCatalogDto,
+    ComposioCatalogQuery, ComposioConnState, ComposioConnectDto, ComposioControl,
+    ComposioControlError, ComposioDisconnectDto, ComposioLinkMode, ComposioLoginDto,
+    ComposioLoginState, ComposioLoginStatusDto, ComposioStatusDto, ComposioTestDto,
 };
 
 const KEY: &str = "ck_test_SECRETKEY_0123456789";
@@ -114,6 +114,7 @@ impl ComposioControl for Fake {
         Ok(vec![ComposioActionDto {
             name: "list_issues".into(),
             description: "List repository issues".into(),
+            class: ComposioActionClass::Read,
         }])
     }
     async fn app(&self, slug: &str) -> Result<ComposioAppDto, ComposioControlError> {

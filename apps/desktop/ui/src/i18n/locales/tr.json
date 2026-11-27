@@ -843,6 +843,18 @@
     "composioHub": {
       "accountConnected": "Composio hesabı bağlı",
       "accountHint": "Uygulamaları görmek ve bağlamak için Composio hesabını bir kez bağla.",
+      "actionClass": {
+        "destructive": "Siler",
+        "money": "Para hareketi yapar",
+        "read": "Sadece okur",
+        "write": "Değişiklik yapar"
+      },
+      "actionClassHint": {
+        "destructive": "Bir şeyi siler veya kaldırır. Botunun erişim düzeyine göre sorar; Tam erişimde sormadan çalışır.",
+        "money": "Para harcar veya taşır. Her erişim düzeyinde önce sana sorar.",
+        "read": "Sadece bilgi arar. Sormadan çalışır.",
+        "write": "Bir şey oluşturur veya değiştirir. Botunun erişim düzeyine göre sorar; Tam erişimde sormadan çalışır."
+      },
       "actionsEmpty": "Botlar bu uygulamada işlem yapamıyor.",
       "actionsLoading": "İşlemler yükleniyor…",
       "actionsNeedAccount": "Bu uygulamadaki işlemleri görmek için Composio hesabını bağla.",

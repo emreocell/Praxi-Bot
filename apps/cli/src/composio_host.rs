@@ -12,10 +12,10 @@ use composio::{
     Linkage, LocalKeySource, LoginState, Redact, ServiceConfig, Toolkit,
 };
 use daemon_api::composio::{
-    ComposioActionDto, ComposioAppDto, ComposioCatalogDto, ComposioCatalogQuery, ComposioConnState,
-    ComposioConnectDto, ComposioDisconnectDto, ComposioLinkMode, ComposioLoginDto,
-    ComposioLoginState, ComposioLoginStatusDto, ComposioStatusDto, ComposioTestDto,
-    ComposioToolkitDto,
+    ComposioActionClass, ComposioActionDto, ComposioAppDto, ComposioCatalogDto,
+    ComposioCatalogQuery, ComposioConnState, ComposioConnectDto, ComposioDisconnectDto,
+    ComposioLinkMode, ComposioLoginDto, ComposioLoginState, ComposioLoginStatusDto,
+    ComposioStatusDto, ComposioTestDto, ComposioToolkitDto,
 };
 use daemon_api::{ComposioControl, ComposioControlError};
 use secret_store::SecretStore;
@@ -223,6 +223,12 @@ impl ComposioControl for ComposioHost {
             .map(|action| ComposioActionDto {
                 name: action.name,
                 description: action.description,
+                class: match action.class {
+                    composio::Risk::Read => ComposioActionClass::Read,
+                    composio::Risk::Write => ComposioActionClass::Write,
+                    composio::Risk::Destructive => ComposioActionClass::Destructive,
+                    composio::Risk::Money => ComposioActionClass::Money,
+                },
             })
             .collect())
     }
