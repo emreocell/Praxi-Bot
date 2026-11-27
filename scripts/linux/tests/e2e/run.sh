@@ -48,7 +48,7 @@ esac
 IMAGE="praxi-e2e-ubuntu-systemd:24.04"
 CONTAINER="praxi-e2e-${MODE}-$$"
 WORK="$(mktemp -d)"
-# shellcheck disable=SC2317 # run through the EXIT trap
+# shellcheck disable=SC2317,SC2329 # run through the EXIT trap
 cleanup() {
   [[ "${E2E_KEEP:-0}" == 1 ]] || docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
   rm -rf "${WORK}"
