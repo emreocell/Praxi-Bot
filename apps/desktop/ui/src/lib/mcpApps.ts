@@ -262,7 +262,6 @@ export function customServerConfig(
   const config: McpServerConfig = {
     name,
     transport: form.transport,
-    category: "other",
     enabled: true
   };
   if (trustHints) {

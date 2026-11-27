@@ -190,6 +190,12 @@ test("a server is added without trust unless the owner chose it", async () => {
   assert.equal(back.trust_hints, true);
 });
 
+test("a custom server is sent without a permission category (the daemon rejects `other`)", () => {
+  const form = { name: "mine", transport: "http" as const, command: "", url: "https://x.example/mcp", env: "" };
+  const res = customServerConfig(form);
+  assert.ok(res.ok && !("category" in res.config));
+});
+
 test("splitArgs honours quotes", () => {
   assert.deepEqual(splitArgs(`npx -y "my pkg" 'a b' c`), [
     "npx",
