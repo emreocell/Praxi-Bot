@@ -271,7 +271,12 @@ async fn documents_search_covers_only_chosen_files_and_cites_path_and_page() {
     let body: Value = serde_json::from_str(text(&out)).unwrap();
     let hits = body["hits"].as_array().unwrap();
     assert_eq!(hits.len(), 1, "{body}");
-    assert_eq!(hits[0]["path"], "/home/ada/Documents/housing/lease.pdf");
+    // Built the way the citation builds it, so the separators are the platform's own.
+    let expected = std::path::Path::new("/home/ada/Documents")
+        .join("housing/lease.pdf")
+        .display()
+        .to_string();
+    assert_eq!(hits[0]["path"], expected.as_str());
     assert_eq!(hits[0]["page"], 2);
     assert!(
         hits[0]["citation"]
