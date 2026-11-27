@@ -151,7 +151,7 @@ fn session_loop(
         lp.sh.tools.register(tool);
     }
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    lp.enable_missions(&w.store, &clock);
+    lp.enable_missions(&w.store, &clock, None);
     lp.mail_handle().set(connector(account_of(w)));
     (lp, fake)
 }

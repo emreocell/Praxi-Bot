@@ -126,11 +126,39 @@ pub(crate) const OWN_INBOX_LABEL_PREFIX: &str = "own inbox ";
 /// Only the daemon writes these labels (they are built from fixed prefixes, never from a page,
 /// a mail or the model), so a tool or a page cannot choose one to hide a private read.
 pub(crate) fn names_private_data(label: &str) -> bool {
-    !(label.starts_with("page ")
-        || label == MISSION_LEDGER_LABEL
-        || label
-            .strip_prefix(OWN_INBOX_LABEL_PREFIX)
-            .is_some_and(plain_folder))
+    !(label.starts_with("page ") || label == MISSION_LEDGER_LABEL || is_own_inbox_label(label))
+}
+
+/// Most sites remembered from the links of the bot's own inbox per run.
+const MAX_MAIL_SITES: usize = 256;
+
+fn is_own_inbox_label(label: &str) -> bool {
+    label
+        .strip_prefix(OWN_INBOX_LABEL_PREFIX)
+        .is_some_and(plain_folder)
+}
+
+/// The distinct sites (registrable domains) of the `http(s)` links in `text`.
+fn link_sites(text: &str) -> Vec<String> {
+    let mut sites: Vec<String> = Vec::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("http") {
+        rest = &rest[at..];
+        let end = rest
+            .find(|c: char| {
+                c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | ')' | ']' | '\\')
+            })
+            .unwrap_or(rest.len());
+        let (candidate, tail) = rest.split_at(end);
+        if let Some(site) = builtin_tools::connector_email::verify::site_domain(candidate)
+            && !sites.contains(&site)
+        {
+            sites.push(site);
+        }
+        // `http` alone does not advance past the candidate, so always move on.
+        rest = if end == 0 { &rest[4..] } else { tail };
+    }
+    sites
 }
 
 /// A folder name the own-inbox label may carry: `A-Z a-z 0-9 _ -`, 1 to 32 characters. The
@@ -157,6 +185,14 @@ pub(crate) struct ContentTaint {
     pub(crate) private_source: bool,
     /// Salted hashes of the words of the private results of this run (see `full_autonomy`).
     pub(crate) seen: crate::full_autonomy::SeenText,
+    /// The sites (registrable domains) that links in the text of the bot's OWN inbox point to.
+    /// Mail from strangers is not the owner's private data, so its words are not in `seen`; but a
+    /// link a stranger wrote must not pass as ordinary browsing either: the Full level's egress
+    /// waiver does not cover these sites, only the verifier-judged path of a verification link
+    /// does (`Shared::own_mail_waived`). Kept as a plain list; more than [`MAX_MAIL_SITES`]
+    /// sets `mail_sites_overflow`, which stands for "any site".
+    pub(crate) mail_sites: Vec<String>,
+    pub(crate) mail_sites_overflow: bool,
     /// The run wrote or changed something that could hold code (a script, a manifest, a build
     /// file, anything but a plain document) AFTER it read untrusted content. A program the bot
     /// starts later may then run what a page chose, so the Full level's shell waiver stops
@@ -271,7 +307,42 @@ impl ContentTaint {
                 None => self.seen.unhashed = true,
             }
         }
+        if is_own_inbox_label(label) {
+            self.note_own_inbox(text);
+        }
         self.push_label(label);
+    }
+
+    /// Remember the sites of the links in the text of an own-inbox read (see
+    /// [`Self::mail_sites`]). Without the text (a spilled or an earlier turn's result) the links
+    /// are unknown, so any site counts.
+    fn note_own_inbox(&mut self, text: Option<&str>) {
+        match text {
+            Some(text) => {
+                for site in link_sites(text) {
+                    self.add_mail_site(site);
+                }
+            }
+            None => self.mail_sites_overflow = true,
+        }
+    }
+
+    fn add_mail_site(&mut self, site: String) {
+        if self.mail_sites.contains(&site) {
+            return;
+        }
+        if self.mail_sites.len() >= MAX_MAIL_SITES {
+            self.mail_sites_overflow = true;
+        } else {
+            self.mail_sites.push(site);
+        }
+    }
+
+    /// Whether `url` points at a site a link of the bot's own inbox pointed to.
+    pub(crate) fn names_mail_site(&self, url: &str) -> bool {
+        self.mail_sites_overflow
+            || builtin_tools::connector_email::verify::site_domain(url.trim())
+                .is_some_and(|site| self.mail_sites.contains(&site))
     }
 
     /// A label for the card, without changing the bits. Used when a stored
@@ -285,6 +356,9 @@ impl ContentTaint {
         if names_private_data(label) {
             self.mark_private_unhashed();
         }
+        if is_own_inbox_label(label) {
+            self.note_own_inbox(None);
+        }
         self.push_label(label);
     }
 
@@ -294,6 +368,9 @@ impl ContentTaint {
     pub(crate) fn note_label_hashed(&mut self, label: &str) {
         if names_private_data(label) {
             self.private_source = true;
+        }
+        if is_own_inbox_label(label) {
+            self.note_own_inbox(None);
         }
         self.push_label(label);
     }
@@ -314,6 +391,10 @@ impl ContentTaint {
         self.private_source |= other.private_source;
         self.code_written_after_untrusted |= other.code_written_after_untrusted;
         self.seen.merge(&other.seen);
+        self.mail_sites_overflow |= other.mail_sites_overflow;
+        for site in &other.mail_sites {
+            self.add_mail_site(site.clone());
+        }
         self.trust_folders
             .extend(other.trust_folders.iter().cloned());
         self.earlier += other.earlier;
@@ -2122,6 +2203,36 @@ mod mail_review_tests {
         assert_eq!(sent["to"], json!(["z@z.test"]));
         assert_eq!(sent["subject"], "s");
         assert_eq!(sent["body"], "y");
+    }
+
+    #[test]
+    fn links_in_the_own_inbox_name_their_sites_and_nothing_else_does() {
+        let own = ContentClass::declared(true, false, false);
+        let mut taint = ContentTaint::default();
+        taint.note_with_text(
+            own,
+            "own inbox INBOX",
+            r#"{"body":"Open https://app.example.com/verify?token=abc, or <a href=\"https://www.other.test/x\">here</a>"}"#,
+        );
+        assert!(!taint.private_source);
+        assert!(taint.names_mail_site("https://example.com/anything"));
+        assert!(taint.names_mail_site("https://other.test/"));
+        assert!(!taint.names_mail_site("https://evil.example.net/steal"));
+        // A page names no mail site.
+        let mut page = ContentTaint::default();
+        page.note_with_text(own, "page https://a.example/", "https://app.example.com/x");
+        assert!(!page.names_mail_site("https://example.com/"));
+        // Without the text, any site counts; the union keeps it.
+        let mut unknown = ContentTaint::default();
+        unknown.note(own, "own inbox INBOX");
+        assert!(unknown.names_mail_site("https://anything.test/"));
+        let mut joined = ContentTaint::default();
+        joined.inherit(&unknown);
+        assert!(joined.names_mail_site("https://anything.test/"));
+        // An address that is not a link names nothing.
+        let mut plain = ContentTaint::default();
+        plain.note_with_text(own, "own inbox INBOX", "write to me@example.com, http");
+        assert!(!plain.names_mail_site("https://example.com/"));
     }
 
     #[test]

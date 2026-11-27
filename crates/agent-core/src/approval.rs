@@ -1654,6 +1654,14 @@ impl Shared {
         if !restricted {
             return true;
         }
+        // A link a stranger's mail carried (read from the bot's own inbox, returned by a wait, or
+        // remembered by an earlier session) is not ordinary browsing: it opens only through the
+        // verifier-judged path (`own_mail_waived`), so a remembered link of site A is never
+        // followed while the browser is on site B, and a mail cannot talk the model into opening
+        // its sites unasked. It asks here.
+        if urls.iter().any(|u| Self::mail_given_site(ctx, u)) {
+            return false;
+        }
         let named = self.owner_named_hosts(ctx);
         // What this call would send to places the owner did not name, and to which site.
         let mut checked: Vec<String> = Vec::new();
@@ -2041,6 +2049,25 @@ impl Shared {
             }
             _ => false,
         }
+    }
+
+    /// Whether `url` is on a site a link from the bot's own mail pointed to in this run: in a
+    /// mail it read, in what `email_wait_for` returned, or in what an earlier session remembered.
+    fn mail_given_site(ctx: &RunCtx, url: &str) -> bool {
+        use builtin_tools::connector_email::verify::site_domain;
+        let Some(site) = site_domain(url.trim()) else {
+            return false;
+        };
+        ctx.taint.lock().names_mail_site(url)
+            || ctx
+                .mail_links
+                .lock()
+                .iter()
+                .any(|l| site_domain(l).as_deref() == Some(site.as_str()))
+            || ctx
+                .restored_mail_links
+                .iter()
+                .any(|l| site_domain(&l.url).as_deref() == Some(site.as_str()))
     }
 
     /// A link a session before remembered (not one this run's own `email_wait_for`
