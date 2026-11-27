@@ -127,6 +127,22 @@ for Testing kendini güncellemez; yeni bir Praxi yeni sabitlenmiş sürümü get
 `sudo praxi browser install`. Ayarlar > Tanılama'da aynı işlem **Tarayıcıyı kur** düğmesidir.
 `--json`, `{"installed", "path", "already_there"}` yazdırır.
 
+### `bot cli status | install | login`
+
+Komutu çalıştıran **kullanıcının** kodlama CLI'ları (Claude Code, Codex, Antigravity, ...): o kullanıcının ev
+klasöründe ve arama yolunda aranırlar; uygulama ve daemon da böyle yapar. Bir sunucuda bu kullanıcı Praxi'nin
+çalıştığı kullanıcı olmalıdır; bu yüzden ona geçen kurucu komutunu kullan: `sudo praxi cli status`. Başka biri
+olarak çalıştırılırsa komut bunu söyler (*Sen ubuntu'sun ama Praxi praxi olarak çalışıyor*) ve kullanılacak biçimi gösterir.
+
+| Komut | Anlamı |
+| --- | --- |
+| `bot cli status` | Baktığı kullanıcı ve ev klasörü, sonra her CLI: kurulu mu, sürüm, nerede bulundu, girişli mi, girişsiz mi ya da "giriş dosyası bulundu (denetlenmedi)". `--json` aynısını JSON olarak yazar. Giriş dosyasını asla okumaz, yalnızca var olup olmadığına bakar |
+| `bot cli install <ENGINE>` | Motorun sabit kurucusunu bu kullanıcı olarak çalıştırır (uygulamadaki **Sunucuya kur**'un çalıştırdığı aynı kurucu). Bir npm paketi gerekiyor ve npm yoksa önce Node.js'i veri klasörüne indirir. Yalnızca kopyala-çalıştır komutu olan motorlar bunu söyler |
+| `bot cli login <ENGINE>` | CLI'ın kendi girişini bu terminalde başlatır (`claude auth login`, `codex login`, `agy`, `vibe --setup`, ...); yanıtları ve yazdığı bağlantı dahil, bu kullanıcı olarak |
+
+`<ENGINE>`, `bot cli status`'un gösterdiği kimliktir (`claude`, `codex`, `cursor`, `opencode`, `agy`, `qwen`,
+`copilot`, `kiro`, `kimi`, `qoder`, `vibe`, `goose`). Bkz. [Sunucuda kodlama CLI'ları](remote-host.md#sunucuda-kodlama-cliları-claude-code-codex-antigravity-).
+
 ### `bot backup create | verify | restore`
 
 `bot backup create <FILE>`; botlarını, sohbetlerini, hafızanı, becerilerini, iş akışlarını,

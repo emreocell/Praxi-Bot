@@ -127,6 +127,24 @@ update itself; a newer Praxi ships a newer pin. On a host set up with `install-l
 the service's user: `sudo praxi browser install`. Settings > Diagnostics has the same action as an
 **Install browser** button. `--json` prints `{"installed", "path", "already_there"}`.
 
+### `bot cli status | install | login`
+
+The coding CLIs (Claude Code, Codex, Antigravity, ...) **of the user that runs the command**: they
+are looked up in that user's home folder and search path, which is what the app and the daemon do
+too. On a server the user must be the one Praxi runs as, so use the installer's command, which
+switches to it: `sudo praxi cli status`. Run as anybody else the command says so (*You are ubuntu,
+but Praxi runs as praxi*) and shows the form to use.
+
+| Command | Meaning |
+| --- | --- |
+| `bot cli status` | The user and home folder it looked up, then each CLI: installed or not, version, where it was found, signed in, not signed in, or "sign-in file found (not checked)". `--json` prints the same as JSON. It never reads a sign-in file, only whether it exists |
+| `bot cli install <ENGINE>` | Run the engine's fixed installer as this user (the one the app's **Install on server** runs). Fetches Node.js into the data folder first when an npm package is needed and there is no npm. Engines with only a copy-and-run command say so |
+| `bot cli login <ENGINE>` | Start the CLI's own sign-in in this terminal (`claude auth login`, `codex login`, `agy`, `vibe --setup`, ...), with its answers and the link it prints, as this user |
+
+`<ENGINE>` is the id shown by `bot cli status` (`claude`, `codex`, `cursor`, `opencode`, `agy`,
+`qwen`, `copilot`, `kiro`, `kimi`, `qoder`, `vibe`, `goose`). See
+[Coding CLIs on a server](remote-host.md#coding-clis-on-a-server-claude-code-codex-antigravity-).
+
 ### `bot backup create | verify | restore`
 
 `bot backup create <FILE>` writes one passphrase-encrypted file with your bots, chats,
