@@ -77,9 +77,8 @@ export function BotBrowserProfile({ botId }: { botId: string }) {
         {!profile.sites_available ? <p role="status">{t("browserProfile.sitesUnavailable")}</p> : profile.domains.length ? <ul className={styles.sites}>
           {profile.domains.map((domain) => <li key={domain}>
             <span>{domain}</span>
-            <Button variant="ghost" disabled={busy || profile.signing_in} onClick={() => { setError(null); setForget(domain); }}
-              aria-label={t("browserProfile.forgetNamed", { domain })}>
-              <Trash2 aria-hidden="true" />{t("browserProfile.forgetSite")}
+            <Button variant="ghost" disabled={busy || profile.signing_in} onClick={() => { setError(null); setForget(domain); }}>
+              <Trash2 aria-hidden="true" />{t("browserProfile.forgetNamed", { domain })}
             </Button>
           </li>)}
         </ul> : <p>{t("browserProfile.empty")}</p>}

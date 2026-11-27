@@ -18,7 +18,7 @@ import { allowlist } from './a11y-allowlist.mjs';
 const args = process.argv.slice(2);
 const flag = (name) => args.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
 const only = flag('only');
-const budgetMs = Number(flag('budget') ?? 120) * 1000;
+const budgetMs = Number(flag('budget') ?? 420) * 1000;
 const root = fileURLToPath(new URL('../', import.meta.url));
 const CHROMES = [process.env.CHROME_BIN, 'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].filter(Boolean);
@@ -43,6 +43,12 @@ const screens = [
   { name: 'chat-approval', query: 'screen=approval' },
   { name: 'schedules', query: 'screen=schedules' },
   { name: 'needs', query: 'screen=needs' },
+  { name: 'notifications', query: 'screen=notifications', expect: '[data-testid=notify-bot-group]' },
+  { name: 'notifications-empty', query: 'screen=notifications-empty', expect: '[data-testid=notify-history-empty]' },
+  { name: 'vault', query: 'screen=vault', expect: '[data-testid=vault-manager]' },
+  { name: 'bot-panel-automation', query: 'screen=bot&panel=1', expect: '[data-testid=bot-panel]', act: [{ click: '[data-testid=bot-panel-tab-automation]' }] },
+  { name: 'bot-panel-library', query: 'screen=bot&panel=1', expect: '[data-testid=bot-panel]', act: [{ click: '[data-testid=bot-panel-tab-library]' }] },
+  { name: 'bot-panel-tools', query: 'screen=bot&panel=1', expect: '[data-testid=bot-panel]', act: [{ click: '[data-testid=bot-panel-tab-tools]' }] },
   { name: 'apps', query: 'screen=apps' },
   { name: 'apps-detail', query: 'screen=apps&composio=connected', expect: '[data-testid=composio-app-gmail]', act: [{ click: '[data-testid=composio-tile-gmail] button' }] },
   { name: 'new-bot-dialog', query: 'screen=newbot' },
@@ -67,7 +73,7 @@ const screens = [
   { name: 'run-location-popover', expect: '[data-testid=home-status]', query: 'screen=home&menu=1' },
   { name: 'add-server-wizard', expect: '[data-testid=add-server-live]', query: 'screen=home&menu=1', act: [{ click: '[data-testid=computer-add]' }] },
   { name: 'add-server-choose', query: 'screen=home&menu=1', act: [{ click: '[data-testid=computer-add]' }, { click: '[data-testid=add-server-next]', optional: true }] },
-  { name: 'schedule-builder', expect: 'form', query: 'screen=schedules', act: [{ click: '[data-testid=schedules-empty-new], [data-testid=schedules-new]', optional: true }, { clickText: /new schedule/i, optional: true }] },
+  { name: 'schedule-builder', expect: 'form', query: 'screen=schedules', act: [{ click: '[data-testid=schedules-empty-new], [data-testid=schedules-new]', optional: true }, { clickText: /^(New schedule|Yeni zamanlama)/i, optional: true }] },
   { name: 'run-timeline', expect: '[role=dialog]', query: 'screen=changes', act: [{ click: '[data-testid=run-timeline]' }] },
   { name: 'live-viewer', expect: '[data-testid=live-viewer]', query: 'screen=chat&panel=1', act: [{ click: '[data-testid=bot-computer-show]' }, { click: '[data-testid=bot-computer-big]' }] },
   { name: 'live-viewer-terminals', expect: '[data-testid=live-viewer-terminals]', query: 'screen=chat&panel=1&lvTerm=1', act: [{ click: '[data-testid=bot-computer-show]' }, { click: '[data-testid=bot-computer-big]' }] },
@@ -84,8 +90,15 @@ const screens = [
 // Two themes (one light, one dark) in English, plus two other locales (text differs, structure does not).
 const themes = ['clay', 'obsidian'];
 const cases = [];
-for (const s of screens) for (const theme of themes) cases.push({ name: `${s.name}/${theme}/en`, query: `${s.query}&theme=${theme}&lang=en`, act: s.act, expect: s.expect, scope: s.scope });
-cases.push({ name: 'home/clay/tr', query: 'screen=home&theme=clay&lang=tr' }, { name: 'settings-general/clay/de', query: 'screen=settings&section=general&theme=clay&lang=de' });
+const locales = ['en', 'tr'];
+for (const s of screens) {
+  for (const theme of themes) {
+    for (const lang of locales) {
+      cases.push({ name: `${s.name}/${theme}/${lang}`, query: `${s.query}&theme=${theme}&lang=${lang}`, act: s.act, expect: s.expect, scope: s.scope, skipRing: s.skipRing });
+    }
+  }
+}
+cases.push({ name: 'settings-general/clay/de', query: 'screen=settings&section=general&theme=clay&lang=de' });
 const selected = only ? cases.filter((c) => c.name.includes(only)) : cases;
 
 const killTree = (pid) => {
